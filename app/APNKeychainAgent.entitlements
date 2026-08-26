@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.application-identifier</key>
+    <string>${APP_IDENTIFIER_PREFIX}ai.nuanu.apn.keychain-agent</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>${DEVELOPMENT_TEAM}</string>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>${APP_IDENTIFIER_PREFIX}ai.nuanu.apn.keys</string>
+    </array>
+</dict>
+</plist>

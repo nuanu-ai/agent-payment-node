@@ -1,0 +1,16 @@
+export declare const OUTPUT_VERSION: "apn.cli.v1";
+export declare const STATE_VERSION: "apn.state.v1";
+export declare const NATIVE_IPC_VERSION: "apn.native.v1";
+export declare const CHAIN_ID: 8453;
+export declare const CHAIN_CAIP2: "eip155:8453";
+export declare const BASE_USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+export declare const USDC_DECIMALS: 6;
+export declare const ETH_DECIMALS: 18;
+export declare const APPROVAL_WINDOW_MS: number;
+export declare const MAX_NONCE_SCAN_BLOCKS = 2048n;
+export declare const MAX_RPC_RESPONSE_BYTES: number;
+export declare const MAX_IPC_FRAME_BYTES: number;
+export declare const NATIVE_REQUEST_FD_ENV: "APN_NATIVE_REQUEST_FD";
+export declare const NATIVE_RESPONSE_FD_ENV: "APN_NATIVE_RESPONSE_FD";
+export declare const HOST_SERIALIZED_ENV: "APN_HOST_SERIALIZED";
+export declare const TRANSFER_TOPIC: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
