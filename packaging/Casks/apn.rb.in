@@ -1,0 +1,25 @@
+# typed: strict
+# frozen_string_literal: true
+
+cask "apn" do
+  version "__APN_VERSION__"
+  sha256 "__APN_SHA256_ARM64__"
+
+  url "__APN_RELEASE_URL_ARM64__"
+  name "Agent Payment Node"
+  desc "Local-first payment runtime for AI agents"
+  homepage "__APN_HOMEPAGE__"
+
+  depends_on arch: :arm64
+  depends_on formula: "node@24"
+
+  app "APNKeychainAgent.app"
+  binary "#{appdir}/APNKeychainAgent.app/Contents/MacOS/APNKeychainAgent",
+         target: "apn"
+
+  caveats <<~EOS
+    APN creates a disposable local-software wallet. Fund only the amount the
+    agent may spend. Uninstalling or upgrading APN does not delete its Keychain
+    wallet or public operation state.
+  EOS
+end

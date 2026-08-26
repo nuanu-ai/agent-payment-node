@@ -1,0 +1,45 @@
+{
+  "name": "@nuanu-ai/apn",
+  "version": "0.1.0",
+  "description": "Local-first Agent Payment Node CLI",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "bin": {
+    "apn": "bin/apn.js"
+  },
+  "files": [
+    "bin/apn.js",
+    "dist/**",
+    "native/BUILD.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",
+    "build:ts": "tsc -p tsconfig.json",
+    "build": "npm run build:ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run test:core && npm run test:native-contract && npm run test:packaging-syntax && npm run test:packaging-behavior",
+    "test:core": "npm run build:test && node --test --test-concurrency=1 dist-test/tests/core/*.test.js && node scripts/core-forbidden-surface.mjs",
+    "test:native-contract": "cargo fmt --check && cargo test --offline --locked && cargo clippy --offline --locked --all-targets -- -D warnings",
+    "test:packaging-syntax": "node scripts/core-package-syntax.mjs",
+    "test:packaging-behavior": "node --test --test-concurrency=1 tests/packaging/*.test.mjs",
+    "test:source": "npm run test:core",
+    "build:test": "tsc -p tsconfig.test.json",
+    "integration:assemble-app": "node scripts/assemble-macos-app.mjs",
+    "prepack": "npm run build && npm test"
+  },
+  "dependencies": {
+    "viem": "2.55.19"
+  },
+  "devDependencies": {
+    "@types/node": "24.5.2",
+    "typescript": "5.9.2"
+  },
+  "license": "SEE LICENSE IN LICENSE"
+}
