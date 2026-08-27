@@ -6,6 +6,15 @@ export type CommandRequest =
   | { readonly command: "wallet.ensure"; readonly profile: string }
   | { readonly command: "wallet.status"; readonly profile: string }
   | { readonly command: "wallet.balance"; readonly profile: string }
+  | { readonly command: "x402.inspect"; readonly url: string }
+  | {
+    readonly command: "x402.fetch.prepare";
+    readonly profile: string;
+    readonly url: string;
+    readonly maxAmountAtomic: string;
+    readonly idempotencyKey: string;
+  }
+  | { readonly command: "x402.fetch.approve"; readonly operationId: string }
   | {
     readonly command: "transfer.prepare";
     readonly profile: string;

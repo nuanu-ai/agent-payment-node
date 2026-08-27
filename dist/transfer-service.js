@@ -2,13 +2,16 @@ import { hashObject } from "./canonical.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic, parseDecimal } from "./money.js";
+import { OperationService } from "./operation-service.js";
 import { appendTransition, sealOperation, sealReceipt } from "./state.js";
 import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, hasExactTransfer, parseEffect, publicOperation, publicReceipt, requireFunding, transferData, validateBalance, validateEconomics, verifyEffect, } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 export class TransferService {
     context;
+    operations;
     constructor(context) {
         this.context = context;
+        this.operations = new OperationService(context.state);
     }
     async prepare(request) {
         const profile = canonicalProfile(request.profile);
@@ -29,21 +32,21 @@ export class TransferService {
             amountAtomic: amount.atomic,
         };
         const requestHash = hashObject(materialRequest);
-        return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
-            const existing = await state.loadOperation(profileHash, operationId);
-            if (existing !== null) {
-                if (existing.requestHash !== requestHash) {
-                    throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to different transfer inputs.");
-                }
-                return publicOperation(existing);
-            }
-            const other = (await state.listOperations(profileHash)).find((operation) => !operation.terminal);
-            if (other !== undefined) {
-                throw new ApnError("APN_OPERATION_BLOCKED", "Another transfer for this profile is not terminal.", {
-                    blockingOperationId: other.operationId,
-                    blockingState: other.state,
-                });
-            }
+        return await state.withLocks([
+            `profile:${profileHash}`,
+            `operation:${operationId}`,
+            `operation:idempotency:${idempotencyHash}`,
+        ], async () => {
+            const existing = await this.operations.resolvePrepare({
+                kind: "direct_transfer",
+                profileHash,
+                operationId,
+                idempotencyHash,
+                requestHash,
+            });
+            if (existing !== null)
+                return publicOperation(existing.record);
+            await this.operations.assertProfileAvailable(profileHash);
             const wallet = await state.loadWallet(profileHash);
             if (wallet === null)
                 throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");

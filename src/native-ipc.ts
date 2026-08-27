@@ -71,7 +71,11 @@ export class InheritedNativeIpc implements NativePort {
     const requestFrame = encodeFrame(request);
     let offset = 0;
     try {
-      while (offset < requestFrame.length) offset += writeSync(this.requestFd, requestFrame, offset);
+      try {
+        while (offset < requestFrame.length) offset += writeSync(this.requestFd, requestFrame, offset);
+      } catch {
+        throw nativeTransportError("Native IPC request transport failed.");
+      }
     } finally {
       closeSync(this.requestFd);
     }
@@ -105,6 +109,8 @@ function validateRequest(request: NativeRequest): void {
       "wallet.ensure",
       "directTransfer.approveAndSign",
       "effectMaterial.get",
+      "x402Exact.approveAndAuthorize",
+      "x402Exact.authorizationMaterial.get",
     ].includes(request.operation) ||
     !isPlainRecord(request.payload)
   ) throw new ApnError("APN_NATIVE_PROTOCOL", "Native IPC request violates the bounded schema.");
@@ -149,7 +155,7 @@ export async function readFrameStream(stream: Readable, timeoutMs = 15_000): Pro
     let total = 0;
     let expected: number | null = null;
     let settled = false;
-    const timeout = setTimeout(() => finish(new ApnError("APN_NATIVE_PROTOCOL", "Native IPC response timed out.")), timeoutMs);
+    const timeout = setTimeout(() => finish(nativeTransportError("Native IPC response timed out.")), timeoutMs);
 
     function finish(error?: Error, value?: unknown): void {
       if (settled) return;
@@ -181,10 +187,10 @@ export async function readFrameStream(stream: Readable, timeoutMs = 15_000): Pro
         finish(new ApnError("APN_NATIVE_PROTOCOL", "Native IPC response contains trailing data or a second frame."));
       }
     });
-    stream.on("error", (error) => finish(error));
+    stream.on("error", () => finish(nativeTransportError("Native IPC response transport failed.")));
     stream.on("end", () => {
       if (expected === null || total !== expected) {
-        finish(new ApnError("APN_NATIVE_PROTOCOL", "Native IPC response ended before one complete frame."));
+        finish(nativeTransportError("Native IPC response ended before one complete frame."));
         return;
       }
       try {
@@ -194,4 +200,8 @@ export async function readFrameStream(stream: Readable, timeoutMs = 15_000): Pro
       }
     });
   });
+}
+
+function nativeTransportError(message: string): ApnError {
+  return new ApnError("APN_NATIVE_PROTOCOL", message, { nativeTransport: true });
 }

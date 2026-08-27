@@ -5,6 +5,7 @@ export class RuntimeContext {
     state;
     native;
     rpc;
+    http;
     clock;
     ids;
     initialized;
@@ -14,6 +15,8 @@ export class RuntimeContext {
             this.native = dependencies.native;
         if (dependencies.rpc !== undefined)
             this.rpc = dependencies.rpc;
+        if (dependencies.http !== undefined)
+            this.http = dependencies.http;
         this.clock = dependencies.clock ?? { now: () => new Date() };
         this.ids = dependencies.ids ?? { next: () => randomUUID() };
     }
@@ -32,6 +35,12 @@ export class RuntimeContext {
             throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
         }
         return this.rpc;
+    }
+    requireHttp() {
+        if (this.http === undefined) {
+            throw new ApnError("APN_HTTP_CONFIG", "This command requires the fail-closed seller HTTPS adapter.");
+        }
+        return this.http;
     }
     nativeRequest(operation, payload) {
         return { version: NATIVE_IPC_VERSION, requestId: this.ids.next(), operation, payload };

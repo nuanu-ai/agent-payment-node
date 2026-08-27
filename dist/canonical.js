@@ -25,6 +25,10 @@ function toCanonical(value) {
 export function sha256(value) {
     return createHash("sha256").update(value).digest("hex");
 }
+export function domainHash(domain, value) {
+    const bytes = typeof value === "string" ? Buffer.from(value, "utf8") : value;
+    return createHash("sha256").update(domain, "utf8").update(Buffer.from([0])).update(bytes).digest("hex");
+}
 export function hashObject(value) {
     return sha256(canonicalJson(value));
 }
