@@ -1,24 +1,17 @@
-import { isPlainRecord } from "./canonical.js";
 import { OUTPUT_VERSION } from "./constants.js";
 import { asApnError } from "./errors.js";
-export function successEnvelope(request, requestId, result) {
-    const record = isPlainRecord(result) ? result : {};
-    const declaredProofClass = typeof record.proof_class === "string"
-        ? record.proof_class
-        : typeof record.proofClass === "string" ? record.proofClass : undefined;
-    const operation = isOperationCommand(request.command) ? result : null;
-    const receipt = request.command === "receipt.get" ? result : null;
+export function successEnvelope(request, requestId, outcome) {
     return {
         version: OUTPUT_VERSION,
         request_id: requestId,
         command: request.command,
         ok: true,
-        proof_class: declaredProofClass ?? proofClassFor(request.command),
-        data: operation === null && receipt === null ? result : null,
-        operation,
-        receipt,
+        proof_class: outcome.proofClass,
+        data: outcome.data,
+        operation: outcome.operation,
+        receipt: outcome.receipt,
         error: null,
-        next_actions: stringActions(record.next_actions ?? record.nextActions),
+        next_actions: outcome.nextActions,
     };
 }
 export function failureEnvelope(command, requestId, error) {
@@ -40,9 +33,6 @@ export function failureEnvelope(command, requestId, error) {
         next_actions: nextActions(safe.code),
     };
 }
-function stringActions(value) {
-    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
-}
 function nextActions(code) {
     switch (code) {
         case "APN_NATIVE_CHANNEL_REQUIRED": return ["Run the command through APNKeychainAgent.app."];
@@ -51,21 +41,5 @@ function nextActions(code) {
         case "APN_STATE_BUSY": return ["Retry after the active APN operation exits."];
         default: return [];
     }
-}
-function isOperationCommand(command) {
-    return [
-        "transfer.prepare", "transfer.approve", "x402.fetch.prepare", "x402.fetch.approve", "operation.status", "operation.resume",
-    ].includes(command);
-}
-function proofClassFor(command) {
-    if (command === "version")
-        return "local_build_metadata";
-    if (command === "wallet.balance")
-        return "chain_verified_public_read";
-    if (command === "x402.inspect")
-        return "seller_challenge_static";
-    if (["wallet.ensure", "wallet.status", "doctor.keychain"].includes(command))
-        return "native_keychain_status";
-    return "durable_public_state";
 }
 //# sourceMappingURL=output.js.map

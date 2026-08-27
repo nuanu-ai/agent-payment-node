@@ -32,6 +32,19 @@ are not inherited. Commands that need no native operation exchange zero IPC
 frames; all other invocations exchange at most one request/response and require
 EOF after the sole frame.
 
+The native allowlist has two x402-specific operations only:
+`x402Exact.approveAndAuthorize` creates one exact EIP-3009 authorization in a
+create-once Keychain slot, and `x402Exact.authorizationMaterial.get` recovers
+that same material after a lost response or restart. The create-once approval
+request and Keychain slot bind the profile, operation, wallet, offer, and
+payment-identifier posture. The EIP-712 signature itself binds the Base USDC
+token domain and exact EIP-3009 `from`, `to`, `value`, `validAfter`,
+`validBefore`, and `nonce` fields. Neither operation accepts seller HTTP wire
+bytes, exposes a generic signing primitive, or broadcasts a transaction.
+Unlike direct transfer, this disposable-wallet x402 path intentionally has no
+TTY prompt; its authority is the already frozen single-use authorization, not
+a reusable session permission.
+
 Before launching the core, the signed host acquires one effective-user macOS
 advisory lock in `_CS_DARWIN_USER_TEMP_DIR`. The lock path is fixed, opened
 without symlink following, verified as an owner-only single-link regular file,
@@ -47,9 +60,9 @@ and architecture, profile/entitlement inspection, clean-host DP-Keychain
 custody, Developer ID, notarization/Gatekeeper, and no-money assembled-app
 acceptance. This source/build lane does not satisfy those gates.
 
-Secret scalars, loaded Keychain values, signed-transaction buffers, and the
-serialized native response buffer use zeroizing owners. The IPC response must
-necessarily exist transiently in the anonymous-pipe kernel buffer and in the
-child process for immediate submission/rebroadcast; the native host cannot
-zero those copies after the write syscall. They must never be logged or copied
-to public state by either side.
+Secret scalars, loaded Keychain values, signed-transaction and x402
+authorization buffers, and the serialized native response buffer use
+zeroizing owners. The IPC response must necessarily exist transiently in the
+anonymous-pipe kernel buffer and in the child process for immediate use; the
+native host cannot zero those copies after the write syscall. They must never
+be logged or copied to public state by either side.

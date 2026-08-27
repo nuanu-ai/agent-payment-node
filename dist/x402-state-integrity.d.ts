@@ -299,6 +299,7 @@ export declare function appendX402Transition(previous: readonly X402Transition[]
 export declare function sealX402Operation(value: Omit<X402OperationRecord, "integrityHash">): X402OperationRecord;
 export declare function validateX402Operation(value: unknown): X402OperationRecord;
 export declare function publicX402Operation(operation: X402OperationRecord, result?: X402ResultRecord): unknown;
+export declare function publicX402ResultData(result: X402ResultRecord): unknown;
 export declare function sealX402Result(value: Omit<X402ResultRecord, "integrityHash">): X402ResultRecord;
 export declare function sealX402Receipt(value: Omit<X402ReceiptRecord, "integrityHash">): X402ReceiptRecord;
 export declare function validateX402Result(value: unknown): X402ResultRecord;
