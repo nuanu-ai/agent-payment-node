@@ -43,6 +43,13 @@ export type CommandRequest = {
     readonly command: "receipt.get";
     readonly operationId: string;
 };
+export interface CommandOutcome {
+    readonly proofClass: string;
+    readonly data: unknown | null;
+    readonly operation: unknown | null;
+    readonly receipt: unknown | null;
+    readonly nextActions: readonly string[];
+}
 export interface OutputEnvelope {
     readonly version: "apn.cli.v1";
     readonly request_id: string;
