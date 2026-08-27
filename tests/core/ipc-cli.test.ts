@@ -82,7 +82,7 @@ test("IPC closes the sole request writer and consumes one EOF-terminated respons
   try { closeSync(responseFd); } catch { /* read stream owns this descriptor */ }
 });
 
-test("CLI argv surface exactly matches Slice 1 and contains no approval bypass", async () => {
+test("CLI argv preserves Slice 1, adds bounded x402 commands, and contains no approval bypass", async () => {
   assert.deepEqual(parseArgv(["--version"]), { request: { command: "version" } });
   assert.deepEqual(parseArgv(["doctor", "keychain"]), { request: { command: "doctor.keychain" } });
   assert.deepEqual(parseArgv(["wallet", "ensure"]), { request: { command: "wallet.ensure", profile: "default" } });
@@ -118,9 +118,19 @@ test("CLI argv surface exactly matches Slice 1 and contains no approval bypass",
   assert.deepEqual(parseArgv(["receipt", "get", "--operation", OPERATION_ID]), {
     request: { command: "receipt.get", operationId: OPERATION_ID },
   });
+  assert.deepEqual(parseArgv(["x402", "inspect", "--url", "https://seller.example/resource"]), {
+    request: { command: "x402.inspect", url: "https://seller.example/resource" },
+  });
+  assert.deepEqual(parseArgv([
+    "x402", "fetch", "approve", "--operation", OPERATION_ID, "--rpc-url", "https://rpc.example",
+  ]), {
+    request: { command: "x402.fetch.approve", operationId: OPERATION_ID },
+    rpcUrl: "https://rpc.example",
+  });
 
   assert.throws(() => parseArgv(["transfer", "prepare"]));
   assert.throws(() => parseArgv(["pay", "transfer", "prepare", "--yes", "true"]));
+  assert.throws(() => parseArgv(["x402", "fetch", "approve", "--operation", OPERATION_ID, "--yes", "true"]));
   assert.throws(() => parseArgv(["wallet", "export"]));
   const outsideHost = await runCli(["wallet", "ensure"], {});
   assert.equal(outsideHost.ok, false);

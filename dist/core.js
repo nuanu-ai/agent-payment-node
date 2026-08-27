@@ -3,14 +3,22 @@ import { failureEnvelope, successEnvelope } from "./output.js";
 import { RuntimeContext } from "./runtime.js";
 import { TransferService } from "./transfer-service.js";
 import { WalletService } from "./wallet-service.js";
+import { OperationService } from "./operation-service.js";
+import { inspectX402 } from "./x402-http.js";
+import { canonicalOperationId } from "./transfer-policy.js";
+import { X402Service } from "./x402-service.js";
 export class ApnCore {
     context;
     wallet;
     transfer;
+    operations;
+    x402;
     constructor(dependencies) {
         this.context = new RuntimeContext(dependencies);
         this.wallet = new WalletService(this.context);
         this.transfer = new TransferService(this.context);
+        this.operations = new OperationService(this.context.state);
+        this.x402 = new X402Service(this.context);
     }
     async execute(request) {
         const requestId = this.context.ids.next();
@@ -34,10 +42,22 @@ export class ApnCore {
             case "wallet.ensure": return await this.wallet.ensure(request.profile);
             case "wallet.status": return await this.wallet.status(request.profile);
             case "wallet.balance": return await this.wallet.balance(request.profile);
+            case "x402.inspect": return await inspectX402(this.context.requireHttp(), request.url);
+            case "x402.fetch.prepare": return await this.x402.prepare(request);
+            case "x402.fetch.approve": return await this.x402.approve(request);
             case "transfer.prepare": return await this.transfer.prepare(request);
             case "transfer.approve": return await this.transfer.approve(request.operationId);
-            case "operation.resume": return await this.transfer.resume(request.operationId);
-            case "operation.status": return await this.transfer.status(request.operationId);
+            case "operation.resume": {
+                await this.context.ready();
+                const operation = await this.operations.required(request.operationId);
+                return operation.kind === "x402_fetch"
+                    ? await this.x402.resume(request.operationId)
+                    : await this.transfer.resume(request.operationId);
+            }
+            case "operation.status":
+                canonicalOperationId(request.operationId);
+                await this.context.ready();
+                return await this.operations.status(request.operationId);
             case "receipt.get": return await this.transfer.receipt(request.operationId);
         }
     }

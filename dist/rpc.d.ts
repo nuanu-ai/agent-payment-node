@@ -1,5 +1,5 @@
 import type { Address, Hex } from "./model.js";
-import type { BalanceSnapshot, FeeEstimate, RpcPort, RpcReceipt } from "./ports.js";
+import type { BalanceSnapshot, FeeEstimate, RpcPort, RpcReceipt, X402PrepareEvidence } from "./ports.js";
 export declare class HttpsBaseRpc implements RpcPort {
     readonly endpoint: URL;
     readonly rpcOrigin: string;
@@ -11,6 +11,7 @@ export declare class HttpsBaseRpc implements RpcPort {
         readonly rpcOrigin: string;
     }>;
     getBalances(address: Address): Promise<BalanceSnapshot>;
+    getX402PrepareEvidence(address: Address): Promise<X402PrepareEvidence>;
     getPendingNonce(address: Address): Promise<string>;
     estimateDirectTransfer(input: {
         readonly from: Address;
@@ -24,4 +25,4 @@ export declare class HttpsBaseRpc implements RpcPort {
     private call;
     private resolvePublicAddresses;
 }
-export declare function isPublicIp(address: string): boolean;
+export { isPublicIp } from "./network-policy.js";

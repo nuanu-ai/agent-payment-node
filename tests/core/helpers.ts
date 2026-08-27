@@ -3,16 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { keccak256 } from "viem";
 import { ApnCore } from "../../src/core.js";
+import { sha256 } from "../../src/canonical.js";
 import { BASE_USDC } from "../../src/constants.js";
 import type { Address, Hex } from "../../src/model.js";
 import type {
   BalanceSnapshot,
   ClockPort,
   FeeEstimate,
+  HttpPort,
   NativePort,
   NativeRequest,
   RpcPort,
   RpcReceipt,
+  X402PrepareEvidence,
 } from "../../src/ports.js";
 import { StateStore } from "../../src/state.js";
 
@@ -73,6 +76,7 @@ export class TestNative implements NativePort {
 
 export class TestRpc implements RpcPort {
   chainId = 8453;
+  rpcOrigin = "https://rpc.example";
   balances: BalanceSnapshot = {
     address: WALLET,
     ethAtomic: "1000000000000000000",
@@ -94,13 +98,29 @@ export class TestRpc implements RpcPort {
   latestNonceAtomic = "7";
   confirmedAtNonce: Hex | null = null;
   confirmedNonceStartBlockAtomic: string | null = null;
+  x402Evidence: X402PrepareEvidence = {
+    address: WALLET,
+    usdcAtomic: "50000000",
+    tokenName: "USD Coin",
+    tokenVersion: "2",
+    domainSeparator: "0x02fa7265e7c5d81118673727957699e4d68f74cd74b7db77da710fe8a2c7834f",
+    rpcOriginHash: sha256("https://rpc.example"),
+    observedAt: "2026-08-26T00:00:00.000Z",
+    queriedTag: "safe",
+    block: {
+      number: "12345",
+      hash: `0x${"b".repeat(64)}` as Hex,
+      timestamp: "1787702400",
+    },
+  };
   readonly submissions: Hex[] = [];
   balanceCalls = 0;
   nonceCalls = 0;
+  x402PrepareCalls = 0;
 
   async assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }> {
     if (this.chainId !== 8453) throw new Error("wrong chain");
-    return { chainId: 8453, rpcOrigin: "https://rpc.example" };
+    return { chainId: 8453, rpcOrigin: this.rpcOrigin };
   }
   async getBalances(address: Address): Promise<BalanceSnapshot> {
     this.balanceCalls += 1;
@@ -109,6 +129,11 @@ export class TestRpc implements RpcPort {
   async getPendingNonce(_address: Address): Promise<string> {
     this.nonceCalls += 1;
     return this.nonceAtomic;
+  }
+  async getX402PrepareEvidence(address: Address): Promise<X402PrepareEvidence> {
+    this.x402PrepareCalls += 1;
+    void address;
+    return { ...this.x402Evidence, block: { ...this.x402Evidence.block } };
   }
   async estimateDirectTransfer(input: { readonly from: Address; readonly to: Address; readonly data: Hex }): Promise<FeeEstimate> {
     if (input.to !== BASE_USDC) throw new Error("wrong token");
@@ -146,11 +171,13 @@ export function makeCore(input: {
   readonly native?: NativePort;
   readonly rpc?: RpcPort;
   readonly clock?: TestClock;
+  readonly http?: HttpPort;
 }): ApnCore {
   return new ApnCore({
     state: new StateStore(input.root, { lockWaitMs: 1_000, lockLeaseMs: 100 }),
     ...(input.native === undefined ? {} : { native: input.native }),
     ...(input.rpc === undefined ? {} : { rpc: input.rpc }),
+    ...(input.http === undefined ? {} : { http: input.http }),
     clock: input.clock ?? new TestClock(),
     ids: { next: () => UUID },
   });

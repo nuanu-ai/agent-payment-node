@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "apn.x402.eip3009-vector.v1",
+  "createPayload": {
+    "profile": "local_software",
+    "operationId": "0101010101010101010101010101010101010101010101010101010101010101",
+    "fingerprint": "0202020202020202020202020202020202020202020202020202020202020202",
+    "wallet": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+    "chainId": "8453",
+    "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "resource": {
+      "origin": "https://seller.example",
+      "path": "/resource",
+      "urlHash": "0303030303030303030303030303030303030303030303030303030303030303"
+    },
+    "capAtomic": "2000000",
+    "payee": "0x2222222222222222222222222222222222222222",
+    "amountAtomic": "1250000",
+    "tokenDomain": {
+      "name": "USD Coin",
+      "version": "2"
+    },
+    "authorization": {
+      "from": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "to": "0x2222222222222222222222222222222222222222",
+      "value": "1250000",
+      "validAfter": "0",
+      "validBefore": "1760000000",
+      "nonce": "0xabababababababababababababababababababababababababababababababab",
+      "createdAt": "1759999940"
+    },
+    "paymentIdentifierPosture": "optional",
+    "paymentIdentifierValue": "apn_0101010101010101010101010101010101010101010101010101010101010101",
+    "offerHash": "0404040404040404040404040404040404040404040404040404040404040404",
+    "intentHash": "399ef13c8ea14bc3459a62c801f55d2ec8ec35aaa06401cb5bf126fdd108bf25"
+  },
+  "domainSeparator": "02fa7265e7c5d81118673727957699e4d68f74cd74b7db77da710fe8a2c7834f",
+  "digest": "e36116884332d647c03f39e04ea71db8f78013a05a7b0c6be310060305b96218",
+  "signature": "0x0a5171938a684accd35a09ca13c5876ee481f3f098efa1eaac412809e90f34695a1a506fcf04c3ea1a4c87d7dd9a707a8118f371367246bfbffcdc9322a9de131c",
+  "signatureHash": "74bb706ea2800779ac000f02304371d1aac9948b31d0cf50dde9e910c7d8ca31",
+  "effectSlot": "7f9a0a84e983ab5a99f039ef4146f8b1f672df9cf80e5458db3d9f54873c37b3"
+}

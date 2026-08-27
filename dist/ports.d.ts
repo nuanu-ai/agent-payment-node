@@ -1,4 +1,5 @@
 import type { Address, Hex } from "./model.js";
+export type { HttpGetRequest, HttpObservation, HttpPort } from "./x402-model.js";
 export interface ClockPort {
     now(): Date;
 }
@@ -8,7 +9,7 @@ export interface IdPort {
 export interface NativeRequest {
     readonly version: "apn.native.v1";
     readonly requestId: string;
-    readonly operation: "wallet.describe" | "wallet.ensure" | "directTransfer.approveAndSign" | "effectMaterial.get";
+    readonly operation: "wallet.describe" | "wallet.ensure" | "directTransfer.approveAndSign" | "effectMaterial.get" | "x402Exact.approveAndAuthorize" | "x402Exact.authorizationMaterial.get";
     readonly payload: Readonly<Record<string, unknown>>;
 }
 export interface NativePort {
@@ -30,6 +31,21 @@ export interface FeeEstimate {
     readonly maxFeePerGasAtomic: string;
     readonly maxPriorityFeePerGasAtomic: string;
 }
+export interface X402PrepareEvidence {
+    readonly address: Address;
+    readonly usdcAtomic: string;
+    readonly tokenName: string;
+    readonly tokenVersion: string;
+    readonly domainSeparator: Hex;
+    readonly rpcOriginHash: string;
+    readonly observedAt: string;
+    readonly queriedTag: "safe";
+    readonly block: {
+        readonly number: string;
+        readonly hash: Hex;
+        readonly timestamp: string;
+    };
+}
 export interface RpcLog {
     readonly address: Address;
     readonly topics: readonly Hex[];
@@ -49,6 +65,7 @@ export interface RpcPort {
         readonly rpcOrigin: string;
     }>;
     getBalances(address: Address): Promise<BalanceSnapshot>;
+    getX402PrepareEvidence(address: Address): Promise<X402PrepareEvidence>;
     getPendingNonce(address: Address): Promise<string>;
     estimateDirectTransfer(input: {
         readonly from: Address;

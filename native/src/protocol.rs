@@ -1,3 +1,4 @@
+use crate::x402::{X402ApprovalIntent, X402AuthorizationRecovery};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
@@ -33,6 +34,9 @@ pub enum ErrorCode {
     WalletMismatch,
     EffectNotFound,
     EffectMismatch,
+    X402AuthorizationInvalid,
+    X402AuthorizationNotFound,
+    X402AuthorizationMismatch,
     KeychainDuplicate,
     KeychainNotFound,
     KeychainLocked,
@@ -72,6 +76,9 @@ impl ErrorCode {
             Self::WalletMismatch => "APN_WALLET_MISMATCH",
             Self::EffectNotFound => "APN_EFFECT_NOT_FOUND",
             Self::EffectMismatch => "APN_EFFECT_MISMATCH",
+            Self::X402AuthorizationInvalid => "APN_X402_AUTHORIZATION_INVALID",
+            Self::X402AuthorizationNotFound => "APN_X402_AUTHORIZATION_NOT_FOUND",
+            Self::X402AuthorizationMismatch => "APN_X402_AUTHORIZATION_MISMATCH",
             Self::KeychainDuplicate => "APN_KEYCHAIN_DUPLICATE",
             Self::KeychainNotFound => "APN_KEYCHAIN_NOT_FOUND",
             Self::KeychainLocked => "APN_KEYCHAIN_LOCKED",
@@ -111,6 +118,8 @@ pub enum Operation {
     WalletEnsure(WalletPayload),
     ApproveAndSign(Box<ApproveAndSignPayload>),
     EffectMaterialGet(EffectMaterialPayload),
+    X402ApproveAndAuthorize(Box<X402ApprovalIntent>),
+    X402AuthorizationMaterialGet(Box<X402AuthorizationRecovery>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -269,6 +278,12 @@ pub fn parse_request(frame: &[u8]) -> AgentResult<Request> {
             Operation::ApproveAndSign(Box::new(decode_payload(envelope.payload)?))
         }
         "effectMaterial.get" => Operation::EffectMaterialGet(decode_payload(envelope.payload)?),
+        "x402Exact.approveAndAuthorize" => {
+            Operation::X402ApproveAndAuthorize(Box::new(decode_payload(envelope.payload)?))
+        }
+        "x402Exact.authorizationMaterial.get" => {
+            Operation::X402AuthorizationMaterialGet(Box::new(decode_payload(envelope.payload)?))
+        }
         _ => return Err(ErrorCode::UnsupportedOperation),
     };
     Ok(Request {

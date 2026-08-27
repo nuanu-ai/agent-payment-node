@@ -7,6 +7,7 @@ import { ApnError, asApnError } from "./errors.js";
 import { InheritedNativeIpc } from "./native-ipc.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
+import { HttpsX402Http } from "./x402-http.js";
 export function parseArgv(argv) {
     const [first, second, third, ...rest] = argv;
     if (first === "--version")
@@ -20,6 +21,30 @@ export function parseArgv(argv) {
     if (first === "wallet" && second === "balance") {
         const options = parseOptions([third, ...rest].filter(defined), ["profile", "rpc-url"]);
         return { request: { command: "wallet.balance", profile: options.profile ?? "default" }, rpcUrl: required(options, "rpc-url") };
+    }
+    if (first === "x402" && second === "inspect") {
+        const options = parseOptions([third, ...rest].filter(defined), ["url"]);
+        return { request: { command: "x402.inspect", url: required(options, "url") } };
+    }
+    if (first === "x402" && second === "fetch" && third === "prepare") {
+        const options = parseOptions(rest, ["profile", "url", "max-amount-atomic", "idempotency-key", "rpc-url"]);
+        return {
+            request: {
+                command: "x402.fetch.prepare",
+                profile: required(options, "profile"),
+                url: required(options, "url"),
+                maxAmountAtomic: required(options, "max-amount-atomic"),
+                idempotencyKey: required(options, "idempotency-key"),
+            },
+            rpcUrl: required(options, "rpc-url"),
+        };
+    }
+    if (first === "x402" && second === "fetch" && third === "approve") {
+        const options = parseOptions(rest, ["operation", "rpc-url"]);
+        return {
+            request: { command: "x402.fetch.approve", operationId: required(options, "operation") },
+            rpcUrl: required(options, "rpc-url"),
+        };
     }
     if (first === "pay" && second === "transfer" && third === "prepare") {
         const options = parseOptions(rest, ["profile", "idempotency-key", "to", "amount-usdc", "rpc-url"]);
@@ -56,11 +81,15 @@ export async function runCli(argv, environment = process.env) {
         const parsed = parseArgv(argv);
         const native = needsNative(parsed.request) ? InheritedNativeIpc.fromEnvironment(environment) : undefined;
         const rpc = parsed.rpcUrl === undefined ? undefined : new HttpsBaseRpc(parsed.rpcUrl);
+        const http = ["x402.inspect", "x402.fetch.prepare", "operation.resume"].includes(parsed.request.command)
+            ? new HttpsX402Http()
+            : undefined;
         const stateRoot = effectiveStateRoot();
         return await new ApnCore({
             state: new StateStore(stateRoot, { hostSerialized: environment[HOST_SERIALIZED_ENV] === "1" }),
             ...(native === undefined ? {} : { native }),
             ...(rpc === undefined ? {} : { rpc }),
+            ...(http === undefined ? {} : { http }),
         }).execute(parsed.request);
     }
     catch (error) {
@@ -83,7 +112,9 @@ export function effectiveStateRoot() {
     return resolve(userInfo().homedir, "Library", "Application Support", "nuanu-apn");
 }
 function needsNative(request) {
-    return ["doctor.keychain", "wallet.ensure", "wallet.status", "transfer.approve", "operation.resume"].includes(request.command);
+    return [
+        "doctor.keychain", "wallet.ensure", "wallet.status", "transfer.approve", "x402.fetch.approve", "operation.resume",
+    ].includes(request.command);
 }
 function noArguments(rest, request) {
     if (rest.length !== 0)

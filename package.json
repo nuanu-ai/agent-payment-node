@@ -35,6 +35,7 @@
     "prepack": "npm run build && npm test"
   },
   "dependencies": {
+    "@x402/core": "2.23.0",
     "viem": "2.55.19"
   },
   "devDependencies": {

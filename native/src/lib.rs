@@ -6,6 +6,7 @@ pub mod ethereum;
 pub mod host;
 pub mod protocol;
 pub mod store;
+pub mod x402;
 
 use crate::ethereum::{
     PreparedTransfer, effect_slot, format_rfc3339_utc, parse_address, sign_transfer,
@@ -18,8 +19,11 @@ use crate::protocol::{
     require_eof, success_response, write_frame,
 };
 use crate::store::{
-    SecureStore, create_effect_once, describe_wallet, ensure_wallet, load_effect,
-    load_wallet_secret,
+    SecureStore, StoredX402Authorization, create_effect_once, create_x402_authorization_once,
+    describe_wallet, ensure_wallet, load_effect, load_wallet_secret, load_x402_authorization,
+};
+use crate::x402::{
+    AuthorizationMaterial, PreparedAuthorization, X402AuthorizationError, X402AuthorizationRecovery,
 };
 use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -108,6 +112,89 @@ fn handle_request(store: &impl SecureStore, request: Request) -> AgentResult<Vec
             }
             success_response(&request.request_id, verified.response())
         }
+        Operation::X402ApproveAndAuthorize(payload) => {
+            let intent = PreparedAuthorization::validate(*payload, now_unix_u64()?)
+                .map_err(map_x402_error)?;
+            let material = approve_and_authorize_x402(store, &intent)?;
+            success_response(&request.request_id, material)
+        }
+        Operation::X402AuthorizationMaterialGet(payload) => {
+            let material = get_x402_authorization(store, &payload)?;
+            success_response(&request.request_id, material)
+        }
+    }
+}
+
+fn approve_and_authorize_x402(
+    store: &impl SecureStore,
+    intent: &PreparedAuthorization,
+) -> AgentResult<AuthorizationMaterial> {
+    let account = intent.effect_slot();
+    match load_x402_authorization(store, &account) {
+        Ok(stored) => return verify_stored_x402(intent, stored, None),
+        Err(ErrorCode::X402AuthorizationNotFound) => {}
+        Err(error) => return Err(error),
+    }
+
+    intent
+        .ensure_live(now_unix_u64()?)
+        .map_err(map_x402_error)?;
+    let secret = load_wallet_secret(store, &intent.intent().profile)?;
+    let secret_bytes: &[u8; 32] = secret
+        .0
+        .as_slice()
+        .try_into()
+        .map_err(|_| ErrorCode::WalletCorrupt)?;
+    let material = intent
+        .sign(secret_bytes, now_unix_u64()?)
+        .map_err(map_x402_error)?;
+    create_x402_authorization_once(store, &account, intent.intent(), &material)?;
+    let stored = load_x402_authorization(store, &account)?;
+    verify_stored_x402(intent, stored, None)
+}
+
+fn get_x402_authorization(
+    store: &impl SecureStore,
+    recovery: &X402AuthorizationRecovery,
+) -> AgentResult<AuthorizationMaterial> {
+    let now = now_unix_u64()?;
+    recovery.validate(now).map_err(map_x402_error)?;
+    let stored = load_x402_authorization(store, &recovery.effect_slot())?;
+    let prepared =
+        PreparedAuthorization::validate(stored.intent.clone(), now).map_err(map_x402_error)?;
+    prepared
+        .matches_recovery(recovery)
+        .map_err(map_x402_error)?;
+    verify_stored_x402(
+        &prepared,
+        stored,
+        recovery.expected_signature_hash.as_deref(),
+    )
+}
+
+fn verify_stored_x402(
+    intent: &PreparedAuthorization,
+    stored: StoredX402Authorization,
+    expected_signature_hash: Option<&str>,
+) -> AgentResult<AuthorizationMaterial> {
+    if &stored.intent != intent.intent() {
+        return Err(ErrorCode::X402AuthorizationMismatch);
+    }
+    intent
+        .ensure_live(now_unix_u64()?)
+        .map_err(map_x402_error)?;
+    intent
+        .verify_stored_material(&stored.material, expected_signature_hash, now_unix_u64()?)
+        .map_err(map_x402_error)
+}
+
+fn map_x402_error(error: X402AuthorizationError) -> ErrorCode {
+    match error {
+        X402AuthorizationError::Invalid => ErrorCode::X402AuthorizationInvalid,
+        X402AuthorizationError::Expired => ErrorCode::Expired,
+        X402AuthorizationError::Mismatch => ErrorCode::X402AuthorizationMismatch,
+        X402AuthorizationError::WalletCorrupt => ErrorCode::WalletCorrupt,
+        X402AuthorizationError::Internal => ErrorCode::Internal,
     }
 }
 
@@ -152,12 +239,23 @@ fn now_unix() -> AgentResult<i64> {
     i64::try_from(duration.as_secs()).map_err(|_| ErrorCode::Internal)
 }
 
+fn now_unix_u64() -> AgentResult<u64> {
+    u64::try_from(now_unix()?).map_err(|_| ErrorCode::Internal)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ethereum::{Uint256, canonical_fingerprint, checksum_address, transfer_calldata};
+    use crate::ethereum::{
+        Uint256, canonical_fingerprint, checksum_address, hex_encode, transfer_calldata,
+    };
     use crate::protocol::{ApprovalPayload, ApproveAndSignPayload, TransactionPayload};
     use crate::store::{SecretData, ensure_wallet_with_secret};
+    use crate::x402::{
+        PaymentIdentifierPosture, PublicAuthorization, X402ApprovalIntent, X402Authorization,
+        X402AuthorizationRecovery, X402Resource, X402TokenDomain,
+    };
+    use sha2::{Digest, Sha256};
     use std::collections::HashMap;
     use std::sync::Mutex;
     use zeroize::Zeroizing;
@@ -238,6 +336,83 @@ mod tests {
         intent
     }
 
+    fn x402_intent(secret: [u8; 32], now: u64) -> X402ApprovalIntent {
+        let wallet = checksum_address(&crate::ethereum::address_from_secret(&secret).unwrap())
+            .to_lowercase();
+        let authorization = X402Authorization {
+            from: wallet.clone(),
+            to: "0x2222222222222222222222222222222222222222".to_owned(),
+            value: "1250000".to_owned(),
+            valid_after: "0".to_owned(),
+            valid_before: (now + 60).to_string(),
+            nonce: format!("0x{}", "ab".repeat(32)),
+            created_at: now.to_string(),
+        };
+        let canonical = format!(
+            "{{\"createdAt\":\"{}\",\"from\":\"{}\",\"nonce\":\"{}\",\"to\":\"{}\",\"validAfter\":\"{}\",\"validBefore\":\"{}\",\"value\":\"{}\"}}",
+            authorization.created_at,
+            authorization.from,
+            authorization.nonce,
+            authorization.to,
+            authorization.valid_after,
+            authorization.valid_before,
+            authorization.value,
+        );
+        let mut intent_hasher = Sha256::new();
+        intent_hasher.update(b"apn.x402.authorization-intent.v1\0");
+        intent_hasher.update(canonical.as_bytes());
+        X402ApprovalIntent {
+            profile: "local_software".to_owned(),
+            operation_id: "01".repeat(32),
+            fingerprint: "02".repeat(32),
+            wallet,
+            chain_id: crate::x402::CHAIN_ID.to_owned(),
+            token: crate::x402::BASE_USDC.to_owned(),
+            resource: X402Resource {
+                origin: "https://seller.example".to_owned(),
+                path: "/resource".to_owned(),
+                url_hash: "03".repeat(32),
+            },
+            cap_atomic: "2000000".to_owned(),
+            payee: authorization.to.clone(),
+            amount_atomic: authorization.value.clone(),
+            token_domain: X402TokenDomain {
+                name: "USD Coin".to_owned(),
+                version: "2".to_owned(),
+            },
+            authorization,
+            payment_identifier_posture: PaymentIdentifierPosture::Absent,
+            payment_identifier_value: None,
+            offer_hash: "04".repeat(32),
+            intent_hash: hex_encode(&intent_hasher.finalize()),
+        }
+    }
+
+    fn x402_recovery(
+        intent: &X402ApprovalIntent,
+        expected_signature_hash: Option<String>,
+    ) -> X402AuthorizationRecovery {
+        X402AuthorizationRecovery {
+            profile: intent.profile.clone(),
+            operation_id: intent.operation_id.clone(),
+            fingerprint: intent.fingerprint.clone(),
+            wallet: intent.wallet.clone(),
+            chain_id: intent.chain_id.clone(),
+            token: intent.token.clone(),
+            token_domain: intent.token_domain.clone(),
+            authorization: PublicAuthorization {
+                from: intent.authorization.from.clone(),
+                to: intent.authorization.to.clone(),
+                value: intent.authorization.value.clone(),
+                valid_after: intent.authorization.valid_after.clone(),
+                valid_before: intent.authorization.valid_before.clone(),
+                nonce: intent.authorization.nonce.clone(),
+            },
+            intent_hash: intent.intent_hash.clone(),
+            expected_signature_hash,
+        }
+    }
+
     #[test]
     fn sign_encode_recover_and_replay_use_identical_stored_bytes() {
         let store = MemoryStore::default();
@@ -283,6 +458,53 @@ mod tests {
             finish_approved_signing(&store, &expired),
             Err(ErrorCode::Expired)
         ));
+    }
+
+    #[test]
+    fn x402_compound_create_loads_first_and_recovery_returns_identical_material() {
+        let store = MemoryStore::default();
+        let mut secret = [0_u8; 32];
+        secret[31] = 1;
+        ensure_wallet_with_secret(&store, "local_software", "2026-08-27T00:00:00.000Z", secret)
+            .unwrap();
+        let now = now_unix_u64().unwrap();
+        let frozen = x402_intent(secret, now);
+        let prepared = PreparedAuthorization::validate(frozen.clone(), now).unwrap();
+        let first = approve_and_authorize_x402(&store, &prepared).unwrap();
+        let replay = approve_and_authorize_x402(&store, &prepared).unwrap();
+        assert_eq!(first.signature.as_str(), replay.signature.as_str());
+        assert_eq!(first.signature_hash, replay.signature_hash);
+
+        let recovered = get_x402_authorization(
+            &store,
+            &x402_recovery(&frozen, Some(first.signature_hash.clone())),
+        )
+        .unwrap();
+        assert_eq!(first.signature.as_str(), recovered.signature.as_str());
+        assert_eq!(first.signature_hash, recovered.signature_hash);
+
+        let conflicting = AuthorizationMaterial {
+            authorization: first.authorization.clone(),
+            signature: Zeroizing::new(first.signature.as_str().to_owned()),
+            signature_hash: "00".repeat(32),
+        };
+        assert_eq!(
+            create_x402_authorization_once(&store, &prepared.effect_slot(), &frozen, &conflicting,),
+            Err(ErrorCode::EffectMismatch)
+        );
+
+        let mut changed = frozen.clone();
+        changed.offer_hash = "05".repeat(32);
+        let changed = PreparedAuthorization::validate(changed, now).unwrap();
+        assert_eq!(
+            approve_and_authorize_x402(&store, &changed).unwrap_err(),
+            ErrorCode::X402AuthorizationMismatch
+        );
+        assert_eq!(
+            get_x402_authorization(&store, &x402_recovery(&frozen, Some("00".repeat(32))),)
+                .unwrap_err(),
+            ErrorCode::X402AuthorizationMismatch
+        );
     }
 
     #[test]

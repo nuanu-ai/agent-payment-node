@@ -10,13 +10,20 @@ const forbidden = [
   "--private-key",
   "--raw-key",
   "--insecure",
+  "rejectUnauthorized: false",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "NODE_EXTRA_CA_CERTS",
+  "checkServerIdentity:",
   "privateKey.read",
   "signMessage",
   "signTypedData",
   "node:child_process",
   "createServer(",
   "http://",
-  "x402",
+  "@x402/fetch",
+  "x402Hub",
+  "facilitator.verify",
+  "facilitator.settle",
 ];
 
 const files = await collect(sourceRoot);
@@ -25,6 +32,9 @@ for (const file of files) {
   const text = await readFile(file, "utf8");
   for (const needle of forbidden) {
     if (text.includes(needle)) violations.push(`${file.slice(productRoot.length + 1)}: ${needle}`);
+  }
+  if (file !== join(sourceRoot, "x402-codec.ts") && text.includes("@x402/core")) {
+    violations.push(`${file.slice(productRoot.length + 1)}: @x402/core outside codec`);
   }
 }
 if (violations.length > 0) {

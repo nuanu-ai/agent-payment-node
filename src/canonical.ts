@@ -27,6 +27,11 @@ export function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export function domainHash(domain: string, value: string | Uint8Array): string {
+  const bytes = typeof value === "string" ? Buffer.from(value, "utf8") : value;
+  return createHash("sha256").update(domain, "utf8").update(Buffer.from([0])).update(bytes).digest("hex");
+}
+
 export function hashObject(value: unknown): string {
   return sha256(canonicalJson(value));
 }

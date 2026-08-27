@@ -2,12 +2,14 @@ use crate::ethereum::{
     address_from_secret, binding_hash, checksum_address, hex_encode, validate_profile,
 };
 use crate::protocol::{AgentResult, ErrorCode, WalletResult};
+use crate::x402::{AuthorizationMaterial, X402ApprovalIntent};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 const WALLET_SERVICE: &str = "ai.nuanu.apn.wallet.v1";
 const EFFECT_SERVICE: &str = "ai.nuanu.apn.effect.v1";
+const X402_EFFECT_SERVICE: &str = "ai.nuanu.apn.x402-effect.v1";
 #[cfg(feature = "acceptance-test")]
 const TEST_SERVICE: &str = "ai.nuanu.apn.TEST.v1";
 
@@ -29,6 +31,20 @@ struct WalletMetadata {
     address: String,
     created_at: String,
     binding_hash: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredX402Authorization {
+    pub intent: X402ApprovalIntent,
+    pub material: AuthorizationMaterial,
+}
+
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+struct StoredX402AuthorizationRef<'a> {
+    intent: &'a X402ApprovalIntent,
+    material: &'a AuthorizationMaterial,
 }
 
 pub fn describe_wallet(
@@ -202,6 +218,42 @@ pub fn create_effect_once(
         Err(ErrorCode::KeychainDuplicate) => {
             let existing = load_effect(store, account)?;
             if existing.0.as_slice() == raw_transaction {
+                Ok(())
+            } else {
+                Err(ErrorCode::EffectMismatch)
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub fn load_x402_authorization(
+    store: &impl SecureStore,
+    account: &str,
+) -> AgentResult<StoredX402Authorization> {
+    let encoded = store
+        .load(X402_EFFECT_SERVICE, account)?
+        .ok_or(ErrorCode::X402AuthorizationNotFound)?;
+    serde_json::from_slice(&encoded.0).map_err(|_| ErrorCode::X402AuthorizationInvalid)
+}
+
+pub fn create_x402_authorization_once(
+    store: &impl SecureStore,
+    account: &str,
+    intent: &X402ApprovalIntent,
+    material: &AuthorizationMaterial,
+) -> AgentResult<()> {
+    let encoded = Zeroizing::new(
+        serde_json::to_vec(&StoredX402AuthorizationRef { intent, material })
+            .map_err(|_| ErrorCode::Internal)?,
+    );
+    match store.create_once(X402_EFFECT_SERVICE, account, &encoded) {
+        Ok(()) => Ok(()),
+        Err(ErrorCode::KeychainDuplicate) => {
+            let existing = store
+                .load(X402_EFFECT_SERVICE, account)?
+                .ok_or(ErrorCode::X402AuthorizationNotFound)?;
+            if existing.0.as_slice() == encoded.as_slice() {
                 Ok(())
             } else {
                 Err(ErrorCode::EffectMismatch)
