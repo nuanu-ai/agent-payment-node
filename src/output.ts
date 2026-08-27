@@ -1,25 +1,19 @@
-import { isPlainRecord } from "./canonical.js";
-import type { CommandRequest, OutputEnvelope } from "./commands.js";
+import type { CommandOutcome, CommandRequest, OutputEnvelope } from "./commands.js";
 import { OUTPUT_VERSION } from "./constants.js";
 import { asApnError } from "./errors.js";
-export function successEnvelope(request: CommandRequest, requestId: string, result: unknown): OutputEnvelope {
-  const record = isPlainRecord(result) ? result : {};
-  const declaredProofClass = typeof record.proof_class === "string"
-    ? record.proof_class
-    : typeof record.proofClass === "string" ? record.proofClass : undefined;
-  const operation = isOperationCommand(request.command) ? result : null;
-  const receipt = request.command === "receipt.get" ? result : null;
+
+export function successEnvelope(request: CommandRequest, requestId: string, outcome: CommandOutcome): OutputEnvelope {
   return {
     version: OUTPUT_VERSION,
     request_id: requestId,
     command: request.command,
     ok: true,
-    proof_class: declaredProofClass ?? proofClassFor(request.command),
-    data: operation === null && receipt === null ? result : null,
-    operation,
-    receipt,
+    proof_class: outcome.proofClass,
+    data: outcome.data,
+    operation: outcome.operation,
+    receipt: outcome.receipt,
     error: null,
-    next_actions: stringActions(record.next_actions ?? record.nextActions),
+    next_actions: outcome.nextActions,
   };
 }
 
@@ -43,10 +37,6 @@ export function failureEnvelope(command: string, requestId: string, error: unkno
   };
 }
 
-function stringActions(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
-
 function nextActions(code: string): readonly string[] {
   switch (code) {
     case "APN_NATIVE_CHANNEL_REQUIRED": return ["Run the command through APNKeychainAgent.app."];
@@ -55,18 +45,4 @@ function nextActions(code: string): readonly string[] {
     case "APN_STATE_BUSY": return ["Retry after the active APN operation exits."];
     default: return [];
   }
-}
-
-function isOperationCommand(command: CommandRequest["command"]): boolean {
-  return [
-    "transfer.prepare", "transfer.approve", "x402.fetch.prepare", "x402.fetch.approve", "operation.status", "operation.resume",
-  ].includes(command);
-}
-
-function proofClassFor(command: CommandRequest["command"]): string {
-  if (command === "version") return "local_build_metadata";
-  if (command === "wallet.balance") return "chain_verified_public_read";
-  if (command === "x402.inspect") return "seller_challenge_static";
-  if (["wallet.ensure", "wallet.status", "doctor.keychain"].includes(command)) return "native_keychain_status";
-  return "durable_public_state";
 }

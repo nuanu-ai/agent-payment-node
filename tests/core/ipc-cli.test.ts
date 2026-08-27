@@ -122,6 +122,19 @@ test("CLI argv preserves Slice 1, adds bounded x402 commands, and contains no ap
     request: { command: "x402.inspect", url: "https://seller.example/resource" },
   });
   assert.deepEqual(parseArgv([
+    "x402", "fetch", "prepare", "--profile", "default", "--url", "https://seller.example/resource",
+    "--max-amount-atomic", "1250000", "--idempotency-key", "x402-001", "--rpc-url", "https://rpc.example",
+  ]), {
+    request: {
+      command: "x402.fetch.prepare",
+      profile: "default",
+      url: "https://seller.example/resource",
+      maxAmountAtomic: "1250000",
+      idempotencyKey: "x402-001",
+    },
+    rpcUrl: "https://rpc.example",
+  });
+  assert.deepEqual(parseArgv([
     "x402", "fetch", "approve", "--operation", OPERATION_ID, "--rpc-url", "https://rpc.example",
   ]), {
     request: { command: "x402.fetch.approve", operationId: OPERATION_ID },
@@ -163,6 +176,17 @@ test("compiled CLI emits exactly one envelope line and exits from envelope statu
   const invalidLines = invalid.stdout.trimEnd().split("\n");
   assert.equal(invalidLines.length, 1);
   assert.equal((JSON.parse(invalidLines[0] ?? "null") as { readonly error?: { readonly code?: unknown } }).error?.code, "APN_UNSUPPORTED_COMMAND");
+
+  const invalidX402 = spawnSync(process.execPath, [entrypoint, "x402", "fetch", "prepare"], { encoding: "utf8" });
+  assert.equal(invalidX402.status, 1);
+  assert.equal(invalidX402.stderr, "");
+  const invalidX402Lines = invalidX402.stdout.trimEnd().split("\n");
+  assert.equal(invalidX402Lines.length, 1);
+  const invalidX402Envelope = JSON.parse(invalidX402Lines[0] ?? "null") as Record<string, unknown>;
+  assert.deepEqual(Object.keys(invalidX402Envelope), [
+    "version", "request_id", "command", "ok", "proof_class", "data", "operation", "receipt", "error", "next_actions",
+  ]);
+  assert.equal((invalidX402Envelope.error as { readonly code?: unknown } | null)?.code, "APN_INVALID_INPUT");
 });
 
 test("state root uses effective-user OS home and ignores caller HOME", () => {

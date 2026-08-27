@@ -1,8 +1,13 @@
 import { ApnError } from "./errors.js";
+import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
-import { publicX402Operation, type X402OperationRecord } from "./x402-state-integrity.js";
+import {
+  publicX402Operation,
+  publicX402ResultData,
+  type X402OperationRecord,
+} from "./x402-state-integrity.js";
 
 export type StoredMoneyOperation =
   | { readonly kind: "direct_transfer"; readonly record: OperationRecord }
@@ -59,5 +64,56 @@ export class OperationService {
   async status(operationId: string): Promise<unknown> {
     const operation = await this.required(operationId);
     return operation.kind === "direct_transfer" ? publicOperation(operation.record) : publicX402Operation(operation.record);
+  }
+
+  async x402Outcome(
+    operationId: string,
+    options: {
+      readonly exposeSellerResult: boolean;
+      readonly exposeTerminalReceipt: boolean;
+    },
+  ): Promise<CommandOutcome> {
+    const found = await this.required(operationId);
+    if (found.kind !== "x402_fetch") throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
+    const operation = found.record;
+    const result = operation.resultLink === undefined
+      ? null
+      : await this.state.loadX402Result(operation.profileHash, operation.operationId);
+    if (operation.resultLink !== undefined && result === null) {
+      throw new ApnError("APN_STATE_CORRUPT", "x402 operation has a dangling public result link.");
+    }
+    const receipt = operation.terminal && options.exposeTerminalReceipt
+      ? await this.state.loadX402Receipt(operation.profileHash, operation.operationId)
+      : null;
+    if (operation.terminal && options.exposeTerminalReceipt && receipt === null) {
+      throw new ApnError("APN_STATE_CORRUPT", "Terminal x402 operation has no public receipt.");
+    }
+    let data: unknown | null = null;
+    if (options.exposeSellerResult && operation.state === "completed") {
+      if (result === null) throw new ApnError("APN_STATE_CORRUPT", "Completed x402 operation has no public result.");
+      data = publicX402ResultData(result);
+    }
+    return {
+      proofClass: operation.proofClass,
+      data,
+      operation: publicX402Operation(operation, result ?? undefined),
+      receipt,
+      nextActions: operation.nextActions,
+    };
+  }
+
+  async x402ReceiptOutcome(operationId: string): Promise<CommandOutcome> {
+    const found = await this.required(operationId);
+    if (found.kind !== "x402_fetch") throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
+    const operation = found.record;
+    const receipt = await this.state.loadX402Receipt(operation.profileHash, operation.operationId);
+    if (receipt === null) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
+    return {
+      proofClass: receipt.proofClass,
+      data: null,
+      operation: null,
+      receipt,
+      nextActions: [],
+    };
   }
 }
