@@ -406,6 +406,18 @@ export function publicX402Operation(operation: X402OperationRecord, result?: X40
   return { ...value, integrityHash: domainHash("apn.x402.public-operation.v1", canonicalJson(value)) };
 }
 
+export function publicX402ResultData(result: X402ResultRecord): unknown {
+  return {
+    kind: "x402_result",
+    media_type: result.mediaType,
+    body: result.mediaType === "application/json"
+      ? JSON.parse(result.bodyText) as unknown
+      : result.bodyText,
+    sha256: result.resultHash,
+    byte_length: result.byteLength,
+  };
+}
+
 export function sealX402Result(value: Omit<X402ResultRecord, "integrityHash">): X402ResultRecord {
   return { ...value, integrityHash: domainHash("apn.x402.result.v1", canonicalJson(value)) };
 }

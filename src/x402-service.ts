@@ -193,6 +193,7 @@ export class X402Service {
     await this.context.ready();
     const found = await this.operations.required(operationId);
     if (found.kind !== "x402_fetch") throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
+    if (found.record.terminal) return publicX402Operation(found.record);
     return await this.withOperationLock(found.record, async (current) => {
       if (current.terminal) return publicX402Operation(current);
       if (current.state !== "awaiting_approval") {
@@ -208,6 +209,7 @@ export class X402Service {
     await this.context.ready();
     const found = await this.operations.required(operationId);
     if (found.kind !== "x402_fetch") throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
+    if (found.record.terminal) return publicX402Operation(found.record);
     return await this.withOperationLock(found.record, async (current) => {
       if (current.terminal) return publicX402Operation(current);
       const receiptRecovered = await this.recoverOrphanReceipt(current);
