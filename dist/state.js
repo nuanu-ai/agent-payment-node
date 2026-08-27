@@ -469,6 +469,7 @@ export class StateStore {
             receipt.paymentIdentifier !== operation.paymentIdentifier?.value ||
             receipt.operationBindingHash !== x402OperationBindingHash(operation) ||
             receipt.previousLinkHash !== operation.transitions.at(-1)?.hash ||
+            receipt.settlementResponseHash !== operation.settlementResponseObservation?.settlementResponseHash ||
             !sameOptionalCanonical(receipt.settlementEvidence, operation.settlementEvidence) ||
             !sameOptionalCanonical(receipt.unusedExpiryEvidence, operation.unusedExpiryEvidence))
             stateCorrupt("x402 recovery receipt does not bind its authoritative operation.");
@@ -779,9 +780,12 @@ function validateX402AppendOnly(previous, next) {
         "settlementEvidence", "unusedExpiryEvidence", "resultLink", "receiptLink",
     ];
     const recoveryObservationAdvance = isExactX402RecoveryObservationAdvance(previous, next);
+    const scanReorgReset = isExactX402ScanReorgReset(previous, next);
     for (const key of freezeOnceKeys) {
         if (previous[key] !== undefined && !sameOptionalCanonical(previous[key], next[key])) {
             if (recoveryObservationAdvance && (key === "settlementResponseObservation" || key === "transactionHint"))
+                continue;
+            if (scanReorgReset && (key === "transactionHint" || key === "settlementEvidence"))
                 continue;
             stateCorrupt(`x402 overwrite removed or replaced durable member ${key}.`);
         }
@@ -819,6 +823,9 @@ function validateX402AppendOnly(previous, next) {
     if (next.transitions.length < previous.transitions.length ||
         previous.transitions.some((item, index) => canonicalJson(item) !== canonicalJson(next.transitions[index])))
         stateCorrupt("x402 transition history is not append-only.");
+    if (next.transitions.length > previous.transitions.length + 1) {
+        stateCorrupt("x402 overwrite appended more than one durable transition.");
+    }
 }
 function isExactX402RecoveryObservationAdvance(previous, next) {
     if (previous.state !== "seller_result_recovery_pending" || next.state !== "seller_result_recovery_pending" ||
@@ -831,7 +838,7 @@ function isExactX402RecoveryObservationAdvance(previous, next) {
         return false;
     const response = next.settlementResponseObservation;
     const hint = next.transactionHint;
-    if (response?.classification !== "success" || hint?.source !== "payment_response")
+    if (response === undefined || hint?.source !== "payment_response")
         return false;
     if (hint.sourceBindingHash !== x402TransactionHintSourceBindingHash("payment_response", response.settlementResponseHash) ||
         hint.transactionHash !== next.settlementEvidence?.transactionHash)
@@ -843,8 +850,7 @@ function isExactX402RecoveryObservationAdvance(previous, next) {
     const currentAttempt = next.attempts[attemptIndex];
     if (priorAttempt?.purpose !== "result_recovery" || priorAttempt.phase !== "pending" ||
         currentAttempt?.purpose !== "result_recovery" || currentAttempt.phase !== "observed" ||
-        currentAttempt.observation?.status !== "200" ||
-        currentAttempt.observation.mediaType === undefined ||
+        currentAttempt.observation === undefined ||
         currentAttempt.observation.paymentResponseHeaderHash !== response.paymentResponseHeaderHash)
         return false;
     const pendingBody = {
@@ -872,6 +878,68 @@ function isExactX402RecoveryObservationAdvance(previous, next) {
         priorHint.sourceBindingHash === x402TransactionHintSourceBindingHash("payment_response", priorResponse.settlementResponseHash) &&
         Number(priorResponse.httpAttemptNumber) < Number(response.httpAttemptNumber);
 }
+function isExactX402ScanReorgReset(previous, next) {
+    const priorScan = previous.authorizationUsedScan;
+    const nextScan = next.authorizationUsedScan;
+    if (priorScan === undefined || nextScan === undefined ||
+        previous.transactionHint?.source !== "authorization_used_log" || next.transactionHint !== undefined ||
+        next.settlementEvidence !== undefined ||
+        !sameOptionalCanonical(previous.settlementResponseObservation, next.settlementResponseObservation) ||
+        previous.unusedExpiryEvidence !== undefined || next.unusedExpiryEvidence !== undefined ||
+        previous.resultLink !== undefined || next.resultLink !== undefined ||
+        previous.receiptLink !== undefined || next.receiptLink !== undefined ||
+        next.state !== "effect_unknown" || next.terminal ||
+        next.attempts.length !== previous.attempts.length ||
+        next.transitions.length !== previous.transitions.length + 1 ||
+        next.transitions.at(-1)?.state !== "effect_unknown")
+        return false;
+    return nextScan.searchStartBlock === priorScan.searchStartBlock &&
+        nextScan.nextFromBlock === nextScan.searchStartBlock &&
+        nextScan.lastCompletedChunk === undefined && nextScan.candidates.length === 0 &&
+        nextScan.status === "active";
+}
+function isExactX402ScanOnlyTransition(previous, next) {
+    const { integrityHash: _previousIntegrityHash, authorizationUsedScan: _previousScan, updatedAt: _previousUpdatedAt, transitions: _previousTransitions, nextActions: _previousNextActions, ...previousBody } = previous;
+    const { integrityHash: _nextIntegrityHash, authorizationUsedScan: _nextScan, updatedAt: _nextUpdatedAt, transitions: _nextTransitions, nextActions: _nextNextActions, ...nextBody } = next;
+    const appendedSelfTransition = next.transitions.length === previous.transitions.length + 1 &&
+        next.transitions.at(-1)?.state === previous.state &&
+        next.transitions.at(-1)?.at === next.updatedAt;
+    return canonicalJson(previousBody) === canonicalJson(nextBody) && appendedSelfTransition;
+}
+function isExactX402CompletedZeroScanExtension(previous, next) {
+    const priorScan = previous.authorizationUsedScan;
+    const nextScan = next.authorizationUsedScan;
+    if (priorScan === undefined || nextScan === undefined ||
+        priorScan.status !== "complete" || priorScan.candidates.length !== 0 || nextScan.status !== "active" ||
+        previous.transactionHint !== undefined || previous.settlementEvidence !== undefined || previous.resultLink !== undefined ||
+        !((previous.state === "effect_unknown" && (previous.attempts.some((attempt) => attempt.purpose === "payment") ||
+            isZeroAttemptPreSendReorgLineage(previous))) ||
+            (previous.state === "authorized_not_sent" && !previous.attempts.some((attempt) => attempt.purpose === "payment"))) ||
+        !isExactX402ScanOnlyTransition(previous, next))
+        return false;
+    return nextScan.searchStartBlock === priorScan.searchStartBlock &&
+        nextScan.nextFromBlock === priorScan.nextFromBlock &&
+        sameOptionalCanonical(nextScan.lastCompletedChunk, priorScan.lastCompletedChunk) &&
+        canonicalJson(nextScan.candidates) === canonicalJson(priorScan.candidates) &&
+        BigInt(nextScan.targetSafeHead.number) > BigInt(priorScan.targetSafeHead.number);
+}
+function isZeroAttemptPreSendReorgLineage(operation) {
+    return operation.state === "effect_unknown" && operation.attempts.length === 0 &&
+        operation.transitions.at(-2)?.state === "effect_unknown" &&
+        operation.transitions.at(-1)?.state === "effect_unknown";
+}
+function isExactX402UnavailableScanResume(previous, next) {
+    const priorScan = previous.authorizationUsedScan;
+    const nextScan = next.authorizationUsedScan;
+    if (priorScan === undefined || nextScan === undefined || priorScan.status !== "unavailable" || nextScan.status !== "active" ||
+        !isExactX402ScanOnlyTransition(previous, next))
+        return false;
+    return nextScan.searchStartBlock === priorScan.searchStartBlock &&
+        nextScan.nextFromBlock === priorScan.nextFromBlock &&
+        sameOptionalCanonical(nextScan.lastCompletedChunk, priorScan.lastCompletedChunk) &&
+        canonicalJson(nextScan.candidates) === canonicalJson(priorScan.candidates) &&
+        canonicalJson(nextScan.targetSafeHead) === canonicalJson(priorScan.targetSafeHead);
+}
 function validateX402ScanContinuity(previous, next) {
     const priorScan = previous.authorizationUsedScan;
     const nextScan = next.authorizationUsedScan;
@@ -890,19 +958,23 @@ function validateX402ScanContinuity(previous, next) {
         sameOptionalCanonical(nextScan.lastCompletedChunk, priorScan.lastCompletedChunk) &&
         canonicalJson(nextScan.candidates) === canonicalJson(priorScan.candidates) &&
         canonicalJson(nextScan.targetSafeHead) === canonicalJson(priorScan.targetSafeHead) &&
-        (priorScan.status !== "unavailable" || nextScan.unavailableReason === priorScan.unavailableReason);
+        (priorScan.status !== "unavailable" || nextScan.unavailableReason === priorScan.unavailableReason) &&
+        isExactX402ScanOnlyTransition(previous, next);
     if (unavailableWithoutAdvance)
+        return;
+    if (isExactX402UnavailableScanResume(previous, next) || isExactX402CompletedZeroScanExtension(previous, next))
         return;
     const reset = nextScan.nextFromBlock === nextScan.searchStartBlock &&
         nextScan.lastCompletedChunk === undefined && nextScan.candidates.length === 0 && nextScan.status === "active";
-    const safeHeadChanged = nextScan.targetSafeHead.number !== priorScan.targetSafeHead.number ||
-        nextScan.targetSafeHead.hash !== priorScan.targetSafeHead.hash;
     if (nextScan.searchStartBlock !== priorScan.searchStartBlock ||
-        (reset && !safeHeadChanged) ||
         (!reset && canonicalJson(nextScan.targetSafeHead) !== canonicalJson(priorScan.targetSafeHead)))
         stateCorrupt("x402 authorization-used scan provenance changed during continuation.");
-    if (reset)
+    if (reset) {
+        if (next.transitions.length !== previous.transitions.length + 1) {
+            stateCorrupt("x402 authorization-used scan reset lacks its durable state transition.");
+        }
         return;
+    }
     if (nextScan.lastCompletedChunk !== undefined && nextScan.lastCompletedChunk.fromBlock !== priorScan.nextFromBlock) {
         stateCorrupt("x402 authorization-used scan skipped or repeated a cursor range.");
     }

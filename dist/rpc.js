@@ -5,6 +5,11 @@ import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES } fr
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses } from "./network-policy.js";
+const AUTHORIZATION_STATE_SELECTOR = "0xe94a0102";
+const AUTHORIZATION_USED_TOPIC = "0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5";
+const MAX_X402_LOGS = 256;
+const MAX_X402_TOPICS = 4;
+const MAX_X402_LOG_DATA_BYTES = 4096;
 export class HttpsBaseRpc {
     endpoint;
     rpcOrigin;
@@ -63,6 +68,116 @@ export class HttpsBaseRpc {
             queriedTag: "safe",
             block: { number, hash, timestamp },
         };
+    }
+    async getX402Head(tag) {
+        const block = record(await this.call("eth_getBlockByNumber", [tag, false]), `${tag} block`);
+        const observedAt = new Date().toISOString();
+        const timestamp = rpcQuantity(block.timestamp).toString();
+        if (BigInt(timestamp) > BigInt(Math.floor(Date.parse(observedAt) / 1000))) {
+            throw new ApnError("APN_RPC_PROTOCOL", `RPC ${tag} block is future-dated.`);
+        }
+        return {
+            queriedTag: tag,
+            number: rpcQuantity(block.number).toString(),
+            hash: nonzeroBytes32(block.hash, `${tag} block hash`),
+            timestamp,
+            observedAt,
+            rpcOrigin: this.rpcOrigin,
+        };
+    }
+    async getX402Block(number) {
+        const quantity = parseAtomic(number);
+        const block = record(await this.call("eth_getBlockByNumber", [`0x${quantity.toString(16)}`, false]), "numbered block");
+        if (rpcQuantity(block.number) !== quantity)
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC numbered block identity is inconsistent.");
+        const observedAt = new Date().toISOString();
+        const timestamp = rpcQuantity(block.timestamp).toString();
+        if (BigInt(timestamp) > BigInt(Math.floor(Date.parse(observedAt) / 1000))) {
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC numbered block is future-dated.");
+        }
+        return {
+            queriedTag: "number",
+            number,
+            hash: nonzeroBytes32(block.hash, "numbered block hash"),
+            timestamp,
+            observedAt,
+            rpcOrigin: this.rpcOrigin,
+        };
+    }
+    async getX402Receipt(transactionHash) {
+        const raw = await this.call("eth_getTransactionReceipt", [transactionHash]);
+        if (raw === null)
+            return null;
+        const receipt = record(raw, "x402 transaction receipt");
+        const status = rpcQuantity(receipt.status);
+        if (status !== 0n && status !== 1n)
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC receipt status is invalid.");
+        const receiptTransactionHash = nonzeroBytes32(receipt.transactionHash, "receipt transaction hash");
+        const blockNumber = rpcQuantity(receipt.blockNumber).toString();
+        const blockHash = nonzeroBytes32(receipt.blockHash, "receipt block hash");
+        if (!Array.isArray(receipt.logs) || receipt.logs.length > MAX_X402_LOGS) {
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC receipt logs exceed the fixed bound.");
+        }
+        const logs = receipt.logs.map((entry) => x402RpcLog(entry));
+        if (logs.some((log) => log.transactionHash !== receiptTransactionHash || log.blockNumber !== blockNumber || log.blockHash !== blockHash))
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC receipt log identity is inconsistent.");
+        return {
+            transactionHash: receiptTransactionHash,
+            status: status === 1n ? "success" : "reverted",
+            blockNumber,
+            blockHash,
+            logs,
+            observedAt: new Date().toISOString(),
+            rpcOrigin: this.rpcOrigin,
+        };
+    }
+    async getX402AuthorizationState(authorizer, nonce, block) {
+        const identity = "tag" in block ? await this.getX402Head(block.tag) : await this.getX402Block(block.number);
+        const tag = `0x${BigInt(identity.number).toString(16)}`;
+        const data = `${AUTHORIZATION_STATE_SELECTOR}${authorizer.slice(2).toLowerCase().padStart(64, "0")}${rpcHex(nonce, 32).slice(2)}`;
+        const encoded = rpcHex(await this.call("eth_call", [{ to: BASE_USDC, data }, tag]), 32);
+        const value = BigInt(encoded);
+        if (value !== 0n && value !== 1n)
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC authorization state is not a canonical boolean.");
+        return {
+            value: value === 1n,
+            blockNumber: identity.number,
+            blockHash: identity.hash,
+            blockTag: "tag" in block ? block.tag : "number",
+            observedAt: new Date().toISOString(),
+            rpcOrigin: this.rpcOrigin,
+        };
+    }
+    async getX402AuthorizationUsedLogs(input) {
+        const from = parseAtomic(input.fromBlock);
+        const to = parseAtomic(input.toBlock);
+        if (from > to || to - from + 1n > 2048n)
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC AuthorizationUsed range exceeds the fixed bound.");
+        const result = await this.callX402Logs([{
+                address: BASE_USDC,
+                fromBlock: `0x${from.toString(16)}`,
+                toBlock: `0x${to.toString(16)}`,
+                topics: [
+                    AUTHORIZATION_USED_TOPIC,
+                    `0x${input.authorizer.slice(2).toLowerCase().padStart(64, "0")}`,
+                    rpcHex(input.nonce, 32),
+                ],
+            }]);
+        if (result.kind !== "complete")
+            return result;
+        if (!Array.isArray(result.value) || result.value.length > MAX_X402_LOGS) {
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC AuthorizationUsed logs exceed the fixed bound.");
+        }
+        const logs = result.value.map((entry) => x402RpcLog(entry));
+        for (const log of logs) {
+            if (log.address.toLowerCase() !== BASE_USDC.toLowerCase() || log.topics.length !== 3 ||
+                log.topics[0] !== AUTHORIZATION_USED_TOPIC ||
+                log.topics[1] !== `0x${input.authorizer.slice(2).toLowerCase().padStart(64, "0")}` ||
+                log.topics[2] !== input.nonce.toLowerCase() || log.data !== "0x" ||
+                BigInt(log.blockNumber) < from || BigInt(log.blockNumber) > to)
+                throw new ApnError("APN_RPC_PROTOCOL", "RPC AuthorizationUsed log violates the exact filter.");
+        }
+        return { kind: "complete", logs };
     }
     async getPendingNonce(address) {
         await this.assertBaseChain();
@@ -150,9 +265,45 @@ export class HttpsBaseRpc {
         }
         return message.result;
     }
+    async callX402Logs(params) {
+        const id = (++this.sequence).toString();
+        const body = JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params });
+        const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
+        const raw = await postJson(this.endpoint, body, addresses);
+        let value;
+        try {
+            value = JSON.parse(raw);
+        }
+        catch {
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not valid JSON.");
+        }
+        const message = record(value, "JSON-RPC response");
+        if (message.jsonrpc !== "2.0" || message.id !== id) {
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates JSON-RPC identity requirements.");
+        }
+        if ("result" in message && !("error" in message))
+            return { kind: "complete", value: message.result };
+        if (!("error" in message) || "result" in message)
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC log response has no exclusive result or error.");
+        const error = record(message.error, "JSON-RPC error");
+        const availability = classifyX402LogAvailabilityMessage(typeof error.message === "string" ? error.message : "");
+        if (availability !== null)
+            return { kind: availability };
+        throw new ApnError("APN_RPC_PROTOCOL", "RPC log query failed without a recognized availability class.");
+    }
     async resolvePublicAddresses() {
         return await resolvePublicAddresses(this.endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     }
+}
+export function classifyX402LogAvailabilityMessage(message) {
+    const text = message.toLowerCase();
+    if (/\b(?:rate[ -]limit(?:ed|ing)?|request limit|too many requests)\b/u.test(text))
+        return null;
+    if (/\b(?:pruned|missing trie|historical state|history unavailable)\b/u.test(text))
+        return "pruned";
+    const rangeSubject = /\b(?:block(?:s)?|range|logs?|results?|query|window)\b/u.test(text);
+    const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most)\b/u.test(text);
+    return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
 async function postJson(endpoint, body, addresses) {
     return await new Promise((resolve, reject) => {
@@ -224,6 +375,31 @@ function rpcAddress(value) {
     if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value))
         throw new ApnError("APN_RPC_PROTOCOL", "RPC address is invalid.");
     return value;
+}
+function nonzeroBytes32(value, label) {
+    const parsed = rpcHex(value, 32);
+    if (/^0x0{64}$/u.test(parsed))
+        throw new ApnError("APN_RPC_PROTOCOL", `RPC ${label} is zero.`);
+    return parsed;
+}
+function x402RpcLog(value) {
+    const log = record(value, "x402 log");
+    if (!Array.isArray(log.topics) || log.topics.length > MAX_X402_TOPICS) {
+        throw new ApnError("APN_RPC_PROTOCOL", "RPC log topics exceed the fixed bound.");
+    }
+    const data = rpcHex(log.data);
+    if ((data.length - 2) / 2 > MAX_X402_LOG_DATA_BYTES) {
+        throw new ApnError("APN_RPC_PROTOCOL", "RPC log data exceeds the fixed bound.");
+    }
+    return {
+        address: rpcAddress(log.address).toLowerCase(),
+        topics: log.topics.map((topic) => rpcHex(topic, 32)),
+        data,
+        blockNumber: rpcQuantity(log.blockNumber).toString(),
+        blockHash: nonzeroBytes32(log.blockHash, "log block hash"),
+        transactionHash: nonzeroBytes32(log.transactionHash, "log transaction hash"),
+        logIndex: rpcQuantity(log.logIndex).toString(),
+    };
 }
 function rpcString(value, label) {
     const encoded = rpcHex(value);

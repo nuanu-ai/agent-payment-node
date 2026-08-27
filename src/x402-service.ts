@@ -46,6 +46,7 @@ import {
   isTransientNativeFailure,
   requestX402Authorization,
   x402NativeRequest,
+  type VerifiedX402PaymentMaterial,
 } from "./x402-native.js";
 
 type X402PrepareRequest = Extract<CommandRequest, { readonly command: "x402.fetch.prepare" }>;
@@ -219,48 +220,130 @@ export class X402Service {
         return await this.completeAuthorization(current, pendingCount === 1 ? "get" : "create");
       }
 
+      const lastAttempt = current.attempts.at(-1);
       let operation = current.state === "paid_request_pending"
-        ? await this.markInterruptedPaidAttempt(current)
-        : current;
+        ? await this.markInterruptedPaidAttempt(current, "effect_unknown")
+        : current.state === "seller_result_recovery_pending" &&
+            lastAttempt?.purpose === "result_recovery" && lastAttempt.phase === "pending"
+          ? await this.markInterruptedPaidAttempt(current, "seller_result_recovery_pending")
+          : current;
       operation = await this.recoverOrphanResult(operation);
+      operation = await this.finishReconciledEvidence(operation);
+      if (operation.terminal) return publicX402Operation(operation);
 
-      // Fresh authorized material has not been exposed to the seller. Preserve the
-      // CP4 send boundary; chain recovery starts only after an exposure is durable.
-      if (operation.state === "authorized_not_sent") return await this.sendPaidRequest(operation, "payment");
-
-      const x402Rpc = x402ReadPort(this.context.requireRpc());
+      const rpc = this.context.requireRpc();
+      const x402Rpc = x402ReadPort(rpc);
+      let verified: VerifiedX402PaymentMaterial | undefined;
+      let completeZeroScanValidated = false;
+      let completeZeroScanRead = false;
       if (x402Rpc !== null) {
-        operation = await new X402RpcReconciler(x402Rpc, this.context.clock, {
-          persist: async (next) => await this.context.state.writeX402Operation(next),
-        }).reconcile(operation);
+        let reconciled;
+        try {
+          reconciled = await new X402RpcReconciler(x402Rpc, this.context.clock, {
+            persist: async (next) => await this.context.state.writeX402Operation(next),
+          }).reconcile(operation);
+        } catch (error) {
+          if (isRecoverableX402RpcObservationFailure(error)) {
+            const durable = await this.context.state.loadX402Operation(operation.profileHash, operation.operationId);
+            if (durable === null) throw new ApnError("APN_STATE_CORRUPT", "Durable x402 operation disappeared during RPC recovery.");
+            return publicX402Operation(durable);
+          }
+          throw error;
+        }
+        operation = reconciled.operation;
+        completeZeroScanValidated = reconciled.completeZeroScanValidated;
+        completeZeroScanRead = reconciled.completeZeroScanRead;
         operation = await this.finishReconciledEvidence(operation);
         if (operation.terminal) return publicX402Operation(operation);
       }
 
+      if (operation.state === "authorized_not_sent") {
+        if (x402Rpc !== null) {
+          if (!completeZeroScanValidated) return publicX402Operation(operation);
+          verified = await this.recoverPaymentMaterial(operation);
+          if (verified === undefined) return publicX402Operation(operation);
+        } else {
+          verified = await this.recoverPaymentMaterial(operation);
+          if (verified === undefined) return publicX402Operation(operation);
+          await this.assertLegacySafeRead(operation);
+        }
+        if (verified === undefined) return publicX402Operation(operation);
+        return await this.sendPaidRequest(operation, "payment", verified);
+      }
+
       if (operation.state === "seller_result_recovery_pending") {
         if (operation.resultLink !== undefined) {
-          const completed = x402Rpc === null ? operation : await this.finishReconciledEvidence(operation);
-          return publicX402Operation(completed);
+          return publicX402Operation(await this.finishReconciledEvidence(operation));
+        }
+        if (this.authorizationExpired(operation) && operation.settlementEvidence !== undefined) {
+          return publicX402Operation(await this.commitTerminal(operation, "failed_settled_without_result"));
         }
         const recoveryAttempt = operation.attempts.find((attempt) => attempt.purpose === "result_recovery");
-        if (recoveryAttempt?.phase === "pending") return await this.sendPaidRequest(operation, "result_recovery", true, x402Rpc !== null);
-        if (recoveryAttempt !== undefined) {
-          return publicX402Operation(x402Rpc === null
-            ? operation
-            : await this.commitTerminal(operation, "failed_settled_without_result"));
+        if (recoveryAttempt?.phase === "pending") {
+          return publicX402Operation(operation);
         }
-        return await this.sendPaidRequest(operation, "result_recovery", false, x402Rpc !== null);
+        if (recoveryAttempt !== undefined) {
+          return publicX402Operation(await this.commitTerminal(operation, "failed_settled_without_result"));
+        }
+        if (verified === undefined) {
+          verified = await this.recoverPaymentMaterial(operation);
+          if (verified === undefined) return publicX402Operation(operation);
+          if (x402Rpc === null) await this.assertLegacySafeRead(operation);
+        }
+        return await this.sendPaidRequest(operation, "result_recovery", verified, x402Rpc !== null);
       }
 
       const scanStatus = operation.authorizationUsedScan?.status;
+      const paymentAttemptCount = operation.attempts.filter((attempt) => attempt.purpose === "payment").length;
       if (
-        operation.transactionHint === undefined && operation.settlementEvidence === undefined &&
-        scanStatus !== "unavailable" && scanStatus !== "ambiguous" &&
-        !(scanStatus === "active" && operation.authorizationUsedScan?.lastCompletedChunk === undefined) &&
+        operation.transactionHint === undefined && operation.settlementResponseObservation === undefined &&
+        operation.settlementEvidence === undefined && operation.resultLink === undefined &&
+        scanStatus === "complete" && operation.authorizationUsedScan?.candidates.length === 0 &&
+        completeZeroScanValidated && completeZeroScanRead && paymentAttemptCount === 1 && operation.attempts.length === 1 &&
         operation.state === "effect_unknown" && x402Rpc !== null
-      ) return await this.sendPaidRequest(operation, "payment", false, true);
+      ) {
+        verified = await this.recoverPaymentMaterial(operation);
+        if (verified === undefined) return publicX402Operation(operation);
+        return await this.sendPaidRequest(operation, "payment", verified, true);
+      }
       return publicX402Operation(operation);
     });
+  }
+
+  private async recoverPaymentMaterial(
+    operation: X402OperationRecord,
+  ): Promise<VerifiedX402PaymentMaterial | undefined> {
+    try {
+      const verified = await requestX402Authorization(
+        this.context.requireNative(),
+        x402NativeRequest(this.context.ids.next(), operation, "get"),
+        operation,
+      );
+      if (
+        verified.native.signatureHash !== operation.signatureHash ||
+        verified.paymentPayloadHash !== operation.paymentPayloadHash ||
+        verified.paymentHeaderHash !== operation.paymentHeaderHash
+      ) throw new ApnError("APN_STATE_CORRUPT", "Recovered x402 payment material differs from durable hashes.");
+      return verified;
+    } catch (error) {
+      if (isTransientNativeFailure(error) || isNativeExpired(error)) return undefined;
+      throw error;
+    }
+  }
+
+  private authorizationExpired(operation: X402OperationRecord): boolean {
+    return BigInt(Math.floor(this.context.clock.now().getTime() / 1000)) >= BigInt(operation.authorization.validBefore);
+  }
+
+  private async assertLegacySafeRead(operation: X402OperationRecord): Promise<void> {
+    const rpc = this.context.requireRpc();
+    const chain = await rpc.assertBaseChain();
+    const evidence = await rpc.getX402PrepareEvidence(operation.wallet);
+    if (
+      evidence.address.toLowerCase() !== operation.wallet || evidence.queriedTag !== "safe" ||
+      evidence.rpcOriginHash !== sha256(chain.rpcOrigin) ||
+      BigInt(evidence.block.number) < BigInt(operation.preparedBlock.number)
+    ) throw new ApnError("APN_RPC_PROTOCOL", "RPC safe read does not bind the frozen x402 payer and exposure range.");
   }
 
   private async withOperationLock(
@@ -309,28 +392,17 @@ export class X402Service {
   private async sendPaidRequest(
     operation: X402OperationRecord,
     purpose: "payment" | "result_recovery",
-    resumePending = false,
+    verified: VerifiedX402PaymentMaterial,
     terminalizeFromExistingEvidence = false,
   ): Promise<unknown> {
     if (operation.attempts.length >= 64) return publicX402Operation(operation);
     try {
-      const verified = await requestX402Authorization(
-        this.context.requireNative(),
-        x402NativeRequest(this.context.ids.next(), operation, "get"),
-        operation,
-      );
-      if (
-        verified.native.signatureHash !== operation.signatureHash ||
-        verified.paymentPayloadHash !== operation.paymentPayloadHash ||
-        verified.paymentHeaderHash !== operation.paymentHeaderHash
-      ) throw new ApnError("APN_STATE_CORRUPT", "Recovered x402 payment material differs from durable hashes.");
-
       const nowMs = this.context.clock.now().getTime();
       const remainingMs = BigInt(operation.authorization.validBefore) * 1000n - BigInt(nowMs);
       const remainingWholeSeconds = remainingMs / 1000n;
       if (remainingWholeSeconds < 1n) return publicX402Operation(operation);
       const timeoutMs = Number(remainingWholeSeconds > 30n ? 30_000n : remainingWholeSeconds * 1000n);
-      const pending = resumePending ? operation : await this.beginPaidAttempt(operation, purpose);
+      const pending = await this.beginPaidAttempt(operation, purpose);
       if (pending.attempts.at(-1)?.purpose !== purpose || pending.attempts.at(-1)?.phase !== "pending") {
         throw new ApnError("APN_STATE_CORRUPT", "Resumed x402 attempt is not the durable pending purpose.");
       }
@@ -343,12 +415,17 @@ export class X402Service {
           timeoutMs,
         });
       } catch {
-        return publicX402Operation(await this.finishPaidAttempt(
+        const observed = await this.finishPaidAttempt(
           pending,
           "ambiguous",
           undefined,
           purpose === "payment" ? "effect_unknown" : "seller_result_recovery_pending",
-        ));
+        );
+        return publicX402Operation(
+          purpose === "result_recovery" && terminalizeFromExistingEvidence && observed.settlementEvidence !== undefined
+            ? await this.commitTerminal(observed, "failed_settled_without_result")
+            : observed,
+        );
       }
 
       let paid: PaidHttpResult;
@@ -361,12 +438,17 @@ export class X402Service {
           origin: operation.resource.origin,
         });
       } catch {
-        return publicX402Operation(await this.finishPaidAttempt(
+        const observed = await this.finishPaidAttempt(
           pending,
           "ambiguous",
           undefined,
           purpose === "payment" ? "effect_unknown" : "seller_result_recovery_pending",
-        ));
+        );
+        return publicX402Operation(
+          purpose === "result_recovery" && terminalizeFromExistingEvidence && observed.settlementEvidence !== undefined
+            ? await this.commitTerminal(observed, "failed_settled_without_result")
+            : observed,
+        );
       }
 
       let decoded;
@@ -388,33 +470,11 @@ export class X402Service {
           paid.observation,
           purpose === "payment" ? "effect_unknown" : "seller_result_recovery_pending",
         );
-        return publicX402Operation(observed);
-      }
-
-      const conflictingHint = (
-        operation.transactionHint !== undefined && operation.transactionHint.transactionHash !== decoded.transactionHash
-      ) || (
-        purpose === "result_recovery" && decoded.transactionHash !== operation.settlementEvidence?.transactionHash
-      );
-      if (conflictingHint) {
-        return publicX402Operation(await this.finishPaidAttempt(
-          pending,
-          "observed",
-          paid.observation,
-          "effect_unknown",
-        ));
-      }
-
-      if (purpose === "result_recovery" && (decoded.classification !== "success" || paid.result === undefined)) {
-        const observed = await this.finishPaidAttempt(
-          pending,
-          "observed",
-          paid.observation,
-          "seller_result_recovery_pending",
+        return publicX402Operation(
+          purpose === "result_recovery" && terminalizeFromExistingEvidence && observed.settlementEvidence !== undefined
+            ? await this.commitTerminal(observed, "failed_settled_without_result")
+            : observed,
         );
-        return publicX402Operation(!terminalizeFromExistingEvidence || observed.settlementEvidence === undefined
-          ? observed
-          : await this.commitTerminal(observed, "failed_settled_without_result"));
       }
 
       const response: SettlementResponseObservation = {
@@ -432,6 +492,36 @@ export class X402Service {
         sourceBindingHash: x402TransactionHintSourceBindingHash("payment_response", decoded.settlementResponseHash),
         observedAt: paid.observation.observedAt,
       };
+
+      const conflictingHint = (
+        operation.transactionHint !== undefined && operation.transactionHint.transactionHash !== decoded.transactionHash
+      ) || (
+        purpose === "result_recovery" && decoded.transactionHash !== operation.settlementEvidence?.transactionHash
+      );
+      if (conflictingHint) {
+        return publicX402Operation(await this.finishPaidAttempt(
+          pending,
+          "observed",
+          paid.observation,
+          "effect_unknown",
+          operation.settlementResponseObservation === undefined
+            ? { settlementResponseObservation: response }
+            : {},
+        ));
+      }
+
+      if (purpose === "result_recovery" && (decoded.classification !== "success" || paid.result === undefined)) {
+        const observed = await this.finishPaidAttempt(
+          pending,
+          "observed",
+          paid.observation,
+          "seller_result_recovery_pending",
+          terminalizeFromExistingEvidence ? { settlementResponseObservation: response, transactionHint: hint } : {},
+        );
+        return publicX402Operation(!terminalizeFromExistingEvidence || observed.settlementEvidence === undefined
+          ? observed
+          : await this.commitTerminal(observed, "failed_settled_without_result"));
+      }
       const observed = await this.finishPaidAttempt(
         pending,
         "observed",
@@ -456,6 +546,9 @@ export class X402Service {
     operation: X402OperationRecord,
     purpose: "payment" | "result_recovery",
   ): Promise<X402OperationRecord> {
+    if (purpose === "result_recovery" && operation.attempts.some((attempt) => attempt.purpose === "result_recovery")) {
+      throw new ApnError("APN_STATE_CORRUPT", "A second x402 result recovery attempt is forbidden.");
+    }
     const at = this.context.clock.now().toISOString();
     const attempt: X402Attempt = {
       attemptNumber: (BigInt(operation.attempts.length) + 1n).toString(),
@@ -486,8 +579,11 @@ export class X402Service {
     return await this.transition(operation, state, { attempts, ...additions });
   }
 
-  private async markInterruptedPaidAttempt(operation: X402OperationRecord): Promise<X402OperationRecord> {
-    return await this.finishPaidAttempt(operation, "ambiguous");
+  private async markInterruptedPaidAttempt(
+    operation: X402OperationRecord,
+    state: "effect_unknown" | "seller_result_recovery_pending",
+  ): Promise<X402OperationRecord> {
+    return await this.finishPaidAttempt(operation, "ambiguous", undefined, state);
   }
 
   private async persistAndLinkResult(
@@ -541,10 +637,16 @@ export class X402Service {
       return await this.commitTerminal(operation, "failed_expired_unused");
     }
     if (operation.settlementEvidence === undefined) return operation;
+    if (
+      operation.settlementResponseObservation !== undefined &&
+      settlementResponseTransaction(operation.settlementResponseObservation) !== operation.settlementEvidence.transactionHash
+    ) return operation;
     if (operation.resultLink !== undefined) return await this.commitTerminal(operation, "completed");
     const recoveryAttempt = operation.attempts.find((attempt) => attempt.purpose === "result_recovery");
     if (operation.paymentIdentifier !== undefined && recoveryAttempt === undefined) {
-      return await this.transition(operation, "seller_result_recovery_pending");
+      return operation.state === "seller_result_recovery_pending"
+        ? operation
+        : await this.transition(operation, "seller_result_recovery_pending");
     }
     if (operation.paymentIdentifier !== undefined && recoveryAttempt?.phase === "pending") return operation;
     return await this.commitTerminal(operation, "failed_settled_without_result");
@@ -715,6 +817,15 @@ function x402ReadPort(rpc: RpcPort): X402RpcPort | null {
     typeof value.getX402AuthorizationUsedLogs === "function" ? value as X402RpcPort : null;
 }
 
+function isRecoverableX402RpcObservationFailure(error: unknown): boolean {
+  return error instanceof ApnError && [
+    "APN_RPC_AMBIGUOUS",
+    "APN_RPC_PROTOCOL",
+    "APN_RPC_CONFIG",
+    "APN_CHAIN_MISMATCH",
+  ].includes(error.code);
+}
+
 function terminalClassification(state: X402TerminalState): {
   readonly reason: X402Reason;
   readonly proofClass: X402ProofClass;
@@ -726,4 +837,13 @@ function terminalClassification(state: X402TerminalState): {
       : state === "failed_expired_unused"
         ? { reason: "x402_failed_expired_unused", proofClass: "x402_expired_unused_finalized" }
         : { reason: "x402_failed_settled_without_result", proofClass: "x402_settled_result_unavailable" };
+}
+
+function settlementResponseTransaction(response: SettlementResponseObservation): string | undefined {
+  try {
+    const value = JSON.parse(response.normalizedCanonicalJson) as { readonly transaction?: unknown };
+    return typeof value.transaction === "string" ? value.transaction : undefined;
+  } catch {
+    return undefined;
+  }
 }

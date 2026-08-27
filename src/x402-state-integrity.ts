@@ -661,14 +661,22 @@ function validateStateSummary(
   if (!Array.isArray(operation.nextActions) || operation.nextActions.some((item) => typeof item !== "string")) stateCorrupt("x402 next actions are invalid.");
   const actions = operation.nextActions as readonly string[];
   const standardActions = shape.nextActions;
-  const archivalActions = state === "effect_unknown" && evidence.authorizationUsedScan?.status === "unavailable"
+  const archivalActions = (state === "effect_unknown" || state === "authorized_not_sent") &&
+    evidence.authorizationUsedScan?.status === "unavailable"
     ? [...standardActions, "use.archival_rpc"] : standardActions;
   if (canonicalJson(actions) !== canonicalJson(archivalActions)) stateCorrupt("x402 next actions are invalid for state.");
+  if (shape.terminal && evidence.attempts.some((attempt) => attempt.phase === "pending")) {
+    stateCorrupt("x402 terminal state retains a pending HTTP attempt.");
+  }
 
   const noResponseEvidence = evidence.settlementResponseObservation === undefined && evidence.transactionHint === undefined &&
     evidence.authorizationUsedScan === undefined && evidence.settlementEvidence === undefined && evidence.unusedExpiryEvidence === undefined;
   const noEffectEvidence = evidence.settlementResponseObservation === undefined && evidence.transactionHint === undefined &&
     evidence.settlementEvidence === undefined && evidence.unusedExpiryEvidence === undefined;
+  const preterminalUnusedExpiry = evidence.unusedExpiryEvidence !== undefined &&
+    evidence.settlementResponseObservation === undefined && evidence.transactionHint === undefined &&
+    evidence.settlementEvidence === undefined && evidence.authorizationUsedScan?.status === "complete" &&
+    evidence.authorizationUsedScan.candidates.length === 0;
   const hasResultLink = operation.resultLink !== undefined;
   const hasReceiptLink = operation.receiptLink !== undefined;
   const lastAttempt = evidence.attempts.at(-1);
@@ -693,23 +701,37 @@ function validateStateSummary(
   if (state === "authorization_material_pending" && (evidence.signatureCount !== 0 || evidence.attempts.length !== 0 || !noResponseEvidence || hasResultLink || hasReceiptLink)) {
     stateCorrupt("x402 authorization-pending state contains later-phase evidence.");
   }
-  if (state === "authorized_not_sent" && (evidence.signatureCount !== 3 || evidence.attempts.length !== 0 || !noEffectEvidence || hasResultLink || hasReceiptLink)) {
+  if (state === "authorized_not_sent" && (
+    evidence.signatureCount !== 3 || evidence.attempts.length !== 0 || (!noEffectEvidence && !preterminalUnusedExpiry) ||
+    hasResultLink || hasReceiptLink
+  )) {
     stateCorrupt("x402 authorized-not-sent evidence is invalid.");
   }
   if (state === "paid_request_pending" && (evidence.signatureCount !== 3 || lastAttempt?.purpose !== "payment" || lastAttempt.phase !== "pending" || !noEffectEvidence || hasResultLink || hasReceiptLink)) {
     stateCorrupt("x402 paid-request pending marker is invalid.");
   }
+  const transitionValues = Array.isArray(operation.transitions) ? operation.transitions : [];
+  const previousTransition = transitionValues.at(-2);
+  const currentTransition = transitionValues.at(-1);
+  const scan = evidence.authorizationUsedScan;
+  const zeroAttemptReorgLineage = scan !== undefined && scan.candidates.length === 0 &&
+    evidence.transactionHint === undefined && evidence.settlementEvidence === undefined &&
+    isPlainRecord(previousTransition) && previousTransition.state === "effect_unknown" &&
+    isPlainRecord(currentTransition) && currentTransition.state === "effect_unknown";
+  const zeroAttemptScanEvidence = state === "effect_unknown" && (
+    evidence.authorizationUsedScan?.status === "unavailable" ||
+    (evidence.authorizationUsedScan?.candidates.length ?? 0) > 0 ||
+    zeroAttemptReorgLineage
+  );
   if (["settlement_pending", "effect_unknown"].includes(state) && (
     evidence.signatureCount !== 3 ||
-    (evidence.attempts.length === 0 && !(state === "effect_unknown" && evidence.authorizationUsedScan?.status === "unavailable")) ||
+    (evidence.attempts.length === 0 && !zeroAttemptScanEvidence) ||
     hasReceiptLink || (state === "settlement_pending" && evidence.unusedExpiryEvidence !== undefined)
   )) {
     stateCorrupt("x402 ambiguous settlement evidence is invalid.");
   }
   if (state === "effect_unknown" && evidence.unusedExpiryEvidence !== undefined && (
-    evidence.settlementResponseObservation !== undefined || evidence.transactionHint !== undefined ||
-    evidence.settlementEvidence !== undefined || evidence.authorizationUsedScan?.status !== "complete" ||
-    evidence.authorizationUsedScan.candidates.length !== 0 || hasResultLink
+    !preterminalUnusedExpiry || hasResultLink
   )) stateCorrupt("x402 preterminal unused-expiry evidence is incomplete or contradictory.");
   if (state === "effect_unknown" && evidence.settlementEvidence !== undefined && hasResultLink) {
     stateCorrupt("x402 effect-unknown state cannot combine final settlement evidence with a linked seller result.");
@@ -748,11 +770,16 @@ function validateStateSummary(
   if (state === "failed_settled_without_result") {
     const responseBacked = evidence.settlementResponseObservation !== undefined && evidence.transactionHint?.source === "payment_response";
     const scan = evidence.authorizationUsedScan;
-    const scanBacked = evidence.settlementResponseObservation === undefined && evidence.transactionHint?.source === "authorization_used_log" &&
-      scan?.status === "complete" && scan.candidates.length === 1 &&
-      BigInt(scan.nextFromBlock) === BigInt(scan.targetSafeHead.number) + 1n;
+    const fullUniqueScan = evidence.transactionHint?.source === "authorization_used_log" && scan?.status === "complete" &&
+      scan.candidates.length === 1 && BigInt(scan.nextFromBlock) === BigInt(scan.targetSafeHead.number) + 1n;
+    const scanBacked = evidence.settlementResponseObservation === undefined && fullUniqueScan;
+    const responseTransaction = evidence.settlementResponseObservation === undefined
+      ? undefined
+      : (JSON.parse(evidence.settlementResponseObservation.normalizedCanonicalJson) as Record<string, unknown>).transaction;
+    const responseCorroboratedByScan = fullUniqueScan && responseTransaction === evidence.transactionHint?.transactionHash;
     if (
-      evidence.signatureCount !== 3 || (!responseBacked && !scanBacked) || evidence.transactionHint === undefined ||
+      evidence.signatureCount !== 3 || (!responseBacked && !scanBacked && !responseCorroboratedByScan) ||
+      evidence.transactionHint === undefined ||
       evidence.settlementEvidence === undefined || evidence.unusedExpiryEvidence !== undefined || hasResultLink || !hasReceiptLink
     ) stateCorrupt("x402 settled-without-result evidence is invalid.");
   }
