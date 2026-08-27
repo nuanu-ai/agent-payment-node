@@ -151,6 +151,7 @@ export class RecoveryRpc extends TestRpc implements X402RpcPort {
   authorizationStateValue = false;
   logOutcomes: X402AuthorizationUsedLogs[] = [];
   blockHashes = new Map<string, Hex>();
+  blockTimestamps = new Map<string, string>();
   onX402Call?: (name: string) => void | Promise<void>;
 
   override async assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }> {
@@ -170,11 +171,16 @@ export class RecoveryRpc extends TestRpc implements X402RpcPort {
     this.x402Calls.push(`block:${number}`);
     await this.onX402Call?.(`block:${number}`);
     const isSafe = number === this.safeHead.number;
+    const isFinalized = number === this.finalizedHead.number;
     return {
       queriedTag: "number",
       number,
-      hash: this.blockHashes.get(number) ?? (isSafe ? this.safeHead.hash : `0x${"d".repeat(64)}`),
-      timestamp: isSafe ? this.safeHead.timestamp : (BigInt(this.safeHead.timestamp) - 1n).toString(),
+      hash: this.blockHashes.get(number) ?? (isSafe
+        ? this.safeHead.hash
+        : isFinalized ? this.finalizedHead.hash : `0x${"d".repeat(64)}`),
+      timestamp: this.blockTimestamps.get(number) ?? (isSafe
+        ? this.safeHead.timestamp
+        : isFinalized ? this.finalizedHead.timestamp : (BigInt(this.safeHead.timestamp) - 1n).toString()),
       observedAt: this.safeHead.observedAt,
       rpcOrigin: this.rpcOrigin,
     };

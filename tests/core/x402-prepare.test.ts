@@ -881,20 +881,40 @@ test("future attempt/state combinations accept exact pending schema and reject s
     persistedAt: state.updatedAt,
   };
   const { integrityHash: _oldIntegrity, ...base } = state;
-  const future = sealed("apn.x402.state.v1", {
-    ...base,
+  const materialPendingOperation = resealOperation({
+    ...state,
+    state: materialPending.state,
+    finalityClass: "pre_effect",
+    reason: materialPending.reason,
+    proofClass: materialPending.proofClass,
+    nextActions: ["operation.resume", "operation.status"],
+    transitions: appendX402Transition(state.transitions, materialPending),
+  });
+  const authorizedOperation = resealOperation({
+    ...materialPendingOperation,
     signatureHash: "2".repeat(64),
     paymentPayloadHash: "3".repeat(64),
     paymentHeaderHash: "4".repeat(64),
+    state: authorized.state,
+    finalityClass: "pre_effect",
+    reason: authorized.reason,
+    proofClass: authorized.proofClass,
+    nextActions: ["operation.resume", "operation.status"],
+    transitions: appendX402Transition(materialPendingOperation.transitions, authorized),
+  });
+  const future = resealOperation({
+    ...authorizedOperation,
     attempts: [attempt],
     state: transition.state,
     finalityClass: "unknown_finality",
     reason: transition.reason,
     proofClass: transition.proofClass,
     nextActions: ["operation.resume", "operation.status"],
-    transitions: futureTransitions,
+    transitions: appendX402Transition(authorizedOperation.transitions, transition),
   });
   const store = new StateStore(temporary.root);
+  await store.writeX402Operation(materialPendingOperation);
+  await store.writeX402Operation(authorizedOperation);
   await store.writeX402Operation(future as unknown as X402OperationRecord);
   assert.deepEqual((await store.loadX402Operation(state.profileHash, operationId))?.attempts, [attempt]);
   const changedCapBody = {
@@ -1267,8 +1287,41 @@ test("future attempt/state combinations accept exact pending schema and reject s
     ...progressed,
     authorizationUsedScan: scan(unavailableProgressedBody),
     nextActions: ["operation.resume", "operation.status", "use.archival_rpc"],
+    transitions: appendX402Transition(progressed.transitions, {
+      at: state.updatedAt, state: "effect_unknown", terminal: false,
+      reason: "x402_effect_unknown", proofClass: "x402_unknown_finality",
+    }),
   });
+  await assert.rejects(
+    store.writeX402Operation(resealOperation({
+      ...unavailableProgressed,
+      transitions: progressed.transitions,
+    })),
+    { code: "APN_STATE_CORRUPT" },
+    "an unavailable classification requires a durable self-transition",
+  );
   await store.writeX402Operation(unavailableProgressed);
+  const rearmedScanBody = {
+    ...unavailableProgressedBody,
+    status: "active",
+    unavailableReason: undefined,
+  };
+  const { unavailableReason: _removedUnavailableReason, ...rearmedScanWithoutReason } = rearmedScanBody;
+  const rearmed = resealOperation({
+    ...unavailableProgressed,
+    authorizationUsedScan: scan(rearmedScanWithoutReason),
+    nextActions: ["operation.resume", "operation.status"],
+    transitions: appendX402Transition(unavailableProgressed.transitions, {
+      at: state.updatedAt, state: "effect_unknown", terminal: false,
+      reason: "x402_effect_unknown", proofClass: "x402_unknown_finality",
+    }),
+  });
+  await assert.rejects(
+    store.writeX402Operation(resealOperation({ ...rearmed, transitions: unavailableProgressed.transitions })),
+    { code: "APN_STATE_CORRUPT" },
+    "an unavailable scan rearm requires a durable self-transition",
+  );
+  await store.writeX402Operation(rearmed);
   const newHeadResetBody = {
     ...sameHeadResetBody,
     targetSafeHead: {
@@ -1277,7 +1330,14 @@ test("future attempt/state combinations accept exact pending schema and reject s
       observedAt: state.updatedAt,
     },
   };
-  const resetOperation = resealOperation({ ...progressed, authorizationUsedScan: scan(newHeadResetBody) });
+  const resetOperation = resealOperation({
+    ...rearmed,
+    authorizationUsedScan: scan(newHeadResetBody),
+    transitions: appendX402Transition(rearmed.transitions, {
+      at: state.updatedAt, state: "effect_unknown", terminal: false,
+      reason: "x402_effect_unknown", proofClass: "x402_unknown_finality",
+    }),
+  });
   await store.writeX402Operation(resetOperation);
 
   const repeatedUnknown = {
@@ -1612,9 +1672,23 @@ test("terminal x402 graph forbids material on no-effect failure and requires exa
     () => validateX402Operation(sellerRecovery),
     "scan-derived exact settlement can enter cached-result recovery without a settlement response",
   );
-  const paymentPendingOperation = resealOperation({
+  const paymentMaterialPendingOperation = resealOperation({
     ...missingResult.operation,
+    state: "authorization_material_pending", finalityClass: "pre_effect", terminal: false,
+    reason: "x402_authorization_material_pending", proofClass: "x402_authorization_recovery",
+    nextActions: ["operation.resume", "operation.status"],
+    transitions: appendX402Transition(missingResult.operation.transitions, materialPending),
+  });
+  const paymentAuthorizedOperation = resealOperation({
+    ...paymentMaterialPendingOperation,
     signatureHash: "1".repeat(64), paymentPayloadHash: "2".repeat(64), paymentHeaderHash: "3".repeat(64),
+    state: "authorized_not_sent", finalityClass: "pre_effect", terminal: false,
+    reason: "x402_authorized_not_sent", proofClass: "x402_authorization_verified",
+    nextActions: ["operation.resume", "operation.status"],
+    transitions: appendX402Transition(paymentMaterialPendingOperation.transitions, authorized),
+  });
+  const paymentPendingOperation = resealOperation({
+    ...paymentAuthorizedOperation,
     attempts: [{
       attemptNumber: "1", purpose: "payment", phase: "pending",
       requestHeaderHash: "3".repeat(64), persistedAt: missingResult.operation.updatedAt,
@@ -1622,9 +1696,7 @@ test("terminal x402 graph forbids material on no-effect failure and requires exa
     state: "paid_request_pending", finalityClass: "unknown_finality", terminal: false,
     reason: "x402_paid_request_pending", proofClass: "x402_unknown_finality",
     nextActions: ["operation.resume", "operation.status"],
-    transitions: appendX402Transition(appendX402Transition(appendX402Transition(
-      missingResult.operation.transitions, materialPending,
-    ), authorized), paid),
+    transitions: appendX402Transition(paymentAuthorizedOperation.transitions, paid),
   });
   const recoveryPendingAttempt = {
     attemptNumber: "2",
@@ -1680,6 +1752,8 @@ test("terminal x402 graph forbids material on no-effect failure and requires exa
     () => validateX402Operation(recoveredCompletion),
     "a successful cached-result response can complete with its response-derived hint",
   );
+  await missingResult.store.writeX402Operation(paymentMaterialPendingOperation);
+  await missingResult.store.writeX402Operation(paymentAuthorizedOperation);
   await missingResult.store.writeX402Operation(paymentPendingOperation);
   await missingResult.store.writeX402Operation(sellerRecovery);
   await missingResult.store.writeX402Operation(sellerRecoveryWithPendingAttempt);
@@ -1753,16 +1827,28 @@ test("terminal x402 graph forbids material on no-effect failure and requires exa
   );
 
   const responseRecovery = await setup("terminal-response-recovery");
-  const responsePaidTransitions = appendX402Transition(appendX402Transition(appendX402Transition(
-    responseRecovery.operation.transitions, materialPending,
-  ), authorized), paid);
+  const responseMaterialPendingOperation = resealOperation({
+    ...responseRecovery.operation,
+    state: "authorization_material_pending", finalityClass: "pre_effect", terminal: false,
+    reason: "x402_authorization_material_pending", proofClass: "x402_authorization_recovery",
+    nextActions: ["operation.resume", "operation.status"],
+    transitions: appendX402Transition(responseRecovery.operation.transitions, materialPending),
+  });
+  const responseAuthorizedOperation = resealOperation({
+    ...responseMaterialPendingOperation,
+    signatureHash: "1".repeat(64), paymentPayloadHash: "2".repeat(64), paymentHeaderHash: "3".repeat(64),
+    state: "authorized_not_sent", finalityClass: "pre_effect", terminal: false,
+    reason: "x402_authorized_not_sent", proofClass: "x402_authorization_verified",
+    nextActions: ["operation.resume", "operation.status"],
+    transitions: appendX402Transition(responseMaterialPendingOperation.transitions, authorized),
+  });
+  const responsePaidTransitions = appendX402Transition(responseAuthorizedOperation.transitions, paid);
   const responsePaymentPendingAttempt = {
     attemptNumber: "1", purpose: "payment", phase: "pending",
     requestHeaderHash: "3".repeat(64), persistedAt: responseRecovery.operation.updatedAt,
   } as const;
   const responsePaidPending = resealOperation({
-    ...responseRecovery.operation,
-    signatureHash: "1".repeat(64), paymentPayloadHash: "2".repeat(64), paymentHeaderHash: "3".repeat(64),
+    ...responseAuthorizedOperation,
     attempts: [responsePaymentPendingAttempt],
     state: "paid_request_pending", finalityClass: "unknown_finality", terminal: false,
     reason: "x402_paid_request_pending", proofClass: "x402_unknown_finality",
@@ -1879,6 +1965,8 @@ test("terminal x402 graph forbids material on no-effect failure and requires exa
     reason: "x402_completed", proofClass: "x402_safe_settlement", nextActions: ["receipt.get"],
     transitions: appendX402Transition(responseRecoveryObservedTransitions, completed),
   });
+  await responseRecovery.store.writeX402Operation(responseMaterialPendingOperation);
+  await responseRecovery.store.writeX402Operation(responseAuthorizedOperation);
   await responseRecovery.store.writeX402Operation(responsePaidPending);
   await responseRecovery.store.writeX402Operation(responseSellerRecovery);
   await responseRecovery.store.writeX402Operation(responseRecoveryPending);
@@ -2022,6 +2110,24 @@ test("terminal x402 graph forbids material on no-effect failure and requires exa
     rpcOriginHash: sha256("https://rpc.example"),
   };
   const expiryEvidence = { ...expiryEvidenceBody, evidenceHash: domainHash("apn.x402.unused-expiry-evidence.v1", canonicalJson(expiryEvidenceBody)) };
+  const expiredScanBody = {
+    schemaVersion: "apn.x402.authorization-used-scan.v1",
+    searchStartBlock: expired.operation.preparedBlock.number,
+    nextFromBlock: "12501",
+    targetSafeHead: { number: "12500", hash: blockHash, observedAt: expired.operation.updatedAt },
+    lastCompletedChunk: {
+      fromBlock: expired.operation.preparedBlock.number,
+      toBlock: "12500",
+      toBlockHash: blockHash,
+    },
+    candidates: [],
+    status: "complete",
+    updatedAt: expired.operation.updatedAt,
+  } as const;
+  const expiredScan = {
+    ...expiredScanBody,
+    evidenceHash: domainHash("apn.x402.authorization-used-scan.v1", canonicalJson(expiredScanBody)),
+  };
   const expiredTransition = {
     at: expired.operation.updatedAt, state: "failed_expired_unused" as const, terminal: true,
     reason: "x402_failed_expired_unused" as const, proofClass: "x402_expired_unused_finalized" as const,
@@ -2032,6 +2138,7 @@ test("terminal x402 graph forbids material on no-effect failure and requires exa
   const expiredOperation = resealOperation({
     ...expired.operation,
     signatureHash: "1".repeat(64), paymentPayloadHash: "2".repeat(64), paymentHeaderHash: "3".repeat(64),
+    authorizationUsedScan: expiredScan,
     unusedExpiryEvidence: expiryEvidence,
     receiptLink: { receiptIntegrityHash: "a".repeat(64) },
     state: "failed_expired_unused", finalityClass: "terminal", terminal: true,

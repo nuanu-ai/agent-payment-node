@@ -59,6 +59,78 @@ export interface RpcReceipt {
     readonly observedAt: string;
     readonly rpcOrigin: string;
 }
+export interface X402RpcHead {
+    readonly queriedTag: "safe" | "finalized";
+    readonly number: string;
+    readonly hash: Hex;
+    readonly timestamp: string;
+    readonly observedAt: string;
+    readonly rpcOrigin: string;
+}
+export interface X402RpcBlock {
+    readonly queriedTag: "number";
+    readonly number: string;
+    readonly hash: Hex;
+    readonly timestamp: string;
+    readonly observedAt: string;
+    readonly rpcOrigin: string;
+}
+export interface X402RpcLog {
+    readonly address: Address;
+    readonly topics: readonly Hex[];
+    readonly data: Hex;
+    readonly blockNumber: string;
+    readonly blockHash: Hex;
+    readonly transactionHash: Hex;
+    readonly logIndex: string;
+}
+export interface X402RpcReceipt {
+    readonly transactionHash: Hex;
+    readonly status: "success" | "reverted";
+    readonly blockNumber: string;
+    readonly blockHash: Hex;
+    readonly logs: readonly X402RpcLog[];
+    readonly observedAt: string;
+    readonly rpcOrigin: string;
+}
+export type X402BlockReference = {
+    readonly tag: "safe" | "finalized";
+} | {
+    readonly number: string;
+};
+export interface X402AuthorizationState {
+    readonly value: boolean;
+    readonly blockNumber: string;
+    readonly blockHash: Hex;
+    readonly blockTag: "safe" | "finalized" | "number";
+    readonly observedAt: string;
+    readonly rpcOrigin: string;
+}
+export type X402AuthorizationUsedLogs = {
+    readonly kind: "complete";
+    readonly logs: readonly X402RpcLog[];
+} | {
+    readonly kind: "pruned";
+} | {
+    readonly kind: "range_unavailable";
+};
+/** Read-only x402 RPC surface. It intentionally has no transaction submission method. */
+export interface X402RpcPort {
+    assertBaseChain(): Promise<{
+        readonly chainId: 8453;
+        readonly rpcOrigin: string;
+    }>;
+    getX402Head(tag: "safe" | "finalized"): Promise<X402RpcHead>;
+    getX402Block(number: string): Promise<X402RpcBlock>;
+    getX402Receipt(transactionHash: Hex): Promise<X402RpcReceipt | null>;
+    getX402AuthorizationState(authorizer: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState>;
+    getX402AuthorizationUsedLogs(input: {
+        readonly authorizer: Address;
+        readonly nonce: Hex;
+        readonly fromBlock: string;
+        readonly toBlock: string;
+    }): Promise<X402AuthorizationUsedLogs>;
+}
 export interface RpcPort {
     assertBaseChain(): Promise<{
         readonly chainId: 8453;

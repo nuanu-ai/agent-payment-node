@@ -13,6 +13,9 @@ export declare class X402Service {
     prepare(request: X402PrepareRequest): Promise<unknown>;
     approve(request: X402ApproveRequest): Promise<unknown>;
     resume(operationIdInput: string): Promise<unknown>;
+    private recoverPaymentMaterial;
+    private authorizationExpired;
+    private assertLegacySafeRead;
     private withOperationLock;
     private completeAuthorization;
     private sendPaidRequest;
@@ -21,6 +24,10 @@ export declare class X402Service {
     private markInterruptedPaidAttempt;
     private persistAndLinkResult;
     private recoverOrphanResult;
+    private finishReconciledEvidence;
+    private recoverOrphanReceipt;
+    private commitTerminal;
+    private commitTerminalOperation;
     private transition;
 }
 export {};

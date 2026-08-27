@@ -309,15 +309,27 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     if ("result" in message && !("error" in message)) return { kind: "complete", value: message.result };
     if (!("error" in message) || "result" in message) throw new ApnError("APN_RPC_PROTOCOL", "RPC log response has no exclusive result or error.");
     const error = record(message.error, "JSON-RPC error");
-    const text = typeof error.message === "string" ? error.message.toLowerCase() : "";
-    if (/pruned|missing trie|historical state|history unavailable/u.test(text)) return { kind: "pruned" };
-    if (/range|too many|limit|window|query returned more/u.test(text)) return { kind: "range_unavailable" };
+    const availability = classifyX402LogAvailabilityMessage(
+      typeof error.message === "string" ? error.message : "",
+    );
+    if (availability !== null) return { kind: availability };
     throw new ApnError("APN_RPC_PROTOCOL", "RPC log query failed without a recognized availability class.");
   }
 
   private async resolvePublicAddresses(): Promise<readonly PinnedAddress[]> {
     return await resolvePublicAddresses(this.endpoint, "APN_RPC_CONFIG", "RPC endpoint");
   }
+}
+
+export function classifyX402LogAvailabilityMessage(
+  message: string,
+): "pruned" | "range_unavailable" | null {
+  const text = message.toLowerCase();
+  if (/\b(?:rate[ -]limit(?:ed|ing)?|request limit|too many requests)\b/u.test(text)) return null;
+  if (/\b(?:pruned|missing trie|historical state|history unavailable)\b/u.test(text)) return "pruned";
+  const rangeSubject = /\b(?:block(?:s)?|range|logs?|results?|query|window)\b/u.test(text);
+  const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most)\b/u.test(text);
+  return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
 
 async function postJson(endpoint: URL, body: string, addresses: readonly PinnedAddress[]): Promise<string> {
