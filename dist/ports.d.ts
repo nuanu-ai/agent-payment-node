@@ -6,6 +6,10 @@ export interface ClockPort {
 export interface IdPort {
     next(): string;
 }
+export interface WaitPort {
+    nowMs(): number;
+    wait(milliseconds: number): Promise<"elapsed" | "interrupted">;
+}
 export interface NativeRequest {
     readonly version: "apn.native.v1";
     readonly requestId: string;
@@ -116,6 +120,7 @@ export type X402AuthorizationUsedLogs = {
 };
 /** Read-only x402 RPC surface. It intentionally has no transaction submission method. */
 export interface X402RpcPort {
+    withTotalTimeout?(milliseconds: number): X402RpcPort;
     assertBaseChain(): Promise<{
         readonly chainId: 8453;
         readonly rpcOrigin: string;

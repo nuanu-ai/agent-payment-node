@@ -1,4 +1,5 @@
 import { request as httpsRequest } from "node:https";
+import { performance } from "node:perf_hooks";
 import { decodeAbiParameters } from "viem";
 import { sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES } from "./constants.js";
@@ -15,10 +16,22 @@ export class HttpsBaseRpc {
     rpcOrigin;
     sequence = 0n;
     pinnedAddresses;
-    constructor(endpoint) {
+    totalDeadlineMs;
+    constructor(endpoint, options = {}) {
         const parsed = parsePublicHttpsUrl(endpoint, "APN_RPC_CONFIG", "RPC endpoint");
         this.endpoint = parsed;
         this.rpcOrigin = parsed.origin;
+        this.totalDeadlineMs = options.totalDeadlineMs;
+    }
+    withTotalTimeout(milliseconds) {
+        if (!Number.isFinite(milliseconds) || milliseconds < 1 || milliseconds > 20_000) {
+            throw new ApnError("APN_RPC_CONFIG", "Bounded x402 RPC timeout is invalid.");
+        }
+        const bounded = new HttpsBaseRpc(this.endpoint.toString(), {
+            totalDeadlineMs: performance.now() + milliseconds,
+        });
+        bounded.pinnedAddresses = this.pinnedAddresses;
+        return bounded;
     }
     async assertBaseChain() {
         const chainId = rpcQuantity(await this.call("eth_chainId", []));
@@ -251,7 +264,7 @@ export class HttpsBaseRpc {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await postJson(this.endpoint, body, addresses);
+        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs());
         let value;
         try {
             value = JSON.parse(raw);
@@ -269,7 +282,7 @@ export class HttpsBaseRpc {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params });
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await postJson(this.endpoint, body, addresses);
+        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs());
         let value;
         try {
             value = JSON.parse(raw);
@@ -294,6 +307,14 @@ export class HttpsBaseRpc {
     async resolvePublicAddresses() {
         return await resolvePublicAddresses(this.endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     }
+    remainingTimeoutMs() {
+        if (this.totalDeadlineMs === undefined)
+            return 20_000;
+        const remaining = Math.floor(this.totalDeadlineMs - performance.now());
+        if (remaining < 1)
+            throw new ApnError("APN_RPC_AMBIGUOUS", "Bounded x402 RPC observation reached its deadline.");
+        return Math.min(20_000, remaining);
+    }
 }
 export function classifyX402LogAvailabilityMessage(message) {
     const text = message.toLowerCase();
@@ -305,7 +326,7 @@ export function classifyX402LogAvailabilityMessage(message) {
     const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most)\b/u.test(text);
     return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
-async function postJson(endpoint, body, addresses) {
+async function postJson(endpoint, body, addresses, timeoutMs) {
     return await new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
@@ -348,7 +369,7 @@ async function postJson(endpoint, body, addresses) {
             response.on("end", () => resolve(Buffer.concat(chunks, total).toString("utf8")));
             response.on("error", () => reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC response failed safely.")));
         });
-        request.setTimeout(20_000, () => request.destroy(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out.")));
+        request.setTimeout(timeoutMs, () => request.destroy(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out.")));
         request.on("error", (error) => reject(error instanceof ApnError ? error : new ApnError("APN_RPC_AMBIGUOUS", "RPC transport failed safely.")));
         request.end(body);
     });

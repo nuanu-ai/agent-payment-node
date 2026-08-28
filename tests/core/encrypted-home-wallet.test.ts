@@ -17,7 +17,7 @@ import { StateStore } from "../../src/state.js";
 import type { TransferApprovalIntent, TransferApprovalPort } from "../../src/tty-approval.js";
 import { isExactTransferApproval, transferApprovalPhrase } from "../../src/tty-approval.js";
 import { x402AuthorizationIntentHash } from "../../src/x402-state-integrity.js";
-import { RECIPIENT, TestClock, TestRpc, temporaryState } from "./helpers.js";
+import { RECIPIENT, TestClock, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
 import { QueuedHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, X402_URL, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
@@ -365,6 +365,7 @@ test("real encrypted custody completes the core x402 prepare and authorize bound
     rpc,
     http,
     clock,
+    policy: new TestProfilePolicy(),
   });
   const wallet = await core.execute({ command: "wallet.ensure", profile: "default" });
   const address = (wallet.data as { address: Address }).address.toLowerCase() as Address;
@@ -394,6 +395,7 @@ test("real encrypted custody completes the core x402 prepare and authorize bound
     rpc,
     http,
     clock,
+    policy: new TestProfilePolicy(),
   });
   const status = await restarted.execute({ command: "operation.status", operationId });
   assert.equal((status.operation as { state: string }).state, "authorized_not_sent");

@@ -8,6 +8,12 @@ import type { RuntimeContext } from "./runtime.js";
 import { canonicalIdempotencyKey } from "./transfer-policy.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import {
+  assertUnattendedX402Balance,
+  effectiveX402Cap,
+  policyBinding,
+  requireProfilePolicy,
+} from "./profile-policy.js";
 import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
 import { observePaidX402Response, type PaidHttpResult } from "./x402-http.js";
 import type { RpcPort, X402RpcPort } from "./ports.js";
@@ -38,6 +44,7 @@ import {
   type X402Reason,
   type X402State,
   type X402TerminalState,
+  type X402SettlementWaitProjection,
 } from "./x402-state-integrity.js";
 import { X402RpcReconciler } from "./x402-rpc-reconciler.js";
 import {
@@ -62,7 +69,7 @@ export class X402Service {
   async prepare(request: X402PrepareRequest): Promise<unknown> {
     const profile = canonicalProfile(request.profile);
     const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
-    const capAtomic = positiveCap(request.maxAmountAtomic);
+    const callerCap = request.maxAmountAtomic === undefined ? undefined : positiveCap(request.maxAmountAtomic);
     const endpoint = canonicalPrepareUrl(request.url);
     const canonicalUrl = endpoint.toString();
     await this.context.ready();
@@ -70,25 +77,34 @@ export class X402Service {
     const profileHash = state.profileHash(profile);
     const operationId = state.operationId(profile, idempotencyKey);
     const idempotencyHash = state.idempotencyHash(idempotencyKey);
-    const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic });
 
     return await state.withLocks([
       `profile:${profileHash}`,
       `operation:${operationId}`,
       `operation:idempotency:${idempotencyHash}`,
     ], async () => {
+      const existingAtExpectedId = await state.loadX402Operation(profileHash, operationId);
+      const provisionalCap = callerCap === undefined
+        ? existingAtExpectedId?.capAtomic ?? "0"
+        : callerCap;
+      const provisionalRequestHash = x402RequestHash({ profile, canonicalUrl, capAtomic: provisionalCap });
       const existing = await this.operations.resolvePrepare({
         kind: "x402_fetch",
         profileHash,
         operationId,
         idempotencyHash,
-        requestHash,
+        requestHash: provisionalRequestHash,
       });
       if (existing !== null) return publicX402Operation(existing.record as X402OperationRecord);
       await this.operations.assertProfileAvailable(profileHash);
 
       const walletRecord = await state.loadWallet(profileHash);
       if (walletRecord === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+      const profilePolicy = requireProfilePolicy(
+        await this.context.requirePolicy().load(policyBinding(walletRecord)),
+      );
+      const capAtomic = effectiveX402Cap(profilePolicy, callerCap);
+      const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic });
       const wallet = walletRecord.address.toLowerCase() as `0x${string}`;
       const http = this.context.requireHttp();
       const rpc = this.context.requireRpc();
@@ -103,6 +119,7 @@ export class X402Service {
         invocationStartedAtMs,
         invocationCompletedAtMs,
       });
+      assertUnattendedX402Balance(profilePolicy, evidence.usdcAtomic);
       const paymentIdentifier = paymentIdentifierState(discovered.paymentRequired, operationId);
       const resourceCanonicalJson = canonicalJson(discovered.paymentRequired.resource);
       const createdAtDate = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
@@ -204,13 +221,45 @@ export class X402Service {
     });
   }
 
-  async resume(operationIdInput: string): Promise<unknown> {
+  async resume(
+    operationIdInput: string,
+    waitSeconds?: number,
+  ): Promise<X402SettlementWaitProjection | undefined> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
     const found = await this.operations.required(operationId);
     if (found.kind !== "x402_fetch") throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
-    if (found.record.terminal) return publicX402Operation(found.record);
-    return await this.withOperationLock(found.record, async (current) => {
+    if (waitSeconds !== undefined) {
+      if (!Number.isSafeInteger(waitSeconds) || waitSeconds < 1 || waitSeconds > 300) {
+        throw new ApnError("APN_INVALID_INPUT", "Settlement wait must be an integer from 1 through 300 seconds.");
+      }
+      if (["awaiting_approval", "authorization_material_pending"].includes(found.record.state)) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires an authorized or post-exposure x402 operation.");
+      }
+      const waitRpc = boundedX402ReadPort(
+        this.context.requireRpc(),
+        Math.min(20_000, waitSeconds * 1_000),
+      );
+      if (waitRpc === null) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
+      }
+      await assertWaitRpcProvenance(waitRpc, found.record);
+    }
+    if (found.record.terminal) {
+      return waitSeconds === undefined ? undefined : {
+        outcome: "completed",
+        requestedSeconds: waitSeconds.toString(),
+        observationCount: "0",
+      };
+    }
+    await this.resumeOnce(found.record);
+    if (waitSeconds === undefined) return undefined;
+    return await this.waitForSettlement(found.record.operationId, waitSeconds);
+  }
+
+  private async resumeOnce(initial: X402OperationRecord): Promise<unknown> {
+    if (initial.terminal) return publicX402Operation(initial);
+    return await this.withOperationLock(initial, async (current) => {
       if (current.terminal) return publicX402Operation(current);
       const receiptRecovered = await this.recoverOrphanReceipt(current);
       if (receiptRecovered !== null) return publicX402Operation(receiptRecovered);
@@ -309,6 +358,78 @@ export class X402Service {
         return await this.sendPaidRequest(operation, "payment", verified, true);
       }
       return publicX402Operation(operation);
+    });
+  }
+
+  private async waitForSettlement(
+    operationId: string,
+    waitSeconds: number,
+  ): Promise<X402SettlementWaitProjection> {
+    const deadline = this.context.wait.nowMs() + waitSeconds * 1000;
+    let observations = 0;
+    while (this.context.wait.nowMs() < deadline) {
+      const current = await this.operations.required(operationId);
+      if (current.kind !== "x402_fetch") throw new ApnError("APN_STATE_CORRUPT", "x402 operation changed kind during settlement wait.");
+      if (current.record.terminal) {
+        return {
+          outcome: "completed",
+          requestedSeconds: waitSeconds.toString(),
+          observationCount: observations.toString(),
+        };
+      }
+      if (!isPostExposureWaitState(current.record)) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "x402 operation has no proven post-exposure state to observe.");
+      }
+      await this.reconcileOnly(current.record, deadline);
+      observations += 1;
+      const observed = await this.operations.required(operationId);
+      if (observed.kind !== "x402_fetch") throw new ApnError("APN_STATE_CORRUPT", "x402 operation changed kind during settlement wait.");
+      if (observed.record.terminal) {
+        return {
+          outcome: "completed",
+          requestedSeconds: waitSeconds.toString(),
+          observationCount: observations.toString(),
+        };
+      }
+      const remaining = deadline - this.context.wait.nowMs();
+      if (remaining <= 0) break;
+      const result = await this.context.wait.wait(Math.min(5_000, Math.max(1, Math.floor(remaining))));
+      if (result === "interrupted") {
+        return {
+          outcome: "interrupted",
+          requestedSeconds: waitSeconds.toString(),
+          observationCount: observations.toString(),
+        };
+      }
+    }
+    return {
+      outcome: "timeout",
+      requestedSeconds: waitSeconds.toString(),
+      observationCount: observations.toString(),
+    };
+  }
+
+  private async reconcileOnly(operation: X402OperationRecord, deadline: number): Promise<void> {
+    await this.withOperationLock(operation, async (current) => {
+      if (current.terminal) return publicX402Operation(current);
+      const receiptRecovered = await this.recoverOrphanReceipt(current);
+      if (receiptRecovered !== null) return publicX402Operation(receiptRecovered);
+      let next = await this.recoverOrphanResult(current);
+      next = await this.finishReconciledEvidence(next);
+      if (next.terminal) return publicX402Operation(next);
+      const remaining = Math.floor(deadline - this.context.wait.nowMs());
+      if (remaining < 1) return publicX402Operation(next);
+      const x402Rpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining));
+      if (x402Rpc === null) throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
+      try {
+        const reconciled = await new X402RpcReconciler(x402Rpc, this.context.clock, {
+          persist: async (value) => await this.context.state.writeX402Operation(value),
+        }).reconcile(next);
+        next = await this.finishReconciledEvidence(reconciled.operation);
+      } catch (error) {
+        if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS") throw error;
+      }
+      return publicX402Operation(next);
     });
   }
 
@@ -819,6 +940,35 @@ function x402ReadPort(rpc: RpcPort): X402RpcPort | null {
     typeof value.getX402AuthorizationUsedLogs === "function" ? value as X402RpcPort : null;
 }
 
+function boundedX402ReadPort(rpc: RpcPort, timeoutMs: number): X402RpcPort | null {
+  const port = x402ReadPort(rpc);
+  if (port === null || typeof port.withTotalTimeout !== "function") return null;
+  return port.withTotalTimeout(timeoutMs);
+}
+
+async function assertWaitRpcProvenance(
+  rpc: X402RpcPort,
+  operation: X402OperationRecord,
+): Promise<void> {
+  const chain = await rpc.assertBaseChain();
+  if (chain.chainId !== 8453 || typeof chain.rpcOrigin !== "string" || chain.rpcOrigin.length === 0) {
+    throw new ApnError("APN_CHAIN_MISMATCH", "Settlement wait RPC is not Base chain ID 8453.");
+  }
+  const safe = await rpc.getX402Head("safe");
+  const observedAt = Date.parse(safe.observedAt);
+  if (
+    safe.queriedTag !== "safe" || safe.rpcOrigin !== chain.rpcOrigin ||
+    !/^(?:0|[1-9][0-9]*)$/u.test(safe.number) ||
+    !/^(?:0|[1-9][0-9]*)$/u.test(safe.timestamp) ||
+    !/^0x[0-9a-f]{64}$/u.test(safe.hash) || /^0x0{64}$/u.test(safe.hash) ||
+    !Number.isFinite(observedAt) || new Date(observedAt).toISOString() !== safe.observedAt ||
+    BigInt(safe.timestamp) > BigInt(Math.floor(observedAt / 1_000)) ||
+    BigInt(safe.number) < BigInt(operation.preparedBlock.number)
+  ) {
+    throw new ApnError("APN_RPC_PROTOCOL", "Settlement wait RPC provenance is unsafe.");
+  }
+}
+
 function isRecoverableX402RpcObservationFailure(error: unknown): boolean {
   return error instanceof ApnError && [
     "APN_RPC_AMBIGUOUS",
@@ -826,6 +976,15 @@ function isRecoverableX402RpcObservationFailure(error: unknown): boolean {
     "APN_RPC_CONFIG",
     "APN_CHAIN_MISMATCH",
   ].includes(error.code);
+}
+
+function isPostExposureWaitState(operation: X402OperationRecord): boolean {
+  return operation.attempts.some((attempt) => attempt.purpose === "payment") && [
+    "paid_request_pending",
+    "settlement_pending",
+    "effect_unknown",
+    "seller_result_recovery_pending",
+  ].includes(operation.state);
 }
 
 function terminalClassification(state: X402TerminalState): {

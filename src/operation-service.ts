@@ -6,6 +6,7 @@ import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import {
   publicX402Operation,
   publicX402ResultData,
+  type X402SettlementWaitProjection,
   type X402OperationRecord,
 } from "./x402-state-integrity.js";
 
@@ -71,6 +72,7 @@ export class OperationService {
     options: {
       readonly exposeSellerResult: boolean;
       readonly exposeTerminalReceipt: boolean;
+      readonly settlementWait?: X402SettlementWaitProjection;
     },
   ): Promise<CommandOutcome> {
     const found = await this.required(operationId);
@@ -96,7 +98,7 @@ export class OperationService {
     return {
       proofClass: operation.proofClass,
       data,
-      operation: publicX402Operation(operation, result ?? undefined),
+      operation: publicX402Operation(operation, result ?? undefined, options.settlementWait),
       receipt,
       nextActions: operation.nextActions,
     };

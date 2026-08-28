@@ -1,4 +1,5 @@
-import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort } from "./ports.js";
+import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort, WaitPort } from "./ports.js";
+import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { StateStore } from "./state.js";
 export interface CoreDependencies {
     readonly state: StateStore;
@@ -7,6 +8,8 @@ export interface CoreDependencies {
     readonly http?: HttpPort;
     readonly clock?: ClockPort;
     readonly ids?: IdPort;
+    readonly policy?: ProfilePolicyPort;
+    readonly wait?: WaitPort;
 }
 export declare class RuntimeContext {
     readonly state: StateStore;
@@ -15,11 +18,14 @@ export declare class RuntimeContext {
     readonly http?: HttpPort;
     readonly clock: ClockPort;
     readonly ids: IdPort;
+    readonly policy?: ProfilePolicyPort;
+    readonly wait: WaitPort;
     private initialized;
     constructor(dependencies: CoreDependencies);
     ready(): Promise<void>;
     requireNative(): NativePort;
     requireRpc(): RpcPort;
     requireHttp(): HttpPort;
+    requirePolicy(): ProfilePolicyPort;
     nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest;
 }

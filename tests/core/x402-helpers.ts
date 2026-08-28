@@ -154,6 +154,8 @@ export class RecoveryRpc extends TestRpc implements X402RpcPort {
   blockTimestamps = new Map<string, string>();
   onX402Call?: (name: string) => void | Promise<void>;
 
+  withTotalTimeout(_milliseconds: number): X402RpcPort { return this; }
+
   override async assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }> {
     this.x402Calls.push("chain");
     await this.onX402Call?.("chain");

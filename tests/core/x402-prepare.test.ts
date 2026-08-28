@@ -276,7 +276,7 @@ test("prepare classifies malformed cap, over-cap, insufficient balance, and wron
   const cases = [
     {
       key: "cap-only-001",
-      expected: "APN_X402_CAP_EXCEEDED",
+      expected: "APN_X402_OFFER_EXCEEDS_LIMIT",
       value: { ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, amount: "11" }] },
       cap: "10",
       mutate: (rpc: TestRpc) => { rpc.x402Evidence = { ...rpc.x402Evidence, domainSeparator: `0x${"f".repeat(64)}` }; },
@@ -2329,7 +2329,7 @@ test("generic operation status canonicalizes identifiers before any state-tree l
   await assert.rejects(access(temporary.root), /ENOENT/u, "invalid IDs must not initialize or traverse the state root");
 });
 
-test("CLI owns only additive x402 prepare syntax and requires every explicit input", () => {
+test("CLI owns additive x402 prepare syntax and permits the profile policy to supply the ceiling", () => {
   assert.deepEqual(parseArgv([
     "x402", "fetch", "prepare",
     "--profile", "default",
@@ -2341,11 +2341,19 @@ test("CLI owns only additive x402 prepare syntax and requires every explicit inp
     request: PREPARE_REQUEST,
     rpcUrl: "https://rpc.example",
   });
-  assert.throws(() => parseArgv([
+  assert.deepEqual(parseArgv([
     "x402", "fetch", "prepare",
     "--profile", "default",
     "--url", X402_URL,
     "--idempotency-key", "x402-payment-001",
     "--rpc-url", "https://rpc.example",
-  ]), ApnError);
+  ]), {
+    request: {
+      command: "x402.fetch.prepare",
+      profile: "default",
+      url: X402_URL,
+      idempotencyKey: "x402-payment-001",
+    },
+    rpcUrl: "https://rpc.example",
+  });
 });

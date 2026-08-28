@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.2 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.2.5 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -31,6 +31,26 @@ apn wallet balance --profile default --rpc-url https://mainnet.base.org
 address, manually, with a small amount of Base ETH and Base USDC. APN never
 prints or exports the private key.
 
+Before unattended x402, the wallet owner must configure explicit limits. APN
+does not compile or substitute monetary defaults:
+
+```sh
+apn wallet policy set --profile default \
+  --max-balance-usdc-atomic <owner-limit-in-6-decimal-units> \
+  --max-x402-amount-atomic <owner-limit-in-6-decimal-units> \
+  [--max-balance-eth-wei <optional-owner-limit>]
+
+apn wallet policy show --profile default
+```
+
+For example, one USDC is `1000000` atomic units. Creating a policy or raising
+any limit requires the exact phrase shown in the foreground terminal. A pure
+decrease is non-interactive. Omitting the optional ETH argument preserves its
+existing value. `wallet balance` reports `policy_unconfigured`, `within_limit`
+or `overfunded`, including exact excess. APN cannot stop inbound funding and
+never sweeps or refunds automatically; an overfunded wallet is blocked from
+starting a new unattended x402 purchase until the owner resolves it.
+
 Prepare and approve a direct transfer:
 
 ```sh
@@ -45,8 +65,8 @@ apn pay transfer approve --operation <operation-id> \
 ```
 
 The prepare step freezes recipient, amount, nonce, fees, calldata and expiry.
-The approve step rechecks them and requires the exact phrase shown on
-`/dev/tty`. A transaction hash is non-terminal: completion requires a
+The approve step rechecks them and requires the exact phrase shown in the
+foreground stdin/stderr TTY. A transaction hash is non-terminal: completion requires a
 successful receipt containing the exact canonical-USDC `Transfer` event.
 
 Inspect and buy a standard x402 resource:
@@ -56,7 +76,6 @@ apn x402 inspect --url https://seller.example/resource
 
 apn x402 fetch prepare --profile default \
   --url https://seller.example/resource \
-  --max-amount-atomic 10000 \
   --idempotency-key example-x402-001 \
   --rpc-url https://mainnet.base.org
 
@@ -69,6 +88,25 @@ durable recovery rules permit a byte-identical paid request. The seller and
 facilitator own settlement submission. APN requires a valid seller result and
 reconciled settlement evidence before reporting a paid completion.
 
+`x402 fetch prepare` uses the owner-approved profile maximum. An optional
+`--max-amount-atomic` may only make that ceiling stricter for one call; it can
+never raise the profile limit. The signed authorization amount always equals
+the selected seller offer, not either ceiling.
+
+If settlement is still pending, one bounded command can perform the existing
+legal resume transition once and then observe the same operation through
+read-only RPC reconciliation:
+
+```sh
+apn operation resume --operation <operation-id> \
+  --rpc-url https://mainnet.base.org \
+  --wait-seconds 60
+```
+
+The wait accepts `1..300` seconds. After any one permitted paid request, the
+observation loop cannot sign, submit, create another operation, or issue
+another HTTP request. Timeout returns the same durable resumable operation.
+
 ## Durable commands
 
 ```text
@@ -77,13 +115,15 @@ apn doctor keychain
 apn wallet ensure [--profile <name>]
 apn wallet status [--profile <name>]
 apn wallet balance [--profile <name>] --rpc-url <https-url>
+apn wallet policy show --profile <name>
+apn wallet policy set --profile <name> --max-balance-usdc-atomic <n> --max-x402-amount-atomic <n> [--max-balance-eth-wei <n>]
 apn pay transfer prepare ...
 apn pay transfer approve --operation <id> --rpc-url <https-url>
 apn x402 inspect --url <https-url>
 apn x402 fetch prepare ...
 apn x402 fetch approve --operation <id> --rpc-url <https-url>
 apn operation status --operation <id>
-apn operation resume --operation <id> --rpc-url <https-url>
+apn operation resume --operation <id> --rpc-url <https-url> [--wait-seconds <1..300>]
 apn receipt get --operation <id>
 ```
 
@@ -137,7 +177,7 @@ that bound rejects persistence and submission rather than overwriting the
 wallet or receipts; envelope partitioning/compaction is a post-MVP capacity
 item.
 
-Direct-transfer approval requires `/dev/tty`, an actual TTY and an exact
+Direct-transfer approval requires foreground stdin/stderr attached to actual TTYs and an exact
 operation-bound phrase. Input is bounded by a 60-second approval deadline;
 timeout, interruption, or input failure closes the terminal and unwinds held
 state locks. The Node implementation does not independently attest the
