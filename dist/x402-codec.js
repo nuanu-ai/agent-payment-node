@@ -99,7 +99,9 @@ export function decodeAndNormalizePaymentResponseHeader(value, expected) {
 function decodeAndNormalizePaymentResponseHeaderUnsafe(value, expected) {
     const strict = decodeCanonicalBase64Json(value);
     const response = record(strict, "PAYMENT-RESPONSE");
-    allowedKeys(response, ["success", "transaction", "network"], ["errorReason", "payer", "amount", "extensions"]);
+    allowedKeys(response, ["success", "transaction", "network"], [
+        "errorReason", "errorMessage", "payer", "amount", "extensions", "extra",
+    ]);
     let official;
     try {
         official = decodeOfficialPaymentResponseHeader(value);
@@ -128,8 +130,12 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(value, expected) {
     }
     if (response.amount !== undefined && (typeof response.amount !== "string" || !POSITIVE_UINT.test(response.amount) || response.amount !== expected.amountAtomic))
         throw settlement("PAYMENT-RESPONSE amount conflicts with the frozen operation.");
-    if (response.extensions !== undefined && (!isPlainRecord(response.extensions) || Object.keys(response.extensions).length !== 0))
-        throw settlement("PAYMENT-RESPONSE extensions are invalid.");
+    if (response.errorMessage !== undefined)
+        boundedString(response.errorMessage, 512, "PAYMENT-RESPONSE errorMessage");
+    if (response.extensions !== undefined)
+        boundedRecord(response.extensions, "PAYMENT-RESPONSE extensions");
+    if (response.extra !== undefined)
+        boundedRecord(response.extra, "PAYMENT-RESPONSE extra");
     let classification;
     if (response.success) {
         if (response.errorReason !== undefined)
@@ -149,7 +155,6 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(value, expected) {
         transaction: response.transaction,
         network: CHAIN_CAIP2,
         ...(response.amount === undefined ? {} : { amount: response.amount }),
-        ...(response.extensions === undefined ? {} : { extensions: {} }),
     };
     const normalizedCanonicalJson = canonicalJson(normalized);
     return {
@@ -496,6 +501,13 @@ function record(value, label) {
     if (!isPlainRecord(value))
         throw protocol(`${label} must be a plain object.`);
     return value;
+}
+function boundedRecord(value, label) {
+    const output = record(value, label);
+    if (Buffer.byteLength(canonicalJson(output), "utf8") > MAX_DECODED_X402_BYTES) {
+        throw protocol(`${label} exceeds the size limit.`);
+    }
+    return output;
 }
 function boundedString(value, maxBytes, label) {
     if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value, "utf8") > maxBytes)

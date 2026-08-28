@@ -109,7 +109,9 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
 ): DecodedPaymentResponse {
   const strict = decodeCanonicalBase64Json(value);
   const response = record(strict, "PAYMENT-RESPONSE");
-  allowedKeys(response, ["success", "transaction", "network"], ["errorReason", "payer", "amount", "extensions"]);
+  allowedKeys(response, ["success", "transaction", "network"], [
+    "errorReason", "errorMessage", "payer", "amount", "extensions", "extra",
+  ]);
   let official: SettleResponse;
   try { official = decodeOfficialPaymentResponseHeader(value); }
   catch { throw settlement("Official x402 v2 representation rejected PAYMENT-RESPONSE."); }
@@ -135,9 +137,9 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
   if (response.amount !== undefined && (
     typeof response.amount !== "string" || !POSITIVE_UINT.test(response.amount) || response.amount !== expected.amountAtomic
   )) throw settlement("PAYMENT-RESPONSE amount conflicts with the frozen operation.");
-  if (response.extensions !== undefined && (
-    !isPlainRecord(response.extensions) || Object.keys(response.extensions).length !== 0
-  )) throw settlement("PAYMENT-RESPONSE extensions are invalid.");
+  if (response.errorMessage !== undefined) boundedString(response.errorMessage, 512, "PAYMENT-RESPONSE errorMessage");
+  if (response.extensions !== undefined) boundedRecord(response.extensions, "PAYMENT-RESPONSE extensions");
+  if (response.extra !== undefined) boundedRecord(response.extra, "PAYMENT-RESPONSE extra");
 
   let classification: DecodedPaymentResponse["classification"];
   if (response.success) {
@@ -158,7 +160,6 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
     transaction: response.transaction,
     network: CHAIN_CAIP2,
     ...(response.amount === undefined ? {} : { amount: response.amount }),
-    ...(response.extensions === undefined ? {} : { extensions: {} }),
   };
   const normalizedCanonicalJson = canonicalJson(normalized);
   return {
@@ -462,6 +463,14 @@ function allowedKeys(value: Record<string, unknown>, required: readonly string[]
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!isPlainRecord(value)) throw protocol(`${label} must be a plain object.`);
   return value;
+}
+
+function boundedRecord(value: unknown, label: string): Record<string, unknown> {
+  const output = record(value, label);
+  if (Buffer.byteLength(canonicalJson(output), "utf8") > MAX_DECODED_X402_BYTES) {
+    throw protocol(`${label} exceeds the size limit.`);
+  }
+  return output;
 }
 
 function boundedString(value: unknown, maxBytes: number, label: string): asserts value is string {
