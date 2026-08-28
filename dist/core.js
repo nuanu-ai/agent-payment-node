@@ -1,5 +1,5 @@
 import { isPlainRecord } from "./canonical.js";
-import { OUTPUT_VERSION } from "./constants.js";
+import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { failureEnvelope, successEnvelope } from "./output.js";
 import { RuntimeContext } from "./runtime.js";
 import { TransferService } from "./transfer-service.js";
@@ -36,11 +36,11 @@ export class ApnCore {
             case "version":
                 return dataOutcome({
                     product: "agent-payment-node",
-                    product_version: "0.2.5",
+                    product_version: PRODUCT_VERSION,
                     cli_version: OUTPUT_VERSION,
                     proof_class: "local_build_metadata",
                 }, "local_build_metadata");
-            case "doctor.keychain": return dataOutcome(await this.wallet.status("default"), "encrypted_apn_home_status");
+            case "doctor.keychain": return dataOutcome(await this.wallet.doctorKeychain(), "encrypted_apn_home_status");
             case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
             case "wallet.status": return dataOutcome(await this.wallet.status(request.profile), "encrypted_apn_home_status");
             case "wallet.balance": return dataOutcome(await this.wallet.balance(request.profile), "chain_verified_public_read");

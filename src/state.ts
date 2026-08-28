@@ -128,6 +128,28 @@ export class StateStore {
     return value === null ? null : validateWallet(value);
   }
 
+  async loadWalletArtifacts(
+    profile: string,
+    profileHash: string,
+  ): Promise<{ readonly stored: WalletRecord | null; readonly encrypted: unknown | null }> {
+    stateIdentifier(profileHash, "profile hash");
+    await this.assertNoSymlinkAncestors(this.root);
+    let rootStats: Stats;
+    try {
+      rootStats = await lstat(this.root);
+    } catch (error) {
+      if (isCode(error, "ENOENT")) return { stored: null, encrypted: null };
+      throw error;
+    }
+    validateDirectory(rootStats, true);
+    if (await realpath(this.root) !== this.root) stateSecurity("State root resolves through an alias or symbolic link.");
+    const [stored, encrypted] = await Promise.all([
+      this.loadWallet(profileHash),
+      this.loadEncryptedWalletEnvelope(profile),
+    ]);
+    return { stored, encrypted };
+  }
+
   async writeWallet(wallet: WalletRecord): Promise<void> {
     await this.ensureDirectory(join("wallets", wallet.profileHash));
     await this.writeJson(join("wallets", wallet.profileHash, "wallet.json"), wallet);

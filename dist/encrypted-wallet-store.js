@@ -27,9 +27,8 @@ export class EncryptedWalletStore {
         const profile = canonicalProfile(profileInput);
         const value = await this.state.loadEncryptedWalletEnvelope(profile);
         if (value === null) {
-            // An absent wallet must still exercise the production Keychain query so
-            // `doctor keychain` distinguishes a usable-but-empty APN profile from a
-            // missing/locked/unavailable Keychain command path.
+            // A native describe against incomplete public state still exercises the
+            // production Keychain query without creating a wrapping secret.
             const probe = await this.wrappingSecret.load();
             probe?.fill(0);
             return null;
