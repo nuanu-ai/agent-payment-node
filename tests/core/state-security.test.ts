@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import test from "node:test";
-import { chmod, link, mkdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { canonicalJson, sha256 } from "../../src/canonical.js";
+import { sha256 } from "../../src/canonical.js";
+import type { AdvisoryLockPort } from "../../src/macos-advisory-lock.js";
 import { StateStore } from "../../src/state.js";
 import { RECIPIENT, TestNative, TestRpc, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
 
@@ -121,48 +123,152 @@ test("operation filenames hash idempotency keys instead of exposing them", async
   assert.match(path, /[a-f0-9]{64}\.json$/);
 });
 
-test("stale-lock takeover never deletes a replacement inode created during the race", async (t) => {
+test("stable kernel lock files remain in place after release", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
+  const store = new StateStore(temporary.root);
+  await store.initialize();
+  await store.withLocks(["stable-key"], async () => undefined);
+  const info = await lstat(lockPath(temporary.root, "stable-key"));
+  assert.equal(info.isFile(), true);
+  assert.equal(info.mode & 0o777, 0o600);
+  assert.equal(info.nlink, 1);
+  assert.equal((await readFile(lockPath(temporary.root, "stable-key"))).length, 0);
+});
 
-  class RacingStore extends StateStore {
-    protected override async beforeStaleLockTakeover(path: string): Promise<void> {
-      await unlink(path);
-      await writeFile(path, canonicalJson({
-        pid: process.pid.toString(),
-        createdAtMs: Date.now().toString(),
-        token: "replacement-inode",
-      }), { mode: 0o600 });
+test("a held kernel lock refuses a contender until the file handle closes", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const holder = new StateStore(temporary.root);
+  const contender = new StateStore(temporary.root, { lockWaitMs: 30 });
+  await holder.initialize();
+  await contender.initialize();
+
+  await holder.withLocks(["busy-key"], async () => {
+    await assert.rejects(contender.withLocks(["busy-key"], async () => undefined), (error: unknown) => {
+      assert.equal((error as { readonly code?: unknown }).code, "APN_STATE_BUSY");
+      assert.match(String(error), /30 milliseconds/);
+      return true;
+    });
+  });
+  await contender.withLocks(["busy-key"], async () => undefined);
+});
+
+test("process exit releases the kernel lock without deleting its stable file", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const contender = new StateStore(temporary.root, { lockWaitMs: 30 });
+  await contender.initialize();
+  const path = lockPath(temporary.root, "process-exit-key");
+  const childSource = `
+    import { constants } from "node:fs";
+    import { open } from "node:fs/promises";
+    import { spawn } from "node:child_process";
+    const held = await open(${JSON.stringify(path)}, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
+    const locker = spawn("/usr/bin/lockf", ["-s", "-t", "0", "3"], { stdio: ["ignore", "ignore", "ignore", held.fd] });
+    locker.once("error", () => process.exit(2));
+    locker.once("close", (code, signal) => {
+      if (code !== 0 || signal !== null) process.exit(3);
+      process.stdout.write("locked\\n");
+      setInterval(() => undefined, 60_000);
+    });
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", childSource], {
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  t.after(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  });
+  assert.equal(await childReady(child), "locked");
+
+  await assert.rejects(contender.withLocks(["process-exit-key"], async () => undefined), (error: unknown) => {
+    assert.equal((error as { readonly code?: unknown }).code, "APN_STATE_BUSY");
+    return true;
+  });
+  child.kill("SIGKILL");
+  await new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
+  await contender.withLocks(["process-exit-key"], async () => undefined);
+  assert.equal((await lstat(path)).isFile(), true);
+});
+
+test("lock files reject symlinks, hard links, wrong modes, and path replacement", async (t) => {
+  for (const kind of ["symlink", "hardlink", "mode"] as const) {
+    const temporary = await temporaryState();
+    t.after(temporary.cleanup);
+    const store = new StateStore(temporary.root);
+    await store.initialize();
+    const key = `${kind}-lock-key`;
+    const path = lockPath(temporary.root, key);
+    if (kind === "symlink") await symlink("/etc/passwd", path);
+    if (kind === "hardlink") {
+      await writeFile(path, "", { mode: 0o600 });
+      await link(path, join(temporary.base, "lock-hardlink"));
     }
+    if (kind === "mode") await writeFile(path, "", { mode: 0o644 });
+
+    await assert.rejects(store.withLocks([key], async () => undefined), (error: unknown) => {
+      assert.equal((error as { readonly code?: unknown }).code, "APN_STATE_SECURITY");
+      return true;
+    });
   }
 
-  const store = new RacingStore(temporary.root, { lockWaitMs: 50, lockLeaseMs: 1, hostSerialized: true });
-  await store.initialize();
-  const lockPath = join(temporary.root, "locks", `${sha256("lock\0race-key")}.lock`);
-  await writeFile(lockPath, canonicalJson({
-    pid: "99999999",
-    createdAtMs: "0",
-    token: "stale-inode",
-  }), { mode: 0o600 });
-
-  await assert.rejects(store.withLocks(["race-key"], async () => undefined), /replacement was preserved/);
-  const replacement = JSON.parse(await readFile(lockPath, "utf8")) as { readonly token?: unknown };
-  assert.equal(replacement.token, "replacement-inode");
+  const replacementCase = await temporaryState();
+  t.after(replacementCase.cleanup);
+  const key = "replacement-lock-key";
+  const path = lockPath(replacementCase.root, key);
+  const replacingPort: AdvisoryLockPort = {
+    tryAcquire: async () => {
+      await unlink(path);
+      await writeFile(path, "replacement", { mode: 0o600 });
+      return true;
+    },
+  };
+  const replacingStore = new StateStore(replacementCase.root, { lockPort: replacingPort });
+  await replacingStore.initialize();
+  await assert.rejects(replacingStore.withLocks([key], async () => undefined), /changed while it was open/);
+  assert.equal(await readFile(path, "utf8"), "replacement");
 });
 
-test("stale-lock recovery is refused without native-host advisory serialization", async (t) => {
+test("concurrent contenders serialize the protected action", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const store = new StateStore(temporary.root, { lockWaitMs: 20, lockLeaseMs: 1 });
-  await store.initialize();
-  const lockPath = join(temporary.root, "locks", `${sha256("lock\0unserialized-key")}.lock`);
-  await writeFile(lockPath, canonicalJson({
-    pid: "99999999",
-    createdAtMs: "0",
-    token: "stale-unserialized",
-  }), { mode: 0o600 });
-
-  await assert.rejects(store.withLocks(["unserialized-key"], async () => undefined), /native host advisory lock/);
-  const retained = JSON.parse(await readFile(lockPath, "utf8")) as { readonly token?: unknown };
-  assert.equal(retained.token, "stale-unserialized");
+  const left = new StateStore(temporary.root, { lockWaitMs: 1_000 });
+  const right = new StateStore(temporary.root, { lockWaitMs: 1_000 });
+  await left.initialize();
+  await right.initialize();
+  let active = 0;
+  let maximumActive = 0;
+  const trace: string[] = [];
+  const enter = async (name: string): Promise<void> => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    trace.push(`${name}:enter`);
+    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 25));
+    trace.push(`${name}:exit`);
+    active -= 1;
+  };
+  await Promise.all([
+    left.withLocks(["serialize-key"], async () => await enter("left")),
+    right.withLocks(["serialize-key"], async () => await enter("right")),
+  ]);
+  assert.equal(maximumActive, 1);
+  assert.match(trace.join(","), /^(left:enter,left:exit,right:enter,right:exit|right:enter,right:exit,left:enter,left:exit)$/);
 });
+
+function lockPath(root: string, key: string): string {
+  return join(root, "locks", `${sha256(`lock\0${key}`)}.lock`);
+}
+
+async function childReady(child: ReturnType<typeof spawn>): Promise<string> {
+  return await new Promise<string>((resolveReady, rejectReady) => {
+    const timeout = setTimeout(() => rejectReady(new Error("kernel-lock child did not become ready")), 1_000);
+    const finish = (value?: string, error?: Error): void => {
+      clearTimeout(timeout);
+      child.removeAllListeners("exit");
+      if (error !== undefined) rejectReady(error);
+      else resolveReady(value ?? "");
+    };
+    child.once("exit", (code, signal) => finish(undefined, new Error(`kernel-lock child exited early: ${String(code)} ${String(signal)}`)));
+    child.stdout?.once("data", (chunk: Buffer) => finish(chunk.toString("utf8").trim()));
+  });
+}

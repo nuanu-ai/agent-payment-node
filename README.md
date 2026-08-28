@@ -1,28 +1,75 @@
 # Agent Payment Node
 
-APN is a local-first CLI for a disposable agent wallet, direct transfers, and
-standard x402 payments. The agent calls one command surface; a signed native
-app owns local custody and narrowly bounded signing.
+APN is an open-source, CLI-first payment runtime for AI agents. Its default
+profile is a disposable local EVM wallet: APN creates it, reports the public
+address for manual low-value funding, and uses the same durable core for Base
+USDC transfers and standard x402 v2 purchases.
 
-The current local MVP targets Apple Silicon macOS, Base (chain ID 8453), native
-ETH for gas, and the canonical Base USDC contract. It creates one stable EOA
-per named profile, keeps the private key and replayable signed effect material
-in the macOS data-protection Keychain, and never exposes a raw-key or
-generic-signing API to Node.js.
+APN 0.2 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+and canonical Base USDC. It does not require an Apple Developer identity, an
+app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
-## Intended install
+## Install
 
-The public release path is one command:
-
-```text
-brew install --cask nuanu-ai/tap/apn
+```sh
+brew install nuanu-ai/tap/apn
 ```
 
-The Cask will install `APNKeychainAgent.app`, Homebrew Node 24, and the `apn`
-command. That Cask has not been published yet. The current artifact is an
-unsigned structural build only.
+The Formula installs the `apn` command and Homebrew `node@24` dependency. The
+first wallet command creates `~/.apn` with mode `0700` and one encrypted wallet
+envelope per profile with mode `0600`.
 
-## Commands
+## First journey
+
+```sh
+apn wallet ensure --profile default
+apn wallet status --profile default
+apn wallet balance --profile default --rpc-url https://mainnet.base.org
+```
+
+`wallet ensure` creates or reuses one stable address. Fund only that public
+address, manually, with a small amount of Base ETH and Base USDC. APN never
+prints or exports the private key.
+
+Prepare and approve a direct transfer:
+
+```sh
+apn pay transfer prepare --profile default \
+  --to 0x2222222222222222222222222222222222222222 \
+  --amount-usdc 0.01 \
+  --idempotency-key example-direct-001 \
+  --rpc-url https://mainnet.base.org
+
+apn pay transfer approve --operation <operation-id> \
+  --rpc-url https://mainnet.base.org
+```
+
+The prepare step freezes recipient, amount, nonce, fees, calldata and expiry.
+The approve step rechecks them and requires the exact phrase shown on
+`/dev/tty`. A transaction hash is non-terminal: completion requires a
+successful receipt containing the exact canonical-USDC `Transfer` event.
+
+Inspect and buy a standard x402 resource:
+
+```sh
+apn x402 inspect --url https://seller.example/resource
+
+apn x402 fetch prepare --profile default \
+  --url https://seller.example/resource \
+  --max-amount-atomic 10000 \
+  --idempotency-key example-x402-001 \
+  --rpc-url https://mainnet.base.org
+
+apn x402 fetch approve --operation <operation-id> \
+  --rpc-url https://mainnet.base.org
+```
+
+APN signs exactly one frozen EIP-3009 authorization and retries only when its
+durable recovery rules permit a byte-identical paid request. The seller and
+facilitator own settlement submission. APN requires a valid seller result and
+reconciled settlement evidence before reporting a paid completion.
+
+## Durable commands
 
 ```text
 apn --version
@@ -30,85 +77,89 @@ apn doctor keychain
 apn wallet ensure [--profile <name>]
 apn wallet status [--profile <name>]
 apn wallet balance [--profile <name>] --rpc-url <https-url>
-apn x402 inspect --url <https-url>
-apn x402 fetch prepare --profile <name> --url <https-url> \
-  --max-amount-atomic <base-units> --idempotency-key <key> \
-  --rpc-url <https-url>
-apn x402 fetch approve --operation <id> --rpc-url <https-url>
-apn pay transfer prepare --profile <name> --to <0x-address> \
-  --amount-usdc <decimal> --idempotency-key <key> --rpc-url <https-url>
+apn pay transfer prepare ...
 apn pay transfer approve --operation <id> --rpc-url <https-url>
+apn x402 inspect --url <https-url>
+apn x402 fetch prepare ...
+apn x402 fetch approve --operation <id> --rpc-url <https-url>
 apn operation status --operation <id>
 apn operation resume --operation <id> --rpc-url <https-url>
 apn receipt get --operation <id>
 ```
 
-Every result is one `apn.cli.v1` JSON object. A direct transfer is prepared and
-frozen before the native host displays its complete economics on `/dev/tty`.
-Direct-transfer signing requires the exact displayed approval phrase; there is
-no `--yes`, stdin, environment-variable, socket, daemon, or unattended bypass.
+`apn doctor keychain` performs a read-only query against the ordinary login
+Keychain. An `ok: true` result means the Keychain command path is usable; an
+`absent` wallet status is expected before first wallet creation and does not
+create a wrapping secret.
 
-APN treats a transaction hash as non-terminal evidence. `completed` requires a
-successful receipt with the exact Base USDC `Transfer` event. Ambiguous send,
-missing receipt, or unresolved nonce consumption remains non-success and is
-recovered through the existing operation and exact signed bytes.
+Every invocation emits exactly one `apn.cli.v1` JSON envelope. Raw private
+keys, wrapping secrets, signed transaction bytes, x402 signatures and payment
+headers are excluded from command output, public operation state and receipts.
 
-## Standard x402 flow
+## Custody and threat model
 
-`x402 inspect` performs one unpaid public-HTTPS `GET`, validates the canonical
-v2 `PAYMENT-REQUIRED` header, and returns compatible seller offers without
-creating state, reading the wallet, or calling RPC. `x402 fetch prepare`
-obtains a fresh 402, applies the caller's atomic-unit cap, checks the profile's
-Base USDC balance and token domain at one pinned safe block, and freezes the
-first fully payable seller-ordered offer under the idempotency key.
+- `~/.apn/wallets/<profile>.json` is a versioned AES-256-GCM envelope.
+- A random 256-bit wrapping secret is stored as the APN-specific generic
+  password `ai.nuanu.apn.wrapping-secret.v1/default` in the ordinary macOS
+  login Keychain, explicitly bound to `~/Library/Keychains/login.keychain-db`.
+- HKDF-SHA-256 derives a per-write encryption key from a random 32-byte salt;
+  the profile, address, chain, creation time and binding hash are authenticated
+  as GCM additional data.
+- The encrypted record also retains exact direct-transfer and x402 effect
+  material so restart recovery never needs a second signature.
+- State uses owner-only permissions, symlink/hardlink rejection, macOS kernel
+  advisory locks, bounded canonical JSON and fsync-plus-atomic-rename writes.
 
-`x402 fetch approve` creates or reuses exactly one EIP-3009 authorization for
-that frozen operation. This disposable-wallet path is unattended by design,
-but it is not a reusable permission or generic signer: profile, target, payee,
-amount, token, chain, nonce, validity, offer, and payment-identifier posture are
-all bound before native signing. APN then repeats the exact `GET` with only the
-canonical `PAYMENT-SIGNATURE` header. It never broadcasts an EVM transaction
-and never calls facilitator verify/settle APIs; the seller/facilitator owns
-submission, while APN validates the seller response and reconciles safe-chain
-evidence through the explicit RPC endpoint.
+This is `local_software_disposable` custody, not savings custody. Encryption
+protects a copied `~/.apn` directory when the Keychain secret is absent. It
+does not protect against compromise of the same unlocked login session, APN
+process, user account or host. JavaScript/viem memory is garbage-collected, so
+cryptographic zeroization of every transient key copy is not claimed. Missing
+Keychain material, authentication failure, unsafe permissions or identity
+mismatch fails closed and never rotates the wallet silently. Every contender
+opens the same stable, owner-only hashed lock file and acquires it through the
+fixed system `/usr/bin/lockf` adapter. APN waits up to five seconds when the
+kernel lock is busy. Releasing the held file descriptor, including on process
+exit or crash, releases the kernel lock; the stable lock file is never renamed
+or unlinked and contains no PID, lease or recovery metadata.
 
-After an ambiguous outcome, `operation resume` runs one bounded durable
-reconciliation step and permits at most one byte-identical paid retry when the
-recorded evidence allows it. Completed JSON or text seller content appears only
-in the completing command's `data`; status and receipts expose safe metadata,
-proof class, finality, transaction hashes, and recovery actions without the
-seller body or replayable payment material.
+The current MVP keeps recovery material in one authenticated wallet envelope
+bounded to 1 MiB. Historical effects are not compacted automatically. Reaching
+that bound rejects persistence and submission rather than overwriting the
+wallet or receipts; envelope partitioning/compaction is a post-MVP capacity
+item.
 
-## Custody and state
+Direct-transfer approval requires `/dev/tty`, an actual TTY and an exact
+operation-bound phrase. Input is bounded by a 60-second approval deadline;
+timeout, interruption, or input failure closes the terminal and unwinds held
+state locks. The Node implementation does not independently attest the
+terminal's foreground process group. This is a human-confirmation boundary,
+not protection against compromise of the same user session.
 
-- Key and replayable direct-transfer/x402 authorization material:
-  data-protection Keychain,
-  `AfterFirstUnlockThisDeviceOnly`, non-synchronizing, exact Nuanu access group.
-- Public state: `~/Library/Application Support/nuanu-apn`, resolved from the
-  effective macOS user rather than caller-controlled `HOME`; it contains
-  integrity-linked operation, recovery, result metadata, and receipts, not the
-  private key, signature, or `PAYMENT-SIGNATURE` bytes.
-- Wallet posture: disposable local software wallet. Fund only low value that
-  the agent is allowed to spend; there is no backup or hardware-wallet claim.
-- Network posture: explicit public HTTPS Base RPC only, with DNS/IP validation,
-  response limits, chain checks, and no redirect following.
+## Recovery guarantees
 
-## Verification boundary
+Idempotency keys resolve to one durable operation. APN persists effect binding
+before submission, treats lost send responses as ambiguous, checks receipts
+and confirmed nonce evidence before resubmission, and recovers only the exact
+encrypted raw transaction or x402 authorization. Status and receipts survive
+restart, reinstall and Formula upgrade because Homebrew does not own `~/.apn`.
 
-Local source proof covers exact-money parsing, idempotency, state recovery,
-receipt validation, strict x402 wire handling, bounded retry and settlement
-reconciliation, inherited-pipe IPC, bounded Rust signing, forbidden-surface
-scans, strict Rust linting, Node 24 tests, and unsigned app structure. Tests use
-injected deterministic ports and no public seller/RPC traffic or money.
+## Proof boundary
 
-It does **not** prove Developer ID signing, the exact provisioning profile,
-data-protection Keychain behavior under the final identity, notarization,
-Gatekeeper, a public Homebrew tap install, upgrade continuity, a live Base USDC
-transfer, or a live paid x402 settlement. Those are explicit release/acceptance
-gates; local GREEN is not production E2E.
+Normal tests cover encryption negatives, permissions, concurrency,
+create/reuse/restart, byte-identical direct-effect recovery, x402 authorization
+recovery, idempotency, receipts and all previous APN journeys without public
+network traffic or money. Local green tests are not live or production E2E.
 
-Hub, MCP, external wallet providers, Stellar, Solana, and Tron are outside this
-Slice. Standard x402 does not require the AI Labs Hub.
+Public release, clean Homebrew install and bounded live Base/x402 acceptance
+are separately recorded release gates. Hub, contracts, MCP, provider wallets,
+Stellar, Solana and TRON are outside this release.
 
-The repository is not published and its open-source license is not selected.
-See `packaging/README.md` for the proof-linked release pipeline.
+The published npm archive includes `npm-shrinkwrap.json`; Formula installation
+therefore resolves the exact integrity-pinned production dependency closure
+recorded by this release.
+
+The former signed-app/Cask path is retained only as a deferred historical
+track under `packaging/`; it is not required by the Formula installation.
+
+Licensed under the MIT License.

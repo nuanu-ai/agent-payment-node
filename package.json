@@ -1,9 +1,9 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
-  "private": true,
+  "private": false,
   "engines": {
     "node": ">=24 <27"
   },
@@ -16,6 +16,7 @@
     "bin/apn.js",
     "dist/**",
     "native/BUILD.md",
+    "npm-shrinkwrap.json",
     "README.md",
     "LICENSE"
   ],
@@ -24,11 +25,11 @@
     "build:ts": "tsc -p tsconfig.json",
     "build": "npm run build:ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run test:core && npm run test:native-contract && npm run test:packaging-syntax && npm run test:packaging-behavior",
+    "test": "npm run test:core",
     "test:core": "npm run build:test && node --test --test-concurrency=1 dist-test/tests/core/*.test.js && node scripts/core-forbidden-surface.mjs",
-    "test:native-contract": "cargo fmt --check && cargo test --offline --locked && cargo clippy --offline --locked --all-targets -- -D warnings",
-    "test:packaging-syntax": "node scripts/core-package-syntax.mjs",
-    "test:packaging-behavior": "node --test --test-concurrency=1 tests/packaging/*.test.mjs",
+    "test:legacy-native-contract": "cargo fmt --check && cargo test --offline --locked && cargo clippy --offline --locked --all-targets -- -D warnings",
+    "test:legacy-cask-syntax": "node scripts/core-package-syntax.mjs",
+    "test:legacy-cask-behavior": "node --test --test-concurrency=1 tests/packaging/*.test.mjs",
     "test:source": "npm run test:core",
     "build:test": "tsc -p tsconfig.test.json",
     "integration:assemble-app": "node scripts/assemble-macos-app.mjs",
@@ -42,5 +43,5 @@
     "@types/node": "24.5.2",
     "typescript": "5.9.2"
   },
-  "license": "SEE LICENSE IN LICENSE"
+  "license": "MIT"
 }

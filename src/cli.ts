@@ -3,11 +3,14 @@ import { userInfo } from "node:os";
 import { resolve } from "node:path";
 import type { CommandRequest, OutputEnvelope } from "./core.js";
 import { ApnCore } from "./core.js";
-import { HOST_SERIALIZED_ENV, OUTPUT_VERSION } from "./constants.js";
+import { OUTPUT_VERSION } from "./constants.js";
 import { ApnError, asApnError } from "./errors.js";
-import { InheritedNativeIpc } from "./native-ipc.js";
+import { LocalWalletNative } from "./local-wallet-native.js";
+import { MacOSLoginKeychainSecret, type WrappingSecretPort } from "./macos-keychain.js";
+import type { NativePort } from "./ports.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
+import type { TransferApprovalPort } from "./tty-approval.js";
 import { HttpsX402Http } from "./x402-http.js";
 
 interface ParsedCli { readonly request: CommandRequest; readonly rpcUrl?: string }
@@ -79,17 +82,35 @@ export function parseArgv(argv: readonly string[]): ParsedCli {
   throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported APN command.");
 }
 
-export async function runCli(argv: readonly string[], environment: NodeJS.ProcessEnv = process.env): Promise<OutputEnvelope> {
+export interface CliRuntimeOptions {
+  readonly stateRoot?: string;
+  readonly native?: NativePort;
+  readonly wrappingSecret?: WrappingSecretPort;
+  readonly approval?: TransferApprovalPort;
+}
+
+export async function runCli(
+  argv: readonly string[],
+  _environment: NodeJS.ProcessEnv = process.env,
+  options: CliRuntimeOptions = {},
+): Promise<OutputEnvelope> {
   try {
     const parsed = parseArgv(argv);
-    const native = needsNative(parsed.request) ? InheritedNativeIpc.fromEnvironment(environment) : undefined;
+    const stateRoot = options.stateRoot ?? effectiveStateRoot();
+    const state = new StateStore(stateRoot);
+    const native = needsNative(parsed.request)
+      ? options.native ?? new LocalWalletNative(
+          state,
+          options.wrappingSecret ?? new MacOSLoginKeychainSecret(),
+          options.approval,
+        )
+      : undefined;
     const rpc = parsed.rpcUrl === undefined ? undefined : new HttpsBaseRpc(parsed.rpcUrl);
     const http = ["x402.inspect", "x402.fetch.prepare", "operation.resume"].includes(parsed.request.command)
       ? new HttpsX402Http()
       : undefined;
-    const stateRoot = effectiveStateRoot();
     return await new ApnCore({
-      state: new StateStore(stateRoot, { hostSerialized: environment[HOST_SERIALIZED_ENV] === "1" }),
+      state,
       ...(native === undefined ? {} : { native }),
       ...(rpc === undefined ? {} : { rpc }),
       ...(http === undefined ? {} : { http }),
@@ -112,7 +133,7 @@ export async function runCli(argv: readonly string[], environment: NodeJS.Proces
 }
 
 export function effectiveStateRoot(): string {
-  return resolve(userInfo().homedir, "Library", "Application Support", "nuanu-apn");
+  return resolve(userInfo().homedir, ".apn");
 }
 
 function needsNative(request: CommandRequest): boolean {

@@ -1,15 +1,14 @@
+import { type AdvisoryLockPort } from "./macos-advisory-lock.js";
 import type { OperationRecord, ReceiptRecord, WalletRecord } from "./model.js";
 import { type X402OperationRecord, type X402ReceiptRecord, type X402ResultRecord } from "./x402-state-integrity.js";
 export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./state-integrity.js";
 export declare class StateStore {
     readonly root: string;
     readonly lockWaitMs: number;
-    readonly lockLeaseMs: number;
-    readonly hostSerialized: boolean;
+    private readonly lockPort;
     constructor(root: string, options?: {
         lockWaitMs?: number;
-        lockLeaseMs?: number;
-        hostSerialized?: boolean;
+        lockPort?: AdvisoryLockPort;
     });
     initialize(): Promise<void>;
     profileHash(profile: string): string;
@@ -17,6 +16,8 @@ export declare class StateStore {
     idempotencyHash(idempotencyKey: string): string;
     loadWallet(profileHash: string): Promise<WalletRecord | null>;
     writeWallet(wallet: WalletRecord): Promise<void>;
+    loadEncryptedWalletEnvelope(profile: string): Promise<unknown | null>;
+    writeEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void>;
     loadOperation(profileHash: string, operationId: string): Promise<OperationRecord | null>;
     findOperation(operationId: string): Promise<OperationRecord | null>;
     writeOperation(operation: OperationRecord): Promise<void>;
@@ -52,7 +53,6 @@ export declare class StateStore {
     private readJson;
     private writeJson;
     private acquireLock;
-    private clearStaleLock;
-    protected beforeStaleLockTakeover(_path: string): Promise<void>;
+    private validateOpenedLock;
     private releaseLock;
 }

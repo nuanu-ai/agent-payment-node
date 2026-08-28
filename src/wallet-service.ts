@@ -58,14 +58,14 @@ export class WalletService {
       );
       if (stored === null) {
         if (!result.found) {
-          return { profile, status: "absent", proof_class: "native_keychain_status", next_actions: ["apn wallet ensure"] };
+          return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: ["apn wallet ensure"] };
         }
         return {
           profile,
-          status: "native_only",
+          status: "encrypted_home_only",
           address: result.address,
           bindingHash: result.bindingHash,
-          proof_class: "native_keychain_status",
+          proof_class: "encrypted_apn_home_status",
           next_actions: ["apn wallet ensure"],
         };
       }

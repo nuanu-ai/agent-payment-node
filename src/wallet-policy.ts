@@ -60,10 +60,10 @@ export function publicWallet(wallet: WalletRecord, status: string): unknown {
     status,
     address: wallet.address,
     chain: CHAIN_CAIP2,
-    custody: "local_software_keychain",
+    custody: "local_software_disposable",
     binding_hash: wallet.bindingHash,
     created_at: wallet.createdAt,
-    proof_class: "native_keychain_status",
+    proof_class: "encrypted_apn_home_status",
     next_actions: [],
   };
 }

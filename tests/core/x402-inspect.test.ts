@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
 import test from "node:test";
 import { ApnCore } from "../../src/core.js";
+import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import { sameIpAddress } from "../../src/network-policy.js";
 import type { NativePort, NativeRequest, RpcPort } from "../../src/ports.js";
@@ -16,6 +17,7 @@ import {
   encodeCanonicalBase64Json,
   encodePaymentRequiredHeader,
   encodePaymentSignatureHeader,
+  inspectCandidates,
 } from "../../src/x402-codec.js";
 import { HttpsX402Http, inspectX402, SELLER_RESPONSE_MAX_HEADER_BYTES } from "../../src/x402-http.js";
 import type { InspectResult } from "../../src/x402-model.js";
@@ -58,6 +60,98 @@ test("official-shape canonical PAYMENT-REQUIRED round-trips through the strict c
   assert.deepEqual(decoded.accepts, [X402_REQUIREMENTS]);
 });
 
+test("standard v2 challenge keeps error and offer order while filtering unsupported mechanisms", () => {
+  const mixedAsset = `0x${X402_REQUIREMENTS.asset.slice(2).toUpperCase()}`;
+  const mixedPayTo = `0x${"aA".repeat(20)}`;
+  const supported = {
+    ...X402_REQUIREMENTS,
+    asset: mixedAsset,
+    payTo: mixedPayTo,
+    extra: {
+      ...X402_REQUIREMENTS.extra,
+      assetTransferMethod: "eip3009",
+      paymentFlow: "authorization",
+    },
+  };
+  const challenge = {
+    ...X402_PAYMENT_REQUIRED,
+    error: "payment-signature is required",
+    accepts: [
+      {
+        scheme: "exact",
+        network: "solana:mainnet",
+        amount: "1000",
+        asset: "USDC",
+        payTo: "7EcDXy7YJ6VAXhTgVxpVz4v8n8vYt3RwX6fPnSH6q2Yr",
+        maxTimeoutSeconds: 60,
+        extra: { feePayer: "seller", transactionFormat: "base64" },
+      },
+      {
+        ...X402_REQUIREMENTS,
+        extra: {
+          ...X402_REQUIREMENTS.extra,
+          assetTransferMethod: "permit2",
+          permit2Address: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        },
+      },
+      supported,
+    ],
+    extensions: { "future-standard-extension": { info: { required: false } } },
+  };
+
+  const decoded = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader(challenge));
+  assert.equal(decoded.error, challenge.error);
+  assert.deepEqual(decoded.accepts, challenge.accepts, "unsupported standard offers remain available for original-index binding");
+  assert.equal(decoded.extensions, undefined, "unimplemented extension namespaces are safely ignored");
+
+  const candidates = inspectCandidates(decoded, X402_URL);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.index, "2");
+  assert.equal(candidates[0]?.asset, mixedAsset.toLowerCase());
+  assert.equal(candidates[0]?.payTo, mixedPayTo.toLowerCase());
+  assert.equal(candidates[0]?.offerHash, domainHash("apn.x402.offer.v1", canonicalJson(supported)));
+});
+
+test("unsupported-offer filtering retains standard envelope and selected-offer strictness", () => {
+  const permit2 = {
+    ...X402_REQUIREMENTS,
+    extra: {
+      ...X402_REQUIREMENTS.extra,
+      assetTransferMethod: "permit2",
+      arbitraryPermit2Data: { witness: true },
+    },
+  };
+  const malformedEip3009 = {
+    ...X402_REQUIREMENTS,
+    extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "eip3009", unexpected: true },
+  };
+  const malformedFlow = {
+    ...X402_REQUIREMENTS,
+    extra: { ...X402_REQUIREMENTS.extra, paymentFlow: null },
+  };
+  const decoded = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
+    ...X402_PAYMENT_REQUIRED,
+    accepts: [permit2, malformedEip3009, malformedFlow, X402_REQUIREMENTS],
+  }));
+  assert.deepEqual(inspectCandidates(decoded, X402_URL).map(({ index }) => index), ["3"]);
+
+  for (const challenge of [
+    { ...X402_PAYMENT_REQUIRED, error: 402 },
+    {
+      ...X402_PAYMENT_REQUIRED,
+      accepts: [{
+        scheme: "exact",
+        network: "solana:mainnet",
+        amount: 1,
+        asset: "USDC",
+        payTo: "seller",
+        maxTimeoutSeconds: 60,
+        extra: { arbitrary: true },
+      }],
+    },
+  ]) assert.throws(() => decodePaymentRequiredHeader(canonicalPaymentRequiredHeader(challenge)), ApnError);
+});
+
 test("strict wire rejects malformed base64, duplicate JSON keys, unsafe numbers, and unknown fields", () => {
   const padded = Buffer.from(`${JSON.stringify(X402_PAYMENT_REQUIRED)} `, "utf8").toString("base64");
   for (const header of [
@@ -73,11 +167,10 @@ test("strict wire rejects malformed base64, duplicate JSON keys, unsafe numbers,
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, unexpected: true }),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, renamedFlow: "authorization" }] }),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, amount: 1 }] }),
-    canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, extra: { ...X402_REQUIREMENTS.extra, paymentFlow: null } }] }),
   ]) assert.throws(() => decodePaymentRequiredHeader(header), ApnError, header.slice(0, 32));
 });
 
-test("payment-identifier accepts only the exact official 2.23.0 declaration", () => {
+test("payment-identifier stays strict while unknown challenge extensions are ignored", () => {
   for (const required of [false, true]) {
     const decoded = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
       ...X402_PAYMENT_REQUIRED,
@@ -115,10 +208,17 @@ test("payment-identifier accepts only the exact official 2.23.0 declaration", ()
     });
     assert.throws(() => decodePaymentRequiredHeader(header), ApnError);
   }
-  assert.throws(() => decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
+  assert.equal(decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
     ...X402_PAYMENT_REQUIRED,
     extensions: { "payment-identifier-renamed": paymentIdentifierDeclaration(false) },
-  })), ApnError);
+  })).extensions, undefined);
+  assert.deepEqual(decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
+    ...X402_PAYMENT_REQUIRED,
+    extensions: {
+      "payment-identifier": paymentIdentifierDeclaration(false),
+      "future-standard-extension": { arbitrary: true },
+    },
+  })).extensions, { "payment-identifier": paymentIdentifierDeclaration(false) });
   assert.throws(() => decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
     ...X402_PAYMENT_REQUIRED,
     extensions: null,

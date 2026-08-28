@@ -1,4 +1,9 @@
-# macOS release assembly
+# Deferred Apple/Cask release assembly
+
+This directory belongs to the waiting Apple-profile Slice and is not the
+default APN 0.2 distribution path. APN 0.2 uses the normal Homebrew Formula in
+`nuanu-ai/homebrew-tap`, encrypted `~/.apn` custody and no signed app bundle.
+The material below remains only for a future explicit return to that Slice.
 
 The supported macOS artifact is an immutable zip containing
 `APNKeychainAgent.app`. The public Cask installs that app, declares the
