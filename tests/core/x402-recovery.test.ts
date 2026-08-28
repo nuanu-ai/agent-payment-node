@@ -1554,7 +1554,12 @@ test("one cached-result retry can complete scan-discovered settlement", async (t
       network: "eip155:8453",
       payer: X402_TEST_ACCOUNT.address.toLowerCase(),
       amount: "1250000",
+      errorMessage: "facilitator metadata",
+      extensions: { trace: { provider: "official" } },
+      extra: { settlementRoute: "live" },
     }),
+    paymentResponseHeaderName: "X-PAYMENT-RESPONSE",
+    mediaType: "application/json; charset=utf-8",
     bodyText: '{"recovered":true}',
   });
   const fixture = await authorizedFixture(t, {
@@ -1574,6 +1579,10 @@ test("one cached-result retry can complete scan-discovered settlement", async (t
   const terminal = await operation(fixture);
   assert.deepEqual(terminal.attempts.map((attempt) => attempt.purpose), ["payment", "result_recovery"]);
   assert.equal(terminal.attempts.filter((attempt) => attempt.purpose === "result_recovery").length, 1);
+  assert.equal(terminal.attempts[1]?.observation?.mediaType, "application/json");
+  const result = await fixture.core.context.state.loadX402Result(terminal.profileHash, terminal.operationId);
+  assert.equal(result?.mediaType, "application/json");
+  assert.equal(result?.bodyText, '{"recovered":true}');
 });
 
 test("a crash after cached-result HTTP exposure never sends the recovery request twice", async (t) => {

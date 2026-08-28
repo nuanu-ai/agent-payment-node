@@ -235,6 +235,33 @@ test("authorized resume persists one paid attempt, strict settlement, and protec
   );
 });
 
+test("official X-PAYMENT-RESPONSE alias is accepted as the settlement response", async (t) => {
+  const settlementHeader = canonicalPaymentResponseHeader({
+    success: true,
+    payer: ACCOUNT.address.toLowerCase(),
+    transaction: X402_TRANSACTION,
+    network: "eip155:8453",
+    amount: "1250000",
+  });
+  const fixture = await authorizedFixture(t, {
+    paidOutcome: paidObservation({
+      paymentResponseHeader: settlementHeader,
+      paymentResponseHeaderName: "X-PAYMENT-RESPONSE",
+    }),
+    idempotencyKey: "x402-official-response-alias",
+  });
+  const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal(resumed.ok, true, JSON.stringify(resumed));
+  const operation = await fixture.core.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
+  assert.equal(operation.state, "settlement_pending");
+  assert.equal(operation.settlementResponseObservation?.classification, "success");
+  assert.equal(
+    operation.attempts[0]?.observation?.paymentResponseHeaderHash,
+    domainHash("apn.x402.payment-response-header.v1", Buffer.from(settlementHeader, "ascii")),
+  );
+  assert.match(operation.resultLink?.resultHash ?? "", /^[a-f0-9]{64}$/u);
+});
+
 test("restart reconstructs the exact paid header after the pending marker is durable", async (t) => {
   const exposureStates: X402OperationRecord[] = [];
   let fixtureRef: Awaited<ReturnType<typeof authorizedFixture>> | undefined;
@@ -281,23 +308,37 @@ test("restart reconstructs the exact paid header after the pending marker is dur
 });
 
 test("PAYMENT-RESPONSE codec is exact, normalized, and closed", () => {
-  const success = decodeAndNormalizePaymentResponseHeader(canonicalPaymentResponseHeader({
+  const coreResponse = {
     success: true,
     payer: ACCOUNT.address,
     transaction: X402_TRANSACTION,
     network: "eip155:8453",
     amount: "1250000",
-    extensions: {},
-  }), { payer: ACCOUNT.address.toLowerCase(), amountAtomic: "1250000" });
+  };
+  const coreHeader = canonicalPaymentResponseHeader(coreResponse);
+  const core = decodeAndNormalizePaymentResponseHeader(coreHeader, {
+    payer: ACCOUNT.address.toLowerCase(), amountAtomic: "1250000",
+  });
+  const additiveHeader = canonicalPaymentResponseHeader({
+    ...coreResponse,
+    errorMessage: "facilitator metadata",
+    extensions: { trace: { provider: "official" } },
+    extra: { settlementRoute: "live", attempts: [1] },
+  });
+  const success = decodeAndNormalizePaymentResponseHeader(additiveHeader, {
+    payer: ACCOUNT.address.toLowerCase(), amountAtomic: "1250000",
+  });
   assert.equal(success.classification, "success");
   assert.deepEqual(JSON.parse(success.normalizedCanonicalJson), {
     amount: "1250000",
-    extensions: {},
     network: "eip155:8453",
     payer: ACCOUNT.address.toLowerCase(),
     success: true,
     transaction: X402_TRANSACTION,
   });
+  assert.equal(success.normalizedCanonicalJson, core.normalizedCanonicalJson);
+  assert.equal(success.settlementResponseHash, core.settlementResponseHash);
+  assert.notEqual(success.paymentResponseHeaderHash, core.paymentResponseHeaderHash);
   const pending = decodeAndNormalizePaymentResponseHeader(canonicalPaymentResponseHeader({
     success: false,
     errorReason: "settlement_pending",
@@ -315,7 +356,13 @@ test("PAYMENT-RESPONSE codec is exact, normalized, and closed", () => {
 
   for (const invalid of [
     "not-base64",
-    canonicalPaymentResponseHeader({ success: true, transaction: X402_TRANSACTION, network: "eip155:8453", errorMessage: "raw" }),
+    canonicalPaymentResponseHeader({ ...coreResponse, errorMessage: "" }),
+    canonicalPaymentResponseHeader({ ...coreResponse, errorMessage: "x".repeat(513) }),
+    canonicalPaymentResponseHeader({ ...coreResponse, extensions: [] }),
+    canonicalPaymentResponseHeader({ ...coreResponse, extra: "not-a-record" }),
+    canonicalPaymentResponseHeader({ ...coreResponse, unknown: true }),
+    canonicalPaymentResponseHeader({ ...coreResponse, errorReason: "conflicts-with-success" }),
+    canonicalPaymentResponseHeader({ ...coreResponse, payer: "0x3333333333333333333333333333333333333333" }),
     canonicalPaymentResponseHeader({ success: true, transaction: `0x${"0".repeat(64)}`, network: "eip155:8453" }),
     canonicalPaymentResponseHeader({ success: true, transaction: X402_TRANSACTION, network: "eip155:1" }),
     canonicalPaymentResponseHeader({ success: true, transaction: X402_TRANSACTION, network: "eip155:8453", amount: "1250001" }),
@@ -402,6 +449,39 @@ test("missing settlement response persists an observed unknown outcome without e
   assert.equal(fixture.http.calls.length, 2);
 });
 
+test("UTF-8 Content-Type parameters are accepted and normalized to the base media type", async (t) => {
+  const settlementHeader = canonicalPaymentResponseHeader({
+    success: true,
+    payer: ACCOUNT.address.toLowerCase(),
+    transaction: X402_TRANSACTION,
+    network: "eip155:8453",
+    amount: "1250000",
+  });
+  const cases = [
+    { label: "json-token", mediaType: "application/json; charset=UTF-8", expected: "application/json", bodyText: "{}" },
+    { label: "text-quoted", mediaType: "text/plain; charset=\"UTF-8\"", expected: "text/plain", bodyText: "sunny" },
+  ] as const;
+  for (const item of cases) {
+    await t.test(item.label, async (nested) => {
+      const fixture = await authorizedFixture(nested, {
+        paidOutcome: paidObservation({
+          paymentResponseHeader: settlementHeader,
+          mediaType: item.mediaType,
+          bodyText: item.bodyText,
+        }),
+        idempotencyKey: `x402-content-type-${item.label}`,
+      });
+      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+      assert.equal(resumed.ok, true, JSON.stringify(resumed));
+      const operation = await fixture.core.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
+      assert.equal(operation.attempts[0]?.observation?.mediaType, item.expected);
+      const result = await fixture.core.context.state.loadX402Result(operation.profileHash, operation.operationId);
+      assert.equal(result?.mediaType, item.expected);
+      assert.equal(result?.bodyText, item.bodyText);
+    });
+  }
+});
+
 test("invalid result and duplicate control headers remain bounded non-terminal with one send", async (t) => {
   const settlementHeader = canonicalPaymentResponseHeader({
     success: true,
@@ -428,6 +508,77 @@ test("invalid result and duplicate control headers remain bounded non-terminal w
           ["PAYMENT-RESPONSE", settlementHeader],
           ["payment-response", settlementHeader],
         ],
+        bodyText: "{}",
+      }),
+    },
+    {
+      label: "primary-and-alias-identical",
+      response: paidObservation({
+        rawHeaderPairs: [
+          ["Content-Type", "application/json"],
+          ["Content-Length", "2"],
+          ["PAYMENT-RESPONSE", settlementHeader],
+          ["X-PAYMENT-RESPONSE", settlementHeader],
+        ],
+        bodyText: "{}",
+      }),
+    },
+    {
+      label: "primary-and-alias-conflicting",
+      response: paidObservation({
+        rawHeaderPairs: [
+          ["Content-Type", "application/json"],
+          ["Content-Length", "2"],
+          ["PAYMENT-RESPONSE", settlementHeader],
+          ["X-PAYMENT-RESPONSE", "different"],
+        ],
+        bodyText: "{}",
+      }),
+    },
+    {
+      label: "duplicate-alias",
+      response: paidObservation({
+        rawHeaderPairs: [
+          ["Content-Type", "application/json"],
+          ["Content-Length", "2"],
+          ["X-PAYMENT-RESPONSE", settlementHeader],
+          ["x-payment-response", settlementHeader],
+        ],
+        bodyText: "{}",
+      }),
+    },
+    {
+      label: "folded-alias",
+      response: paidObservation({
+        rawHeaderPairs: [
+          ["Content-Type", "application/json"],
+          ["Content-Length", "2"],
+          ["X-PAYMENT-RESPONSE", `${settlementHeader},${settlementHeader}`],
+        ],
+        bodyText: "{}",
+      }),
+    },
+    {
+      label: "malformed-content-type-parameter",
+      response: paidObservation({ paymentResponseHeader: settlementHeader, mediaType: "application/json; charset", bodyText: "{}" }),
+    },
+    {
+      label: "duplicate-content-type-parameter",
+      response: paidObservation({
+        paymentResponseHeader: settlementHeader,
+        mediaType: "application/json; charset=utf-8; charset=utf-8",
+        bodyText: "{}",
+      }),
+    },
+    {
+      label: "unknown-content-type-parameter",
+      response: paidObservation({ paymentResponseHeader: settlementHeader, mediaType: "application/json; profile=v1", bodyText: "{}" }),
+    },
+    {
+      label: "non-utf8-content-type-parameter",
+      response: paidObservation({
+        paymentResponseHeader: settlementHeader,
+        mediaType: "application/json; charset=iso-8859-1",
         bodyText: "{}",
       }),
     },
