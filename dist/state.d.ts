@@ -15,6 +15,10 @@ export declare class StateStore {
     operationId(profile: string, idempotencyKey: string): string;
     idempotencyHash(idempotencyKey: string): string;
     loadWallet(profileHash: string): Promise<WalletRecord | null>;
+    loadWalletArtifacts(profile: string, profileHash: string): Promise<{
+        readonly stored: WalletRecord | null;
+        readonly encrypted: unknown | null;
+    }>;
     writeWallet(wallet: WalletRecord): Promise<void>;
     loadEncryptedWalletEnvelope(profile: string): Promise<unknown | null>;
     writeEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void>;

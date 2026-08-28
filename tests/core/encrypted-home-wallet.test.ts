@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, lstat, readFile, writeFile } from "node:fs/promises";
+import { chmod, lstat, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { keccak256, recoverTypedDataAddress } from "viem";
@@ -61,6 +61,7 @@ test("doctor keychain probes custody without creating a wallet or wrapping secre
   assert.equal((result.data as { status: string }).status, "absent");
   assert.equal(wrapping.loads, 1);
   assert.equal(wrapping.creates, 0);
+  await assert.rejects(stat(temporary.root), { code: "ENOENT" });
 });
 
 test("CLI creates, reuses, and restarts one encrypted disposable wallet under the injected APN home", async (t) => {
@@ -96,8 +97,17 @@ test("CLI creates, reuses, and restarts one encrypted disposable wallet under th
     wrappingSecret: wrapping,
     approval,
   });
+  const loadsBeforeDoctor = wrapping.loads;
+  const doctor = await runCli(["doctor", "keychain"], {}, {
+    stateRoot: temporary.root,
+    wrappingSecret: wrapping,
+    approval,
+  });
   assert.equal((reused.data as { readonly address: Address }).address, address);
   assert.equal((restarted.data as { readonly address: Address }).address, address);
+  assert.equal((doctor.data as { readonly status: string }).status, "ready");
+  assert.equal((doctor.data as { readonly address: Address }).address, address);
+  assert.equal(wrapping.loads, loadsBeforeDoctor + 1);
   assert.equal(wrapping.creates, 1);
   assert.equal(JSON.stringify(created).includes("privateKey"), false);
 });

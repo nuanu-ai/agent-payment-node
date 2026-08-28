@@ -6,10 +6,12 @@ import { ApnError, type ErrorCode } from "./errors.js";
 import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort, WaitPort } from "./ports.js";
 import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { StateStore } from "./state.js";
+import type { WrappingSecretPort } from "./macos-keychain.js";
 
 export interface CoreDependencies {
   readonly state: StateStore;
   readonly native?: NativePort;
+  readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
   readonly rpc?: RpcPort;
   readonly http?: HttpPort;
   readonly clock?: ClockPort;
@@ -21,6 +23,7 @@ export interface CoreDependencies {
 export class RuntimeContext {
   readonly state: StateStore;
   readonly native?: NativePort;
+  readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
   readonly rpc?: RpcPort;
   readonly http?: HttpPort;
   readonly clock: ClockPort;
@@ -32,6 +35,7 @@ export class RuntimeContext {
   constructor(dependencies: CoreDependencies) {
     this.state = dependencies.state;
     if (dependencies.native !== undefined) this.native = dependencies.native;
+    if (dependencies.keychainProbe !== undefined) this.keychainProbe = dependencies.keychainProbe;
     if (dependencies.rpc !== undefined) this.rpc = dependencies.rpc;
     if (dependencies.http !== undefined) this.http = dependencies.http;
     this.clock = dependencies.clock ?? { now: () => new Date() };
@@ -50,6 +54,13 @@ export class RuntimeContext {
       throw new ApnError("APN_NATIVE_CHANNEL_REQUIRED", "This command must run as a child of the signed native app host.");
     }
     return this.native;
+  }
+
+  requireKeychainProbe(): Pick<WrappingSecretPort, "load"> {
+    if (this.keychainProbe === undefined) {
+      throw new ApnError("APN_NATIVE_CHANNEL_REQUIRED", "This command requires the read-only login Keychain probe.");
+    }
+    return this.keychainProbe;
   }
 
   requireRpc(): RpcPort {

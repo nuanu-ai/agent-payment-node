@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.2.5 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.2.6 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -19,12 +19,28 @@ The Formula installs the `apn` command and Homebrew `node@24` dependency. The
 first wallet command creates `~/.apn` with mode `0700` and one encrypted wallet
 envelope per profile with mode `0600`.
 
+An agent can discover the complete installed contract without a repository or
+README. Text help is available at every group and command; the versioned JSON
+manifest is the machine source of truth:
+
+```sh
+apn --help
+apn wallet --help
+apn help pay transfer prepare
+apn help --json
+```
+
+All discovery paths run before state, Keychain, wallet, policy, approval,
+network, signing or payment construction. Successful help is raw text and the
+manifest is one raw `apn.command-manifest.v1` JSON object. Operational commands
+continue to emit exactly one `apn.cli.v1` envelope.
+
 ## First journey
 
 ```sh
 apn wallet ensure --profile default
 apn wallet status --profile default
-apn wallet balance --profile default --rpc-url https://mainnet.base.org
+apn wallet balance --profile default --rpc-url https://rpc.example
 ```
 
 `wallet ensure` creates or reuses one stable address. Fund only that public
@@ -55,13 +71,13 @@ Prepare and approve a direct transfer:
 
 ```sh
 apn pay transfer prepare --profile default \
-  --to 0x2222222222222222222222222222222222222222 \
+  --to <recipient-address> \
   --amount-usdc 0.01 \
   --idempotency-key example-direct-001 \
-  --rpc-url https://mainnet.base.org
+  --rpc-url https://rpc.example
 
 apn pay transfer approve --operation <operation-id> \
-  --rpc-url https://mainnet.base.org
+  --rpc-url https://rpc.example
 ```
 
 The prepare step freezes recipient, amount, nonce, fees, calldata and expiry.
@@ -77,10 +93,10 @@ apn x402 inspect --url https://seller.example/resource
 apn x402 fetch prepare --profile default \
   --url https://seller.example/resource \
   --idempotency-key example-x402-001 \
-  --rpc-url https://mainnet.base.org
+  --rpc-url https://rpc.example
 
 apn x402 fetch approve --operation <operation-id> \
-  --rpc-url https://mainnet.base.org
+  --rpc-url https://rpc.example
 ```
 
 APN signs exactly one frozen EIP-3009 authorization and retries only when its
@@ -99,7 +115,7 @@ read-only RPC reconciliation:
 
 ```sh
 apn operation resume --operation <operation-id> \
-  --rpc-url https://mainnet.base.org \
+  --rpc-url https://rpc.example \
   --wait-seconds 60
 ```
 
@@ -109,30 +125,32 @@ another HTTP request. Timeout returns the same durable resumable operation.
 
 ## Durable commands
 
+<!-- BEGIN APN COMMAND CATALOG -->
 ```text
 apn --version
 apn doctor keychain
-apn wallet ensure [--profile <name>]
-apn wallet status [--profile <name>]
-apn wallet balance [--profile <name>] --rpc-url <https-url>
-apn wallet policy show --profile <name>
-apn wallet policy set --profile <name> --max-balance-usdc-atomic <n> --max-x402-amount-atomic <n> [--max-balance-eth-wei <n>]
-apn pay transfer prepare ...
-apn pay transfer approve --operation <id> --rpc-url <https-url>
+apn wallet ensure [--profile <profile>]
+apn wallet status [--profile <profile>]
+apn wallet balance [--profile <profile>] --rpc-url <https-url>
+apn wallet policy show --profile <profile>
+apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
 apn x402 inspect --url <https-url>
-apn x402 fetch prepare ...
-apn x402 fetch approve --operation <id> --rpc-url <https-url>
-apn operation status --operation <id>
-apn operation resume --operation <id> --rpc-url <https-url> [--wait-seconds <1..300>]
-apn receipt get --operation <id>
+apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]
+apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
+apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
+apn pay transfer approve --operation <operation-id> --rpc-url <https-url>
+apn operation status --operation <operation-id>
+apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]
+apn receipt get --operation <operation-id>
 ```
+<!-- END APN COMMAND CATALOG -->
 
 `apn doctor keychain` performs a read-only query against the ordinary login
 Keychain. An `ok: true` result means the Keychain command path is usable; an
 `absent` wallet status is expected before first wallet creation and does not
 create a wrapping secret.
 
-Every invocation emits exactly one `apn.cli.v1` JSON envelope. Raw private
+Every operational invocation emits exactly one `apn.cli.v1` JSON envelope. Raw private
 keys, wrapping secrets, signed transaction bytes, x402 signatures and payment
 headers are excluded from command output, public operation state and receipts.
 

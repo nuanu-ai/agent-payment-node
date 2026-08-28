@@ -9,6 +9,17 @@ export class WalletService {
     constructor(context) {
         this.context = context;
     }
+    async doctorKeychain() {
+        const profile = "default";
+        const profileHash = this.context.state.profileHash(profile);
+        const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
+        if (artifacts.stored === null && artifacts.encrypted === null) {
+            const wrapping = await this.context.requireKeychainProbe().load();
+            wrapping?.fill(0);
+            return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: ["apn wallet ensure"] };
+        }
+        return await this.initializedStatus(profile, profileHash);
+    }
     async ensure(profileInput) {
         const profile = canonicalProfile(profileInput);
         await this.context.ready();
@@ -40,8 +51,15 @@ export class WalletService {
     }
     async status(profileInput) {
         const profile = canonicalProfile(profileInput);
-        await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
+        const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
+        if (artifacts.stored === null && artifacts.encrypted === null) {
+            return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: ["apn wallet ensure"] };
+        }
+        return await this.initializedStatus(profile, profileHash);
+    }
+    async initializedStatus(profile, profileHash) {
+        await this.context.ready();
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
             const stored = await this.context.state.loadWallet(profileHash);
             const result = parseWalletDescribe(await this.context.requireNative().request(this.context.nativeRequest("wallet.describe", { profile })), profile);
