@@ -79,7 +79,7 @@ export class StateStore {
         const canonical = await realpath(this.root);
         if (canonical !== this.root)
             stateSecurity("State root resolves through an alias or symbolic link.");
-        for (const name of ["wallets", "operations", "receipts", "x402-operations", "x402-results", "x402-receipts", "locks"]) {
+        for (const name of ["wallets", "policies", "operations", "receipts", "x402-operations", "x402-results", "x402-receipts", "locks"]) {
             await this.ensureDirectory(name);
         }
     }
@@ -105,6 +105,12 @@ export class StateStore {
     }
     async writeEncryptedWalletEnvelope(profile, envelope) {
         await this.writeJson(join("wallets", `${profile}.json`), envelope);
+    }
+    async loadEncryptedPolicyEnvelope(profile) {
+        return await this.readJson(join("policies", `${profile}.json`));
+    }
+    async writeEncryptedPolicyEnvelope(profile, envelope) {
+        await this.writeJson(join("policies", `${profile}.json`), envelope);
     }
     async loadOperation(profileHash, operationId) {
         const value = await this.readJson(join("operations", profileHash, `${operationId}.json`));

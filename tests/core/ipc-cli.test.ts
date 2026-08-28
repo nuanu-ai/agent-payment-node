@@ -115,6 +115,17 @@ test("CLI argv preserves Slice 1, adds bounded x402 commands, and contains no ap
     request: { command: "operation.resume", operationId: OPERATION_ID },
     rpcUrl: "https://rpc.example",
   });
+  assert.deepEqual(parseArgv([
+    "operation", "resume", "--operation", OPERATION_ID, "--rpc-url", "https://rpc.example", "--wait-seconds", "300",
+  ]), {
+    request: { command: "operation.resume", operationId: OPERATION_ID, waitSeconds: 300 },
+    rpcUrl: "https://rpc.example",
+  });
+  for (const value of ["0", "301", "01", "1.0", "-1"]) {
+    assert.throws(() => parseArgv([
+      "operation", "resume", "--operation", OPERATION_ID, "--rpc-url", "https://rpc.example", "--wait-seconds", value,
+    ]), ApnError);
+  }
   assert.deepEqual(parseArgv(["receipt", "get", "--operation", OPERATION_ID]), {
     request: { command: "receipt.get", operationId: OPERATION_ID },
   });

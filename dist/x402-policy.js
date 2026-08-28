@@ -37,8 +37,9 @@ export async function freshChallenge(http, canonicalUrl) {
 export function candidatesWithinCap(challenge, capAtomic) {
     const cap = parseAtomic(capAtomic, { positive: true });
     const candidates = challenge.staticCandidates.filter((candidate) => parseAtomic(candidate.amountAtomic, { positive: true }) <= cap);
-    if (candidates.length === 0)
-        throw new ApnError("APN_X402_CAP_EXCEEDED", "Every supported seller offer exceeds the explicit payment cap.");
+    if (candidates.length === 0) {
+        throw new ApnError("APN_X402_OFFER_EXCEEDS_LIMIT", "Every supported seller offer exceeds the effective x402 limit.");
+    }
     return candidates;
 }
 export function selectPrepareOffer(challenge, underCap, evidence, wallet, context) {
