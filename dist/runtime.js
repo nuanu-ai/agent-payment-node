@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
+import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
@@ -8,6 +10,8 @@ export class RuntimeContext {
     http;
     clock;
     ids;
+    policy;
+    wait;
     initialized;
     constructor(dependencies) {
         this.state = dependencies.state;
@@ -19,6 +23,9 @@ export class RuntimeContext {
             this.http = dependencies.http;
         this.clock = dependencies.clock ?? { now: () => new Date() };
         this.ids = dependencies.ids ?? { next: () => randomUUID() };
+        if (dependencies.policy !== undefined)
+            this.policy = dependencies.policy;
+        this.wait = dependencies.wait ?? new ProcessWaitPort();
     }
     async ready() {
         this.initialized ??= this.state.initialize();
@@ -42,8 +49,34 @@ export class RuntimeContext {
         }
         return this.http;
     }
+    requirePolicy() {
+        if (this.policy === undefined) {
+            throw new ApnError("APN_WALLET_POLICY_REQUIRED", "This command requires the encrypted profile policy store.");
+        }
+        return this.policy;
+    }
     nativeRequest(operation, payload) {
         return { version: NATIVE_IPC_VERSION, requestId: this.ids.next(), operation, payload };
+    }
+}
+class ProcessWaitPort {
+    nowMs() { return performance.now(); }
+    async wait(milliseconds) {
+        const controller = new AbortController();
+        const onSigint = () => controller.abort();
+        process.once("SIGINT", onSigint);
+        try {
+            await waitFor(milliseconds, undefined, { signal: controller.signal });
+            return "elapsed";
+        }
+        catch (error) {
+            if (controller.signal.aborted)
+                return "interrupted";
+            throw error;
+        }
+        finally {
+            process.off("SIGINT", onSigint);
+        }
     }
 }
 //# sourceMappingURL=runtime.js.map

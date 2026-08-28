@@ -13,13 +13,22 @@ export type CommandRequest = {
     readonly command: "wallet.balance";
     readonly profile: string;
 } | {
+    readonly command: "wallet.policy.show";
+    readonly profile: string;
+} | {
+    readonly command: "wallet.policy.set";
+    readonly profile: string;
+    readonly maxBalanceUsdcAtomic: string;
+    readonly maxX402AmountAtomic: string;
+    readonly maxBalanceEthWei?: string;
+} | {
     readonly command: "x402.inspect";
     readonly url: string;
 } | {
     readonly command: "x402.fetch.prepare";
     readonly profile: string;
     readonly url: string;
-    readonly maxAmountAtomic: string;
+    readonly maxAmountAtomic?: string;
     readonly idempotencyKey: string;
 } | {
     readonly command: "x402.fetch.approve";
@@ -36,6 +45,7 @@ export type CommandRequest = {
 } | {
     readonly command: "operation.resume";
     readonly operationId: string;
+    readonly waitSeconds?: number;
 } | {
     readonly command: "operation.status";
     readonly operationId: string;

@@ -365,7 +365,18 @@ export function validateX402Operation(value: unknown): X402OperationRecord {
   }
 }
 
-export function publicX402Operation(operation: X402OperationRecord, result?: X402ResultRecord): unknown {
+export interface X402SettlementWaitProjection {
+  readonly outcome: "completed" | "timeout" | "interrupted";
+  readonly requestedSeconds: string;
+  readonly observationCount: string;
+}
+
+export function publicX402Operation(
+  operation: X402OperationRecord,
+  result?: X402ResultRecord,
+  settlementWait?: X402SettlementWaitProjection,
+): unknown {
+  const timedOut = settlementWait?.outcome === "timeout" && !operation.terminal;
   const value = {
     schemaVersion: "apn.x402.public-operation.v1",
     kind: operation.kind,
@@ -373,8 +384,8 @@ export function publicX402Operation(operation: X402OperationRecord, result?: X40
     state: operation.state,
     finalityClass: operation.finalityClass,
     terminal: operation.terminal,
-    reason: operation.reason,
-    proofClass: operation.proofClass,
+    reason: timedOut ? "x402_settlement_wait_timeout" : operation.reason,
+    proofClass: timedOut ? "x402_unknown_finality" : operation.proofClass,
     nextActions: operation.nextActions,
     createdAt: operation.createdAt,
     updatedAt: operation.updatedAt,
@@ -402,6 +413,7 @@ export function publicX402Operation(operation: X402OperationRecord, result?: X40
     ...(result === undefined ? {} : {
       result: { resultHash: result.resultHash, mediaType: result.mediaType, byteLength: result.byteLength },
     }),
+    ...(settlementWait === undefined ? {} : { settlementWait }),
   };
   return { ...value, integrityHash: domainHash("apn.x402.public-operation.v1", canonicalJson(value)) };
 }

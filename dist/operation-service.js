@@ -76,7 +76,7 @@ export class OperationService {
         return {
             proofClass: operation.proofClass,
             data,
-            operation: publicX402Operation(operation, result ?? undefined),
+            operation: publicX402Operation(operation, result ?? undefined, options.settlementWait),
             receipt,
             nextActions: operation.nextActions,
         };

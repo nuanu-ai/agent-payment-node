@@ -4,7 +4,7 @@ import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import type { Hex } from "../../src/model.js";
 import type { HttpGetRequest, HttpObservation } from "../../src/x402-model.js";
-import type { X402RpcReceipt } from "../../src/ports.js";
+import type { WaitPort, X402RpcReceipt } from "../../src/ports.js";
 import { classifyX402LogAvailabilityMessage } from "../../src/rpc.js";
 import {
   appendX402Transition,
@@ -47,6 +47,7 @@ async function authorizedFixture(t: TestContext, input: {
   readonly clock?: TestClock;
   readonly idempotencyKey?: string;
   readonly onHttpCall?: (request: HttpGetRequest, callNumber: number) => void | Promise<void>;
+  readonly wait?: WaitPort;
 } = {}): Promise<Fixture> {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
@@ -62,7 +63,14 @@ async function authorizedFixture(t: TestContext, input: {
   const rpc = new RecoveryRpc();
   rpc.x402Evidence = { ...rpc.x402Evidence, address: X402_TEST_ACCOUNT.address };
   const clock = input.clock ?? new TestClock();
-  const core = makeCore({ root: temporary.root, native, rpc, http, clock });
+  const core = makeCore({
+    root: temporary.root,
+    native,
+    rpc,
+    http,
+    clock,
+    ...(input.wait === undefined ? {} : { wait: input.wait }),
+  });
   assert.equal((await core.execute({ command: "wallet.ensure", profile: "default" })).ok, true);
   const prepared = await core.execute({
     command: "x402.fetch.prepare",
@@ -78,6 +86,21 @@ async function authorizedFixture(t: TestContext, input: {
   rpc.x402Calls.length = 0;
   native.calls.length = 0;
   return { core, operationId: operationId as string, native, rpc, http, clock, root: temporary.root };
+}
+
+class ControlledWait implements WaitPort {
+  value = 0;
+  readonly calls: number[] = [];
+  onWait?: (milliseconds: number) => void | Promise<void>;
+  outcome: "elapsed" | "interrupted" = "elapsed";
+
+  nowMs(): number { return this.value; }
+  async wait(milliseconds: number): Promise<"elapsed" | "interrupted"> {
+    this.calls.push(milliseconds);
+    this.value += milliseconds;
+    await this.onWait?.(milliseconds);
+    return this.outcome;
+  }
 }
 
 async function operation(fixture: Fixture): Promise<X402OperationRecord> {
@@ -225,6 +248,245 @@ test("first authorized send follows recovered material and a durable Base safe s
   ]);
   assert.deepEqual(nativeAtPaidHttp, ["x402Exact.authorizationMaterial.get"]);
   assert.equal((await operation(fixture)).authorizationUsedScan?.status, "complete");
+});
+
+test("one bounded resume waits outside locks and completes through RPC-only settlement observations", async (t) => {
+  const wait = new ControlledWait();
+  const fixture = await authorizedFixture(t, {
+    idempotencyKey: "bounded-settlement-wait",
+    wait,
+    paidOutcomes: [paidObservation({
+      paymentResponseHeader: canonicalPaymentResponseHeader({
+        success: true,
+        transaction: X402_TRANSACTION,
+        network: "eip155:8453",
+        payer: X402_TEST_ACCOUNT.address.toLowerCase(),
+        amount: "1250000",
+      }),
+    })],
+  });
+  let observedReleasedLocks = false;
+  wait.onWait = async () => {
+    const current = await operation(fixture);
+    await fixture.core.context.state.withLocks([
+      `profile:${current.profileHash}`,
+      `operation:${current.operationId}`,
+    ], async () => { observedReleasedLocks = true; });
+    configureSettlement(fixture.rpc, current);
+  };
+
+  const completed = await fixture.core.execute({
+    command: "operation.resume",
+    operationId: fixture.operationId,
+    waitSeconds: 10,
+  });
+  assert.equal(completed.ok, true, JSON.stringify(completed));
+  assert.equal((completed.operation as { state: string }).state, "completed");
+  assert.deepEqual((completed.operation as { settlementWait: unknown }).settlementWait, {
+    outcome: "completed",
+    requestedSeconds: "10",
+    observationCount: "2",
+  });
+  assert.equal(observedReleasedLocks, true);
+  assert.equal(fixture.http.calls.length, 2, "challenge plus exactly one paid GET");
+  assert.deepEqual(fixture.native.calls.map((call) => call.operation), ["x402Exact.authorizationMaterial.get"]);
+  assert.equal((await operation(fixture)).attempts.filter((attempt) => attempt.purpose === "payment").length, 1);
+  assert.equal(fixture.rpc.submissions.length, 0);
+
+  const httpCalls = fixture.http.calls.length;
+  const nativeCalls = fixture.native.calls.length;
+  const replay = await fixture.core.execute({
+    command: "operation.resume",
+    operationId: fixture.operationId,
+    waitSeconds: 1,
+  });
+  assert.deepEqual((replay.operation as { settlementWait: unknown }).settlementWait, {
+    outcome: "completed",
+    requestedSeconds: "1",
+    observationCount: "0",
+  });
+  assert.equal(fixture.http.calls.length, httpCalls);
+  assert.equal(fixture.native.calls.length, nativeCalls);
+});
+
+test("bounded wait advances a no-hint multi-chunk cursor and discovers settlement without another effect", async (t) => {
+  const wait = new ControlledWait();
+  const fixture = await authorizedFixture(t, {
+    idempotencyKey: "bounded-no-hint-multichunk",
+    wait,
+    paidOutcomes: [paidObservation()],
+  });
+  let advanced = false;
+  wait.onWait = async () => {
+    if (advanced) return;
+    advanced = true;
+    const current = await operation(fixture);
+    const previousSafe = fixture.rpc.safeHead;
+    fixture.rpc.blockHashes.set(previousSafe.number, previousSafe.hash);
+    fixture.rpc.safeHead = {
+      ...previousSafe,
+      number: (BigInt(previousSafe.number) + 3_000n).toString(),
+      hash: `0x${"e".repeat(64)}` as Hex,
+    };
+    const settlement = configureSettlement(fixture.rpc, current);
+    fixture.rpc.logOutcomes.push(
+      { kind: "complete", logs: [] },
+      { kind: "complete", logs: [settlement.logs[0]!] },
+    );
+  };
+
+  const completed = await fixture.core.execute({
+    command: "operation.resume",
+    operationId: fixture.operationId,
+    waitSeconds: 20,
+  });
+  assert.equal(completed.ok, true, JSON.stringify(completed));
+  assert.equal((completed.operation as { state: string }).state, "failed_settled_without_result");
+  assert.equal((completed.operation as { terminal: boolean }).terminal, true);
+  assert.notEqual(completed.receipt, null);
+  assert.deepEqual(
+    fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")),
+    ["logs:12345-12345", "logs:12346-14393", "logs:14394-15345"],
+  );
+  assert.equal(fixture.http.calls.length, 2, "challenge plus one paid GET only");
+  assert.equal(fixture.native.calls.length, 1, "one existing authorization retrieval only");
+  assert.equal((await operation(fixture)).attempts.filter((attempt) => attempt.purpose === "payment").length, 1);
+  assert.equal(fixture.rpc.submissions.length, 0);
+});
+
+test("bounded settlement timeout remains resumable without another authorization or paid request", async (t) => {
+  const wait = new ControlledWait();
+  const fixture = await authorizedFixture(t, {
+    idempotencyKey: "bounded-settlement-timeout",
+    wait,
+    paidOutcomes: [paidObservation({
+      paymentResponseHeader: canonicalPaymentResponseHeader({
+        success: true,
+        transaction: X402_TRANSACTION,
+        network: "eip155:8453",
+        payer: X402_TEST_ACCOUNT.address.toLowerCase(),
+        amount: "1250000",
+      }),
+    })],
+  });
+  const timedOut = await fixture.core.execute({
+    command: "operation.resume",
+    operationId: fixture.operationId,
+    waitSeconds: 1,
+  });
+  assert.equal(timedOut.ok, true, JSON.stringify(timedOut));
+  assert.equal((timedOut.operation as { state: string }).state, "settlement_pending");
+  assert.equal((timedOut.operation as { reason: string }).reason, "x402_settlement_wait_timeout");
+  assert.deepEqual((timedOut.operation as { settlementWait: unknown }).settlementWait, {
+    outcome: "timeout",
+    requestedSeconds: "1",
+    observationCount: "1",
+  });
+  assert.equal(fixture.http.calls.length, 2);
+  assert.deepEqual(fixture.native.calls.map((call) => call.operation), ["x402Exact.authorizationMaterial.get"]);
+  assert.equal((await operation(fixture)).attempts.length, 1);
+
+  const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal(resumed.ok, true, JSON.stringify(resumed));
+  assert.equal(fixture.http.calls.length, 2, "manual recovery must not replay the paid GET");
+  assert.equal(fixture.native.calls.length, 1, "manual recovery must not create or retrieve another authorization");
+  assert.equal(fixture.rpc.submissions.length, 0);
+});
+
+test("interrupted bounded wait restarts from the same operation and never duplicates payment effects", async (t) => {
+  const wait = new ControlledWait();
+  wait.outcome = "interrupted";
+  const fixture = await authorizedFixture(t, {
+    idempotencyKey: "bounded-settlement-interrupt-restart",
+    wait,
+    paidOutcomes: [paidObservation({
+      paymentResponseHeader: canonicalPaymentResponseHeader({
+        success: true,
+        transaction: X402_TRANSACTION,
+        network: "eip155:8453",
+        payer: X402_TEST_ACCOUNT.address.toLowerCase(),
+        amount: "1250000",
+      }),
+    })],
+  });
+  const interrupted = await fixture.core.execute({
+    command: "operation.resume",
+    operationId: fixture.operationId,
+    waitSeconds: 10,
+  });
+  assert.equal(interrupted.ok, true, JSON.stringify(interrupted));
+  assert.equal((interrupted.operation as { state: string }).state, "settlement_pending");
+  assert.deepEqual((interrupted.operation as { settlementWait: unknown }).settlementWait, {
+    outcome: "interrupted",
+    requestedSeconds: "10",
+    observationCount: "1",
+  });
+  assert.equal(fixture.http.calls.length, 2);
+  assert.equal(fixture.native.calls.length, 1);
+
+  configureSettlement(fixture.rpc, await operation(fixture));
+  const restarted = makeCore({
+    root: fixture.root,
+    native: fixture.native,
+    rpc: fixture.rpc,
+    http: fixture.http,
+    clock: fixture.clock,
+    wait: new ControlledWait(),
+  });
+  const completed = await restarted.execute({
+    command: "operation.resume",
+    operationId: fixture.operationId,
+    waitSeconds: 10,
+  });
+  assert.equal(completed.ok, true, JSON.stringify(completed));
+  assert.equal((completed.operation as { state: string }).state, "completed");
+  assert.equal(fixture.http.calls.length, 2, "restart must not issue another paid GET");
+  assert.equal(fixture.native.calls.length, 1, "restart must not retrieve or create another authorization");
+  assert.equal((await operation(fixture)).attempts.filter((attempt) => attempt.purpose === "payment").length, 1);
+  assert.equal(fixture.rpc.submissions.length, 0);
+});
+
+test("bounded wait rejects unsafe RPC provenance and pre-approval state before payment effects", async (t) => {
+  const wrongChain = await authorizedFixture(t, { idempotencyKey: "bounded-wrong-chain" });
+  wrongChain.rpc.assertBaseChain = async () => {
+    throw new ApnError("APN_CHAIN_MISMATCH", "wrong chain");
+  };
+  const rejected = await wrongChain.core.execute({
+    command: "operation.resume",
+    operationId: wrongChain.operationId,
+    waitSeconds: 1,
+  });
+  assert.equal(rejected.error?.code, "APN_CHAIN_MISMATCH");
+  assert.equal(wrongChain.http.calls.length, 1, "wait preflight must not send a paid GET");
+  assert.equal(wrongChain.native.calls.length, 0);
+  assert.equal((await operation(wrongChain)).state, "authorized_not_sent");
+
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const native = new ExactX402Native();
+  const rpc = new RecoveryRpc();
+  rpc.x402Evidence = { ...rpc.x402Evidence, address: X402_TEST_ACCOUNT.address };
+  const http = new QueuedHttp([challengeObservation()]);
+  const core = makeCore({ root: temporary.root, native, rpc, http });
+  assert.equal((await core.execute({ command: "wallet.ensure", profile: "default" })).ok, true);
+  const prepared = await core.execute({
+    command: "x402.fetch.prepare",
+    profile: "default",
+    url: X402_URL,
+    idempotencyKey: "bounded-awaiting-approval",
+  });
+  const operationId = (prepared.operation as { operationId: string }).operationId;
+  native.calls.length = 0;
+  rpc.x402Calls.length = 0;
+  const unsafeState = await core.execute({
+    command: "operation.resume",
+    operationId,
+    waitSeconds: 1,
+  });
+  assert.equal(unsafeState.error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(http.calls.length, 1);
+  assert.equal(native.calls.length, 0);
+  assert.equal(rpc.x402Calls.length, 0);
 });
 
 test("a complete pre-send AuthorizationUsed scan persists effect-unknown without paid HTTP", async (t) => {

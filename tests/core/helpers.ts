@@ -16,7 +16,15 @@ import type {
   RpcPort,
   RpcReceipt,
   X402PrepareEvidence,
+  WaitPort,
 } from "../../src/ports.js";
+import {
+  sealProfilePolicy,
+  type ProfilePolicyBinding,
+  type ProfilePolicyPort,
+  type ProfilePolicyRecord,
+  type ProfilePolicySetInput,
+} from "../../src/profile-policy.js";
 import { StateStore } from "../../src/state.js";
 
 export const WALLET = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1" as Address;
@@ -71,6 +79,29 @@ export class TestNative implements NativePort {
       rawTransaction: this.rawTransaction,
       rawTransactionHash: keccak256(this.rawTransaction),
     };
+  }
+}
+
+export class TestProfilePolicy implements ProfilePolicyPort {
+  record: ProfilePolicyRecord | null = null;
+  readonly defaults: ProfilePolicySetInput;
+
+  constructor(defaults: ProfilePolicySetInput = {
+    maxBalanceUsdcAtomic: "100000000",
+    maxX402AmountAtomic: "10000000",
+    maxBalanceEthWei: "2000000000000000000",
+  }) {
+    this.defaults = defaults;
+  }
+
+  async load(binding: ProfilePolicyBinding): Promise<ProfilePolicyRecord | null> {
+    this.record ??= policyRecord(binding, this.defaults);
+    return this.record;
+  }
+
+  async set(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): Promise<ProfilePolicyRecord> {
+    this.record = policyRecord(binding, input);
+    return this.record;
   }
 }
 
@@ -172,14 +203,29 @@ export function makeCore(input: {
   readonly rpc?: RpcPort;
   readonly clock?: TestClock;
   readonly http?: HttpPort;
+  readonly policy?: ProfilePolicyPort | null;
+  readonly wait?: WaitPort;
 }): ApnCore {
+  const policy = input.policy === null ? undefined : input.policy ?? new TestProfilePolicy();
   return new ApnCore({
     state: new StateStore(input.root, { lockWaitMs: 1_000 }),
     ...(input.native === undefined ? {} : { native: input.native }),
     ...(input.rpc === undefined ? {} : { rpc: input.rpc }),
     ...(input.http === undefined ? {} : { http: input.http }),
+    ...(policy === undefined ? {} : { policy }),
+    ...(input.wait === undefined ? {} : { wait: input.wait }),
     clock: input.clock ?? new TestClock(),
     ids: { next: () => UUID },
+  });
+}
+
+function policyRecord(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): ProfilePolicyRecord {
+  return sealProfilePolicy({
+    schemaVersion: "apn.profile-policy.v1",
+    ...binding,
+    ...input,
+    approvedAt: "2026-08-25T00:00:00.000Z",
+    updatedAt: "2026-08-25T00:00:00.000Z",
   });
 }
 

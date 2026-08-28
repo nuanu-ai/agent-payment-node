@@ -5,7 +5,11 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     readonly rpcOrigin: string;
     private sequence;
     private pinnedAddresses;
-    constructor(endpoint: string);
+    private readonly totalDeadlineMs;
+    constructor(endpoint: string, options?: {
+        readonly totalDeadlineMs?: number;
+    });
+    withTotalTimeout(milliseconds: number): X402RpcPort;
     assertBaseChain(): Promise<{
         readonly chainId: 8453;
         readonly rpcOrigin: string;
@@ -35,6 +39,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     private call;
     private callX402Logs;
     private resolvePublicAddresses;
+    private remainingTimeoutMs;
 }
 export declare function classifyX402LogAvailabilityMessage(message: string): "pruned" | "range_unavailable" | null;
 export { isPublicIp } from "./network-policy.js";
