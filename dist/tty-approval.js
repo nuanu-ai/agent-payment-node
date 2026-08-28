@@ -1,4 +1,3 @@
-import { open } from "node:fs/promises";
 import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -69,13 +68,63 @@ export function isExactTransferApproval(expected, supplied) {
     return supplied === expected;
 }
 async function openApprovalTerminal() {
-    const handle = await open("/dev/tty", "r+");
+    const input = process.stdin;
+    const output = process.stderr;
+    if (input.isTTY !== true || output.isTTY !== true)
+        throw new Error("foreground terminal unavailable");
     return {
-        fd: handle.fd,
-        write: async (contents) => await handle.writeFile(contents),
-        read: (signal) => handle.createReadStream({ autoClose: false, highWaterMark: 1, signal }),
-        close: async () => await handle.close(),
+        fd: input.fd,
+        write: async (contents) => await new Promise((resolve, reject) => {
+            output.write(contents, (error) => error === null || error === undefined ? resolve() : reject(error));
+        }),
+        read: (signal) => readTerminal(input, signal),
+        close: async () => { input.pause(); },
     };
+}
+async function* readTerminal(input, signal) {
+    const queued = [];
+    let ended = false;
+    let failure;
+    let wake;
+    const notify = () => { wake?.(); };
+    const onData = (chunk) => {
+        queued.push(Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, "utf8"));
+        notify();
+    };
+    const onEnd = () => { ended = true; notify(); };
+    const onError = () => { failure = new Error("approval terminal read failed"); notify(); };
+    const abort = () => { failure = new Error("approval terminal read aborted"); notify(); };
+    input.on("data", onData);
+    input.once("end", onEnd);
+    input.once("error", onError);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted)
+        abort();
+    input.resume();
+    try {
+        while (true) {
+            if (failure !== undefined)
+                throw failure;
+            const next = queued.shift();
+            if (next !== undefined) {
+                yield next;
+                continue;
+            }
+            if (ended)
+                return;
+            await new Promise((resolve) => { wake = resolve; });
+            wake = undefined;
+        }
+    }
+    finally {
+        input.pause();
+        input.removeListener("data", onData);
+        input.removeListener("end", onEnd);
+        input.removeListener("error", onError);
+        signal.removeEventListener("abort", abort);
+        for (const chunk of queued)
+            chunk.fill(0);
+    }
 }
 async function readApprovalInput(tty, expiresAt, deadlineMs, externalSignal) {
     const controller = new AbortController();
