@@ -34,7 +34,7 @@ export class HttpsBaseRpc {
         const tag = block.number;
         const eth = rpcQuantity(await this.call("eth_getBalance", [address, tag])).toString();
         const data = `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}`;
-        const usdc = rpcQuantity(await this.call("eth_call", [{ to: BASE_USDC, data }, tag])).toString();
+        const usdc = rpcUint256Data(await this.call("eth_call", [{ to: BASE_USDC, data }, tag]), "USDC balance");
         return { address, ethAtomic: eth, usdcAtomic: usdc, blockNumberAtomic: blockNumber, blockHash, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin };
     }
     async getX402PrepareEvidence(address) {

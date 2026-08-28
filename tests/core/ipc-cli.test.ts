@@ -224,3 +224,27 @@ test("shipping RPC accepts only credential-free public HTTPS and redacts path/qu
   assert.equal(isPublicIp("2606:4700:4700::1111"), true);
   assert.equal(new HttpsBaseRpc("https://rpc.example/secret/path?api_key=CANARY").rpcOrigin, "https://rpc.example");
 });
+
+test("shipping balance RPC decodes ERC-20 balanceOf as 32-byte ABI data", async () => {
+  const rpc = new HttpsBaseRpc("https://rpc.example");
+  const calls: [string, readonly unknown[]][] = [];
+  (rpc as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> }).call = async (method, params) => {
+    calls.push([method, params]);
+    if (method === "eth_chainId") return "0x2105";
+    if (method === "eth_getBlockByNumber") return { number: "0x1", hash: `0x${"1".repeat(64)}` };
+    if (method === "eth_getBalance") return "0x0";
+    if (method === "eth_call") return `0x${"0".repeat(64)}`;
+    throw new Error(`unexpected RPC method ${method}`);
+  };
+
+  const address = "0x1111111111111111111111111111111111111111";
+  const snapshot = await rpc.getBalances(address);
+  assert.equal(snapshot.ethAtomic, "0");
+  assert.equal(snapshot.usdcAtomic, "0");
+  assert.equal(snapshot.blockNumberAtomic, "1");
+  assert.deepEqual(calls.map(([method]) => method), [
+    "eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_call",
+  ]);
+  assert.equal(calls[2]?.[1][1], "0x1");
+  assert.equal(calls[3]?.[1][1], "0x1");
+});
