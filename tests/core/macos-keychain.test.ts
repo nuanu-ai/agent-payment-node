@@ -43,10 +43,19 @@ test("doctor probe targets the exact login Keychain without creating a secret", 
   assert.deepEqual(calls, [[...FIND_ARGS]]);
 });
 
-test("create binds both find and add to the exact login Keychain and keeps the secret out of argv", async () => {
+test("create binds both find and add to the exact login Keychain using security's password argument", async () => {
   const calls: { readonly args: readonly string[]; readonly input: Buffer | undefined }[] = [];
+  let observedPasswordBytes = 0;
   const runner: SecurityRunner = async (args, input) => {
-    calls.push({ args: [...args], input: input === undefined ? undefined : Buffer.from(input) });
+    const sanitized = [...args];
+    if (args[0] === "add-generic-password") {
+      const passwordIndex = args.indexOf("-w") + 1;
+      const decoded = Buffer.from(args[passwordIndex] ?? "", "base64");
+      observedPasswordBytes = decoded.length;
+      decoded.fill(0);
+      sanitized[passwordIndex] = "<redacted>";
+    }
+    calls.push({ args: sanitized, input: input === undefined ? undefined : Buffer.from(input) });
     if (args[0] === "find-generic-password") return { code: 44, stdout: Buffer.alloc(0) };
     return { code: 0, stdout: Buffer.alloc(0) };
   };
@@ -62,13 +71,11 @@ test("create binds both find and add to the exact login Keychain and keeps the s
       [...FIND_ARGS],
       [
         "add-generic-password", "-a", "default", "-s", "ai.nuanu.apn.wrapping-secret.v1",
-        "-l", "Nuanu APN wrapping secret", LOGIN_KEYCHAIN, "-w",
+        "-l", "Nuanu APN wrapping secret", "-w", "<redacted>", LOGIN_KEYCHAIN,
       ],
     ]);
-    const addInput = calls[1]?.input;
-    assert.ok(addInput);
-    assert.equal(addInput.length > 0, true);
-    assert.equal(calls.flatMap((call) => call.args).includes(secret.toString("base64")), false);
+    assert.equal(calls[1]?.input, undefined);
+    assert.equal(observedPasswordBytes, 32);
   } finally {
     secret.fill(0);
     for (const call of calls) call.input?.fill(0);

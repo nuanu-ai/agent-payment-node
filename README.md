@@ -123,6 +123,14 @@ kernel lock is busy. Releasing the held file descriptor, including on process
 exit or crash, releases the kernel lock; the stable lock file is never renamed
 or unlinked and contains no PID, lease or recovery metadata.
 
+On first creation only, APN invokes the fixed system `/usr/bin/security`
+command with the generated wrapping secret in its `-w` password argument,
+because the macOS CLI's prompt form reads from a controlling terminal rather
+than piped stdin. That argument can be observed by another process already
+running as the same user during the short creation window. This is inside the
+declared same-unlocked-user compromise boundary; APN never returns the
+wrapping secret or the encrypted wallet's private key to its caller.
+
 The current MVP keeps recovery material in one authenticated wallet envelope
 bounded to 1 MiB. Historical effects are not compacted automatically. Reaching
 that bound rejects persistence and submission rather than overwriting the

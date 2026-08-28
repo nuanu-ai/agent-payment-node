@@ -42,22 +42,17 @@ export class MacOSLoginKeychainSecret {
         if (current !== null)
             return current;
         const generated = randomBytes(32);
-        const encoded = Buffer.from(generated.toString("base64"), "utf8");
-        const input = Buffer.concat([encoded, Buffer.from("\n"), encoded, Buffer.from("\n")]);
+        const encoded = generated.toString("base64");
         let result;
         try {
             result = await this.security([
                 "add-generic-password", "-a", ACCOUNT, "-s", SERVICE,
-                "-l", "Nuanu APN wrapping secret", this.loginKeychain, "-w",
-            ], input);
+                "-l", "Nuanu APN wrapping secret", "-w", encoded, this.loginKeychain,
+            ]);
         }
         catch (error) {
             generated.fill(0);
             throw error;
-        }
-        finally {
-            encoded.fill(0);
-            input.fill(0);
         }
         result.stdout.fill(0);
         if (result.code === 0)
