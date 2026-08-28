@@ -1,14 +1,18 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
   "private": false,
   "engines": {
     "node": ">=24 <27"
   },
-  "os": ["darwin"],
-  "cpu": ["arm64"],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "bin": {
     "apn": "bin/apn.js"
   },
