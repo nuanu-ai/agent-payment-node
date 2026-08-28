@@ -3,6 +3,7 @@ import { ApnError } from "./errors.js";
 import { formatAtomic } from "./money.js";
 import { sealWallet } from "./state.js";
 import { assertWalletMatches, canonicalProfile, parseWalletDescribe, parseWalletEnsure, publicProvenance, publicWallet, validateBalance, } from "./wallet-policy.js";
+import { fundingPosture, policyBinding, publicProfilePolicy } from "./profile-policy.js";
 export class WalletService {
     context;
     constructor(context) {
@@ -67,33 +68,64 @@ export class WalletService {
         const profile = canonicalProfile(profileInput);
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
-        const wallet = await this.context.state.loadWallet(profileHash);
-        if (wallet === null)
-            throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-        const snapshot = await this.context.requireRpc().getBalances(wallet.address);
-        validateBalance(snapshot, wallet.address);
-        return {
-            profile,
-            funding_address: wallet.address,
-            explorer_url: `https://basescan.org/address/${wallet.address}`,
-            chain: CHAIN_CAIP2,
-            proof_class: "chain_verified_public_read",
-            balances: {
-                ETH: { atomic: snapshot.ethAtomic, decimal: formatAtomic(snapshot.ethAtomic, ETH_DECIMALS), decimals: ETH_DECIMALS },
-                USDC: {
-                    atomic: snapshot.usdcAtomic,
-                    decimal: formatAtomic(snapshot.usdcAtomic, USDC_DECIMALS),
-                    decimals: USDC_DECIMALS,
-                    contract: BASE_USDC,
+        return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+            const wallet = await this.context.state.loadWallet(profileHash);
+            if (wallet === null)
+                throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+            const policy = await this.context.requirePolicy().load(policyBinding(wallet));
+            const snapshot = await this.context.requireRpc().getBalances(wallet.address);
+            validateBalance(snapshot, wallet.address);
+            return {
+                profile,
+                funding_address: wallet.address,
+                explorer_url: `https://basescan.org/address/${wallet.address}`,
+                chain: CHAIN_CAIP2,
+                proof_class: "chain_verified_public_read",
+                balances: {
+                    ETH: { atomic: snapshot.ethAtomic, decimal: formatAtomic(snapshot.ethAtomic, ETH_DECIMALS), decimals: ETH_DECIMALS },
+                    USDC: {
+                        atomic: snapshot.usdcAtomic,
+                        decimal: formatAtomic(snapshot.usdcAtomic, USDC_DECIMALS),
+                        decimals: USDC_DECIMALS,
+                        contract: BASE_USDC,
+                    },
                 },
-            },
-            provenance: publicProvenance(snapshot),
-            funding_guidance: {
-                action: "Fund this disposable wallet manually with a small amount of Base ETH for gas and Base USDC for the payment.",
-                warning: "Only fund an amount you can afford to lose; this local-software wallet has no backup or hardware protection.",
-            },
-            next_actions: ["Fund with low value only", "Re-run apn wallet balance"],
-        };
+                provenance: publicProvenance(snapshot),
+                funding_guidance: {
+                    action: "Fund this disposable wallet manually with a small amount of Base ETH for gas and Base USDC for the payment.",
+                    warning: "Only fund an amount you can afford to lose; this local-software wallet has no backup or hardware protection.",
+                },
+                funding_posture: fundingPosture(snapshot.usdcAtomic, snapshot.ethAtomic, policy),
+                next_actions: ["Fund with low value only", "Re-run apn wallet balance"],
+            };
+        });
+    }
+    async policyShow(profileInput) {
+        const profile = canonicalProfile(profileInput);
+        await this.context.ready();
+        const profileHash = this.context.state.profileHash(profile);
+        return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+            const wallet = await this.context.state.loadWallet(profileHash);
+            if (wallet === null)
+                throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+            return publicProfilePolicy(profile, await this.context.requirePolicy().load(policyBinding(wallet)));
+        });
+    }
+    async policySet(request) {
+        const profile = canonicalProfile(request.profile);
+        await this.context.ready();
+        const profileHash = this.context.state.profileHash(profile);
+        return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+            const wallet = await this.context.state.loadWallet(profileHash);
+            if (wallet === null)
+                throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+            const policy = await this.context.requirePolicy().set(policyBinding(wallet), {
+                maxBalanceUsdcAtomic: request.maxBalanceUsdcAtomic,
+                maxX402AmountAtomic: request.maxX402AmountAtomic,
+                ...(request.maxBalanceEthWei === undefined ? {} : { maxBalanceEthWei: request.maxBalanceEthWei }),
+            });
+            return publicProfilePolicy(profile, policy);
+        });
     }
 }
 //# sourceMappingURL=wallet-service.js.map

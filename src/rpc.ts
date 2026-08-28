@@ -1,4 +1,5 @@
 import { request as httpsRequest } from "node:https";
+import { performance } from "node:perf_hooks";
 import { decodeAbiParameters } from "viem";
 import { sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES } from "./constants.js";
@@ -36,11 +37,24 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   readonly rpcOrigin: string;
   private sequence = 0n;
   private pinnedAddresses: Promise<readonly PinnedAddress[]> | undefined;
+  private readonly totalDeadlineMs: number | undefined;
 
-  constructor(endpoint: string) {
+  constructor(endpoint: string, options: { readonly totalDeadlineMs?: number } = {}) {
     const parsed = parsePublicHttpsUrl(endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     this.endpoint = parsed;
     this.rpcOrigin = parsed.origin;
+    this.totalDeadlineMs = options.totalDeadlineMs;
+  }
+
+  withTotalTimeout(milliseconds: number): X402RpcPort {
+    if (!Number.isFinite(milliseconds) || milliseconds < 1 || milliseconds > 20_000) {
+      throw new ApnError("APN_RPC_CONFIG", "Bounded x402 RPC timeout is invalid.");
+    }
+    const bounded = new HttpsBaseRpc(this.endpoint.toString(), {
+      totalDeadlineMs: performance.now() + milliseconds,
+    });
+    bounded.pinnedAddresses = this.pinnedAddresses;
+    return bounded;
   }
 
   async assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }> {
@@ -281,7 +295,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const id = (++this.sequence).toString();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-    const raw = await postJson(this.endpoint, body, addresses);
+    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs());
     let value: unknown;
     try { value = JSON.parse(raw) as unknown; } catch { throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not valid JSON."); }
     const message = record(value, "JSON-RPC response");
@@ -299,7 +313,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const id = (++this.sequence).toString();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params });
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-    const raw = await postJson(this.endpoint, body, addresses);
+    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs());
     let value: unknown;
     try { value = JSON.parse(raw) as unknown; } catch { throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not valid JSON."); }
     const message = record(value, "JSON-RPC response");
@@ -319,6 +333,13 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   private async resolvePublicAddresses(): Promise<readonly PinnedAddress[]> {
     return await resolvePublicAddresses(this.endpoint, "APN_RPC_CONFIG", "RPC endpoint");
   }
+
+  private remainingTimeoutMs(): number {
+    if (this.totalDeadlineMs === undefined) return 20_000;
+    const remaining = Math.floor(this.totalDeadlineMs - performance.now());
+    if (remaining < 1) throw new ApnError("APN_RPC_AMBIGUOUS", "Bounded x402 RPC observation reached its deadline.");
+    return Math.min(20_000, remaining);
+  }
 }
 
 export function classifyX402LogAvailabilityMessage(
@@ -332,7 +353,12 @@ export function classifyX402LogAvailabilityMessage(
   return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
 
-async function postJson(endpoint: URL, body: string, addresses: readonly PinnedAddress[]): Promise<string> {
+async function postJson(
+  endpoint: URL,
+  body: string,
+  addresses: readonly PinnedAddress[],
+  timeoutMs: number,
+): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const selected = addresses[0];
     if (selected === undefined) { reject(new ApnError("APN_RPC_CONFIG", "RPC host has no validated address.")); return; }
@@ -358,7 +384,7 @@ async function postJson(endpoint: URL, body: string, addresses: readonly PinnedA
       response.on("end", () => resolve(Buffer.concat(chunks, total).toString("utf8")));
       response.on("error", () => reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC response failed safely.")));
     });
-    request.setTimeout(20_000, () => request.destroy(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out.")));
+    request.setTimeout(timeoutMs, () => request.destroy(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out.")));
     request.on("error", (error) => reject(error instanceof ApnError ? error : new ApnError("APN_RPC_AMBIGUOUS", "RPC transport failed safely.")));
     request.end(body);
   });

@@ -9,6 +9,7 @@ import { OperationService } from "./operation-service.js";
 import { inspectX402 } from "./x402-http.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
+import { ApnError } from "./errors.js";
 
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
@@ -42,7 +43,7 @@ export class ApnCore {
       case "version":
         return dataOutcome({
           product: "agent-payment-node",
-          product_version: "0.2.4",
+          product_version: "0.2.5",
           cli_version: OUTPUT_VERSION,
           proof_class: "local_build_metadata",
         }, "local_build_metadata");
@@ -50,6 +51,8 @@ export class ApnCore {
       case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
       case "wallet.status": return dataOutcome(await this.wallet.status(request.profile), "encrypted_apn_home_status");
       case "wallet.balance": return dataOutcome(await this.wallet.balance(request.profile), "chain_verified_public_read");
+      case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile), "encrypted_profile_policy_status");
+      case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
       case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url), "seller_challenge_static");
       case "x402.fetch.prepare": return operationOutcome(await this.x402.prepare(request));
       case "x402.fetch.approve": {
@@ -65,11 +68,15 @@ export class ApnCore {
         await this.context.ready();
         const operation = await this.operations.required(request.operationId);
         if (operation.kind === "x402_fetch") {
-          await this.x402.resume(request.operationId);
+          const settlementWait = await this.x402.resume(request.operationId, request.waitSeconds);
           return await this.operations.x402Outcome(request.operationId, {
             exposeSellerResult: true,
             exposeTerminalReceipt: true,
+            ...(settlementWait === undefined ? {} : { settlementWait }),
           });
+        }
+        if (request.waitSeconds !== undefined) {
+          throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is only available for x402 operations.");
         }
         return operationOutcome(await this.transfer.resume(request.operationId));
       }

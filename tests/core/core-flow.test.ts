@@ -116,6 +116,24 @@ test("concurrent duplicate prepares serialize and perform one RPC preparation", 
   assert.equal(rpc.nonceCalls, 1);
 });
 
+test("direct-transfer resume rejects x402 settlement wait without signing or submission", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const native = new TestNative();
+  const rpc = new TestRpc();
+  await ensureWallet(makeCore({ root: temporary.root, native }));
+  const operationId = await prepareTransfer(makeCore({ root: temporary.root, rpc }), "direct-no-x402-wait");
+  native.calls.length = 0;
+  const result = await makeCore({ root: temporary.root, native, rpc }).execute({
+    command: "operation.resume",
+    operationId,
+    waitSeconds: 1,
+  });
+  assert.equal(result.error?.code, "APN_INVALID_INPUT");
+  assert.equal(native.calls.length, 0);
+  assert.equal(rpc.submissions.length, 0);
+});
+
 test("prepared time is whole-second canonical even with a production-style millisecond clock", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);

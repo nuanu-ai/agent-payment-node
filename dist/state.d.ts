@@ -18,6 +18,8 @@ export declare class StateStore {
     writeWallet(wallet: WalletRecord): Promise<void>;
     loadEncryptedWalletEnvelope(profile: string): Promise<unknown | null>;
     writeEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void>;
+    loadEncryptedPolicyEnvelope(profile: string): Promise<unknown | null>;
+    writeEncryptedPolicyEnvelope(profile: string, envelope: unknown): Promise<void>;
     loadOperation(profileHash: string, operationId: string): Promise<OperationRecord | null>;
     findOperation(operationId: string): Promise<OperationRecord | null>;
     writeOperation(operation: OperationRecord): Promise<void>;

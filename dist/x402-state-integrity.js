@@ -80,7 +80,8 @@ export function validateX402Operation(value) {
         stateCorrupt("x402 operation protected state validation failed.");
     }
 }
-export function publicX402Operation(operation, result) {
+export function publicX402Operation(operation, result, settlementWait) {
+    const timedOut = settlementWait?.outcome === "timeout" && !operation.terminal;
     const value = {
         schemaVersion: "apn.x402.public-operation.v1",
         kind: operation.kind,
@@ -88,8 +89,8 @@ export function publicX402Operation(operation, result) {
         state: operation.state,
         finalityClass: operation.finalityClass,
         terminal: operation.terminal,
-        reason: operation.reason,
-        proofClass: operation.proofClass,
+        reason: timedOut ? "x402_settlement_wait_timeout" : operation.reason,
+        proofClass: timedOut ? "x402_unknown_finality" : operation.proofClass,
         nextActions: operation.nextActions,
         createdAt: operation.createdAt,
         updatedAt: operation.updatedAt,
@@ -117,6 +118,7 @@ export function publicX402Operation(operation, result) {
         ...(result === undefined ? {} : {
             result: { resultHash: result.resultHash, mediaType: result.mediaType, byteLength: result.byteLength },
         }),
+        ...(settlementWait === undefined ? {} : { settlementWait }),
     };
     return { ...value, integrityHash: domainHash("apn.x402.public-operation.v1", canonicalJson(value)) };
 }
