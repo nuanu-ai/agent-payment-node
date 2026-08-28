@@ -57,7 +57,7 @@ export function decodePaymentRequiredHeader(value: string): PaymentRequired {
   if (JSON.stringify(official) !== JSON.stringify(strict)) {
     throw protocol("Official and strict x402 representations disagree.");
   }
-  return strict;
+  return paymentRequiredWithSupportedExtensions(strict);
 }
 
 export function encodePaymentSignatureHeader(value: unknown): string {
@@ -188,7 +188,10 @@ function inspectCandidate(requirements: PaymentRequirements, index: number): Ins
     !POSITIVE_UINT.test(requirements.amount) || !ADDRESS.test(requirements.payTo) || /^0x0{40}$/iu.test(requirements.payTo) ||
     !Number.isInteger(requirements.maxTimeoutSeconds) || requirements.maxTimeoutSeconds < 30 || requirements.maxTimeoutSeconds > 300 ||
     !isPlainRecord(extra) || typeof extra.name !== "string" || extra.name.length === 0 ||
+    Buffer.byteLength(extra.name, "utf8") > 128 ||
     typeof extra.version !== "string" || extra.version.length === 0 ||
+    Buffer.byteLength(extra.version, "utf8") > 128 ||
+    Object.keys(extra).some((key) => !["name", "version", "assetTransferMethod", "paymentFlow"].includes(key)) ||
     (extra.assetTransferMethod !== undefined && extra.assetTransferMethod !== "eip3009") ||
     (extra.paymentFlow !== undefined && extra.paymentFlow !== "authorization")
   ) return null;
@@ -212,14 +215,17 @@ function inspectCandidate(requirements: PaymentRequirements, index: number): Ins
 
 function validatePaymentRequired(value: unknown): asserts value is PaymentRequired {
   const paymentRequired = record(value, "PAYMENT-REQUIRED");
-  allowedKeys(paymentRequired, ["x402Version", "resource", "accepts"], ["extensions"]);
+  allowedKeys(paymentRequired, ["x402Version", "resource", "accepts"], ["error", "extensions"]);
   if (paymentRequired.x402Version !== 2) throw protocol("Only x402Version 2 is supported.");
+  if (paymentRequired.error !== undefined && typeof paymentRequired.error !== "string") {
+    throw protocol("PAYMENT-REQUIRED error is invalid.");
+  }
   validateResource(paymentRequired.resource);
   if (!Array.isArray(paymentRequired.accepts) || paymentRequired.accepts.length === 0 || paymentRequired.accepts.length > MAX_ACCEPTS) {
     throw protocol("PAYMENT-REQUIRED accepts must contain 1 through 16 entries.");
   }
   paymentRequired.accepts.forEach(validateRequirements);
-  if (paymentRequired.extensions !== undefined) validateExtensions(paymentRequired.extensions);
+  if (paymentRequired.extensions !== undefined) validatePaymentRequiredExtensions(paymentRequired.extensions);
 }
 
 function validatePaymentPayload(value: unknown): asserts value is PaymentPayload {
@@ -246,7 +252,7 @@ function validatePaymentPayload(value: unknown): asserts value is PaymentPayload
   if (authorization.to !== accepted.payTo.toLowerCase() || authorization.value !== accepted.amount) {
     throw protocol("PAYMENT-SIGNATURE authorization economics disagree with accepted requirements.");
   }
-  if (paymentPayload.extensions !== undefined) validateExtensions(paymentPayload.extensions, true);
+  if (paymentPayload.extensions !== undefined) validatePaymentPayloadExtensions(paymentPayload.extensions);
 }
 
 function validateResource(value: unknown): void {
@@ -276,22 +282,29 @@ function validateRequirements(value: unknown): void {
   boundedString(requirements.amount, 128, "requirements.amount");
   boundedString(requirements.asset, 256, "requirements.asset");
   boundedString(requirements.payTo, 256, "requirements.payTo");
-  if (!Number.isSafeInteger(requirements.maxTimeoutSeconds)) throw protocol("requirements.maxTimeoutSeconds is invalid.");
-  if (requirements.extra === undefined) return;
-  const extra = record(requirements.extra, "requirements.extra");
-  allowedKeys(extra, ["name", "version"], ["assetTransferMethod", "paymentFlow"]);
-  boundedString(extra.name, 128, "requirements.extra.name");
-  boundedString(extra.version, 128, "requirements.extra.version");
-  if (extra.assetTransferMethod !== undefined) boundedString(extra.assetTransferMethod, 64, "requirements.extra.assetTransferMethod");
-  if (extra.paymentFlow !== undefined) boundedString(extra.paymentFlow, 64, "requirements.extra.paymentFlow");
+  if (!Number.isSafeInteger(requirements.maxTimeoutSeconds) || Number(requirements.maxTimeoutSeconds) <= 0) {
+    throw protocol("requirements.maxTimeoutSeconds is invalid.");
+  }
+  if (requirements.extra !== undefined && requirements.extra !== null && !isPlainRecord(requirements.extra)) {
+    throw protocol("requirements.extra must be a plain object when present.");
+  }
 }
 
-function validateExtensions(value: unknown, paymentPayload = false): void {
+function validatePaymentRequiredExtensions(value: unknown): void {
   const extensions = record(value, "extensions");
-  const keys = Object.keys(extensions);
-  if (keys.length === 0) return;
+  if (Object.hasOwn(extensions, "payment-identifier")) {
+    validatePaymentIdentifierDeclaration(extensions["payment-identifier"], false);
+  }
+}
+
+function validatePaymentPayloadExtensions(value: unknown): void {
+  const extensions = record(value, "extensions");
   if (!exactKeys(extensions, ["payment-identifier"])) throw protocol("Only the payment-identifier extension is supported.");
-  const declaration = record(extensions["payment-identifier"], "payment-identifier declaration");
+  validatePaymentIdentifierDeclaration(extensions["payment-identifier"], true);
+}
+
+function validatePaymentIdentifierDeclaration(value: unknown, paymentPayload: boolean): void {
+  const declaration = record(value, "payment-identifier declaration");
   allowedKeys(declaration, ["info", "schema"], []);
   const info = record(declaration.info, "payment-identifier info");
   allowedKeys(info, paymentPayload ? ["required", "id"] : ["required"], []);
@@ -300,6 +313,14 @@ function validateExtensions(value: unknown, paymentPayload = false): void {
     typeof info.id !== "string" || info.id.length < 16 || info.id.length > 128 || !/^[a-zA-Z0-9_-]+$/u.test(info.id)
   )) throw protocol("payment-identifier id is invalid.");
   validatePaymentIdentifierSchema(declaration.schema);
+}
+
+function paymentRequiredWithSupportedExtensions(value: PaymentRequired): PaymentRequired {
+  const extensions = value.extensions;
+  if (extensions === undefined || Object.keys(extensions).every((key) => key === "payment-identifier")) return value;
+  const { extensions: _ignored, ...paymentRequired } = value;
+  if (!Object.hasOwn(extensions, "payment-identifier")) return paymentRequired;
+  return { ...paymentRequired, extensions: { "payment-identifier": extensions["payment-identifier"] } };
 }
 
 function validateEvmSignature(value: unknown): void {

@@ -174,7 +174,7 @@ export function makeCore(input: {
   readonly http?: HttpPort;
 }): ApnCore {
   return new ApnCore({
-    state: new StateStore(input.root, { lockWaitMs: 1_000, lockLeaseMs: 100 }),
+    state: new StateStore(input.root, { lockWaitMs: 1_000 }),
     ...(input.native === undefined ? {} : { native: input.native }),
     ...(input.rpc === undefined ? {} : { rpc: input.rpc }),
     ...(input.http === undefined ? {} : { http: input.http }),

@@ -55,6 +55,11 @@ const violations = [];
 for (const file of files) {
   const text = await readFile(file, "utf8");
   for (const needle of forbidden) {
+    if (
+      needle === "node:child_process" &&
+      (file === join(sourceRoot, "macos-keychain.ts") || file === join(sourceRoot, "macos-advisory-lock.ts"))
+    ) continue;
+    if (needle === "signTypedData" && file === join(sourceRoot, "local-wallet-native.ts")) continue;
     if (text.includes(needle)) violations.push(`${file.slice(productRoot.length + 1)}: ${needle}`);
   }
   if (file !== join(sourceRoot, "x402-codec.ts") && text.includes("@x402/core")) {

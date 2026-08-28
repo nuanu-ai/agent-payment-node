@@ -35,13 +35,13 @@ export class ApnCore {
             case "version":
                 return dataOutcome({
                     product: "agent-payment-node",
-                    product_version: "0.1.0",
+                    product_version: "0.2.0",
                     cli_version: OUTPUT_VERSION,
                     proof_class: "local_build_metadata",
                 }, "local_build_metadata");
-            case "doctor.keychain": return dataOutcome(await this.wallet.status("default"), "native_keychain_status");
-            case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "native_keychain_status");
-            case "wallet.status": return dataOutcome(await this.wallet.status(request.profile), "native_keychain_status");
+            case "doctor.keychain": return dataOutcome(await this.wallet.status("default"), "encrypted_apn_home_status");
+            case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
+            case "wallet.status": return dataOutcome(await this.wallet.status(request.profile), "encrypted_apn_home_status");
             case "wallet.balance": return dataOutcome(await this.wallet.balance(request.profile), "chain_verified_public_read");
             case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url), "seller_challenge_static");
             case "x402.fetch.prepare": return operationOutcome(await this.x402.prepare(request));

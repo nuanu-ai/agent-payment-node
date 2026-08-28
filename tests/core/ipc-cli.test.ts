@@ -145,9 +145,6 @@ test("CLI argv preserves Slice 1, adds bounded x402 commands, and contains no ap
   assert.throws(() => parseArgv(["pay", "transfer", "prepare", "--yes", "true"]));
   assert.throws(() => parseArgv(["x402", "fetch", "approve", "--operation", OPERATION_ID, "--yes", "true"]));
   assert.throws(() => parseArgv(["wallet", "export"]));
-  const outsideHost = await runCli(["wallet", "ensure"], {});
-  assert.equal(outsideHost.ok, false);
-  assert.equal(outsideHost.error?.code, "APN_NATIVE_CHANNEL_REQUIRED");
 });
 
 test("zero-native version command returns one clean apn.cli.v1 result", async () => {
@@ -193,7 +190,7 @@ test("state root uses effective-user OS home and ignores caller HOME", () => {
   const original = process.env.HOME;
   process.env.HOME = "/tmp/caller-controlled-home";
   try {
-    assert.equal(effectiveStateRoot(), resolve(userInfo().homedir, "Library", "Application Support", "nuanu-apn"));
+    assert.equal(effectiveStateRoot(), resolve(userInfo().homedir, ".apn"));
     assert.equal(effectiveStateRoot().startsWith("/tmp/caller-controlled-home"), false);
   } finally {
     if (original === undefined) delete process.env.HOME;

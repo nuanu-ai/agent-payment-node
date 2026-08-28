@@ -35,10 +35,10 @@ export function failureEnvelope(command, requestId, error) {
 }
 function nextActions(code) {
     switch (code) {
-        case "APN_NATIVE_CHANNEL_REQUIRED": return ["Run the command through APNKeychainAgent.app."];
+        case "APN_NATIVE_CHANNEL_REQUIRED": return ["Initialize the local APN custody adapter."];
         case "APN_RPC_CONFIG": return ["Provide --rpc-url with an explicit HTTPS Base endpoint."];
         case "APN_REPREPARE_REQUIRED": return ["Prepare a new transfer with a new idempotency key."];
-        case "APN_STATE_BUSY": return ["Retry after the active APN operation exits."];
+        case "APN_STATE_BUSY": return ["The kernel lock stayed busy through the bounded wait; retry after the active APN process exits. APN keeps stable lock files in place."];
         default: return [];
     }
 }

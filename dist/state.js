@@ -2,8 +2,9 @@ import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath, rename, stat, unlink, } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
-import { canonicalJson, isPlainRecord, sha256 } from "./canonical.js";
+import { canonicalJson, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
+import { MacosAdvisoryLock } from "./macos-advisory-lock.js";
 import { validateOperation, validateReceipt, validateWallet } from "./state-integrity.js";
 import { x402OperationBindingHash, x402TransactionHintSourceBindingHash, validateX402Operation, validateX402Receipt, validateX402Result, } from "./x402-state-integrity.js";
 export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./state-integrity.js";
@@ -53,16 +54,17 @@ function validateFile(stats) {
 export class StateStore {
     root;
     lockWaitMs;
-    lockLeaseMs;
-    hostSerialized;
+    lockPort;
     constructor(root, options = {}) {
         if (!isAbsolute(root) || normalize(root) !== root || resolve(root) !== root) {
             throw new ApnError("APN_STATE_SECURITY", "State root must be a canonical absolute path.");
         }
         this.root = root;
         this.lockWaitMs = options.lockWaitMs ?? 5_000;
-        this.lockLeaseMs = options.lockLeaseMs ?? 30_000;
-        this.hostSerialized = options.hostSerialized ?? false;
+        if (!Number.isSafeInteger(this.lockWaitMs) || this.lockWaitMs < 0 || this.lockWaitMs > 60_000) {
+            throw new ApnError("APN_STATE_SECURITY", "State lock wait must be between 0 and 60000 milliseconds.");
+        }
+        this.lockPort = options.lockPort ?? new MacosAdvisoryLock();
     }
     async initialize() {
         await this.assertNoSymlinkAncestors(this.root);
@@ -97,6 +99,12 @@ export class StateStore {
     async writeWallet(wallet) {
         await this.ensureDirectory(join("wallets", wallet.profileHash));
         await this.writeJson(join("wallets", wallet.profileHash, "wallet.json"), wallet);
+    }
+    async loadEncryptedWalletEnvelope(profile) {
+        return await this.readJson(join("wallets", `${profile}.json`));
+    }
+    async writeEncryptedWalletEnvelope(profile, envelope) {
+        await this.writeJson(join("wallets", `${profile}.json`), envelope);
     }
     async loadOperation(profileHash, operationId) {
         const value = await this.readJson(join("operations", profileHash, `${operationId}.json`));
@@ -660,102 +668,56 @@ export class StateStore {
     }
     async acquireLock(key) {
         const lockName = `${sha256(`lock\0${key}`)}.lock`;
-        const relativePath = join("locks", lockName);
-        const path = this.resolveRelative(relativePath);
+        const path = this.resolveRelative(join("locks", lockName));
         const started = Date.now();
-        const token = randomBytes(16).toString("hex");
-        while (Date.now() - started <= this.lockWaitMs) {
-            const handle = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, FILE_MODE).catch((error) => {
-                if (isCode(error, "EEXIST"))
-                    return null;
-                throw error;
-            });
-            if (handle !== null) {
-                try {
-                    await handle.writeFile(canonicalJson({ pid: process.pid.toString(), createdAtMs: Date.now().toString(), token }));
-                    await handle.sync();
-                }
-                finally {
-                    await handle.close();
-                }
-                return { path, token };
+        do {
+            let handle;
+            try {
+                handle = await open(path, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, FILE_MODE);
             }
-            await this.clearStaleLock(relativePath);
-            await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
-        }
-        throw new ApnError("APN_STATE_BUSY", "State is busy; retry the operation.");
+            catch (error) {
+                if (isCode(error, "ELOOP"))
+                    stateSecurity("State lock file is a symbolic link.");
+                throw error;
+            }
+            try {
+                await this.validateOpenedLock(path, handle);
+                if (await this.lockPort.tryAcquire(handle.fd)) {
+                    await this.validateOpenedLock(path, handle);
+                    return { handle };
+                }
+            }
+            catch (error) {
+                await handle.close().catch(() => undefined);
+                throw error;
+            }
+            await handle.close();
+            const elapsed = Date.now() - started;
+            if (elapsed >= this.lockWaitMs)
+                break;
+            await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(10, this.lockWaitMs - elapsed)));
+        } while (true);
+        throw new ApnError("APN_STATE_BUSY", `State remained busy for ${this.lockWaitMs} milliseconds; retry the operation.`);
     }
-    async clearStaleLock(relativePath) {
-        const target = this.resolveRelative(relativePath);
-        let handle;
+    async validateOpenedLock(path, handle) {
+        const opened = await handle.stat();
+        let current;
         try {
-            handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+            current = await lstat(path);
         }
         catch (error) {
             if (isCode(error, "ENOENT"))
-                return;
+                stateSecurity("State lock file changed while it was open.");
             throw error;
-        }
-        const opened = await handle.stat();
-        validateFile(opened);
-        let value;
-        try {
-            value = JSON.parse(await handle.readFile({ encoding: "utf8" }));
-        }
-        catch {
-            await handle.close();
-            stateSecurity("Lock file has invalid JSON.");
-        }
-        if (!isPlainRecord(value) || typeof value.pid !== "string" || typeof value.createdAtMs !== "string") {
-            await handle.close();
-            stateSecurity("Lock file has an invalid schema.");
-        }
-        const pid = Number(value.pid);
-        const createdAtMs = Number(value.createdAtMs);
-        if (!Number.isSafeInteger(pid) || pid <= 0 || !Number.isSafeInteger(createdAtMs)) {
-            await handle.close();
-            stateSecurity("Lock file has invalid ownership metadata.");
-        }
-        if (Date.now() - createdAtMs <= this.lockLeaseMs || pidAlive(pid)) {
-            await handle.close();
-            return;
-        }
-        if (!this.hostSerialized) {
-            await handle.close();
-            throw new ApnError("APN_STATE_BUSY", "Stale-lock recovery requires the native host advisory lock.");
-        }
-        await this.beforeStaleLockTakeover(target);
-        const current = await lstat(target).catch((error) => {
-            if (isCode(error, "ENOENT"))
-                return null;
-            throw error;
-        });
-        if (current === null) {
-            await handle.close();
-            return;
         }
         if (current.dev !== opened.dev || current.ino !== opened.ino) {
-            await handle.close();
-            stateSecurity("Lock changed during stale takeover; replacement was preserved.");
+            stateSecurity("State lock file changed while it was open.");
         }
-        await unlink(target);
-        await handle.close();
+        validateFile(opened);
+        validateFile(current);
     }
-    async beforeStaleLockTakeover(_path) { }
     async releaseLock(lock) {
-        const relativePath = relative(this.root, lock.path);
-        const value = await this.readJson(relativePath).catch(() => null);
-        if (isPlainRecord(value) && value.token === lock.token)
-            await unlink(lock.path).catch(() => undefined);
-    }
-}
-function pidAlive(pid) {
-    try {
-        process.kill(pid, 0);
-        return true;
-    }
-    catch (error) {
-        return isCode(error, "EPERM");
+        await lock.handle.close();
     }
 }
 function isCode(error, code) {
