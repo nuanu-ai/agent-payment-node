@@ -35,7 +35,7 @@ export class ApnCore {
             case "version":
                 return dataOutcome({
                     product: "agent-payment-node",
-                    product_version: "0.2.3",
+                    product_version: "0.2.4",
                     cli_version: OUTPUT_VERSION,
                     proof_class: "local_build_metadata",
                 }, "local_build_metadata");

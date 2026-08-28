@@ -287,6 +287,7 @@ export function challengeObservation(input: {
 
 export function paidObservation(input: {
   readonly paymentResponseHeader?: string;
+  readonly paymentResponseHeaderName?: "PAYMENT-RESPONSE" | "X-PAYMENT-RESPONSE";
   readonly paymentRequiredHeader?: string;
   readonly status?: number;
   readonly bodyText?: string;
@@ -303,7 +304,10 @@ export function paidObservation(input: {
   const rawHeaderPairs = input.rawHeaderPairs ?? [
     ["Content-Type", input.mediaType ?? "application/json"],
     ["Content-Length", bodyBytes.byteLength.toString()],
-    ...(input.paymentResponseHeader === undefined ? [] : [["PAYMENT-RESPONSE", input.paymentResponseHeader] as const]),
+    ...(input.paymentResponseHeader === undefined ? [] : [[
+      input.paymentResponseHeaderName ?? "PAYMENT-RESPONSE",
+      input.paymentResponseHeader,
+    ] as const]),
     ...(input.paymentRequiredHeader === undefined ? [] : [["PAYMENT-REQUIRED", input.paymentRequiredHeader] as const]),
   ];
   return {
