@@ -25,7 +25,8 @@ const MAX_HEADER_NAME_BYTES = 256;
 const MAX_CONTROL_VALUE_BYTES = 64 * 1024;
 const MAX_AGGREGATE_HEADER_BYTES = 96 * 1024;
 const MAX_BODY_BYTES = 256 * 1024;
-const CONTROL_HEADERS = new Set(["payment-required", "payment-signature", "payment-response"]);
+const PAYMENT_RESPONSE_HEADERS = new Set(["payment-response", "x-payment-response"]);
+const CONTROL_HEADERS = new Set(["payment-required", "payment-signature", ...PAYMENT_RESPONSE_HEADERS]);
 export const SELLER_RESPONSE_MAX_HEADER_BYTES = 128 * 1024;
 
 export class HttpsX402Http implements HttpPort {
@@ -125,18 +126,12 @@ export function observePaidX402Response(
     requireAsciiControl(paymentRequiredHeader, "PAYMENT-REQUIRED");
     decodePaymentRequiredHeader(paymentRequiredHeader);
   }
-  const paymentResponseHeader = optionalSingleHeader(raw.rawHeaderPairs, "payment-response");
+  const paymentResponseHeader = optionalPaymentResponseHeader(raw.rawHeaderPairs);
   if (paymentResponseHeader !== undefined) requireAsciiControl(paymentResponseHeader, "PAYMENT-RESPONSE");
 
   let result: PaidHttpResult["result"];
   if (raw.status === 200) {
-    const mediaType = singleControlLikeHeader(raw.rawHeaderPairs, "content-type");
-    if (
-      Buffer.byteLength(mediaType, "utf8") > 128 ||
-      (mediaType !== "application/json" && !/^text\/[a-z0-9!#$%&'*+.^_`|~-]+$/u.test(mediaType))
-    ) {
-      throw resultError("Seller result media type is unsupported or non-canonical.");
-    }
+    const mediaType = parseResultMediaType(singleControlLikeHeader(raw.rawHeaderPairs, "content-type"));
     let bodyText: string;
     try { bodyText = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw.bodyBytes); }
     catch { throw resultError("Seller result is not strict UTF-8."); }
@@ -324,9 +319,10 @@ function validateRawHeaders(pairs: readonly (readonly [string, string])[]): void
     if (CONTROL_HEADERS.has(normalizedName)) {
       if (valueBytes > MAX_CONTROL_VALUE_BYTES) throw httpError("APN_HTTP_PROTOCOL", "x402 control header exceeds the size limit.");
       if (value.trim() !== value || value.includes(",")) throw httpError("APN_HTTP_PROTOCOL", "x402 control header is folded or non-canonical.");
-      const count = (controlCounts.get(normalizedName) ?? 0) + 1;
-      if (count > 1) throw httpError("APN_HTTP_PROTOCOL", `Seller response contains duplicate ${normalizedName} headers.`);
-      controlCounts.set(normalizedName, count);
+      const semanticName = PAYMENT_RESPONSE_HEADERS.has(normalizedName) ? "payment-response" : normalizedName;
+      const count = (controlCounts.get(semanticName) ?? 0) + 1;
+      if (count > 1) throw httpError("APN_HTTP_PROTOCOL", `Seller response contains duplicate ${semanticName} headers.`);
+      controlCounts.set(semanticName, count);
     }
   }
   if (aggregate > MAX_AGGREGATE_HEADER_BYTES) throw httpError("APN_HTTP_PROTOCOL", "Seller headers exceed the aggregate size limit.");
@@ -345,12 +341,44 @@ function optionalSingleHeader(pairs: readonly (readonly [string, string])[], nam
   return values[0];
 }
 
+function optionalPaymentResponseHeader(pairs: readonly (readonly [string, string])[]): string | undefined {
+  const values = pairs
+    .filter(([candidate]) => PAYMENT_RESPONSE_HEADERS.has(candidate.toLowerCase()))
+    .map(([, value]) => value);
+  if (values.length > 1) {
+    throw httpError("APN_HTTP_PROTOCOL", "Seller response contains duplicate payment-response headers.");
+  }
+  return values[0];
+}
+
 function singleControlLikeHeader(pairs: readonly (readonly [string, string])[], name: string): string {
   const value = optionalSingleHeader(pairs, name);
   if (value === undefined || value.trim() !== value || value.includes(",")) {
     throw resultError(`Seller response requires one canonical ${name.toUpperCase()} header.`);
   }
   return value;
+}
+
+function parseResultMediaType(value: string): string {
+  if (Buffer.byteLength(value, "utf8") > 128) {
+    throw resultError("Seller result media type is unsupported or non-canonical.");
+  }
+  const parts = value.split(";");
+  const mediaType = parts[0];
+  if (
+    mediaType === undefined ||
+    (mediaType !== "application/json" && !/^text\/[a-z0-9!#$%&'*+.^_`|~-]+$/u.test(mediaType))
+  ) {
+    throw resultError("Seller result media type is unsupported or non-canonical.");
+  }
+  const parameter = parts[1];
+  if (
+    parts.length > 2 ||
+    (parameter !== undefined && !/^[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8")[ \t]*$/iu.test(parameter))
+  ) {
+    throw resultError("Seller result media type parameters are malformed or unsupported.");
+  }
+  return mediaType;
 }
 
 function requireAsciiControl(value: string, name: string): void {
