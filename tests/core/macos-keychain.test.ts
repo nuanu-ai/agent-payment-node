@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { stat } from "node:fs/promises";
 import test from "node:test";
 import { runCli } from "../../src/cli.js";
 import {
@@ -41,6 +42,7 @@ test("doctor probe targets the exact login Keychain without creating a secret", 
   assert.equal(result.ok, true);
   assert.equal((result.data as { readonly status: string }).status, "absent");
   assert.deepEqual(calls, [[...FIND_ARGS]]);
+  await assert.rejects(stat(temporary.root), { code: "ENOENT" });
 });
 
 test("create binds both find and add to the exact login Keychain using security's password argument", async () => {

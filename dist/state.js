@@ -96,6 +96,27 @@ export class StateStore {
         const value = await this.readJson(join("wallets", profileHash, "wallet.json"));
         return value === null ? null : validateWallet(value);
     }
+    async loadWalletArtifacts(profile, profileHash) {
+        stateIdentifier(profileHash, "profile hash");
+        await this.assertNoSymlinkAncestors(this.root);
+        let rootStats;
+        try {
+            rootStats = await lstat(this.root);
+        }
+        catch (error) {
+            if (isCode(error, "ENOENT"))
+                return { stored: null, encrypted: null };
+            throw error;
+        }
+        validateDirectory(rootStats, true);
+        if (await realpath(this.root) !== this.root)
+            stateSecurity("State root resolves through an alias or symbolic link.");
+        const [stored, encrypted] = await Promise.all([
+            this.loadWallet(profileHash),
+            this.loadEncryptedWalletEnvelope(profile),
+        ]);
+        return { stored, encrypted };
+    }
     async writeWallet(wallet) {
         await this.ensureDirectory(join("wallets", wallet.profileHash));
         await this.writeJson(join("wallets", wallet.profileHash, "wallet.json"), wallet);

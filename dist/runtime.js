@@ -6,6 +6,7 @@ import { ApnError } from "./errors.js";
 export class RuntimeContext {
     state;
     native;
+    keychainProbe;
     rpc;
     http;
     clock;
@@ -17,6 +18,8 @@ export class RuntimeContext {
         this.state = dependencies.state;
         if (dependencies.native !== undefined)
             this.native = dependencies.native;
+        if (dependencies.keychainProbe !== undefined)
+            this.keychainProbe = dependencies.keychainProbe;
         if (dependencies.rpc !== undefined)
             this.rpc = dependencies.rpc;
         if (dependencies.http !== undefined)
@@ -36,6 +39,12 @@ export class RuntimeContext {
             throw new ApnError("APN_NATIVE_CHANNEL_REQUIRED", "This command must run as a child of the signed native app host.");
         }
         return this.native;
+    }
+    requireKeychainProbe() {
+        if (this.keychainProbe === undefined) {
+            throw new ApnError("APN_NATIVE_CHANNEL_REQUIRED", "This command requires the read-only login Keychain probe.");
+        }
+        return this.keychainProbe;
     }
     requireRpc() {
         if (this.rpc === undefined) {
