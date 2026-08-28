@@ -1,4 +1,3 @@
-import { open } from "node:fs/promises";
 import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -104,13 +103,58 @@ export function isExactTransferApproval(expected: string, supplied: string): boo
 }
 
 async function openApprovalTerminal(): Promise<ApprovalTerminal> {
-  const handle = await open("/dev/tty", "r+");
+  const input = process.stdin;
+  const output = process.stderr;
+  if (input.isTTY !== true || output.isTTY !== true) throw new Error("foreground terminal unavailable");
   return {
-    fd: handle.fd,
-    write: async (contents) => await handle.writeFile(contents),
-    read: (signal) => handle.createReadStream({ autoClose: false, highWaterMark: 1, signal }),
-    close: async () => await handle.close(),
+    fd: input.fd,
+    write: async (contents) => await new Promise<void>((resolve, reject) => {
+      output.write(contents, (error) => error === null || error === undefined ? resolve() : reject(error));
+    }),
+    read: (signal) => readTerminal(input, signal),
+    close: async () => { input.pause(); },
   };
+}
+
+async function* readTerminal(input: NodeJS.ReadStream, signal: AbortSignal): AsyncGenerator<Uint8Array> {
+  const queued: Buffer[] = [];
+  let ended = false;
+  let failure: Error | undefined;
+  let wake: (() => void) | undefined;
+  const notify = (): void => { wake?.(); };
+  const onData = (chunk: Buffer | string): void => {
+    queued.push(Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, "utf8"));
+    notify();
+  };
+  const onEnd = (): void => { ended = true; notify(); };
+  const onError = (): void => { failure = new Error("approval terminal read failed"); notify(); };
+  const abort = (): void => { failure = new Error("approval terminal read aborted"); notify(); };
+  input.on("data", onData);
+  input.once("end", onEnd);
+  input.once("error", onError);
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+  input.resume();
+  try {
+    while (true) {
+      if (failure !== undefined) throw failure;
+      const next = queued.shift();
+      if (next !== undefined) {
+        yield next;
+        continue;
+      }
+      if (ended) return;
+      await new Promise<void>((resolve) => { wake = resolve; });
+      wake = undefined;
+    }
+  } finally {
+    input.pause();
+    input.removeListener("data", onData);
+    input.removeListener("end", onEnd);
+    input.removeListener("error", onError);
+    signal.removeEventListener("abort", abort);
+    for (const chunk of queued) chunk.fill(0);
+  }
 }
 
 async function readApprovalInput(
