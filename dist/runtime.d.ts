@@ -1,9 +1,11 @@
 import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort, WaitPort } from "./ports.js";
 import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { StateStore } from "./state.js";
+import type { WrappingSecretPort } from "./macos-keychain.js";
 export interface CoreDependencies {
     readonly state: StateStore;
     readonly native?: NativePort;
+    readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
     readonly rpc?: RpcPort;
     readonly http?: HttpPort;
     readonly clock?: ClockPort;
@@ -14,6 +16,7 @@ export interface CoreDependencies {
 export declare class RuntimeContext {
     readonly state: StateStore;
     readonly native?: NativePort;
+    readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
     readonly rpc?: RpcPort;
     readonly http?: HttpPort;
     readonly clock: ClockPort;
@@ -24,6 +27,7 @@ export declare class RuntimeContext {
     constructor(dependencies: CoreDependencies);
     ready(): Promise<void>;
     requireNative(): NativePort;
+    requireKeychainProbe(): Pick<WrappingSecretPort, "load">;
     requireRpc(): RpcPort;
     requireHttp(): HttpPort;
     requirePolicy(): ProfilePolicyPort;

@@ -18,6 +18,18 @@ import { fundingPosture, policyBinding, publicProfilePolicy } from "./profile-po
 export class WalletService {
   constructor(private readonly context: RuntimeContext) {}
 
+  async doctorKeychain(): Promise<unknown> {
+    const profile = "default";
+    const profileHash = this.context.state.profileHash(profile);
+    const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
+    if (artifacts.stored === null && artifacts.encrypted === null) {
+      const wrapping = await this.context.requireKeychainProbe().load();
+      wrapping?.fill(0);
+      return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: ["apn wallet ensure"] };
+    }
+    return await this.initializedStatus(profile, profileHash);
+  }
+
   async ensure(profileInput: string): Promise<unknown> {
     const profile = canonicalProfile(profileInput);
     await this.context.ready();
@@ -50,8 +62,16 @@ export class WalletService {
 
   async status(profileInput: string): Promise<unknown> {
     const profile = canonicalProfile(profileInput);
-    await this.context.ready();
     const profileHash = this.context.state.profileHash(profile);
+    const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
+    if (artifacts.stored === null && artifacts.encrypted === null) {
+      return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: ["apn wallet ensure"] };
+    }
+    return await this.initializedStatus(profile, profileHash);
+  }
+
+  private async initializedStatus(profile: string, profileHash: string): Promise<unknown> {
+    await this.context.ready();
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
       const stored = await this.context.state.loadWallet(profileHash);
       const result = parseWalletDescribe(
