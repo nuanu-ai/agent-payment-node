@@ -34,11 +34,11 @@ test("official MCP packages are exactly pinned, locked and present in the packag
   const lock = JSON.parse(lockBytes.toString("utf8"));
   assert.equal(manifest.dependencies?.["@modelcontextprotocol/server"], "2.0.0");
   assert.equal(manifest.devDependencies?.["@modelcontextprotocol/client"], "2.0.0");
-  assert.equal(manifest.dependencies?.zod, "4.5.1");
+  assert.equal(manifest.dependencies?.zod, "4.4.3");
   assert.deepEqual(lockBytes, shrinkwrapBytes);
   assert.equal(lock.packages?.["node_modules/@modelcontextprotocol/server"]?.version, "2.0.0");
   assert.equal(lock.packages?.["node_modules/@modelcontextprotocol/client"]?.version, "2.0.0");
-  assert.equal(lock.packages?.["node_modules/zod"]?.version, "4.5.1");
+  assert.equal(lock.packages?.["node_modules/zod"]?.version, "4.4.3");
   assert.ok(Object.keys(await import("@modelcontextprotocol/server")).length > 0);
   assert.ok(Object.keys(await import("@modelcontextprotocol/client")).length > 0);
 
