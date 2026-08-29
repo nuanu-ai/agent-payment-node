@@ -6,6 +6,7 @@ import type { OutputEnvelope } from "./commands.js";
 import { PRODUCT_VERSION } from "./constants.js";
 import { RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
 import { MCP_TOOLS, type ProjectedMcpTool } from "./mcp-projection.js";
+import { RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
 import { failureEnvelope } from "./output.js";
 import { executeBoundCommand, type RuntimeFactoryOptions } from "./runtime-factory.js";
 
@@ -51,6 +52,14 @@ async function callTool(
     const policyApproval = bound.request.command === "wallet.policy.set"
       ? new RejectingMcpPolicyApproval(bound.request)
       : undefined;
+    if (bound.request.command === "transfer.approve") {
+      if (bound.rpcUrl === undefined) throw new Error("The bound transfer approval is missing its required RPC URL.");
+      const { native: _injectedNative, approval: _injectedApproval, ...sharedOptions } = options;
+      return await executeBoundCommand(bound, {
+        ...sharedOptions,
+        approval: new RejectingMcpTransferApproval(bound.request, bound.rpcUrl),
+      });
+    }
     return await executeBoundCommand(bound, {
       ...options,
       ...(policyApproval === undefined ? {} : { policyApproval }),
