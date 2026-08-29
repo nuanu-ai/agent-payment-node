@@ -1,0 +1,170 @@
+import { exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
+import { BASE_USDC, CHAIN_CAIP2, USDC_DECIMALS } from "./constants.js";
+import { ApnError } from "./errors.js";
+export const PROVIDER_PROFILE_VERSION = "apn.provider-profile.v1";
+export const PROVIDER_CAPABILITY_VERSION = "apn.provider-capability.v1";
+export const LOCAL_PROVIDER_ID = "local";
+export function localCapabilitySnapshot() {
+    return {
+        schema_version: PROVIDER_CAPABILITY_VERSION,
+        network: { caip2: CHAIN_CAIP2, chain: "base" },
+        asset: { symbol: "USDC", contract: BASE_USDC, decimals: USDC_DECIMALS },
+        lifecycle: { connect: false, status: true, logout: false },
+        read: { address: true, balance: true, funding_guidance: true },
+        direct: {
+            available: true,
+            mode: "local_raw_transaction_apn_submit",
+            execution_owner: "apn",
+            retry_owner: "apn_operation_state",
+        },
+        x402: {
+            available: true,
+            mode: "local_detached_eip3009_apn_paid_retry",
+            execution_owner: "apn",
+            retry_owner: "apn_state_machine",
+        },
+        evidence: { available: true, owner: "apn" },
+    };
+}
+export function lifecycleReadOnlyCapabilitySnapshot() {
+    return {
+        schema_version: PROVIDER_CAPABILITY_VERSION,
+        network: { caip2: CHAIN_CAIP2, chain: "base" },
+        asset: { symbol: "USDC", contract: BASE_USDC, decimals: USDC_DECIMALS },
+        lifecycle: { connect: true, status: true, logout: true },
+        read: { address: true, balance: true, funding_guidance: true },
+        direct: {
+            available: false,
+            mode: "provider_atomic_send",
+            execution_owner: "provider",
+            retry_owner: "apn_outer_no_replay_journal",
+        },
+        x402: {
+            available: false,
+            mode: "provider_atomic_paid_fetch",
+            execution_owner: "provider",
+            retry_owner: "apn_outer_no_replay_journal",
+        },
+        evidence: { available: false, owner: "provider" },
+    };
+}
+export function capabilityHash(snapshot) {
+    assertCapabilitySnapshot(snapshot);
+    return hashObject(snapshot);
+}
+export function accountBindingHash(providerId, address) {
+    return sha256(`provider-account-binding\0${providerId}\0${address.toLowerCase()}`);
+}
+export function projectLegacyLocalProfile(wallet) {
+    const snapshot = localCapabilitySnapshot();
+    return {
+        schema_version: PROVIDER_PROFILE_VERSION,
+        profile: wallet.profile,
+        profile_hash: wallet.profileHash,
+        provider_id: LOCAL_PROVIDER_ID,
+        public_address: wallet.address,
+        account_binding_hash: wallet.bindingHash,
+        trust_class: "local_software_wallet",
+        revision: 1,
+        capability_snapshot: snapshot,
+        capability_hash: capabilityHash(snapshot),
+        observed_at: wallet.createdAt,
+        drift: { state: "bound", reason: "none" },
+    };
+}
+export function validateProviderProfile(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, [
+        "schema_version", "profile", "profile_hash", "provider_id", "public_address", "account_binding_hash",
+        "trust_class", "revision", "capability_snapshot", "capability_hash", "observed_at", "drift",
+    ]))
+        invalidProfile();
+    const profile = value;
+    if (profile.schema_version !== PROVIDER_PROFILE_VERSION ||
+        typeof profile.profile !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profile.profile) ||
+        typeof profile.profile_hash !== "string" || !/^[a-f0-9]{64}$/u.test(profile.profile_hash) ||
+        profile.profile_hash !== sha256(`profile\0${profile.profile}`) ||
+        typeof profile.provider_id !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profile.provider_id) ||
+        typeof profile.public_address !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(profile.public_address) ||
+        typeof profile.account_binding_hash !== "string" || !/^[a-f0-9]{64}$/u.test(profile.account_binding_hash) ||
+        !["local_software_wallet", "provider_managed_non_custodial_tee"].includes(profile.trust_class) ||
+        !Number.isSafeInteger(profile.revision) || profile.revision < 1 ||
+        typeof profile.capability_hash !== "string" || !/^[a-f0-9]{64}$/u.test(profile.capability_hash) ||
+        profile.capability_hash !== capabilityHash(profile.capability_snapshot) ||
+        !isCanonicalTimestamp(profile.observed_at))
+        invalidProfile();
+    assertDrift(profile.drift);
+    if ((profile.provider_id === LOCAL_PROVIDER_ID) !== (profile.trust_class === "local_software_wallet"))
+        invalidProfile();
+    return profile;
+}
+function assertCapabilitySnapshot(snapshot) {
+    if (!isPlainRecord(snapshot) || !exactKeys(snapshot, [
+        "schema_version", "network", "asset", "lifecycle", "read", "direct", "x402", "evidence",
+    ]) || snapshot.schema_version !== PROVIDER_CAPABILITY_VERSION)
+        invalidProfile();
+    if (snapshot.network?.caip2 !== CHAIN_CAIP2 || snapshot.network.chain !== "base" ||
+        snapshot.asset?.symbol !== "USDC" || snapshot.asset.contract !== BASE_USDC || snapshot.asset.decimals !== USDC_DECIMALS ||
+        !isPlainRecord(snapshot.lifecycle) || !isPlainRecord(snapshot.read) || !isPlainRecord(snapshot.direct) ||
+        !isPlainRecord(snapshot.x402) || !isPlainRecord(snapshot.evidence))
+        invalidProfile();
+    if (!exactKeys(snapshot.network, ["caip2", "chain"]) || !exactKeys(snapshot.asset, ["symbol", "contract", "decimals"]) ||
+        !exactKeys(snapshot.lifecycle, ["connect", "status", "logout"]) ||
+        !exactKeys(snapshot.read, ["address", "balance", "funding_guidance"]) ||
+        !exactKeys(snapshot.direct, ["available", "mode", "execution_owner", "retry_owner"]) ||
+        !exactKeys(snapshot.x402, ["available", "mode", "execution_owner", "retry_owner"]) ||
+        !exactKeys(snapshot.evidence, ["available", "owner"]))
+        invalidProfile();
+    for (const value of [
+        snapshot.lifecycle.connect, snapshot.lifecycle.status, snapshot.lifecycle.logout,
+        snapshot.read.address, snapshot.read.balance, snapshot.read.funding_guidance,
+        snapshot.direct.available, snapshot.x402.available, snapshot.evidence.available,
+    ])
+        if (typeof value !== "boolean")
+            invalidProfile();
+    if (!new Set(["local_raw_transaction_apn_submit", "provider_atomic_send"]).has(snapshot.direct.mode))
+        invalidProfile();
+    if (!new Set(["local_detached_eip3009_apn_paid_retry", "provider_atomic_paid_fetch"]).has(snapshot.x402.mode))
+        invalidProfile();
+    if (!["apn", "provider"].includes(snapshot.direct.execution_owner) ||
+        !["apn_operation_state", "apn_outer_no_replay_journal"].includes(snapshot.direct.retry_owner) ||
+        !["apn", "provider"].includes(snapshot.x402.execution_owner) ||
+        !["apn_state_machine", "apn_outer_no_replay_journal"].includes(snapshot.x402.retry_owner) ||
+        !["apn", "provider"].includes(snapshot.evidence.owner))
+        invalidProfile();
+    const directLocal = snapshot.direct.mode === "local_raw_transaction_apn_submit";
+    const x402Local = snapshot.x402.mode === "local_detached_eip3009_apn_paid_retry";
+    if (directLocal !== (snapshot.direct.execution_owner === "apn" && snapshot.direct.retry_owner === "apn_operation_state") ||
+        x402Local !== (snapshot.x402.execution_owner === "apn" && snapshot.x402.retry_owner === "apn_state_machine"))
+        invalidProfile();
+}
+function assertDrift(drift) {
+    if (!isPlainRecord(drift) || !["bound", "drift_blocked", "rebind_pending"].includes(drift.state))
+        invalidProfile();
+    const expectedKeys = drift.state === "bound"
+        ? ["state", "reason"]
+        : ["state", "reason", "observed_address", "observed_account_binding_hash", "observed_capability_hash", "observed_at"];
+    if (!exactKeys(drift, expectedKeys))
+        invalidProfile();
+    if (![
+        "none", "identity_changed", "capability_changed", "identity_and_capability_changed",
+    ].includes(drift.reason))
+        invalidProfile();
+    if ((drift.state === "bound") !== (drift.reason === "none"))
+        invalidProfile();
+    for (const hash of [drift.observed_account_binding_hash, drift.observed_capability_hash]) {
+        if (hash !== undefined && !/^[a-f0-9]{64}$/u.test(hash))
+            invalidProfile();
+    }
+    if (drift.observed_address !== undefined && !/^0x[0-9a-fA-F]{40}$/u.test(drift.observed_address))
+        invalidProfile();
+    if (drift.observed_at !== undefined && !isCanonicalTimestamp(drift.observed_at))
+        invalidProfile();
+}
+function isCanonicalTimestamp(value) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+function invalidProfile() {
+    throw new ApnError("APN_STATE_CORRUPT", "Provider profile state is invalid.");
+}
+//# sourceMappingURL=provider-profile.js.map

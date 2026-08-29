@@ -8,6 +8,7 @@ import { MCP_TOOLS } from "./mcp-projection.js";
 import { RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
 import { failureEnvelope } from "./output.js";
 import { executeBoundCommand } from "./runtime-factory.js";
+import { ApnError } from "./errors.js";
 export function createMcpServer(options = {}) {
     const server = new Server({ name: "agent-payment-node", version: PRODUCT_VERSION }, { capabilities: { tools: {} } });
     const toolsByName = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
@@ -34,6 +35,10 @@ export async function serveMcpStdio() {
 async function callTool(tool, input, options) {
     try {
         const bound = bindMcpInput(tool.command, input);
+        if (bound.request.command === "wallet.connect") {
+            const handoff = walletConnectHandoff(bound.request);
+            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "Wallet provider authentication must continue in the foreground CLI.", { cli_handoff: handoff, foreground_auth: true }));
+        }
         const policyApproval = bound.request.command === "wallet.policy.set"
             ? new RejectingMcpPolicyApproval(bound.request)
             : undefined;
@@ -54,6 +59,9 @@ async function callTool(tool, input, options) {
     catch (error) {
         return failureEnvelope("invalid", randomUUID(), error);
     }
+}
+function walletConnectHandoff(request) {
+    return `apn wallet connect --profile ${request.profile} --provider ${request.providerId}${request.expectedRevision === undefined ? "" : ` --expected-revision ${request.expectedRevision}`}`;
 }
 function mcpResult(envelope) {
     return {

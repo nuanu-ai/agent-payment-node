@@ -7,6 +7,11 @@ import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort, W
 import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { StateStore } from "./state.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
+import type {
+  ForegroundAuthenticationPort,
+  ProviderProfileRepositoryPort,
+  ProviderRegistryPort,
+} from "./provider-ports.js";
 
 export interface CoreDependencies {
   readonly state: StateStore;
@@ -18,6 +23,9 @@ export interface CoreDependencies {
   readonly ids?: IdPort;
   readonly policy?: ProfilePolicyPort;
   readonly wait?: WaitPort;
+  readonly profileRepository?: ProviderProfileRepositoryPort;
+  readonly providerRegistry?: ProviderRegistryPort;
+  readonly foregroundAuthentication?: ForegroundAuthenticationPort;
 }
 
 export class RuntimeContext {
@@ -30,6 +38,9 @@ export class RuntimeContext {
   readonly ids: IdPort;
   readonly policy?: ProfilePolicyPort;
   readonly wait: WaitPort;
+  readonly profileRepository?: ProviderProfileRepositoryPort;
+  readonly providerRegistry?: ProviderRegistryPort;
+  readonly foregroundAuthentication?: ForegroundAuthenticationPort;
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
@@ -42,6 +53,9 @@ export class RuntimeContext {
     this.ids = dependencies.ids ?? { next: () => randomUUID() };
     if (dependencies.policy !== undefined) this.policy = dependencies.policy;
     this.wait = dependencies.wait ?? new ProcessWaitPort();
+    if (dependencies.profileRepository !== undefined) this.profileRepository = dependencies.profileRepository;
+    if (dependencies.providerRegistry !== undefined) this.providerRegistry = dependencies.providerRegistry;
+    if (dependencies.foregroundAuthentication !== undefined) this.foregroundAuthentication = dependencies.foregroundAuthentication;
   }
 
   async ready(): Promise<void> {
@@ -82,6 +96,23 @@ export class RuntimeContext {
       throw new ApnError("APN_WALLET_POLICY_REQUIRED", "This command requires the encrypted profile policy store.");
     }
     return this.policy;
+  }
+
+  requireProfileRepository(): ProviderProfileRepositoryPort {
+    if (this.profileRepository === undefined) throw new ApnError("APN_INTERNAL", "Provider profile repository is unavailable.");
+    return this.profileRepository;
+  }
+
+  requireProviderRegistry(): ProviderRegistryPort {
+    if (this.providerRegistry === undefined) throw new ApnError("APN_INTERNAL", "Provider registry is unavailable.");
+    return this.providerRegistry;
+  }
+
+  requireForegroundAuthentication(): ForegroundAuthenticationPort {
+    if (this.foregroundAuthentication === undefined) {
+      throw new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "A foreground terminal is required for wallet provider authentication.");
+    }
+    return this.foregroundAuthentication;
   }
 
   nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest {

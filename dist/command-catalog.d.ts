@@ -1,9 +1,9 @@
-import { ApnError } from "./errors.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
 import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
 export { renderHelp, renderReadmeCommandReference };
 export { assertCompatibleManifestEvolution, validateCommandManifest };
-export type ScalarType = "string" | "profile" | "https_url" | "address" | "decimal_usdc" | "atomic_usdc" | "wei" | "operation_id" | "idempotency_key" | "integer_seconds";
+export * from "./command-catalog-parser.js";
+export type ScalarType = "string" | "profile" | "provider_id" | "positive_integer" | "https_url" | "address" | "decimal_usdc" | "atomic_usdc" | "wei" | "operation_id" | "idempotency_key" | "integer_seconds";
 export type EffectClass = "none" | "local_read" | "network_read" | "local_write" | "payment_prepare" | "payment_submit" | "recovery";
 export type ApprovalClass = "none" | "foreground_tty" | "prior_profile_policy" | "prior_operation_authorization";
 export interface CommandOption {
@@ -59,7 +59,7 @@ export declare const COMMANDS: readonly CommandDefinition[];
 export declare const COMMAND_MANIFEST: {
     readonly schema_version: "apn.command-manifest.v1";
     readonly product: "agent-payment-node";
-    readonly product_version: "0.2.9";
+    readonly product_version: "0.3.0";
     readonly cli_envelope_version: "apn.cli.v1";
     readonly compatibility: {
         readonly additive_optional_within_version: true;
@@ -82,27 +82,3 @@ export declare const COMMAND_MANIFEST: {
     readonly groups: readonly CommandGroup[];
     readonly commands: readonly CommandDefinition[];
 };
-export interface ParsedCatalogCommand {
-    readonly command: CommandDefinition;
-    readonly values: Readonly<Record<string, string>>;
-}
-export type DiscoveryDispatch = {
-    readonly ok: true;
-    readonly output: string;
-    readonly exitCode: 0;
-    readonly presentation: "text" | "json";
-} | {
-    readonly ok: false;
-    readonly error: {
-        readonly code: ApnError["code"];
-        readonly message: string;
-    };
-    readonly nextActions: readonly string[];
-    readonly exitCode: 1;
-    readonly presentation: "json";
-};
-export declare function parseCatalogArgv(argv: readonly string[]): ParsedCatalogCommand;
-export declare function parseCatalogInput(definition: CommandDefinition, input: Readonly<Record<string, unknown>>): ParsedCatalogCommand;
-export declare function dispatchDiscovery(argv: readonly string[]): DiscoveryDispatch | null;
-export declare function renderDiscoveryOutput(dispatch: DiscoveryDispatch): string;
-export declare function catalogNextActions(argv: readonly string[]): readonly string[];

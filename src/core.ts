@@ -10,6 +10,7 @@ import { inspectX402 } from "./x402-http.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
+import { ProviderWalletService } from "./provider-wallet-service.js";
 
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
@@ -20,6 +21,7 @@ export class ApnCore {
   readonly transfer: TransferService;
   readonly operations: OperationService;
   readonly x402: X402Service;
+  readonly providerWallet: ProviderWalletService;
 
   constructor(dependencies: CoreDependencies) {
     this.context = new RuntimeContext(dependencies);
@@ -27,6 +29,7 @@ export class ApnCore {
     this.transfer = new TransferService(this.context);
     this.operations = new OperationService(this.context.state);
     this.x402 = new X402Service(this.context);
+    this.providerWallet = new ProviderWalletService(this.context);
   }
 
   async execute(request: CommandRequest): Promise<OutputEnvelope> {
@@ -49,12 +52,24 @@ export class ApnCore {
         }, "local_build_metadata");
       case "doctor.keychain": return dataOutcome(await this.wallet.doctorKeychain(), "encrypted_apn_home_status");
       case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
-      case "wallet.status": return dataOutcome(await this.wallet.status(request.profile), "encrypted_apn_home_status");
-      case "wallet.balance": return dataOutcome(await this.wallet.balance(request.profile), "chain_verified_public_read");
+      case "wallet.connect": return dataOutcome(await this.providerWallet.connect(request), "provider_profile_binding");
+      case "wallet.status": {
+        const providerStatus = await this.providerWallet.status(request.profile);
+        return providerStatus === null
+          ? dataOutcome(await this.wallet.status(request.profile), "encrypted_apn_home_status")
+          : dataOutcome(providerStatus, "provider_profile_binding");
+      }
+      case "wallet.balance": return dataOutcome(
+        await this.providerWallet.balance(request.profile) ?? await this.wallet.balance(request.profile),
+        "chain_verified_public_read",
+      );
       case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile), "encrypted_profile_policy_status");
       case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
       case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url), "seller_challenge_static");
-      case "x402.fetch.prepare": return operationOutcome(await this.x402.prepare(request));
+      case "x402.fetch.prepare": {
+        await this.providerWallet.assertPaymentAvailable(request.profile, "x402");
+        return operationOutcome(await this.x402.prepare(request));
+      }
       case "x402.fetch.approve": {
         await this.x402.approve(request);
         return await this.operations.x402Outcome(request.operationId, {
@@ -62,7 +77,10 @@ export class ApnCore {
           exposeTerminalReceipt: true,
         });
       }
-      case "transfer.prepare": return operationOutcome(await this.transfer.prepare(request));
+      case "transfer.prepare": {
+        await this.providerWallet.assertPaymentAvailable(request.profile, "direct");
+        return operationOutcome(await this.transfer.prepare(request));
+      }
       case "transfer.approve": return operationOutcome(await this.transfer.approve(request.operationId));
       case "operation.resume": {
         await this.context.ready();

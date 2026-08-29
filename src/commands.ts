@@ -4,6 +4,12 @@ export type CommandRequest =
   | { readonly command: "version" }
   | { readonly command: "doctor.keychain" }
   | { readonly command: "wallet.ensure"; readonly profile: string }
+  | {
+    readonly command: "wallet.connect";
+    readonly profile: string;
+    readonly providerId: string;
+    readonly expectedRevision?: number;
+  }
   | { readonly command: "wallet.status"; readonly profile: string }
   | { readonly command: "wallet.balance"; readonly profile: string }
   | { readonly command: "wallet.policy.show"; readonly profile: string }

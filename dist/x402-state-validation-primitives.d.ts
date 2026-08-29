@@ -1,0 +1,15 @@
+export declare function canonicalText(value: unknown, maxBytes?: number): unknown;
+export declare function record(value: unknown): Record<string, unknown>;
+export declare function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown>;
+export declare function allowedRecord(value: unknown, required: readonly string[], optional: readonly string[]): Record<string, unknown>;
+export declare function allowedKeys(value: Record<string, unknown>, required: readonly string[], optional: readonly string[]): void;
+export declare function hash(value: unknown): asserts value is string;
+export declare function address(value: unknown): asserts value is `0x${string}`;
+export declare function bytes32(value: unknown): asserts value is `0x${string}`;
+export declare function transactionHash(value: unknown): asserts value is `0x${string}`;
+export declare function uint(value: unknown): asserts value is string;
+export declare function positive(value: unknown): asserts value is string;
+export declare function mediaType(value: unknown): asserts value is string;
+export declare function timestamp(value: unknown): asserts value is string;
+export declare function hasUnpairedSurrogate(value: string): boolean;
+export declare function stateCorrupt(message: string): never;
