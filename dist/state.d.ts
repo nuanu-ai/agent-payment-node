@@ -1,25 +1,17 @@
-import { type AdvisoryLockPort } from "./macos-advisory-lock.js";
+import { type ProviderProfileRecord } from "./provider-profile.js";
 import type { OperationRecord, ReceiptRecord, WalletRecord } from "./model.js";
+import { SecureStateStore } from "./secure-state-store.js";
 import { type X402OperationRecord, type X402ReceiptRecord, type X402ResultRecord } from "./x402-state-integrity.js";
 export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./state-integrity.js";
-export declare class StateStore {
-    readonly root: string;
-    readonly lockWaitMs: number;
-    private readonly lockPort;
-    constructor(root: string, options?: {
-        lockWaitMs?: number;
-        lockPort?: AdvisoryLockPort;
-    });
-    initialize(): Promise<void>;
-    profileHash(profile: string): string;
-    operationId(profile: string, idempotencyKey: string): string;
-    idempotencyHash(idempotencyKey: string): string;
+export declare class StateStore extends SecureStateStore {
     loadWallet(profileHash: string): Promise<WalletRecord | null>;
     loadWalletArtifacts(profile: string, profileHash: string): Promise<{
         readonly stored: WalletRecord | null;
         readonly encrypted: unknown | null;
     }>;
     writeWallet(wallet: WalletRecord): Promise<void>;
+    loadProviderProfile(profileHash: string): Promise<ProviderProfileRecord | null>;
+    writeProviderProfile(profile: ProviderProfileRecord): Promise<void>;
     loadEncryptedWalletEnvelope(profile: string): Promise<unknown | null>;
     writeEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void>;
     loadEncryptedPolicyEnvelope(profile: string): Promise<unknown | null>;
@@ -48,17 +40,7 @@ export declare class StateStore {
     listX402Receipts(profileHash: string): Promise<readonly X402ReceiptRecord[]>;
     loadReceipt(profileHash: string, operationId: string): Promise<ReceiptRecord | null>;
     writeReceipt(profileHash: string, receipt: ReceiptRecord): Promise<void>;
-    withLocks<T>(keys: readonly string[], action: () => Promise<T>): Promise<T>;
-    protected beforeLockAcquire(_key: string): Promise<void>;
     private validateX402TerminalGraph;
     private validateX402RecoveryReceiptAuthority;
     private operationProfiles;
-    private ensureDirectory;
-    private resolveRelative;
-    private assertNoSymlinkAncestors;
-    private readJson;
-    private writeJson;
-    private acquireLock;
-    private validateOpenedLock;
-    private releaseLock;
 }

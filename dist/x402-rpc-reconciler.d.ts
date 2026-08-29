@@ -15,9 +15,5 @@ export declare class X402RpcReconciler {
     constructor(rpc: X402RpcPort, clock: ClockPort, store: X402ReconciliationStore);
     reconcile(input: X402OperationRecord): Promise<X402ReconciliationOutcome>;
     private reconcileHint;
-    private scanOneChunk;
-    private validateScanAnchor;
-    private resetScanAfterReorg;
-    private persistScanReset;
     private persist;
 }

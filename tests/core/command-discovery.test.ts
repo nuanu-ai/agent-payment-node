@@ -39,6 +39,7 @@ const EXPECTED_COMMANDS = [
   "mcp config",
   "doctor keychain",
   "wallet ensure",
+  "wallet connect",
   "wallet status",
   "wallet balance",
   "wallet policy show",
@@ -112,6 +113,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "",
     "Commands:",
     "  apn wallet ensure [--profile <profile>] — Create or reuse one encrypted disposable wallet.",
+    "  apn wallet connect --profile <profile> --provider <provider-id> [--expected-revision <positive-integer>] — Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.",
     "  apn wallet status [--profile <profile>] — Read wallet presence and public identity.",
     "  apn wallet balance [--profile <profile>] --rpc-url <https-url> — Read Base ETH and canonical Base-USDC balances.",
     "",
@@ -263,11 +265,11 @@ test("manifest validator and compatibility gate reject every declared structural
   assert.doesNotThrow(() => assertCompatibleManifestEvolution(COMMAND_MANIFEST, additive));
 
   const previousVersion = cloneManifest();
-  previousVersion.product_version = "0.2.8";
+  previousVersion.product_version = "0.2.9";
   assert.throws(() => validateCommandManifest(previousVersion), ApnError, "installed manifest validator remains version-exact");
   assert.doesNotThrow(
     () => assertCompatibleManifestEvolution(previousVersion, COMMAND_MANIFEST),
-    "schema-compatible 0.2.8 to 0.2.9 evolution is permitted",
+    "schema-compatible 0.2.9 to 0.3.0 evolution is permitted",
   );
   for (const invalidVersion of ["banana", "1", "01.2.3", "1.02.3", "1.2.03", "1.2.3-01"]) {
     const invalidVersionManifest = cloneManifest();
@@ -492,6 +494,8 @@ function validValue(type: ScalarType): string {
   switch (type) {
     case "string": return "value";
     case "profile": return "agent_1";
+    case "provider_id": return "coinbase-agentic-wallet";
+    case "positive_integer": return "1";
     case "https_url": return "https://rpc.example/resource";
     case "address": return "0x1111111111111111111111111111111111111111";
     case "decimal_usdc": return "0.01";

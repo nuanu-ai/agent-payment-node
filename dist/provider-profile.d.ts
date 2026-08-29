@@ -1,0 +1,75 @@
+import { BASE_USDC, CHAIN_CAIP2, USDC_DECIMALS } from "./constants.js";
+import type { Address, WalletRecord } from "./model.js";
+export declare const PROVIDER_PROFILE_VERSION: "apn.provider-profile.v1";
+export declare const PROVIDER_CAPABILITY_VERSION: "apn.provider-capability.v1";
+export declare const LOCAL_PROVIDER_ID: "local";
+export type ProviderTrustClass = "local_software_wallet" | "provider_managed_non_custodial_tee";
+export type DirectExecutionMode = "local_raw_transaction_apn_submit" | "provider_atomic_send";
+export type X402ExecutionMode = "local_detached_eip3009_apn_paid_retry" | "provider_atomic_paid_fetch";
+export type ProviderProfileState = "bound" | "drift_blocked" | "rebind_pending";
+export interface ProviderCapabilitySnapshot {
+    readonly schema_version: typeof PROVIDER_CAPABILITY_VERSION;
+    readonly network: {
+        readonly caip2: typeof CHAIN_CAIP2;
+        readonly chain: "base";
+    };
+    readonly asset: {
+        readonly symbol: "USDC";
+        readonly contract: typeof BASE_USDC;
+        readonly decimals: typeof USDC_DECIMALS;
+    };
+    readonly lifecycle: {
+        readonly connect: boolean;
+        readonly status: boolean;
+        readonly logout: boolean;
+    };
+    readonly read: {
+        readonly address: boolean;
+        readonly balance: boolean;
+        readonly funding_guidance: boolean;
+    };
+    readonly direct: {
+        readonly available: boolean;
+        readonly mode: DirectExecutionMode;
+        readonly execution_owner: "apn" | "provider";
+        readonly retry_owner: "apn_operation_state" | "apn_outer_no_replay_journal";
+    };
+    readonly x402: {
+        readonly available: boolean;
+        readonly mode: X402ExecutionMode;
+        readonly execution_owner: "apn" | "provider";
+        readonly retry_owner: "apn_state_machine" | "apn_outer_no_replay_journal";
+    };
+    readonly evidence: {
+        readonly available: boolean;
+        readonly owner: "apn" | "provider";
+    };
+}
+export interface ProviderDrift {
+    readonly state: ProviderProfileState;
+    readonly reason: "none" | "identity_changed" | "capability_changed" | "identity_and_capability_changed";
+    readonly observed_address?: Address;
+    readonly observed_account_binding_hash?: string;
+    readonly observed_capability_hash?: string;
+    readonly observed_at?: string;
+}
+export interface ProviderProfileRecord {
+    readonly schema_version: typeof PROVIDER_PROFILE_VERSION;
+    readonly profile: string;
+    readonly profile_hash: string;
+    readonly provider_id: string;
+    readonly public_address: Address;
+    readonly account_binding_hash: string;
+    readonly trust_class: ProviderTrustClass;
+    readonly revision: number;
+    readonly capability_snapshot: ProviderCapabilitySnapshot;
+    readonly capability_hash: string;
+    readonly observed_at: string;
+    readonly drift: ProviderDrift;
+}
+export declare function localCapabilitySnapshot(): ProviderCapabilitySnapshot;
+export declare function lifecycleReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot;
+export declare function capabilityHash(snapshot: ProviderCapabilitySnapshot): string;
+export declare function accountBindingHash(providerId: string, address: Address): string;
+export declare function projectLegacyLocalProfile(wallet: WalletRecord): ProviderProfileRecord;
+export declare function validateProviderProfile(value: unknown): ProviderProfileRecord;

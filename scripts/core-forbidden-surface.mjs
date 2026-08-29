@@ -54,10 +54,16 @@ const files = await collect(sourceRoot);
 const violations = [];
 for (const file of files) {
   const text = await readFile(file, "utf8");
+  const lineCount = text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
+  if (lineCount > 500) violations.push(`${file.slice(productRoot.length + 1)}: ${lineCount} lines exceeds 500`);
   for (const needle of forbidden) {
     if (
       needle === "node:child_process" &&
-      (file === join(sourceRoot, "macos-keychain.ts") || file === join(sourceRoot, "macos-advisory-lock.ts"))
+      (
+        file === join(sourceRoot, "macos-keychain.ts") ||
+        file === join(sourceRoot, "macos-advisory-lock.ts") ||
+        file === join(sourceRoot, "awal-process-adapter.ts")
+      )
     ) continue;
     if (needle === "signTypedData" && file === join(sourceRoot, "local-wallet-native.ts")) continue;
     if (text.includes(needle)) violations.push(`${file.slice(productRoot.length + 1)}: ${needle}`);
@@ -65,12 +71,20 @@ for (const file of files) {
   if (file !== join(sourceRoot, "x402-codec.ts") && text.includes("@x402/core")) {
     violations.push(`${file.slice(productRoot.length + 1)}: @x402/core outside codec`);
   }
+  if (file === join(sourceRoot, "awal-process-adapter.ts")) {
+    for (const required of ["process.execPath", "shell: false", "[script, ...argv]"]) {
+      if (!text.includes(required)) violations.push(`src/awal-process-adapter.ts: missing ${required}`);
+    }
+    for (const disallowed of ["npx", "execFile(", "process.env.PATH", "shell: true", "fork(", "ipc"]) {
+      if (text.includes(disallowed)) violations.push(`src/awal-process-adapter.ts: ${disallowed}`);
+    }
+  }
 }
 if (violations.length > 0) {
   process.stderr.write(`Forbidden shipping surface detected:\n${violations.join("\n")}\n`);
   process.exitCode = 1;
 } else {
-  process.stdout.write(`core forbidden-surface scan passed (${files.length} files)\n`);
+  process.stdout.write(`core forbidden-surface and 500-line-limit scan passed (${files.length} files)\n`);
 }
 
 async function collect(directory) {
