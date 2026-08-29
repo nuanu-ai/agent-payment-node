@@ -9,6 +9,14 @@ const SELECTED_PATHS = [
     "wallet balance",
     "wallet policy show",
     "wallet policy set",
+    "x402 inspect",
+    "x402 fetch prepare",
+    "x402 fetch approve",
+    "pay transfer prepare",
+    "pay transfer approve",
+    "operation status",
+    "operation resume",
+    "receipt get",
 ];
 export function projectMcpTools(manifest = COMMAND_MANIFEST) {
     validateCommandManifest(manifest);
@@ -72,21 +80,30 @@ function inputSchema(command) {
     return { type: "object", properties, required, additionalProperties: false };
 }
 function optionSchema(option) {
-    if (!new Set(["profile", "https_url", "atomic_usdc", "wei"]).has(option.type)) {
-        throw projectionFailure("A selected command uses an unsupported MCP scalar type.");
-    }
     if (!new Set(["public", "operator_input"]).has(option.sensitivity)) {
         throw projectionFailure("A selected command uses unsupported MCP sensitivity metadata.");
     }
-    const pattern = option.type === "profile"
-        ? "^[a-z0-9][a-z0-9._-]{0,63}$"
-        : option.type === "atomic_usdc" || option.type === "wei" ? "^[1-9][0-9]*$" : undefined;
+    const pattern = scalarPattern(option.type);
     return {
         type: "string",
         description: `Catalog type ${option.type}; constraints ${option.constraints.join(", ") || "none"}; sensitivity ${option.sensitivity}.`,
         ...(pattern === undefined ? {} : { pattern }),
         ...(option.default.kind === "literal" ? { default: option.default.value } : {}),
     };
+}
+function scalarPattern(type) {
+    switch (type) {
+        case "profile": return "^[a-z0-9][a-z0-9._-]{0,63}$";
+        case "atomic_usdc":
+        case "wei": return "^[1-9][0-9]*$";
+        case "address": return "^0x[0-9a-fA-F]{40}$";
+        case "decimal_usdc": return "^(?:[1-9][0-9]*(?:\\.[0-9]{0,5}[1-9])?|0\\.[0-9]{0,5}[1-9])$";
+        case "idempotency_key": return "^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$";
+        case "operation_id": return "^[a-f0-9]{64}$";
+        case "integer_seconds": return "^(?:[1-9]|[1-9][0-9]|[12][0-9]{2}|300)$";
+        case "https_url": return undefined;
+        default: throw projectionFailure("A selected command uses an unsupported MCP scalar type.");
+    }
 }
 function projectionFailure(message) {
     return new ApnError("APN_INTERNAL", message);

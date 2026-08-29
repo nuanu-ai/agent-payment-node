@@ -166,10 +166,10 @@ export const COMMANDS: readonly CommandDefinition[] = [
   command(
     ["x402", "fetch", "approve"],
     "apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>",
-    "Authorize and send the one frozen x402 request.",
+    "Authorize one frozen x402 request for durable resume.",
     [operationRequired, rpcRequired],
     "payment_submit",
-    "Creates one policy-bounded authorization and sends only the frozen paid request.",
+    "Creates one policy-bounded authorization; operation resume owns the next paid-request transition.",
     "prior_profile_policy",
     "No per-payment prompt; the frozen operation and existing profile policy are the authorization boundary.",
     x402States,
