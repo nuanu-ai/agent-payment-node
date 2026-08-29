@@ -30,11 +30,15 @@ export function failureEnvelope(command, requestId, error) {
             message: safe.message,
             ...(safe.details === undefined ? {} : { details: safe.details }),
         },
-        next_actions: nextActions(safe.code),
+        next_actions: nextActions(safe),
     };
 }
-function nextActions(code) {
-    switch (code) {
+function nextActions(error) {
+    switch (error.code) {
+        case "APN_FOREGROUND_APPROVAL_REQUIRED": {
+            const handoff = error.details?.cli_handoff;
+            return typeof handoff === "string" ? [handoff] : [];
+        }
         case "APN_NATIVE_CHANNEL_REQUIRED": return ["Initialize the local APN custody adapter."];
         case "APN_RPC_CONFIG": return ["Provide --rpc-url with an explicit HTTPS Base endpoint."];
         case "APN_REPREPARE_REQUIRED": return ["Prepare a new transfer with a new idempotency key."];

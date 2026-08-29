@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.2.6 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.2.7 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -34,6 +34,17 @@ All discovery paths run before state, Keychain, wallet, policy, approval,
 network, signing or payment construction. Successful help is raw text and the
 manifest is one raw `apn.command-manifest.v1` JSON object. Operational commands
 continue to emit exactly one `apn.cli.v1` envelope.
+
+Local MCP clients can obtain a provider-neutral launch descriptor and start the
+stdio server without editing any client configuration:
+
+```sh
+apn mcp config
+apn mcp serve
+```
+
+The server exposes only version, Keychain doctor, wallet and wallet-policy
+tools in this release. It has no remote listener and no payment execution tool.
 
 ## First journey
 
@@ -128,6 +139,8 @@ another HTTP request. Timeout returns the same durable resumable operation.
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
 apn --version
+apn mcp serve
+apn mcp config
 apn doctor keychain
 apn wallet ensure [--profile <profile>]
 apn wallet status [--profile <profile>]
@@ -218,7 +231,9 @@ recovery, idempotency, receipts and all previous APN journeys without public
 network traffic or money. Local green tests are not live or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
-are separately recorded release gates. Hub, contracts, MCP, provider wallets,
+are separately recorded release gates. The local stdio MCP surface in this
+release is limited to version, Keychain doctor, wallet and wallet-policy tools;
+payment tools remain outside it. Hub, contracts, remote MCP, provider wallets,
 Stellar, Solana and TRON are outside this release.
 
 The published npm archive includes `npm-shrinkwrap.json`; Formula installation
