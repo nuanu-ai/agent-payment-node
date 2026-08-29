@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.2.8 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.2.9 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -43,8 +43,10 @@ apn mcp config
 apn mcp serve
 ```
 
-The server exposes only version, Keychain doctor, wallet and wallet-policy
-tools in this release. It has no remote listener and no payment execution tool.
+The server exposes exactly fifteen catalog-derived tools: version, Keychain
+doctor, wallet and wallet-policy operations plus x402 inspect/prepare/approve,
+direct-transfer prepare/foreground handoff, operation status/resume and receipt
+reads. It has no remote listener, remote transport or arbitrary sign/send tool.
 
 ## First journey
 
@@ -95,6 +97,9 @@ The prepare step freezes recipient, amount, nonce, fees, calldata and expiry.
 The approve step rechecks them and requires the exact phrase shown in the
 foreground stdin/stderr TTY. A transaction hash is non-terminal: completion requires a
 successful receipt containing the exact canonical-USDC `Transfer` event.
+Calling direct approval through MCP never opens a TTY or loads signing material;
+it returns the exact operation-bound CLI command to run in that foreground
+terminal.
 
 Inspect and buy a standard x402 resource:
 
@@ -110,10 +115,12 @@ apn x402 fetch approve --operation <operation-id> \
   --rpc-url https://rpc.example
 ```
 
-APN signs exactly one frozen EIP-3009 authorization and retries only when its
-durable recovery rules permit a byte-identical paid request. The seller and
-facilitator own settlement submission. APN requires a valid seller result and
-reconciled settlement evidence before reporting a paid completion.
+The approve command creates exactly one frozen EIP-3009 authorization. It does
+not send the paid request; `operation resume` owns the next legal paid-request
+or recovery transition. APN retries only when its durable recovery rules permit
+a byte-identical paid request. The seller and facilitator own settlement
+submission. APN requires a valid seller result and reconciled settlement
+evidence before reporting a paid completion.
 
 `x402 fetch prepare` uses the owner-approved profile maximum. An optional
 `--max-amount-atomic` may only make that ceiling stricter for one call; it can
@@ -231,9 +238,10 @@ recovery, idempotency, receipts and all previous APN journeys without public
 network traffic or money. Local green tests are not live or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
-are separately recorded release gates. The local stdio MCP surface in this
-release is limited to version, Keychain doctor, wallet and wallet-policy tools;
-payment tools remain outside it. Hub, contracts, remote MCP, provider wallets,
+are separately recorded release gates. The local stdio MCP surface projects
+the same fifteen catalog-selected wallet, policy, payment, operation and
+receipt commands through the shared binder/runtime/core path. Direct approval
+remains foreground CLI only. Hub, contracts, remote MCP, provider wallets,
 Stellar, Solana and TRON are outside this release.
 
 The published npm archive includes `npm-shrinkwrap.json`; Formula installation
