@@ -32,9 +32,11 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["doctor", "wallet", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["mcp", "doctor", "wallet", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "--version",
+  "mcp serve",
+  "mcp config",
   "doctor keychain",
   "wallet ensure",
   "wallet status",
@@ -261,11 +263,11 @@ test("manifest validator and compatibility gate reject every declared structural
   assert.doesNotThrow(() => assertCompatibleManifestEvolution(COMMAND_MANIFEST, additive));
 
   const previousVersion = cloneManifest();
-  previousVersion.product_version = "0.2.5";
+  previousVersion.product_version = "0.2.6";
   assert.throws(() => validateCommandManifest(previousVersion), ApnError, "installed manifest validator remains version-exact");
   assert.doesNotThrow(
     () => assertCompatibleManifestEvolution(previousVersion, COMMAND_MANIFEST),
-    "schema-compatible 0.2.5 to 0.2.6 evolution is permitted",
+    "schema-compatible 0.2.6 to 0.2.7 evolution is permitted",
   );
   for (const invalidVersion of ["banana", "1", "01.2.3", "1.02.3", "1.2.03", "1.2.3-01"]) {
     const invalidVersionManifest = cloneManifest();

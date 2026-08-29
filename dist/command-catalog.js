@@ -1,15 +1,14 @@
-import { randomUUID } from "node:crypto";
-import { isPlainRecord } from "./canonical.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { ApnError, asApnError } from "./errors.js";
+import { usageFailureEnvelope } from "./command-discovery-output.js";
+import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
+import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
+export { renderHelp, renderReadmeCommandReference };
+export { assertCompatibleManifestEvolution, validateCommandManifest };
 const noDefault = { kind: "none" };
 const defaultProfile = { kind: "literal", value: "default" };
-const scalarTypes = new Set(["string", "profile", "https_url", "address", "decimal_usdc", "atomic_usdc", "wei", "operation_id", "idempotency_key", "integer_seconds"]);
-const effectClasses = new Set(["none", "local_read", "network_read", "local_write", "payment_prepare", "payment_submit", "recovery"]);
-const approvalClasses = new Set(["none", "foreground_tty", "prior_profile_policy", "prior_operation_authorization"]);
-const sensitivities = new Set(["public", "operator_input", "sensitive_input"]);
-const protectedExampleContent = /private[-_ ]?key|mnemonic|wrapping[-_ ]?secret|raw[-_ ]?signed[-_ ]?transaction|payment[-_ ]?header|reusable[-_ ]?authorization/iu;
 const completedStates = { terminal: ["completed", "classified_failure"], non_terminal: [] };
+const mcpServerStates = { terminal: ["server_closed", "classified_failure"], non_terminal: ["serving"] };
 const directStates = {
     terminal: ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_proven_superseded"],
     non_terminal: ["awaiting_approval", "signed_not_submitted", "submitted_pending", "unknown_finality"],
@@ -38,6 +37,7 @@ const rpcRequired = option("--rpc-url", "https_url", true, noDefault, [
 ], "operator_input");
 const operationRequired = option("--operation", "operation_id", true, noDefault, ["64_lowercase_hex_characters"], "public");
 export const COMMAND_GROUPS = [
+    { path: ["mcp"], summary: "Serve and discover the local APN MCP transport.", kind: "group" },
     { path: ["doctor"], summary: "Inspect local APN prerequisites.", kind: "group" },
     { path: ["wallet"], summary: "Create, inspect and configure the disposable wallet.", kind: "group" },
     { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
@@ -50,6 +50,8 @@ export const COMMAND_GROUPS = [
 ];
 export const COMMANDS = [
     command(["--version"], "apn --version", "Report installed APN and CLI contract versions.", [], "none", "Reads immutable build metadata only.", "none", "Never.", completedStates, [], ["apn --version"]),
+    command(["mcp", "serve"], "apn mcp serve", "Serve the selected APN commands over local MCP stdio.", [], "none", "Starts only a local child-process stdio session.", "none", "Never.", mcpServerStates, [], ["apn mcp serve"], "text"),
+    command(["mcp", "config"], "apn mcp config", "Print the provider-neutral APN MCP launch descriptor.", [], "none", "Returns immutable launch metadata without reading or changing client configuration.", "none", "Never.", completedStates, [], ["apn mcp config"], "text"),
     command(["doctor", "keychain"], "apn doctor keychain", "Check whether the ordinary login Keychain command path is usable.", [], "local_read", "Reads Keychain availability without creating wallet material.", "none", "Never.", completedStates, [], ["apn doctor keychain"]),
     command(["wallet", "ensure"], "apn wallet ensure [--profile <profile>]", "Create or reuse one encrypted disposable wallet.", [profileOptional], "local_write", "May create ~/.apn state and one Keychain wrapping secret.", "none", "Wallet creation itself is non-interactive.", completedStates, [], ["apn wallet ensure --profile default"]),
     command(["wallet", "status"], "apn wallet status [--profile <profile>]", "Read wallet presence and public identity.", [profileOptional], "local_read", "Returns absent without creating state or accessing Keychain material.", "none", "Never.", completedStates, [], ["apn wallet status --profile default"]),
@@ -137,12 +139,25 @@ export function parseCatalogArgv(argv) {
         if (token === undefined || value === undefined || !token.startsWith("--") || value.startsWith("--")) {
             throw new ApnError("APN_INVALID_INPUT", "Options must use complete `--name value` pairs.");
         }
-        const optionDefinition = definition.options.find((candidate) => candidate.name === token);
-        if (optionDefinition === undefined || token in values) {
+        if (token in values) {
             throw new ApnError("APN_INVALID_INPUT", "Command contains an unknown or duplicate option.");
         }
-        validateOptionValue(optionDefinition, value);
         values[token] = value;
+    }
+    return parseCatalogInput(definition, values);
+}
+export function parseCatalogInput(definition, input) {
+    const values = {};
+    for (const [name, rawValue] of Object.entries(input)) {
+        const optionDefinition = definition.options.find((candidate) => candidate.name === name);
+        if (optionDefinition === undefined) {
+            throw new ApnError("APN_INVALID_INPUT", "Command contains an unknown or duplicate option.");
+        }
+        if (typeof rawValue !== "string") {
+            throw new ApnError("APN_INVALID_INPUT", `${optionDefinition.name} must be a string.`);
+        }
+        validateOptionValue(optionDefinition, rawValue);
+        values[name] = rawValue;
     }
     for (const optionDefinition of definition.options) {
         if (values[optionDefinition.name] !== undefined)
@@ -201,228 +216,6 @@ export function catalogNextActions(argv) {
     const candidate = argv[0] === "help" ? argv.slice(1) : argv.at(-1) === "--help" ? argv.slice(0, -1) : argv;
     const prefix = longestCatalogPrefix(candidate);
     return prefix === undefined ? ["apn help"] : [`apn help ${prefix.path.join(" ")}`, "apn help"];
-}
-export function renderReadmeCommandReference() {
-    return COMMANDS.map((definition) => definition.synopsis).join("\n");
-}
-export function validateCommandManifest(value) {
-    validateCommandManifestShape(value, PRODUCT_VERSION);
-}
-function validateCommandManifestShape(value, installedProductVersion) {
-    if (!isPlainRecord(value) || !hasRequiredKeys(value, [
-        "schema_version", "product", "product_version", "cli_envelope_version", "compatibility", "discovery", "groups", "commands",
-    ]))
-        manifestInvalid();
-    if (value.schema_version !== "apn.command-manifest.v1" || value.product !== "agent-payment-node" ||
-        !isSemanticVersion(value.product_version) ||
-        (installedProductVersion !== undefined && value.product_version !== installedProductVersion) ||
-        value.cli_envelope_version !== OUTPUT_VERSION)
-        manifestInvalid();
-    const compatibility = recordWithKeys(value.compatibility, ["additive_optional_within_version", "breaking_change_requires_new_schema"]);
-    if (compatibility.additive_optional_within_version !== true || !sameStrings(compatibility.breaking_change_requires_new_schema, [
-        "field_remove_or_rename", "meaning_or_unit_change", "optional_to_required", "enum_contraction",
-    ]))
-        manifestInvalid();
-    const discovery = recordWithKeys(value.discovery, ["root_text_forms", "scoped_text_forms", "machine_form", "options"]);
-    if (!sameStrings(discovery.root_text_forms, ["apn --help", "apn help"]) ||
-        !sameStrings(discovery.scoped_text_forms, ["apn <path...> --help", "apn help <path...>"]) ||
-        discovery.machine_form !== "apn help --json" || !Array.isArray(discovery.options) || discovery.options.length !== 2)
-        manifestInvalid();
-    for (const [index, expected] of [[0, ["--help", "flag", "root_group_or_command"]], [1, ["--json", "flag", "root_help_only"]]]) {
-        const item = recordWithKeys(discovery.options[index], ["name", "type", "scope"]);
-        if (item.name !== expected[0] || item.type !== expected[1] || item.scope !== expected[2])
-            manifestInvalid();
-    }
-    if (!Array.isArray(value.groups) || !Array.isArray(value.commands) || value.groups.length === 0 || value.commands.length === 0)
-        manifestInvalid();
-    const knownPaths = new Set();
-    for (const rawGroup of value.groups) {
-        const group = recordWithKeys(rawGroup, ["path", "summary", "kind"]);
-        const path = manifestPath(group.path);
-        if (group.kind !== "group" || !nonempty(group.summary) || knownPaths.has(path))
-            manifestInvalid();
-        knownPaths.add(path);
-    }
-    const commandPaths = new Set();
-    const recoveryTargets = [];
-    for (const rawCommand of value.commands) {
-        const commandValue = recordWithKeys(rawCommand, [
-            "path", "synopsis", "summary", "options", "effect", "approval", "output", "states", "recovery", "examples",
-        ]);
-        const path = manifestPath(commandValue.path);
-        if (knownPaths.has(path) || commandPaths.has(path) || !nonempty(commandValue.synopsis) || !nonempty(commandValue.summary))
-            manifestInvalid();
-        commandPaths.add(path);
-        if (!Array.isArray(commandValue.options))
-            manifestInvalid();
-        const optionNames = new Set();
-        for (const rawOption of commandValue.options) {
-            const manifestOption = recordWithKeys(rawOption, ["name", "type", "required", "default", "constraints", "sensitivity"]);
-            if (typeof manifestOption.name !== "string" || !manifestOption.name.startsWith("--") || optionNames.has(manifestOption.name) ||
-                !scalarTypes.has(manifestOption.type) || typeof manifestOption.required !== "boolean" ||
-                !Array.isArray(manifestOption.constraints) || !manifestOption.constraints.every(nonempty) ||
-                !sensitivities.has(manifestOption.sensitivity))
-                manifestInvalid();
-            optionNames.add(manifestOption.name);
-            const defaultValue = isPlainRecord(manifestOption.default) ? manifestOption.default : manifestInvalid();
-            if (defaultValue.kind === "none") {
-                if (!hasRequiredKeys(defaultValue, ["kind"]))
-                    manifestInvalid();
-            }
-            else if (defaultValue.kind === "literal") {
-                if (!hasRequiredKeys(defaultValue, ["kind", "value"]) || !nonempty(defaultValue.value) || manifestOption.required)
-                    manifestInvalid();
-            }
-            else
-                manifestInvalid();
-        }
-        const effect = recordWithKeys(commandValue.effect, ["class", "summary"]);
-        const approval = recordWithKeys(commandValue.approval, ["class", "when"]);
-        if (!effectClasses.has(effect.class) || !nonempty(effect.summary) || !approvalClasses.has(approval.class) || !nonempty(approval.when))
-            manifestInvalid();
-        const output = recordWithKeys(commandValue.output, ["contract", "success_exit", "failure_exit", "success", "failures"]);
-        if (output.contract !== "apn.cli.v1" || output.success_exit !== 0 || output.failure_exit !== 1 || !nonempty(output.success) || !Array.isArray(output.failures) || !output.failures.every(nonempty))
-            manifestInvalid();
-        const states = recordWithKeys(commandValue.states, ["terminal", "non_terminal"]);
-        if (!uniqueStrings(states.terminal) || !uniqueStrings(states.non_terminal))
-            manifestInvalid();
-        if (!Array.isArray(commandValue.recovery))
-            manifestInvalid();
-        for (const rawRecovery of commandValue.recovery) {
-            const recovery = recordWithKeys(rawRecovery, ["command_path", "when"]);
-            recoveryTargets.push(manifestPath(recovery.command_path));
-            if (!nonempty(recovery.when))
-                manifestInvalid();
-        }
-        if (!Array.isArray(commandValue.examples) || commandValue.examples.length === 0 || !commandValue.examples.every(nonempty))
-            manifestInvalid();
-        if (commandValue.examples.some((example) => /0x[0-9a-fA-F]{40}/u.test(String(example)) || protectedExampleContent.test(String(example))))
-            manifestInvalid();
-    }
-    if (recoveryTargets.some((target) => !commandPaths.has(target)))
-        manifestInvalid();
-}
-export function assertCompatibleManifestEvolution(previous, next) {
-    validateCommandManifestShape(previous);
-    validateCommandManifestShape(next);
-    const before = previous;
-    const after = next;
-    const afterGroups = new Map(after.groups.map((group) => [manifestPath(group.path), group]));
-    for (const group of before.groups) {
-        const nextGroup = afterGroups.get(manifestPath(group.path));
-        if (nextGroup === undefined || group.kind !== nextGroup.kind || group.summary !== nextGroup.summary)
-            manifestInvalid();
-    }
-    const afterCommands = new Map(after.commands.map((commandValue) => [manifestPath(commandValue.path), commandValue]));
-    for (const previousCommand of before.commands) {
-        const nextCommand = afterCommands.get(manifestPath(previousCommand.path));
-        if (nextCommand === undefined)
-            manifestInvalid();
-        if (JSON.stringify(commandSemantics(previousCommand)) !== JSON.stringify(commandSemantics(nextCommand)))
-            manifestInvalid();
-        const previousOptions = previousCommand.options;
-        const nextOptions = new Map(nextCommand.options.map((item) => [String(item.name), item]));
-        for (const previousOption of previousOptions) {
-            const nextOption = nextOptions.get(String(previousOption.name));
-            if (nextOption === undefined || JSON.stringify(optionSemantics(previousOption)) !== JSON.stringify(optionSemantics(nextOption)))
-                manifestInvalid();
-        }
-        for (const nextOption of nextOptions.values()) {
-            if (!previousOptions.some((item) => item.name === nextOption.name) && nextOption.required === true)
-                manifestInvalid();
-        }
-    }
-    for (const requiredMarker of before.compatibility.breaking_change_requires_new_schema) {
-        if (!after.compatibility.breaking_change_requires_new_schema.includes(requiredMarker))
-            manifestInvalid();
-    }
-}
-export function renderHelp(path) {
-    if (path.length === 0)
-        return renderRootHelp();
-    const group = COMMAND_GROUPS.find((candidate) => samePath(candidate.path, path));
-    if (group !== undefined)
-        return renderGroupHelp(group);
-    const commandDefinition = COMMANDS.find((candidate) => samePath(candidate.path, path));
-    if (commandDefinition !== undefined)
-        return renderCommandHelp(commandDefinition);
-    throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unknown APN help path.");
-}
-function renderRootHelp() {
-    const lines = [
-        `Agent Payment Node ${PRODUCT_VERSION}`,
-        "Local-first payments for AI agents.",
-        "",
-        "Usage:",
-        "  apn <command> [options]",
-        "",
-        "Top-level groups:",
-    ];
-    for (const group of COMMAND_GROUPS.filter((candidate) => candidate.path.length === 1)) {
-        lines.push(`  ${group.path.join(" ").padEnd(12)} ${group.summary}`);
-    }
-    lines.push("", "Top-level commands:");
-    for (const commandDefinition of COMMANDS.filter((candidate) => candidate.path.length === 1)) {
-        lines.push(`  ${commandDefinition.synopsis.padEnd(24)} ${commandDefinition.summary}`);
-    }
-    lines.push("", "Discovery:", "  apn help <path...>", "  apn <path...> --help", "  apn help --json    Exact apn.command-manifest.v1 contract");
-    return lines.join("\n");
-}
-function renderGroupHelp(group) {
-    const lines = [group.summary, "", "Usage:", `  apn ${group.path.join(" ")} <command> [options]`, "", "Subgroups:"];
-    const childGroups = COMMAND_GROUPS.filter((candidate) => candidate.path.length === group.path.length + 1 && hasPrefix(candidate.path, group.path));
-    const childCommands = COMMANDS.filter((candidate) => candidate.path.length === group.path.length + 1 && hasPrefix(candidate.path, group.path));
-    if (childGroups.length === 0)
-        lines.push("  (none)");
-    for (const child of childGroups)
-        lines.push(`  apn ${child.path.join(" ")} <command> [options] — ${child.summary}`);
-    lines.push("", "Commands:");
-    if (childCommands.length === 0)
-        lines.push("  (none)");
-    for (const child of childCommands)
-        lines.push(`  ${child.synopsis} — ${child.summary}`);
-    lines.push("", `Machine contract: apn help --json`, `Detailed help: apn help ${group.path.join(" ")} <child>`);
-    return lines.join("\n");
-}
-function renderCommandHelp(definition) {
-    const lines = [
-        definition.summary,
-        "",
-        "Usage:",
-        `  ${definition.synopsis}`,
-        "",
-        "Options:",
-    ];
-    if (definition.options.length === 0)
-        lines.push("  (none)");
-    for (const commandOption of definition.options) {
-        const required = commandOption.required ? "required" : "optional";
-        const defaultValue = commandOption.default.kind === "literal" ? `; default=${commandOption.default.value}` : "";
-        lines.push(`  ${commandOption.name} <${commandOption.type}>  ${required}${defaultValue}; ${commandOption.constraints.join(", ")}`);
-    }
-    lines.push("", `Effect: ${definition.effect.class} — ${definition.effect.summary}`, `Approval: ${definition.approval.class} — ${definition.approval.when}`, `Output: ${definition.output.contract}; success exit ${definition.output.success_exit}; failure exit ${definition.output.failure_exit}`, `Terminal states: ${definition.states.terminal.length === 0 ? "(none)" : definition.states.terminal.join(", ")}`, `Non-terminal states: ${definition.states.non_terminal.length === 0 ? "(none)" : definition.states.non_terminal.join(", ")}`, "Recovery:");
-    if (definition.recovery.length === 0)
-        lines.push("  (none)");
-    for (const recovery of definition.recovery)
-        lines.push(`  apn ${recovery.command_path.join(" ")} — ${recovery.when}`);
-    lines.push("", "Examples:");
-    for (const example of definition.examples)
-        lines.push(`  ${example}`);
-    return lines.join("\n");
-}
-function usageFailureEnvelope(error, nextActions) {
-    return {
-        version: OUTPUT_VERSION,
-        request_id: randomUUID(),
-        command: "invalid",
-        ok: false,
-        proof_class: "classified_failure",
-        data: null,
-        operation: null,
-        receipt: null,
-        error,
-        next_actions: nextActions,
-    };
 }
 function longestCommandPrefix(argv) {
     return COMMANDS.reduce((selected, candidate) => {
@@ -516,7 +309,7 @@ function validateCrossOptionConstraints(definition, values) {
 function invalidDiscovery() {
     throw new ApnError("APN_INVALID_INPUT", "Discovery options are misplaced, duplicated, incomplete or unknown.");
 }
-function command(path, synopsis, summary, options, effectClass, effectSummary, approvalClass, approvalWhen, states, recovery, examples) {
+function command(path, synopsis, summary, options, effectClass, effectSummary, approvalClass, approvalWhen, states, recovery, examples, outputContract = "apn.cli.v1") {
     return {
         path,
         synopsis,
@@ -525,11 +318,11 @@ function command(path, synopsis, summary, options, effectClass, effectSummary, a
         effect: { class: effectClass, summary: effectSummary },
         approval: { class: approvalClass, when: approvalWhen },
         output: {
-            contract: "apn.cli.v1",
+            contract: outputContract,
             success_exit: 0,
             failure_exit: 1,
-            success: "One successful apn.cli.v1 envelope.",
-            failures: ["One classified-failure apn.cli.v1 envelope."],
+            success: outputContract === "apn.cli.v1" ? "One successful apn.cli.v1 envelope." : "The command-specific raw transport output.",
+            failures: [outputContract === "apn.cli.v1" ? "One classified-failure apn.cli.v1 envelope." : "A classified command failure."],
         },
         states,
         recovery,
@@ -544,67 +337,5 @@ function hasPrefix(value, prefix) {
 }
 function samePath(left, right) {
     return left.length === right.length && left.every((token, index) => right[index] === token);
-}
-function recordWithKeys(value, keys) {
-    if (!isPlainRecord(value) || !hasRequiredKeys(value, keys))
-        return manifestInvalid();
-    return value;
-}
-function hasRequiredKeys(value, keys) {
-    return keys.every((key) => Object.hasOwn(value, key));
-}
-function commandSemantics(value) {
-    const effect = value.effect;
-    const approval = value.approval;
-    const output = value.output;
-    const states = value.states;
-    const recovery = value.recovery;
-    return {
-        synopsis: value.synopsis,
-        summary: value.summary,
-        effect: { class: effect.class, summary: effect.summary },
-        approval: { class: approval.class, when: approval.when },
-        output: {
-            contract: output.contract,
-            success_exit: output.success_exit,
-            failure_exit: output.failure_exit,
-            success: output.success,
-            failures: output.failures,
-        },
-        states: { terminal: states.terminal, non_terminal: states.non_terminal },
-        recovery: recovery.map((item) => ({ command_path: item.command_path, when: item.when })),
-        examples: value.examples,
-    };
-}
-function optionSemantics(value) {
-    const defaultValue = value.default;
-    return {
-        name: value.name,
-        type: value.type,
-        required: value.required,
-        default: defaultValue.kind === "literal" ? { kind: defaultValue.kind, value: defaultValue.value } : { kind: defaultValue.kind },
-        constraints: value.constraints,
-        sensitivity: value.sensitivity,
-    };
-}
-function manifestPath(value) {
-    if (!Array.isArray(value) || value.length === 0 || !value.every(nonempty))
-        return manifestInvalid();
-    return value.join(" ");
-}
-function uniqueStrings(value) {
-    return Array.isArray(value) && value.every(nonempty) && new Set(value).size === value.length;
-}
-function sameStrings(value, expected) {
-    return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index]);
-}
-function nonempty(value) {
-    return typeof value === "string" && value.length > 0;
-}
-function isSemanticVersion(value) {
-    return typeof value === "string" && /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.test(value);
-}
-function manifestInvalid() {
-    throw new ApnError("APN_INTERNAL", "Command manifest validation failed.");
 }
 //# sourceMappingURL=command-catalog.js.map
