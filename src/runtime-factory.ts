@@ -13,6 +13,15 @@ import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
 import { HttpsX402Http } from "./x402-http.js";
+import { AWAL_PROVIDER_ID, AwalProcessAdapter } from "./awal-process-adapter.js";
+import { TtyForegroundAuthentication } from "./foreground-auth.js";
+import type {
+  ForegroundAuthenticationPort,
+  ProviderProfileRepositoryPort,
+  ProviderRegistryPort,
+} from "./provider-ports.js";
+import { ProviderRegistry } from "./provider-registry.js";
+import { StateProfileRepository } from "./profile-repository.js";
 
 export interface RuntimeFactoryOptions {
   readonly stateRoot?: string;
@@ -26,6 +35,9 @@ export interface RuntimeFactoryOptions {
   readonly clock?: ClockPort;
   readonly ids?: IdPort;
   readonly wait?: WaitPort;
+  readonly profileRepository?: ProviderProfileRepositoryPort;
+  readonly providerRegistry?: ProviderRegistryPort;
+  readonly foregroundAuthentication?: ForegroundAuthenticationPort;
 }
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
@@ -44,8 +56,19 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     : undefined;
   const rpc = options.rpc ?? (bound.rpcUrl === undefined ? undefined : new HttpsBaseRpc(bound.rpcUrl));
   const http = options.http ?? (needsHttp(bound.request.command) ? new HttpsX402Http() : undefined);
+  const profileRepository = options.profileRepository ?? new StateProfileRepository(state);
+  const providerRegistry = options.providerRegistry ?? new ProviderRegistry([{
+    provider_id: AWAL_PROVIDER_ID,
+    create: () => new AwalProcessAdapter().bundle(),
+  }]);
+  const foregroundAuthentication = options.foregroundAuthentication ?? (
+    bound.request.command === "wallet.connect" ? new TtyForegroundAuthentication() : undefined
+  );
   return new ApnCore({
     state,
+    profileRepository,
+    providerRegistry,
+    ...(foregroundAuthentication === undefined ? {} : { foregroundAuthentication }),
     ...(native === undefined ? {} : { native }),
     ...(bound.request.command === "doctor.keychain" ? { keychainProbe: wrappingSecret } : {}),
     ...(rpc === undefined ? {} : { rpc }),

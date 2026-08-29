@@ -5,6 +5,7 @@ export declare class WalletService {
     constructor(context: RuntimeContext);
     doctorKeychain(): Promise<unknown>;
     ensure(profileInput: string): Promise<unknown>;
+    private materializeLocalProfile;
     status(profileInput: string): Promise<unknown>;
     private initializedStatus;
     balance(profileInput: string): Promise<unknown>;

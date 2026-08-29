@@ -37,6 +37,16 @@ function bindParsedCatalog(parsed) {
         case "--version": return { request: { command: "version" } };
         case "doctor keychain": return { request: { command: "doctor.keychain" } };
         case "wallet ensure": return { request: { command: "wallet.ensure", profile: value(options, "--profile") } };
+        case "wallet connect": return {
+            request: {
+                command: "wallet.connect",
+                profile: value(options, "--profile"),
+                providerId: value(options, "--provider"),
+                ...(options["--expected-revision"] === undefined
+                    ? {}
+                    : { expectedRevision: Number(options["--expected-revision"]) }),
+            },
+        };
         case "wallet status": return { request: { command: "wallet.status", profile: value(options, "--profile") } };
         case "wallet balance": return {
             request: { command: "wallet.balance", profile: value(options, "--profile") },
