@@ -4,6 +4,7 @@ import { formatAtomic } from "./money.js";
 import { sealWallet } from "./state.js";
 import { assertWalletMatches, canonicalProfile, parseWalletDescribe, parseWalletEnsure, publicProvenance, publicWallet, validateBalance, } from "./wallet-policy.js";
 import { fundingPosture, policyBinding, publicProfilePolicy } from "./profile-policy.js";
+import { projectLegacyLocalProfile } from "./provider-profile.js";
 export class WalletService {
     context;
     constructor(context) {
@@ -25,6 +26,10 @@ export class WalletService {
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+            const providerProfile = await this.context.profileRepository?.load(profileHash) ?? null;
+            if (providerProfile !== null && providerProfile.provider_id !== "local") {
+                throw new ApnError("APN_PROFILE_DRIFT", "The APN profile is already bound to a different wallet provider.");
+            }
             const stored = await this.context.state.loadWallet(profileHash);
             const native = this.context.requireNative();
             const result = stored === null
@@ -35,6 +40,7 @@ export class WalletService {
             }
             if (stored !== null) {
                 assertWalletMatches(stored, result);
+                await this.materializeLocalProfile(stored, providerProfile);
                 return publicWallet(stored, "ready");
             }
             const wallet = sealWallet({
@@ -46,8 +52,20 @@ export class WalletService {
                 bindingHash: result.bindingHash,
             });
             await this.context.state.writeWallet(wallet);
+            await this.materializeLocalProfile(wallet, providerProfile);
             return publicWallet(wallet, "ready");
         });
+    }
+    async materializeLocalProfile(wallet, existing) {
+        const projected = projectLegacyLocalProfile(wallet);
+        if (existing === null) {
+            await this.context.profileRepository?.save(projected);
+            return;
+        }
+        if (existing.provider_id !== "local" || existing.public_address.toLowerCase() !== wallet.address.toLowerCase() ||
+            existing.account_binding_hash !== wallet.bindingHash || existing.capability_hash !== projected.capability_hash) {
+            throw new ApnError("APN_STATE_CORRUPT", "Local provider profile projection does not match legacy wallet state.");
+        }
     }
     async status(profileInput) {
         const profile = canonicalProfile(profileInput);

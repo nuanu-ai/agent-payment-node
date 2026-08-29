@@ -13,6 +13,9 @@ export class RuntimeContext {
     ids;
     policy;
     wait;
+    profileRepository;
+    providerRegistry;
+    foregroundAuthentication;
     initialized;
     constructor(dependencies) {
         this.state = dependencies.state;
@@ -29,6 +32,12 @@ export class RuntimeContext {
         if (dependencies.policy !== undefined)
             this.policy = dependencies.policy;
         this.wait = dependencies.wait ?? new ProcessWaitPort();
+        if (dependencies.profileRepository !== undefined)
+            this.profileRepository = dependencies.profileRepository;
+        if (dependencies.providerRegistry !== undefined)
+            this.providerRegistry = dependencies.providerRegistry;
+        if (dependencies.foregroundAuthentication !== undefined)
+            this.foregroundAuthentication = dependencies.foregroundAuthentication;
     }
     async ready() {
         this.initialized ??= this.state.initialize();
@@ -63,6 +72,22 @@ export class RuntimeContext {
             throw new ApnError("APN_WALLET_POLICY_REQUIRED", "This command requires the encrypted profile policy store.");
         }
         return this.policy;
+    }
+    requireProfileRepository() {
+        if (this.profileRepository === undefined)
+            throw new ApnError("APN_INTERNAL", "Provider profile repository is unavailable.");
+        return this.profileRepository;
+    }
+    requireProviderRegistry() {
+        if (this.providerRegistry === undefined)
+            throw new ApnError("APN_INTERNAL", "Provider registry is unavailable.");
+        return this.providerRegistry;
+    }
+    requireForegroundAuthentication() {
+        if (this.foregroundAuthentication === undefined) {
+            throw new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "A foreground terminal is required for wallet provider authentication.");
+        }
+        return this.foregroundAuthentication;
     }
     nativeRequest(operation, payload) {
         return { version: NATIVE_IPC_VERSION, requestId: this.ids.next(), operation, payload };

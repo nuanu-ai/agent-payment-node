@@ -7,6 +7,11 @@ export type CommandRequest = {
     readonly command: "wallet.ensure";
     readonly profile: string;
 } | {
+    readonly command: "wallet.connect";
+    readonly profile: string;
+    readonly providerId: string;
+    readonly expectedRevision?: number;
+} | {
     readonly command: "wallet.status";
     readonly profile: string;
 } | {

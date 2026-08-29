@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.2.9 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.3.0 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -43,7 +43,7 @@ apn mcp config
 apn mcp serve
 ```
 
-The server exposes exactly fifteen catalog-derived tools: version, Keychain
+The server exposes exactly sixteen catalog-derived tools: version, Keychain
 doctor, wallet and wallet-policy operations plus x402 inspect/prepare/approve,
 direct-transfer prepare/foreground handoff, operation status/resume and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
@@ -55,6 +55,18 @@ apn wallet ensure --profile default
 apn wallet status --profile default
 apn wallet balance --profile default --rpc-url https://rpc.example
 ```
+
+To create or reuse a provider-managed profile, use the generic foreground path:
+
+```sh
+apn wallet connect --profile provider-one --provider coinbase-agentic-wallet
+```
+
+The CLI collects provider authentication only in the foreground. MCP returns
+the exact CLI handoff before provider process access. The documented provider
+client requires the email and one-time code in short-lived child argv; this is
+a residual local same-user process-table risk, not OS-level argv secrecy. APN
+does not log, persist or return those argv values or raw authentication output.
 
 `wallet ensure` creates or reuses one stable address. Fund only that public
 address, manually, with a small amount of Base ETH and Base USDC. APN never
@@ -150,6 +162,7 @@ apn mcp serve
 apn mcp config
 apn doctor keychain
 apn wallet ensure [--profile <profile>]
+apn wallet connect --profile <profile> --provider <provider-id> [--expected-revision <positive-integer>]
 apn wallet status [--profile <profile>]
 apn wallet balance [--profile <profile>] --rpc-url <https-url>
 apn wallet policy show --profile <profile>

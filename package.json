@@ -1,6 +1,6 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
   "private": false,
@@ -42,6 +42,7 @@
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
     "@x402/core": "2.23.0",
+    "awal": "2.12.1",
     "viem": "2.55.19",
     "zod": "4.4.3"
   },

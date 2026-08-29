@@ -35,6 +35,16 @@ export function failureEnvelope(command, requestId, error) {
 }
 function nextActions(error) {
     switch (error.code) {
+        case "APN_FOREGROUND_AUTH_REQUIRED": {
+            const handoff = error.details?.cli_handoff;
+            return typeof handoff === "string" ? [handoff] : [];
+        }
+        case "APN_PROFILE_DRIFT": return ["Run the foreground wallet connect handoff with --expected-revision set to the current revision."];
+        case "APN_PROVIDER_SESSION_REQUIRED": return ["Run the foreground wallet connect handoff again."];
+        case "APN_PROVIDER_UNAVAILABLE": return ["Verify the exact pinned provider client, then retry foreground wallet connect."];
+        case "APN_PROVIDER_PROTOCOL": return ["Stop and verify the pinned provider client before retrying."];
+        case "APN_PROVIDER_EFFECT_UNAVAILABLE": return ["Use a local profile for payment effects in this APN version."];
+        case "APN_PROFILE_REVISION_CONFLICT": return ["Read current wallet status, then retry foreground connect with the exact current revision."];
         case "APN_FOREGROUND_APPROVAL_REQUIRED": {
             const handoff = error.details?.cli_handoff;
             return typeof handoff === "string" ? [handoff] : [];
