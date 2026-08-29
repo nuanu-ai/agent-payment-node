@@ -111,7 +111,6 @@ export function publicOperation(operation) {
     return {
         operation_id: operation.operationId,
         idempotency_hash: operation.idempotencyHash,
-        fingerprint: operation.fingerprint,
         profile: operation.profile,
         state: operation.state,
         terminal: operation.terminal,

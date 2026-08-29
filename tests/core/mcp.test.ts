@@ -15,7 +15,7 @@ import { projectMcpTools } from "../../src/mcp-projection.js";
 import { createMcpServer, type McpRuntimeOptions } from "../../src/mcp-server.js";
 import type { NativePort, NativeRequest } from "../../src/ports.js";
 import type { ProfilePolicyApprovalIntent, ProfilePolicyApprovalPort } from "../../src/policy-approval.js";
-import { TestNative, TestRpc, temporaryState } from "./helpers.js";
+import { RECIPIENT, TestNative, TestRpc, exactReceipt, temporaryState } from "./helpers.js";
 
 const TOOL_NAMES = [
   "apn_version",
@@ -25,6 +25,14 @@ const TOOL_NAMES = [
   "apn_wallet_balance",
   "apn_wallet_policy_show",
   "apn_wallet_policy_set",
+  "apn_x402_inspect",
+  "apn_x402_fetch_prepare",
+  "apn_x402_fetch_approve",
+  "apn_pay_transfer_prepare",
+  "apn_pay_transfer_approve",
+  "apn_operation_status",
+  "apn_operation_resume",
+  "apn_receipt_get",
 ] as const;
 const MASTER = Buffer.from("55".repeat(32), "hex");
 
@@ -38,7 +46,7 @@ class RecordingPolicyApproval implements ProfilePolicyApprovalPort {
   async approve(intent: ProfilePolicyApprovalIntent): Promise<void> { this.intents.push(intent); }
 }
 
-test("official MCP client proves production stdio descriptor, seven tools, application failures and clean close", async () => {
+test("official MCP client proves production stdio descriptor, fifteen tools, application failures and clean close", async () => {
   const executable = process.env.APN_INSTALLED_BIN ?? resolve("bin/apn.js");
   const config = spawnSync(executable, ["mcp", "config"], { cwd: resolve("."), encoding: "utf8" });
   assert.equal(config.status, 0, config.stderr);
@@ -86,6 +94,14 @@ test("official MCP client proves production stdio descriptor, seven tools, appli
         required: ["profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"],
         defaults: {},
       },
+      { name: "apn_x402_inspect", properties: ["url"], required: ["url"], defaults: {} },
+      { name: "apn_x402_fetch_prepare", properties: ["profile", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
+      { name: "apn_x402_fetch_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
+      { name: "apn_pay_transfer_prepare", properties: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], required: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], defaults: {} },
+      { name: "apn_pay_transfer_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
+      { name: "apn_operation_status", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_operation_resume", properties: ["operation", "rpc_url", "wait_seconds"], required: ["operation", "rpc_url"], defaults: {} },
+      { name: "apn_receipt_get", properties: ["operation"], required: ["operation"], defaults: {} },
     ]);
     const listedBytes = JSON.stringify(listed);
     assert.equal(listedBytes.includes(MASTER.toString("hex")), false);
@@ -99,6 +115,12 @@ test("official MCP client proves production stdio descriptor, seven tools, appli
       ["apn_wallet_status", { unknown: "value" }],
       ["apn_wallet_balance", {}],
       ["apn_wallet_status", { profile: 17 }],
+      ["apn_x402_inspect", { url: "http://seller.example" }],
+      ["apn_x402_fetch_prepare", { profile: "default" }],
+      ["apn_x402_fetch_approve", { operation: "A".repeat(64), rpc_url: "https://rpc.example" }],
+      ["apn_pay_transfer_prepare", { profile: "default", idempotency_key: "payment-001", to: "not-an-address", amount_usdc: "1.0", rpc_url: "https://rpc.example" }],
+      ["apn_operation_resume", { operation: "a".repeat(64), rpc_url: "https://rpc.example", wait_seconds: 1 }],
+      ["apn_receipt_get", { operation: "a".repeat(64), extra: "rejected" }],
       ["apn_wallet_policy_set", {
         profile: "default",
         max_balance_usdc_atomic: "100",
@@ -126,7 +148,7 @@ test("manifest projection is exact, strict and rejects missing, colliding or uns
     typeof schema === "object" && schema !== null && !Array.isArray(schema) && schema.type === "string"
   ))), true);
   assert.equal(projected.some((tool) => tool.name.includes("mcp")), false);
-  assert.equal(projected.some((tool) => /x402|payment|transfer|operation|receipt|control/iu.test(tool.name)), false);
+  assert.equal(projected.some((tool) => tool.name.includes("mcp") || tool.name.includes("control")), false);
 
   const absent = cloneManifest();
   absent.commands = absent.commands.filter((command) => command.path.join(" ") !== "wallet status");
@@ -146,7 +168,7 @@ test("manifest projection is exact, strict and rejects missing, colliding or uns
 
   const unsupported = cloneManifest();
   const status = unsupported.commands.find((command) => command.path.join(" ") === "wallet status")!;
-  status.options[0]!.type = "address";
+  status.options[0]!.type = "string";
   assert.throws(() => projectMcpTools(unsupported));
 });
 
@@ -220,6 +242,84 @@ test("MCP runtime preserves wallet lifecycle, reads, balance and one core execut
   } finally {
     await restarted.close();
   }
+});
+
+test("direct MCP approval returns the exact foreground handoff before custody and ignores hostile native injection", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const rpc = new TestRpc();
+  const setupNative = new TestNative();
+  assert.equal((await runCli(["wallet", "ensure"], {}, {
+    stateRoot: temporary.root, native: setupNative,
+  })).ok, true);
+  let hostileNativeCalls = 0;
+  let hostileApprovalCalls = 0;
+  let wrappingLoads = 0;
+  let wrappingCreates = 0;
+  const connection = await connectMcp({
+    stateRoot: temporary.root,
+    rpc,
+    native: { request: async () => { hostileNativeCalls += 1; throw new Error("HOSTILE_NATIVE_CANARY"); } },
+    approval: { approve: async () => { hostileApprovalCalls += 1; throw new Error("HOSTILE_TTY_CANARY"); } },
+    wrappingSecret: {
+      load: async () => { wrappingLoads += 1; throw new Error("KEYCHAIN_LOAD_CANARY"); },
+      create: async () => { wrappingCreates += 1; throw new Error("KEYCHAIN_CREATE_CANARY"); },
+    },
+  });
+  t.after(connection.close);
+  const prepared = decodeResult(await connection.client.callTool({
+    name: "apn_pay_transfer_prepare",
+    arguments: {
+      profile: "default", idempotency_key: "mcp-direct-001", to: RECIPIENT,
+      amount_usdc: "1.25", rpc_url: "https://rpc.example/",
+    },
+  }));
+  const operation = prepared.operation as {
+    readonly operation_id?: unknown; readonly state?: unknown; readonly fingerprint?: unknown;
+  };
+  assert.equal(operation.state, "awaiting_approval");
+  assert.equal(typeof operation.operation_id, "string");
+  assert.equal(operation.fingerprint, undefined);
+  const operationId = operation.operation_id as string;
+  assert.equal(hostileNativeCalls, 0);
+  assert.equal(hostileApprovalCalls, 0);
+  assert.equal(wrappingLoads, 0);
+  assert.equal(wrappingCreates, 0);
+  assert.equal(rpc.submissions.length, 0);
+
+  const handoff = `apn pay transfer approve --operation ${operationId} --rpc-url https://rpc.example/`;
+  const rejected = decodeResult(await connection.client.callTool({
+    name: "apn_pay_transfer_approve",
+    arguments: { operation: operationId, rpc_url: "https://rpc.example/" },
+  }));
+  assert.equal(rejected.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
+  assert.deepEqual(rejected.error?.details, {
+    approval_boundary: "foreground_tty", operation_id: operationId, profile: "default", cli_handoff: handoff,
+  });
+  assert.deepEqual(rejected.next_actions, [handoff]);
+  assert.equal(hostileNativeCalls, 0);
+  assert.equal(hostileApprovalCalls, 0);
+  assert.equal(wrappingLoads, 0);
+  assert.equal(wrappingCreates, 0);
+  assert.equal(rpc.submissions.length, 0);
+  assert.doesNotMatch(JSON.stringify(rejected), /fingerprint|phrase|HOSTILE|KEYCHAIN/iu);
+
+  const status = decodeResult(await connection.client.callTool({
+    name: "apn_operation_status", arguments: { operation: operationId },
+  }));
+  assert.equal((status.operation as { readonly state: string }).state, "awaiting_approval");
+  assert.equal(JSON.stringify(status).includes("fingerprint"), false);
+  rpc.receipt = exactReceipt();
+  const completed = await runCli([
+    "pay", "transfer", "approve", "--operation", operationId, "--rpc-url", "https://rpc.example/",
+  ], {}, { stateRoot: temporary.root, native: new TestNative(), rpc });
+  assert.equal(completed.ok, true, JSON.stringify(completed));
+  const receipt = decodeResult(await connection.client.callTool({
+    name: "apn_receipt_get", arguments: { operation: operationId },
+  }));
+  assert.equal(receipt.ok, true, JSON.stringify(receipt));
+  assert.equal(hostileNativeCalls, 0);
+  assert.equal(wrappingLoads, 0);
 });
 
 test("MCP policy creation and increases fail closed before write while a pure decrease is allowed", async (t) => {
