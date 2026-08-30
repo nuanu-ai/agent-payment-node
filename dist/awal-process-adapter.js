@@ -41,6 +41,9 @@ export class NodeAwalProcessRunner {
             let size = 0;
             let classificationSize = 0;
             let classificationTruncated = false;
+            const classifyLogin = sensitive && isLoginArgv(argv);
+            const loginStdoutMatcher = newAsciiMatcher();
+            const loginStderrMatcher = newAsciiMatcher();
             let settled = false;
             const zeroChunks = () => {
                 for (const chunk of chunks)
@@ -67,6 +70,8 @@ export class NodeAwalProcessRunner {
                 const bytes = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, "utf8");
                 if (Buffer.isBuffer(chunk))
                     chunk.fill(0);
+                if (classifyLogin)
+                    consumeAsciiMatch(loginStdoutMatcher, bytes);
                 if (sensitive) {
                     bytes.fill(0);
                     return;
@@ -84,6 +89,8 @@ export class NodeAwalProcessRunner {
                 const bytes = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, "utf8");
                 if (Buffer.isBuffer(chunk))
                     chunk.fill(0);
+                if (classifyLogin)
+                    consumeAsciiMatch(loginStderrMatcher, bytes);
                 if (sensitive || classificationTruncated) {
                     bytes.fill(0);
                     return;
@@ -110,8 +117,16 @@ export class NodeAwalProcessRunner {
                 const classification = classificationTruncated
                     ? undefined
                     : classifyOptionalAddressFailure(argv, exitCode, Buffer.concat(classificationChunks));
+                const loginDisposition = exitCode === 0 && (loginStdoutMatcher.found || loginStderrMatcher.found)
+                    ? "already_authenticated"
+                    : undefined;
                 zeroChunks();
-                resolveResult({ exitCode, stdout, ...(classification === undefined ? {} : { optionalFailure: classification }) });
+                resolveResult({
+                    exitCode,
+                    stdout,
+                    ...(classification === undefined ? {} : { optionalFailure: classification }),
+                    ...(loginDisposition === undefined ? {} : { loginDisposition }),
+                });
             };
             const timeout = setTimeout(() => {
                 fail(providerFailure("The wallet provider process timed out safely."));
@@ -145,7 +160,9 @@ export class AwalProcessAdapter {
     }
     async connect(foreground) {
         const identity = await foreground.readIdentity();
-        await this.runSensitive({ kind: "login", identity });
+        const disposition = await this.runSensitive({ kind: "login", identity });
+        if (disposition === "already_authenticated")
+            return;
         const challenge = await foreground.readChallengeResponse();
         await this.runSensitive({ kind: "verify", challenge });
     }
@@ -185,9 +202,49 @@ export class AwalProcessAdapter {
     async runSensitive(command) {
         const result = await this.runner.run(argv(command), true);
         result.stdout.fill(0);
+        if (result.loginDisposition !== undefined && command.kind !== "login")
+            providerProtocol();
         if (result.exitCode !== 0)
             throw command.kind === "status" ? sessionFailure() : providerFailure("Wallet provider authentication failed safely.");
+        return result.loginDisposition;
     }
+}
+const ALREADY_SIGNED_IN = Buffer.from("already signed in", "ascii");
+const ALREADY_SIGNED_IN_PREFIX = buildPrefixTable(ALREADY_SIGNED_IN);
+function newAsciiMatcher() {
+    return { matched: 0, found: false };
+}
+function consumeAsciiMatch(state, bytes) {
+    if (state.found)
+        return;
+    for (const byte of bytes) {
+        const folded = byte >= 0x41 && byte <= 0x5a ? byte + 0x20 : byte;
+        while (state.matched > 0 && folded !== ALREADY_SIGNED_IN[state.matched]) {
+            state.matched = ALREADY_SIGNED_IN_PREFIX[state.matched - 1] ?? 0;
+        }
+        if (folded === ALREADY_SIGNED_IN[state.matched])
+            state.matched += 1;
+        if (state.matched === ALREADY_SIGNED_IN.length) {
+            state.found = true;
+            state.matched = 0;
+            return;
+        }
+    }
+}
+function buildPrefixTable(pattern) {
+    const prefix = new Array(pattern.length).fill(0);
+    for (let index = 1, matched = 0; index < pattern.length; index += 1) {
+        while (matched > 0 && pattern[index] !== pattern[matched])
+            matched = prefix[matched - 1] ?? 0;
+        if (pattern[index] === pattern[matched])
+            matched += 1;
+        prefix[index] = matched;
+    }
+    return prefix;
+}
+function isLoginArgv(commandArgv) {
+    return commandArgv.length === 4 && commandArgv[0] === "auth" && commandArgv[1] === "login" &&
+        commandArgv[2] !== undefined && commandArgv[3] === "--json";
 }
 export async function resolveAwalBin() {
     const require = createRequire(import.meta.url);
@@ -244,7 +301,8 @@ function parseBalance(bytes) {
         providerProtocol();
     const usdc = value.balances.USDC;
     if (typeof value.address !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(value.address) ||
-        value.chain !== "base" || typeof usdc.raw !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(usdc.raw) ||
+        (value.chain !== "Base" && value.chain !== "base") ||
+        typeof usdc.raw !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(usdc.raw) ||
         typeof usdc.formatted !== "string" || usdc.formatted.length === 0 || usdc.decimals !== 6 ||
         typeof value.timestamp !== "string" || !isTimestamp(value.timestamp))
         providerProtocol();
