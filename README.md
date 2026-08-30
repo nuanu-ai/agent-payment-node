@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.3.2 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.3.3 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -157,17 +157,22 @@ apn x402 fetch approve --operation <operation-id> \
   --rpc-url https://rpc.example
 ```
 
-The approve command creates exactly one frozen EIP-3009 authorization. It does
-not send the paid request; `operation resume` owns the next legal paid-request
-or recovery transition. APN retries only when its durable recovery rules permit
-a byte-identical paid request. The seller and facilitator own settlement
-submission. APN requires a valid seller result and reconciled settlement
-evidence before reporting a paid completion.
+For a local-software profile, approve creates exactly one frozen EIP-3009
+authorization; `operation resume` owns the next legal byte-identical paid-request
+or recovery transition under the existing durable rules. For a bound Coinbase
+profile, approve rechecks the stored policy, profile and balance, performs one
+final unpaid GET preflight, durably commits `started`, and invokes exactly one
+AWAL provider-atomic GET. Coinbase owns payment and its internal paid retry;
+status and resume are observation-only and never invoke AWAL pay again. APN
+completes only when the bounded seller result joins one exact successful outgoing
+Base-USDC Transfer in the fixed window from the frozen lower block through the
+earliest block timestamp at or after `started + 240000ms`.
 
 `x402 fetch prepare` uses the owner-approved profile maximum. An optional
 `--max-amount-atomic` may only make that ceiling stricter for one call; it can
-never raise the profile limit. The signed authorization amount always equals
-the selected seller offer, not either ceiling.
+never raise the profile limit. The local signed authorization amount and the
+Coinbase provider maximum both equal the selected seller offer, not either
+ceiling.
 
 If settlement is still pending, one bounded command can perform the existing
 legal resume transition once and then observe the same operation through
@@ -180,8 +185,9 @@ apn operation resume --operation <operation-id> \
 ```
 
 The wait accepts `1..300` seconds. After any one permitted paid request, the
-observation loop cannot sign, submit, create another operation, or issue
-another HTTP request. Timeout returns the same durable resumable operation.
+observation loop cannot sign, submit, create another operation, or issue another
+seller/provider paid request. Timeout returns the same durable resumable
+operation.
 
 ## Durable commands
 
@@ -278,16 +284,20 @@ restart, reinstall and Formula upgrade because Homebrew does not own `~/.apn`.
 ## Proof boundary
 
 Normal tests cover encryption negatives, permissions, concurrency,
-create/reuse/restart, byte-identical direct-effect recovery, x402 authorization
-recovery, idempotency, receipts and all previous APN journeys without public
-network traffic or money. Local green tests are not live or production E2E.
+create/reuse/restart, byte-identical direct-effect recovery, local x402
+authorization recovery, Coinbase x402 exact argv/deadline/no-replay and bounded
+settlement evidence, idempotency, receipts and all previous APN journeys without
+public network traffic or money. Deterministic green tests are source proof, not
+live provider acceptance, payment proof or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
 are separately recorded release gates. The local stdio MCP surface projects
 the same sixteen catalog-selected wallet, policy, payment, operation and
 receipt commands through the shared binder/runtime/core path. Direct approval
-remains foreground CLI only. Coinbase x402, Hub, contracts, remote MCP, other
-providers, Stellar, Solana and TRON are outside this release.
+remains foreground CLI only. Coinbase x402 source and deterministic product
+proof are included; live Coinbase/provider and paid acceptance remain separate
+unproven release gates. Hub, contracts, remote MCP, other providers, Stellar,
+Solana and TRON are outside this release.
 
 The published npm archive includes `npm-shrinkwrap.json`; Formula installation
 therefore resolves the exact integrity-pinned production dependency closure

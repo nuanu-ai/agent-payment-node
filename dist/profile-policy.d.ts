@@ -1,4 +1,5 @@
 import type { Address, WalletRecord } from "./model.js";
+import type { ProviderProfileRecord } from "./provider-profile.js";
 export declare const PROFILE_POLICY_VERSION: "apn.profile-policy.v1";
 export interface ProfilePolicyBinding {
     readonly profile: string;
@@ -24,7 +25,7 @@ export interface ProfilePolicyPort {
     load(binding: ProfilePolicyBinding): Promise<ProfilePolicyRecord | null>;
     set(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): Promise<ProfilePolicyRecord>;
 }
-export declare function policyBinding(wallet: WalletRecord): ProfilePolicyBinding;
+export declare function policyBinding(wallet: WalletRecord | ProviderProfileRecord): ProfilePolicyBinding;
 export declare function canonicalPolicyInput(input: ProfilePolicySetInput): ProfilePolicySetInput;
 export declare function sealProfilePolicy(value: Omit<ProfilePolicyRecord, "integrityHash">): ProfilePolicyRecord;
 export declare function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBinding): ProfilePolicyRecord;

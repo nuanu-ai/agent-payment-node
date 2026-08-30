@@ -1,5 +1,6 @@
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
+import { performance } from "node:perf_hooks";
 import { rootCertificates } from "node:tls";
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -14,7 +15,13 @@ const PAYMENT_RESPONSE_HEADERS = new Set(["payment-response", "x-payment-respons
 const CONTROL_HEADERS = new Set(["payment-required", "payment-signature", ...PAYMENT_RESPONSE_HEADERS]);
 export const SELLER_RESPONSE_MAX_HEADER_BYTES = 128 * 1024;
 export class HttpsX402Http {
+    nowMs = () => performance.now();
+    scheduleDeadline = (callback, delayMs) => setTimeout(callback, delayMs);
+    cancelDeadline = (timer) => clearTimeout(timer);
+    resolveAddresses = resolvePublicAddresses;
+    request = httpsRequest;
     async get(request) {
+        const startedMs = this.nowMs();
         const endpoint = parsePublicHttpsUrl(request.url, "APN_HTTP_CONFIG", "Seller URL", 2048);
         const canonicalUrl = endpoint.toString();
         if (canonicalUrl !== request.url)
@@ -29,8 +36,9 @@ export class HttpsX402Http {
         if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) {
             throw httpError("APN_HTTP_CONFIG", "Seller request timeout is outside the permitted bound.");
         }
-        const addresses = await resolvePublicAddresses(endpoint, "APN_HTTP_CONFIG", "Seller URL");
-        return await getOnce(endpoint, addresses, request.paymentSignature, timeoutMs);
+        const deadlineMs = startedMs + timeoutMs;
+        const addresses = await beforeDeadline(() => this.resolveAddresses(endpoint, "APN_HTTP_CONFIG", "Seller URL"), deadlineMs, this.nowMs, this.scheduleDeadline, this.cancelDeadline);
+        return await getOnce(endpoint, addresses, request.paymentSignature, deadlineMs, this.nowMs, this.request, this.scheduleDeadline, this.cancelDeadline);
     }
 }
 export async function inspectX402(http, value) {
@@ -162,7 +170,7 @@ function validateInspectObservation(observation, endpoint) {
         throw httpError("APN_HTTP_PROTOCOL", "Seller response body exceeds the size limit.");
     validateRawHeaders(observation.rawHeaderPairs);
 }
-async function getOnce(endpoint, addresses, paymentSignature, timeoutMs) {
+async function getOnce(endpoint, addresses, paymentSignature, deadlineMs, nowMs, requestOnce, scheduleDeadline, cancelDeadline) {
     return await new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
@@ -172,99 +180,155 @@ async function getOnce(endpoint, addresses, paymentSignature, timeoutMs) {
         const startedAt = new Date().toISOString();
         const headers = paymentSignature === undefined ? undefined : { "PAYMENT-SIGNATURE": paymentSignature };
         const hostname = unbracket(endpoint.hostname);
-        const request = httpsRequest(endpoint, {
-            method: "GET",
-            agent: false,
-            maxHeaderSize: SELLER_RESPONSE_MAX_HEADER_BYTES,
-            family: selected.family,
-            rejectUnauthorized: true,
-            ca: [...rootCertificates],
-            ...(isIP(hostname) === 0 ? { servername: hostname } : {}),
-            ...(headers === undefined ? {} : { headers }),
-            lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
-        }, (response) => {
-            const status = response.statusCode;
-            if (status === undefined || status < 100 || status > 599) {
-                response.destroy();
-                reject(httpError("APN_HTTP_PROTOCOL", "Seller returned an invalid HTTP status."));
+        let request;
+        let activeResponse;
+        let settled = false;
+        const finishError = (error) => {
+            if (settled)
+                return;
+            settled = true;
+            cancelDeadline(timer);
+            activeResponse?.destroy();
+            request?.destroy();
+            reject(error instanceof ApnError ? error : httpError("APN_HTTP_AMBIGUOUS", "Seller transport failed safely."));
+        };
+        const finishValue = (value) => {
+            if (remainingBudgetMs(deadlineMs, nowMs) < 1) {
+                finishError(httpError("APN_HTTP_AMBIGUOUS", "Seller request timed out."));
                 return;
             }
-            if (status >= 300 && status < 400) {
-                response.destroy();
-                reject(httpError("APN_HTTP_PROTOCOL", "Seller redirects are forbidden."));
+            if (settled)
                 return;
-            }
-            let rawHeaderPairs;
-            try {
-                rawHeaderPairs = pairRawHeaders(response.rawHeaders);
-                validateRawHeaders(rawHeaderPairs);
-                const contentEncoding = optionalSingleHeader(rawHeaderPairs, "content-encoding");
-                if (contentEncoding !== undefined && contentEncoding !== "identity")
-                    throw httpError("APN_HTTP_PROTOCOL", "Compressed seller responses are forbidden.");
-                const contentLength = optionalSingleHeader(rawHeaderPairs, "content-length");
-                if (contentLength !== undefined && (!/^(?:0|[1-9][0-9]*)$/u.test(contentLength) || BigInt(contentLength) > BigInt(MAX_BODY_BYTES))) {
-                    throw httpError("APN_HTTP_PROTOCOL", "Seller Content-Length is invalid or oversized.");
-                }
-            }
-            catch (error) {
-                response.destroy();
-                reject(error);
-                return;
-            }
-            const chunks = [];
-            let total = 0;
-            let failed = false;
-            const fail = (error) => {
-                if (failed)
-                    return;
-                failed = true;
-                response.destroy();
-                reject(error);
-            };
-            response.on("data", (chunk) => {
-                total += chunk.length;
-                if (total > MAX_BODY_BYTES) {
-                    fail(httpError("APN_HTTP_PROTOCOL", "Seller response body exceeds the size limit."));
+            settled = true;
+            cancelDeadline(timer);
+            resolve(value);
+        };
+        const timeoutMs = remainingMs(deadlineMs, nowMs);
+        const timer = scheduleDeadline(() => finishError(httpError("APN_HTTP_AMBIGUOUS", "Seller request timed out.")), timeoutMs);
+        try {
+            request = requestOnce(endpoint, {
+                method: "GET",
+                agent: false,
+                maxHeaderSize: SELLER_RESPONSE_MAX_HEADER_BYTES,
+                family: selected.family,
+                rejectUnauthorized: true,
+                ca: [...rootCertificates],
+                ...(isIP(hostname) === 0 ? { servername: hostname } : {}),
+                ...(headers === undefined ? {} : { headers }),
+                lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
+            }, (response) => {
+                if (settled) {
+                    response.destroy();
                     return;
                 }
-                chunks.push(chunk);
-            });
-            response.on("end", () => {
-                if (failed)
+                activeResponse = response;
+                const status = response.statusCode;
+                if (status === undefined || status < 100 || status > 599) {
+                    finishError(httpError("APN_HTTP_PROTOCOL", "Seller returned an invalid HTTP status."));
                     return;
+                }
+                if (status >= 300 && status < 400) {
+                    finishError(httpError("APN_HTTP_PROTOCOL", "Seller redirects are forbidden."));
+                    return;
+                }
+                let rawHeaderPairs;
                 try {
-                    const rawTrailers = pairRawHeaders(response.rawTrailers);
-                    if (rawTrailers.some(([name]) => CONTROL_HEADERS.has(name.toLowerCase()))) {
-                        throw httpError("APN_HTTP_PROTOCOL", "x402 control trailers are forbidden.");
+                    rawHeaderPairs = pairRawHeaders(response.rawHeaders);
+                    validateRawHeaders(rawHeaderPairs);
+                    const contentEncoding = optionalSingleHeader(rawHeaderPairs, "content-encoding");
+                    if (contentEncoding !== undefined && contentEncoding !== "identity")
+                        throw httpError("APN_HTTP_PROTOCOL", "Compressed seller responses are forbidden.");
+                    const contentLength = optionalSingleHeader(rawHeaderPairs, "content-length");
+                    if (contentLength !== undefined && (!/^(?:0|[1-9][0-9]*)$/u.test(contentLength) || BigInt(contentLength) > BigInt(MAX_BODY_BYTES))) {
+                        throw httpError("APN_HTTP_PROTOCOL", "Seller Content-Length is invalid or oversized.");
                     }
-                    const socket = response.socket;
-                    if (socket.authorized !== true || socket.remoteAddress === undefined || !sameIpAddress(socket.remoteAddress, selected.address)) {
-                        throw httpError("APN_HTTP_PROTOCOL", "Seller TLS or address pinning was not proven.");
-                    }
-                    resolve({
-                        status,
-                        rawHeaderPairs,
-                        bodyBytes: Buffer.concat(chunks, total),
-                        finalUrl: endpoint.toString(),
-                        observedOrigin: endpoint.origin,
-                        dnsAddresses: addresses.map((address) => address.address),
-                        selectedAddress: selected.address,
-                        startedAt,
-                        observedAt: new Date().toISOString(),
-                        safeTransportProvenance: { protocol: "https", tlsAuthorized: true, redirectCount: 0 },
-                    });
                 }
                 catch (error) {
-                    reject(error);
+                    finishError(error);
+                    return;
                 }
+                const chunks = [];
+                let total = 0;
+                const fail = (error) => {
+                    finishError(error);
+                };
+                response.on("data", (chunk) => {
+                    if (settled)
+                        return;
+                    total += chunk.length;
+                    if (total > MAX_BODY_BYTES) {
+                        fail(httpError("APN_HTTP_PROTOCOL", "Seller response body exceeds the size limit."));
+                        return;
+                    }
+                    chunks.push(chunk);
+                });
+                response.on("end", () => {
+                    if (settled)
+                        return;
+                    try {
+                        const rawTrailers = pairRawHeaders(response.rawTrailers);
+                        if (rawTrailers.some(([name]) => CONTROL_HEADERS.has(name.toLowerCase()))) {
+                            throw httpError("APN_HTTP_PROTOCOL", "x402 control trailers are forbidden.");
+                        }
+                        const socket = response.socket;
+                        if (socket.authorized !== true || socket.remoteAddress === undefined || !sameIpAddress(socket.remoteAddress, selected.address)) {
+                            throw httpError("APN_HTTP_PROTOCOL", "Seller TLS or address pinning was not proven.");
+                        }
+                        finishValue({
+                            status,
+                            rawHeaderPairs,
+                            bodyBytes: Buffer.concat(chunks, total),
+                            finalUrl: endpoint.toString(),
+                            observedOrigin: endpoint.origin,
+                            dnsAddresses: addresses.map((address) => address.address),
+                            selectedAddress: selected.address,
+                            startedAt,
+                            observedAt: new Date().toISOString(),
+                            safeTransportProvenance: { protocol: "https", tlsAuthorized: true, redirectCount: 0 },
+                        });
+                    }
+                    catch (error) {
+                        finishError(error);
+                    }
+                });
+                response.on("error", () => fail(httpError("APN_HTTP_AMBIGUOUS", "Seller response failed safely.")));
             });
-            response.on("error", () => fail(httpError("APN_HTTP_AMBIGUOUS", "Seller response failed safely.")));
-        });
-        request.setTimeout(timeoutMs, () => request.destroy(httpError("APN_HTTP_AMBIGUOUS", "Seller request timed out.")));
-        request.on("error", (error) => reject(error instanceof ApnError ? error : httpError("APN_HTTP_AMBIGUOUS", "Seller transport failed safely.")));
-        request.end();
+            request.on("error", (error) => finishError(error));
+            request.end();
+        }
+        catch (error) {
+            finishError(error);
+        }
     });
 }
+async function beforeDeadline(operation, deadlineMs, nowMs, scheduleDeadline, cancelDeadline) {
+    return await new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (callback) => {
+            if (settled)
+                return;
+            settled = true;
+            cancelDeadline(timer);
+            callback();
+        };
+        const timer = scheduleDeadline(() => finish(() => reject(httpError("APN_HTTP_AMBIGUOUS", "Seller request timed out."))), remainingMs(deadlineMs, nowMs));
+        try {
+            operation().then((value) => remainingBudgetMs(deadlineMs, nowMs) < 1
+                ? finish(() => reject(httpError("APN_HTTP_AMBIGUOUS", "Seller request timed out.")))
+                : finish(() => resolve(value)), (error) => finish(() => reject(error)));
+        }
+        catch (error) {
+            finish(() => reject(error));
+        }
+    });
+}
+function remainingMs(deadlineMs, nowMs) {
+    const remaining = remainingBudgetMs(deadlineMs, nowMs);
+    if (remaining < 1)
+        throw httpError("APN_HTTP_AMBIGUOUS", "Seller request timed out.");
+    return remaining;
+}
+function remainingBudgetMs(deadlineMs, nowMs) { return Math.floor(deadlineMs - nowMs()); }
 function pairRawHeaders(values) {
     if (values.length % 2 !== 0)
         throw httpError("APN_HTTP_PROTOCOL", "Seller raw headers are malformed.");

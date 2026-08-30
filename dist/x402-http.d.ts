@@ -2,6 +2,11 @@ import type { HttpGetRequest, HttpObservation, HttpPort, InspectResult } from ".
 import type { X402HttpObservation } from "./x402-state-integrity.js";
 export declare const SELLER_RESPONSE_MAX_HEADER_BYTES: number;
 export declare class HttpsX402Http implements HttpPort {
+    private readonly nowMs;
+    private readonly scheduleDeadline;
+    private readonly cancelDeadline;
+    private readonly resolveAddresses;
+    private readonly request;
     get(request: HttpGetRequest): Promise<HttpObservation>;
 }
 export declare function inspectX402(http: HttpPort, value: string): Promise<InspectResult>;

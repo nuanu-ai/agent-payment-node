@@ -83,12 +83,15 @@ const directStates = {
 const x402States = {
   terminal: ["completed", "failed_before_effect", "failed_expired_unused", "failed_settled_without_result"],
   non_terminal: [
+    "preparing",
     "awaiting_approval",
+    "started",
     "authorization_material_pending",
     "authorized_not_sent",
     "paid_request_pending",
     "settlement_pending",
     "effect_unknown",
+    "ambiguous_effect",
     "seller_result_recovery_pending",
   ],
 } as const;
@@ -187,10 +190,10 @@ export const COMMANDS: readonly CommandDefinition[] = [
   command(
     ["x402", "fetch", "approve"],
     "apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>",
-    "Authorize one frozen x402 request for durable resume.",
+    "Advance one frozen x402 request under its stored policy.",
     [operationRequired, rpcRequired],
     "payment_submit",
-    "Creates one policy-bounded authorization; operation resume owns the next paid-request transition.",
+    "Rechecks frozen intent and policy, then either persists local authorization or executes the provider-owned paid fetch exactly once.",
     "prior_profile_policy",
     "No per-payment prompt; the frozen operation and existing profile policy are the authorization boundary.",
     x402States,

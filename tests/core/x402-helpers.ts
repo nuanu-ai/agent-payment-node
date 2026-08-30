@@ -222,6 +222,10 @@ export class RecoveryRpc extends TestRpc implements X402RpcPort {
     await this.onX402Call?.(`logs:${input.fromBlock}-${input.toBlock}`);
     return this.logOutcomes.shift() ?? { kind: "complete", logs: [] };
   }
+
+  async getX402TransferLogs(): Promise<{ readonly kind: "complete"; readonly logs: readonly X402RpcLog[] }> {
+    return { kind: "complete", logs: [] };
+  }
 }
 
 export function authorizationUsedLog(input: {

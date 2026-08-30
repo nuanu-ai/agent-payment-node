@@ -97,6 +97,7 @@ export class X402PaidRequest extends X402Lifecycle {
   protected async withOperationLock(
     operation: X402OperationRecord,
     callback: (current: X402OperationRecord) => Promise<unknown>,
+    lockWaitMs?: number,
   ): Promise<unknown> {
     return await this.context.state.withLocks([
       `profile:${operation.profileHash}`,
@@ -105,7 +106,7 @@ export class X402PaidRequest extends X402Lifecycle {
       const current = await this.context.state.loadX402Operation(operation.profileHash, operation.operationId);
       if (current === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
       return await callback(current);
-    });
+    }, lockWaitMs === undefined ? {} : { waitMs: lockWaitMs });
   }
 
   protected async completeAuthorization(
@@ -142,14 +143,24 @@ export class X402PaidRequest extends X402Lifecycle {
     purpose: "payment" | "result_recovery",
     verified: VerifiedX402PaymentMaterial,
     terminalizeFromExistingEvidence = false,
+    callerDeadlineMs?: number,
   ): Promise<unknown> {
     if (operation.attempts.length >= 64) return publicX402Operation(operation);
     try {
-      const nowMs = this.context.clock.now().getTime();
-      const remainingMs = BigInt(operation.authorization.validBefore) * 1000n - BigInt(nowMs);
-      const remainingWholeSeconds = remainingMs / 1000n;
-      if (remainingWholeSeconds < 1n) return publicX402Operation(operation);
-      const timeoutMs = Number(remainingWholeSeconds > 30n ? 30_000n : remainingWholeSeconds * 1000n);
+      const requestTimeoutMs = (): number | undefined => {
+        const nowMs = this.context.clock.now().getTime();
+        const remainingMs = BigInt(operation.authorization.validBefore) * 1000n - BigInt(nowMs);
+        const remainingWholeSeconds = remainingMs / 1000n;
+        if (remainingWholeSeconds < 1n) return undefined;
+        const authorizationTimeoutMs = Number(
+          remainingWholeSeconds > 30n ? 30_000n : remainingWholeSeconds * 1000n,
+        );
+        const callerRemainingMs = callerDeadlineMs === undefined
+          ? authorizationTimeoutMs
+          : Math.floor(callerDeadlineMs - this.context.wait.nowMs());
+        return callerRemainingMs < 1 ? undefined : Math.min(authorizationTimeoutMs, callerRemainingMs);
+      };
+      if (requestTimeoutMs() === undefined) return publicX402Operation(operation);
       const pending = await this.beginPaidAttempt(operation, purpose);
       if (pending.attempts.at(-1)?.purpose !== purpose || pending.attempts.at(-1)?.phase !== "pending") {
         throw new ApnError("APN_STATE_CORRUPT", "Resumed x402 attempt is not the durable pending purpose.");
@@ -157,6 +168,8 @@ export class X402PaidRequest extends X402Lifecycle {
 
       let rawResponse;
       try {
+        const timeoutMs = requestTimeoutMs();
+        if (timeoutMs === undefined) throw new Error("x402 caller or authorization deadline elapsed");
         rawResponse = await this.context.requireHttp().get({
           url: operation.resource.canonicalUrl,
           paymentSignature: verified.paymentHeader,

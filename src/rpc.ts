@@ -2,7 +2,7 @@ import { request as httpsRequest } from "node:https";
 import { performance } from "node:perf_hooks";
 import { decodeAbiParameters } from "viem";
 import { sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES } from "./constants.js";
+import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 import type { Address, Hex } from "./model.js";
@@ -22,6 +22,7 @@ import type {
   X402RpcLog,
   X402RpcPort,
   X402RpcReceipt,
+  X402TransferLogs,
 } from "./ports.js";
 
 type JsonRpcResult = { readonly jsonrpc: "2.0"; readonly id: string; readonly result: unknown };
@@ -224,6 +225,36 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
         log.topics[2] !== input.nonce.toLowerCase() || log.data !== "0x" ||
         BigInt(log.blockNumber) < from || BigInt(log.blockNumber) > to
       ) throw new ApnError("APN_RPC_PROTOCOL", "RPC AuthorizationUsed log violates the exact filter.");
+    }
+    return { kind: "complete", logs };
+  }
+
+  async getX402TransferLogs(input: {
+    readonly from: Address;
+    readonly fromBlock: string;
+    readonly toBlock: string;
+  }): Promise<X402TransferLogs> {
+    const from = parseAtomic(input.fromBlock);
+    const to = parseAtomic(input.toBlock);
+    if (from > to || to - from + 1n > 2048n) throw new ApnError("APN_RPC_PROTOCOL", "RPC Transfer range exceeds the fixed bound.");
+    const fromTopic = `0x${input.from.slice(2).toLowerCase().padStart(64, "0")}`;
+    const result = await this.callX402Logs([{
+      address: BASE_USDC,
+      fromBlock: `0x${from.toString(16)}`,
+      toBlock: `0x${to.toString(16)}`,
+      topics: [TRANSFER_TOPIC, fromTopic],
+    }]);
+    if (result.kind !== "complete") return result;
+    if (!Array.isArray(result.value) || result.value.length > MAX_X402_LOGS) {
+      throw new ApnError("APN_RPC_PROTOCOL", "RPC Transfer logs exceed the fixed bound.");
+    }
+    const logs = result.value.map((entry: unknown) => x402RpcLog(entry));
+    for (const log of logs) {
+      if (
+        log.address.toLowerCase() !== BASE_USDC.toLowerCase() || log.topics.length !== 3 ||
+        log.topics[0] !== TRANSFER_TOPIC || log.topics[1] !== fromTopic || log.data.length !== 66 ||
+        BigInt(log.blockNumber) < from || BigInt(log.blockNumber) > to
+      ) throw new ApnError("APN_RPC_PROTOCOL", "RPC Transfer log violates the exact filter.");
     }
     return { kind: "complete", logs };
   }

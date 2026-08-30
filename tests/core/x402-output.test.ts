@@ -221,6 +221,7 @@ test("compiled core journey returns completed seller data, safe operation, and r
   }
   assert.equal(JSON.stringify(completed.operation).includes("canonicalUrl"), false);
   assert.equal(JSON.stringify(completed.receipt).includes("bodyText"), false);
+  assert.equal((completed.receipt as { readonly schemaVersion?: unknown } | null)?.schemaVersion, "apn.x402.receipt.v1");
 });
 
 test("explicit command outcomes preserve falsy data without changing envelope slots", () => {

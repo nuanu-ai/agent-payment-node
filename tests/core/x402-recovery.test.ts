@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { performance } from "node:perf_hooks";
 import test, { type TestContext } from "node:test";
 import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import type { Hex } from "../../src/model.js";
 import type { HttpGetRequest, HttpObservation } from "../../src/x402-model.js";
-import type { WaitPort, X402RpcReceipt } from "../../src/ports.js";
+import type { WaitPort, X402RpcPort, X402RpcReceipt } from "../../src/ports.js";
 import { classifyX402LogAvailabilityMessage } from "../../src/rpc.js";
 import {
   appendX402Transition,
@@ -48,6 +49,7 @@ async function authorizedFixture(t: TestContext, input: {
   readonly idempotencyKey?: string;
   readonly onHttpCall?: (request: HttpGetRequest, callNumber: number) => void | Promise<void>;
   readonly wait?: WaitPort;
+  readonly rpc?: RecoveryRpc;
 } = {}): Promise<Fixture> {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
@@ -60,7 +62,7 @@ async function authorizedFixture(t: TestContext, input: {
     ...(input.paidOutcomes ?? [new Error("ambiguous paid request")]),
   ], input.onHttpCall);
   const native = new ExactX402Native();
-  const rpc = new RecoveryRpc();
+  const rpc = input.rpc ?? new RecoveryRpc();
   rpc.x402Evidence = { ...rpc.x402Evidence, address: X402_TEST_ACCOUNT.address };
   const clock = input.clock ?? new TestClock();
   const core = makeCore({
@@ -100,6 +102,25 @@ class ControlledWait implements WaitPort {
     this.value += milliseconds;
     await this.onWait?.(milliseconds);
     return this.outcome;
+  }
+}
+
+class SlowSecondBoundedRpc extends RecoveryRpc {
+  readonly boundedCalls: number[] = [];
+  private slowTimeout: number | undefined;
+  override withTotalTimeout(milliseconds: number): X402RpcPort {
+    this.boundedCalls.push(milliseconds);
+    if (this.boundedCalls.length === 2) this.slowTimeout = milliseconds;
+    return this;
+  }
+  override async assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }> {
+    if (this.slowTimeout !== undefined) {
+      const timeout = this.slowTimeout;
+      this.slowTimeout = undefined;
+      await new Promise((resolve) => setTimeout(resolve, timeout));
+      throw new Error("injected bounded local RPC timeout");
+    }
+    return await super.assertBaseChain();
   }
 }
 
@@ -391,6 +412,112 @@ test("bounded settlement timeout remains resumable without another authorization
   assert.equal(fixture.http.calls.length, 2, "manual recovery must not replay the paid GET");
   assert.equal(fixture.native.calls.length, 1, "manual recovery must not create or retrieve another authorization");
   assert.equal(fixture.rpc.submissions.length, 0);
+});
+
+test("bounded wait caps the second local RPC observation inside the same caller deadline", async (t) => {
+  const rpc = new SlowSecondBoundedRpc();
+  const fixture = await authorizedFixture(t, {
+    idempotencyKey: "bounded-local-rpc-total-deadline",
+    rpc,
+    paidOutcomes: [new Error("ambiguous paid request")],
+  });
+  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal((await operation(fixture)).state, "effect_unknown");
+  const started = performance.now();
+  const response = await fixture.core.execute({
+    command: "operation.resume", operationId: fixture.operationId, waitSeconds: 1,
+  });
+  const elapsed = performance.now() - started;
+  assert.equal(response.ok, true, JSON.stringify(response));
+  assert.ok(elapsed < 1_500, `local bounded RPC exceeded caller window: ${elapsed}ms`);
+  assert.deepEqual({
+    reason: (response.operation as { reason?: unknown }).reason,
+    proofClass: (response.operation as { proofClass?: unknown }).proofClass,
+    settlementWait: (response.operation as { settlementWait?: unknown }).settlementWait,
+  }, {
+    reason: "x402_settlement_wait_timeout",
+    proofClass: "x402_unknown_finality",
+    settlementWait: { outcome: "timeout", requestedSeconds: "1", observationCount: "0" },
+  });
+  assert.equal(rpc.boundedCalls.length, 2);
+  assert.ok(rpc.boundedCalls.every((value) => value <= 1_000));
+  assert.equal(fixture.http.calls.length, 2, "bounded observation must not replay the paid request");
+});
+
+test("one-second bounded wait caps the permitted paid HTTP and journals timeout ambiguity", async (t) => {
+  const wait = new ControlledWait();
+  const fixture = await authorizedFixture(t, {
+    idempotencyKey: "bounded-paid-http-deadline",
+    wait,
+    paidOutcomes: [paidObservation()],
+    onHttpCall: (request, callNumber) => {
+      if (callNumber !== 2) return;
+      assert.equal(request.timeoutMs, 750);
+      wait.value += request.timeoutMs;
+      throw new Error("injected paid HTTP timeout");
+    },
+  });
+  let consumedRpcBudget = false;
+  fixture.rpc.onX402Call = () => {
+    if (consumedRpcBudget) return;
+    consumedRpcBudget = true;
+    wait.value += 250;
+  };
+  const response = await fixture.core.execute({
+    command: "operation.resume", operationId: fixture.operationId, waitSeconds: 1,
+  });
+  assert.equal(response.ok, true, JSON.stringify(response));
+  assert.equal((response.operation as { state?: unknown }).state, "effect_unknown");
+  assert.deepEqual((response.operation as { settlementWait?: unknown }).settlementWait, {
+    outcome: "timeout", requestedSeconds: "1", observationCount: "0",
+  });
+  const durable = await operation(fixture);
+  assert.deepEqual(durable.attempts.map((attempt) => [attempt.purpose, attempt.phase]), [["payment", "ambiguous"]]);
+  assert.equal(fixture.http.calls.length, 2);
+  assert.equal(wait.value, 1_000);
+});
+
+test("one-second bounded wait caps cached result-recovery HTTP without replay", async (t) => {
+  const wait = new ControlledWait();
+  const fixture = await authorizedFixture(t, {
+    paymentIdentifier: true,
+    idempotencyKey: "bounded-result-recovery-http-deadline",
+    wait,
+    paidOutcomes: [new Error("initial ambiguity"), paidObservation()],
+    onHttpCall: (request, callNumber) => {
+      if (callNumber !== 3) return;
+      assert.equal(request.timeoutMs, 750);
+      wait.value += request.timeoutMs;
+      throw new Error("injected result-recovery HTTP timeout");
+    },
+  });
+  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  await advanceSafeAndReset(fixture);
+  const exposed = await operation(fixture);
+  const settlement = configureSettlement(fixture.rpc, exposed);
+  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
+  let consumedRpcBudget = false;
+  fixture.rpc.onX402Call = () => {
+    if (consumedRpcBudget) return;
+    consumedRpcBudget = true;
+    wait.value += 250;
+  };
+  const response = await fixture.core.execute({
+    command: "operation.resume", operationId: fixture.operationId, waitSeconds: 1,
+  });
+  assert.equal(response.ok, true, JSON.stringify(response));
+  assert.equal((response.operation as { state?: unknown }).state, "failed_settled_without_result");
+  assert.deepEqual((response.operation as { settlementWait?: unknown }).settlementWait, {
+    outcome: "timeout", requestedSeconds: "1", observationCount: "0",
+  });
+  const durable = await operation(fixture);
+  assert.deepEqual(durable.attempts.map((attempt) => [attempt.purpose, attempt.phase]), [
+    ["payment", "ambiguous"], ["result_recovery", "ambiguous"],
+  ]);
+  assert.equal(fixture.http.calls.length, 3);
+  assert.equal(wait.value, 1_000);
+  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal(fixture.http.calls.length, 3, "terminal recovery timeout must never replay seller HTTP");
 });
 
 test("interrupted bounded wait restarts from the same operation and never duplicates payment effects", async (t) => {

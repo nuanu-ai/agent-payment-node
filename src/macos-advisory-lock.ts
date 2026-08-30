@@ -7,7 +7,7 @@ const LOCKF_BUSY_EXIT = 75;
 const LOCKF_TIMEOUT_MS = 1_000;
 
 export interface AdvisoryLockPort {
-  tryAcquire(fd: number): Promise<boolean>;
+  tryAcquire(fd: number, timeoutMs?: number, boundedWait?: boolean): Promise<boolean>;
 }
 
 export interface LockfChild {
@@ -45,8 +45,9 @@ export class MacosAdvisoryLock implements AdvisoryLockPort {
     }
   }
 
-  async tryAcquire(fd: number): Promise<boolean> {
+  async tryAcquire(fd: number, timeoutMs = this.timeoutMs, boundedWait = false): Promise<boolean> {
     if (!Number.isSafeInteger(fd) || fd < 0) throw lockfFailure();
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > this.timeoutMs) throw lockfFailure();
     return await new Promise<boolean>((resolve, reject) => {
       let child: LockfChild;
       try {
@@ -70,8 +71,8 @@ export class MacosAdvisoryLock implements AdvisoryLockPort {
       };
       const timeout = setTimeout(() => {
         child.kill("SIGKILL");
-        finish();
-      }, this.timeoutMs);
+        finish(boundedWait ? false : undefined);
+      }, timeoutMs);
       timeout.unref();
       child.once("error", () => finish());
       child.once("close", (code, signal) => {

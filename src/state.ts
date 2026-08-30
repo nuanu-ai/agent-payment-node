@@ -12,7 +12,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
-import { canonicalJson, sha256 } from "./canonical.js";
+import { canonicalJson, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { MacosAdvisoryLock, type AdvisoryLockPort } from "./macos-advisory-lock.js";
 import { validateProviderProfile, type ProviderProfileRecord } from "./provider-profile.js";
@@ -48,9 +48,10 @@ import {
 } from "./x402-state-integrity.js";
 
 export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./state-integrity.js";
+const PROVIDER_X402_OPERATION_SCHEMA = "apn.provider-x402.state.v1";
+const PROVIDER_X402_RECEIPT_SCHEMA = "apn.provider-x402.receipt.v1";
 
 export class StateStore extends SecureStateStore {
-
   async loadWallet(profileHash: string): Promise<WalletRecord | null> {
     const value = await this.readJson(join("wallets", profileHash, "wallet.json"));
     return value === null ? null : validateWallet(value);
@@ -82,7 +83,6 @@ export class StateStore extends SecureStateStore {
     await this.ensureDirectory(join("wallets", wallet.profileHash));
     await this.writeJson(join("wallets", wallet.profileHash, "wallet.json"), wallet);
   }
-
   async loadProviderProfile(profileHash: string): Promise<ProviderProfileRecord | null> {
     stateIdentifier(profileHash, "profile hash");
     const value = await this.readJson(join("profiles", profileHash, "profile.json"));
@@ -97,7 +97,6 @@ export class StateStore extends SecureStateStore {
     await this.ensureDirectory(join("profiles", profile.profile_hash));
     await this.writeJson(join("profiles", profile.profile_hash, "profile.json"), profile);
   }
-
   async loadEncryptedWalletEnvelope(profile: string): Promise<unknown | null> {
     return await this.readJson(join("wallets", `${profile}.json`));
   }
@@ -105,7 +104,6 @@ export class StateStore extends SecureStateStore {
   async writeEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void> {
     await this.writeJson(join("wallets", `${profile}.json`), envelope);
   }
-
   async loadEncryptedPolicyEnvelope(profile: string): Promise<unknown | null> {
     return await this.readJson(join("policies", `${profile}.json`));
   }
@@ -113,7 +111,6 @@ export class StateStore extends SecureStateStore {
   async writeEncryptedPolicyEnvelope(profile: string, envelope: unknown): Promise<void> {
     await this.writeJson(join("policies", `${profile}.json`), envelope);
   }
-
   async loadOperation(profileHash: string, operationId: string): Promise<OperationRecord | null> {
     const value = await this.readJson(join("operations", profileHash, `${operationId}.json`));
     if (value === null) return null;
@@ -140,7 +137,6 @@ export class StateStore extends SecureStateStore {
     }
     return found;
   }
-
   async writeOperation(operation: OperationRecord): Promise<void> {
     await this.ensureDirectory(join("operations", operation.profileHash));
     await this.writeJson(join("operations", operation.profileHash, `${operation.operationId}.json`), operation);
@@ -165,7 +161,6 @@ export class StateStore extends SecureStateStore {
     }
     return operations;
   }
-
   async listAllOperations(): Promise<readonly OperationRecord[]> {
     const profiles = await this.operationProfiles("operations");
     const operations: OperationRecord[] = [];
@@ -178,6 +173,7 @@ export class StateStore extends SecureStateStore {
     stateIdentifier(operationId, "x402 operation ID");
     const value = await this.readJson(join("x402-operations", profileHash, `${operationId}.json`));
     if (value === null) return null;
+    if (storedSchema(value) === PROVIDER_X402_OPERATION_SCHEMA) return null;
     const operation = validateX402Operation(value);
     if (operation.profileHash !== profileHash || operation.operationId !== operationId) {
       stateCorrupt("x402 operation path binding is invalid.");
@@ -204,14 +200,19 @@ export class StateStore extends SecureStateStore {
     validateX402Operation(operation);
     stateIdentifier(operation.profileHash, "x402 profile hash");
     stateIdentifier(operation.operationId, "x402 operation ID");
-    const previous = await this.loadX402Operation(operation.profileHash, operation.operationId);
+    const path = join("x402-operations", operation.profileHash, `${operation.operationId}.json`);
+    const stored = await this.readJson(path);
+    if (stored !== null && storedSchema(stored) === PROVIDER_X402_OPERATION_SCHEMA) {
+      stateCorrupt("Local x402 operation path is occupied by another strategy.");
+    }
+    const previous = stored === null ? null : validateX402Operation(stored);
     if (previous !== null) {
       validateX402AppendOnly(previous, operation);
       validateX402ScanContinuity(previous, operation);
     }
     await this.validateX402TerminalGraph(operation);
     await this.ensureDirectory(join("x402-operations", operation.profileHash));
-    await this.writeJson(join("x402-operations", operation.profileHash, `${operation.operationId}.json`), operation);
+    await this.writeJson(path, operation);
   }
 
   async listX402Operations(profileHash: string): Promise<readonly X402OperationRecord[]> {
@@ -226,6 +227,7 @@ export class StateStore extends SecureStateStore {
       }
       const value = await this.readJson(join(directory, entry.name));
       if (value === null) stateCorrupt("x402 operation disappeared during validation.");
+      if (storedSchema(value) === PROVIDER_X402_OPERATION_SCHEMA) continue;
       const operation = validateX402Operation(value);
       const operationId = entry.name.slice(0, -".json".length);
       if (operation.profileHash !== profileHash || operation.operationId !== operationId) {
@@ -372,8 +374,13 @@ export class StateStore extends SecureStateStore {
     if (operation.profileHash !== profileHash) stateCorrupt("x402 receipt profile does not bind its authoritative operation.");
     if (operation.terminal) stateCorrupt("x402 receipt cannot overwrite a terminal operation graph.");
     this.validateX402RecoveryReceiptAuthority(operation, receipt);
+    const path = join("x402-receipts", profileHash, `${receipt.operationId}.json`);
+    const stored = await this.readJson(path);
+    if (stored !== null && storedSchema(stored) === PROVIDER_X402_RECEIPT_SCHEMA) {
+      stateCorrupt("Local x402 receipt path is occupied by the provider strategy.");
+    }
     await this.ensureDirectory(join("x402-receipts", profileHash));
-    await this.writeJson(join("x402-receipts", profileHash, `${receipt.operationId}.json`), receipt);
+    await this.writeJson(path, receipt);
   }
 
   async listX402Receipts(profileHash: string): Promise<readonly X402ReceiptRecord[]> {
@@ -400,8 +407,6 @@ export class StateStore extends SecureStateStore {
     await this.ensureDirectory(join("receipts", profileHash));
     await this.writeJson(join("receipts", profileHash, `${receipt.operationId}.json`), receipt);
   }
-
-
   private async validateX402TerminalGraph(operation: X402OperationRecord): Promise<void> {
     let linkedResult: X402ResultRecord | undefined;
     if (operation.resultLink !== undefined) {
@@ -487,4 +492,8 @@ export class StateStore extends SecureStateStore {
     return profiles.sort();
   }
 
+}
+
+function storedSchema(value: unknown): unknown {
+  return isPlainRecord(value) ? value.schemaVersion : undefined;
 }

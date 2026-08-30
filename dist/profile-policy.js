@@ -4,6 +4,14 @@ import { parseAtomic } from "./money.js";
 export const PROFILE_POLICY_VERSION = "apn.profile-policy.v1";
 const HASH = /^[a-f0-9]{64}$/u;
 export function policyBinding(wallet) {
+    if ("provider_id" in wallet) {
+        return {
+            profile: wallet.profile,
+            profileHash: wallet.profile_hash,
+            walletAddress: wallet.public_address,
+            walletBindingHash: wallet.account_binding_hash,
+        };
+    }
     return {
         profile: wallet.profile,
         profileHash: wallet.profileHash,

@@ -27,7 +27,7 @@ export class ApnCore {
     this.context = new RuntimeContext(dependencies);
     this.wallet = new WalletService(this.context);
     this.transfer = new TransferService(this.context);
-    this.operations = new OperationService(this.context.state);
+    this.operations = new OperationService(this.context.state, this.context.providerX402Repository);
     this.x402 = new X402Service(this.context);
     this.providerWallet = new ProviderWalletService(this.context);
   }
@@ -101,6 +101,7 @@ export class ApnCore {
       case "operation.status": {
         canonicalOperationId(request.operationId);
         await this.context.ready();
+        await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
         return operation.kind === "x402_fetch"
           ? await this.operations.x402Outcome(request.operationId, {
@@ -112,6 +113,7 @@ export class ApnCore {
       case "receipt.get": {
         canonicalOperationId(request.operationId);
         await this.context.ready();
+        await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
         return operation.kind === "x402_fetch"
           ? await this.operations.x402ReceiptOutcome(request.operationId)

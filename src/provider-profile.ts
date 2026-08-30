@@ -125,6 +125,12 @@ export function coinbaseDirectCapabilitySnapshot(): ProviderCapabilitySnapshot {
       execution_owner: "provider",
       retry_owner: "apn_outer_no_replay_journal",
     },
+    x402: {
+      available: true,
+      mode: "provider_atomic_paid_fetch",
+      execution_owner: "provider",
+      retry_owner: "apn_outer_no_replay_journal",
+    },
     evidence: { available: true, owner: "apn" },
   };
 }
