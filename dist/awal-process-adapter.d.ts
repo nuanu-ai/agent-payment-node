@@ -10,6 +10,7 @@ export interface AwalProcessResult {
     readonly exitCode: number;
     readonly stdout: Buffer;
     readonly optionalFailure?: "unsupported" | "unavailable";
+    readonly loginDisposition?: "already_authenticated";
 }
 export interface AwalProcessRunnerPort {
     run(argv: readonly string[], sensitive: boolean): Promise<AwalProcessResult>;

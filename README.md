@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.3.0 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.3.1 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -62,11 +62,13 @@ To create or reuse a provider-managed profile, use the generic foreground path:
 apn wallet connect --profile provider-one --provider coinbase-agentic-wallet
 ```
 
-The CLI collects provider authentication only in the foreground. MCP returns
-the exact CLI handoff before provider process access. The documented provider
-client requires the email and one-time code in short-lived child argv; this is
-a residual local same-user process-table risk, not OS-level argv secrecy. APN
-does not log, persist or return those argv values or raw authentication output.
+The CLI first reuses an active provider session without another email or OTP
+prompt. If no session is active, it collects provider authentication only in
+the foreground. MCP returns the exact CLI handoff before provider process
+access. The documented provider client requires the email and one-time code in
+short-lived child argv; this is a residual local same-user process-table risk,
+not OS-level argv secrecy. APN does not log, persist or return those argv
+values or raw authentication output.
 
 `wallet ensure` creates or reuses one stable address. Fund only that public
 address, manually, with a small amount of Base ETH and Base USDC. APN never
