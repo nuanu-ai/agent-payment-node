@@ -20,7 +20,8 @@ export type ProviderX402State =
   | "settlement_pending"
   | "ambiguous_effect"
   | "completed"
-  | "failed_before_effect";
+  | "failed_before_effect"
+  | "failed_settled_without_result";
 
 export interface ProviderX402Transition {
   readonly sequence: string;
@@ -133,7 +134,7 @@ export interface ProviderX402ReceiptRecord {
   readonly schemaVersion: "apn.provider-x402.receipt.v1";
   readonly kind: "x402_fetch";
   readonly operationId: string;
-  readonly terminalState: "completed" | "failed_before_effect";
+  readonly terminalState: "completed" | "failed_before_effect" | "failed_settled_without_result";
   readonly reason: string;
   readonly proofClass: string;
   readonly fingerprint: string;
@@ -227,7 +228,7 @@ export function validateProviderX402Operation(value: unknown): ProviderX402Opera
     !Array.isArray(operation.transitions) || operation.transitions.length === 0 ||
     operation.transitions.at(-1)?.state !== operation.state || operation.transitions.at(-1)?.reason !== operation.reason ||
     operation.transitions.at(-1)?.proofClass !== operation.proofClass ||
-    operation.terminal !== ["completed", "failed_before_effect"].includes(operation.state)
+    operation.terminal !== ["completed", "failed_before_effect", "failed_settled_without_result"].includes(operation.state)
   ) corrupt();
   validateTransitions(operation.transitions);
   if (operation.invocation !== undefined) validateInvocation(operation.invocation, operation);
@@ -240,19 +241,30 @@ export function validateProviderX402Operation(value: unknown): ProviderX402Opera
     operation.evidenceLowerBlock === undefined || operation.evidenceDeadlineAt === undefined
   )) corrupt();
   if (operation.state === "completed" && (operation.sellerResult === undefined || operation.settlementEvidence === undefined)) corrupt();
+  if (operation.state === "failed_settled_without_result" && (
+    operation.reason !== "seller_result_missing" || operation.proofClass !== "confirmed_settlement_without_seller_result" ||
+    operation.sellerResult !== undefined || operation.settlementEvidence === undefined
+  )) corrupt();
   return operation;
 }
 
 export function validateProviderX402Receipt(value: unknown): ProviderX402ReceiptRecord {
   if (!isPlainRecord(value)) corrupt();
   const receipt = value as unknown as ProviderX402ReceiptRecord;
+  if (!exactKeys(value, [
+    "schemaVersion", "kind", "operationId", "terminalState", "reason", "proofClass", "fingerprint",
+    "requestDigest", "requirementDigest", "payer", "payee", "amountAtomic", "network", "token",
+    ...(receipt.result === undefined ? [] : ["result"]),
+    ...(receipt.settlement === undefined ? [] : ["settlement"]),
+    "operationBindingHash", "createdAt", "integrityHash",
+  ])) corrupt();
   const without = { ...receipt, integrityHash: undefined } as Record<string, unknown>;
   delete without.integrityHash;
   if (
     receipt.schemaVersion !== "apn.provider-x402.receipt.v1" || receipt.kind !== "x402_fetch" ||
     !hash(receipt.operationId) || !hash(receipt.fingerprint) || !hash(receipt.requestDigest) ||
     !hash(receipt.requirementDigest) || receipt.integrityHash !== hashObject(without) ||
-    !["completed", "failed_before_effect"].includes(receipt.terminalState) ||
+    !["completed", "failed_before_effect", "failed_settled_without_result"].includes(receipt.terminalState) ||
     receipt.network !== CHAIN_CAIP2 || receipt.token !== BASE_USDC.toLowerCase()
   ) corrupt();
   if (receipt.result !== undefined && (
@@ -261,6 +273,10 @@ export function validateProviderX402Receipt(value: unknown): ProviderX402Receipt
   )) corrupt();
   if (receipt.terminalState === "completed" && (receipt.result === undefined || receipt.settlement === undefined)) corrupt();
   if (receipt.terminalState === "failed_before_effect" && (receipt.result !== undefined || receipt.settlement !== undefined)) corrupt();
+  if (receipt.terminalState === "failed_settled_without_result" && (
+    receipt.reason !== "seller_result_missing" || receipt.proofClass !== "confirmed_settlement_without_seller_result" ||
+    receipt.result !== undefined || receipt.settlement === undefined
+  )) corrupt();
   return receipt;
 }
 
@@ -288,10 +304,11 @@ export function validateProviderX402Continuity(
     preparing: ["preparing", "awaiting_approval", "failed_before_effect"],
     awaiting_approval: ["started", "failed_before_effect"],
     started: ["settlement_pending", "ambiguous_effect", "failed_before_effect"],
-    settlement_pending: ["settlement_pending", "ambiguous_effect", "completed"],
-    ambiguous_effect: ["ambiguous_effect"],
+    settlement_pending: ["settlement_pending", "ambiguous_effect", "completed", "failed_settled_without_result"],
+    ambiguous_effect: ["ambiguous_effect", "failed_settled_without_result"],
     completed: [],
     failed_before_effect: [],
+    failed_settled_without_result: [],
   };
   if (!allowed[previous.state].includes(next.state)) corrupt();
 }

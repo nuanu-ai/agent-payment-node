@@ -272,7 +272,12 @@ export class ProviderX402Service {
     }
     async reconcile(operation, deadline) {
         operation = await this.recoverOrphanReceipt(operation);
-        if (operation.terminal || operation.evidenceLowerBlock === undefined)
+        if (operation.terminal)
+            return operation;
+        if (operation.settlementEvidence !== undefined &&
+            !(operation.state === "ambiguous_effect" && operation.sellerResult !== undefined))
+            return await this.terminalizeSettled(operation);
+        if (operation.evidenceLowerBlock === undefined)
             return operation;
         if (operation.state === "ambiguous_effect" && operation.immutableUpperBlock !== undefined)
             return operation;
@@ -295,58 +300,69 @@ export class ProviderX402Service {
                 ...(observation.upperBlock === undefined ? {} : { immutableUpperBlock: observation.upperBlock }),
             });
         }
-        if (operation.state === "ambiguous_effect") {
-            return await this.transition(operation, "ambiguous_effect", operation.sellerResult === undefined
-                ? "seller_result_missing"
-                : "settlement_verified_after_ambiguity", "x402_unknown_finality", {
-                immutableUpperBlock: observation.upperBlock,
-                settlementEvidence: observation.evidence,
-            });
+        if (operation.state === "ambiguous_effect" && operation.sellerResult !== undefined) {
+            return await this.transition(operation, "ambiguous_effect", "settlement_verified_after_ambiguity", "x402_unknown_finality", { immutableUpperBlock: observation.upperBlock, settlementEvidence: observation.evidence });
         }
-        let evidenced = await this.transition(operation, operation.sellerResult === undefined ? "ambiguous_effect" : "settlement_pending", operation.sellerResult === undefined ? "seller_result_missing" : "x402_settlement_verified", operation.sellerResult === undefined ? "x402_unknown_finality" : "x402_settlement_verified_result_pending", { immutableUpperBlock: observation.upperBlock, settlementEvidence: observation.evidence });
-        if (evidenced.sellerResult === undefined)
-            return evidenced;
-        const receipt = sealProviderX402Receipt({
+        const evidenced = await this.transition(operation, operation.sellerResult === undefined ? "ambiguous_effect" : "settlement_pending", operation.sellerResult === undefined ? "seller_result_missing" : "x402_settlement_verified", operation.sellerResult === undefined ? "x402_unknown_finality" : "x402_settlement_verified_result_pending", { immutableUpperBlock: observation.upperBlock, settlementEvidence: observation.evidence });
+        return await this.terminalizeSettled(evidenced);
+    }
+    async terminalizeSettled(operation) {
+        if (operation.settlementEvidence === undefined)
+            return operation;
+        const completed = operation.sellerResult !== undefined;
+        const terminalState = completed ? "completed" : "failed_settled_without_result";
+        const reason = completed ? "x402_completed" : "seller_result_missing";
+        const proofClass = completed ? "x402_safe_settlement" : "confirmed_settlement_without_seller_result";
+        const at = this.context.clock.now().toISOString();
+        const receipt = this.terminalReceipt(operation, terminalState, reason, proofClass, at);
+        await this.repository.writeReceipt(operation.profileHash, receipt);
+        return await this.transition(operation, terminalState, reason, proofClass, {}, at);
+    }
+    terminalReceipt(operation, terminalState, reason, proofClass, createdAt) {
+        return sealProviderX402Receipt({
             schemaVersion: "apn.provider-x402.receipt.v1",
             kind: "x402_fetch",
-            operationId: evidenced.operationId,
-            terminalState: "completed",
-            reason: "x402_completed",
-            proofClass: "x402_safe_settlement",
-            fingerprint: evidenced.fingerprint,
-            requestDigest: evidenced.request.requestDigest,
-            requirementDigest: evidenced.requirement.digest,
-            payer: evidenced.provider.payer,
-            payee: evidenced.requirement.payee,
-            amountAtomic: evidenced.requirement.amountAtomic,
-            network: evidenced.requirement.network,
-            token: evidenced.requirement.token,
-            result: {
-                classification: evidenced.sellerResult.classification,
-                sha256: evidenced.sellerResult.sha256,
-                byteLength: evidenced.sellerResult.byte_length,
-            },
-            settlement: observation.evidence,
-            operationBindingHash: providerX402BindingHash(evidenced),
-            createdAt: this.context.clock.now().toISOString(),
+            operationId: operation.operationId,
+            terminalState,
+            reason,
+            proofClass,
+            fingerprint: operation.fingerprint,
+            requestDigest: operation.request.requestDigest,
+            requirementDigest: operation.requirement.digest,
+            payer: operation.provider.payer,
+            payee: operation.requirement.payee,
+            amountAtomic: operation.requirement.amountAtomic,
+            network: operation.requirement.network,
+            token: operation.requirement.token,
+            ...(operation.sellerResult === undefined ? {} : { result: {
+                    classification: operation.sellerResult.classification,
+                    sha256: operation.sellerResult.sha256,
+                    byteLength: operation.sellerResult.byte_length,
+                } }),
+            ...(operation.settlementEvidence === undefined ? {} : { settlement: operation.settlementEvidence }),
+            operationBindingHash: providerX402BindingHash(operation),
+            createdAt,
         });
-        await this.repository.writeReceipt(evidenced.profileHash, receipt);
-        evidenced = await this.transition(evidenced, "completed", "x402_completed", "x402_safe_settlement");
-        return evidenced;
     }
     async recoverOrphanReceipt(operation) {
-        if (operation.terminal)
-            return operation;
         const receipt = await this.repository.loadReceipt(operation.profileHash, operation.operationId);
+        if (operation.terminal) {
+            if (receipt === null) {
+                const terminalState = operation.state;
+                const reconstructed = this.terminalReceipt(operation, terminalState, operation.reason, operation.proofClass, operation.updatedAt);
+                await this.repository.writeReceipt(operation.profileHash, reconstructed);
+            }
+            return operation;
+        }
         if (receipt === null)
             return operation;
         if (receipt.terminalState === "failed_before_effect") {
             return await this.transition(operation, "failed_before_effect", receipt.reason, receipt.proofClass);
         }
-        if (operation.sellerResult === undefined || operation.settlementEvidence === undefined) {
-            throw new ApnError("APN_STATE_CORRUPT", "Provider x402 completion receipt has no matching durable evidence.");
+        if (operation.settlementEvidence === undefined || (receipt.terminalState === "completed" ? operation.sellerResult === undefined : operation.sellerResult !== undefined)) {
+            throw new ApnError("APN_STATE_CORRUPT", "Provider x402 terminal receipt has no matching durable evidence.");
         }
-        return await this.transition(operation, "completed", receipt.reason, receipt.proofClass);
+        return await this.transition(operation, receipt.terminalState, receipt.reason, receipt.proofClass);
     }
     async withOperationLock(operation, action, deadline) {
         const remaining = deadline === undefined ? undefined : Math.floor(deadline - this.context.wait.nowMs());
@@ -362,35 +378,18 @@ export class ProviderX402Service {
         }, remaining === undefined ? {} : { waitMs: remaining });
     }
     async failBeforeEffect(operation, reason, shouldThrow = true) {
-        const receipt = sealProviderX402Receipt({
-            schemaVersion: "apn.provider-x402.receipt.v1",
-            kind: "x402_fetch",
-            operationId: operation.operationId,
-            terminalState: "failed_before_effect",
-            reason,
-            proofClass: "x402_proven_no_effect",
-            fingerprint: operation.fingerprint,
-            requestDigest: operation.request.requestDigest,
-            requirementDigest: operation.requirement.digest,
-            payer: operation.provider.payer,
-            payee: operation.requirement.payee,
-            amountAtomic: operation.requirement.amountAtomic,
-            network: operation.requirement.network,
-            token: operation.requirement.token,
-            operationBindingHash: providerX402BindingHash(operation),
-            createdAt: this.context.clock.now().toISOString(),
-        });
+        const at = this.context.clock.now().toISOString();
+        const receipt = this.terminalReceipt(operation, "failed_before_effect", reason, "x402_proven_no_effect", at);
         await this.repository.writeReceipt(operation.profileHash, receipt);
-        const failed = await this.transition(operation, "failed_before_effect", reason, "x402_proven_no_effect");
+        const failed = await this.transition(operation, "failed_before_effect", reason, "x402_proven_no_effect", {}, at);
         if (shouldThrow)
             throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen x402 inputs changed before provider effect; prepare a new operation.");
         return failed;
     }
-    async transition(operation, state, reason, proofClass, extra = {}) {
-        const at = this.context.clock.now().toISOString();
+    async transition(operation, state, reason, proofClass, extra = {}, at = this.context.clock.now().toISOString()) {
         const transitions = appendProviderX402Transition(operation.transitions, { at, state, reason, proofClass });
         const { integrityHash: _integrity, ...base } = operation;
-        const terminal = state === "completed" || state === "failed_before_effect";
+        const terminal = ["completed", "failed_before_effect", "failed_settled_without_result"].includes(state);
         const updated = sealProviderX402Operation({
             ...base,
             ...extra,

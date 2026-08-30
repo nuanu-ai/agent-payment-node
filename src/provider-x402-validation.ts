@@ -54,6 +54,7 @@ export function assertProviderX402ReceiptAuthority(
   receipt: ProviderX402ReceiptRecord,
 ): void {
   const completed = receipt.terminalState === "completed";
+  const settledWithoutResult = receipt.terminalState === "failed_settled_without_result";
   const receiptTime = Date.parse(receipt.createdAt);
   const operationTime = Date.parse(operation.updatedAt);
   if (
@@ -68,8 +69,12 @@ export function assertProviderX402ReceiptAuthority(
       receipt.terminalState !== operation.state || receipt.reason !== operation.reason || receipt.proofClass !== operation.proofClass
     )) ||
     (completed && (receipt.reason !== "x402_completed" || receipt.proofClass !== "x402_safe_settlement")) ||
-    (!completed && receipt.proofClass !== "x402_proven_no_effect") ||
+    (settledWithoutResult && (
+      receipt.reason !== "seller_result_missing" || receipt.proofClass !== "confirmed_settlement_without_seller_result"
+    )) ||
+    (!completed && !settledWithoutResult && receipt.proofClass !== "x402_proven_no_effect") ||
     (completed !== (operation.sellerResult !== undefined && operation.settlementEvidence !== undefined)) ||
+    (settledWithoutResult !== (operation.sellerResult === undefined && operation.settlementEvidence !== undefined)) ||
     canonicalJson(receipt.settlement ?? null) !== canonicalJson(operation.settlementEvidence ?? null) ||
     canonicalJson(receipt.result ?? null) !== canonicalJson(operation.sellerResult === undefined ? null : {
       classification: operation.sellerResult.classification,

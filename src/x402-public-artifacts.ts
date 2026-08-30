@@ -16,7 +16,7 @@ interface NormalizedProviderReceipt {
   readonly variant: "normalized_provider_json";
   readonly kind: "x402_fetch";
   readonly operationId: string;
-  readonly terminalState: "completed" | "failed_before_effect";
+  readonly terminalState: "completed" | "failed_before_effect" | "failed_settled_without_result";
   readonly reason: string;
   readonly proofClass: string;
   readonly resource: { readonly origin: string; readonly path: string; readonly urlHash: string };
@@ -153,14 +153,20 @@ export function validatePublicX402Receipt(value: unknown): PublicX402Receipt {
     receipt.schemaVersion !== "apn.x402.public-receipt.v1" || receipt.variant !== "normalized_provider_json" ||
     receipt.kind !== "x402_fetch" || !hash(receipt.operationId) || !safeLabel(receipt.reason) || !safeLabel(receipt.proofClass) ||
     receipt.integrityHash !== domainHash("apn.x402.public-receipt.v1", canonicalJson(base)) ||
-    !["completed", "failed_before_effect"].includes(receipt.terminalState) ||
+    !["completed", "failed_before_effect", "failed_settled_without_result"].includes(receipt.terminalState) ||
     receipt.network !== CHAIN_CAIP2 || receipt.token !== BASE_USDC.toLowerCase() || !address(receipt.payer) ||
     !address(receipt.payee) || !positive(receipt.amountAtomic) || !hash(receipt.fingerprint) ||
     !hash(receipt.requestDigest) || !hash(receipt.requirementDigest) || !hash(receipt.operationBindingHash) ||
     !validResource(receipt.resource) || !canonicalUtc(receipt.createdAt) ||
     (receipt.result !== undefined && !validReceiptResult(receipt.result)) ||
     (receipt.settlement !== undefined && !validSettlement(receipt.settlement, receipt)) ||
-    (receipt.terminalState === "completed") !== (receipt.result !== undefined && receipt.settlement !== undefined)
+    (receipt.terminalState === "completed") !== (receipt.result !== undefined && receipt.settlement !== undefined) ||
+    (receipt.terminalState === "failed_settled_without_result") !== (
+      receipt.result === undefined && receipt.settlement !== undefined
+    ) ||
+    (receipt.terminalState === "failed_before_effect" && (
+      receipt.result !== undefined || receipt.settlement !== undefined
+    ))
   ) throw new TypeError("Invalid public x402 receipt.");
   return receipt;
 }
