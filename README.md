@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.3.3 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.3.4 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -168,6 +168,12 @@ completes only when the bounded seller result joins one exact successful outgoin
 Base-USDC Transfer in the fixed window from the frozen lower block through the
 earliest block timestamp at or after `started + 240000ms`.
 
+If that exact settlement is independently proven but no usable seller result is
+available, APN terminates the same operation as
+`failed_settled_without_result`. The immutable receipt records the exact spent
+amount and Transfer evidence without inventing seller success or seller data;
+status, resume, restart and approval replay remain observation-only.
+
 `x402 fetch prepare` uses the owner-approved profile maximum. An optional
 `--max-amount-atomic` may only make that ceiling stricter for one call; it can
 never raise the profile limit. The local signed authorization amount and the
@@ -295,8 +301,8 @@ are separately recorded release gates. The local stdio MCP surface projects
 the same sixteen catalog-selected wallet, policy, payment, operation and
 receipt commands through the shared binder/runtime/core path. Direct approval
 remains foreground CLI only. Coinbase x402 source and deterministic product
-proof are included; live Coinbase/provider and paid acceptance remain separate
-unproven release gates. Hub, contracts, remote MCP, other providers, Stellar,
+proof are included; live Coinbase/provider and paid acceptance are recorded as
+separate release gates. Hub, contracts, remote MCP, other providers, Stellar,
 Solana and TRON are outside this release.
 
 The published npm archive includes `npm-shrinkwrap.json`; Formula installation

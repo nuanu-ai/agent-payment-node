@@ -4,7 +4,7 @@ import type { ProfilePolicyRecord } from "./profile-policy.js";
 import type { X402RpcBlock, X402RpcHead, X402RpcLog } from "./ports.js";
 import { type X402SettlementWaitProjection } from "./x402-state-integrity.js";
 export declare const PROVIDER_X402_STATE_VERSION: "apn.provider-x402.state.v1";
-export type ProviderX402State = "preparing" | "awaiting_approval" | "started" | "settlement_pending" | "ambiguous_effect" | "completed" | "failed_before_effect";
+export type ProviderX402State = "preparing" | "awaiting_approval" | "started" | "settlement_pending" | "ambiguous_effect" | "completed" | "failed_before_effect" | "failed_settled_without_result";
 export interface ProviderX402Transition {
     readonly sequence: string;
     readonly at: string;
@@ -115,7 +115,7 @@ export interface ProviderX402ReceiptRecord {
     readonly schemaVersion: "apn.provider-x402.receipt.v1";
     readonly kind: "x402_fetch";
     readonly operationId: string;
-    readonly terminalState: "completed" | "failed_before_effect";
+    readonly terminalState: "completed" | "failed_before_effect" | "failed_settled_without_result";
     readonly reason: string;
     readonly proofClass: string;
     readonly fingerprint: string;
