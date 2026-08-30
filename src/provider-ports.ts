@@ -1,4 +1,4 @@
-import type { Address } from "./model.js";
+import type { Address, Hex } from "./model.js";
 import type { ProviderCapabilitySnapshot, ProviderProfileRecord } from "./provider-profile.js";
 
 export interface ForegroundAuthenticationPort {
@@ -40,6 +40,19 @@ export interface ProviderWalletReadPort {
 
 export interface DirectExecutionPort {
   readonly mode: "local_raw_transaction_apn_submit" | "provider_atomic_send";
+  assertCompatibleIntent?(input: {
+    readonly amountAtomic: string;
+    readonly amountDecimal: string;
+    readonly recipient: Address;
+  }): void;
+  execute?(input: {
+    readonly amountDecimal: string;
+    readonly recipient: Address;
+  }): Promise<
+    | { readonly disposition: "acknowledged"; readonly transactionHash: Hex }
+    | { readonly disposition: "not_started"; readonly reason: "provider_child_not_created" | "provider_binary_unavailable" }
+    | { readonly disposition: "ambiguous"; readonly reason: string }
+  >;
 }
 
 export interface X402ExecutionPort {

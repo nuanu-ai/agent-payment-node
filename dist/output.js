@@ -39,7 +39,12 @@ function nextActions(error) {
             const handoff = error.details?.cli_handoff;
             return typeof handoff === "string" ? [handoff] : [];
         }
-        case "APN_PROFILE_DRIFT": return ["Run the foreground wallet connect handoff with --expected-revision set to the current revision."];
+        case "APN_PROFILE_DRIFT": {
+            const handoff = error.details?.cli_handoff;
+            return typeof handoff === "string"
+                ? [handoff]
+                : ["Run the foreground wallet connect handoff with --expected-revision set to the current revision."];
+        }
         case "APN_PROVIDER_SESSION_REQUIRED": return ["Run the foreground wallet connect handoff again."];
         case "APN_PROVIDER_UNAVAILABLE": return ["Verify the exact pinned provider client, then retry foreground wallet connect."];
         case "APN_PROVIDER_PROTOCOL": return ["Stop and verify the pinned provider client before retrying."];

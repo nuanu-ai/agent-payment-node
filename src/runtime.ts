@@ -12,6 +12,7 @@ import type {
   ProviderProfileRepositoryPort,
   ProviderRegistryPort,
 } from "./provider-ports.js";
+import type { TransferApprovalPort } from "./tty-approval.js";
 
 export interface CoreDependencies {
   readonly state: StateStore;
@@ -26,6 +27,8 @@ export interface CoreDependencies {
   readonly profileRepository?: ProviderProfileRepositoryPort;
   readonly providerRegistry?: ProviderRegistryPort;
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
+  readonly transferApproval?: TransferApprovalPort;
+  readonly rpcUrl?: string;
 }
 
 export class RuntimeContext {
@@ -41,6 +44,8 @@ export class RuntimeContext {
   readonly profileRepository?: ProviderProfileRepositoryPort;
   readonly providerRegistry?: ProviderRegistryPort;
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
+  readonly transferApproval?: TransferApprovalPort;
+  readonly rpcUrl?: string;
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
@@ -56,6 +61,8 @@ export class RuntimeContext {
     if (dependencies.profileRepository !== undefined) this.profileRepository = dependencies.profileRepository;
     if (dependencies.providerRegistry !== undefined) this.providerRegistry = dependencies.providerRegistry;
     if (dependencies.foregroundAuthentication !== undefined) this.foregroundAuthentication = dependencies.foregroundAuthentication;
+    if (dependencies.transferApproval !== undefined) this.transferApproval = dependencies.transferApproval;
+    if (dependencies.rpcUrl !== undefined) this.rpcUrl = dependencies.rpcUrl;
   }
 
   async ready(): Promise<void> {
@@ -113,6 +120,18 @@ export class RuntimeContext {
       throw new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "A foreground terminal is required for wallet provider authentication.");
     }
     return this.foregroundAuthentication;
+  }
+
+  requireTransferApproval(): TransferApprovalPort {
+    if (this.transferApproval === undefined) {
+      throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "A foreground terminal is required for direct-transfer approval.");
+    }
+    return this.transferApproval;
+  }
+
+  requireRpcUrl(): string {
+    if (this.rpcUrl === undefined) throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
+    return this.rpcUrl;
   }
 
   nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest {

@@ -14,11 +14,13 @@ export interface TransferApprovalIntent {
   readonly recipient: Address;
   readonly amountAtomic: string;
   readonly amountDecimal: string;
-  readonly nonceAtomic: string;
-  readonly gasLimitAtomic: string;
-  readonly maxFeePerGasAtomic: string;
-  readonly maxPriorityFeePerGasAtomic: string;
+  readonly nonceAtomic?: string;
+  readonly gasLimitAtomic?: string;
+  readonly maxFeePerGasAtomic?: string;
+  readonly maxPriorityFeePerGasAtomic?: string;
   readonly expiresAt: string;
+  readonly providerId?: string;
+  readonly policyIdentity?: string;
 }
 
 export interface TransferApprovalPort {
@@ -76,10 +78,12 @@ export class TtyTransferApproval implements TransferApprovalPort {
         `Sender: ${intent.walletAddress}`,
         `Recipient: ${intent.recipient}`,
         `Amount: ${intent.amountDecimal} USDC (${intent.amountAtomic} atomic)`,
-        `Nonce: ${intent.nonceAtomic}`,
-        `Gas limit: ${intent.gasLimitAtomic}`,
-        `Max fee per gas: ${intent.maxFeePerGasAtomic} wei`,
-        `Max priority fee per gas: ${intent.maxPriorityFeePerGasAtomic} wei`,
+        ...(intent.providerId === undefined ? [] : [`Provider: ${intent.providerId}`]),
+        ...(intent.policyIdentity === undefined ? [] : [`Policy: ${intent.policyIdentity}`]),
+        ...(intent.nonceAtomic === undefined ? [] : [`Nonce: ${intent.nonceAtomic}`]),
+        ...(intent.gasLimitAtomic === undefined ? [] : [`Gas limit: ${intent.gasLimitAtomic}`]),
+        ...(intent.maxFeePerGasAtomic === undefined ? [] : [`Max fee per gas: ${intent.maxFeePerGasAtomic} wei`]),
+        ...(intent.maxPriorityFeePerGasAtomic === undefined ? [] : [`Max priority fee per gas: ${intent.maxPriorityFeePerGasAtomic} wei`]),
         `Expires: ${intent.expiresAt}`,
         `Fingerprint: ${intent.fingerprint}`,
         `Type exactly: ${phrase}`,
