@@ -141,10 +141,8 @@ export class WalletService {
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-            const wallet = await this.context.state.loadWallet(profileHash);
-            if (wallet === null)
-                throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-            return publicProfilePolicy(profile, await this.context.requirePolicy().load(policyBinding(wallet)));
+            const binding = await this.policyBindingForProfile(profileHash);
+            return publicProfilePolicy(profile, await this.context.requirePolicy().load(binding));
         });
     }
     async policySet(request) {
@@ -152,16 +150,23 @@ export class WalletService {
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-            const wallet = await this.context.state.loadWallet(profileHash);
-            if (wallet === null)
-                throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-            const policy = await this.context.requirePolicy().set(policyBinding(wallet), {
+            const binding = await this.policyBindingForProfile(profileHash);
+            const policy = await this.context.requirePolicy().set(binding, {
                 maxBalanceUsdcAtomic: request.maxBalanceUsdcAtomic,
                 maxX402AmountAtomic: request.maxX402AmountAtomic,
                 ...(request.maxBalanceEthWei === undefined ? {} : { maxBalanceEthWei: request.maxBalanceEthWei }),
             });
             return publicProfilePolicy(profile, policy);
         });
+    }
+    async policyBindingForProfile(profileHash) {
+        const provider = await this.context.profileRepository?.load(profileHash) ?? null;
+        if (provider !== null)
+            return policyBinding(provider);
+        const wallet = await this.context.state.loadWallet(profileHash);
+        if (wallet === null)
+            throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+        return policyBinding(wallet);
     }
 }
 //# sourceMappingURL=wallet-service.js.map

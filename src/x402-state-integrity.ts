@@ -22,12 +22,21 @@ export interface X402SettlementWaitProjection {
   readonly observationCount: string;
 }
 
+export function x402WaitProjectedStatus(
+  status: { readonly reason: string; readonly proofClass: string; readonly terminal: boolean },
+  settlementWait?: X402SettlementWaitProjection,
+): { readonly reason: string; readonly proofClass: string } {
+  return settlementWait?.outcome === "timeout" && !status.terminal
+    ? { reason: "x402_settlement_wait_timeout", proofClass: "x402_unknown_finality" }
+    : { reason: status.reason, proofClass: status.proofClass };
+}
+
 export function publicX402Operation(
   operation: X402OperationRecord,
   result?: X402ResultRecord,
   settlementWait?: X402SettlementWaitProjection,
 ): unknown {
-  const timedOut = settlementWait?.outcome === "timeout" && !operation.terminal;
+  const waitStatus = x402WaitProjectedStatus(operation, settlementWait);
   const value = {
     schemaVersion: "apn.x402.public-operation.v1",
     kind: operation.kind,
@@ -35,8 +44,8 @@ export function publicX402Operation(
     state: operation.state,
     finalityClass: operation.finalityClass,
     terminal: operation.terminal,
-    reason: timedOut ? "x402_settlement_wait_timeout" : operation.reason,
-    proofClass: timedOut ? "x402_unknown_finality" : operation.proofClass,
+    reason: waitStatus.reason,
+    proofClass: waitStatus.proofClass,
     nextActions: operation.nextActions,
     createdAt: operation.createdAt,
     updatedAt: operation.updatedAt,

@@ -1,5 +1,5 @@
 import type { Address, Hex } from "./model.js";
-import type { BalanceSnapshot, FeeEstimate, RpcPort, RpcReceipt, X402AuthorizationState, X402AuthorizationUsedLogs, X402BlockReference, X402PrepareEvidence, X402RpcBlock, X402RpcHead, X402RpcPort, X402RpcReceipt } from "./ports.js";
+import type { BalanceSnapshot, FeeEstimate, RpcPort, RpcReceipt, X402AuthorizationState, X402AuthorizationUsedLogs, X402BlockReference, X402PrepareEvidence, X402RpcBlock, X402RpcHead, X402RpcPort, X402RpcReceipt, X402TransferLogs } from "./ports.js";
 export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     readonly endpoint: URL;
     readonly rpcOrigin: string;
@@ -26,6 +26,11 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly fromBlock: string;
         readonly toBlock: string;
     }): Promise<X402AuthorizationUsedLogs>;
+    getX402TransferLogs(input: {
+        readonly from: Address;
+        readonly fromBlock: string;
+        readonly toBlock: string;
+    }): Promise<X402TransferLogs>;
     getPendingNonce(address: Address): Promise<string>;
     estimateDirectTransfer(input: {
         readonly from: Address;

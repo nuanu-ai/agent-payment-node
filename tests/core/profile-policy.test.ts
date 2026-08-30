@@ -108,6 +108,34 @@ test("encrypted owner policy requires approval for creation/increase, preserves 
   assert.equal((shown.data as { integrity_status: string }).integrity_status, "authenticated");
 });
 
+test("provider rebind invalidates the old encrypted policy and requires a newly approved policy", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  await state.initialize();
+  const approval = new RecordingPolicyApproval();
+  const clock = new TestClock();
+  const policy = new EncryptedProfilePolicy(state, new TestWrappingSecret(), approval, clock);
+  const first: ProfilePolicyBinding = {
+    profile: "provider-one",
+    profileHash: state.profileHash("provider-one"),
+    walletAddress: `0x${"1".repeat(40)}`,
+    walletBindingHash: "a".repeat(64),
+  };
+  const rebound: ProfilePolicyBinding = {
+    ...first,
+    walletAddress: `0x${"2".repeat(40)}`,
+    walletBindingHash: "b".repeat(64),
+  };
+  const limits = { maxBalanceUsdcAtomic: "50000000", maxX402AmountAtomic: "2000000" };
+  await policy.set(first, limits);
+  clock.advance(1_000);
+  await policy.set(rebound, limits);
+  assert.deepEqual(approval.intents.map((intent) => intent.change), ["create", "create"]);
+  assert.equal((await policy.load(rebound))?.walletBindingHash, rebound.walletBindingHash);
+  await assert.rejects(policy.load(first), (error: unknown) => error instanceof ApnError && error.code === "APN_STATE_CORRUPT");
+});
+
 test("same chain balance is classified from owner values and never from a compiled monetary default", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);

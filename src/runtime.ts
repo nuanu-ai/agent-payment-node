@@ -13,6 +13,7 @@ import type {
   ProviderRegistryPort,
 } from "./provider-ports.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
+import type { ProviderX402Repository } from "./provider-x402-repository.js";
 
 export interface CoreDependencies {
   readonly state: StateStore;
@@ -29,6 +30,7 @@ export interface CoreDependencies {
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
   readonly transferApproval?: TransferApprovalPort;
   readonly rpcUrl?: string;
+  readonly providerX402Repository?: ProviderX402Repository;
 }
 
 export class RuntimeContext {
@@ -46,6 +48,7 @@ export class RuntimeContext {
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
   readonly transferApproval?: TransferApprovalPort;
   readonly rpcUrl?: string;
+  readonly providerX402Repository?: ProviderX402Repository;
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
@@ -63,6 +66,7 @@ export class RuntimeContext {
     if (dependencies.foregroundAuthentication !== undefined) this.foregroundAuthentication = dependencies.foregroundAuthentication;
     if (dependencies.transferApproval !== undefined) this.transferApproval = dependencies.transferApproval;
     if (dependencies.rpcUrl !== undefined) this.rpcUrl = dependencies.rpcUrl;
+    if (dependencies.providerX402Repository !== undefined) this.providerX402Repository = dependencies.providerX402Repository;
   }
 
   async ready(): Promise<void> {

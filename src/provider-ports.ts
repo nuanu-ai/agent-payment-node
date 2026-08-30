@@ -57,6 +57,37 @@ export interface DirectExecutionPort {
 
 export interface X402ExecutionPort {
   readonly mode: "local_detached_eip3009_apn_paid_retry" | "provider_atomic_paid_fetch";
+  assertCompatibleIntent?(input: { readonly amountAtomic: string }): void;
+  prime?(): Promise<void>;
+  execute?(input: {
+    readonly url: string;
+    readonly amountAtomic: string;
+    readonly correlationId: string;
+    readonly requestDigest: string;
+  }): Promise<
+    | { readonly disposition: "not_started"; readonly reason: "provider_child_not_created" | "provider_binary_unavailable" }
+    | { readonly disposition: "ambiguous"; readonly reason: string; readonly invocation?: ProviderX402Invocation }
+    | { readonly disposition: "seller_result"; readonly invocation: ProviderX402Invocation; readonly result: ProviderX402SellerResult }
+  >;
+}
+
+export interface ProviderX402Invocation {
+  readonly correlation_id: string;
+  readonly request_digest: string;
+  readonly intent_binding_hash: string;
+  readonly child_identity_hash: string;
+  readonly output_sha256: string;
+  readonly output_byte_length: string;
+}
+
+export interface ProviderX402SellerResult {
+  readonly classification: "normalized_provider_json";
+  readonly http_status: string;
+  readonly payment_made: true;
+  readonly amount_paid_atomic: string;
+  readonly canonical_json: string;
+  readonly byte_length: string;
+  readonly sha256: string;
 }
 
 export interface EvidencePort {

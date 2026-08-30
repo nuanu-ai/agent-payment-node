@@ -2,6 +2,7 @@ import { hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 import type { Address, WalletRecord } from "./model.js";
+import type { ProviderProfileRecord } from "./provider-profile.js";
 
 export const PROFILE_POLICY_VERSION = "apn.profile-policy.v1" as const;
 
@@ -35,7 +36,15 @@ export interface ProfilePolicyPort {
   set(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): Promise<ProfilePolicyRecord>;
 }
 
-export function policyBinding(wallet: WalletRecord): ProfilePolicyBinding {
+export function policyBinding(wallet: WalletRecord | ProviderProfileRecord): ProfilePolicyBinding {
+  if ("provider_id" in wallet) {
+    return {
+      profile: wallet.profile,
+      profileHash: wallet.profile_hash,
+      walletAddress: wallet.public_address,
+      walletBindingHash: wallet.account_binding_hash,
+    };
+  }
   return {
     profile: wallet.profile,
     profileHash: wallet.profileHash,

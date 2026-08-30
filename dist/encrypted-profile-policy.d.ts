@@ -11,5 +11,6 @@ export declare class EncryptedProfilePolicy implements ProfilePolicyPort {
     constructor(state: StateStore, wrappingSecret: WrappingSecretPort, approval: ProfilePolicyApprovalPort, clock?: ClockPort);
     load(binding: ProfilePolicyBinding): Promise<ProfilePolicyRecord | null>;
     set(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): Promise<ProfilePolicyRecord>;
+    private loadForSet;
     private save;
 }

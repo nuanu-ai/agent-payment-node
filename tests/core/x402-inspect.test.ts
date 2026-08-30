@@ -315,7 +315,7 @@ test("PAYMENT-SIGNATURE is canonical strict exact-EVM PaymentPayload before tran
   const source = await readFile("src/x402-http.ts", "utf8");
   const validation = source.indexOf("decodePaymentSignatureHeader(request.paymentSignature)");
   const canonicality = source.indexOf("encodePaymentSignatureHeader(decodedPaymentSignature) !== request.paymentSignature");
-  const network = source.indexOf("resolvePublicAddresses(endpoint");
+  const network = source.indexOf("this.resolveAddresses(endpoint");
   assert.ok(
     validation >= 0 && canonicality > validation && network > canonicality,
     "paid header validation and canonical byte equality must precede DNS/TLS I/O",
