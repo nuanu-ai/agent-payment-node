@@ -14,8 +14,13 @@ export function validateX402Operation(value) {
         stateCorrupt("x402 operation protected state validation failed.");
     }
 }
+export function x402WaitProjectedStatus(status, settlementWait) {
+    return settlementWait?.outcome === "timeout" && !status.terminal
+        ? { reason: "x402_settlement_wait_timeout", proofClass: "x402_unknown_finality" }
+        : { reason: status.reason, proofClass: status.proofClass };
+}
 export function publicX402Operation(operation, result, settlementWait) {
-    const timedOut = settlementWait?.outcome === "timeout" && !operation.terminal;
+    const waitStatus = x402WaitProjectedStatus(operation, settlementWait);
     const value = {
         schemaVersion: "apn.x402.public-operation.v1",
         kind: operation.kind,
@@ -23,8 +28,8 @@ export function publicX402Operation(operation, result, settlementWait) {
         state: operation.state,
         finalityClass: operation.finalityClass,
         terminal: operation.terminal,
-        reason: timedOut ? "x402_settlement_wait_timeout" : operation.reason,
-        proofClass: timedOut ? "x402_unknown_finality" : operation.proofClass,
+        reason: waitStatus.reason,
+        proofClass: waitStatus.proofClass,
         nextActions: operation.nextActions,
         createdAt: operation.createdAt,
         updatedAt: operation.updatedAt,

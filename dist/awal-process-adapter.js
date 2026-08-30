@@ -3,6 +3,7 @@ import { exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { accountBindingHash, coinbaseDirectCapabilitySnapshot } from "./provider-profile.js";
 import { AwalDirectAdapter } from "./awal-direct-adapter.js";
+import { AwalX402Adapter } from "./awal-x402-adapter.js";
 export const AWAL_PROVIDER_ID = "coinbase-agentic-wallet";
 export { AWAL_BIN, AWAL_INTEGRITY, AWAL_PROCESS_TIMEOUT_MS, AWAL_SHASUM, AWAL_VERSION, resolveAwalBin, } from "./awal-package.js";
 import { AWAL_PROCESS_TIMEOUT_MS, resolveAwalBin } from "./awal-package.js";
@@ -141,10 +142,12 @@ const defaultLaunch = (executable, args, options) => spawn(executable, [...args]
 export class AwalProcessAdapter {
     runner;
     direct;
+    x402;
     capabilities = coinbaseDirectCapabilitySnapshot();
-    constructor(runner = new NodeAwalProcessRunner(), direct = new AwalDirectAdapter()) {
+    constructor(runner = new NodeAwalProcessRunner(), direct = new AwalDirectAdapter(), x402 = new AwalX402Adapter()) {
         this.runner = runner;
         this.direct = direct;
+        this.x402 = x402;
     }
     bundle() {
         return {
@@ -154,6 +157,7 @@ export class AwalProcessAdapter {
             lifecycle: this,
             reads: this,
             direct: this.direct,
+            x402: this.x402,
             evidence: { owner: "apn" },
         };
     }

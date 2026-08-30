@@ -1,5 +1,5 @@
 export interface AdvisoryLockPort {
-    tryAcquire(fd: number): Promise<boolean>;
+    tryAcquire(fd: number, timeoutMs?: number, boundedWait?: boolean): Promise<boolean>;
 }
 export interface LockfChild {
     once(event: "error", listener: (error: Error) => void): this;
@@ -20,5 +20,5 @@ export declare class MacosAdvisoryLock implements AdvisoryLockPort {
     private readonly spawnLockf;
     private readonly timeoutMs;
     constructor(options?: MacosAdvisoryLockOptions);
-    tryAcquire(fd: number): Promise<boolean>;
+    tryAcquire(fd: number, timeoutMs?: number, boundedWait?: boolean): Promise<boolean>;
 }

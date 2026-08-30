@@ -104,9 +104,12 @@ function needsNative(command: string): boolean {
 }
 
 function needsPolicy(command: string): boolean {
-  return ["wallet.balance", "wallet.policy.show", "wallet.policy.set", "x402.fetch.prepare"].includes(command);
+  return [
+    "wallet.balance", "wallet.policy.show", "wallet.policy.set", "x402.fetch.prepare",
+    "x402.fetch.approve", "operation.resume",
+  ].includes(command);
 }
 
 function needsHttp(command: string): boolean {
-  return ["x402.inspect", "x402.fetch.prepare", "operation.resume"].includes(command);
+  return ["x402.inspect", "x402.fetch.prepare", "x402.fetch.approve", "operation.resume"].includes(command);
 }

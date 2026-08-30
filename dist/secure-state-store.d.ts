@@ -17,7 +17,9 @@ export declare class SecureStateStore {
     profileHash(profile: string): string;
     operationId(profile: string, idempotencyKey: string): string;
     idempotencyHash(idempotencyKey: string): string;
-    withLocks<T>(keys: readonly string[], action: () => Promise<T>): Promise<T>;
+    withLocks<T>(keys: readonly string[], action: () => Promise<T>, options?: {
+        readonly waitMs?: number;
+    }): Promise<T>;
     protected beforeLockAcquire(_key: string): Promise<void>;
     protected ensureDirectory(relativePath: string): Promise<void>;
     protected resolveRelative(relativePath: string): string;

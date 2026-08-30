@@ -66,9 +66,19 @@ import {
   isRecoverableX402RpcObservationFailure,
   x402ReadPort,
 } from "./x402-service-rpc.js";
+import { ProviderX402Service } from "./provider-x402-service.js";
+import { isCode } from "./secure-state-store.js";
 
 export class X402Service extends X402PaidRequest {
+  private readonly providerX402: ProviderX402Service;
+
+  constructor(context: RuntimeContext) {
+    super(context);
+    this.providerX402 = new ProviderX402Service(context);
+  }
+
   async prepare(request: X402PrepareRequest): Promise<unknown> {
+    if (await this.providerX402.canHandle(request.profile)) return await this.providerX402.prepare(request);
     const profile = canonicalProfile(request.profile);
     const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
     const callerCap = request.maxAmountAtomic === undefined ? undefined : positiveCap(request.maxAmountAtomic);
@@ -212,6 +222,7 @@ export class X402Service extends X402PaidRequest {
     await this.context.ready();
     const found = await this.operations.required(operationId);
     if (found.kind !== "x402_fetch") throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
+    if (found.strategy === "provider_atomic") return await this.providerX402.approve(operationId);
     if (found.record.terminal) return publicX402Operation(found.record);
     return await this.withOperationLock(found.record, async (current) => {
       if (current.terminal) return publicX402Operation(current);
@@ -228,24 +239,29 @@ export class X402Service extends X402PaidRequest {
     waitSeconds?: number,
   ): Promise<X402SettlementWaitProjection | undefined> {
     const operationId = canonicalOperationId(operationIdInput);
+    if (waitSeconds !== undefined && (!Number.isSafeInteger(waitSeconds) || waitSeconds < 1 || waitSeconds > 300)) {
+      throw new ApnError("APN_INVALID_INPUT", "Settlement wait must be an integer from 1 through 300 seconds.");
+    }
+    const deadline = waitSeconds === undefined ? undefined : this.context.wait.nowMs() + waitSeconds * 1_000;
     await this.context.ready();
     const found = await this.operations.required(operationId);
     if (found.kind !== "x402_fetch") throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
+    if (found.strategy === "provider_atomic") return await this.providerX402.resume(operationId, waitSeconds);
     if (waitSeconds !== undefined) {
-      if (!Number.isSafeInteger(waitSeconds) || waitSeconds < 1 || waitSeconds > 300) {
-        throw new ApnError("APN_INVALID_INPUT", "Settlement wait must be an integer from 1 through 300 seconds.");
-      }
       if (["awaiting_approval", "authorization_material_pending"].includes(found.record.state)) {
         throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires an authorized or post-exposure x402 operation.");
       }
-      const waitRpc = boundedX402ReadPort(
-        this.context.requireRpc(),
-        Math.min(20_000, waitSeconds * 1_000),
-      );
+      const remaining = remainingWaitMs(deadline as number, this.context.wait.nowMs());
+      if (remaining < 1) return waitTimeout(waitSeconds, 0);
+      const waitRpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining));
       if (waitRpc === null) {
         throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
       }
-      await assertWaitRpcProvenance(waitRpc, found.record);
+      try { await assertWaitRpcProvenance(waitRpc, found.record); }
+      catch (error) {
+        if (remainingWaitMs(deadline as number, this.context.wait.nowMs()) < 1) return waitTimeout(waitSeconds, 0);
+        throw error;
+      }
     }
     if (found.record.terminal) {
       return waitSeconds === undefined ? undefined : {
@@ -254,13 +270,29 @@ export class X402Service extends X402PaidRequest {
         observationCount: "0",
       };
     }
-    await this.resumeOnce(found.record);
+    try { await this.resumeOnce(found.record, deadline); }
+    catch (error) {
+      if (waitSeconds !== undefined && (
+        isCode(error, "APN_STATE_BUSY") || remainingWaitMs(deadline as number, this.context.wait.nowMs()) < 1
+      )) return waitTimeout(waitSeconds, 0);
+      throw error;
+    }
     if (waitSeconds === undefined) return undefined;
-    return await this.waitForSettlement(found.record.operationId, waitSeconds);
+    return await this.waitForSettlement(found.record.operationId, waitSeconds, deadline as number);
   }
 
-  private async resumeOnce(initial: X402OperationRecord): Promise<unknown> {
+  async recoverRead(operationIdInput: string): Promise<void> {
+    const operationId = canonicalOperationId(operationIdInput);
+    const found = await this.operations.required(operationId);
+    if (found.kind === "x402_fetch" && found.strategy === "provider_atomic") {
+      await this.providerX402.recoverRead(operationId);
+    }
+  }
+
+  private async resumeOnce(initial: X402OperationRecord, deadline?: number): Promise<unknown> {
     if (initial.terminal) return publicX402Operation(initial);
+    const remaining = deadline === undefined ? undefined : remainingWaitMs(deadline, this.context.wait.nowMs());
+    if (remaining !== undefined && remaining < 1) throw new ApnError("APN_STATE_BUSY", "Settlement wait deadline elapsed before lock acquisition.");
     return await this.withOperationLock(initial, async (current) => {
       if (current.terminal) return publicX402Operation(current);
       const receiptRecovered = await this.recoverOrphanReceipt(current);
@@ -285,7 +317,14 @@ export class X402Service extends X402PaidRequest {
       if (operation.terminal) return publicX402Operation(operation);
 
       const rpc = this.context.requireRpc();
-      const x402Rpc = x402ReadPort(rpc);
+      const rpcRemaining = deadline === undefined ? undefined : remainingWaitMs(deadline, this.context.wait.nowMs());
+      if (rpcRemaining !== undefined && rpcRemaining < 1) return publicX402Operation(operation);
+      const x402Rpc = rpcRemaining === undefined
+        ? x402ReadPort(rpc)
+        : boundedX402ReadPort(rpc, Math.min(20_000, rpcRemaining));
+      if (deadline !== undefined && x402Rpc === null) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the bounded read-only x402 RPC surface.");
+      }
       let verified: VerifiedX402PaymentMaterial | undefined;
       let completeZeroScanValidated = false;
       let completeZeroScanRead = false;
@@ -321,7 +360,7 @@ export class X402Service extends X402PaidRequest {
           await this.assertLegacySafeRead(operation);
         }
         if (verified === undefined) return publicX402Operation(operation);
-        return await this.sendPaidRequest(operation, "payment", verified);
+        return await this.sendPaidRequest(operation, "payment", verified, false, deadline);
       }
 
       if (operation.state === "seller_result_recovery_pending") {
@@ -343,7 +382,7 @@ export class X402Service extends X402PaidRequest {
           if (verified === undefined) return publicX402Operation(operation);
           if (x402Rpc === null) await this.assertLegacySafeRead(operation);
         }
-        return await this.sendPaidRequest(operation, "result_recovery", verified, x402Rpc !== null);
+        return await this.sendPaidRequest(operation, "result_recovery", verified, x402Rpc !== null, deadline);
       }
 
       const scanStatus = operation.authorizationUsedScan?.status;
@@ -357,21 +396,21 @@ export class X402Service extends X402PaidRequest {
       ) {
         verified = await this.recoverPaymentMaterial(operation);
         if (verified === undefined) return publicX402Operation(operation);
-        return await this.sendPaidRequest(operation, "payment", verified, true);
+        return await this.sendPaidRequest(operation, "payment", verified, true, deadline);
       }
       return publicX402Operation(operation);
-    });
+    }, remaining);
   }
 
   private async waitForSettlement(
     operationId: string,
     waitSeconds: number,
+    deadline: number,
   ): Promise<X402SettlementWaitProjection> {
-    const deadline = this.context.wait.nowMs() + waitSeconds * 1000;
     let observations = 0;
-    while (this.context.wait.nowMs() < deadline) {
+    while (remainingWaitMs(deadline, this.context.wait.nowMs()) >= 1) {
       const current = await this.operations.required(operationId);
-      if (current.kind !== "x402_fetch") throw new ApnError("APN_STATE_CORRUPT", "x402 operation changed kind during settlement wait.");
+      if (current.kind !== "x402_fetch" || current.strategy !== "local") throw new ApnError("APN_STATE_CORRUPT", "x402 operation changed strategy during settlement wait.");
       if (current.record.terminal) {
         return {
           outcome: "completed",
@@ -385,7 +424,7 @@ export class X402Service extends X402PaidRequest {
       await this.reconcileOnly(current.record, deadline);
       observations += 1;
       const observed = await this.operations.required(operationId);
-      if (observed.kind !== "x402_fetch") throw new ApnError("APN_STATE_CORRUPT", "x402 operation changed kind during settlement wait.");
+      if (observed.kind !== "x402_fetch" || observed.strategy !== "local") throw new ApnError("APN_STATE_CORRUPT", "x402 operation changed strategy during settlement wait.");
       if (observed.record.terminal) {
         return {
           outcome: "completed",
@@ -393,7 +432,7 @@ export class X402Service extends X402PaidRequest {
           observationCount: observations.toString(),
         };
       }
-      const remaining = deadline - this.context.wait.nowMs();
+      const remaining = remainingWaitMs(deadline, this.context.wait.nowMs());
       if (remaining <= 0) break;
       const result = await this.context.wait.wait(Math.min(5_000, Math.max(1, Math.floor(remaining))));
       if (result === "interrupted") {
@@ -412,14 +451,16 @@ export class X402Service extends X402PaidRequest {
   }
 
   private async reconcileOnly(operation: X402OperationRecord, deadline: number): Promise<void> {
-    await this.withOperationLock(operation, async (current) => {
+    const lockWaitMs = remainingWaitMs(deadline, this.context.wait.nowMs());
+    if (lockWaitMs < 1) return;
+    try { await this.withOperationLock(operation, async (current) => {
       if (current.terminal) return publicX402Operation(current);
       const receiptRecovered = await this.recoverOrphanReceipt(current);
       if (receiptRecovered !== null) return publicX402Operation(receiptRecovered);
       let next = await this.recoverOrphanResult(current);
       next = await this.finishReconciledEvidence(next);
       if (next.terminal) return publicX402Operation(next);
-      const remaining = Math.floor(deadline - this.context.wait.nowMs());
+      const remaining = remainingWaitMs(deadline, this.context.wait.nowMs());
       if (remaining < 1) return publicX402Operation(next);
       const x402Rpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining));
       if (x402Rpc === null) throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
@@ -432,7 +473,18 @@ export class X402Service extends X402PaidRequest {
         if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS") throw error;
       }
       return publicX402Operation(next);
-    });
+    }, lockWaitMs); }
+    catch (error) {
+      if (!isCode(error, "APN_STATE_BUSY")) throw error;
+    }
   }
 
+}
+
+function remainingWaitMs(deadline: number, nowMs: number): number {
+  return Math.floor(deadline - nowMs);
+}
+
+function waitTimeout(seconds: number, observations: number): X402SettlementWaitProjection {
+  return { outcome: "timeout", requestedSeconds: seconds.toString(), observationCount: observations.toString() };
 }

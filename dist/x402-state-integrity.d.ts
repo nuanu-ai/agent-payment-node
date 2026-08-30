@@ -6,6 +6,14 @@ export interface X402SettlementWaitProjection {
     readonly requestedSeconds: string;
     readonly observationCount: string;
 }
+export declare function x402WaitProjectedStatus(status: {
+    readonly reason: string;
+    readonly proofClass: string;
+    readonly terminal: boolean;
+}, settlementWait?: X402SettlementWaitProjection): {
+    readonly reason: string;
+    readonly proofClass: string;
+};
 export declare function publicX402Operation(operation: X402OperationRecord, result?: X402ResultRecord, settlementWait?: X402SettlementWaitProjection): unknown;
 export declare function publicX402ResultData(result: X402ResultRecord): unknown;
 export declare function sealX402Result(value: Omit<X402ResultRecord, "integrityHash">): X402ResultRecord;

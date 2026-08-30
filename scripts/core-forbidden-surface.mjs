@@ -57,15 +57,11 @@ for (const file of files) {
   const lineCount = text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
   if (lineCount > 500) violations.push(`${file.slice(productRoot.length + 1)}: ${lineCount} lines exceeds 500`);
   for (const needle of forbidden) {
-    if (
-      needle === "node:child_process" &&
-      (
-        file === join(sourceRoot, "macos-keychain.ts") ||
-        file === join(sourceRoot, "macos-advisory-lock.ts") ||
-        file === join(sourceRoot, "awal-process-adapter.ts") ||
-        file === join(sourceRoot, "awal-direct-adapter.ts")
-      )
-    ) continue;
+    if (needle === "node:child_process" && [
+      "macos-keychain.ts", "macos-advisory-lock.ts", "awal-process-adapter.ts",
+      "awal-direct-adapter.ts", "awal-x402-adapter.ts",
+    ].some((name) => file === join(sourceRoot, name))) continue;
+    if (needle === "--scheme" && file === join(sourceRoot, "awal-x402-adapter.ts")) continue;
     if (needle === "signTypedData" && file === join(sourceRoot, "local-wallet-native.ts")) continue;
     if (text.includes(needle)) violations.push(`${file.slice(productRoot.length + 1)}: ${needle}`);
   }
@@ -88,6 +84,18 @@ for (const file of files) {
     }
     for (const disallowed of ["npx", "execFile(", "process.env.PATH", "shell: true", "fork(", "ipc"]) {
       if (text.includes(disallowed)) violations.push(`src/awal-direct-adapter.ts: ${disallowed}`);
+    }
+  }
+  if (file === join(sourceRoot, "awal-x402-adapter.ts")) {
+    for (const required of [
+      "process.execPath", "shell: false", "script, \"x402\", \"pay\"", "\"-X\", \"GET\"",
+      "\"--max-amount\"", "\"--scheme\", \"exact\"", "\"--correlation-id\"", "\"--json\"",
+      "AWAL_X402_PROCESS_TIMEOUT_MS = 210_000",
+    ]) {
+      if (!text.includes(required)) violations.push(`src/awal-x402-adapter.ts: missing ${required}`);
+    }
+    for (const disallowed of ["npx", "execFile(", "process.env.PATH", "shell: true", "fork(", "ipc", "\"-d\""]) {
+      if (text.includes(disallowed)) violations.push(`src/awal-x402-adapter.ts: ${disallowed}`);
     }
   }
 }

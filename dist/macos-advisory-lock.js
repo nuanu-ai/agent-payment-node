@@ -14,8 +14,10 @@ export class MacosAdvisoryLock {
             throw lockfFailure();
         }
     }
-    async tryAcquire(fd) {
+    async tryAcquire(fd, timeoutMs = this.timeoutMs, boundedWait = false) {
         if (!Number.isSafeInteger(fd) || fd < 0)
+            throw lockfFailure();
+        if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > this.timeoutMs)
             throw lockfFailure();
         return await new Promise((resolve, reject) => {
             let child;
@@ -43,8 +45,8 @@ export class MacosAdvisoryLock {
             };
             const timeout = setTimeout(() => {
                 child.kill("SIGKILL");
-                finish();
-            }, this.timeoutMs);
+                finish(boundedWait ? false : undefined);
+            }, timeoutMs);
             timeout.unref();
             child.once("error", () => finish());
             child.once("close", (code, signal) => {
