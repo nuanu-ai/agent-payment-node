@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.3.1 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.3.2 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -107,13 +107,41 @@ apn pay transfer approve --operation <operation-id> \
   --rpc-url https://rpc.example
 ```
 
-The prepare step freezes recipient, amount, nonce, fees, calldata and expiry.
-The approve step rechecks them and requires the exact phrase shown in the
-foreground stdin/stderr TTY. A transaction hash is non-terminal: completion requires a
-successful receipt containing the exact canonical-USDC `Transfer` event.
+For the default local wallet, prepare freezes recipient, amount, nonce, fees,
+calldata and expiry. For a bound Coinbase profile it instead freezes the public
+profile revision/capability/sender, provider execution ownership, recipient,
+integer atomic amount and canonical decimal, Base/canonical-USDC identity,
+foreground-approval policy and validated RPC binding. Available provider
+balance is never spending authority.
+
+Approval rechecks the applicable frozen facts and requires the exact phrase
+shown in the foreground stdin/stderr TTY. The Coinbase adapter then durably
+marks `started` before invoking exact `awal@2.12.1` through `process.execPath`
+with only `send <amount> <recipient> --chain base --asset usdc --json`. Any
+possible post-child timeout, loss, nonzero exit, malformed response or missing
+transaction hash becomes no-replay `ambiguous_effect`; status, resume and
+restart only observe. A provider transaction hash is non-terminal: completion
+requires an independent successful Base receipt containing the exact canonical-
+USDC `Transfer` event for the frozen sender, recipient and atomic amount.
+Terminal provider receipts are committed before their terminal operation link;
+after a crash between those writes, resume or receipt recovery links the exact
+orphan receipt without another provider or RPC effect. A terminal provider
+operation is never readable without its authoritative receipt. If the provider
+reports a different sender before start, APN marks the profile `drift_blocked`
+and returns the exact foreground `wallet connect --expected-revision` rebind
+path instead of suggesting another doomed transfer prepare.
+The direct adapter reuses the existing bounded AWAL process timeout; expiry is
+only an ambiguity signal and never authorizes a retry or another provider call.
 Calling direct approval through MCP never opens a TTY or loads signing material;
 it returns the exact operation-bound CLI command to run in that foreground
 terminal.
+
+Pinned `awal@2.12.1` parses its decimal argument through JavaScript floating-
+point arithmetic and also treats whole numbers greater than `100` as atomic
+units. Before durable start or child creation, the Coinbase adapter emulates
+that exact parser and accepts only a decimal whose provider result equals APN's
+frozen integer atomic amount. APN does not substitute atomic argv, add a spend
+cap or weaken its integer monetary authority.
 
 Inspect and buy a standard x402 resource:
 
@@ -239,10 +267,12 @@ not protection against compromise of the same user session.
 
 ## Recovery guarantees
 
-Idempotency keys resolve to one durable operation. APN persists effect binding
-before submission, treats lost send responses as ambiguous, checks receipts
-and confirmed nonce evidence before resubmission, and recovers only the exact
-encrypted raw transaction or x402 authorization. Status and receipts survive
+Idempotency keys resolve to one durable operation. Local execution persists
+effect binding before submission and recovers only the exact encrypted raw
+transaction or x402 authorization. Provider-atomic direct execution persists a
+no-replay start journal before child creation and never resends after a possible
+effect. Both paths treat lost outcomes as ambiguous and require independent
+receipt evidence. Status and receipts survive
 restart, reinstall and Formula upgrade because Homebrew does not own `~/.apn`.
 
 ## Proof boundary
@@ -254,10 +284,10 @@ network traffic or money. Local green tests are not live or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
 are separately recorded release gates. The local stdio MCP surface projects
-the same fifteen catalog-selected wallet, policy, payment, operation and
+the same sixteen catalog-selected wallet, policy, payment, operation and
 receipt commands through the shared binder/runtime/core path. Direct approval
-remains foreground CLI only. Hub, contracts, remote MCP, provider wallets,
-Stellar, Solana and TRON are outside this release.
+remains foreground CLI only. Coinbase x402, Hub, contracts, remote MCP, other
+providers, Stellar, Solana and TRON are outside this release.
 
 The published npm archive includes `npm-shrinkwrap.json`; Formula installation
 therefore resolves the exact integrity-pinned production dependency closure

@@ -62,7 +62,8 @@ for (const file of files) {
       (
         file === join(sourceRoot, "macos-keychain.ts") ||
         file === join(sourceRoot, "macos-advisory-lock.ts") ||
-        file === join(sourceRoot, "awal-process-adapter.ts")
+        file === join(sourceRoot, "awal-process-adapter.ts") ||
+        file === join(sourceRoot, "awal-direct-adapter.ts")
       )
     ) continue;
     if (needle === "signTypedData" && file === join(sourceRoot, "local-wallet-native.ts")) continue;
@@ -77,6 +78,16 @@ for (const file of files) {
     }
     for (const disallowed of ["npx", "execFile(", "process.env.PATH", "shell: true", "fork(", "ipc"]) {
       if (text.includes(disallowed)) violations.push(`src/awal-process-adapter.ts: ${disallowed}`);
+    }
+  }
+  if (file === join(sourceRoot, "awal-direct-adapter.ts")) {
+    for (const required of [
+      "process.execPath", "shell: false", "script, \"send\"", "\"--chain\", \"base\"", "\"--asset\", \"usdc\"", "\"--json\"",
+    ]) {
+      if (!text.includes(required)) violations.push(`src/awal-direct-adapter.ts: missing ${required}`);
+    }
+    for (const disallowed of ["npx", "execFile(", "process.env.PATH", "shell: true", "fork(", "ipc"]) {
+      if (text.includes(disallowed)) violations.push(`src/awal-direct-adapter.ts: ${disallowed}`);
     }
   }
 }

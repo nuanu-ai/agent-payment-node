@@ -211,7 +211,13 @@ export class LocalWalletNative implements NativePort {
   }
 }
 
-interface DirectIntent extends TransferApprovalIntent { readonly transactionData: Hex }
+interface DirectIntent extends TransferApprovalIntent {
+  readonly transactionData: Hex;
+  readonly nonceAtomic: string;
+  readonly gasLimitAtomic: string;
+  readonly maxFeePerGasAtomic: string;
+  readonly maxPriorityFeePerGasAtomic: string;
+}
 
 function parseDirectIntent(payload: Readonly<Record<string, unknown>>): DirectIntent {
   exactRecord(payload, ["profile", "operationId", "fingerprint", "walletAddress", "chainId", "transaction", "approval"]);

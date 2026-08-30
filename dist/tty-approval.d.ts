@@ -8,11 +8,13 @@ export interface TransferApprovalIntent {
     readonly recipient: Address;
     readonly amountAtomic: string;
     readonly amountDecimal: string;
-    readonly nonceAtomic: string;
-    readonly gasLimitAtomic: string;
-    readonly maxFeePerGasAtomic: string;
-    readonly maxPriorityFeePerGasAtomic: string;
+    readonly nonceAtomic?: string;
+    readonly gasLimitAtomic?: string;
+    readonly maxFeePerGasAtomic?: string;
+    readonly maxPriorityFeePerGasAtomic?: string;
     readonly expiresAt: string;
+    readonly providerId?: string;
+    readonly policyIdentity?: string;
 }
 export interface TransferApprovalPort {
     approve(intent: TransferApprovalIntent): Promise<void>;

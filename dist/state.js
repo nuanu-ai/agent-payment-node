@@ -6,6 +6,7 @@ import { canonicalJson, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { MacosAdvisoryLock } from "./macos-advisory-lock.js";
 import { validateProviderProfile } from "./provider-profile.js";
+import { assertProviderTerminalReceiptAuthority } from "./provider-direct-receipt.js";
 import { validateOperation, validateReceipt, validateWallet } from "./state-integrity.js";
 import { isCode, SecureStateStore, stateCorrupt, stateIdentifier, stateSecurity, validateDirectory, } from "./secure-state-store.js";
 import { sameOptionalCanonical, validateX402AppendOnly, validateX402ScanContinuity, } from "./x402-state-continuity.js";
@@ -70,7 +71,13 @@ export class StateStore extends SecureStateStore {
     }
     async loadOperation(profileHash, operationId) {
         const value = await this.readJson(join("operations", profileHash, `${operationId}.json`));
-        return value === null ? null : validateOperation(value);
+        if (value === null)
+            return null;
+        const operation = validateOperation(value);
+        if (operation.providerDirect !== undefined && operation.terminal) {
+            assertProviderTerminalReceiptAuthority(operation, await this.loadReceipt(profileHash, operationId));
+        }
+        return operation;
     }
     async findOperation(operationId) {
         const operationsRoot = this.resolveRelative("operations");
@@ -102,10 +109,14 @@ export class StateStore extends SecureStateStore {
             if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) {
                 stateSecurity("Operations directory contains an unsafe entry.");
             }
-            const value = await this.readJson(join(directory, entry.name));
-            if (value === null)
+            const operationId = entry.name.slice(0, -".json".length);
+            const operation = await this.loadOperation(profileHash, operationId);
+            if (operation === null)
                 stateCorrupt("Operation disappeared during validation.");
-            operations.push(validateOperation(value));
+            if (operation.profileHash !== profileHash || operation.operationId !== operationId) {
+                stateCorrupt("Operation path binding is invalid.");
+            }
+            operations.push(operation);
         }
         return operations;
     }

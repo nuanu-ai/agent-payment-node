@@ -7,6 +7,7 @@ import { MacOSLoginKeychainSecret } from "./macos-keychain.js";
 import { TtyProfilePolicyApproval } from "./policy-approval.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
+import { TtyTransferApproval } from "./tty-approval.js";
 import { HttpsX402Http } from "./x402-http.js";
 import { AWAL_PROVIDER_ID, AwalProcessAdapter } from "./awal-process-adapter.js";
 import { TtyForegroundAuthentication } from "./foreground-auth.js";
@@ -29,11 +30,14 @@ export function createApnCore(bound, options = {}) {
             create: () => new AwalProcessAdapter().bundle(),
         }]);
     const foregroundAuthentication = options.foregroundAuthentication ?? (bound.request.command === "wallet.connect" ? new TtyForegroundAuthentication() : undefined);
+    const transferApproval = options.approval ?? (bound.request.command === "transfer.approve" ? new TtyTransferApproval() : undefined);
     return new ApnCore({
         state,
         profileRepository,
         providerRegistry,
         ...(foregroundAuthentication === undefined ? {} : { foregroundAuthentication }),
+        ...(transferApproval === undefined ? {} : { transferApproval }),
+        ...(bound.rpcUrl === undefined ? {} : { rpcUrl: bound.rpcUrl }),
         ...(native === undefined ? {} : { native }),
         ...(bound.request.command === "doctor.keychain" ? { keychainProbe: wrappingSecret } : {}),
         ...(rpc === undefined ? {} : { rpc }),
