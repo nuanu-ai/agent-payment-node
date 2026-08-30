@@ -44,6 +44,7 @@ class FixtureRunner implements AwalProcessRunnerPort {
   readonly calls: Array<{ readonly argv: readonly string[]; readonly sensitive: boolean }> = [];
   address: `0x${string}` = ADDRESS_A;
   authExitCode = 0;
+  loginDisposition: AwalProcessResult["loginDisposition"];
   balanceStdout: Buffer | null = null;
   addressExitCode = 0;
   addressOptionalFailure: AwalProcessResult["optionalFailure"];
@@ -55,7 +56,7 @@ class FixtureRunner implements AwalProcessRunnerPort {
         exitCode: 0,
         stdout: Buffer.from(JSON.stringify({
           address: this.address,
-          chain: "base",
+          chain: "Base",
           balances: { USDC: { raw: "1230000", formatted: "1.23 USDC", decimals: 6 } },
           timestamp: OBSERVED_AT,
         })),
@@ -66,7 +67,13 @@ class FixtureRunner implements AwalProcessRunnerPort {
       stdout: Buffer.from(this.address),
       ...(this.addressOptionalFailure === undefined ? {} : { optionalFailure: this.addressOptionalFailure }),
     };
-    return { exitCode: argv[0] === "auth" ? this.authExitCode : 0, stdout: Buffer.alloc(0) };
+    return {
+      exitCode: argv[0] === "auth" ? this.authExitCode : 0,
+      stdout: Buffer.alloc(0),
+      ...(argv[0] === "auth" && argv[1] === "login" && this.loginDisposition !== undefined
+        ? { loginDisposition: this.loginDisposition }
+        : {}),
+    };
   }
 }
 
@@ -74,9 +81,11 @@ class FixtureForeground implements ForegroundAuthenticationPort {
   readonly identityCanary = "protected" + String.fromCharCode(64) + "example.invalid";
   readonly challengeCanary = [7, 3, 9, 1, 4, 8].join("");
   confirmations = 0;
+  identityReads = 0;
+  challengeReads = 0;
   confirm = true;
-  async readIdentity(): Promise<string> { return this.identityCanary; }
-  async readChallengeResponse(): Promise<string> { return this.challengeCanary; }
+  async readIdentity(): Promise<string> { this.identityReads += 1; return this.identityCanary; }
+  async readChallengeResponse(): Promise<string> { this.challengeReads += 1; return this.challengeCanary; }
   async confirmRebind(): Promise<boolean> { this.confirmations += 1; return this.confirm; }
 }
 
@@ -186,6 +195,79 @@ test("AWAL runner bounds hung processes, kills and cleans listeners with one sta
   assert.equal(child.listenerCount("close"), 0);
   assert.equal(child.stdout.listenerCount("data"), 0);
   assert.equal(child.stderr.listenerCount("data"), 0);
+});
+
+test("AWAL runner classifies only a successful exact login reuse signal without retaining protected output", async () => {
+  const execute = async (
+    argv: readonly string[],
+    exitCode: number,
+    stdoutValues: readonly string[],
+    stderrValues: readonly string[] = [],
+  ): Promise<{ readonly result: AwalProcessResult; readonly emitted: readonly Buffer[] }> => {
+    const stdout = stdoutValues.map((value) => Buffer.from(value));
+    const stderr = stderrValues.map((value) => Buffer.from(value));
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      kill(): boolean;
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => true;
+    const runner = new NodeAwalProcessRunner(
+      async () => "/exact/node_modules/awal/dist/index.js",
+      () => {
+        queueMicrotask(() => {
+          for (const value of stdout) child.stdout.emit("data", value);
+          for (const value of stderr) child.stderr.emit("data", value);
+          child.emit("close", exitCode);
+        });
+        return child;
+      },
+      1_000,
+    );
+    return { result: await runner.run(argv, true), emitted: [...stdout, ...stderr] };
+  };
+
+  const identityCanary = "protected" + String.fromCharCode(64) + "example.invalid";
+  const stdoutReuse = await execute(
+    ["auth", "login", identityCanary, "--json"],
+    0,
+    ["You are AlReAdY si", "gned In. No reauthentication is needed."],
+  );
+  assert.equal(stdoutReuse.result.loginDisposition, "already_authenticated");
+  assert.equal(stdoutReuse.result.stdout.length, 0);
+  assert.equal(JSON.stringify(stdoutReuse.result).includes(identityCanary), false);
+  for (const emitted of stdoutReuse.emitted) assert.equal(emitted.every((byte) => byte === 0), true);
+
+  const stderrReuse = await execute(
+    ["auth", "login", identityCanary, "--json"],
+    0,
+    [],
+    ["- Sending verification code...\n", "Already signed in\n"],
+  );
+  assert.equal(stderrReuse.result.loginDisposition, "already_authenticated");
+  for (const emitted of stderrReuse.emitted) assert.equal(emitted.every((byte) => byte === 0), true);
+
+  for (const [argv, exitCode] of [
+    [["auth", "verify", "739148", "--json"], 0],
+    [["status", "--json"], 0],
+    [["auth", "login", identityCanary, "--json"], 1],
+  ] as const) {
+    const ignored = await execute(argv, exitCode, ["Already signed in"]);
+    assert.equal(ignored.result.loginDisposition, undefined);
+    assert.equal(ignored.result.stdout.length, 0);
+  }
+
+  const flowCanary = "flow-" + "canary-should-not-survive";
+  const fresh = await execute(
+    ["auth", "login", identityCanary, "--json"],
+    0,
+    [JSON.stringify({ flowId: flowCanary, message: "Verification code sent" })],
+  );
+  assert.equal(fresh.result.loginDisposition, undefined);
+  assert.equal(fresh.result.stdout.length, 0);
+  assert.equal(JSON.stringify(fresh.result).includes(flowCanary), false);
 });
 
 test("optional address failures are narrow while malformed and mismatched successful output fails closed", async () => {
@@ -328,16 +410,20 @@ test("generic foreground connect creates, reuses and restarts one safe provider 
   }
 
   const restartedRunner = new FixtureRunner();
+  restartedRunner.loginDisposition = "already_authenticated";
+  const restartedForeground = new FixtureForeground();
   const reused = await runCli([
     "wallet", "connect", "--profile", "provider-one", "--provider", AWAL_PROVIDER_ID,
   ], {}, {
     stateRoot: temporary.root,
     providerRegistry: registry(restartedRunner),
-    foregroundAuthentication: new FixtureForeground(),
+    foregroundAuthentication: restartedForeground,
   });
   assert.equal(reused.ok, true, JSON.stringify(reused));
   assert.equal((reused.data as Record<string, unknown>).reused, true);
   assert.equal((reused.data as Record<string, unknown>).revision, 1);
+  assert.equal(restartedForeground.identityReads, 1);
+  assert.equal(restartedForeground.challengeReads, 0);
   const statusRunner = new FixtureRunner();
   const status = await runCli(["wallet", "status", "--profile", "provider-one"], {}, {
     stateRoot: temporary.root,
@@ -354,11 +440,10 @@ test("generic foreground connect creates, reuses and restarts one safe provider 
     { argv: ["address", "--chain", "base"], sensitive: false },
   ]);
   assert.deepEqual(restartedRunner.calls.map((call) => call.argv.slice(0, 2)), [
-    ["auth", "login"], ["auth", "verify"], ["balance", "--chain"],
+    ["auth", "login"], ["balance", "--chain"],
   ]);
   assert.equal(restartedRunner.calls[0]?.sensitive, true);
-  assert.equal(restartedRunner.calls[1]?.sensitive, true);
-  assert.equal(restartedRunner.calls[2]?.sensitive, false);
+  assert.equal(restartedRunner.calls[1]?.sensitive, false);
 
   const mcpRunner = new FixtureRunner();
   const server = createMcpServer({ stateRoot: temporary.root, providerRegistry: registry(mcpRunner) });
@@ -376,9 +461,47 @@ test("generic foreground connect creates, reuses and restarts one safe provider 
   assert.equal((mcpStatus.data as Record<string, unknown>).proof_class, "provider_profile_binding");
 });
 
+test("already authenticated AWAL connect reuses the session without identity or OTP prompts", async () => {
+  const runner = new FixtureRunner();
+  runner.loginDisposition = "already_authenticated";
+  const foreground = new FixtureForeground();
+  await new AwalProcessAdapter(runner).connect(foreground);
+  assert.equal(foreground.identityReads, 1);
+  assert.equal(foreground.challengeReads, 0);
+  assert.deepEqual(runner.calls, [
+    { argv: ["auth", "login", foreground.identityCanary, "--json"], sensitive: true },
+  ]);
+
+  const nonLoginDisposition: AwalProcessRunnerPort = {
+    run: async () => ({ exitCode: 0, stdout: Buffer.alloc(0), loginDisposition: "already_authenticated" }),
+  };
+  await assert.rejects(
+    new AwalProcessAdapter(nonLoginDisposition).probeStatus(),
+    (error: unknown) => (error as { readonly code?: unknown }).code === "APN_PROVIDER_PROTOCOL",
+  );
+
+  const failedReuseLookalike: AwalProcessRunnerPort = {
+    run: async () => ({ exitCode: 1, stdout: Buffer.alloc(0), loginDisposition: "already_authenticated" }),
+  };
+  await assert.rejects(
+    new AwalProcessAdapter(failedReuseLookalike).connect(foreground),
+    (error: unknown) => (error as { readonly code?: unknown }).code === "APN_PROVIDER_UNAVAILABLE",
+  );
+});
+
 test("malformed provider balance and failed authentication fail without a partial profile write", async (t) => {
   const malformed = new FixtureRunner();
   malformed.balanceStdout = Buffer.from(JSON.stringify({ address: ADDRESS_A, chain: "base", balances: {} }));
+  await assert.rejects(
+    new AwalProcessAdapter(malformed).observeBalance(),
+    (error: unknown) => (error as { readonly code?: unknown }).code === "APN_PROVIDER_PROTOCOL",
+  );
+  malformed.balanceStdout = Buffer.from(JSON.stringify({
+    address: ADDRESS_A,
+    chain: "BASE",
+    balances: { USDC: { raw: "0", formatted: "0", decimals: 6 } },
+    timestamp: OBSERVED_AT,
+  }));
   await assert.rejects(
     new AwalProcessAdapter(malformed).observeBalance(),
     (error: unknown) => (error as { readonly code?: unknown }).code === "APN_PROVIDER_PROTOCOL",
