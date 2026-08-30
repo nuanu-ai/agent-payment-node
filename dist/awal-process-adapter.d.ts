@@ -1,11 +1,7 @@
-import type { ForegroundAuthenticationPort, ProviderAdapterBundle, ProviderBalanceObservation, ProviderLifecyclePort, ProviderWalletReadPort } from "./provider-ports.js";
+import type { ForegroundAuthenticationPort, ProviderAdapterBundle, ProviderBalanceObservation, DirectExecutionPort, ProviderLifecyclePort, ProviderWalletReadPort } from "./provider-ports.js";
 import type { Address } from "./model.js";
 export declare const AWAL_PROVIDER_ID: "coinbase-agentic-wallet";
-export declare const AWAL_VERSION: "2.12.1";
-export declare const AWAL_BIN: "dist/index.js";
-export declare const AWAL_INTEGRITY: "sha512-z4whchSMbUhDuhwoI/+7vZ1ArwG9e8C9yIX9Y3W+JXJkR3E95iIZ1vIBZ6nPWSzakCw21YuZhFvOpGKEXtN6kQ==";
-export declare const AWAL_SHASUM: "9c4c077983d608e278ed84053199427026ebbaa8";
-export declare const AWAL_PROCESS_TIMEOUT_MS = 30000;
+export { AWAL_BIN, AWAL_INTEGRITY, AWAL_PROCESS_TIMEOUT_MS, AWAL_SHASUM, AWAL_VERSION, resolveAwalBin, } from "./awal-package.js";
 export interface AwalProcessResult {
     readonly exitCode: number;
     readonly stdout: Buffer;
@@ -41,8 +37,9 @@ export declare class NodeAwalProcessRunner implements AwalProcessRunnerPort {
 }
 export declare class AwalProcessAdapter implements ProviderLifecyclePort, ProviderWalletReadPort {
     private readonly runner;
+    private readonly direct;
     readonly capabilities: import("./provider-profile.js").ProviderCapabilitySnapshot;
-    constructor(runner?: AwalProcessRunnerPort);
+    constructor(runner?: AwalProcessRunnerPort, direct?: DirectExecutionPort);
     bundle(): ProviderAdapterBundle;
     connect(foreground: ForegroundAuthenticationPort): Promise<void>;
     logout(): Promise<void>;
@@ -51,5 +48,3 @@ export declare class AwalProcessAdapter implements ProviderLifecyclePort, Provid
     crossCheckAddress(expected: Address): Promise<void>;
     private runSensitive;
 }
-export declare function resolveAwalBin(): Promise<string>;
-export {};

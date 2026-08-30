@@ -6,14 +6,19 @@ import { OperationService } from "./operation-service.js";
 import { appendTransition, sealOperation, sealReceipt } from "./state.js";
 import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, hasExactTransfer, parseEffect, publicOperation, publicReceipt, requireFunding, transferData, validateBalance, validateEconomics, verifyEffect, } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 export class TransferService {
     context;
     operations;
+    providerDirect;
     constructor(context) {
         this.context = context;
         this.operations = new OperationService(context.state);
+        this.providerDirect = new ProviderDirectTransferService(context);
     }
     async prepare(request) {
+        if (await this.providerDirect.canHandle(request.profile))
+            return await this.providerDirect.prepare(request);
         const profile = canonicalProfile(request.profile);
         const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
         const recipient = canonicalAddress(request.recipient);
@@ -117,9 +122,12 @@ export class TransferService {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const found = await this.requiredOperation(operationId);
-        const { profile, profileHash } = found;
+        if (found.providerDirect !== undefined)
+            return await this.providerDirect.approve(operationId);
+        const localFound = requiredLocal(found);
+        const { profile, profileHash } = localFound;
         return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
-            let operation = await this.requiredOperation(operationId);
+            let operation = requiredLocal(await this.requiredOperation(operationId));
             if (operation.terminal)
                 return publicOperation(operation);
             if (operation.state !== "awaiting_approval") {
@@ -187,9 +195,12 @@ export class TransferService {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const found = await this.requiredOperation(operationId);
-        const { profile, profileHash } = found;
+        if (found.providerDirect !== undefined)
+            return await this.providerDirect.resume(operationId);
+        const localFound = requiredLocal(found);
+        const { profile, profileHash } = localFound;
         return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
-            let operation = await this.requiredOperation(operationId);
+            let operation = requiredLocal(await this.requiredOperation(operationId));
             if (operation.terminal)
                 return publicOperation(operation);
             if (operation.state === "awaiting_approval") {
@@ -227,6 +238,8 @@ export class TransferService {
         await this.context.ready();
         const operationId = canonicalOperationId(operationIdInput);
         const operation = await this.requiredOperation(operationId);
+        if (operation.providerDirect !== undefined)
+            return await this.providerDirect.receipt(operationId);
         const receipt = await this.context.state.loadReceipt(operation.profileHash, operationId);
         if (receipt === null)
             throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
@@ -320,5 +333,11 @@ export class TransferService {
         };
         await this.context.state.writeReceipt(operation.profileHash, sealReceipt(receiptBase));
     }
+}
+function requiredLocal(operation) {
+    if (operation.providerDirect !== undefined || operation.transactionData === undefined ||
+        operation.economics === undefined || operation.preparedBlockNumberAtomic === undefined)
+        throw new ApnError("APN_STATE_CORRUPT", "Local direct operation is missing its transaction economics.");
+    return operation;
 }
 //# sourceMappingURL=transfer-service.js.map

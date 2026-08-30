@@ -2,7 +2,12 @@ import { CHAIN_CAIP2, BASE_USDC, ETH_DECIMALS, USDC_DECIMALS } from "./constants
 import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
 import { formatAtomic } from "./money.js";
-import { capabilityHash, type ProviderProfileRecord } from "./provider-profile.js";
+import {
+  capabilityHash,
+  markProviderProfileDrift,
+  type ProviderBindingObservation,
+  type ProviderProfileRecord,
+} from "./provider-profile.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalProfile, publicProvenance, validateBalance } from "./wallet-policy.js";
 
@@ -31,7 +36,7 @@ export class ProviderWalletService {
       await adapter.lifecycle.connect(this.context.requireForegroundAuthentication());
       const observation = await adapter.reads.observeBalance();
       const observedCapabilityHash = capabilityHash(adapter.capabilities);
-      const observed = {
+      const observed: ProviderBindingObservation = {
         address: observation.address,
         accountBindingHash: observation.account_binding_hash,
         capabilityHash: observedCapabilityHash,
@@ -53,7 +58,7 @@ export class ProviderWalletService {
       const same = sameBinding(existing, observed);
       if (same && existing.drift.state === "bound") return publicProfile(existing, true);
       const drifted = existing.drift.state === "bound"
-        ? driftedProfile(existing, observed)
+        ? markProviderProfileDrift(existing, observed)
         : existing;
       if (drifted !== existing) await repository.save(drifted);
       if (request.expectedRevision === undefined) {
@@ -100,7 +105,7 @@ export class ProviderWalletService {
       await adapter.lifecycle.probeStatus();
       const observation = await adapter.reads.observeBalance();
       await adapter.reads.crossCheckAddress(observation.address);
-      const observed = {
+      const observed: ProviderBindingObservation = {
         address: observation.address,
         accountBindingHash: observation.account_binding_hash,
         capabilityHash: capabilityHash(adapter.capabilities),
@@ -108,7 +113,7 @@ export class ProviderWalletService {
         trustClass: adapter.trust_class,
       };
       const drifted = current.drift.state === "bound" && !sameBinding(current, observed)
-        ? driftedProfile(current, observed)
+        ? markProviderProfileDrift(current, observed)
         : current;
       if (drifted !== current) await repository.save(drifted);
       return publicProfile(drifted, true);
@@ -174,6 +179,13 @@ export class ProviderWalletService {
     }
     const capability = kind === "direct" ? bound.capability_snapshot.direct : bound.capability_snapshot.x402;
     if (!capability.available) {
+      if (kind === "direct") {
+        throw new ApnError(
+          "APN_PROFILE_DRIFT",
+          "The persisted provider profile predates direct-effect binding; explicit foreground rebind is required.",
+          { current_revision: String(bound.revision) },
+        );
+      }
       throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This provider profile does not support the requested payment effect in this APN version.");
     }
   }
@@ -217,31 +229,6 @@ function sameBinding(profile: ProviderProfileRecord, observed: {
     profile.account_binding_hash === observed.accountBindingHash &&
     profile.capability_hash === observed.capabilityHash &&
     profile.trust_class === observed.trustClass;
-}
-
-function driftedProfile(profile: ProviderProfileRecord, observed: {
-  readonly address: ProviderProfileRecord["public_address"];
-  readonly accountBindingHash: string;
-  readonly capabilityHash: string;
-  readonly observedAt: string;
-  readonly trustClass: ProviderProfileRecord["trust_class"];
-}): ProviderProfileRecord {
-  const identityChanged = profile.public_address.toLowerCase() !== observed.address.toLowerCase() ||
-    profile.account_binding_hash !== observed.accountBindingHash;
-  const capabilityChanged = profile.capability_hash !== observed.capabilityHash ||
-    profile.trust_class !== observed.trustClass;
-  return {
-    ...profile,
-    drift: {
-      state: "drift_blocked",
-      reason: identityChanged && capabilityChanged ? "identity_and_capability_changed"
-        : identityChanged ? "identity_changed" : "capability_changed",
-      observed_address: observed.address,
-      observed_account_binding_hash: observed.accountBindingHash,
-      observed_capability_hash: observed.capabilityHash,
-      observed_at: observed.observedAt,
-    },
-  };
 }
 
 function publicProfile(profile: ProviderProfileRecord, reused: boolean): unknown {

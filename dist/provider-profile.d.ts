@@ -67,9 +67,18 @@ export interface ProviderProfileRecord {
     readonly observed_at: string;
     readonly drift: ProviderDrift;
 }
+export interface ProviderBindingObservation {
+    readonly address: Address;
+    readonly accountBindingHash: string;
+    readonly capabilityHash: string;
+    readonly observedAt: string;
+    readonly trustClass: ProviderTrustClass;
+}
 export declare function localCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function lifecycleReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot;
+export declare function coinbaseDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function capabilityHash(snapshot: ProviderCapabilitySnapshot): string;
 export declare function accountBindingHash(providerId: string, address: Address): string;
+export declare function markProviderProfileDrift(profile: ProviderProfileRecord, observed: ProviderBindingObservation): ProviderProfileRecord;
 export declare function projectLegacyLocalProfile(wallet: WalletRecord): ProviderProfileRecord;
 export declare function validateProviderProfile(value: unknown): ProviderProfileRecord;

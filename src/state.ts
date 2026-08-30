@@ -16,6 +16,7 @@ import { canonicalJson, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { MacosAdvisoryLock, type AdvisoryLockPort } from "./macos-advisory-lock.js";
 import { validateProviderProfile, type ProviderProfileRecord } from "./provider-profile.js";
+import { assertProviderTerminalReceiptAuthority } from "./provider-direct-receipt.js";
 import type {
   OperationRecord,
   ReceiptRecord,
@@ -115,7 +116,12 @@ export class StateStore extends SecureStateStore {
 
   async loadOperation(profileHash: string, operationId: string): Promise<OperationRecord | null> {
     const value = await this.readJson(join("operations", profileHash, `${operationId}.json`));
-    return value === null ? null : validateOperation(value);
+    if (value === null) return null;
+    const operation = validateOperation(value);
+    if (operation.providerDirect !== undefined && operation.terminal) {
+      assertProviderTerminalReceiptAuthority(operation, await this.loadReceipt(profileHash, operationId));
+    }
+    return operation;
   }
 
   async findOperation(operationId: string): Promise<OperationRecord | null> {
@@ -149,9 +155,13 @@ export class StateStore extends SecureStateStore {
       if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) {
         stateSecurity("Operations directory contains an unsafe entry.");
       }
-      const value = await this.readJson(join(directory, entry.name));
-      if (value === null) stateCorrupt("Operation disappeared during validation.");
-      operations.push(validateOperation(value));
+      const operationId = entry.name.slice(0, -".json".length);
+      const operation = await this.loadOperation(profileHash, operationId);
+      if (operation === null) stateCorrupt("Operation disappeared during validation.");
+      if (operation.profileHash !== profileHash || operation.operationId !== operationId) {
+        stateCorrupt("Operation path binding is invalid.");
+      }
+      operations.push(operation);
     }
     return operations;
   }
