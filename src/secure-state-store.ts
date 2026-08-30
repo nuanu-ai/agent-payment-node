@@ -112,12 +112,24 @@ export class SecureStateStore {
     return sha256(`idempotency\0${idempotencyKey}`);
   }
 
-  async withLocks<T>(keys: readonly string[], action: () => Promise<T>): Promise<T> {
+  async withLocks<T>(
+    keys: readonly string[],
+    action: () => Promise<T>,
+    options: { readonly waitMs?: number } = {},
+  ): Promise<T> {
+    const waitMs = options.waitMs ?? this.lockWaitMs;
+    if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 300_000) {
+      throw new ApnError("APN_STATE_SECURITY", "State lock wait override must be between 0 and 300000 milliseconds.");
+    }
+    const strictDeadline = options.waitMs !== undefined;
+    const started = Date.now();
     const held: HeldLock[] = [];
     try {
       for (const key of [...new Set(keys)].sort(compareLockKeys)) {
         await this.beforeLockAcquire(key);
-        held.push(await this.acquireLock(key));
+        const elapsed = Date.now() - started;
+        if (strictDeadline && elapsed >= waitMs) throw busy(waitMs);
+        held.push(await this.acquireLock(key, Math.max(0, waitMs - elapsed), strictDeadline));
       }
       return await action();
     } finally {
@@ -280,7 +292,7 @@ export class SecureStateStore {
     }
   }
 
-  private async acquireLock(key: string): Promise<HeldLock> {
+  private async acquireLock(key: string, waitMs: number, strictDeadline: boolean): Promise<HeldLock> {
     const lockName = `${sha256(`lock\0${key}`)}.lock`;
     const path = this.resolveRelative(join("locks", lockName));
     const started = Date.now();
@@ -294,7 +306,17 @@ export class SecureStateStore {
       }
       try {
         await this.validateOpenedLock(path, handle);
-        if (await this.lockPort.tryAcquire(handle.fd)) {
+        const elapsed = Date.now() - started;
+        if (strictDeadline && elapsed >= waitMs) {
+          await handle.close();
+          break;
+        }
+        const attemptTimeoutMs = Math.max(1, Math.min(1_000, waitMs - elapsed || 1));
+        if (await this.lockPort.tryAcquire(
+          handle.fd,
+          strictDeadline ? attemptTimeoutMs : undefined,
+          strictDeadline,
+        )) {
           await this.validateOpenedLock(path, handle);
           return { handle };
         }
@@ -304,10 +326,10 @@ export class SecureStateStore {
       }
       await handle.close();
       const elapsed = Date.now() - started;
-      if (elapsed >= this.lockWaitMs) break;
-      await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, Math.min(10, this.lockWaitMs - elapsed)));
+      if (elapsed >= waitMs) break;
+      await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, Math.min(10, waitMs - elapsed)));
     } while (true);
-    throw new ApnError("APN_STATE_BUSY", `State remained busy for ${this.lockWaitMs} milliseconds; retry the operation.`);
+    throw busy(waitMs);
   }
 
   private async validateOpenedLock(path: string, handle: FileHandle): Promise<void> {
@@ -329,4 +351,8 @@ export class SecureStateStore {
   private async releaseLock(lock: HeldLock): Promise<void> {
     await lock.handle.close();
   }
+}
+
+function busy(waitMs: number): ApnError {
+  return new ApnError("APN_STATE_BUSY", `State remained busy for ${waitMs} milliseconds; retry the operation.`);
 }

@@ -13,4 +13,5 @@ export declare class WalletService {
     policySet(request: Extract<CommandRequest, {
         readonly command: "wallet.policy.set";
     }>): Promise<unknown>;
+    private policyBindingForProfile;
 }

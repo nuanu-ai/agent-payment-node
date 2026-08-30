@@ -18,6 +18,7 @@ export class RuntimeContext {
     foregroundAuthentication;
     transferApproval;
     rpcUrl;
+    providerX402Repository;
     initialized;
     constructor(dependencies) {
         this.state = dependencies.state;
@@ -44,6 +45,8 @@ export class RuntimeContext {
             this.transferApproval = dependencies.transferApproval;
         if (dependencies.rpcUrl !== undefined)
             this.rpcUrl = dependencies.rpcUrl;
+        if (dependencies.providerX402Repository !== undefined)
+            this.providerX402Repository = dependencies.providerX402Repository;
     }
     async ready() {
         this.initialized ??= this.state.initialize();

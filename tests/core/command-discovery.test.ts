@@ -75,6 +75,11 @@ test("one exact static catalog owns all groups, commands, recovery targets, exam
       for (const url of example.match(/https:\/\/[^ >]+/gu) ?? []) assert.match(url, /\.example(?:\/|$)/u);
     }
   }
+  const x402Approve = COMMANDS.find((entry) => entry.path.join(" ") === "x402 fetch approve");
+  assert.equal(x402Approve?.summary, "Advance one frozen x402 request under its stored policy.");
+  assert.match(x402Approve?.effect.summary ?? "", /local authorization|provider-owned paid fetch/u);
+  assert.doesNotMatch(x402Approve?.effect.summary ?? "", /resume owns the next paid-request/u);
+  assert.equal(x402Approve?.states.non_terminal.includes("started"), true);
 });
 
 test("root, every group and every leaf have identical prefix/suffix text discovery", () => {

@@ -55,6 +55,16 @@ test("macOS advisory lock fails closed on spawn errors and bounded timeout", asy
   assert.equal(killed, true);
 });
 
+test("macOS advisory lock classifies an explicit caller-budget timeout as busy", async () => {
+  let killed = false;
+  const hanging = new MacosAdvisoryLock({
+    spawnLockf: () => hangingChild(() => { killed = true; }),
+    timeoutMs: 100,
+  });
+  assert.equal(await hanging.tryAcquire(7, 10, true), false);
+  assert.equal(killed, true);
+});
+
 function closingChild(code: number | null, signal: NodeJS.Signals | null = null): LockfChild {
   const child = childEmitter();
   queueMicrotask(() => child.emit("close", code, signal));

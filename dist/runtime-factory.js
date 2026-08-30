@@ -60,9 +60,12 @@ function needsNative(command) {
     ].includes(command);
 }
 function needsPolicy(command) {
-    return ["wallet.balance", "wallet.policy.show", "wallet.policy.set", "x402.fetch.prepare"].includes(command);
+    return [
+        "wallet.balance", "wallet.policy.show", "wallet.policy.set", "x402.fetch.prepare",
+        "x402.fetch.approve", "operation.resume",
+    ].includes(command);
 }
 function needsHttp(command) {
-    return ["x402.inspect", "x402.fetch.prepare", "operation.resume"].includes(command);
+    return ["x402.inspect", "x402.fetch.prepare", "x402.fetch.approve", "operation.resume"].includes(command);
 }
 //# sourceMappingURL=runtime-factory.js.map

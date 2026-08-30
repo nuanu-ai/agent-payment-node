@@ -4,6 +4,7 @@ import type { StateStore } from "./state.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { ForegroundAuthenticationPort, ProviderProfileRepositoryPort, ProviderRegistryPort } from "./provider-ports.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
+import type { ProviderX402Repository } from "./provider-x402-repository.js";
 export interface CoreDependencies {
     readonly state: StateStore;
     readonly native?: NativePort;
@@ -19,6 +20,7 @@ export interface CoreDependencies {
     readonly foregroundAuthentication?: ForegroundAuthenticationPort;
     readonly transferApproval?: TransferApprovalPort;
     readonly rpcUrl?: string;
+    readonly providerX402Repository?: ProviderX402Repository;
 }
 export declare class RuntimeContext {
     readonly state: StateStore;
@@ -35,6 +37,7 @@ export declare class RuntimeContext {
     readonly foregroundAuthentication?: ForegroundAuthenticationPort;
     readonly transferApproval?: TransferApprovalPort;
     readonly rpcUrl?: string;
+    readonly providerX402Repository?: ProviderX402Repository;
     private initialized;
     constructor(dependencies: CoreDependencies);
     ready(): Promise<void>;

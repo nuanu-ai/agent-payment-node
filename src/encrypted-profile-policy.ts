@@ -57,7 +57,7 @@ export class EncryptedProfilePolicy implements ProfilePolicyPort {
   }
 
   async set(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): Promise<ProfilePolicyRecord> {
-    const current = await this.load(binding);
+    const current = await this.loadForSet(binding);
     const supplied = canonicalPolicyInput(input);
     const effective: ProfilePolicySetInput = {
       ...supplied,
@@ -99,6 +99,22 @@ export class EncryptedProfilePolicy implements ProfilePolicyPort {
     } finally {
       wrapping.fill(0);
     }
+  }
+
+  private async loadForSet(binding: ProfilePolicyBinding): Promise<ProfilePolicyRecord | null> {
+    const value = await this.state.loadEncryptedPolicyEnvelope(binding.profile);
+    if (value === null) return null;
+    const envelope = parseEnvelope(value);
+    if (canonicalJson(envelope.binding) === canonicalJson(binding)) return await this.load(binding);
+    if (
+      envelope.binding.profile !== binding.profile || envelope.binding.profileHash !== binding.profileHash
+    ) corrupt("Profile policy envelope profile binding is invalid.");
+    const wrapping = await this.wrappingSecret.load();
+    if (wrapping === null) corrupt("The rebound profile policy wrapping secret is missing.");
+    try {
+      decryptEnvelope(envelope, wrapping, envelope.binding);
+      return null;
+    } finally { wrapping.fill(0); }
   }
 
   private async save(binding: ProfilePolicyBinding, policy: ProfilePolicyRecord, wrapping: Buffer): Promise<void> {
@@ -174,7 +190,7 @@ function decryptEnvelope(
   }
 }
 
-function parseEnvelope(value: unknown, binding: ProfilePolicyBinding): PolicyEnvelope {
+function parseEnvelope(value: unknown, binding?: ProfilePolicyBinding): PolicyEnvelope {
   if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "binding", "kdf", "cipher"])) {
     corrupt("Profile policy envelope schema is invalid.");
   }
@@ -182,7 +198,14 @@ function parseEnvelope(value: unknown, binding: ProfilePolicyBinding): PolicyEnv
   if (!isPlainRecord(value.binding) || !exactKeys(value.binding, ["profile", "profileHash", "walletAddress", "walletBindingHash"])) {
     corrupt("Profile policy binding schema is invalid.");
   }
-  if (canonicalJson(value.binding) !== canonicalJson(binding)) corrupt("Profile policy envelope binding is invalid.");
+  const storedBinding = value.binding as unknown as ProfilePolicyBinding;
+  if (
+    typeof storedBinding.profile !== "string" || typeof storedBinding.profileHash !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(storedBinding.profileHash) || typeof storedBinding.walletAddress !== "string" ||
+    !/^0x[0-9a-fA-F]{40}$/u.test(storedBinding.walletAddress) || typeof storedBinding.walletBindingHash !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(storedBinding.walletBindingHash)
+  ) corrupt("Profile policy envelope binding is invalid.");
+  if (binding !== undefined && canonicalJson(value.binding) !== canonicalJson(binding)) corrupt("Profile policy envelope binding is invalid.");
   if (!isPlainRecord(value.kdf) || !exactKeys(value.kdf, ["name", "salt"]) || value.kdf.name !== KDF_NAME || typeof value.kdf.salt !== "string") {
     corrupt("Profile policy KDF metadata is invalid.");
   }

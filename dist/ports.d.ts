@@ -118,6 +118,14 @@ export type X402AuthorizationUsedLogs = {
 } | {
     readonly kind: "range_unavailable";
 };
+export type X402TransferLogs = {
+    readonly kind: "complete";
+    readonly logs: readonly X402RpcLog[];
+} | {
+    readonly kind: "pruned";
+} | {
+    readonly kind: "range_unavailable";
+};
 /** Read-only x402 RPC surface. It intentionally has no transaction submission method. */
 export interface X402RpcPort {
     withTotalTimeout?(milliseconds: number): X402RpcPort;
@@ -135,6 +143,11 @@ export interface X402RpcPort {
         readonly fromBlock: string;
         readonly toBlock: string;
     }): Promise<X402AuthorizationUsedLogs>;
+    getX402TransferLogs(input: {
+        readonly from: Address;
+        readonly fromBlock: string;
+        readonly toBlock: string;
+    }): Promise<X402TransferLogs>;
 }
 export interface RpcPort {
     assertBaseChain(): Promise<{

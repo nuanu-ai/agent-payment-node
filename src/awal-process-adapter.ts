@@ -8,10 +8,12 @@ import type {
   DirectExecutionPort,
   ProviderLifecyclePort,
   ProviderWalletReadPort,
+  X402ExecutionPort,
 } from "./provider-ports.js";
 import { accountBindingHash, coinbaseDirectCapabilitySnapshot } from "./provider-profile.js";
 import type { Address } from "./model.js";
 import { AwalDirectAdapter } from "./awal-direct-adapter.js";
+import { AwalX402Adapter } from "./awal-x402-adapter.js";
 
 export const AWAL_PROVIDER_ID = "coinbase-agentic-wallet" as const;
 export {
@@ -192,6 +194,7 @@ export class AwalProcessAdapter implements ProviderLifecyclePort, ProviderWallet
   constructor(
     private readonly runner: AwalProcessRunnerPort = new NodeAwalProcessRunner(),
     private readonly direct: DirectExecutionPort = new AwalDirectAdapter(),
+    private readonly x402: X402ExecutionPort = new AwalX402Adapter(),
   ) {}
 
   bundle(): ProviderAdapterBundle {
@@ -202,6 +205,7 @@ export class AwalProcessAdapter implements ProviderLifecyclePort, ProviderWallet
       lifecycle: this,
       reads: this,
       direct: this.direct,
+      x402: this.x402,
       evidence: { owner: "apn" },
     };
   }
