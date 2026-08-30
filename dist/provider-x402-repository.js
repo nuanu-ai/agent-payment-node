@@ -108,7 +108,7 @@ export class ProviderX402Repository extends SecureStateStore {
         await this.ready();
         validateProviderX402Receipt(receipt);
         const operation = await this.loadOperation(profileHash, receipt.operationId);
-        if (operation === null || operation.terminal || receipt.fingerprint !== operation.fingerprint ||
+        if (operation === null || receipt.fingerprint !== operation.fingerprint ||
             receipt.operationBindingHash !== providerX402BindingHash(operation))
             stateCorrupt("Provider x402 receipt authority is invalid.");
         assertProviderX402ReceiptAuthority(operation, receipt);
