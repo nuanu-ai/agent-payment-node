@@ -265,11 +265,11 @@ test("manifest validator and compatibility gate reject every declared structural
   assert.doesNotThrow(() => assertCompatibleManifestEvolution(COMMAND_MANIFEST, additive));
 
   const previousVersion = cloneManifest();
-  previousVersion.product_version = "0.2.9";
+  previousVersion.product_version = "0.3.0";
   assert.throws(() => validateCommandManifest(previousVersion), ApnError, "installed manifest validator remains version-exact");
   assert.doesNotThrow(
     () => assertCompatibleManifestEvolution(previousVersion, COMMAND_MANIFEST),
-    "schema-compatible 0.2.9 to 0.3.0 evolution is permitted",
+    "schema-compatible 0.3.0 to 0.3.1 evolution is permitted",
   );
   for (const invalidVersion of ["banana", "1", "01.2.3", "1.02.3", "1.2.03", "1.2.3-01"]) {
     const invalidVersionManifest = cloneManifest();
