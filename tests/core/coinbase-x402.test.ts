@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import test, { type TestContext } from "node:test";
@@ -1110,7 +1110,7 @@ test("frozen settlement lower-block mismatch is durable ambiguity and can never 
   assert.equal(fixture.effect.calls.length, 1);
 });
 
-test("started persistence, same-operation races and every post-start ambiguity are strict no-replay", async (t) => {
+test("started persistence, same-operation races and exact spend without seller result terminalize once without replay", async (t) => {
   const failing = await setup(t, { failStartedStore: true });
   const failedOperationId = await prepare(failing.core, "provider-store-failure");
   const failedStart = await failing.core.execute({ command: "x402.fetch.approve", operationId: failedOperationId });
@@ -1158,13 +1158,106 @@ test("started persistence, same-operation races and every post-start ambiguity a
     rpcUrl: "https://rpc.example/base?tenant=one",
     clock: ambiguous.clock,
   });
-  const recovered = await restarted.execute({ command: "operation.resume", operationId });
+  const httpCallsBeforeRecovery = ambiguous.http.calls.length;
+  const [recovered, concurrentRecovered] = await Promise.all([
+    restarted.execute({ command: "operation.resume", operationId }),
+    restarted.execute({ command: "operation.resume", operationId }),
+  ]);
   assert.equal(recovered.ok, true, JSON.stringify(recovered));
-  assert.equal((recovered.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal(concurrentRecovered.ok, true, JSON.stringify(concurrentRecovered));
+  assert.equal((recovered.operation as { state?: unknown }).state, "failed_settled_without_result");
+  assert.equal((recovered.operation as { terminal?: unknown }).terminal, true);
   assert.equal((recovered.operation as { reason?: unknown }).reason, "seller_result_missing");
+  assert.equal(
+    (recovered.operation as { proofClass?: unknown }).proofClass,
+    "confirmed_settlement_without_seller_result",
+  );
+  assert.equal(recovered.data, null, "settlement evidence must not invent seller data");
+  assert.deepEqual(concurrentRecovered.operation, recovered.operation, "concurrent reconciliation must converge byte-stably");
   const durable = await new ProviderX402Repository(ambiguous.temporary.root).findOperation(operationId);
-  assert.notEqual(durable?.settlementEvidence, undefined, "exact settlement alone must be preserved but never complete");
+  assert.equal(durable?.state, "failed_settled_without_result");
+  assert.equal(durable?.terminal, true);
+  assert.equal(durable?.sellerResult, undefined);
+  assert.notEqual(durable?.settlementEvidence, undefined, "exact settlement must be preserved in the spent terminal");
+
+  const firstReceipt = await restarted.execute({ command: "receipt.get", operationId });
+  assert.equal(firstReceipt.ok, true, JSON.stringify(firstReceipt));
+  assert.equal((firstReceipt.receipt as { terminalState?: unknown }).terminalState, "failed_settled_without_result");
+  assert.equal((firstReceipt.receipt as { reason?: unknown }).reason, "seller_result_missing");
+  assert.equal(
+    (firstReceipt.receipt as { proofClass?: unknown }).proofClass,
+    "confirmed_settlement_without_seller_result",
+  );
+  assert.equal("result" in (firstReceipt.receipt as object), false);
+  assert.equal(
+    (firstReceipt.receipt as { settlement?: { receiptStatus?: unknown } }).settlement?.receiptStatus,
+    "success",
+  );
+  assert.equal(
+    (firstReceipt.receipt as { settlement?: { transfer?: { value?: unknown } } }).settlement?.transfer?.value,
+    X402_REQUIREMENTS.amount,
+  );
+  validatePublicX402Receipt(firstReceipt.receipt);
+  const receiptPath = join(ambiguous.temporary.root, "x402-receipts", ambiguous.profile.profile_hash, `${operationId}.json`);
+  const storedReceipt = await readFile(receiptPath, "utf8");
+
+  await restarted.execute({ command: "operation.status", operationId });
+  await restarted.execute({ command: "operation.resume", operationId });
+  await restarted.execute({ command: "x402.fetch.approve", operationId });
+  const replayedReceipt = await restarted.execute({ command: "receipt.get", operationId });
+  assert.deepEqual(replayedReceipt.receipt, firstReceipt.receipt);
+  assert.equal(await readFile(receiptPath, "utf8"), storedReceipt, "spent receipt must be immutable and counted once");
+
+  const parsedReceipt = JSON.parse(storedReceipt) as ProviderX402ReceiptRecord;
+  const { integrityHash: _receiptHash, ...receiptBase } = parsedReceipt;
+  const injectedBase = { ...receiptBase, seller_result: { status: "invented" } };
+  await writeFile(receiptPath, canonicalJson({ ...injectedBase, integrityHash: hashObject(injectedBase) }), { mode: 0o600 });
+  await assert.rejects(
+    new ProviderX402Repository(ambiguous.temporary.root).loadReceipt(ambiguous.profile.profile_hash, operationId),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "APN_STATE_CORRUPT",
+    "a recomputed receipt with an undeclared seller field must fail closed",
+  );
+  await writeFile(receiptPath, storedReceipt, { mode: 0o600 });
+
+  await unlink(receiptPath);
+  const stateFirstRestart = restartedCore(ambiguous);
+  const stateFirstStatus = await stateFirstRestart.execute({ command: "operation.status", operationId });
+  assert.equal(stateFirstStatus.ok, true, JSON.stringify(stateFirstStatus));
+  assert.equal((stateFirstStatus.operation as { state?: unknown }).state, "failed_settled_without_result");
+  assert.equal(await readFile(receiptPath, "utf8"), storedReceipt, "state-first recovery must reconstruct identical receipt bytes");
+  const stateFirstReceipt = await stateFirstRestart.execute({ command: "receipt.get", operationId });
+  assert.deepEqual(stateFirstReceipt.receipt, firstReceipt.receipt);
+
+  const surfaceOptions = {
+    stateRoot: ambiguous.temporary.root,
+    native: new TestNative(),
+    profileRepository: new StateProfileRepository(ambiguous.state),
+    providerRegistry: ambiguous.registry,
+    policy: ambiguous.policy,
+    rpc: ambiguous.rpc,
+    http: ambiguous.http,
+    clock: ambiguous.clock,
+  };
+  const cliReceipt = await runCli(["receipt", "get", "--operation", operationId], {}, surfaceOptions);
+  assert.deepEqual(cliReceipt.receipt, firstReceipt.receipt, "CLI must project the shared terminal receipt schema");
+  const server = createMcpServer(surfaceOptions);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "provider-spent-receipt-test", version: "1.0.0" });
+  await client.connect(clientTransport);
+  try {
+    const result = await client.callTool({ name: "apn_receipt_get", arguments: { operation: operationId } });
+    assert.deepEqual(
+      (result.structuredContent as unknown as OutputEnvelope).receipt,
+      firstReceipt.receipt,
+      "MCP must project the shared terminal receipt schema",
+    );
+  } finally {
+    await client.close();
+    await server.close();
+  }
   assert.equal(ambiguousEffect.calls.length, 1, "restart settlement recovery must never replay AWAL pay");
+  assert.equal(ambiguous.http.calls.length, httpCallsBeforeRecovery, "terminal recovery must never repeat paid or unpaid HTTP");
 });
 
 function invocation(
