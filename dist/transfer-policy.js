@@ -70,6 +70,9 @@ export function parseEffect(value) {
     };
 }
 export async function verifyEffect(effect, operation) {
+    if (operation.transactionData === undefined || operation.economics === undefined) {
+        throw new ApnError("APN_NATIVE_PROTOCOL", "Native signing requires a local direct operation.");
+    }
     const computed = keccak256(effect.rawTransaction);
     if (computed.toLowerCase() !== effect.transactionHash.toLowerCase() ||
         computed.toLowerCase() !== effect.rawTransactionHash.toLowerCase())
@@ -121,12 +124,30 @@ export function publicOperation(operation) {
         wallet_address: operation.walletAddress,
         recipient: operation.recipient,
         amount: { atomic: operation.amountAtomic, decimal: operation.amountDecimal, decimals: USDC_DECIMALS },
-        economics: operation.economics,
+        ...(operation.economics === undefined ? {} : { economics: operation.economics }),
         prepared_at: operation.preparedAt,
-        prepared_block_number_atomic: operation.preparedBlockNumberAtomic,
+        ...(operation.preparedBlockNumberAtomic === undefined ? {} : {
+            prepared_block_number_atomic: operation.preparedBlockNumberAtomic,
+        }),
         expires_at: operation.expiresAt,
         ...(operation.transactionHash === undefined ? {} : { transaction_hash: operation.transactionHash }),
         ...(operation.rawTransactionHash === undefined ? {} : { raw_transaction_hash: operation.rawTransactionHash }),
+        ...(operation.providerDirect === undefined ? {} : {
+            provider: operation.providerDirect.providerId,
+            profile_revision: operation.providerDirect.profileRevision,
+            capability_hash: operation.providerDirect.capabilityHash,
+            execution: {
+                mode: operation.providerDirect.executionMode,
+                owner: operation.providerDirect.executionOwner,
+                retry_owner: operation.providerDirect.retryOwner,
+            },
+            policy: {
+                identity: operation.providerDirect.policy.identity,
+                verdict: operation.providerDirect.policy.verdict,
+                foreground_approval_required: operation.providerDirect.policy.foregroundApprovalRequired,
+            },
+            rpc_binding_hash: operation.providerDirect.rpcBindingHash,
+        }),
         transition_hash: operation.transitions.at(-1)?.hash,
         receipt_reference: `${operation.operationId}.json`,
         next_actions: operationNextActions(operation),
@@ -152,6 +173,15 @@ function addressTopic(address) {
     return `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
 }
 function operationNextActions(operation) {
+    if (operation.state === "failed_before_effect" && operation.reason === "provider_sender_changed" &&
+        operation.providerDirect !== undefined)
+        return [
+            `apn wallet connect --profile ${operation.profile} --provider ${operation.providerDirect.providerId} --expected-revision ${operation.providerDirect.profileRevision}`,
+        ];
+    if (operation.state === "failed_before_effect" && operation.reason === "provider_amount_encoding_incompatible")
+        return [
+            `apn pay transfer prepare --profile ${operation.profile} --idempotency-key <new-key> --to ${operation.recipient} --amount-usdc <exact-provider-compatible-decimal> --rpc-url <https-url>`,
+        ];
     if (operation.state === "failed_before_effect")
         return [
             `apn pay transfer prepare --profile ${operation.profile} --idempotency-key <new-key> --to ${operation.recipient} --amount-usdc ${operation.amountDecimal} --rpc-url <https-url>`,

@@ -61,6 +61,14 @@ export interface ProviderProfileRecord {
   readonly drift: ProviderDrift;
 }
 
+export interface ProviderBindingObservation {
+  readonly address: Address;
+  readonly accountBindingHash: string;
+  readonly capabilityHash: string;
+  readonly observedAt: string;
+  readonly trustClass: ProviderTrustClass;
+}
+
 export function localCapabilitySnapshot(): ProviderCapabilitySnapshot {
   return {
     schema_version: PROVIDER_CAPABILITY_VERSION,
@@ -107,6 +115,20 @@ export function lifecycleReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapsho
   };
 }
 
+export function coinbaseDirectCapabilitySnapshot(): ProviderCapabilitySnapshot {
+  const snapshot = lifecycleReadOnlyCapabilitySnapshot();
+  return {
+    ...snapshot,
+    direct: {
+      available: true,
+      mode: "provider_atomic_send",
+      execution_owner: "provider",
+      retry_owner: "apn_outer_no_replay_journal",
+    },
+    evidence: { available: true, owner: "apn" },
+  };
+}
+
 export function capabilityHash(snapshot: ProviderCapabilitySnapshot): string {
   assertCapabilitySnapshot(snapshot);
   return hashObject(snapshot);
@@ -114,6 +136,28 @@ export function capabilityHash(snapshot: ProviderCapabilitySnapshot): string {
 
 export function accountBindingHash(providerId: string, address: Address): string {
   return sha256(`provider-account-binding\0${providerId}\0${address.toLowerCase()}`);
+}
+
+export function markProviderProfileDrift(
+  profile: ProviderProfileRecord,
+  observed: ProviderBindingObservation,
+): ProviderProfileRecord {
+  const identityChanged = profile.public_address.toLowerCase() !== observed.address.toLowerCase() ||
+    profile.account_binding_hash !== observed.accountBindingHash;
+  const capabilityChanged = profile.capability_hash !== observed.capabilityHash ||
+    profile.trust_class !== observed.trustClass;
+  return {
+    ...profile,
+    drift: {
+      state: "drift_blocked",
+      reason: identityChanged && capabilityChanged ? "identity_and_capability_changed"
+        : identityChanged ? "identity_changed" : "capability_changed",
+      observed_address: observed.address,
+      observed_account_binding_hash: observed.accountBindingHash,
+      observed_capability_hash: observed.capabilityHash,
+      observed_at: observed.observedAt,
+    },
+  };
 }
 
 export function projectLegacyLocalProfile(wallet: WalletRecord): ProviderProfileRecord {

@@ -10,7 +10,10 @@ const completedStates = { terminal: ["completed", "classified_failure"], non_ter
 const mcpServerStates = { terminal: ["server_closed", "classified_failure"], non_terminal: ["serving"] };
 const directStates = {
     terminal: ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_proven_superseded"],
-    non_terminal: ["awaiting_approval", "signed_not_submitted", "submitted_pending", "unknown_finality"],
+    non_terminal: [
+        "awaiting_approval", "started", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
+        "signed_not_submitted", "submitted_pending", "unknown_finality",
+    ],
 };
 const x402States = {
     terminal: ["completed", "failed_before_effect", "failed_expired_unused", "failed_settled_without_result"],

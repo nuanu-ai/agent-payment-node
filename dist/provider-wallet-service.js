@@ -1,7 +1,7 @@
 import { CHAIN_CAIP2, BASE_USDC, ETH_DECIMALS, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { formatAtomic } from "./money.js";
-import { capabilityHash } from "./provider-profile.js";
+import { capabilityHash, markProviderProfileDrift, } from "./provider-profile.js";
 import { canonicalProfile, publicProvenance, validateBalance } from "./wallet-policy.js";
 export class ProviderWalletService {
     context;
@@ -53,7 +53,7 @@ export class ProviderWalletService {
             if (same && existing.drift.state === "bound")
                 return publicProfile(existing, true);
             const drifted = existing.drift.state === "bound"
-                ? driftedProfile(existing, observed)
+                ? markProviderProfileDrift(existing, observed)
                 : existing;
             if (drifted !== existing)
                 await repository.save(drifted);
@@ -112,7 +112,7 @@ export class ProviderWalletService {
                 trustClass: adapter.trust_class,
             };
             const drifted = current.drift.state === "bound" && !sameBinding(current, observed)
-                ? driftedProfile(current, observed)
+                ? markProviderProfileDrift(current, observed)
                 : current;
             if (drifted !== current)
                 await repository.save(drifted);
@@ -181,6 +181,9 @@ export class ProviderWalletService {
         }
         const capability = kind === "direct" ? bound.capability_snapshot.direct : bound.capability_snapshot.x402;
         if (!capability.available) {
+            if (kind === "direct") {
+                throw new ApnError("APN_PROFILE_DRIFT", "The persisted provider profile predates direct-effect binding; explicit foreground rebind is required.", { current_revision: String(bound.revision) });
+            }
             throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This provider profile does not support the requested payment effect in this APN version.");
         }
     }
@@ -206,24 +209,6 @@ function sameBinding(profile, observed) {
         profile.account_binding_hash === observed.accountBindingHash &&
         profile.capability_hash === observed.capabilityHash &&
         profile.trust_class === observed.trustClass;
-}
-function driftedProfile(profile, observed) {
-    const identityChanged = profile.public_address.toLowerCase() !== observed.address.toLowerCase() ||
-        profile.account_binding_hash !== observed.accountBindingHash;
-    const capabilityChanged = profile.capability_hash !== observed.capabilityHash ||
-        profile.trust_class !== observed.trustClass;
-    return {
-        ...profile,
-        drift: {
-            state: "drift_blocked",
-            reason: identityChanged && capabilityChanged ? "identity_and_capability_changed"
-                : identityChanged ? "identity_changed" : "capability_changed",
-            observed_address: observed.address,
-            observed_account_binding_hash: observed.accountBindingHash,
-            observed_capability_hash: observed.capabilityHash,
-            observed_at: observed.observedAt,
-        },
-    };
 }
 function publicProfile(profile, reused) {
     const rebindCommand = `apn wallet connect --profile ${profile.profile} --provider ${profile.provider_id} --expected-revision ${profile.revision}`;

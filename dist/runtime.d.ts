@@ -3,6 +3,7 @@ import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { StateStore } from "./state.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { ForegroundAuthenticationPort, ProviderProfileRepositoryPort, ProviderRegistryPort } from "./provider-ports.js";
+import type { TransferApprovalPort } from "./tty-approval.js";
 export interface CoreDependencies {
     readonly state: StateStore;
     readonly native?: NativePort;
@@ -16,6 +17,8 @@ export interface CoreDependencies {
     readonly profileRepository?: ProviderProfileRepositoryPort;
     readonly providerRegistry?: ProviderRegistryPort;
     readonly foregroundAuthentication?: ForegroundAuthenticationPort;
+    readonly transferApproval?: TransferApprovalPort;
+    readonly rpcUrl?: string;
 }
 export declare class RuntimeContext {
     readonly state: StateStore;
@@ -30,6 +33,8 @@ export declare class RuntimeContext {
     readonly profileRepository?: ProviderProfileRepositoryPort;
     readonly providerRegistry?: ProviderRegistryPort;
     readonly foregroundAuthentication?: ForegroundAuthenticationPort;
+    readonly transferApproval?: TransferApprovalPort;
+    readonly rpcUrl?: string;
     private initialized;
     constructor(dependencies: CoreDependencies);
     ready(): Promise<void>;
@@ -41,5 +46,7 @@ export declare class RuntimeContext {
     requireProfileRepository(): ProviderProfileRepositoryPort;
     requireProviderRegistry(): ProviderRegistryPort;
     requireForegroundAuthentication(): ForegroundAuthenticationPort;
+    requireTransferApproval(): TransferApprovalPort;
+    requireRpcUrl(): string;
     nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest;
 }

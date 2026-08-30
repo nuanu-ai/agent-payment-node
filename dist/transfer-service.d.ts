@@ -3,6 +3,7 @@ import type { RuntimeContext } from "./runtime.js";
 export declare class TransferService {
     private readonly context;
     private readonly operations;
+    private readonly providerDirect;
     constructor(context: RuntimeContext);
     prepare(request: Extract<CommandRequest, {
         command: "transfer.prepare";

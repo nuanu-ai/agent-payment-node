@@ -16,6 +16,8 @@ export class RuntimeContext {
     profileRepository;
     providerRegistry;
     foregroundAuthentication;
+    transferApproval;
+    rpcUrl;
     initialized;
     constructor(dependencies) {
         this.state = dependencies.state;
@@ -38,6 +40,10 @@ export class RuntimeContext {
             this.providerRegistry = dependencies.providerRegistry;
         if (dependencies.foregroundAuthentication !== undefined)
             this.foregroundAuthentication = dependencies.foregroundAuthentication;
+        if (dependencies.transferApproval !== undefined)
+            this.transferApproval = dependencies.transferApproval;
+        if (dependencies.rpcUrl !== undefined)
+            this.rpcUrl = dependencies.rpcUrl;
     }
     async ready() {
         this.initialized ??= this.state.initialize();
@@ -88,6 +94,17 @@ export class RuntimeContext {
             throw new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "A foreground terminal is required for wallet provider authentication.");
         }
         return this.foregroundAuthentication;
+    }
+    requireTransferApproval() {
+        if (this.transferApproval === undefined) {
+            throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "A foreground terminal is required for direct-transfer approval.");
+        }
+        return this.transferApproval;
+    }
+    requireRpcUrl() {
+        if (this.rpcUrl === undefined)
+            throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
+        return this.rpcUrl;
     }
     nativeRequest(operation, payload) {
         return { version: NATIVE_IPC_VERSION, requestId: this.ids.next(), operation, payload };

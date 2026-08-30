@@ -3,7 +3,7 @@ import type { CommandRequest } from "./commands.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic, parseDecimal } from "./money.js";
-import type { Hex, OperationRecord, ReceiptRecord } from "./model.js";
+import type { Economics, Hex, OperationRecord, ReceiptRecord } from "./model.js";
 import { OperationService } from "./operation-service.js";
 import type { RpcPort, RpcReceipt } from "./ports.js";
 import type { RuntimeContext } from "./runtime.js";
@@ -23,15 +23,19 @@ import {
   verifyEffect,
 } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 
 export class TransferService {
   private readonly operations: OperationService;
+  private readonly providerDirect: ProviderDirectTransferService;
 
   constructor(private readonly context: RuntimeContext) {
     this.operations = new OperationService(context.state);
+    this.providerDirect = new ProviderDirectTransferService(context);
   }
 
   async prepare(request: Extract<CommandRequest, { command: "transfer.prepare" }>): Promise<unknown> {
+    if (await this.providerDirect.canHandle(request.profile)) return await this.providerDirect.prepare(request);
     const profile = canonicalProfile(request.profile);
     const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
     const recipient = canonicalAddress(request.recipient);
@@ -134,9 +138,11 @@ export class TransferService {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
     const found = await this.requiredOperation(operationId);
-    const { profile, profileHash } = found;
+    if (found.providerDirect !== undefined) return await this.providerDirect.approve(operationId);
+    const localFound = requiredLocal(found);
+    const { profile, profileHash } = localFound;
     return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
-      let operation = await this.requiredOperation(operationId);
+      let operation = requiredLocal(await this.requiredOperation(operationId));
       if (operation.terminal) return publicOperation(operation);
       if (operation.state !== "awaiting_approval") {
         throw new ApnError("APN_OPERATION_BLOCKED", "Operation is already signed; use operation resume.");
@@ -211,9 +217,11 @@ export class TransferService {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
     const found = await this.requiredOperation(operationId);
-    const { profile, profileHash } = found;
+    if (found.providerDirect !== undefined) return await this.providerDirect.resume(operationId);
+    const localFound = requiredLocal(found);
+    const { profile, profileHash } = localFound;
     return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
-      let operation = await this.requiredOperation(operationId);
+      let operation = requiredLocal(await this.requiredOperation(operationId));
       if (operation.terminal) return publicOperation(operation);
       if (operation.state === "awaiting_approval") {
         throw new ApnError("APN_OPERATION_BLOCKED", "Operation still requires transfer approve.");
@@ -250,6 +258,7 @@ export class TransferService {
     await this.context.ready();
     const operationId = canonicalOperationId(operationIdInput);
     const operation = await this.requiredOperation(operationId);
+    if (operation.providerDirect !== undefined) return await this.providerDirect.receipt(operationId);
     const receipt = await this.context.state.loadReceipt(operation.profileHash, operationId);
     if (receipt === null) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
     if (receipt.operationIntegrityHash !== operation.integrityHash) {
@@ -258,7 +267,7 @@ export class TransferService {
     return publicReceipt(receipt);
   }
 
-  private async submitAndInspect(operationInput: OperationRecord, rawTransaction: Hex): Promise<OperationRecord> {
+  private async submitAndInspect(operationInput: LocalOperationRecord, rawTransaction: Hex): Promise<LocalOperationRecord> {
     let operation = operationInput;
     const rpc = this.context.requireRpc();
     try {
@@ -279,7 +288,7 @@ export class TransferService {
     return await this.inspectReceipt(operation, rpc);
   }
 
-  private async inspectReceipt(operation: OperationRecord, rpc: RpcPort): Promise<OperationRecord> {
+  private async inspectReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord> {
     if (operation.transactionHash === undefined) return operation;
     let receipt: RpcReceipt | null;
     try {
@@ -302,7 +311,7 @@ export class TransferService {
     );
   }
 
-  private async proveSuperseding(operation: OperationRecord, rpc: RpcPort): Promise<OperationRecord | null> {
+  private async proveSuperseding(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord | null> {
     const latest = parseAtomic(await rpc.getLatestConfirmedNonce(operation.walletAddress));
     if (latest <= parseAtomic(operation.economics.nonceAtomic)) return null;
     const hash = await rpc.getConfirmedTransactionAtNonce(
@@ -328,24 +337,24 @@ export class TransferService {
     return operation;
   }
 
-  private async failBeforeEffect(operation: OperationRecord, reason: string): Promise<never> {
+  private async failBeforeEffect(operation: LocalOperationRecord, reason: string): Promise<never> {
     await this.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
     throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen transfer inputs changed before approval; prepare a new operation.");
   }
 
   private async transition(
-    operation: OperationRecord,
+    operation: LocalOperationRecord,
     state: OperationRecord["state"],
     terminal: boolean,
     reason: string,
     proofClass: string,
     extra: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt">> = {},
     rpcReceipt?: RpcReceipt,
-  ): Promise<OperationRecord> {
+  ): Promise<LocalOperationRecord> {
     const at = this.context.clock.now().toISOString();
     const transitions = appendTransition(operation.transitions, { at, state, terminal, reason, proofClass });
     const { integrityHash: _previousIntegrityHash, ...base } = operation;
-    const updated = sealOperation({ ...base, ...extra, state, terminal, reason, proofClass, transitions });
+    const updated = sealOperation({ ...base, ...extra, state, terminal, reason, proofClass, transitions }) as LocalOperationRecord;
     await this.persist(updated, rpcReceipt);
     return updated;
   }
@@ -369,4 +378,19 @@ export class TransferService {
     };
     await this.context.state.writeReceipt(operation.profileHash, sealReceipt(receiptBase));
   }
+}
+
+type LocalOperationRecord = OperationRecord & {
+  readonly providerDirect?: never;
+  readonly transactionData: Hex;
+  readonly economics: Economics;
+  readonly preparedBlockNumberAtomic: string;
+};
+
+function requiredLocal(operation: OperationRecord): LocalOperationRecord {
+  if (
+    operation.providerDirect !== undefined || operation.transactionData === undefined ||
+    operation.economics === undefined || operation.preparedBlockNumberAtomic === undefined
+  ) throw new ApnError("APN_STATE_CORRUPT", "Local direct operation is missing its transaction economics.");
+  return operation as LocalOperationRecord;
 }
