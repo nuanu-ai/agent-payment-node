@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
-import { isSafeNormalizedProviderJson } from "./normalized-provider-json.js";
+import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
 import type { ProviderX402SellerResult } from "./provider-ports.js";
 import type { ProviderX402OperationRecord, ProviderX402ReceiptRecord } from "./provider-x402-model.js";
 import type { X402RpcBlock, X402RpcHead } from "./ports.js";
@@ -178,9 +178,11 @@ export function validatePublicX402Result(value: unknown): PublicX402Result {
   if (value.variant === "normalized_provider_json") {
     if (
       !exactKeys(value, ["kind", "variant", "classification", "body", "sha256", "byte_length"]) ||
-      value.classification !== "normalized_provider_json" || !isSafeNormalizedProviderJson(value.body)
+      value.classification !== "normalized_provider_json"
     ) throw new TypeError("Invalid public x402 result.");
-    const normalized = canonicalJson(value.body);
+    let normalized: string;
+    try { normalized = canonicalizeNormalizedProviderJson(value.body); }
+    catch { throw new TypeError("Invalid public x402 result."); }
     if (value.sha256 !== sha256(normalized) || value.byte_length !== Buffer.byteLength(normalized).toString()) {
       throw new TypeError("Invalid public x402 result.");
     }

@@ -7,7 +7,7 @@ import type {
   X402ExecutionPort,
 } from "./provider-ports.js";
 import { providerX402InvocationIntentHash } from "./provider-x402-model.js";
-import { isSafeNormalizedProviderJson } from "./normalized-provider-json.js";
+import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
 import { resolveAwalBin } from "./awal-package.js";
 
 export const AWAL_X402_PROCESS_TIMEOUT_MS = 210_000;
@@ -214,8 +214,9 @@ function parseSellerResult(bytes: Buffer, expectedAmount: string): ProviderX402S
     typeof value.statusText !== "string" || Buffer.byteLength(value.statusText, "utf8") > MAX_STATUS_TEXT_BYTES ||
     value.paymentMade !== true || canonicalProviderAmount(value.amountPaid) !== expectedAmount
   ) throw protocol();
-  if (!isSafeNormalizedProviderJson(value.data)) throw protocol();
-  const canonical = canonicalJson(value.data);
+  let canonical: string;
+  try { canonical = canonicalizeNormalizedProviderJson(value.data); }
+  catch { throw protocol(); }
   const length = Buffer.byteLength(canonical, "utf8");
   if (length > MAX_OUTPUT_BYTES) throw protocol();
   return {
