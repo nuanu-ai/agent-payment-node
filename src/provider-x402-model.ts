@@ -4,7 +4,7 @@ import { ApnError } from "./errors.js";
 import type { ProviderX402Invocation, ProviderX402SellerResult } from "./provider-ports.js";
 import type { ProfilePolicyRecord } from "./profile-policy.js";
 import type { X402RpcBlock, X402RpcHead, X402RpcLog } from "./ports.js";
-import { isSafeNormalizedProviderJson } from "./normalized-provider-json.js";
+import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
 import { x402WaitProjectedStatus, type X402SettlementWaitProjection } from "./x402-state-integrity.js";
 import {
   providerX402CompleteBindingHash,
@@ -372,7 +372,7 @@ function validateSellerResult(result: ProviderX402SellerResult, amount: string):
   ) corrupt();
   try {
     const parsed = JSON.parse(result.canonical_json) as unknown;
-    if (canonicalJson(parsed) !== result.canonical_json || !isSafeNormalizedProviderJson(parsed)) corrupt();
+    if (canonicalizeNormalizedProviderJson(parsed) !== result.canonical_json) corrupt();
   }
   catch { corrupt(); }
 }
