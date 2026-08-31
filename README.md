@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.3.4 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.3.5 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -167,6 +167,10 @@ status and resume are observation-only and never invoke AWAL pay again. APN
 completes only when the bounded seller result joins one exact successful outgoing
 Base-USDC Transfer in the fixed window from the frozen lower block through the
 earliest block timestamp at or after `started + 240000ms`.
+
+The AWAL adapter accepts only its exact paid-success envelope and normalizes
+seller `data` as bounded canonical JSON; provider metadata and raw process output
+are discarded and never become seller result state.
 
 If that exact settlement is independently proven but no usable seller result is
 available, APN terminates the same operation as

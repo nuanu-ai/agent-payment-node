@@ -16,6 +16,7 @@ import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
 import { BASE_USDC, TRANSFER_TOPIC } from "../../src/constants.js";
 import { ApnCore } from "../../src/core.js";
 import { runCli } from "../../src/cli.js";
+import { canonicalizeNormalizedProviderJson } from "../../src/normalized-provider-json.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import type { Address, Hex } from "../../src/model.js";
@@ -383,10 +384,10 @@ test("AWAL x402 uses exact Node argv, exact deadline and normalized bounded JSON
       child.emit("spawn");
       child.stdout.emit("data", Buffer.from(JSON.stringify({
         status: 200,
-        statusText: "OK",
+        statusText: "PROVIDER_STATUS_TEXT_CANARY",
         data: true,
         paymentMade: true,
-        amountPaid: 1_250_000,
+        amountPaid: "1250000",
       })));
       child.emit("close", 0);
     });
@@ -400,6 +401,8 @@ test("AWAL x402 uses exact Node argv, exact deadline and normalized bounded JSON
     requestDigest: "b".repeat(64),
   });
   assert.equal(result.disposition, "seller_result");
+  assert.equal(JSON.stringify(result).includes("PROVIDER_STATUS_TEXT_CANARY"), false);
+  assert.equal(JSON.stringify(result).includes("paymentMade"), false);
   assert.deepEqual(launches, [{
     executable: process.execPath,
     args: [
@@ -417,11 +420,54 @@ test("AWAL x402 uses exact Node argv, exact deadline and normalized bounded JSON
   assert.throws(() => adapter.assertCompatibleIntent({ amountAtomic: "9007199254740992" }), /unsupported safe x402/u);
 });
 
+test("AWAL 2.12.1 source-shaped object seller result is normalized", async () => {
+  const launch: AwalX402LaunchPort = () => {
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number; stdout: EventEmitter; stderr: EventEmitter; kill(): boolean;
+    };
+    child.pid = 42;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => true;
+    queueMicrotask(() => {
+      child.emit("spawn");
+      child.stdout.emit("data", Buffer.from(JSON.stringify({
+        status: 200,
+        statusText: "SOURCE_SHAPED_STATUS_TEXT_CANARY",
+        data: { ok: true },
+        paymentMade: true,
+        amountPaid: 1_250_000,
+      })));
+      child.emit("close", 0);
+    });
+    return child;
+  };
+  const result = await new AwalX402Adapter(async () => "/exact/awal", launch).execute({
+    url: X402_URL,
+    amountAtomic: X402_REQUIREMENTS.amount,
+    correlationId: "a".repeat(64),
+    requestDigest: "b".repeat(64),
+  });
+  assert.equal(result.disposition, "seller_result");
+  assert.equal(JSON.stringify(result).includes("SOURCE_SHAPED_STATUS_TEXT_CANARY"), false);
+  assert.equal(JSON.stringify(result).includes("paymentMade"), false);
+  if (result.disposition === "seller_result") {
+    assert.equal(result.result.canonical_json, '{"ok":true}');
+    assert.equal(result.result.byte_length, "11");
+    assert.equal(result.result.sha256, sha256('{"ok":true}'));
+  }
+});
+
 test("AWAL x402 treats non-2xx, missing payment facts, amount mismatch and protected data as ambiguous", async () => {
   const protocolCases: readonly unknown[] = [
     { status: 402, statusText: "Payment Required", data: {}, paymentMade: true, amountPaid: 1_250_000 },
     { status: 200, statusText: "OK", data: {}, paymentMade: false, amountPaid: 1_250_000 },
     { status: 200, statusText: "OK", data: {}, paymentMade: true, amountPaid: 1_250_001 },
+    { status: 200.5, statusText: "OK", data: {}, paymentMade: true, amountPaid: 1_250_000 },
+    { status: 200, data: {}, paymentMade: true, amountPaid: 1_250_000 },
+    { status: 200, statusText: "OK", data: {}, amountPaid: 1_250_000 },
+    { status: 200, statusText: "OK", data: {}, paymentMade: true, amountPaid: 1_250_000, extra: true },
+    { status: 200, statusText: "x".repeat(513), data: {}, paymentMade: true, amountPaid: 1_250_000 },
   ];
   const protectedValues: readonly unknown[] = [
     { neutral: "owner@example.com" },
@@ -470,6 +516,47 @@ test("AWAL x402 treats non-2xx, missing payment facts, amount mismatch and prote
       "/Users/tony", "PRIVATE KEY", "AbCdEfGh", "123456", "OTP", "one-time code", "PROTECTED_CANARY",
     ]) assert.equal(JSON.stringify(result).includes(protectedValue), false);
   }
+});
+
+test("AWAL x402 zeroizes captured provider buffers on success and parser rejection", async () => {
+  const execute = async (stdout: Buffer, stderr: Buffer) => {
+    const launch: AwalX402LaunchPort = () => {
+      const child = new EventEmitter() as EventEmitter & {
+        pid: number; stdout: EventEmitter; stderr: EventEmitter; kill(): boolean;
+      };
+      child.pid = 42;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => true;
+      queueMicrotask(() => {
+        child.emit("spawn");
+        child.stdout.emit("data", stdout);
+        child.stderr.emit("data", stderr);
+        child.emit("close", 0);
+      });
+      return child;
+    };
+    return await new AwalX402Adapter(async () => "/exact/awal", launch).execute({
+      url: X402_URL,
+      amountAtomic: X402_REQUIREMENTS.amount,
+      correlationId: "a".repeat(64),
+      requestDigest: "b".repeat(64),
+    });
+  };
+
+  const valid = Buffer.from(JSON.stringify({
+    status: 200, statusText: "OK", data: { ok: true }, paymentMade: true, amountPaid: 1_250_000,
+  }));
+  const validStderr = Buffer.from("PROTECTED_STDERR_CANARY");
+  assert.equal((await execute(valid, validStderr)).disposition, "seller_result");
+  assert.equal(valid.every((byte) => byte === 0), true);
+  assert.equal(validStderr.every((byte) => byte === 0), true);
+
+  const invalid = Buffer.from('{"unsupported":true}');
+  const invalidStderr = Buffer.from("PROTECTED_REJECTION_CANARY");
+  assert.equal((await execute(invalid, invalidStderr)).disposition, "ambiguous");
+  assert.equal(invalid.every((byte) => byte === 0), true);
+  assert.equal(invalidStderr.every((byte) => byte === 0), true);
 });
 
 test("durable validation downgrades injected protected seller values without persistence or replay", async (t) => {
@@ -581,7 +668,9 @@ test("provider x402 joins normalized seller result with the sole exact fixed-win
   const resumed = await fixture.core.execute({ command: "operation.resume", operationId });
   assert.equal(resumed.ok, true, JSON.stringify(resumed));
   assert.equal((resumed.operation as { state?: unknown }).state, "completed");
-  assert.equal((resumed.data as { body?: unknown }).body, true);
+  assert.deepEqual((resumed.data as { body?: unknown }).body, {
+    forecast: { condition: "clear", temperatureC: 27.5 }, ok: true,
+  });
   assert.equal(fixture.effect.calls.length, 1, "settlement observation must never replay AWAL pay");
   const receipt = await fixture.core.execute({ command: "receipt.get", operationId });
   assert.equal(receipt.ok, true, JSON.stringify(receipt));
@@ -1285,7 +1374,10 @@ function hasCode(error: unknown, code: string): boolean {
 }
 
 function sellerResult(): ProviderX402SellerResult {
-  const body = canonicalJson(true);
+  const body = canonicalizeNormalizedProviderJson({
+    ok: true,
+    forecast: { temperatureC: 27.5, condition: "clear" },
+  });
   return {
     classification: "normalized_provider_json",
     http_status: "200",

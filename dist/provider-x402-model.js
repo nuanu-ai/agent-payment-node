@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { ApnError } from "./errors.js";
-import { isSafeNormalizedProviderJson } from "./normalized-provider-json.js";
+import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
 import { x402WaitProjectedStatus } from "./x402-state-integrity.js";
 import { providerX402CompleteBindingHash, providerX402FrozenFingerprint, validateProviderX402Settlement, } from "./provider-x402-validation.js";
 export const PROVIDER_X402_STATE_VERSION = "apn.provider-x402.state.v1";
@@ -199,7 +199,7 @@ function validateSellerResult(result, amount) {
         corrupt();
     try {
         const parsed = JSON.parse(result.canonical_json);
-        if (canonicalJson(parsed) !== result.canonical_json || !isSafeNormalizedProviderJson(parsed))
+        if (canonicalizeNormalizedProviderJson(parsed) !== result.canonical_json)
             corrupt();
     }
     catch {

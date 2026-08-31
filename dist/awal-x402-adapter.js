@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { providerX402InvocationIntentHash } from "./provider-x402-model.js";
-import { isSafeNormalizedProviderJson } from "./normalized-provider-json.js";
+import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
 import { resolveAwalBin } from "./awal-package.js";
 export const AWAL_X402_PROCESS_TIMEOUT_MS = 210_000;
 export const AWAL_X402_INTERNAL_TIMEOUT_MS = 180_000;
@@ -184,9 +184,13 @@ function parseSellerResult(bytes, expectedAmount) {
         typeof value.statusText !== "string" || Buffer.byteLength(value.statusText, "utf8") > MAX_STATUS_TEXT_BYTES ||
         value.paymentMade !== true || canonicalProviderAmount(value.amountPaid) !== expectedAmount)
         throw protocol();
-    if (!isSafeNormalizedProviderJson(value.data))
+    let canonical;
+    try {
+        canonical = canonicalizeNormalizedProviderJson(value.data);
+    }
+    catch {
         throw protocol();
-    const canonical = canonicalJson(value.data);
+    }
     const length = Buffer.byteLength(canonical, "utf8");
     if (length > MAX_OUTPUT_BYTES)
         throw protocol();
