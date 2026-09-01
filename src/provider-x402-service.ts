@@ -48,6 +48,20 @@ import {
   requireProviderX402Profile,
 } from "./provider-x402-preconditions.js";
 
+const SETTLEMENT_OBSERVATION_REASONS = new Set([
+  "provider_evidence_capability_gap",
+  "settlement_block_mismatch",
+  "settlement_evidence_contradiction",
+  "settlement_mismatch",
+  "settlement_not_unique",
+  "settlement_receipt_mismatch",
+  "settlement_receipt_missing",
+]);
+const RETRYABLE_SETTLEMENT_OBSERVATION_REASONS = new Set([
+  "provider_evidence_capability_gap",
+  "settlement_receipt_missing",
+]);
+
 type PrepareRequest = Extract<CommandRequest, { readonly command: "x402.fetch.prepare" }>;
 const EVIDENCE_WINDOW_MS = 240_000;
 export class ProviderX402Service {
@@ -294,6 +308,10 @@ export class ProviderX402Service {
       return await this.terminalizeSettled(operation);
     }
     if (operation.evidenceLowerBlock === undefined) return operation;
+    if (
+      operation.state === "ambiguous_effect" && SETTLEMENT_OBSERVATION_REASONS.has(operation.reason) &&
+      (operation.immutableUpperBlock === undefined || !RETRYABLE_SETTLEMENT_OBSERVATION_REASONS.has(operation.reason))
+    ) return operation;
     assertProviderX402RpcBinding(this.context, operation);
     const remaining = deadline === undefined ? undefined : Math.floor(deadline - this.context.wait.nowMs());
     if (remaining !== undefined && remaining < 1) return operation;
@@ -314,10 +332,15 @@ export class ProviderX402Service {
       });
     }
     if (operation.state === "ambiguous_effect" && operation.sellerResult !== undefined) {
-      return await this.transition(
-        operation, "ambiguous_effect", "settlement_verified_after_ambiguity", "x402_unknown_finality",
+      const retryableObservation = RETRYABLE_SETTLEMENT_OBSERVATION_REASONS.has(operation.reason);
+      const evidenced = await this.transition(
+        operation,
+        retryableObservation ? "settlement_pending" : "ambiguous_effect",
+        retryableObservation ? "x402_settlement_verified" : "settlement_verified_after_ambiguity",
+        retryableObservation ? "x402_settlement_verified_result_pending" : "x402_unknown_finality",
         { immutableUpperBlock: observation.upperBlock, settlementEvidence: observation.evidence },
       );
+      return retryableObservation ? await this.terminalizeSettled(evidenced) : evidenced;
     }
     const evidenced = await this.transition(
       operation,
