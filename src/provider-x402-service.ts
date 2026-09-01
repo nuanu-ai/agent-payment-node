@@ -289,12 +289,11 @@ export class ProviderX402Service {
   private async reconcile(operation: ProviderX402OperationRecord, deadline?: number): Promise<ProviderX402OperationRecord> {
     operation = await this.recoverOrphanReceipt(operation);
     if (operation.terminal) return operation;
-    if (
-      operation.settlementEvidence !== undefined &&
-      !(operation.state === "ambiguous_effect" && operation.sellerResult !== undefined)
-    ) return await this.terminalizeSettled(operation);
+    if (operation.settlementEvidence !== undefined) {
+      if (operation.state === "ambiguous_effect" && operation.sellerResult !== undefined) return operation;
+      return await this.terminalizeSettled(operation);
+    }
     if (operation.evidenceLowerBlock === undefined) return operation;
-    if (operation.state === "ambiguous_effect" && operation.immutableUpperBlock !== undefined) return operation;
     assertProviderX402RpcBinding(this.context, operation);
     const remaining = deadline === undefined ? undefined : Math.floor(deadline - this.context.wait.nowMs());
     if (remaining !== undefined && remaining < 1) return operation;
@@ -305,7 +304,11 @@ export class ProviderX402Service {
     const observation = await observeProviderSettlement(operation, rpc);
     if (observation.kind === "pending") return operation;
     if (observation.kind === "ambiguous") {
-      if (operation.state === "ambiguous_effect" && operation.reason === observation.reason && observation.upperBlock === undefined) return operation;
+      const sameUpper = observation.upperBlock === undefined
+        ? operation.immutableUpperBlock === undefined
+        : operation.immutableUpperBlock !== undefined &&
+          canonicalJson(operation.immutableUpperBlock) === canonicalJson(observation.upperBlock);
+      if (operation.state === "ambiguous_effect" && operation.reason === observation.reason && sameUpper) return operation;
       return await this.transition(operation, "ambiguous_effect", observation.reason, "x402_unknown_finality", {
         ...(observation.upperBlock === undefined ? {} : { immutableUpperBlock: observation.upperBlock }),
       });
