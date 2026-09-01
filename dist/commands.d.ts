@@ -52,6 +52,11 @@ export type CommandRequest = {
     readonly operationId: string;
     readonly waitSeconds?: number;
 } | {
+    readonly command: "operation.recover-transaction-settlement";
+    readonly operationId: string;
+    readonly transactionHash: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "operation.status";
     readonly operationId: string;
 } | {

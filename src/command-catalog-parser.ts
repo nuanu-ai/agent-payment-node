@@ -153,6 +153,7 @@ function validateOptionValue(definition: CommandOption, value: string): void {
     case "atomic_usdc":
     case "wei": if (!/^[1-9][0-9]*$/u.test(value)) invalid(); return;
     case "operation_id": if (!/^[a-f0-9]{64}$/u.test(value)) invalid(); return;
+    case "transaction_hash": if (!/^0x[0-9a-fA-F]{64}$/u.test(value)) invalid(); return;
     case "idempotency_key": if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/u.test(value)) invalid(); return;
     case "integer_seconds": if (!/^[1-9][0-9]*$/u.test(value) || Number(value) > 300) invalid(); return;
   }

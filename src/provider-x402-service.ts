@@ -14,15 +14,17 @@ import {
   providerX402ReadPort,
 } from "./provider-x402-evidence.js";
 import {
-  appendProviderX402Transition,
-  providerX402BindingHash,
   providerX402RequestHash,
   publicProviderX402Operation,
-  sealProviderX402Operation,
-  sealProviderX402Receipt,
   type ProviderX402OperationRecord,
   type ProviderX402ReceiptRecord,
 } from "./provider-x402-model.js";
+import { providerX402SettledWithoutResultProof } from "./provider-x402-proof.js";
+import {
+  providerX402TerminalReceipt,
+  transitionProviderX402Operation,
+  type ProviderX402TransitionExtra,
+} from "./provider-x402-state.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { stagedProviderX402Operation } from "./provider-x402-stage.js";
 import { isCode } from "./secure-state-store.js";
@@ -356,50 +358,18 @@ export class ProviderX402Service {
     const completed = operation.sellerResult !== undefined;
     const terminalState = completed ? "completed" as const : "failed_settled_without_result" as const;
     const reason = completed ? "x402_completed" : "seller_result_missing";
-    const proofClass = completed ? "x402_safe_settlement" : "confirmed_settlement_without_seller_result";
+    const proofClass = completed ? "x402_safe_settlement" : providerX402SettledWithoutResultProof(operation.settlementEvidence);
     const at = this.context.clock.now().toISOString();
-    const receipt = this.terminalReceipt(operation, terminalState, reason, proofClass, at);
+    const receipt = providerX402TerminalReceipt(operation, terminalState, reason, proofClass, at);
     await this.repository.writeReceipt(operation.profileHash, receipt);
     return await this.transition(operation, terminalState, reason, proofClass, {}, at);
-  }
-  private terminalReceipt(
-    operation: ProviderX402OperationRecord,
-    terminalState: ProviderX402ReceiptRecord["terminalState"],
-    reason: string,
-    proofClass: string,
-    createdAt: string,
-  ): ProviderX402ReceiptRecord {
-    return sealProviderX402Receipt({
-      schemaVersion: "apn.provider-x402.receipt.v1",
-      kind: "x402_fetch",
-      operationId: operation.operationId,
-      terminalState,
-      reason,
-      proofClass,
-      fingerprint: operation.fingerprint,
-      requestDigest: operation.request.requestDigest,
-      requirementDigest: operation.requirement.digest,
-      payer: operation.provider.payer,
-      payee: operation.requirement.payee,
-      amountAtomic: operation.requirement.amountAtomic,
-      network: operation.requirement.network,
-      token: operation.requirement.token,
-      ...(operation.sellerResult === undefined ? {} : { result: {
-        classification: operation.sellerResult.classification,
-        sha256: operation.sellerResult.sha256,
-        byteLength: operation.sellerResult.byte_length,
-      } }),
-      ...(operation.settlementEvidence === undefined ? {} : { settlement: operation.settlementEvidence }),
-      operationBindingHash: providerX402BindingHash(operation),
-      createdAt,
-    });
   }
   private async recoverOrphanReceipt(operation: ProviderX402OperationRecord): Promise<ProviderX402OperationRecord> {
     const receipt = await this.repository.loadReceipt(operation.profileHash, operation.operationId);
     if (operation.terminal) {
       if (receipt === null) {
         const terminalState = operation.state as ProviderX402ReceiptRecord["terminalState"];
-        const reconstructed = this.terminalReceipt(
+        const reconstructed = providerX402TerminalReceipt(
           operation, terminalState, operation.reason, operation.proofClass, operation.updatedAt,
         );
         await this.repository.writeReceipt(operation.profileHash, reconstructed);
@@ -438,7 +408,7 @@ export class ProviderX402Service {
     shouldThrow = true,
   ): Promise<ProviderX402OperationRecord> {
     const at = this.context.clock.now().toISOString();
-    const receipt = this.terminalReceipt(operation, "failed_before_effect", reason, "x402_proven_no_effect", at);
+    const receipt = providerX402TerminalReceipt(operation, "failed_before_effect", reason, "x402_proven_no_effect", at);
     await this.repository.writeReceipt(operation.profileHash, receipt);
     const failed = await this.transition(operation, "failed_before_effect", reason, "x402_proven_no_effect", {}, at);
     if (shouldThrow) throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen x402 inputs changed before provider effect; prepare a new operation.");
@@ -450,28 +420,10 @@ export class ProviderX402Service {
     state: ProviderX402OperationRecord["state"],
     reason: string,
     proofClass: string,
-    extra: Partial<Pick<ProviderX402OperationRecord,
-      "preparedBalance" | "finalPreflight" | "evidenceLowerBlock" | "evidenceDeadlineAt" | "immutableUpperBlock" |
-      "invocation" | "sellerResult" | "settlementEvidence"
-    >> = {},
+    extra: ProviderX402TransitionExtra = {},
     at = this.context.clock.now().toISOString(),
   ): Promise<ProviderX402OperationRecord> {
-    const transitions = appendProviderX402Transition(operation.transitions, { at, state, reason, proofClass });
-    const { integrityHash: _integrity, ...base } = operation;
-    const terminal = ["completed", "failed_before_effect", "failed_settled_without_result"].includes(state);
-    const updated = sealProviderX402Operation({
-      ...base,
-      ...extra,
-      state,
-      finalityClass: terminal ? "terminal" : ["preparing", "awaiting_approval"].includes(state) ? "pre_effect" : "unknown_finality",
-      terminal,
-      reason,
-      proofClass,
-      nextActions: state === "awaiting_approval" ? ["x402.fetch.approve", "operation.status"]
-        : terminal ? ["receipt.get"] : ["operation.status", "operation.resume"],
-      updatedAt: at,
-      transitions,
-    });
+    const updated = transitionProviderX402Operation(operation, state, reason, proofClass, extra, at);
     await this.repository.writeOperation(updated);
     return updated;
   }

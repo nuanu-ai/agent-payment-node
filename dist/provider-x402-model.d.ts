@@ -3,6 +3,8 @@ import type { ProviderX402Invocation, ProviderX402SellerResult } from "./provide
 import type { ProfilePolicyRecord } from "./profile-policy.js";
 import type { X402RpcBlock, X402RpcHead, X402RpcLog } from "./ports.js";
 import { type X402SettlementWaitProjection } from "./x402-state-integrity.js";
+import { type ProviderX402TransactionRecoveryBinding } from "./provider-x402-transaction-recovery-model.js";
+export type { ProviderX402TransactionRecoveryBinding } from "./provider-x402-transaction-recovery-model.js";
 export declare const PROVIDER_X402_STATE_VERSION: "apn.provider-x402.state.v1";
 export type ProviderX402State = "preparing" | "awaiting_approval" | "started" | "settlement_pending" | "ambiguous_effect" | "completed" | "failed_before_effect" | "failed_settled_without_result";
 export interface ProviderX402Transition {
@@ -25,7 +27,7 @@ export interface ProviderX402PolicyBinding {
     readonly effectiveCapAtomic: string;
     readonly verdict: "authorized_by_existing_profile_policy";
 }
-export interface ProviderX402SettlementEvidence {
+export interface ProviderX402RangeSettlementEvidence {
     readonly schemaVersion: "apn.provider-x402.settlement.v1";
     readonly lowerBlock: X402RpcHead;
     readonly upperBlock: X402RpcBlock;
@@ -41,6 +43,30 @@ export interface ProviderX402SettlementEvidence {
     readonly rpcOriginHash: string;
     readonly evidenceHash: string;
 }
+export interface ProviderX402TransactionSettlementEvidence {
+    readonly schemaVersion: "apn.provider-x402.transaction-settlement.v1";
+    readonly chainId: "8453";
+    readonly network: typeof CHAIN_CAIP2;
+    readonly token: `0x${string}`;
+    readonly transactionHash: `0x${string}`;
+    readonly receiptStatus: "success";
+    readonly receiptBlock: X402RpcBlock;
+    readonly safeHead: X402RpcHead;
+    readonly payer: `0x${string}`;
+    readonly payee: `0x${string}`;
+    readonly amountAtomic: string;
+    readonly transfer: {
+        readonly logIndex: string;
+        readonly blockNumber: string;
+        readonly blockHash: `0x${string}`;
+        readonly transactionHash: `0x${string}`;
+    };
+    readonly qualifyingTransferCount: "1";
+    readonly rpcOriginHash: string;
+    readonly observedAt: string;
+    readonly evidenceHash: string;
+}
+export type ProviderX402SettlementEvidence = ProviderX402RangeSettlementEvidence | ProviderX402TransactionSettlementEvidence;
 export interface ProviderX402OperationRecord {
     readonly schemaVersion: typeof PROVIDER_X402_STATE_VERSION;
     readonly kind: "x402_fetch";
@@ -99,6 +125,7 @@ export interface ProviderX402OperationRecord {
     readonly immutableUpperBlock?: X402RpcBlock;
     readonly invocation?: ProviderX402Invocation;
     readonly sellerResult?: ProviderX402SellerResult;
+    readonly transactionRecovery?: ProviderX402TransactionRecoveryBinding;
     readonly settlementEvidence?: ProviderX402SettlementEvidence;
     readonly state: ProviderX402State;
     readonly finalityClass: "pre_effect" | "unknown_finality" | "terminal";

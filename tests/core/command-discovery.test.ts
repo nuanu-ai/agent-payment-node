@@ -51,6 +51,7 @@ const EXPECTED_COMMANDS = [
   "pay transfer approve",
   "operation status",
   "operation resume",
+  "operation recover-transaction-settlement",
   "receipt get",
 ];
 
@@ -507,6 +508,7 @@ function validValue(type: ScalarType): string {
     case "atomic_usdc": return "100";
     case "wei": return "100";
     case "operation_id": return "a".repeat(64);
+    case "transaction_hash": return `0x${"b".repeat(64)}`;
     case "idempotency_key": return "example-001";
     case "integer_seconds": return "60";
   }

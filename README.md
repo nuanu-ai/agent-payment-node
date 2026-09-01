@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.3.6 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.3.7 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -199,6 +199,24 @@ observation loop cannot sign, submit, create another operation, or issue another
 seller/provider paid request. Timeout returns the same durable resumable
 operation.
 
+An eligible legacy Coinbase operation that is durably stuck at
+`provider_evidence_capability_gap` can be closed from one independently known
+Base transaction without calling Coinbase or replaying payment:
+
+```sh
+apn operation recover-transaction-settlement \
+  --operation <operation-id> \
+  --transaction-hash <transaction-hash> \
+  --idempotency-key <recovery-idempotency-key> \
+  --rpc-url https://rpc.example
+```
+
+This narrow recovery reads only that receipt, its canonical block and the safe
+head. It never scans a block range, signs, submits, invokes AWAL or creates a
+seller result. A matching Base-USDC transfer terminalizes once as
+`failed_settled_without_result`; changed operation, transaction or idempotency
+material fails closed.
+
 ## Durable commands
 
 <!-- BEGIN APN COMMAND CATALOG -->
@@ -220,6 +238,7 @@ apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <addre
 apn pay transfer approve --operation <operation-id> --rpc-url <https-url>
 apn operation status --operation <operation-id>
 apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]
+apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
 ```
 <!-- END APN COMMAND CATALOG -->
@@ -302,7 +321,7 @@ live provider acceptance, payment proof or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
 are separately recorded release gates. The local stdio MCP surface projects
-the same sixteen catalog-selected wallet, policy, payment, operation and
+the same seventeen catalog-selected wallet, policy, payment, operation and
 receipt commands through the shared binder/runtime/core path. Direct approval
 remains foreground CLI only. Coinbase x402 source and deterministic product
 proof are included; live Coinbase/provider and paid acceptance are recorded as

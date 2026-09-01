@@ -3,7 +3,7 @@ import { assertCompatibleManifestEvolution, validateCommandManifest } from "./co
 export { renderHelp, renderReadmeCommandReference };
 export { assertCompatibleManifestEvolution, validateCommandManifest };
 export * from "./command-catalog-parser.js";
-export type ScalarType = "string" | "profile" | "provider_id" | "positive_integer" | "https_url" | "address" | "decimal_usdc" | "atomic_usdc" | "wei" | "operation_id" | "idempotency_key" | "integer_seconds";
+export type ScalarType = "string" | "profile" | "provider_id" | "positive_integer" | "https_url" | "address" | "decimal_usdc" | "atomic_usdc" | "wei" | "operation_id" | "transaction_hash" | "idempotency_key" | "integer_seconds";
 export type EffectClass = "none" | "local_read" | "network_read" | "local_write" | "payment_prepare" | "payment_submit" | "recovery";
 export type ApprovalClass = "none" | "foreground_tty" | "prior_profile_policy" | "prior_operation_authorization";
 export interface CommandOption {
@@ -59,7 +59,7 @@ export declare const COMMANDS: readonly CommandDefinition[];
 export declare const COMMAND_MANIFEST: {
     readonly schema_version: "apn.command-manifest.v1";
     readonly product: "agent-payment-node";
-    readonly product_version: "0.3.6";
+    readonly product_version: "0.3.7";
     readonly cli_envelope_version: "apn.cli.v1";
     readonly compatibility: {
         readonly additive_optional_within_version: true;

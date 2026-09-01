@@ -31,7 +31,7 @@ import {
   providerX402InvocationIntentHash,
   type ProviderX402OperationRecord,
   type ProviderX402ReceiptRecord,
-  type ProviderX402SettlementEvidence,
+  type ProviderX402RangeSettlementEvidence,
 } from "../../src/provider-x402-model.js";
 import { ProviderRegistry } from "../../src/provider-registry.js";
 import {
@@ -41,6 +41,8 @@ import {
   type ProviderProfileRecord,
 } from "../../src/provider-profile.js";
 import { ProviderX402Repository } from "../../src/provider-x402-repository.js";
+import { OperationService } from "../../src/operation-service.js";
+import { recoveryMaterialDigest } from "../../src/provider-x402-transaction-binding.js";
 import { validatePublicX402Receipt } from "../../src/x402-public-artifacts.js";
 import type {
   X402AuthorizationState,
@@ -141,6 +143,10 @@ class ProviderRpc extends TestRpc implements X402RpcPort {
   readonly blockHashOverrides = new Map<string, Hex>();
   transferCalls = 0;
   chainCalls = 0;
+  receiptCalls = 0;
+  headCalls = 0;
+  blockCalls = 0;
+  readonly receiptHashes: Hex[] = [];
   readonly boundedTimeouts: number[] = [];
   readonly transferRanges: Array<{ readonly from: Address; readonly fromBlock: string; readonly toBlock: string }> = [];
   slowBounded = false;
@@ -164,6 +170,7 @@ class ProviderRpc extends TestRpc implements X402RpcPort {
     return await super.assertBaseChain();
   }
   async getX402Head(tag: "safe" | "finalized"): Promise<X402RpcHead> {
+    this.headCalls += 1;
     if (this.boundedTimeout !== undefined) {
       const timeout = this.boundedTimeout;
       this.boundedTimeout = undefined;
@@ -181,6 +188,7 @@ class ProviderRpc extends TestRpc implements X402RpcPort {
     };
   }
   async getX402Block(number: string): Promise<X402RpcBlock> {
+    this.blockCalls += 1;
     const value = BigInt(number);
     return {
       queriedTag: "number",
@@ -191,7 +199,11 @@ class ProviderRpc extends TestRpc implements X402RpcPort {
       rpcOrigin: this.rpcOrigin,
     };
   }
-  async getX402Receipt(): Promise<X402RpcReceipt | null> { return this.x402Receipt; }
+  async getX402Receipt(transactionHash: Hex): Promise<X402RpcReceipt | null> {
+    this.receiptCalls += 1;
+    this.receiptHashes.push(transactionHash);
+    return this.x402Receipt;
+  }
   async getX402AuthorizationState(_authorizer: Address, _nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState> {
     const identity = "tag" in block ? await this.getX402Head(block.tag) : await this.getX402Block(block.number);
     return {
@@ -224,6 +236,8 @@ class FailingProviderRepository extends ProviderX402Repository {
   failPreparingWriteAt: number | undefined;
   failAwaiting = false;
   preparingWrites = 0;
+  failSettledWithoutResult = false;
+  failReceipt = false;
   override async writeOperation(operation: Parameters<ProviderX402Repository["writeOperation"]>[0]): Promise<void> {
     if (operation.state === "preparing") {
       this.preparingWrites += 1;
@@ -241,7 +255,21 @@ class FailingProviderRepository extends ProviderX402Repository {
       this.failCompleted = false;
       throw new Error("injected terminal store failure");
     }
+    if (operation.state === "failed_settled_without_result" && this.failSettledWithoutResult) {
+      this.failSettledWithoutResult = false;
+      throw new Error("injected settled-without-result store failure");
+    }
     await super.writeOperation(operation);
+  }
+  override async writeReceipt(
+    profileHash: string,
+    receipt: Parameters<ProviderX402Repository["writeReceipt"]>[1],
+  ): Promise<void> {
+    if (receipt.terminalState === "failed_settled_without_result" && this.failReceipt) {
+      this.failReceipt = false;
+      throw new Error("injected receipt store failure");
+    }
+    await super.writeReceipt(profileHash, receipt);
   }
 }
 
@@ -262,6 +290,8 @@ async function setup(t: TestContext, input: {
   readonly failCompletedStore?: boolean;
   readonly failPreparingWriteAt?: number;
   readonly failAwaitingStore?: boolean;
+  readonly failSettledWithoutResultStore?: boolean;
+  readonly failReceiptStore?: boolean;
   readonly policy?: ProfilePolicyPort;
   readonly rpcUrl?: string;
 } = {}) {
@@ -303,7 +333,8 @@ async function setup(t: TestContext, input: {
   const rpc = new ProviderRpc(clock);
   const http = input.http ?? new TestHttp(challengeObservation());
   const policy = input.policy ?? new TestProfilePolicy();
-  const injectedRepository = input.failStartedStore || input.failCompletedStore || input.failAwaitingStore || input.failPreparingWriteAt !== undefined
+  const injectedRepository = input.failStartedStore || input.failCompletedStore || input.failAwaitingStore ||
+    input.failSettledWithoutResultStore || input.failReceiptStore || input.failPreparingWriteAt !== undefined
     ? new FailingProviderRepository(temporary.root)
     : undefined;
   if (injectedRepository !== undefined) {
@@ -311,6 +342,8 @@ async function setup(t: TestContext, input: {
     injectedRepository.failCompleted = input.failCompletedStore === true;
     injectedRepository.failPreparingWriteAt = input.failPreparingWriteAt;
     injectedRepository.failAwaiting = input.failAwaitingStore === true;
+    injectedRepository.failSettledWithoutResult = input.failSettledWithoutResultStore === true;
+    injectedRepository.failReceipt = input.failReceiptStore === true;
   }
   const core = new ApnCore({
     state,
@@ -1240,9 +1273,9 @@ test("recomputed settlement and receipt tampering cannot cross the authoritative
   const originalReceiptText = await readFile(receiptPath, "utf8");
   const originalOperation = JSON.parse(originalOperationText) as ProviderX402OperationRecord;
   assert.notEqual(originalOperation.settlementEvidence, undefined);
-  const evidence = originalOperation.settlementEvidence as ProviderX402SettlementEvidence;
+  const evidence = originalOperation.settlementEvidence as ProviderX402RangeSettlementEvidence;
   const wrongHash = `0x${"e".repeat(64)}` as Hex;
-  const mutations: readonly ((value: ProviderX402SettlementEvidence) => ProviderX402SettlementEvidence)[] = [
+  const mutations: readonly ((value: ProviderX402RangeSettlementEvidence) => ProviderX402RangeSettlementEvidence)[] = [
     (value) => ({ ...value, transactionHash: wrongHash }),
     (value) => ({ ...value, transfer: { ...value.transfer, transactionHash: wrongHash } }),
     (value) => ({ ...value, transfer: { ...value.transfer, address: PAYER } }),
@@ -1688,6 +1721,294 @@ test("started persistence, same-operation races and exact spend without seller r
   assert.equal(ambiguousEffect.calls.length, 1, "restart settlement recovery must never replay AWAL pay");
   assert.equal(ambiguous.http.calls.length, httpCallsBeforeRecovery, "terminal recovery must never repeat paid or unpaid HTTP");
 });
+
+test("exact-transaction recovery terminalizes once, survives restart and projects identical bounded CLI/MCP output", async (t) => {
+  const effect = ambiguousEffect();
+  const fixture = await setup(t, { effect });
+  const operationId = await legacyCapabilityGap(fixture, "provider-exact-recovery-success");
+  armTransactionReceipt(fixture);
+  const callsBefore = recoveryCallCounts(fixture);
+  const request = {
+    command: "operation.recover-transaction-settlement" as const,
+    operationId,
+    transactionHash: TRANSACTION.toUpperCase().replace("0X", "0x"),
+    idempotencyKey: "provider-exact-recovery-idempotency",
+  };
+  const recovered = await fixture.core.execute(request);
+  assert.equal(recovered.ok, true, JSON.stringify(recovered));
+  assert.deepEqual(Object.keys(recovered.operation as object), [
+    "operationId", "state", "reason", "proofClass", "transactionHash", "terminal",
+    "createdAt", "updatedAt", "nextActions",
+  ]);
+  assert.deepEqual(Object.keys(recovered.receipt as object), [
+    "operationId", "terminalState", "reason", "proofClass", "transactionHash", "receiptIntegrity", "createdAt",
+  ]);
+  assert.equal((recovered.operation as { state?: unknown }).state, "failed_settled_without_result");
+  assert.equal(
+    (recovered.operation as { proofClass?: unknown }).proofClass,
+    "confirmed_exact_transaction_settlement_without_seller_result",
+  );
+  assert.equal(effect.calls.length, 1, "recovery must not invoke the provider again");
+  assert.equal(fixture.rpc.transferCalls, callsBefore.transferCalls, "recovery must not scan logs");
+  assert.deepEqual(fixture.rpc.receiptHashes.slice(callsBefore.receiptCalls), [TRANSACTION]);
+  assert.equal(fixture.rpc.receiptCalls, callsBefore.receiptCalls + 1);
+  assert.equal(fixture.rpc.headCalls, callsBefore.headCalls + 1);
+  assert.equal(fixture.rpc.blockCalls, callsBefore.blockCalls + 1);
+
+  const stored = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(stored?.transactionRecovery?.stage, "evidence_validated");
+  assert.equal(stored?.transactionRecovery?.transactionHash, TRANSACTION);
+  assert.equal(stored?.settlementEvidence?.schemaVersion, "apn.provider-x402.transaction-settlement.v1");
+  assert.equal(stored?.sellerResult, undefined);
+  const publicReceipt = await fixture.core.execute({ command: "receipt.get", operationId });
+  assert.equal(publicReceipt.ok, true, JSON.stringify(publicReceipt));
+  assert.equal((publicReceipt.receipt as { amountAtomic?: unknown }).amountAtomic, X402_REQUIREMENTS.amount);
+  assert.equal(
+    (publicReceipt.receipt as { settlement?: { evidenceMode?: unknown } }).settlement?.evidenceMode,
+    "exact_transaction",
+  );
+  await new OperationService(
+    new StateStore(fixture.temporary.root),
+    new ProviderX402Repository(fixture.temporary.root),
+  ).assertProfileAvailable(fixture.profile.profile_hash);
+
+  const countsAfterCommit = recoveryCallCounts(fixture);
+  const replay = await fixture.core.execute(request);
+  assert.deepEqual(replay.operation, recovered.operation);
+  assert.deepEqual(replay.receipt, recovered.receipt);
+  assert.deepEqual(recoveryCallCounts(fixture), countsAfterCommit, "terminal replay must not observe RPC again");
+
+  const surfaceOptions = {
+    stateRoot: fixture.temporary.root,
+    profileRepository: new StateProfileRepository(fixture.state),
+    providerRegistry: fixture.registry,
+    policy: fixture.policy,
+    rpc: fixture.rpc,
+    http: fixture.http,
+    clock: fixture.clock,
+  };
+  const cli = await runCli([
+    "operation", "recover-transaction-settlement", "--operation", operationId,
+    "--transaction-hash", TRANSACTION, "--idempotency-key", request.idempotencyKey,
+    "--rpc-url", "https://rpc.example/base?tenant=one",
+  ], {}, surfaceOptions);
+  assert.deepEqual(cli.operation, recovered.operation);
+  assert.deepEqual(cli.receipt, recovered.receipt);
+  const server = createMcpServer(surfaceOptions);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "provider-exact-recovery-test", version: "1.0.0" });
+  await client.connect(clientTransport);
+  try {
+    const result = await client.callTool({
+      name: "apn_operation_recover_transaction_settlement",
+      arguments: {
+        operation: operationId,
+        transaction_hash: TRANSACTION,
+        idempotency_key: request.idempotencyKey,
+        rpc_url: "https://rpc.example/base?tenant=one",
+      },
+    });
+    const envelope = result.structuredContent as unknown as OutputEnvelope;
+    assert.deepEqual(envelope.operation, recovered.operation);
+    assert.deepEqual(envelope.receipt, recovered.receipt);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+  assert.deepEqual(recoveryCallCounts(fixture), countsAfterCommit, "fresh CLI/MCP replay must remain read-only locally");
+});
+
+test("exact-transaction recovery fails closed for every receipt, canonicality and transfer mismatch", async (t) => {
+  const cases = [
+    "missing", "reverted", "wrong_transaction", "wrong_block", "not_safe",
+    "wrong_token", "wrong_payer", "wrong_payee", "wrong_amount", "multiple",
+  ] as const;
+  for (const classification of cases) {
+    await t.test(classification, async (sub) => {
+      const effect = ambiguousEffect();
+      const fixture = await setup(sub, { effect });
+      const operationId = await legacyCapabilityGap(fixture, `provider-exact-negative-${classification}`);
+      const transfer = exactTransfer(1010n);
+      const receipt: X402RpcReceipt = {
+        transactionHash: classification === "wrong_transaction" ? `0x${"d".repeat(64)}` : TRANSACTION,
+        status: classification === "reverted" ? "reverted" : "success",
+        blockNumber: transfer.blockNumber,
+        blockHash: classification === "wrong_block" ? `0x${"e".repeat(64)}` : transfer.blockHash,
+        logs: classification === "multiple" ? [transfer, { ...transfer, logIndex: "2" }] : [
+          classification === "wrong_token" ? { ...transfer, address: "0x3333333333333333333333333333333333333333" }
+          : classification === "wrong_payer" ? { ...transfer, topics: [
+              transfer.topics[0] as Hex, `0x${"4".repeat(40).padStart(64, "0")}` as Hex, transfer.topics[2] as Hex,
+            ] }
+            : classification === "wrong_payee" ? { ...transfer, topics: [
+                transfer.topics[0] as Hex, transfer.topics[1] as Hex, `0x${"5".repeat(40).padStart(64, "0")}` as Hex,
+              ] }
+              : classification === "wrong_amount" ? { ...transfer, data: `0x${"1".padStart(64, "0")}` as Hex }
+                : transfer],
+        observedAt: fixture.clock.now().toISOString(),
+        rpcOrigin: fixture.rpc.rpcOrigin,
+      };
+      fixture.rpc.x402Receipt = classification === "missing" ? null : receipt;
+      if (classification === "not_safe") fixture.rpc.safeNumber = 1009n;
+      const beforeRangeCalls = fixture.rpc.transferCalls;
+      const failed = await fixture.core.execute({
+        command: "operation.recover-transaction-settlement",
+        operationId,
+        transactionHash: TRANSACTION,
+        idempotencyKey: `provider-exact-negative-recovery-${classification}`,
+      });
+      assert.equal(failed.ok, false, `${classification}: ${JSON.stringify(failed)}`);
+      assert.equal(
+        failed.error?.code,
+        ["missing", "not_safe"].includes(classification) ? "APN_X402_RECOVERY_AMBIGUOUS" : "APN_X402_SETTLEMENT_INVALID",
+      );
+      const durable = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+      assert.equal(durable?.state, "ambiguous_effect");
+      assert.equal(durable?.terminal, false);
+      assert.equal(durable?.transactionRecovery?.stage, "bound");
+      assert.equal(durable?.settlementEvidence, undefined);
+      assert.equal(await new ProviderX402Repository(fixture.temporary.root).loadReceipt(fixture.profile.profile_hash, operationId), null);
+      assert.equal(fixture.rpc.transferCalls, beforeRangeCalls);
+      assert.equal(effect.calls.length, 1);
+    });
+  }
+});
+
+test("exact-transaction recovery converges across concurrency, crash boundaries and rejects binding reuse", async (t) => {
+  await t.test("concurrent identical calls", async (sub) => {
+    const fixture = await setup(sub, { effect: ambiguousEffect() });
+    const operationId = await legacyCapabilityGap(fixture, "provider-exact-concurrent");
+    armTransactionReceipt(fixture);
+    const request = {
+      command: "operation.recover-transaction-settlement" as const,
+      operationId,
+      transactionHash: TRANSACTION,
+      idempotencyKey: "provider-exact-concurrent-recovery",
+    };
+    const [left, right] = await Promise.all([fixture.core.execute(request), fixture.core.execute(request)]);
+    assert.equal(left.ok, true, JSON.stringify(left));
+    assert.deepEqual(right.operation, left.operation);
+    assert.deepEqual(right.receipt, left.receipt);
+    assert.equal(fixture.rpc.receiptCalls, 1);
+    assert.equal(fixture.rpc.transferCalls, 0);
+  });
+
+  for (const failure of ["receipt", "terminal"] as const) {
+    await t.test(`restart after ${failure} write failure`, async (sub) => {
+      const fixture = await setup(sub, {
+        effect: ambiguousEffect(),
+        ...(failure === "receipt" ? { failReceiptStore: true } : { failSettledWithoutResultStore: true }),
+      });
+      const operationId = await legacyCapabilityGap(fixture, `provider-exact-crash-${failure}`);
+      armTransactionReceipt(fixture);
+      const request = {
+        command: "operation.recover-transaction-settlement" as const,
+        operationId,
+        transactionHash: TRANSACTION,
+        idempotencyKey: `provider-exact-crash-recovery-${failure}`,
+      };
+      const failed = await fixture.core.execute(request);
+      assert.equal(failed.ok, false);
+      const calls = recoveryCallCounts(fixture);
+      const recovered = await restartedCore(fixture).execute(request);
+      assert.equal(recovered.ok, true, JSON.stringify(recovered));
+      assert.equal((recovered.operation as { state?: unknown }).state, "failed_settled_without_result");
+      assert.deepEqual(recoveryCallCounts(fixture), calls, "restart must commit already validated evidence without RPC replay");
+      const replay = await restartedCore(fixture).execute(request);
+      assert.deepEqual(replay.receipt, recovered.receipt);
+      assert.deepEqual(recoveryCallCounts(fixture), calls);
+    });
+  }
+
+  await t.test("operation, transaction and idempotency conflicts", async (sub) => {
+    const fixture = await setup(sub, { effect: ambiguousEffect() });
+    const operationId = await legacyCapabilityGap(fixture, "provider-exact-conflict");
+    fixture.rpc.x402Receipt = null;
+    const key = "provider-exact-conflict-recovery";
+    const first = await fixture.core.execute({
+      command: "operation.recover-transaction-settlement", operationId, transactionHash: TRANSACTION, idempotencyKey: key,
+    });
+    assert.equal(first.error?.code, "APN_X402_RECOVERY_AMBIGUOUS");
+    const repository = new ProviderX402Repository(fixture.temporary.root);
+    const before = await repository.findOperation(operationId);
+    for (const request of [
+      { transactionHash: `0x${"d".repeat(64)}`, idempotencyKey: key },
+      { transactionHash: TRANSACTION, idempotencyKey: "provider-exact-conflicting-key" },
+    ]) {
+      const conflict = await fixture.core.execute({
+        command: "operation.recover-transaction-settlement", operationId, ...request,
+      });
+      assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+      assert.deepEqual(await repository.findOperation(operationId), before);
+    }
+    const otherOperation = "d".repeat(64);
+    const otherProfile = "e".repeat(64);
+    const otherIdempotency = "f".repeat(64);
+    await assert.rejects(repository.reserveTransactionRecovery({
+      operationId: otherOperation,
+      profileHash: otherProfile,
+      transactionHash: TRANSACTION,
+      idempotencyDigest: otherIdempotency,
+      materialDigest: recoveryMaterialDigest({
+        operationId: otherOperation, transactionHash: TRANSACTION, idempotencyDigest: otherIdempotency,
+      }),
+      createdAt: fixture.clock.now().toISOString(),
+    }), (error: unknown) => hasCode(error, "APN_IDEMPOTENCY_CONFLICT"));
+  });
+});
+
+function ambiguousEffect(): FixtureX402 {
+  const effect = new FixtureX402();
+  effect.result = { disposition: "ambiguous", reason: "provider_result_invalid", invocation: invocation() };
+  return effect;
+}
+
+async function legacyCapabilityGap(
+  fixture: Awaited<ReturnType<typeof setup>>,
+  key: string,
+): Promise<string> {
+  const operationId = await prepare(fixture.core, key);
+  const approved = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  assert.equal(approved.ok, true, JSON.stringify(approved));
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+  fixture.rpc.failChain = true;
+  const gap = await fixture.core.execute({ command: "operation.resume", operationId });
+  fixture.rpc.failChain = false;
+  assert.equal(gap.ok, true, JSON.stringify(gap));
+  assert.equal((gap.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((gap.operation as { reason?: unknown }).reason, "provider_evidence_capability_gap");
+  const stored = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(stored?.immutableUpperBlock, undefined);
+  return operationId;
+}
+
+function armTransactionReceipt(fixture: Awaited<ReturnType<typeof setup>>): void {
+  const transfer = exactTransfer(1010n);
+  fixture.rpc.x402Receipt = {
+    transactionHash: TRANSACTION,
+    status: "success",
+    blockNumber: transfer.blockNumber,
+    blockHash: transfer.blockHash,
+    logs: [transfer],
+    observedAt: fixture.clock.now().toISOString(),
+    rpcOrigin: fixture.rpc.rpcOrigin,
+  };
+}
+
+function recoveryCallCounts(fixture: Awaited<ReturnType<typeof setup>>): {
+  readonly transferCalls: number;
+  readonly receiptCalls: number;
+  readonly headCalls: number;
+  readonly blockCalls: number;
+} {
+  return {
+    transferCalls: fixture.rpc.transferCalls,
+    receiptCalls: fixture.rpc.receiptCalls,
+    headCalls: fixture.rpc.headCalls,
+    blockCalls: fixture.rpc.blockCalls,
+  };
+}
 
 function invocation(
   operationId: string = "a".repeat(64),

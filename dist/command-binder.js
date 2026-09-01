@@ -100,6 +100,15 @@ function bindParsedCatalog(parsed) {
             },
             rpcUrl: value(options, "--rpc-url"),
         };
+        case "operation recover-transaction-settlement": return {
+            request: {
+                command: "operation.recover-transaction-settlement",
+                operationId: value(options, "--operation"),
+                transactionHash: value(options, "--transaction-hash"),
+                idempotencyKey: value(options, "--idempotency-key"),
+            },
+            rpcUrl: value(options, "--rpc-url"),
+        };
         case "receipt get": return { request: { command: "receipt.get", operationId: value(options, "--operation") } };
         default: throw new ApnError("APN_INTERNAL", "The command catalog has no request binding.");
     }
