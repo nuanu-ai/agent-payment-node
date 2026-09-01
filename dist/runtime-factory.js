@@ -46,6 +46,7 @@ export function createApnCore(bound, options = {}) {
         ...(options.clock === undefined ? {} : { clock: options.clock }),
         ...(options.ids === undefined ? {} : { ids: options.ids }),
         ...(options.wait === undefined ? {} : { wait: options.wait }),
+        ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
     });
 }
 export async function executeBoundCommand(bound, options = {}) {

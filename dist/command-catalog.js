@@ -50,7 +50,7 @@ export const COMMAND_GROUPS = [
     { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
     { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
     { path: ["pay", "transfer"], summary: "Prepare and submit Base-USDC transfers.", kind: "group" },
-    { path: ["operation"], summary: "Read or resume durable operations.", kind: "group" },
+    { path: ["operation"], summary: "Read or recover durable operations.", kind: "group" },
     { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ];
 export const COMMANDS = [
@@ -108,6 +108,15 @@ export const COMMANDS = [
         { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
         { command_path: ["receipt", "get"], when: "After terminal completion." },
     ], ["apn operation resume --operation <operation-id> --rpc-url <https-base-rpc-url> --wait-seconds 60"]),
+    command(["operation", "recover-transaction-settlement"], "apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>", "Terminalize one eligible legacy x402 operation from an independently known exact Base transaction.", [
+        operationRequired,
+        option("--transaction-hash", "transaction_hash", true, noDefault, ["32_byte_evm_transaction_hash", "canonicalized_to_lowercase"], "public"),
+        option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_200_safe_ascii_characters"], "operator_input"),
+        rpcRequired,
+    ], "recovery", "Reads only the named Base transaction receipt and canonical block facts, then durably terminalizes an eligible already-settled operation.", "prior_operation_authorization", "The existing frozen operation and caller-supplied immutable recovery binding are the authorization boundary; no payment is submitted.", allOperationStates, [
+        { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
+        { command_path: ["receipt", "get"], when: "After terminal recovery." },
+    ], ["apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <idempotency-key> --rpc-url <https-base-rpc-url>"]),
     command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Read one durable terminal receipt.", [operationRequired], "local_read", "Reads a terminal receipt and never resumes an operation.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ];
 export const COMMAND_MANIFEST = {

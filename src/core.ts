@@ -11,6 +11,7 @@ import { canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
+import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
 
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
@@ -22,6 +23,7 @@ export class ApnCore {
   readonly operations: OperationService;
   readonly x402: X402Service;
   readonly providerWallet: ProviderWalletService;
+  readonly providerTransactionRecovery: ProviderX402TransactionRecoveryService;
 
   constructor(dependencies: CoreDependencies) {
     this.context = new RuntimeContext(dependencies);
@@ -30,6 +32,7 @@ export class ApnCore {
     this.operations = new OperationService(this.context.state, this.context.providerX402Repository);
     this.x402 = new X402Service(this.context);
     this.providerWallet = new ProviderWalletService(this.context);
+    this.providerTransactionRecovery = new ProviderX402TransactionRecoveryService(this.context);
   }
 
   async execute(request: CommandRequest): Promise<OutputEnvelope> {
@@ -97,6 +100,16 @@ export class ApnCore {
           throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is only available for x402 operations.");
         }
         return operationOutcome(await this.transfer.resume(request.operationId));
+      }
+      case "operation.recover-transaction-settlement": {
+        const recovered = await this.providerTransactionRecovery.recover(request);
+        return {
+          proofClass: recovered.operation.proofClass,
+          data: null,
+          operation: recovered.operation,
+          receipt: recovered.receipt,
+          nextActions: recovered.operation.nextActions,
+        };
       }
       case "operation.status": {
         canonicalOperationId(request.operationId);

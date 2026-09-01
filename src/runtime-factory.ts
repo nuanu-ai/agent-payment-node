@@ -23,6 +23,7 @@ import type {
 } from "./provider-ports.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { StateProfileRepository } from "./profile-repository.js";
+import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 
 export interface RuntimeFactoryOptions {
   readonly stateRoot?: string;
@@ -39,6 +40,7 @@ export interface RuntimeFactoryOptions {
   readonly profileRepository?: ProviderProfileRepositoryPort;
   readonly providerRegistry?: ProviderRegistryPort;
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
+  readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
 }
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
@@ -83,6 +85,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.ids === undefined ? {} : { ids: options.ids }),
     ...(options.wait === undefined ? {} : { wait: options.wait }),
+    ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
   });
 }
 
