@@ -20,9 +20,15 @@ const REQUIRED_ENVELOPE_KEYS = ["status", "data", "paymentMade", "amountPaid"] a
 const KNOWN_ENVELOPE_KEYS = new Set([...REQUIRED_ENVELOPE_KEYS, "statusText"]);
 const CONFLICTING_OUTER_KEYS = new Set([
   "status", "statustext", "data", "paymentmade", "amountpaid",
-  "httpstatus", "statuscode", "amountpaidatomic",
+  "httpstatus", "httpstatuscode", "statuscode", "amountpaidatomic", "paidamount",
   "result", "response", "payload", "body", "sellerresult",
 ]);
+const CONFLICTING_OUTER_KEY_WORDS = new Set([
+  "amount", "body", "data", "paid", "payment", "payload", "response", "result", "seller", "status",
+]);
+const CONFLICTING_OUTER_KEY_FRAGMENTS = [
+  "amount", "body", "paid", "payment", "payload", "response", "result", "seller", "status",
+] as const;
 
 interface AwalX402Stream {
   on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -246,11 +252,28 @@ function validateEnvelopeKeys(value: Record<string, unknown>): void {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) throw protocol();
     const compact = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
-    if (!KNOWN_ENVELOPE_KEYS.has(key) && CONFLICTING_OUTER_KEYS.has(compact)) throw protocol();
+    if (!KNOWN_ENVELOPE_KEYS.has(key)) {
+      if (isConflictingOuterKey(key, compact)) throw protocol();
+      try { canonicalizeNormalizedProviderJson(descriptor.value); }
+      catch { throw protocol(); }
+    }
     Object.defineProperty(keyShape, key, { value: null, enumerable: true });
   }
   try { canonicalizeNormalizedProviderJson(keyShape); }
   catch { throw protocol(); }
+}
+
+function isConflictingOuterKey(key: string, compact: string): boolean {
+  if (CONFLICTING_OUTER_KEYS.has(compact)) return true;
+  if (compact.startsWith("data") || CONFLICTING_OUTER_KEY_FRAGMENTS.some((fragment) => compact.includes(fragment))) {
+    return true;
+  }
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .split(/[^a-z0-9]+/iu)
+    .filter((word) => word.length > 0)
+    .map((word) => word.toLowerCase());
+  return words.some((word) => CONFLICTING_OUTER_KEY_WORDS.has(word));
 }
 
 function providerAtomic(value: string): number {

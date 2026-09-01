@@ -513,11 +513,18 @@ test("AWAL 2.12.1 source-proven envelope discards safe additive fields without a
     { ...required, result: { ok: false } },
     { ...required, response: { ok: false } },
     { ...required, amount_paid: 1_250_000 },
+    { ...required, httpStatusCode: 402 },
+    { ...required, paidAmount: 999 },
+    { ...required, paymentstatus: "unpaid" },
+    { ...required, paymentamount: 999 },
+    { ...required, resultdata: { ok: false } },
     { ...required, sessionToken: "PROTECTED_OUTER_CANARY" },
+    { ...required, providerMetadata: { sessionToken: "PROTECTED_NESTED_CANARY" } },
   ]) {
     const result = await executeAwalEnvelope(value);
     assert.equal(result.disposition, "ambiguous");
     assert.equal(JSON.stringify(result).includes("PROTECTED_OUTER_CANARY"), false);
+    assert.equal(JSON.stringify(result).includes("PROTECTED_NESTED_CANARY"), false);
   }
 });
 
@@ -1331,6 +1338,136 @@ test("transient receipt observation retries the identical frozen interval after 
   assert.equal(canonicalJson((await restarted.execute({ command: "receipt.get", operationId })).receipt), receiptText);
   assert.equal(fixture.rpc.transferRanges.length, 2);
   assert.equal(effect.calls.length, 1);
+});
+
+test("transient receipt observation joins an existing seller result after restart without provider replay", async (t) => {
+  const fixture = await setup(t);
+  const operationId = await prepare(fixture.core, "provider-frozen-range-result-retry");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const transfer = exactTransfer(1010n);
+  fixture.rpc.transferLogs = [transfer];
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+
+  const first = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((first.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((first.operation as { reason?: unknown }).reason, "settlement_receipt_missing");
+  fixture.rpc.x402Receipt = {
+    transactionHash: TRANSACTION,
+    status: "success",
+    blockNumber: transfer.blockNumber,
+    blockHash: transfer.blockHash,
+    logs: [transfer],
+    observedAt: fixture.clock.now().toISOString(),
+    rpcOrigin: fixture.rpc.rpcOrigin,
+  };
+  fixture.clock.advance(120_000);
+  fixture.rpc.safeNumber = 1031n;
+
+  const restarted = restartedCore(fixture);
+  const recovered = await restarted.execute({ command: "operation.resume", operationId });
+  assert.equal(recovered.ok, true, JSON.stringify(recovered));
+  assert.equal((recovered.operation as { state?: unknown }).state, "completed");
+  assert.equal((recovered.operation as { terminal?: unknown }).terminal, true);
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+  assert.equal(fixture.effect.calls.length, 1);
+  const receipt = await restarted.execute({ command: "receipt.get", operationId });
+  assert.equal((receipt.receipt as { terminalState?: unknown }).terminalState, "completed");
+});
+
+test("contradictory frozen-range observation is durable and cannot be erased by a later RPC response", async (t) => {
+  const effect = new FixtureX402();
+  effect.result = { disposition: "ambiguous", reason: "provider_result_invalid", invocation: invocation() };
+  const fixture = await setup(t, { effect });
+  const operationId = await prepare(fixture.core, "provider-frozen-range-contradiction");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const transfer = exactTransfer(1010n);
+  fixture.rpc.transferLogs = [transfer, { ...transfer, logIndex: "2" }];
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+
+  const first = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((first.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((first.operation as { reason?: unknown }).reason, "settlement_not_unique");
+  const frozen = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(frozen?.immutableUpperBlock?.number, "1021");
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+
+  fixture.rpc.transferLogs = [transfer];
+  fixture.rpc.x402Receipt = {
+    transactionHash: TRANSACTION,
+    status: "success",
+    blockNumber: transfer.blockNumber,
+    blockHash: transfer.blockHash,
+    logs: [transfer],
+    observedAt: fixture.clock.now().toISOString(),
+    rpcOrigin: fixture.rpc.rpcOrigin,
+  };
+  fixture.clock.advance(120_000);
+  fixture.rpc.safeNumber = 1031n;
+  const restarted = restartedCore(fixture);
+  const retried = await restarted.execute({ command: "operation.resume", operationId });
+  assert.equal((retried.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((retried.operation as { reason?: unknown }).reason, "settlement_not_unique");
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+  assert.equal(effect.calls.length, 1);
+  const receipt = await restarted.execute({ command: "receipt.get", operationId });
+  assert.equal(receipt.ok, false);
+  assert.equal((receipt.error as { code?: unknown }).code, "APN_RECEIPT_NOT_FOUND");
+});
+
+test("repeated pre-range transient failures preserve the frozen upper bound without transition growth", async (t) => {
+  const effect = new FixtureX402();
+  effect.result = { disposition: "ambiguous", reason: "provider_result_invalid", invocation: invocation() };
+  const fixture = await setup(t, { effect });
+  const operationId = await prepare(fixture.core, "provider-frozen-range-prequery-transient");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const transfer = exactTransfer(1010n);
+  fixture.rpc.transferLogs = [transfer];
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+  const first = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((first.operation as { reason?: unknown }).reason, "settlement_receipt_missing");
+
+  fixture.rpc.failChain = true;
+  const transient = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((transient.operation as { reason?: unknown }).reason, "provider_evidence_capability_gap");
+  const afterTransient = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(afterTransient?.immutableUpperBlock?.number, "1021");
+  const transitionCount = afterTransient?.transitions.length;
+  const repeated = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((repeated.operation as { reason?: unknown }).reason, "provider_evidence_capability_gap");
+  const afterRepeated = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(afterRepeated?.transitions.length, transitionCount);
+  assert.equal(afterRepeated?.immutableUpperBlock?.number, "1021");
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+
+  fixture.rpc.failChain = false;
+  fixture.rpc.x402Receipt = {
+    transactionHash: TRANSACTION,
+    status: "success",
+    blockNumber: transfer.blockNumber,
+    blockHash: transfer.blockHash,
+    logs: [transfer],
+    observedAt: fixture.clock.now().toISOString(),
+    rpcOrigin: fixture.rpc.rpcOrigin,
+  };
+  const recovered = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((recovered.operation as { state?: unknown }).state, "failed_settled_without_result");
+  assert.equal(effect.calls.length, 1);
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
 });
 
 test("fixed-window settlement rejects zero, multiple, another, reverted and unavailable outgoing evidence", async (t) => {
