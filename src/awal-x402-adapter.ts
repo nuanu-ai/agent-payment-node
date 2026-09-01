@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "./canonical.js";
+import { canonicalJson, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type {
   ProviderX402Invocation,
@@ -16,6 +16,13 @@ export const AWAL_X402_SHUTDOWN_MARGIN_MS = 30_000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const MAX_STATUS_TEXT_BYTES = 512;
 const MAX_PROVIDER_ATOMIC = 9_007_199_254_740_991n;
+const REQUIRED_ENVELOPE_KEYS = ["status", "data", "paymentMade", "amountPaid"] as const;
+const KNOWN_ENVELOPE_KEYS = new Set([...REQUIRED_ENVELOPE_KEYS, "statusText"]);
+const CONFLICTING_OUTER_KEYS = new Set([
+  "status", "statustext", "data", "paymentmade", "amountpaid",
+  "httpstatus", "statuscode", "amountpaidatomic",
+  "result", "response", "payload", "body", "sellerresult",
+]);
 
 interface AwalX402Stream {
   on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -206,12 +213,13 @@ function parseSellerResult(bytes: Buffer, expectedAmount: string): ProviderX402S
   let value: unknown;
   try { value = JSON.parse(bytes.toString("utf8")) as unknown; }
   catch { throw protocol(); }
-  if (!isPlainRecord(value) || !exactKeys(value, ["status", "statusText", "data", "paymentMade", "amountPaid"])) {
-    throw protocol();
-  }
+  if (!isPlainRecord(value)) throw protocol();
+  validateEnvelopeKeys(value);
   if (
     !Number.isSafeInteger(value.status) || Number(value.status) < 200 || Number(value.status) > 299 ||
-    typeof value.statusText !== "string" || Buffer.byteLength(value.statusText, "utf8") > MAX_STATUS_TEXT_BYTES ||
+    (Object.hasOwn(value, "statusText") && (
+      typeof value.statusText !== "string" || Buffer.byteLength(value.statusText, "utf8") > MAX_STATUS_TEXT_BYTES
+    )) ||
     value.paymentMade !== true || canonicalProviderAmount(value.amountPaid) !== expectedAmount
   ) throw protocol();
   let canonical: string;
@@ -228,6 +236,21 @@ function parseSellerResult(bytes: Buffer, expectedAmount: string): ProviderX402S
     byte_length: length.toString(),
     sha256: sha256(canonical),
   };
+}
+
+function validateEnvelopeKeys(value: Record<string, unknown>): void {
+  for (const required of REQUIRED_ENVELOPE_KEYS) if (!Object.hasOwn(value, required)) throw protocol();
+  const keyShape = Object.create(null) as Record<string, null>;
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") throw protocol();
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) throw protocol();
+    const compact = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
+    if (!KNOWN_ENVELOPE_KEYS.has(key) && CONFLICTING_OUTER_KEYS.has(compact)) throw protocol();
+    Object.defineProperty(keyShape, key, { value: null, enumerable: true });
+  }
+  try { canonicalizeNormalizedProviderJson(keyShape); }
+  catch { throw protocol(); }
 }
 
 function providerAtomic(value: string): number {
