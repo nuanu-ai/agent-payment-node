@@ -137,12 +137,16 @@ export function validateProviderX402Continuity(previous, next) {
         awaiting_approval: ["started", "failed_before_effect"],
         started: ["settlement_pending", "ambiguous_effect", "failed_before_effect"],
         settlement_pending: ["settlement_pending", "ambiguous_effect", "completed", "failed_settled_without_result"],
-        ambiguous_effect: ["ambiguous_effect", "failed_settled_without_result"],
+        ambiguous_effect: ["ambiguous_effect", "settlement_pending", "failed_settled_without_result"],
         completed: [],
         failed_before_effect: [],
         failed_settled_without_result: [],
     };
     if (!allowed[previous.state].includes(next.state))
+        corrupt();
+    if (previous.state === "ambiguous_effect" && next.state === "settlement_pending" && (!["provider_evidence_capability_gap", "settlement_receipt_missing"].includes(previous.reason) ||
+        next.reason !== "x402_settlement_verified" || next.proofClass !== "x402_settlement_verified_result_pending" ||
+        next.sellerResult === undefined || next.settlementEvidence === undefined))
         corrupt();
 }
 export function publicProviderX402Operation(operation, settlementWait) {
