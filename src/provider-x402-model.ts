@@ -17,6 +17,7 @@ import {
   validateProviderX402TransactionRecoveryContinuity,
   type ProviderX402TransactionRecoveryBinding,
 } from "./provider-x402-transaction-recovery-model.js";
+import { validateProviderX402RejectionShape } from "./provider-x402-rejection-shape.js";
 export type { ProviderX402TransactionRecoveryBinding } from "./provider-x402-transaction-recovery-model.js";
 
 export const PROVIDER_X402_STATE_VERSION = "apn.provider-x402.state.v1" as const;
@@ -422,9 +423,15 @@ function validateTransitions(transitions: readonly ProviderX402Transition[]): vo
 }
 
 function validateSellerResult(result: ProviderX402SellerResult, amount: string): void {
+  const hasPaymentMade = Object.hasOwn(result, "payment_made");
+  const hasAmountPaid = Object.hasOwn(result, "amount_paid_atomic");
   if (
-    result.classification !== "normalized_provider_json" || result.payment_made !== true ||
-    result.amount_paid_atomic !== amount || !/^(?:2[0-9]{2})$/u.test(result.http_status) ||
+    !isPlainRecord(result) || !exactKeys(result, [
+      "classification", "http_status", ...(hasPaymentMade ? ["payment_made", "amount_paid_atomic"] : []),
+      "canonical_json", "byte_length", "sha256",
+    ]) || hasPaymentMade !== hasAmountPaid ||
+    (hasPaymentMade && (result.payment_made !== true || result.amount_paid_atomic !== amount)) ||
+    result.classification !== "normalized_provider_json" || !/^(?:2[0-9]{2})$/u.test(result.http_status) ||
     result.byte_length !== Buffer.byteLength(result.canonical_json, "utf8").toString() ||
     result.sha256 !== sha256(result.canonical_json)
   ) corrupt();
@@ -440,6 +447,7 @@ function validateInvocation(invocation: ProviderX402Invocation, operation: Provi
     !isPlainRecord(invocation) || !exactKeys(invocation, [
       "correlation_id", "request_digest", "intent_binding_hash", "child_identity_hash",
       "output_sha256", "output_byte_length",
+      ...(invocation.rejection_shape === undefined ? [] : ["rejection_shape"]),
     ]) || invocation.correlation_id !== operation.operationId || invocation.request_digest !== operation.request.requestDigest ||
     invocation.intent_binding_hash !== providerX402InvocationIntentHash({
       correlationId: operation.operationId,
@@ -450,6 +458,11 @@ function validateInvocation(invocation: ProviderX402Invocation, operation: Provi
     !hash(invocation.child_identity_hash) || !hash(invocation.output_sha256) ||
     !/^(?:0|[1-9][0-9]*)$/u.test(invocation.output_byte_length) || BigInt(invocation.output_byte_length) > 262_144n
   ) corrupt();
+  if (invocation.rejection_shape !== undefined) {
+    try { validateProviderX402RejectionShape(invocation.rejection_shape); }
+    catch { corrupt(); }
+    if (!operation.transitions.some((transition) => transition.reason === "provider_result_invalid")) corrupt();
+  }
 }
 
 function hash(value: unknown): value is string { return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value); }

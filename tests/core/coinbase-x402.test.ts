@@ -97,7 +97,14 @@ class FixtureX402 implements X402ExecutionPort {
       return { ...this.result, invocation: invocation(input.correlationId, input.amountAtomic, input.requestDigest) };
     }
     if (this.result.disposition === "ambiguous" && this.result.invocation !== undefined) {
-      return { ...this.result, invocation: invocation(input.correlationId, input.amountAtomic, input.requestDigest) };
+      return {
+        ...this.result,
+        invocation: {
+          ...invocation(input.correlationId, input.amountAtomic, input.requestDigest),
+          ...(this.result.invocation.rejection_shape === undefined
+            ? {} : { rejection_shape: this.result.invocation.rejection_shape }),
+        },
+      };
     }
     return this.result;
   }
@@ -521,6 +528,42 @@ test("AWAL 2.12.1 source-shaped object seller result is normalized", async () =>
   }
 });
 
+test("AWAL 2.12.1 source-supported 2xx data result does not require payment metadata", async () => {
+  const result = await executeAwalEnvelope({
+    status: 200,
+    statusText: "OK",
+    data: { ok: true },
+  });
+  assert.equal(result.disposition, "seller_result");
+  if (result.disposition === "seller_result") {
+    assert.equal(result.result.canonical_json, '{"ok":true}');
+    assert.equal("payment_made" in result.result, false);
+    assert.equal("amount_paid_atomic" in result.result, false);
+  }
+});
+
+test("source-supported seller result completes only after independent exact settlement proof", async (t) => {
+  const providerResult = await executeAwalEnvelope({ status: 200, data: { ok: true } });
+  assert.equal(providerResult.disposition, "seller_result");
+  const effect = new FixtureX402();
+  effect.result = providerResult;
+  const fixture = await setup(t, { effect });
+  const operationId = await prepare(fixture.core, "provider-source-result-independent-settlement");
+  const approved = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  assert.equal((approved.operation as { state?: unknown }).state, "settlement_pending");
+  assert.equal((approved.operation as { terminal?: unknown }).terminal, false);
+  const pending = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.notEqual(pending?.sellerResult, undefined);
+  assert.equal("payment_made" in (pending?.sellerResult ?? {}), false);
+  assert.equal(pending?.settlementEvidence, undefined);
+
+  armExactSettlement(fixture);
+  const completed = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((completed.operation as { state?: unknown }).state, "completed");
+  assert.equal((completed.operation as { transactionHash?: unknown }).transactionHash, TRANSACTION);
+  assert.equal(effect.calls.length, 1);
+});
+
 test("AWAL 2.12.1 source-proven envelope discards safe additive fields without accepting aliases or wrappers", async () => {
   const required = {
     status: 200,
@@ -561,13 +604,84 @@ test("AWAL 2.12.1 source-proven envelope discards safe additive fields without a
   }
 });
 
-test("AWAL x402 treats non-2xx, missing payment facts, amount mismatch and protected data as ambiguous", async () => {
+test("AWAL rejected envelope retains only a bounded redacted structural fingerprint", async () => {
+  const protectedValue = "PROTECTED_REJECTION_VALUE_CANARY";
+  const result = await executeAwalEnvelope({
+    status: 200,
+    data: { ok: true },
+    paymentMade: true,
+    amountPaid: 1_250_000,
+    result: { ok: false },
+    sessionToken: protectedValue,
+  });
+  assert.equal(result.disposition, "ambiguous");
+  assert.equal(JSON.stringify(result).includes(protectedValue), false);
+  assert.equal(JSON.stringify(result).includes("sessionToken"), false);
+  if (result.disposition === "ambiguous") {
+    const shape = (result.invocation as { rejection_shape?: {
+      root_type?: unknown;
+      known_fields?: readonly { name?: unknown }[];
+      sampled_unknown_key_count?: unknown;
+      sampled_protected_key_count?: unknown;
+      sampled_conflicting_alias_count?: unknown;
+      truncated?: unknown;
+      shape_sha256?: unknown;
+    } } | undefined)?.rejection_shape;
+    assert.notEqual(shape, undefined);
+    assert.equal(shape?.root_type, "object");
+    assert.deepEqual(shape?.known_fields?.map((field) => field.name), [
+      "status", "data", "paymentMade", "amountPaid",
+    ]);
+    assert.equal(shape?.sampled_unknown_key_count, "2");
+    assert.equal(shape?.sampled_protected_key_count, "1");
+    assert.equal(shape?.sampled_conflicting_alias_count, "1");
+    assert.equal(shape?.truncated, false);
+    assert.match(String(shape?.shape_sha256), /^[a-f0-9]{64}$/u);
+  }
+});
+
+test("provider_result_invalid persists only the redacted rejection shape across restart", async (t) => {
+  const protectedValue = "PROTECTED_DURABLE_REJECTION_CANARY";
+  const rejected = await executeAwalEnvelope({
+    status: 200,
+    data: { ok: true },
+    paymentMade: true,
+    amountPaid: 1_250_000,
+    sessionToken: protectedValue,
+  });
+  assert.equal(rejected.disposition, "ambiguous");
+  const effect = new FixtureX402();
+  effect.result = rejected;
+  const fixture = await setup(t, { effect });
+  const operationId = await prepare(fixture.core, "provider-durable-rejection-shape");
+  const approved = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  assert.equal((approved.operation as { reason?: unknown }).reason, "provider_result_invalid");
+
+  const operationPath = join(
+    fixture.temporary.root, "x402-operations", fixture.profile.profile_hash, `${operationId}.json`,
+  );
+  const storedText = await readFile(operationPath, "utf8");
+  assert.equal(storedText.includes(protectedValue), false);
+  assert.equal(storedText.includes("sessionToken"), false);
+  assert.equal(storedText.includes("apn.provider-x402.rejection-shape.v1"), true);
+  const durable = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(durable?.invocation?.rejection_shape?.sampled_protected_key_count, "1");
+
+  const restarted = await restartedCore(fixture).execute({ command: "operation.status", operationId });
+  assert.equal((restarted.operation as { reason?: unknown }).reason, "provider_result_invalid");
+  assert.equal(JSON.stringify(restarted).includes(protectedValue), false);
+  assert.equal(JSON.stringify(restarted).includes("sessionToken"), false);
+  assert.equal(effect.calls.length, 1);
+});
+
+test("AWAL x402 treats non-2xx, partial payment metadata, amount mismatch and protected data as ambiguous", async () => {
   const protocolCases: readonly unknown[] = [
     { status: 402, statusText: "Payment Required", data: {}, paymentMade: true, amountPaid: 1_250_000 },
     { status: 200, statusText: "OK", data: {}, paymentMade: false, amountPaid: 1_250_000 },
     { status: 200, statusText: "OK", data: {}, paymentMade: true, amountPaid: 1_250_001 },
     { status: 200.5, statusText: "OK", data: {}, paymentMade: true, amountPaid: 1_250_000 },
     { status: 200, statusText: "OK", data: {}, amountPaid: 1_250_000 },
+    { status: 200, statusText: "OK", data: {}, paymentMade: true },
     { status: 200, statusText: 200, data: {}, paymentMade: true, amountPaid: 1_250_000 },
     { status: 200, statusText: "x".repeat(513), data: {}, paymentMade: true, amountPaid: 1_250_000 },
   ];
@@ -1817,6 +1931,37 @@ test("exact-transaction recovery terminalizes once, survives restart and project
     await server.close();
   }
   assert.deepEqual(recoveryCallCounts(fixture), countsAfterCommit, "fresh CLI/MCP replay must remain read-only locally");
+});
+
+test("exact-transaction recovery admits provider_result_invalid without provider replay", async (t) => {
+  const effect = ambiguousEffect();
+  const fixture = await setup(t, { effect });
+  const operationId = await prepare(fixture.core, "provider-result-invalid-exact-recovery");
+  const approved = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  assert.equal((approved.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((approved.operation as { reason?: unknown }).reason, "provider_result_invalid");
+
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+  armTransactionReceipt(fixture);
+  const request = {
+    command: "operation.recover-transaction-settlement" as const,
+    operationId,
+    transactionHash: TRANSACTION,
+    idempotencyKey: "provider-result-invalid-exact-recovery-key",
+  };
+  const recovered = await fixture.core.execute(request);
+  assert.equal(recovered.ok, true, JSON.stringify(recovered));
+  assert.equal((recovered.operation as { state?: unknown }).state, "failed_settled_without_result");
+  assert.equal(effect.calls.length, 1, "recovery must not invoke AWAL again");
+  assert.equal(fixture.rpc.transferCalls, 0, "exact recovery must not scan an unbounded range");
+
+  const callsAfterCommit = recoveryCallCounts(fixture);
+  const replay = await restartedCore(fixture).execute(request);
+  assert.deepEqual(replay.operation, recovered.operation);
+  assert.deepEqual(replay.receipt, recovered.receipt);
+  assert.deepEqual(recoveryCallCounts(fixture), callsAfterCommit, "terminal replay must not observe RPC again");
+  assert.equal(effect.calls.length, 1);
 });
 
 test("exact-transaction recovery fails closed for every receipt, canonicality and transfer mismatch", async (t) => {
