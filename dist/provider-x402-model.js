@@ -6,6 +6,7 @@ import { x402WaitProjectedStatus } from "./x402-state-integrity.js";
 import { providerX402CompleteBindingHash, providerX402FrozenFingerprint, validateProviderX402Settlement, } from "./provider-x402-validation.js";
 import { providerX402SettledWithoutResultProof } from "./provider-x402-proof.js";
 import { validateProviderX402TransactionRecoveryBinding, validateProviderX402TransactionRecoveryContinuity, } from "./provider-x402-transaction-recovery-model.js";
+import { validateProviderX402RejectionShape } from "./provider-x402-rejection-shape.js";
 export const PROVIDER_X402_STATE_VERSION = "apn.provider-x402.state.v1";
 export function providerX402RequestHash(input) {
     return hashObject({
@@ -213,8 +214,14 @@ function validateTransitions(transitions) {
     });
 }
 function validateSellerResult(result, amount) {
-    if (result.classification !== "normalized_provider_json" || result.payment_made !== true ||
-        result.amount_paid_atomic !== amount || !/^(?:2[0-9]{2})$/u.test(result.http_status) ||
+    const hasPaymentMade = Object.hasOwn(result, "payment_made");
+    const hasAmountPaid = Object.hasOwn(result, "amount_paid_atomic");
+    if (!isPlainRecord(result) || !exactKeys(result, [
+        "classification", "http_status", ...(hasPaymentMade ? ["payment_made", "amount_paid_atomic"] : []),
+        "canonical_json", "byte_length", "sha256",
+    ]) || hasPaymentMade !== hasAmountPaid ||
+        (hasPaymentMade && (result.payment_made !== true || result.amount_paid_atomic !== amount)) ||
+        result.classification !== "normalized_provider_json" || !/^(?:2[0-9]{2})$/u.test(result.http_status) ||
         result.byte_length !== Buffer.byteLength(result.canonical_json, "utf8").toString() ||
         result.sha256 !== sha256(result.canonical_json))
         corrupt();
@@ -231,6 +238,7 @@ function validateInvocation(invocation, operation) {
     if (!isPlainRecord(invocation) || !exactKeys(invocation, [
         "correlation_id", "request_digest", "intent_binding_hash", "child_identity_hash",
         "output_sha256", "output_byte_length",
+        ...(invocation.rejection_shape === undefined ? [] : ["rejection_shape"]),
     ]) || invocation.correlation_id !== operation.operationId || invocation.request_digest !== operation.request.requestDigest ||
         invocation.intent_binding_hash !== providerX402InvocationIntentHash({
             correlationId: operation.operationId,
@@ -241,6 +249,16 @@ function validateInvocation(invocation, operation) {
         !hash(invocation.child_identity_hash) || !hash(invocation.output_sha256) ||
         !/^(?:0|[1-9][0-9]*)$/u.test(invocation.output_byte_length) || BigInt(invocation.output_byte_length) > 262144n)
         corrupt();
+    if (invocation.rejection_shape !== undefined) {
+        try {
+            validateProviderX402RejectionShape(invocation.rejection_shape);
+        }
+        catch {
+            corrupt();
+        }
+        if (!operation.transitions.some((transition) => transition.reason === "provider_result_invalid"))
+            corrupt();
+    }
 }
 function hash(value) { return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value); }
 function positive(value) { return typeof value === "string" && /^[1-9][0-9]*$/u.test(value); }

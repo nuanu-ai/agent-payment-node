@@ -102,7 +102,7 @@ function appendObject(value: object, depth: number, state: CanonicalState): void
   if (keys.length > NORMALIZED_PROVIDER_JSON_LIMITS.maxObjectKeys) invalid();
   const entries: Array<{ readonly key: string; readonly value: unknown }> = [];
   for (const key of keys) {
-    if (DANGEROUS_KEYS.has(key) || PROTECTED_KEY.test(compactKey(key))) invalid();
+    if (isProtectedNormalizedProviderKey(key)) invalid();
     validateText(key);
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) invalid();
@@ -126,6 +126,10 @@ function validateText(value: string): void {
 
 function compactKey(value: string): string {
   return value.replace(/[^a-z0-9]/giu, "");
+}
+
+export function isProtectedNormalizedProviderKey(value: string): boolean {
+  return DANGEROUS_KEYS.has(value) || PROTECTED_KEY.test(compactKey(value));
 }
 
 function append(value: string | undefined, state: CanonicalState): void {
