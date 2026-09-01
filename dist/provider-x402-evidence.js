@@ -20,6 +20,7 @@ export async function observeProviderSettlement(operation, rpc) {
     if (operation.evidenceLowerBlock === undefined || operation.evidenceDeadlineAt === undefined) {
         return { kind: "ambiguous", reason: "provider_evidence_capability_gap" };
     }
+    let upperBlock = operation.immutableUpperBlock;
     try {
         const identity = await rpc.assertBaseChain();
         if (sha256(identity.rpcOrigin) !== operation.rpcOriginHash)
@@ -29,7 +30,7 @@ export async function observeProviderSettlement(operation, rpc) {
         const deadlineSeconds = BigInt(Math.ceil(Date.parse(operation.evidenceDeadlineAt) / 1_000));
         if (BigInt(safe.timestamp) < deadlineSeconds)
             return { kind: "pending" };
-        const upperBlock = await immutableUpper(operation, rpc, safe.number, deadlineSeconds, identity.rpcOrigin);
+        upperBlock = await immutableUpper(operation, rpc, safe.number, deadlineSeconds, identity.rpcOrigin);
         const logs = await outgoingTransfers(rpc, operation.provider.payer, operation.evidenceLowerBlock.number, upperBlock.number);
         if (logs === null)
             return { kind: "ambiguous", reason: "provider_evidence_capability_gap", upperBlock };
@@ -69,8 +70,14 @@ export async function observeProviderSettlement(operation, rpc) {
         };
         return { kind: "verified", upperBlock, evidence: { ...base, evidenceHash: hashObject(base) } };
     }
-    catch {
-        return { kind: "ambiguous", reason: "provider_evidence_capability_gap" };
+    catch (error) {
+        return {
+            kind: "ambiguous",
+            reason: error instanceof ApnError && error.code === "APN_RPC_PROTOCOL"
+                ? "settlement_evidence_contradiction"
+                : "provider_evidence_capability_gap",
+            ...(upperBlock === undefined ? {} : { upperBlock }),
+        };
     }
 }
 async function immutableUpper(operation, rpc, safeNumber, deadline, rpcOrigin) {

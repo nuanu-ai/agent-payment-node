@@ -142,6 +142,7 @@ class ProviderRpc extends TestRpc implements X402RpcPort {
   transferCalls = 0;
   chainCalls = 0;
   readonly boundedTimeouts: number[] = [];
+  readonly transferRanges: Array<{ readonly from: Address; readonly fromBlock: string; readonly toBlock: string }> = [];
   slowBounded = false;
   failChain = false;
   private boundedTimeout: number | undefined;
@@ -203,8 +204,13 @@ class ProviderRpc extends TestRpc implements X402RpcPort {
     };
   }
   async getX402AuthorizationUsedLogs(): Promise<X402AuthorizationUsedLogs> { return { kind: "complete", logs: [] }; }
-  async getX402TransferLogs(): Promise<X402TransferLogs> {
+  async getX402TransferLogs(input: {
+    readonly from: Address;
+    readonly fromBlock: string;
+    readonly toBlock: string;
+  }): Promise<X402TransferLogs> {
     this.transferCalls += 1;
+    this.transferRanges.push(input);
     return this.transferOutcome ?? { kind: "complete", logs: [...this.transferLogs] };
   }
   private timestamp(number: bigint): string {
@@ -369,6 +375,30 @@ async function prepare(core: ApnCore, key = "provider-x402-001"): Promise<string
   return operationId as string;
 }
 
+async function executeAwalEnvelope(value: unknown) {
+  const launch: AwalX402LaunchPort = () => {
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number; stdout: EventEmitter; stderr: EventEmitter; kill(): boolean;
+    };
+    child.pid = 42;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => true;
+    queueMicrotask(() => {
+      child.emit("spawn");
+      child.stdout.emit("data", Buffer.from(JSON.stringify(value)));
+      child.emit("close", 0);
+    });
+    return child;
+  };
+  return await new AwalX402Adapter(async () => "/exact/awal", launch).execute({
+    url: X402_URL,
+    amountAtomic: X402_REQUIREMENTS.amount,
+    correlationId: "a".repeat(64),
+    requestDigest: "b".repeat(64),
+  });
+}
+
 test("AWAL x402 uses exact Node argv, exact deadline and normalized bounded JSON", async () => {
   assert.equal(AWAL_X402_PROCESS_TIMEOUT_MS, 210_000);
   assert.equal(AWAL_X402_SHUTDOWN_MARGIN_MS, 30_000);
@@ -458,15 +488,54 @@ test("AWAL 2.12.1 source-shaped object seller result is normalized", async () =>
   }
 });
 
+test("AWAL 2.12.1 source-proven envelope discards safe additive fields without accepting aliases or wrappers", async () => {
+  const required = {
+    status: 200,
+    data: { ok: true },
+    paymentMade: true,
+    amountPaid: 1_250_000,
+  };
+  const additiveCanary = "SOURCE_PROVEN_ADDITIVE_CANARY";
+  for (const value of [
+    required,
+    { ...required, statusText: "OK" },
+    { ...required, statusText: "OK", providerMetadata: { note: additiveCanary } },
+  ]) {
+    const result = await executeAwalEnvelope(value);
+    assert.equal(result.disposition, "seller_result");
+    assert.equal(JSON.stringify(result).includes(additiveCanary), false);
+    if (result.disposition === "seller_result") assert.equal(result.result.canonical_json, '{"ok":true}');
+  }
+
+  for (const value of [
+    { result: required },
+    { response: required },
+    { ...required, result: { ok: false } },
+    { ...required, response: { ok: false } },
+    { ...required, amount_paid: 1_250_000 },
+    { ...required, httpStatusCode: 402 },
+    { ...required, paidAmount: 999 },
+    { ...required, paymentstatus: "unpaid" },
+    { ...required, paymentamount: 999 },
+    { ...required, resultdata: { ok: false } },
+    { ...required, sessionToken: "PROTECTED_OUTER_CANARY" },
+    { ...required, providerMetadata: { sessionToken: "PROTECTED_NESTED_CANARY" } },
+  ]) {
+    const result = await executeAwalEnvelope(value);
+    assert.equal(result.disposition, "ambiguous");
+    assert.equal(JSON.stringify(result).includes("PROTECTED_OUTER_CANARY"), false);
+    assert.equal(JSON.stringify(result).includes("PROTECTED_NESTED_CANARY"), false);
+  }
+});
+
 test("AWAL x402 treats non-2xx, missing payment facts, amount mismatch and protected data as ambiguous", async () => {
   const protocolCases: readonly unknown[] = [
     { status: 402, statusText: "Payment Required", data: {}, paymentMade: true, amountPaid: 1_250_000 },
     { status: 200, statusText: "OK", data: {}, paymentMade: false, amountPaid: 1_250_000 },
     { status: 200, statusText: "OK", data: {}, paymentMade: true, amountPaid: 1_250_001 },
     { status: 200.5, statusText: "OK", data: {}, paymentMade: true, amountPaid: 1_250_000 },
-    { status: 200, data: {}, paymentMade: true, amountPaid: 1_250_000 },
     { status: 200, statusText: "OK", data: {}, amountPaid: 1_250_000 },
-    { status: 200, statusText: "OK", data: {}, paymentMade: true, amountPaid: 1_250_000, extra: true },
+    { status: 200, statusText: 200, data: {}, paymentMade: true, amountPaid: 1_250_000 },
     { status: 200, statusText: "x".repeat(513), data: {}, paymentMade: true, amountPaid: 1_250_000 },
   ];
   const protectedValues: readonly unknown[] = [
@@ -557,6 +626,97 @@ test("AWAL x402 zeroizes captured provider buffers on success and parser rejecti
   assert.equal((await execute(invalid, invalidStderr)).disposition, "ambiguous");
   assert.equal(invalid.every((byte) => byte === 0), true);
   assert.equal(invalidStderr.every((byte) => byte === 0), true);
+});
+
+test("AWAL x402 zeroizes captured provider buffers on process, size and timeout exits", async (t) => {
+  const executeExit = async (
+    trigger: (child: EventEmitter & { stdout: EventEmitter; stderr: EventEmitter }, stdout: Buffer) => void,
+    stdout = Buffer.from("PROTECTED_PROCESS_EXIT_CANARY"),
+  ) => {
+    let childRef: (EventEmitter & { stdout: EventEmitter; stderr: EventEmitter }) | undefined;
+    const launch: AwalX402LaunchPort = () => {
+      const child = new EventEmitter() as EventEmitter & {
+        pid: number; stdout: EventEmitter; stderr: EventEmitter; kill(): boolean;
+      };
+      child.pid = 42;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => true;
+      childRef = child;
+      return child;
+    };
+    const pending = new AwalX402Adapter(async () => "/exact/awal", launch).execute({
+      url: X402_URL,
+      amountAtomic: X402_REQUIREMENTS.amount,
+      correlationId: "a".repeat(64),
+      requestDigest: "b".repeat(64),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.notEqual(childRef, undefined);
+    trigger(childRef!, stdout);
+    const result = await pending;
+    assert.equal(stdout.every((byte) => byte === 0), true);
+    return result;
+  };
+
+  assert.equal((await executeExit((child, stdout) => {
+    child.emit("spawn");
+    child.stdout.emit("data", stdout);
+    child.emit("error", new Error("injected process loss"));
+  })).disposition, "ambiguous");
+  assert.equal((await executeExit((child, stdout) => {
+    child.emit("spawn");
+    child.stdout.emit("data", stdout);
+    child.emit("close", 1);
+  })).disposition, "ambiguous");
+
+  const oversized = Buffer.alloc(256 * 1024 + 1, 65);
+  assert.equal((await executeExit((child, stdout) => {
+    child.emit("spawn");
+    child.stdout.emit("data", stdout);
+  }, oversized)).disposition, "ambiguous");
+
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const timeoutBytes = Buffer.from("PROTECTED_TIMEOUT_CANARY");
+  let timeoutChild: (EventEmitter & { stdout: EventEmitter; stderr: EventEmitter }) | undefined;
+  const timeoutLaunch: AwalX402LaunchPort = () => {
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number; stdout: EventEmitter; stderr: EventEmitter; kill(): boolean;
+    };
+    child.pid = 42;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => true;
+    timeoutChild = child;
+    return child;
+  };
+  const timed = new AwalX402Adapter(async () => "/exact/awal", timeoutLaunch).execute({
+    url: X402_URL,
+    amountAtomic: X402_REQUIREMENTS.amount,
+    correlationId: "a".repeat(64),
+    requestDigest: "b".repeat(64),
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.notEqual(timeoutChild, undefined);
+  timeoutChild?.emit("spawn");
+  timeoutChild?.stdout.emit("data", timeoutBytes);
+  try {
+    t.mock.timers.tick(AWAL_X402_PROCESS_TIMEOUT_MS);
+    assert.equal((await timed).disposition, "ambiguous");
+    assert.equal(timeoutBytes.every((byte) => byte === 0), true);
+  } finally {
+    t.mock.timers.reset();
+  }
+
+  const launchFailure = await new AwalX402Adapter(async () => "/exact/awal", () => {
+    throw new Error("injected launch failure");
+  }).execute({
+    url: X402_URL,
+    amountAtomic: X402_REQUIREMENTS.amount,
+    correlationId: "a".repeat(64),
+    requestDigest: "b".repeat(64),
+  });
+  assert.equal(launchFailure.disposition, "not_started");
 });
 
 test("durable validation downgrades injected protected seller values without persistence or replay", async (t) => {
@@ -1128,6 +1288,186 @@ test("recomputed settlement and receipt tampering cannot cross the authoritative
     (error: unknown) => hasCode(error, "APN_STATE_CORRUPT"),
   );
   await writeFile(receiptPath, originalReceiptText, { mode: 0o600 });
+});
+
+test("transient receipt observation retries the identical frozen interval after restart and terminalizes without replay", async (t) => {
+  const effect = new FixtureX402();
+  effect.result = { disposition: "ambiguous", reason: "provider_result_invalid", invocation: invocation() };
+  const fixture = await setup(t, { effect });
+  const operationId = await prepare(fixture.core, "provider-frozen-range-retry");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const transfer = exactTransfer(1010n);
+  fixture.rpc.transferLogs = [transfer];
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+
+  const first = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((first.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((first.operation as { reason?: unknown }).reason, "settlement_receipt_missing");
+  const frozen = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(frozen?.immutableUpperBlock?.number, "1021");
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+
+  fixture.rpc.x402Receipt = {
+    transactionHash: TRANSACTION,
+    status: "success",
+    blockNumber: transfer.blockNumber,
+    blockHash: transfer.blockHash,
+    logs: [transfer],
+    observedAt: fixture.clock.now().toISOString(),
+    rpcOrigin: fixture.rpc.rpcOrigin,
+  };
+  fixture.clock.advance(120_000);
+  fixture.rpc.safeNumber = 1031n;
+  const restarted = restartedCore(fixture);
+  const recovered = await restarted.execute({ command: "operation.resume", operationId });
+  assert.equal((recovered.operation as { state?: unknown }).state, "failed_settled_without_result");
+  assert.equal((recovered.operation as { terminal?: unknown }).terminal, true);
+  assert.equal(recovered.data, null);
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+  assert.equal(effect.calls.length, 1);
+  const receipt = await restarted.execute({ command: "receipt.get", operationId });
+  assert.equal((receipt.receipt as { terminalState?: unknown }).terminalState, "failed_settled_without_result");
+  const receiptText = canonicalJson(receipt.receipt);
+  await restarted.execute({ command: "operation.resume", operationId });
+  assert.equal(canonicalJson((await restarted.execute({ command: "receipt.get", operationId })).receipt), receiptText);
+  assert.equal(fixture.rpc.transferRanges.length, 2);
+  assert.equal(effect.calls.length, 1);
+});
+
+test("transient receipt observation joins an existing seller result after restart without provider replay", async (t) => {
+  const fixture = await setup(t);
+  const operationId = await prepare(fixture.core, "provider-frozen-range-result-retry");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const transfer = exactTransfer(1010n);
+  fixture.rpc.transferLogs = [transfer];
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+
+  const first = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((first.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((first.operation as { reason?: unknown }).reason, "settlement_receipt_missing");
+  fixture.rpc.x402Receipt = {
+    transactionHash: TRANSACTION,
+    status: "success",
+    blockNumber: transfer.blockNumber,
+    blockHash: transfer.blockHash,
+    logs: [transfer],
+    observedAt: fixture.clock.now().toISOString(),
+    rpcOrigin: fixture.rpc.rpcOrigin,
+  };
+  fixture.clock.advance(120_000);
+  fixture.rpc.safeNumber = 1031n;
+
+  const restarted = restartedCore(fixture);
+  const recovered = await restarted.execute({ command: "operation.resume", operationId });
+  assert.equal(recovered.ok, true, JSON.stringify(recovered));
+  assert.equal((recovered.operation as { state?: unknown }).state, "completed");
+  assert.equal((recovered.operation as { terminal?: unknown }).terminal, true);
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+  assert.equal(fixture.effect.calls.length, 1);
+  const receipt = await restarted.execute({ command: "receipt.get", operationId });
+  assert.equal((receipt.receipt as { terminalState?: unknown }).terminalState, "completed");
+});
+
+test("contradictory frozen-range observation is durable and cannot be erased by a later RPC response", async (t) => {
+  const effect = new FixtureX402();
+  effect.result = { disposition: "ambiguous", reason: "provider_result_invalid", invocation: invocation() };
+  const fixture = await setup(t, { effect });
+  const operationId = await prepare(fixture.core, "provider-frozen-range-contradiction");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const transfer = exactTransfer(1010n);
+  fixture.rpc.transferLogs = [transfer, { ...transfer, logIndex: "2" }];
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+
+  const first = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((first.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((first.operation as { reason?: unknown }).reason, "settlement_not_unique");
+  const frozen = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(frozen?.immutableUpperBlock?.number, "1021");
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+
+  fixture.rpc.transferLogs = [transfer];
+  fixture.rpc.x402Receipt = {
+    transactionHash: TRANSACTION,
+    status: "success",
+    blockNumber: transfer.blockNumber,
+    blockHash: transfer.blockHash,
+    logs: [transfer],
+    observedAt: fixture.clock.now().toISOString(),
+    rpcOrigin: fixture.rpc.rpcOrigin,
+  };
+  fixture.clock.advance(120_000);
+  fixture.rpc.safeNumber = 1031n;
+  const restarted = restartedCore(fixture);
+  const retried = await restarted.execute({ command: "operation.resume", operationId });
+  assert.equal((retried.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((retried.operation as { reason?: unknown }).reason, "settlement_not_unique");
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+  assert.equal(effect.calls.length, 1);
+  const receipt = await restarted.execute({ command: "receipt.get", operationId });
+  assert.equal(receipt.ok, false);
+  assert.equal((receipt.error as { code?: unknown }).code, "APN_RECEIPT_NOT_FOUND");
+});
+
+test("repeated pre-range transient failures preserve the frozen upper bound without transition growth", async (t) => {
+  const effect = new FixtureX402();
+  effect.result = { disposition: "ambiguous", reason: "provider_result_invalid", invocation: invocation() };
+  const fixture = await setup(t, { effect });
+  const operationId = await prepare(fixture.core, "provider-frozen-range-prequery-transient");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const transfer = exactTransfer(1010n);
+  fixture.rpc.transferLogs = [transfer];
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+  const first = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((first.operation as { reason?: unknown }).reason, "settlement_receipt_missing");
+
+  fixture.rpc.failChain = true;
+  const transient = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((transient.operation as { reason?: unknown }).reason, "provider_evidence_capability_gap");
+  const afterTransient = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(afterTransient?.immutableUpperBlock?.number, "1021");
+  const transitionCount = afterTransient?.transitions.length;
+  const repeated = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((repeated.operation as { reason?: unknown }).reason, "provider_evidence_capability_gap");
+  const afterRepeated = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(afterRepeated?.transitions.length, transitionCount);
+  assert.equal(afterRepeated?.immutableUpperBlock?.number, "1021");
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
+
+  fixture.rpc.failChain = false;
+  fixture.rpc.x402Receipt = {
+    transactionHash: TRANSACTION,
+    status: "success",
+    blockNumber: transfer.blockNumber,
+    blockHash: transfer.blockHash,
+    logs: [transfer],
+    observedAt: fixture.clock.now().toISOString(),
+    rpcOrigin: fixture.rpc.rpcOrigin,
+  };
+  const recovered = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((recovered.operation as { state?: unknown }).state, "failed_settled_without_result");
+  assert.equal(effect.calls.length, 1);
+  assert.deepEqual(fixture.rpc.transferRanges.map(({ fromBlock, toBlock }) => ({ fromBlock, toBlock })), [
+    { fromBlock: "1000", toBlock: "1021" },
+    { fromBlock: "1000", toBlock: "1021" },
+  ]);
 });
 
 test("fixed-window settlement rejects zero, multiple, another, reverted and unavailable outgoing evidence", async (t) => {

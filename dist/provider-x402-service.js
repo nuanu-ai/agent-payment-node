@@ -15,6 +15,19 @@ import { assertProviderAtomicAmount, assertProviderPolicyBalance, sameFrozenProv
 import { waitForProviderSettlement } from "./provider-x402-wait.js";
 import { boundedX402ReadPort } from "./x402-service-rpc.js";
 import { assertFrozenProviderX402Policy, assertProviderX402RpcBinding, canonicalProviderX402RpcUrl, observeProviderX402Balance, requireProviderX402Adapter, requireProviderX402Profile, } from "./provider-x402-preconditions.js";
+const SETTLEMENT_OBSERVATION_REASONS = new Set([
+    "provider_evidence_capability_gap",
+    "settlement_block_mismatch",
+    "settlement_evidence_contradiction",
+    "settlement_mismatch",
+    "settlement_not_unique",
+    "settlement_receipt_mismatch",
+    "settlement_receipt_missing",
+]);
+const RETRYABLE_SETTLEMENT_OBSERVATION_REASONS = new Set([
+    "provider_evidence_capability_gap",
+    "settlement_receipt_missing",
+]);
 const EVIDENCE_WINDOW_MS = 240_000;
 export class ProviderX402Service {
     context;
@@ -274,12 +287,15 @@ export class ProviderX402Service {
         operation = await this.recoverOrphanReceipt(operation);
         if (operation.terminal)
             return operation;
-        if (operation.settlementEvidence !== undefined &&
-            !(operation.state === "ambiguous_effect" && operation.sellerResult !== undefined))
+        if (operation.settlementEvidence !== undefined) {
+            if (operation.state === "ambiguous_effect" && operation.sellerResult !== undefined)
+                return operation;
             return await this.terminalizeSettled(operation);
+        }
         if (operation.evidenceLowerBlock === undefined)
             return operation;
-        if (operation.state === "ambiguous_effect" && operation.immutableUpperBlock !== undefined)
+        if (operation.state === "ambiguous_effect" && SETTLEMENT_OBSERVATION_REASONS.has(operation.reason) &&
+            (operation.immutableUpperBlock === undefined || !RETRYABLE_SETTLEMENT_OBSERVATION_REASONS.has(operation.reason)))
             return operation;
         assertProviderX402RpcBinding(this.context, operation);
         const remaining = deadline === undefined ? undefined : Math.floor(deadline - this.context.wait.nowMs());
@@ -294,14 +310,20 @@ export class ProviderX402Service {
         if (observation.kind === "pending")
             return operation;
         if (observation.kind === "ambiguous") {
-            if (operation.state === "ambiguous_effect" && operation.reason === observation.reason && observation.upperBlock === undefined)
+            const sameUpper = observation.upperBlock === undefined
+                ? operation.immutableUpperBlock === undefined
+                : operation.immutableUpperBlock !== undefined &&
+                    canonicalJson(operation.immutableUpperBlock) === canonicalJson(observation.upperBlock);
+            if (operation.state === "ambiguous_effect" && operation.reason === observation.reason && sameUpper)
                 return operation;
             return await this.transition(operation, "ambiguous_effect", observation.reason, "x402_unknown_finality", {
                 ...(observation.upperBlock === undefined ? {} : { immutableUpperBlock: observation.upperBlock }),
             });
         }
         if (operation.state === "ambiguous_effect" && operation.sellerResult !== undefined) {
-            return await this.transition(operation, "ambiguous_effect", "settlement_verified_after_ambiguity", "x402_unknown_finality", { immutableUpperBlock: observation.upperBlock, settlementEvidence: observation.evidence });
+            const retryableObservation = RETRYABLE_SETTLEMENT_OBSERVATION_REASONS.has(operation.reason);
+            const evidenced = await this.transition(operation, retryableObservation ? "settlement_pending" : "ambiguous_effect", retryableObservation ? "x402_settlement_verified" : "settlement_verified_after_ambiguity", retryableObservation ? "x402_settlement_verified_result_pending" : "x402_unknown_finality", { immutableUpperBlock: observation.upperBlock, settlementEvidence: observation.evidence });
+            return retryableObservation ? await this.terminalizeSettled(evidenced) : evidenced;
         }
         const evidenced = await this.transition(operation, operation.sellerResult === undefined ? "ambiguous_effect" : "settlement_pending", operation.sellerResult === undefined ? "seller_result_missing" : "x402_settlement_verified", operation.sellerResult === undefined ? "x402_unknown_finality" : "x402_settlement_verified_result_pending", { immutableUpperBlock: observation.upperBlock, settlementEvidence: observation.evidence });
         return await this.terminalizeSettled(evidenced);
