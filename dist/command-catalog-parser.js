@@ -159,6 +159,10 @@ function validateOptionValue(definition, value) {
             if (!/^[a-f0-9]{64}$/u.test(value))
                 invalid();
             return;
+        case "transaction_hash":
+            if (!/^0x[0-9a-fA-F]{64}$/u.test(value))
+                invalid();
+            return;
         case "idempotency_key":
             if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/u.test(value))
                 invalid();

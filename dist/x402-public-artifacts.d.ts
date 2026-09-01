@@ -33,7 +33,8 @@ interface NormalizedProviderReceipt {
     readonly createdAt: string;
     readonly integrityHash: string;
 }
-interface NormalizedProviderSettlement {
+type NormalizedProviderSettlement = NormalizedProviderRangeSettlement | NormalizedProviderTransactionSettlement;
+interface NormalizedProviderRangeSettlement {
     readonly network: typeof CHAIN_CAIP2;
     readonly chainId: "8453";
     readonly token: `0x${string}`;
@@ -51,6 +52,29 @@ interface NormalizedProviderSettlement {
         readonly transactionHash: `0x${string}`;
     };
     readonly rpcOriginHash: string;
+    readonly evidenceHash: string;
+}
+interface NormalizedProviderTransactionSettlement {
+    readonly evidenceMode: "exact_transaction";
+    readonly network: typeof CHAIN_CAIP2;
+    readonly chainId: "8453";
+    readonly token: `0x${string}`;
+    readonly transactionHash: `0x${string}`;
+    readonly receiptStatus: "success";
+    readonly receiptBlock: PublicBlock;
+    readonly safeHead: PublicBlock;
+    readonly transfer: {
+        readonly logIndex: string;
+        readonly from: `0x${string}`;
+        readonly to: `0x${string}`;
+        readonly value: string;
+        readonly blockNumber: string;
+        readonly blockHash: `0x${string}`;
+        readonly transactionHash: `0x${string}`;
+    };
+    readonly qualifyingTransferCount: "1";
+    readonly rpcOriginHash: string;
+    readonly observedAt: string;
     readonly evidenceHash: string;
 }
 interface PublicBlock {

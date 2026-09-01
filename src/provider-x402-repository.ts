@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson, isPlainRecord } from "./canonical.js";
+import { ApnError } from "./errors.js";
 import { SecureStateStore, stateCorrupt, stateIdentifier, stateSecurity } from "./secure-state-store.js";
 import {
   providerX402BindingHash,
@@ -11,9 +12,18 @@ import {
   type ProviderX402ReceiptRecord,
 } from "./provider-x402-model.js";
 import { assertProviderX402ReceiptAuthority } from "./provider-x402-validation.js";
+import {
+  sealTransactionReservation,
+  sealTransactionReservationIndex,
+  validateTransactionReservation,
+  validateTransactionReservationIndex,
+  type ProviderX402TransactionReservation,
+} from "./provider-x402-transaction-binding.js";
 
 const OPERATIONS = "x402-operations";
 const RECEIPTS = "x402-receipts";
+const RECOVERY_RESERVATIONS = "x402-recovery-reservations";
+const RECOVERY_RESERVATION_INDEX = `${RECOVERY_RESERVATIONS}/index.json`;
 const LOCAL_OPERATION_SCHEMA = "apn.x402.state.v1";
 
 export class ProviderX402Repository extends SecureStateStore {
@@ -26,6 +36,7 @@ export class ProviderX402Repository extends SecureStateStore {
 
   private async initializeRoots(): Promise<void> {
     await super.initialize();
+    await this.ensureDirectory(RECOVERY_RESERVATIONS);
   }
 
   async loadOperation(profileHash: string, operationId: string): Promise<ProviderX402OperationRecord | null> {
@@ -127,6 +138,52 @@ export class ProviderX402Repository extends SecureStateStore {
     }
     await this.ensureDirectory(join(RECEIPTS, profileHash));
     await this.writeJson(join(RECEIPTS, profileHash, `${receipt.operationId}.json`), receipt);
+  }
+
+  async reserveTransactionRecovery(input: {
+    readonly operationId: string;
+    readonly profileHash: string;
+    readonly transactionHash: `0x${string}`;
+    readonly idempotencyDigest: string;
+    readonly materialDigest: string;
+    readonly createdAt: string;
+  }): Promise<ProviderX402TransactionReservation> {
+    await this.ready();
+    stateIdentifier(input.operationId, "provider x402 recovery operation ID");
+    stateIdentifier(input.profileHash, "provider x402 recovery profile hash");
+    stateIdentifier(input.idempotencyDigest, "provider x402 recovery idempotency digest");
+    if (!/^0x[0-9a-f]{64}$/u.test(input.transactionHash) || /^0x0{64}$/u.test(input.transactionHash)) {
+      stateSecurity("Provider x402 recovery transaction hash is invalid.");
+    }
+    const indexValue = await this.readJson(RECOVERY_RESERVATION_INDEX);
+    const index = indexValue === null
+      ? sealTransactionReservationIndex([])
+      : validateTransactionReservationIndex(indexValue);
+    const matches = index.reservations.filter((reservation) =>
+      reservation.transactionHash === input.transactionHash || reservation.idempotencyDigest === input.idempotencyDigest
+    );
+    if (matches.length > 1) stateCorrupt("Recovery reservation index contains conflicting ownership.");
+    const existing = matches[0] ?? null;
+    const reservation = existing ?? sealTransactionReservation({
+      schemaVersion: "apn.provider-x402.transaction-reservation.v1",
+      chainId: "8453",
+      transactionHash: input.transactionHash,
+      operationId: input.operationId,
+      profileHash: input.profileHash,
+      evidenceMode: "exact_transaction",
+      idempotencyDigest: input.idempotencyDigest,
+      materialDigest: input.materialDigest,
+      createdAt: input.createdAt,
+    });
+    if (
+      reservation.operationId !== input.operationId || reservation.profileHash !== input.profileHash ||
+      reservation.transactionHash !== input.transactionHash || reservation.idempotencyDigest !== input.idempotencyDigest ||
+      reservation.materialDigest !== input.materialDigest
+    ) throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Recovery transaction or idempotency key is already bound to different material.");
+    if (existing === null) {
+      await this.writeJson(RECOVERY_RESERVATION_INDEX, sealTransactionReservationIndex([...index.reservations, reservation]));
+    }
+    return reservation;
   }
 
   private async profileDirectories(rootName: string): Promise<readonly string[]> {

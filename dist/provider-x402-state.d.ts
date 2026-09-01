@@ -1,0 +1,4 @@
+import { type ProviderX402OperationRecord, type ProviderX402ReceiptRecord } from "./provider-x402-model.js";
+export type ProviderX402TransitionExtra = Partial<Pick<ProviderX402OperationRecord, "preparedBalance" | "finalPreflight" | "evidenceLowerBlock" | "evidenceDeadlineAt" | "immutableUpperBlock" | "invocation" | "sellerResult" | "transactionRecovery" | "settlementEvidence">>;
+export declare function transitionProviderX402Operation(operation: ProviderX402OperationRecord, state: ProviderX402OperationRecord["state"], reason: string, proofClass: string, extra: ProviderX402TransitionExtra, at: string): ProviderX402OperationRecord;
+export declare function providerX402TerminalReceipt(operation: ProviderX402OperationRecord, terminalState: ProviderX402ReceiptRecord["terminalState"], reason: string, proofClass: string, createdAt: string): ProviderX402ReceiptRecord;

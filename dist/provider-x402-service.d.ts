@@ -17,7 +17,6 @@ export declare class ProviderX402Service {
     resume(operationIdInput: string, waitSeconds?: number): Promise<ProviderSettlementWaitProjection | undefined>;
     private reconcile;
     private terminalizeSettled;
-    private terminalReceipt;
     private recoverOrphanReceipt;
     private withOperationLock;
     private failBeforeEffect;
