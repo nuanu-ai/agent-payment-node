@@ -8,6 +8,11 @@ import type {
 } from "./provider-ports.js";
 import { providerX402InvocationIntentHash } from "./provider-x402-model.js";
 import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
+import {
+  isConflictingProviderX402OuterKey,
+  providerX402RejectionShape,
+  PROVIDER_X402_KNOWN_ENVELOPE_KEYS,
+} from "./provider-x402-rejection-shape.js";
 import { resolveAwalBin } from "./awal-package.js";
 
 export const AWAL_X402_PROCESS_TIMEOUT_MS = 210_000;
@@ -16,19 +21,8 @@ export const AWAL_X402_SHUTDOWN_MARGIN_MS = 30_000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const MAX_STATUS_TEXT_BYTES = 512;
 const MAX_PROVIDER_ATOMIC = 9_007_199_254_740_991n;
-const REQUIRED_ENVELOPE_KEYS = ["status", "data", "paymentMade", "amountPaid"] as const;
-const KNOWN_ENVELOPE_KEYS = new Set([...REQUIRED_ENVELOPE_KEYS, "statusText"]);
-const CONFLICTING_OUTER_KEYS = new Set([
-  "status", "statustext", "data", "paymentmade", "amountpaid",
-  "httpstatus", "httpstatuscode", "statuscode", "amountpaidatomic", "paidamount",
-  "result", "response", "payload", "body", "sellerresult",
-]);
-const CONFLICTING_OUTER_KEY_WORDS = new Set([
-  "amount", "body", "data", "paid", "payment", "payload", "response", "result", "seller", "status",
-]);
-const CONFLICTING_OUTER_KEY_FRAGMENTS = [
-  "amount", "body", "paid", "payment", "payload", "response", "result", "seller", "status",
-] as const;
+const REQUIRED_ENVELOPE_KEYS = ["status", "data"] as const;
+const KNOWN_ENVELOPE_KEYS = new Set<string>(PROVIDER_X402_KNOWN_ENVELOPE_KEYS);
 
 interface AwalX402Stream {
   on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -195,7 +189,11 @@ export class AwalX402Adapter implements X402ExecutionPort {
           const result = parseSellerResult(output, input.amountAtomic);
           finish({ disposition: "seller_result", invocation: evidence, result });
         } catch {
-          finish({ disposition: "ambiguous", reason: "provider_result_invalid", invocation: evidence });
+          finish({
+            disposition: "ambiguous",
+            reason: "provider_result_invalid",
+            invocation: { ...evidence, rejection_shape: providerX402RejectionShape(output) },
+          });
         } finally { output.fill(0); }
       };
       const timeout = setTimeout(() => {
@@ -221,12 +219,12 @@ function parseSellerResult(bytes: Buffer, expectedAmount: string): ProviderX402S
   catch { throw protocol(); }
   if (!isPlainRecord(value)) throw protocol();
   validateEnvelopeKeys(value);
+  const payment = paymentMetadata(value, expectedAmount);
   if (
     !Number.isSafeInteger(value.status) || Number(value.status) < 200 || Number(value.status) > 299 ||
     (Object.hasOwn(value, "statusText") && (
       typeof value.statusText !== "string" || Buffer.byteLength(value.statusText, "utf8") > MAX_STATUS_TEXT_BYTES
-    )) ||
-    value.paymentMade !== true || canonicalProviderAmount(value.amountPaid) !== expectedAmount
+    ))
   ) throw protocol();
   let canonical: string;
   try { canonical = canonicalizeNormalizedProviderJson(value.data); }
@@ -236,8 +234,7 @@ function parseSellerResult(bytes: Buffer, expectedAmount: string): ProviderX402S
   return {
     classification: "normalized_provider_json",
     http_status: String(value.status),
-    payment_made: true,
-    amount_paid_atomic: expectedAmount,
+    ...payment,
     canonical_json: canonical,
     byte_length: length.toString(),
     sha256: sha256(canonical),
@@ -251,9 +248,8 @@ function validateEnvelopeKeys(value: Record<string, unknown>): void {
     if (typeof key !== "string") throw protocol();
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) throw protocol();
-    const compact = key.replace(/[^a-z0-9]/giu, "").toLowerCase();
     if (!KNOWN_ENVELOPE_KEYS.has(key)) {
-      if (isConflictingOuterKey(key, compact)) throw protocol();
+      if (isConflictingProviderX402OuterKey(key)) throw protocol();
       try { canonicalizeNormalizedProviderJson(descriptor.value); }
       catch { throw protocol(); }
     }
@@ -263,17 +259,16 @@ function validateEnvelopeKeys(value: Record<string, unknown>): void {
   catch { throw protocol(); }
 }
 
-function isConflictingOuterKey(key: string, compact: string): boolean {
-  if (CONFLICTING_OUTER_KEYS.has(compact)) return true;
-  if (compact.startsWith("data") || CONFLICTING_OUTER_KEY_FRAGMENTS.some((fragment) => compact.includes(fragment))) {
-    return true;
-  }
-  const words = key
-    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
-    .split(/[^a-z0-9]+/iu)
-    .filter((word) => word.length > 0)
-    .map((word) => word.toLowerCase());
-  return words.some((word) => CONFLICTING_OUTER_KEY_WORDS.has(word));
+function paymentMetadata(
+  value: Record<string, unknown>,
+  expectedAmount: string,
+): { readonly payment_made: true; readonly amount_paid_atomic: string } | Record<string, never> {
+  const hasPaymentMade = Object.hasOwn(value, "paymentMade");
+  const hasAmountPaid = Object.hasOwn(value, "amountPaid");
+  if (hasPaymentMade !== hasAmountPaid) throw protocol();
+  if (!hasPaymentMade) return {};
+  if (value.paymentMade !== true || canonicalProviderAmount(value.amountPaid) !== expectedAmount) throw protocol();
+  return { payment_made: true, amount_paid_atomic: expectedAmount };
 }
 
 function providerAtomic(value: string): number {

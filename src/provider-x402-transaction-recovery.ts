@@ -174,8 +174,10 @@ export class ProviderX402TransactionRecoveryService {
       operation.state !== "ambiguous_effect" || operation.sellerResult !== undefined ||
       operation.immutableUpperBlock !== undefined ||
       (operation.settlementEvidence !== undefined && operation.settlementEvidence.schemaVersion !== "apn.provider-x402.transaction-settlement.v1") ||
-      (binding === undefined && operation.reason !== "provider_evidence_capability_gap")
-    ) throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not eligible for legacy exact-transaction recovery.");
+      (binding === undefined && ![
+        "provider_evidence_capability_gap", "provider_result_invalid",
+      ].includes(operation.reason))
+    ) throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not eligible for exact-transaction recovery.");
   }
 
   private async projectCommitted(operation: ProviderX402OperationRecord): Promise<ProviderX402RecoveryProjection> {

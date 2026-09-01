@@ -1,5 +1,6 @@
 import type { Address, Hex } from "./model.js";
 import type { ProviderCapabilitySnapshot, ProviderProfileRecord } from "./provider-profile.js";
+import type { ProviderX402RejectionShape } from "./provider-x402-rejection-shape.js";
 
 export interface ForegroundAuthenticationPort {
   readIdentity(): Promise<string>;
@@ -78,13 +79,14 @@ export interface ProviderX402Invocation {
   readonly child_identity_hash: string;
   readonly output_sha256: string;
   readonly output_byte_length: string;
+  readonly rejection_shape?: ProviderX402RejectionShape;
 }
 
 export interface ProviderX402SellerResult {
   readonly classification: "normalized_provider_json";
   readonly http_status: string;
-  readonly payment_made: true;
-  readonly amount_paid_atomic: string;
+  readonly payment_made?: true;
+  readonly amount_paid_atomic?: string;
   readonly canonical_json: string;
   readonly byte_length: string;
   readonly sha256: string;

@@ -97,7 +97,7 @@ function appendObject(value, depth, state) {
         invalid();
     const entries = [];
     for (const key of keys) {
-        if (DANGEROUS_KEYS.has(key) || PROTECTED_KEY.test(compactKey(key)))
+        if (isProtectedNormalizedProviderKey(key))
             invalid();
         validateText(key);
         const descriptor = Object.getOwnPropertyDescriptor(value, key);
@@ -124,6 +124,9 @@ function validateText(value) {
 }
 function compactKey(value) {
     return value.replace(/[^a-z0-9]/giu, "");
+}
+export function isProtectedNormalizedProviderKey(value) {
+    return DANGEROUS_KEYS.has(value) || PROTECTED_KEY.test(compactKey(value));
 }
 function append(value, state) {
     if (value === undefined)
