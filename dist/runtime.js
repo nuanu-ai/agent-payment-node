@@ -19,6 +19,7 @@ export class RuntimeContext {
     transferApproval;
     rpcUrl;
     providerX402Repository;
+    providerTransactionEvidence;
     initialized;
     constructor(dependencies) {
         this.state = dependencies.state;
@@ -47,6 +48,8 @@ export class RuntimeContext {
             this.rpcUrl = dependencies.rpcUrl;
         if (dependencies.providerX402Repository !== undefined)
             this.providerX402Repository = dependencies.providerX402Repository;
+        if (dependencies.providerTransactionEvidence !== undefined)
+            this.providerTransactionEvidence = dependencies.providerTransactionEvidence;
     }
     async ready() {
         this.initialized ??= this.state.initialize();

@@ -23,6 +23,7 @@ const SELECTED_PATHS = [
   "pay transfer approve",
   "operation status",
   "operation resume",
+  "operation recover-transaction-settlement",
   "receipt get",
 ] as const;
 
@@ -123,6 +124,7 @@ function scalarPattern(type: CommandOption["type"]): string | undefined {
     case "decimal_usdc": return "^(?:[1-9][0-9]*(?:\\.[0-9]{0,5}[1-9])?|0\\.[0-9]{0,5}[1-9])$";
     case "idempotency_key": return "^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$";
     case "operation_id": return "^[a-f0-9]{64}$";
+    case "transaction_hash": return "^0x[0-9a-fA-F]{64}$";
     case "integer_seconds": return "^(?:[1-9]|[1-9][0-9]|[12][0-9]{2}|300)$";
     case "https_url": return undefined;
     default: throw projectionFailure("A selected command uses an unsupported MCP scalar type.");

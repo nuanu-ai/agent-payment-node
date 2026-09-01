@@ -1,6 +1,8 @@
 import { canonicalJson, hashObject } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
+import {} from "./provider-x402-model.js";
+import { providerX402SettledWithoutResultProof } from "./provider-x402-proof.js";
 export function providerX402FrozenFingerprint(operation) {
     return hashObject({
         operationId: operation.operationId,
@@ -22,6 +24,13 @@ export function providerX402FrozenFingerprint(operation) {
     });
 }
 export function validateProviderX402Settlement(evidence, operation) {
+    if (evidence.schemaVersion === "apn.provider-x402.transaction-settlement.v1") {
+        validateTransactionSettlement(evidence, operation);
+        return;
+    }
+    validateRangeSettlement(evidence, operation);
+}
+function validateRangeSettlement(evidence, operation) {
     const { evidenceHash: _evidenceHash, ...base } = evidence;
     const lower = operation.evidenceLowerBlock;
     const upper = operation.immutableUpperBlock;
@@ -40,6 +49,25 @@ export function validateProviderX402Settlement(evidence, operation) {
         BigInt(upper.timestamp) < BigInt(Math.ceil(Date.parse(operation.evidenceDeadlineAt ?? "") / 1_000)))
         corrupt();
 }
+function validateTransactionSettlement(evidence, operation) {
+    const { evidenceHash: _evidenceHash, ...base } = evidence;
+    const transfer = evidence.transfer;
+    const binding = operation.transactionRecovery;
+    if (evidence.evidenceHash !== hashObject(base) || evidence.chainId !== "8453" ||
+        evidence.network !== CHAIN_CAIP2 || evidence.token !== BASE_USDC.toLowerCase() ||
+        evidence.payer !== operation.provider.payer || evidence.payee !== operation.requirement.payee ||
+        evidence.amountAtomic !== operation.requirement.amountAtomic || evidence.receiptStatus !== "success" ||
+        evidence.rpcOriginHash !== operation.rpcOriginHash || evidence.qualifyingTransferCount !== "1" ||
+        binding?.transactionHash !== evidence.transactionHash || binding.evidenceDigest !== evidence.evidenceHash ||
+        binding.stage !== "evidence_validated" || !validBlock(evidence.receiptBlock, "number") ||
+        !validBlock(evidence.safeHead, "safe") || BigInt(evidence.receiptBlock.number) > BigInt(evidence.safeHead.number) ||
+        (evidence.receiptBlock.number === evidence.safeHead.number && evidence.receiptBlock.hash !== evidence.safeHead.hash) ||
+        transfer.transactionHash !== evidence.transactionHash || transfer.blockNumber !== evidence.receiptBlock.number ||
+        transfer.blockHash !== evidence.receiptBlock.hash || !/^(?:0|[1-9][0-9]*)$/u.test(transfer.logIndex) ||
+        !canonicalUtc(evidence.observedAt) || Date.parse(evidence.observedAt) < Date.parse(evidence.receiptBlock.observedAt) ||
+        Date.parse(evidence.observedAt) < Date.parse(evidence.safeHead.observedAt))
+        corrupt();
+}
 export function assertProviderX402ReceiptAuthority(operation, receipt) {
     const completed = receipt.terminalState === "completed";
     const settledWithoutResult = receipt.terminalState === "failed_settled_without_result";
@@ -54,7 +82,8 @@ export function assertProviderX402ReceiptAuthority(operation, receipt) {
         (operation.terminal ? receiptTime > operationTime : receiptTime < operationTime) ||
         (operation.terminal && (receipt.terminalState !== operation.state || receipt.reason !== operation.reason || receipt.proofClass !== operation.proofClass)) ||
         (completed && (receipt.reason !== "x402_completed" || receipt.proofClass !== "x402_safe_settlement")) ||
-        (settledWithoutResult && (receipt.reason !== "seller_result_missing" || receipt.proofClass !== "confirmed_settlement_without_seller_result")) ||
+        (settledWithoutResult && (receipt.reason !== "seller_result_missing" ||
+            receipt.proofClass !== providerX402SettledWithoutResultProof(receipt.settlement))) ||
         (!completed && !settledWithoutResult && receipt.proofClass !== "x402_proven_no_effect") ||
         (completed !== (operation.sellerResult !== undefined && operation.settlementEvidence !== undefined)) ||
         (settledWithoutResult !== (operation.sellerResult === undefined && operation.settlementEvidence !== undefined)) ||

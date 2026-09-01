@@ -4,6 +4,8 @@ import { ApnError } from "./errors.js";
 import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
 import { x402WaitProjectedStatus } from "./x402-state-integrity.js";
 import { providerX402CompleteBindingHash, providerX402FrozenFingerprint, validateProviderX402Settlement, } from "./provider-x402-validation.js";
+import { providerX402SettledWithoutResultProof } from "./provider-x402-proof.js";
+import { validateProviderX402TransactionRecoveryBinding, validateProviderX402TransactionRecoveryContinuity, } from "./provider-x402-transaction-recovery-model.js";
 export const PROVIDER_X402_STATE_VERSION = "apn.provider-x402.state.v1";
 export function providerX402RequestHash(input) {
     return hashObject({
@@ -61,8 +63,15 @@ export function validateProviderX402Operation(value) {
         validateInvocation(operation.invocation, operation);
     if (operation.sellerResult !== undefined)
         validateSellerResult(operation.sellerResult, operation.requirement.amountAtomic);
+    if (operation.transactionRecovery !== undefined) {
+        validateProviderX402TransactionRecoveryBinding(operation.transactionRecovery, operation.operationId);
+    }
     if (operation.settlementEvidence !== undefined)
         validateProviderX402Settlement(operation.settlementEvidence, operation);
+    if (operation.settlementEvidence?.schemaVersion === "apn.provider-x402.transaction-settlement.v1" && (operation.transactionRecovery?.stage !== "evidence_validated" ||
+        operation.transactionRecovery.evidenceDigest !== operation.settlementEvidence.evidenceHash ||
+        operation.transactionRecovery.transactionHash !== operation.settlementEvidence.transactionHash))
+        corrupt();
     if (operation.sellerResult !== undefined && operation.invocation === undefined)
         corrupt();
     if (!["preparing", "failed_before_effect"].includes(operation.state) && operation.preparedBalance === undefined)
@@ -72,7 +81,8 @@ export function validateProviderX402Operation(value) {
         corrupt();
     if (operation.state === "completed" && (operation.sellerResult === undefined || operation.settlementEvidence === undefined))
         corrupt();
-    if (operation.state === "failed_settled_without_result" && (operation.reason !== "seller_result_missing" || operation.proofClass !== "confirmed_settlement_without_seller_result" ||
+    if (operation.state === "failed_settled_without_result" && (operation.reason !== "seller_result_missing" ||
+        operation.proofClass !== providerX402SettledWithoutResultProof(operation.settlementEvidence) ||
         operation.sellerResult !== undefined || operation.settlementEvidence === undefined))
         corrupt();
     return operation;
@@ -104,7 +114,8 @@ export function validateProviderX402Receipt(value) {
         corrupt();
     if (receipt.terminalState === "failed_before_effect" && (receipt.result !== undefined || receipt.settlement !== undefined))
         corrupt();
-    if (receipt.terminalState === "failed_settled_without_result" && (receipt.reason !== "seller_result_missing" || receipt.proofClass !== "confirmed_settlement_without_seller_result" ||
+    if (receipt.terminalState === "failed_settled_without_result" && (receipt.reason !== "seller_result_missing" ||
+        receipt.proofClass !== providerX402SettledWithoutResultProof(receipt.settlement) ||
         receipt.result !== undefined || receipt.settlement === undefined))
         corrupt();
     return receipt;
@@ -124,6 +135,7 @@ export function validateProviderX402Continuity(previous, next) {
         if (previous[key] !== undefined && canonicalJson(previous[key]) !== canonicalJson(next[key]))
             corrupt();
     }
+    validateProviderX402TransactionRecoveryContinuity(previous.transactionRecovery, next.transactionRecovery);
     if (next.transitions.length !== previous.transitions.length + 1)
         corrupt();
     for (let index = 0; index < previous.transitions.length; index += 1) {
@@ -178,12 +190,17 @@ export function publicProviderX402Operation(operation, settlementWait) {
         }),
         ...(operation.settlementEvidence === undefined ? {} : {
             transactionHash: operation.settlementEvidence.transactionHash,
-            blockNumber: operation.settlementEvidence.transfer.blockNumber,
-            blockHash: operation.settlementEvidence.transfer.blockHash,
+            blockNumber: settlementBlock(operation.settlementEvidence).number,
+            blockHash: settlementBlock(operation.settlementEvidence).hash,
         }),
         ...(settlementWait === undefined ? {} : { settlementWait }),
     };
     return { ...value, integrityHash: domainHash("apn.x402.public-operation.v1", canonicalJson(value)) };
+}
+function settlementBlock(evidence) {
+    return evidence.schemaVersion === "apn.provider-x402.transaction-settlement.v1"
+        ? evidence.receiptBlock
+        : { number: evidence.transfer.blockNumber, hash: evidence.transfer.blockHash };
 }
 function validateTransitions(transitions) {
     let previous = "0".repeat(64);

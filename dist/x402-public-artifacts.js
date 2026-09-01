@@ -105,6 +105,30 @@ function publicSettlement(settlement) {
     const block = (value) => ({
         number: value.number, hash: value.hash, timestamp: value.timestamp, observedAt: value.observedAt,
     });
+    if (settlement.schemaVersion === "apn.provider-x402.transaction-settlement.v1")
+        return {
+            evidenceMode: "exact_transaction",
+            network: settlement.network,
+            chainId: settlement.chainId,
+            token: settlement.token,
+            transactionHash: settlement.transactionHash,
+            receiptStatus: settlement.receiptStatus,
+            receiptBlock: block(settlement.receiptBlock),
+            safeHead: block(settlement.safeHead),
+            transfer: {
+                logIndex: settlement.transfer.logIndex,
+                from: settlement.payer,
+                to: settlement.payee,
+                value: settlement.amountAtomic,
+                blockNumber: settlement.transfer.blockNumber,
+                blockHash: settlement.transfer.blockHash,
+                transactionHash: settlement.transfer.transactionHash,
+            },
+            qualifyingTransferCount: settlement.qualifyingTransferCount,
+            rpcOriginHash: settlement.rpcOriginHash,
+            observedAt: settlement.observedAt,
+            evidenceHash: settlement.evidenceHash,
+        };
     return {
         network: settlement.network,
         chainId: settlement.chainId,
@@ -144,6 +168,9 @@ function validReceiptResult(value) {
         value.classification === "normalized_provider_json" && hash(value.sha256) && decimal(value.byteLength);
 }
 function validSettlement(value, receipt) {
+    if (isPlainRecord(value) && value.evidenceMode === "exact_transaction") {
+        return validTransactionSettlement(value, receipt);
+    }
     if (!isPlainRecord(value) || !exactKeys(value, [
         "network", "chainId", "token", "transactionHash", "receiptStatus", "lowerBlock", "upperBlock", "transfer",
         "rpcOriginHash", "evidenceHash",
@@ -163,6 +190,31 @@ function validSettlement(value, receipt) {
     const blockNumber = BigInt(settlement.transfer.blockNumber);
     return BigInt(settlement.lowerBlock.number) < BigInt(settlement.upperBlock.number) &&
         blockNumber >= BigInt(settlement.lowerBlock.number) && blockNumber <= BigInt(settlement.upperBlock.number);
+}
+function validTransactionSettlement(value, receipt) {
+    if (!exactKeys(value, [
+        "evidenceMode", "network", "chainId", "token", "transactionHash", "receiptStatus",
+        "receiptBlock", "safeHead", "transfer", "qualifyingTransferCount", "rpcOriginHash", "observedAt", "evidenceHash",
+    ]))
+        return false;
+    const settlement = value;
+    if (settlement.network !== CHAIN_CAIP2 || settlement.chainId !== "8453" || settlement.token !== receipt.token ||
+        settlement.receiptStatus !== "success" || !hashHex(settlement.transactionHash) ||
+        !hash(settlement.rpcOriginHash) || !hash(settlement.evidenceHash) ||
+        !validBlock(settlement.receiptBlock) || !validBlock(settlement.safeHead) ||
+        settlement.qualifyingTransferCount !== "1" || !canonicalUtc(settlement.observedAt) ||
+        !isPlainRecord(settlement.transfer) || !exactKeys(settlement.transfer, [
+        "logIndex", "from", "to", "value", "blockNumber", "blockHash", "transactionHash",
+    ]) || !decimal(settlement.transfer.logIndex) || settlement.transfer.from !== receipt.payer ||
+        settlement.transfer.to !== receipt.payee || settlement.transfer.value !== receipt.amountAtomic ||
+        settlement.transfer.blockNumber !== settlement.receiptBlock.number ||
+        settlement.transfer.blockHash !== settlement.receiptBlock.hash ||
+        settlement.transfer.transactionHash !== settlement.transactionHash ||
+        BigInt(settlement.receiptBlock.number) > BigInt(settlement.safeHead.number) ||
+        (settlement.receiptBlock.number === settlement.safeHead.number && settlement.receiptBlock.hash !== settlement.safeHead.hash))
+        return false;
+    return Date.parse(settlement.observedAt) >= Date.parse(settlement.receiptBlock.observedAt) &&
+        Date.parse(settlement.observedAt) >= Date.parse(settlement.safeHead.observedAt);
 }
 function validBlock(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["number", "hash", "timestamp", "observedAt"]) ||

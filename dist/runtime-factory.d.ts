@@ -7,6 +7,7 @@ import { type ProfilePolicyApprovalPort } from "./policy-approval.js";
 import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
 import type { ForegroundAuthenticationPort, ProviderProfileRepositoryPort, ProviderRegistryPort } from "./provider-ports.js";
+import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 export interface RuntimeFactoryOptions {
     readonly stateRoot?: string;
     readonly native?: NativePort;
@@ -22,6 +23,7 @@ export interface RuntimeFactoryOptions {
     readonly profileRepository?: ProviderProfileRepositoryPort;
     readonly providerRegistry?: ProviderRegistryPort;
     readonly foregroundAuthentication?: ForegroundAuthenticationPort;
+    readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
 }
 export declare function createApnCore(bound: BoundCommand, options?: RuntimeFactoryOptions): ApnCore;
 export declare function executeBoundCommand(bound: BoundCommand, options?: RuntimeFactoryOptions): Promise<OutputEnvelope>;

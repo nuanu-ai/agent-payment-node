@@ -38,6 +38,12 @@ export type CommandRequest =
   }
   | { readonly command: "transfer.approve"; readonly operationId: string }
   | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number }
+  | {
+    readonly command: "operation.recover-transaction-settlement";
+    readonly operationId: string;
+    readonly transactionHash: string;
+    readonly idempotencyKey: string;
+  }
   | { readonly command: "operation.status"; readonly operationId: string }
   | { readonly command: "receipt.get"; readonly operationId: string };
 
