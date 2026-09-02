@@ -78,8 +78,8 @@ test("MetaMask direct adapter uses exact sender, canonical Base USDC argv and sa
     providerState: "AWAITING_MFA",
   });
   assert.deepEqual(runner.calls.map((call) => call.argv), [
-    ["wallet", "select", SENDER, "--chain-namespace", "eip155", "--json"],
-    ["wallet", "address", "--chain-namespace", "eip155", "--json"],
+    ["wallet", "select", SENDER, "--chain-namespace", "evm", "--json"],
+    ["wallet", "address", "--chain-namespace", "evm", "--json"],
     ["transfer", "--to", RECIPIENT, "--amount", "1", "--chain-id", "8453", "--token", BASE_USDC, "--json"],
   ]);
 

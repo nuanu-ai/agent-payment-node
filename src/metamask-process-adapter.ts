@@ -122,7 +122,7 @@ export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWa
   }
 
   private async readAddressUnlocked(): Promise<Address> {
-    const result = await this.runner.runJson(["wallet", "address", "--chain-namespace", "eip155", "--json"]);
+    const result = await this.runner.runJson(["wallet", "address", "--chain-namespace", "evm", "--json"]);
     try {
       const data = requireSuccess(result.exitCode, result.stdout);
       if (typeof data.address !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(data.address)) throw providerProtocol();

@@ -166,7 +166,7 @@ test("connect performs only required provider-native QR login and Guard server-w
     ["doctor", "--json"],
     ["init", "--wallet", "server-wallet", "--mode", "guard", "--json"],
     ["doctor", "--json"],
-    ["wallet", "address", "--chain-namespace", "eip155", "--json"],
+    ["wallet", "address", "--chain-namespace", "evm", "--json"],
   ]);
 });
 
@@ -177,7 +177,7 @@ test("connected session is reused without login or reinitialization", async () =
   assert.deepEqual(runner.foregroundCalls, []);
   assert.deepEqual(runner.jsonCalls, [
     ["doctor", "--json"],
-    ["wallet", "address", "--chain-namespace", "eip155", "--json"],
+    ["wallet", "address", "--chain-namespace", "evm", "--json"],
   ]);
 });
 
