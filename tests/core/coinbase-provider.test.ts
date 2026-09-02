@@ -122,13 +122,21 @@ class BlockingRpc extends TestRpc {
 
 class FixtureDirect implements DirectExecutionPort {
   readonly mode = "provider_atomic_send" as const;
-  readonly calls: Array<{ readonly amountDecimal: string; readonly recipient: `0x${string}` }> = [];
+  readonly calls: Array<{
+    readonly amountDecimal: string;
+    readonly recipient: `0x${string}`;
+    readonly sender: `0x${string}`;
+  }> = [];
   result: Awaited<ReturnType<NonNullable<DirectExecutionPort["execute"]>>> = {
     disposition: "acknowledged",
     transactionHash: PROVIDER_TRANSACTION_HASH,
   };
   onExecute: (() => Promise<void>) | undefined;
-  async execute(input: { readonly amountDecimal: string; readonly recipient: `0x${string}` }) {
+  async execute(input: {
+    readonly amountDecimal: string;
+    readonly recipient: `0x${string}`;
+    readonly sender: `0x${string}`;
+  }) {
     this.calls.push(input);
     await this.onExecute?.();
     return this.result;
@@ -913,7 +921,7 @@ test("Coinbase direct adapter uses one closed send argv and classifies every pos
     return child;
   };
   const adapter = new AwalDirectAdapter(async () => "/exact/node_modules/awal/dist/index.js", launch, 1_000);
-  const result = await adapter.execute({ amountDecimal: "1.25", recipient: ADDRESS_B });
+  const result = await adapter.execute({ amountDecimal: "1.25", recipient: ADDRESS_B, sender: ADDRESS_A });
   assert.deepEqual(result, { disposition: "acknowledged", transactionHash: PROVIDER_TRANSACTION_HASH });
   assert.deepEqual(launches, [{
     executable: process.execPath,
@@ -954,7 +962,7 @@ test("Coinbase direct adapter uses one closed send argv and classifies every pos
     async () => { throw new Error("missing"); },
     () => { resolverLaunches += 1; throw new Error("must not launch"); },
   );
-  assert.deepEqual(await missingBinary.execute({ amountDecimal: "1", recipient: ADDRESS_B }), {
+  assert.deepEqual(await missingBinary.execute({ amountDecimal: "1", recipient: ADDRESS_B, sender: ADDRESS_A }), {
     disposition: "not_started",
     reason: "provider_binary_unavailable",
   });
@@ -964,7 +972,7 @@ test("Coinbase direct adapter uses one closed send argv and classifies every pos
     async () => "/exact/node_modules/awal/dist/index.js",
     () => { throw new Error("synchronous launch failure"); },
   );
-  assert.deepEqual(await launchFailure.execute({ amountDecimal: "1", recipient: ADDRESS_B }), {
+  assert.deepEqual(await launchFailure.execute({ amountDecimal: "1", recipient: ADDRESS_B, sender: ADDRESS_A }), {
     disposition: "not_started",
     reason: "provider_child_not_created",
   });
@@ -985,7 +993,7 @@ test("Coinbase direct adapter uses one closed send argv and classifies every pos
       });
       return child;
     }, 5);
-    const classified = await direct.execute({ amountDecimal: "1", recipient: ADDRESS_B });
+    const classified = await direct.execute({ amountDecimal: "1", recipient: ADDRESS_B, sender: ADDRESS_A });
     assert.equal(classified.disposition, "ambiguous", kind);
     if (kind === "timeout") assert.equal(kills, 1);
     assert.equal(child.listenerCount("spawn"), 0);
@@ -1093,7 +1101,7 @@ test("provider direct prepare is complete and atomic, MCP stops at exact handoff
   assert.equal((approved[0]?.operation as Record<string, unknown>).state, "evidence_pending");
   assert.equal(approval.calls.length, 1);
   assert.equal(direct.calls.length, 1);
-  assert.deepEqual(direct.calls[0], { amountDecimal: "1.25", recipient: ADDRESS_B });
+  assert.deepEqual(direct.calls[0], { amountDecimal: "1.25", recipient: ADDRESS_B, sender: ADDRESS_A });
 
   rpc.receipt = exactProviderReceipt();
   const resumed = await runCli([
@@ -1299,7 +1307,7 @@ test("pinned AWAL float encoding incompatibility is a monotonic pre-effect failu
     "pay", "transfer", "approve", "--operation", hundredId, "--rpc-url", "https://rpc.example/encoding",
   ], {}, { stateRoot: temporary.root, providerRegistry, rpc, approval: new FixtureApproval() });
   assert.equal(hundredApproved.ok, true, JSON.stringify(hundredApproved));
-  assert.deepEqual(effect.calls, [{ amountDecimal: "100", recipient: ADDRESS_B }]);
+  assert.deepEqual(effect.calls, [{ amountDecimal: "100", recipient: ADDRESS_B, sender: ADDRESS_A }]);
 });
 
 test("provider receipt adversaries and unavailable evidence never complete or resend", async () => {

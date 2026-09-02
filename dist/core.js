@@ -86,10 +86,7 @@ export class ApnCore {
                         ...(settlementWait === undefined ? {} : { settlementWait }),
                     });
                 }
-                if (request.waitSeconds !== undefined) {
-                    throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is only available for x402 operations.");
-                }
-                return operationOutcome(await this.transfer.resume(request.operationId));
+                return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds));
             }
             case "operation.recover-transaction-settlement": {
                 const recovered = await this.providerTransactionRecovery.recover(request);

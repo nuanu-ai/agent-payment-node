@@ -22,8 +22,16 @@ import type {
   ProviderRegistryPort,
 } from "./provider-ports.js";
 import { ProviderRegistry } from "./provider-registry.js";
+import {
+  METAMASK_AGENT_WALLET_PROVIDER_ID,
+  MetaMaskProcessAdapter,
+} from "./metamask-process-adapter.js";
 import { StateProfileRepository } from "./profile-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
+import {
+  EncryptedProviderAuthorizationStore,
+  type ProviderAuthorizationStorePort,
+} from "./encrypted-provider-authorization-store.js";
 
 export interface RuntimeFactoryOptions {
   readonly stateRoot?: string;
@@ -41,6 +49,7 @@ export interface RuntimeFactoryOptions {
   readonly providerRegistry?: ProviderRegistryPort;
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
+  readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
 }
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
@@ -60,15 +69,29 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const rpc = options.rpc ?? (bound.rpcUrl === undefined ? undefined : new HttpsBaseRpc(bound.rpcUrl));
   const http = options.http ?? (needsHttp(bound.request.command) ? new HttpsX402Http() : undefined);
   const profileRepository = options.profileRepository ?? new StateProfileRepository(state);
-  const providerRegistry = options.providerRegistry ?? new ProviderRegistry([{
-    provider_id: AWAL_PROVIDER_ID,
-    create: () => new AwalProcessAdapter().bundle(),
-  }]);
+  const providerRegistry = options.providerRegistry ?? new ProviderRegistry([
+    {
+      provider_id: AWAL_PROVIDER_ID,
+      create: () => new AwalProcessAdapter().bundle(),
+    },
+    {
+      provider_id: METAMASK_AGENT_WALLET_PROVIDER_ID,
+      create: () => new MetaMaskProcessAdapter(
+        undefined,
+        async (work) => await state.withLocks([`provider-session:${METAMASK_AGENT_WALLET_PROVIDER_ID}`], work),
+      ).bundle(),
+    },
+  ]);
   const foregroundAuthentication = options.foregroundAuthentication ?? (
     bound.request.command === "wallet.connect" ? new TtyForegroundAuthentication() : undefined
   );
   const transferApproval = options.approval ?? (
     bound.request.command === "transfer.approve" ? new TtyTransferApproval() : undefined
+  );
+  const providerAuthorizationStore = options.providerAuthorizationStore ?? (
+    needsProviderAuthorizationStore(bound.request.command)
+      ? new EncryptedProviderAuthorizationStore(state, wrappingSecret)
+      : undefined
   );
   return new ApnCore({
     state,
@@ -86,6 +109,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(options.ids === undefined ? {} : { ids: options.ids }),
     ...(options.wait === undefined ? {} : { wait: options.wait }),
     ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
+    ...(providerAuthorizationStore === undefined ? {} : { providerAuthorizationStore }),
   });
 }
 
@@ -115,4 +139,8 @@ function needsPolicy(command: string): boolean {
 
 function needsHttp(command: string): boolean {
   return ["x402.inspect", "x402.fetch.prepare", "x402.fetch.approve", "operation.resume"].includes(command);
+}
+
+function needsProviderAuthorizationStore(command: string): boolean {
+  return ["x402.fetch.approve", "operation.resume"].includes(command);
 }

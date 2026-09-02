@@ -7,5 +7,6 @@ export declare class X402PaidRequest extends X402Lifecycle {
     protected assertLegacySafeRead(operation: X402OperationRecord): Promise<void>;
     protected withOperationLock(operation: X402OperationRecord, callback: (current: X402OperationRecord) => Promise<unknown>, lockWaitMs?: number): Promise<unknown>;
     protected completeAuthorization(operation: X402OperationRecord, kind: "create" | "get"): Promise<unknown>;
+    private providerAuthorization;
     protected sendPaidRequest(operation: X402OperationRecord, purpose: "payment" | "result_recovery", verified: VerifiedX402PaymentMaterial, terminalizeFromExistingEvidence?: boolean, callerDeadlineMs?: number): Promise<unknown>;
 }

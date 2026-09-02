@@ -48,7 +48,7 @@ export function validateOperation(value) {
         "proofClass", "transitions", "integrityHash",
     ];
     const optionalKeys = [
-        "transactionData", "economics", "preparedBlockNumberAtomic", "providerDirect",
+        "transactionData", "economics", "preparedBlockNumberAtomic", "providerDirect", "providerEffect",
         "transactionHash", "rawTransactionHash", "lastSubmissionAt",
     ];
     const actualKeys = Object.keys(value);
@@ -117,7 +117,8 @@ function validateTransitions(values) {
         stateCorrupt("Operation has no transition history.");
 }
 function validateLocalDirect(operation) {
-    if (operation.transactionData === undefined || operation.economics === undefined || operation.preparedBlockNumberAtomic === undefined) {
+    if (operation.transactionData === undefined || operation.economics === undefined ||
+        operation.preparedBlockNumberAtomic === undefined || operation.providerEffect !== undefined) {
         stateCorrupt("Local direct operation is missing its transaction economics.");
     }
     parseAtomic(operation.preparedBlockNumberAtomic);
@@ -145,29 +146,42 @@ function validateProviderDirect(operation, binding) {
         binding.policy.verdict !== "foreground_approval_required" || binding.policy.foregroundApprovalRequired !== true)
         stateCorrupt("Provider direct operation binding is invalid.");
     const providerStates = [
-        "awaiting_approval", "started", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
-        "completed", "failed_before_effect", "failed_confirmed_revert",
+        "awaiting_approval", "started", "provider_pending", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
+        "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
     ];
     if (!providerStates.includes(operation.state))
         stateCorrupt("Provider direct operation state is invalid.");
-    const terminalStates = ["completed", "failed_before_effect", "failed_confirmed_revert"];
+    const terminalStates = [
+        "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
+    ];
     if (operation.terminal !== terminalStates.includes(operation.state)) {
         stateCorrupt("Provider direct terminal posture is invalid.");
     }
     if (["provider_acknowledged", "evidence_pending", "completed", "failed_confirmed_revert"]
         .includes(operation.state) && operation.transactionHash === undefined)
         stateCorrupt("Provider direct transaction identity is inconsistent with state.");
-    if (["awaiting_approval", "started", "failed_before_effect"].includes(operation.state) &&
+    if (["awaiting_approval", "started", "provider_pending", "failed_before_effect", "failed_provider_rejected"]
+        .includes(operation.state) &&
         operation.transactionHash !== undefined)
         stateCorrupt("Provider direct pre-effect state has a transaction identity.");
+    if (operation.providerEffect !== undefined)
+        validateProviderEffectReference(operation.providerEffect);
+    if (operation.state === "provider_pending" && operation.providerEffect === undefined) {
+        stateCorrupt("Provider-pending operation has no durable recovery reference.");
+    }
+    if (operation.state === "awaiting_approval" && operation.providerEffect !== undefined) {
+        stateCorrupt("Provider request exists before foreground approval.");
+    }
     const allowed = {
         awaiting_approval: ["started", "failed_before_effect"],
-        started: ["provider_acknowledged", "ambiguous_effect", "failed_before_effect"],
+        started: ["provider_pending", "provider_acknowledged", "ambiguous_effect", "failed_before_effect", "failed_provider_rejected"],
+        provider_pending: ["provider_acknowledged", "ambiguous_effect", "failed_provider_rejected"],
         provider_acknowledged: ["evidence_pending", "completed", "failed_confirmed_revert", "ambiguous_effect"],
         evidence_pending: ["completed", "failed_confirmed_revert", "ambiguous_effect"],
-        ambiguous_effect: ["completed", "failed_confirmed_revert"],
+        ambiguous_effect: ["provider_acknowledged", "completed", "failed_provider_rejected", "failed_confirmed_revert"],
         completed: [],
         failed_before_effect: [],
+        failed_provider_rejected: [],
         failed_confirmed_revert: [],
     };
     for (let index = 0; index < operation.transitions.length; index += 1) {
@@ -184,6 +198,13 @@ function validateProviderDirect(operation, binding) {
             stateCorrupt("Provider direct state transition is invalid.");
         }
     }
+}
+function validateProviderEffectReference(reference) {
+    if (!isPlainRecord(reference) || !exactKeys(reference, ["schemaVersion", "kind", "recoveryToken", "providerState"]) ||
+        reference.schemaVersion !== "apn.provider-effect-reference.v1" || reference.kind !== "transaction" ||
+        typeof reference.recoveryToken !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/u.test(reference.recoveryToken) ||
+        typeof reference.providerState !== "string" || !/^[A-Z_]{3,64}$/u.test(reference.providerState))
+        stateCorrupt("Provider effect recovery reference is invalid.");
 }
 function withoutIntegrity(value) {
     const { integrityHash: _ignored, ...rest } = value;

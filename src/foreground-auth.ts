@@ -1,6 +1,7 @@
 import { isatty } from "node:tty";
 import { ApnError } from "./errors.js";
 import type { ForegroundAuthenticationPort } from "./provider-ports.js";
+import type { ProviderProfileRecord } from "./provider-profile.js";
 
 const MAX_AUTH_INPUT_BYTES = 512;
 
@@ -41,8 +42,8 @@ export class TtyForegroundAuthentication implements ForegroundAuthenticationPort
     readonly observed_address: `0x${string}`;
     readonly current_capability_hash: string;
     readonly observed_capability_hash: string;
-    readonly current_trust_class: "local_software_wallet" | "provider_managed_non_custodial_tee";
-    readonly observed_trust_class: "local_software_wallet" | "provider_managed_non_custodial_tee";
+    readonly current_trust_class: ProviderProfileRecord["trust_class"];
+    readonly observed_trust_class: ProviderProfileRecord["trust_class"];
   }): Promise<boolean> {
     const phrase = `REBIND APN PROFILE ${input.revision}`;
     const prompt = [

@@ -11,7 +11,6 @@ import { canonicalProfile } from "./wallet-policy.js";
 import {
   assertUnattendedX402Balance,
   effectiveX402Cap,
-  policyBinding,
   requireProfilePolicy,
 } from "./profile-policy.js";
 import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
@@ -68,6 +67,7 @@ import {
 } from "./x402-service-rpc.js";
 import { ProviderX402Service } from "./provider-x402-service.js";
 import { isCode } from "./secure-state-store.js";
+import { resolveX402Payer } from "./x402-payer.js";
 
 export class X402Service extends X402PaidRequest {
   private readonly providerX402: ProviderX402Service;
@@ -110,14 +110,13 @@ export class X402Service extends X402PaidRequest {
       if (existing !== null) return publicX402Operation(existing.record as X402OperationRecord);
       await this.operations.assertProfileAvailable(profileHash);
 
-      const walletRecord = await state.loadWallet(profileHash);
-      if (walletRecord === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+      const payer = await resolveX402Payer(this.context, profileHash);
       const profilePolicy = requireProfilePolicy(
-        await this.context.requirePolicy().load(policyBinding(walletRecord)),
+        await this.context.requirePolicy().load(payer.policy),
       );
       const capAtomic = effectiveX402Cap(profilePolicy, callerCap);
       const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic });
-      const wallet = walletRecord.address.toLowerCase() as `0x${string}`;
+      const wallet = payer.wallet;
       const http = this.context.requireHttp();
       const rpc = this.context.requireRpc();
       const discovered = await freshChallenge(http, canonicalUrl);
@@ -163,6 +162,7 @@ export class X402Service extends X402PaidRequest {
         capAtomic,
         selectedOffer: selected.selectedOffer,
         wallet,
+        ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
         ...(paymentIdentifier === undefined ? {} : { paymentIdentifier }),
       };
       const initial = {
@@ -194,6 +194,7 @@ export class X402Service extends X402PaidRequest {
         amountAtomic: selected.amountAtomic,
         capAtomic,
         selectedOffer: selected.selectedOffer,
+        ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
         preparedBlock: {
           number: evidence.block.number,
           hash: evidence.block.hash,

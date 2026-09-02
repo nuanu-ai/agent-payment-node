@@ -6,6 +6,7 @@ export type Hex = `0x${string}`;
 export type OperationState =
   | "awaiting_approval"
   | "started"
+  | "provider_pending"
   | "provider_acknowledged"
   | "evidence_pending"
   | "ambiguous_effect"
@@ -14,6 +15,7 @@ export type OperationState =
   | "unknown_finality"
   | "completed"
   | "failed_before_effect"
+  | "failed_provider_rejected"
   | "failed_confirmed_revert"
   | "failed_proven_superseded";
 
@@ -41,6 +43,13 @@ export interface ProviderDirectBinding {
     readonly verdict: "foreground_approval_required";
     readonly foregroundApprovalRequired: true;
   };
+}
+
+export interface ProviderEffectReference {
+  readonly schemaVersion: "apn.provider-effect-reference.v1";
+  readonly kind: "transaction";
+  readonly recoveryToken: string;
+  readonly providerState: string;
 }
 
 export interface Transition {
@@ -71,6 +80,7 @@ export interface OperationRecord {
   readonly transactionData?: Hex;
   readonly economics?: Economics;
   readonly providerDirect?: ProviderDirectBinding;
+  readonly providerEffect?: ProviderEffectReference;
   readonly preparedAt: string;
   readonly preparedBlockNumberAtomic?: string;
   readonly expiresAt: string;

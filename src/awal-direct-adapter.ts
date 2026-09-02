@@ -55,7 +55,11 @@ export class AwalDirectAdapter implements DirectExecutionPort {
     }
   }
 
-  async execute(input: { readonly amountDecimal: string; readonly recipient: Address }): Promise<DirectResult> {
+  async execute(input: {
+    readonly amountDecimal: string;
+    readonly recipient: Address;
+    readonly sender: Address;
+  }): Promise<DirectResult> {
     let script: string;
     try {
       script = await this.binResolver();

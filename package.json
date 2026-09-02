@@ -1,6 +1,6 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.3.10",
+  "version": "0.4.0",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
   "private": false,
@@ -40,6 +40,7 @@
     "prepack": "npm run build && npm test"
   },
   "dependencies": {
+    "@metamask/agent-wallet": "6.1.5",
     "@modelcontextprotocol/server": "2.0.0",
     "@x402/core": "2.23.0",
     "awal": "2.12.1",
@@ -51,5 +52,11 @@
     "@types/node": "24.5.2",
     "typescript": "5.9.2"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "keywords": [],
+  "author": ""
 }

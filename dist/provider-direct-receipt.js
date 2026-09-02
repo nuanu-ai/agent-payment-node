@@ -13,6 +13,7 @@ const CHILD_NOT_CREATED_REASONS = new Set([
     "provider_binary_unavailable",
     "provider_child_not_created",
 ]);
+const PROVIDER_REJECTION_REASONS = new Set(["provider_denied", "provider_expired"]);
 export function providerDirectReceipt(operation, rpcReceipt) {
     const transition = operation.transitions.at(-1);
     if (transition === undefined)
@@ -87,6 +88,12 @@ function assertTerminalReceipt(receipt, operation) {
             receipt.blockNumberAtomic === undefined || receipt.exactTransferLog !== false)
             stateCorrupt("Provider direct revert receipt lacks exact receipt evidence.");
         parseAtomic(receipt.blockNumberAtomic);
+        return;
+    }
+    if (receipt.state === "failed_provider_rejected") {
+        if (receipt.blockNumberAtomic !== undefined || receipt.exactTransferLog !== undefined || receipt.transactionHash !== undefined ||
+            !PROVIDER_REJECTION_REASONS.has(receipt.reason) || receipt.proofClass !== "provider_terminal_no_transaction")
+            stateCorrupt("Provider direct rejection receipt is invalid.");
         return;
     }
     if (receipt.state !== "failed_before_effect" || receipt.blockNumberAtomic !== undefined ||

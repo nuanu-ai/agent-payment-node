@@ -240,6 +240,16 @@ export interface X402OperationRecord {
   readonly amountAtomic: string;
   readonly capAtomic: string;
   readonly selectedOffer: X402SelectedOffer;
+  readonly providerSigner?: {
+    readonly schemaVersion: "apn.x402.provider-signer.v1";
+    readonly providerId: string;
+    readonly profileRevision: number;
+    readonly capabilityHash: string;
+    readonly accountBindingHash: string;
+    readonly executionMode: "provider_detached_eip3009_apn_paid_retry";
+    readonly executionOwner: "apn";
+    readonly retryOwner: "apn_state_machine";
+  };
   readonly preparedBlock: { readonly number: string; readonly hash: `0x${string}`; readonly observedAt: string };
   readonly paymentIdentifier?: { readonly declarationCanonicalJson: string; readonly declarationHash: string; readonly value: string };
   readonly authorization: {
@@ -285,7 +295,7 @@ export function x402RequestHash(input: { readonly profile: string; readonly cano
 }
 
 export function x402Fingerprint(input: Pick<X402OperationRecord,
-  "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier"
+  "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier" | "providerSigner"
 >): string {
   return domainHash("apn.x402.request.v1", canonicalJson({
     kind: input.kind,
@@ -299,6 +309,7 @@ export function x402Fingerprint(input: Pick<X402OperationRecord,
     capAtomic: input.capAtomic,
     selectedOfferHash: input.selectedOffer.offerHash,
     wallet: input.wallet,
+    ...(input.providerSigner === undefined ? {} : { providerSigner: input.providerSigner }),
     acceptedResolvedDefaults: input.selectedOffer.resolved,
     paymentIdentifier: input.paymentIdentifier === undefined
       ? { advertised: false }
