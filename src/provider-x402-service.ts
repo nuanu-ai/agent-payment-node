@@ -312,7 +312,7 @@ export class ProviderX402Service {
     if (operation.evidenceLowerBlock === undefined) return operation;
     if (
       operation.state === "ambiguous_effect" && SETTLEMENT_OBSERVATION_REASONS.has(operation.reason) &&
-      (operation.immutableUpperBlock === undefined || !RETRYABLE_SETTLEMENT_OBSERVATION_REASONS.has(operation.reason))
+      !RETRYABLE_SETTLEMENT_OBSERVATION_REASONS.has(operation.reason)
     ) return operation;
     assertProviderX402RpcBinding(this.context, operation);
     const remaining = deadline === undefined ? undefined : Math.floor(deadline - this.context.wait.nowMs());
