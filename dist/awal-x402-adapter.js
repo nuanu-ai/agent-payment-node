@@ -187,6 +187,8 @@ function parseSellerResult(bytes, expectedAmount) {
     if (!isPlainRecord(value))
         throw protocol();
     validateEnvelopeKeys(value);
+    if (Object.hasOwn(value, "headers") && !isPlainRecord(value.headers))
+        throw protocol();
     const payment = paymentMetadata(value, expectedAmount);
     if (!Number.isSafeInteger(value.status) || Number(value.status) < 200 || Number(value.status) > 299 ||
         (Object.hasOwn(value, "statusText") && (typeof value.statusText !== "string" || Buffer.byteLength(value.statusText, "utf8") > MAX_STATUS_TEXT_BYTES)))

@@ -16,7 +16,7 @@ const CONFLICTING_WORDS = new Set([
 ]);
 
 export const PROVIDER_X402_KNOWN_ENVELOPE_KEYS = [
-  "status", "statusText", "data", "paymentMade", "amountPaid",
+  "status", "statusText", "data", "paymentMade", "amountPaid", "headers",
 ] as const;
 
 type KnownEnvelopeKey = typeof PROVIDER_X402_KNOWN_ENVELOPE_KEYS[number];

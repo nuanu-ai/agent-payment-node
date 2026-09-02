@@ -44,7 +44,7 @@ function validateRangeSettlement(evidence, operation) {
         evidence.transactionHash !== transfer.transactionHash || !validBlock(lower, "safe") || !validBlock(upper, "number") ||
         !validTransfer(transfer, operation) || BigInt(transfer.blockNumber) < BigInt(lower.number) ||
         BigInt(transfer.blockNumber) > BigInt(upper.number) || BigInt(lower.number) >= BigInt(upper.number) ||
-        Date.parse(operation.evidenceDeadlineAt ?? "") !== Date.parse(operation.transitions.find((item) => item.state === "started")?.at ?? "") + 240_000 ||
+        Date.parse(operation.evidenceDeadlineAt ?? "") !== Date.parse(operation.finalPreflight?.observedAt ?? "") + 240_000 ||
         BigInt(lower.timestamp) >= BigInt(Math.ceil(Date.parse(operation.evidenceDeadlineAt ?? "") / 1_000)) ||
         BigInt(upper.timestamp) < BigInt(Math.ceil(Date.parse(operation.evidenceDeadlineAt ?? "") / 1_000)))
         corrupt();

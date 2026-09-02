@@ -173,7 +173,7 @@ export class ProviderX402Service {
                     finalPreflight: { requirementDigest: selected.digest, observedAt: startedAt.toISOString() },
                     evidenceLowerBlock: lower.lowerBlock,
                     evidenceDeadlineAt: new Date(startedAt.getTime() + EVIDENCE_WINDOW_MS).toISOString(),
-                });
+                }, startedAt.toISOString());
                 let effect;
                 try {
                     effect = await adapter.x402.execute({
