@@ -131,6 +131,7 @@ function validateOptionValue(definition: CommandOption, value: string): void {
     case "string": if (value.length === 0) invalid(); return;
     case "profile": if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value)) invalid(); return;
     case "provider_id": if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value)) invalid(); return;
+    case "provider_auth_method": if (!/^[a-z][a-z0-9-]{0,31}$/u.test(value)) invalid(); return;
     case "positive_integer": if (!/^[1-9][0-9]*$/u.test(value) || !Number.isSafeInteger(Number(value))) invalid(); return;
     case "https_url": {
       const parsed = (() => { try { return new URL(value); } catch { return invalid(); } })();

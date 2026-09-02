@@ -80,6 +80,8 @@ async function callTool(
 
 function walletConnectHandoff(request: Extract<import("./commands.js").CommandRequest, { readonly command: "wallet.connect" }>): string {
   return `apn wallet connect --profile ${request.profile} --provider ${request.providerId}${
+    request.authenticationMethod === undefined ? "" : ` --auth-method ${request.authenticationMethod}`
+  }${
     request.expectedRevision === undefined ? "" : ` --expected-revision ${request.expectedRevision}`
   }`;
 }

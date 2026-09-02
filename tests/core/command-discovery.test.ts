@@ -119,7 +119,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "",
     "Commands:",
     "  apn wallet ensure [--profile <profile>] — Create or reuse one encrypted disposable wallet.",
-    "  apn wallet connect --profile <profile> --provider <provider-id> [--expected-revision <positive-integer>] — Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.",
+    "  apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] — Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.",
     "  apn wallet status [--profile <profile>] — Read wallet presence and public identity.",
     "  apn wallet balance [--profile <profile>] --rpc-url <https-url> — Read Base ETH and canonical Base-USDC balances.",
     "",
@@ -199,6 +199,7 @@ test("catalog parser derives requiredness, defaults, duplicate rejection and sca
   }
   for (const [path, option, invalidValues] of [
     [["wallet", "status"], "--profile", ["UPPER", "", "a".repeat(65)]],
+    [["wallet", "connect"], "--auth-method", ["UPPER", "email_otp", "", `a${"b".repeat(32)}`]],
     [["wallet", "balance"], "--rpc-url", ["http://rpc.example", "https://user:pass@rpc.example", "https://rpc.example/#fragment"]],
     [["pay", "transfer", "prepare"], "--to", ["0x1234", "recipient"]],
     [["pay", "transfer", "prepare"], "--amount-usdc", ["0", "01", "1.0000001"]],
@@ -501,6 +502,7 @@ function validValue(type: ScalarType): string {
     case "string": return "value";
     case "profile": return "agent_1";
     case "provider_id": return "coinbase-agentic-wallet";
+    case "provider_auth_method": return "browser";
     case "positive_integer": return "1";
     case "https_url": return "https://rpc.example/resource";
     case "address": return "0x1111111111111111111111111111111111111111";

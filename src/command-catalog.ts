@@ -10,6 +10,7 @@ export type ScalarType =
   | "string"
   | "profile"
   | "provider_id"
+  | "provider_auth_method"
   | "positive_integer"
   | "https_url"
   | "address"
@@ -130,11 +131,15 @@ export const COMMANDS: readonly CommandDefinition[] = [
   command(["wallet", "ensure"], "apn wallet ensure [--profile <profile>]", "Create or reuse one encrypted disposable wallet.", [profileOptional], "local_write", "May create ~/.apn state and one Keychain wrapping secret.", "none", "Wallet creation itself is non-interactive.", completedStates, [], ["apn wallet ensure --profile default"]),
   command(
     ["wallet", "connect"],
-    "apn wallet connect --profile <profile> --provider <provider-id> [--expected-revision <positive-integer>]",
+    "apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>]",
     "Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.",
     [
       profileRequired,
       option("--provider", "provider_id", true, noDefault, ["registered_provider_identifier"], "public"),
+      option("--auth-method", "provider_auth_method", false, noDefault, [
+        "provider_declared_authentication_method",
+        "metamask_agent_wallet_values_qr_or_browser",
+      ], "public"),
       option("--expected-revision", "positive_integer", false, noDefault, ["required_for_rebind", "omitted_for_initial_connect"], "public"),
     ],
     "local_write",
@@ -146,6 +151,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
     [
       "apn wallet connect --profile provider-one --provider coinbase-agentic-wallet",
       "apn wallet connect --profile metamask --provider metamask-agent-wallet",
+      "apn wallet connect --profile metamask --provider metamask-agent-wallet --auth-method browser",
     ],
   ),
   command(["wallet", "status"], "apn wallet status [--profile <profile>]", "Read wallet presence and public identity.", [profileOptional], "local_read", "Returns absent without creating state or accessing Keychain material.", "none", "Never.", completedStates, [], ["apn wallet status --profile default"]),

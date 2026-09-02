@@ -558,6 +558,26 @@ test("already authenticated AWAL connect reuses the session without identity or 
   );
 });
 
+test("provider-specific authentication methods are rejected before Coinbase access", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const runner = new FixtureRunner();
+  const foreground = new FixtureForeground();
+  const result = await runCli([
+    "wallet", "connect", "--profile", "provider-one", "--provider", AWAL_PROVIDER_ID,
+    "--auth-method", "browser",
+  ], {}, {
+    stateRoot: temporary.root,
+    providerRegistry: registry(runner),
+    foregroundAuthentication: foreground,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, "APN_INVALID_INPUT");
+  assert.deepEqual(runner.calls, []);
+  assert.equal(foreground.identityReads, 0);
+  assert.equal(foreground.challengeReads, 0);
+});
+
 test("malformed provider balance and failed authentication fail without a partial profile write", async (t) => {
   const malformed = new FixtureRunner();
   malformed.balanceStdout = Buffer.from(JSON.stringify({ address: ADDRESS_A, chain: "base", balances: {} }));
@@ -639,6 +659,15 @@ test("MCP connect returns the exact foreground handoff before provider compositi
   assert.equal(envelope.error?.code, "APN_FOREGROUND_AUTH_REQUIRED");
   assert.equal(envelope.error?.details?.cli_handoff, handoff);
   assert.deepEqual(envelope.next_actions, [handoff]);
+  const browserResult = await client.callTool({
+    name: "apn_wallet_connect",
+    arguments: { profile: "metamask", provider: "metamask-agent-wallet", auth_method: "browser" },
+  });
+  const browserEnvelope = browserResult.structuredContent as unknown as OutputEnvelope;
+  const browserHandoff = "apn wallet connect --profile metamask --provider metamask-agent-wallet --auth-method browser";
+  assert.equal(browserEnvelope.error?.code, "APN_FOREGROUND_AUTH_REQUIRED");
+  assert.equal(browserEnvelope.error?.details?.cli_handoff, browserHandoff);
+  assert.deepEqual(browserEnvelope.next_actions, [browserHandoff]);
   assert.equal(resolves, 0);
 });
 

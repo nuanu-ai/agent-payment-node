@@ -5,6 +5,7 @@ import { MetaMaskDirectAdapter } from "./metamask-direct-adapter.js";
 import { MetaMaskX402Adapter } from "./metamask-x402-adapter.js";
 import { NodeMetaMaskProcessRunner } from "./metamask-process-runner.js";
 export const METAMASK_AGENT_WALLET_PROVIDER_ID = "metamask-agent-wallet";
+export const METAMASK_AGENT_WALLET_AUTHENTICATION_METHODS = ["qr", "browser"];
 export class MetaMaskProcessAdapter {
     runner;
     exclusive;
@@ -12,6 +13,7 @@ export class MetaMaskProcessAdapter {
     direct;
     x402Signer;
     capabilities = metamaskDirectCapabilitySnapshot();
+    authenticationMethods = METAMASK_AGENT_WALLET_AUTHENTICATION_METHODS;
     constructor(runner = new NodeMetaMaskProcessRunner(), exclusive = async (work) => await work(), now = () => new Date(), direct = new MetaMaskDirectAdapter(runner, exclusive), x402Signer = new MetaMaskX402Adapter(runner, exclusive)) {
         this.runner = runner;
         this.exclusive = exclusive;
@@ -31,11 +33,14 @@ export class MetaMaskProcessAdapter {
             evidence: { owner: "apn" },
         };
     }
-    async connect(_foreground) {
+    async connect(_foreground, options = {}) {
         await this.exclusive(async () => {
+            const authenticationMethod = requireAuthenticationMethod(options.authenticationMethod);
             let status = await this.doctor();
             if (!status.authenticated) {
-                const exitCode = await this.runner.runForeground(["login", "qr"]);
+                const exitCode = await this.runner.runForeground(authenticationMethod === "browser"
+                    ? ["login", "browser", "--otp-pair"]
+                    : ["login", "qr"]);
                 if (exitCode !== 0)
                     throw authenticationFailure();
                 status = await this.doctor();
@@ -124,6 +129,13 @@ export class MetaMaskProcessAdapter {
             result.stdout.fill(0);
         }
     }
+}
+function requireAuthenticationMethod(input) {
+    const selected = input ?? "qr";
+    if (selected !== "qr" && selected !== "browser") {
+        throw new ApnError("APN_INVALID_INPUT", "MetaMask Agent Wallet supports only qr or browser authentication.");
+    }
+    return selected;
 }
 function requireSuccess(exitCode, bytes) {
     let value;
