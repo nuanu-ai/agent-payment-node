@@ -29,7 +29,11 @@ export class MetaMaskDirectAdapter implements DirectExecutionPort {
     readonly sender: Address;
   }): Promise<DirectResult> {
     return await this.exclusive(async () => {
-      await this.selectAndCrossCheck(input.sender);
+      try {
+        await this.selectAndCrossCheck(input.sender);
+      } catch {
+        return { disposition: "not_started", reason: "provider_child_not_created" };
+      }
       let result: MetaMaskProcessResult;
       try {
         result = await this.runner.runJson([
@@ -89,7 +93,7 @@ export class MetaMaskDirectAdapter implements DirectExecutionPort {
     try {
       const data = successData(observed);
       if (
-        data === null || data.mode !== "server-wallet" || data.chainNamespace !== "eip155" ||
+        data === null || data.mode !== "server" || data.chainNamespace !== "eip155" ||
         typeof data.address !== "string" || data.address.toLowerCase() !== expected.toLowerCase()
       ) throw new Error("selected sender mismatch");
     } finally {
@@ -105,7 +109,7 @@ function parseTransferResult(result: MetaMaskProcessResult, expected: Address): 
   if (!isPlainRecord(value.data)) return { disposition: "ambiguous", reason: "provider_response_malformed" };
   const data = value.data;
   if (
-    data.mode !== "server-wallet" || typeof data.address !== "string" ||
+    data.mode !== "server" || typeof data.address !== "string" ||
     data.address.toLowerCase() !== expected.toLowerCase()
   ) return { disposition: "ambiguous", reason: "provider_sender_mismatch" };
   return classifyEffect(data);

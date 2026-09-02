@@ -98,7 +98,7 @@ export class MetaMaskX402Adapter implements X402SigningPort {
     try {
       const data = successfulData(observed);
       if (
-        data === null || data.mode !== "server-wallet" || data.chainNamespace !== "eip155" ||
+        data === null || data.mode !== "server" || data.chainNamespace !== "eip155" ||
         typeof data.address !== "string" || data.address.toLowerCase() !== expected.toLowerCase()
       ) throw new Error("selected signer mismatch");
     } finally { observed.stdout.fill(0); }
@@ -112,7 +112,7 @@ function parseSigningResult(result: MetaMaskProcessResult, expected: Address): X
   if (!isPlainRecord(envelope.data)) return ambiguous("provider_response_malformed");
   const data = envelope.data;
   if (
-    data.mode !== "server-wallet" || typeof data.address !== "string" ||
+    data.mode !== "server" || typeof data.address !== "string" ||
     data.address.toLowerCase() !== expected.toLowerCase()
   ) return ambiguous("provider_signer_mismatch");
   return classify(data);

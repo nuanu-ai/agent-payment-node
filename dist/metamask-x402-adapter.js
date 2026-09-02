@@ -97,7 +97,7 @@ export class MetaMaskX402Adapter {
         ]);
         try {
             const data = successfulData(observed);
-            if (data === null || data.mode !== "server-wallet" || data.chainNamespace !== "eip155" ||
+            if (data === null || data.mode !== "server" || data.chainNamespace !== "eip155" ||
                 typeof data.address !== "string" || data.address.toLowerCase() !== expected.toLowerCase())
                 throw new Error("selected signer mismatch");
         }
@@ -115,7 +115,7 @@ function parseSigningResult(result, expected) {
     if (!isPlainRecord(envelope.data))
         return ambiguous("provider_response_malformed");
     const data = envelope.data;
-    if (data.mode !== "server-wallet" || typeof data.address !== "string" ||
+    if (data.mode !== "server" || typeof data.address !== "string" ||
         data.address.toLowerCase() !== expected.toLowerCase())
         return ambiguous("provider_signer_mismatch");
     return classify(data);

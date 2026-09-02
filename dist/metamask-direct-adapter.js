@@ -15,7 +15,12 @@ export class MetaMaskDirectAdapter {
     }
     async execute(input) {
         return await this.exclusive(async () => {
-            await this.selectAndCrossCheck(input.sender);
+            try {
+                await this.selectAndCrossCheck(input.sender);
+            }
+            catch {
+                return { disposition: "not_started", reason: "provider_child_not_created" };
+            }
             let result;
             try {
                 result = await this.runner.runJson([
@@ -80,7 +85,7 @@ export class MetaMaskDirectAdapter {
         ]);
         try {
             const data = successData(observed);
-            if (data === null || data.mode !== "server-wallet" || data.chainNamespace !== "eip155" ||
+            if (data === null || data.mode !== "server" || data.chainNamespace !== "eip155" ||
                 typeof data.address !== "string" || data.address.toLowerCase() !== expected.toLowerCase())
                 throw new Error("selected sender mismatch");
         }
@@ -98,7 +103,7 @@ function parseTransferResult(result, expected) {
     if (!isPlainRecord(value.data))
         return { disposition: "ambiguous", reason: "provider_response_malformed" };
     const data = value.data;
-    if (data.mode !== "server-wallet" || typeof data.address !== "string" ||
+    if (data.mode !== "server" || typeof data.address !== "string" ||
         data.address.toLowerCase() !== expected.toLowerCase())
         return { disposition: "ambiguous", reason: "provider_sender_mismatch" };
     return classifyEffect(data);

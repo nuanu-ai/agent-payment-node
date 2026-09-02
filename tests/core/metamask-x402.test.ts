@@ -67,16 +67,16 @@ class FixtureRunner implements MetaMaskProcessRunnerPort {
     });
     if (argv[0] === "wallet" && argv[1] === "select") return success({ selected: this.address });
     if (argv[0] === "wallet" && argv[1] === "address") return success({
-      mode: "server-wallet", chainNamespace: "eip155", address: this.address,
+      mode: "server", chainNamespace: "eip155", address: this.address,
     });
     if (argv[0] === "wallet" && argv[1] === "sign-typed-data") {
       if (this.initial === "throw") throw new Error("provider response lost");
       if (this.initial === "rejected") return success({
-        mode: "server-wallet", address: this.address, status: "DENIED",
+        mode: "server", address: this.address, status: "DENIED",
       });
       this.signature = await signPayload(this.signer, requiredFlag(argv, "--payload"));
       return success({
-        mode: "server-wallet", address: this.address, status: "AWAITING_MFA", pollingId: TOKEN,
+        mode: "server", address: this.address, status: "AWAITING_MFA", pollingId: TOKEN,
       });
     }
     if (argv[0] === "wallet" && argv[1] === "requests" && argv[2] === "watch") {

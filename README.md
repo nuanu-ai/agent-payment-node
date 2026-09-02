@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.4.1 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.4.2 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
