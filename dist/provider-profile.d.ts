@@ -78,6 +78,7 @@ export declare function localCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function lifecycleReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function coinbaseDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function metamaskReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot;
+export declare function metamaskDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function capabilityHash(snapshot: ProviderCapabilitySnapshot): string;
 export declare function accountBindingHash(providerId: string, address: Address): string;
 export declare function markProviderProfileDrift(profile: ProviderProfileRecord, observed: ProviderBindingObservation): ProviderProfileRecord;

@@ -34,6 +34,7 @@ export declare class AwalDirectAdapter implements DirectExecutionPort {
     execute(input: {
         readonly amountDecimal: string;
         readonly recipient: Address;
+        readonly sender: Address;
     }): Promise<DirectResult>;
 }
 export {};

@@ -228,9 +228,10 @@ test("generic APN profile binds, restarts and reads independent Base balance", a
   assert.equal(rpc.balanceCalls, 1);
 });
 
-test("read-only Slice advertises no direct or x402 effect", () => {
+test("direct Slice advertises provider direct while x402 remains unavailable", () => {
   const capabilities = new MetaMaskProcessAdapter(new FixtureRunner()).capabilities;
-  assert.equal(capabilities.direct.available, false);
+  assert.equal(capabilities.direct.available, true);
+  assert.equal(capabilities.direct.mode, "provider_atomic_send");
   assert.equal(capabilities.x402.available, false);
   assert.equal(capabilities.lifecycle.connect, true);
   assert.equal(capabilities.read.address, true);
