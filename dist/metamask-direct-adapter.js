@@ -1,5 +1,7 @@
 import { isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
+import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
+import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 const PENDING_STATES = new Set(["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING"]);
 const UNSAFE_FAILURE_STATES = new Set([
     "FAILED", "BROADCAST_FAILED", "BROADCAST_TRACKING_EXPIRED", "CONFIRMATION_TRACKING_EXPIRED",
@@ -85,7 +87,7 @@ export class MetaMaskDirectAdapter {
         ]);
         try {
             const data = successData(observed);
-            if (data === null || data.mode !== "server" || data.chainNamespace !== "eip155" ||
+            if (data === null || data.mode !== "server" || !isMetaMaskEvmNamespace(data.chainNamespace) ||
                 typeof data.address !== "string" || data.address.toLowerCase() !== expected.toLowerCase())
                 throw new Error("selected sender mismatch");
         }
@@ -95,25 +97,48 @@ export class MetaMaskDirectAdapter {
     }
 }
 function parseTransferResult(result, expected) {
-    const value = parseEnvelope(result.stdout);
+    const parsed = parseMetaMaskProcessOutput(result.stdout);
+    if (parsed === null)
+        return { disposition: "ambiguous", reason: "provider_response_malformed" };
+    const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices);
+    if (pendingNotice.disposition === "invalid")
+        return { disposition: "ambiguous", reason: pendingNotice.reason };
+    const value = parsed.envelope;
+    if (value === null)
+        return pendingNotice.disposition === "pending"
+            ? pendingNotice
+            : { disposition: "ambiguous", reason: "provider_response_malformed" };
     if (!isPlainRecord(value))
         return { disposition: "ambiguous", reason: "provider_response_malformed" };
-    if (result.exitCode !== 0 || value.ok !== true)
-        return parseProviderFailure(value);
+    if (result.exitCode !== 0 || value.ok !== true) {
+        const failure = parseProviderFailure(value);
+        return pendingNotice.disposition === "pending" && failure.disposition === "ambiguous" ? pendingNotice : failure;
+    }
     if (!isPlainRecord(value.data))
         return { disposition: "ambiguous", reason: "provider_response_malformed" };
     const data = value.data;
     if (data.mode !== "server" || typeof data.address !== "string" ||
         data.address.toLowerCase() !== expected.toLowerCase())
         return { disposition: "ambiguous", reason: "provider_sender_mismatch" };
-    return classifyEffect(data);
+    return reconcilePendingNotice(classifyEffect(data), pendingNotice, data.pollingId);
 }
 function parseWatchResult(result, recoveryToken) {
-    const value = parseEnvelope(result.stdout);
+    const parsed = parseMetaMaskProcessOutput(result.stdout);
+    if (parsed === null)
+        return { disposition: "ambiguous", reason: "provider_response_malformed" };
+    const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices, recoveryToken);
+    if (pendingNotice.disposition === "invalid")
+        return { disposition: "ambiguous", reason: pendingNotice.reason };
+    const value = parsed.envelope;
+    if (value === null)
+        return pendingNotice.disposition === "pending"
+            ? pendingNotice
+            : { disposition: "ambiguous", reason: "provider_response_malformed" };
     if (!isPlainRecord(value))
         return { disposition: "ambiguous", reason: "provider_response_malformed" };
     if (result.exitCode !== 0 || value.ok !== true) {
-        return parseProviderFailure(value, recoveryToken);
+        const failure = parseProviderFailure(value, recoveryToken);
+        return pendingNotice.disposition === "pending" && failure.disposition === "ambiguous" ? pendingNotice : failure;
     }
     if (!isPlainRecord(value.data) || !isPlainRecord(value.data.request) || !isPlainRecord(value.data.status)) {
         return { disposition: "ambiguous", reason: "provider_response_malformed" };
@@ -128,7 +153,7 @@ function parseWatchResult(result, recoveryToken) {
     if (requestHash !== undefined && statusHash !== undefined && requestHash.toLowerCase() !== statusHash.toLowerCase()) {
         return { disposition: "ambiguous", reason: "provider_transaction_identity_conflict" };
     }
-    return classifyEffect({ ...status, hash: statusHash ?? requestHash, pollingId: recoveryToken });
+    return reconcilePendingNotice(classifyEffect({ ...status, hash: statusHash ?? requestHash, pollingId: recoveryToken }), pendingNotice);
 }
 function classifyEffect(data) {
     const hash = validHash(data.hash) ? data.hash : validHash(data.txHash) ? data.txHash : undefined;
@@ -162,21 +187,24 @@ function parseProviderFailure(value, recoveryToken) {
             ? "provider_request_not_found" : "provider_exit_unclassified" };
 }
 function isSuccess(result) {
-    const value = parseEnvelope(result.stdout);
+    const value = parseMetaMaskProcessOutput(result.stdout)?.envelope;
     return result.exitCode === 0 && isPlainRecord(value) && value.ok === true && isPlainRecord(value.data);
 }
 function successData(result) {
-    const value = parseEnvelope(result.stdout);
+    const value = parseMetaMaskProcessOutput(result.stdout)?.envelope;
     return result.exitCode === 0 && isPlainRecord(value) && value.ok === true && isPlainRecord(value.data)
         ? value.data : null;
 }
-function parseEnvelope(bytes) {
-    try {
-        return JSON.parse(bytes.toString("utf8"));
-    }
-    catch {
-        return null;
-    }
+function reconcilePendingNotice(result, notice, summaryToken) {
+    if (notice.disposition !== "pending")
+        return result;
+    if (summaryToken !== undefined && (typeof summaryToken !== "string" || !isRecoveryToken(summaryToken) || summaryToken !== notice.recoveryToken))
+        return { disposition: "ambiguous", reason: "provider_recovery_identity_mismatch" };
+    if (result.disposition !== "pending")
+        return result;
+    return notice.recoveryToken === result.recoveryToken
+        ? result
+        : { disposition: "ambiguous", reason: "provider_recovery_identity_mismatch" };
 }
 function validHash(value) {
     return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/u.test(value);

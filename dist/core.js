@@ -88,6 +88,7 @@ export class ApnCore {
                 }
                 return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds));
             }
+            case "operation.recover-provider-request": return operationOutcome(await this.transfer.recoverProviderRequest(request.operationId, request.providerRequestId));
             case "operation.recover-transaction-settlement": {
                 const recovered = await this.providerTransactionRecovery.recover(request);
                 return {

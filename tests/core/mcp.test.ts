@@ -33,6 +33,7 @@ const TOOL_NAMES = [
   "apn_pay_transfer_approve",
   "apn_operation_status",
   "apn_operation_resume",
+  "apn_operation_recover_provider_request",
   "apn_operation_recover_transaction_settlement",
   "apn_receipt_get",
 ] as const;
@@ -48,7 +49,7 @@ class RecordingPolicyApproval implements ProfilePolicyApprovalPort {
   async approve(intent: ProfilePolicyApprovalIntent): Promise<void> { this.intents.push(intent); }
 }
 
-test("official MCP client proves production stdio descriptor, seventeen tools, application failures and clean close", async () => {
+test("official MCP client proves production stdio descriptor, eighteen tools, application failures and clean close", async () => {
   const executable = process.env.APN_INSTALLED_BIN ?? resolve("bin/apn.js");
   const config = spawnSync(executable, ["mcp", "config"], { cwd: resolve("."), encoding: "utf8" });
   assert.equal(config.status, 0, config.stderr);
@@ -110,6 +111,12 @@ test("official MCP client proves production stdio descriptor, seventeen tools, a
       { name: "apn_operation_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_operation_resume", properties: ["operation", "rpc_url", "wait_seconds"], required: ["operation", "rpc_url"], defaults: {} },
       {
+        name: "apn_operation_recover_provider_request",
+        properties: ["operation", "provider_request_id"],
+        required: ["operation", "provider_request_id"],
+        defaults: {},
+      },
+      {
         name: "apn_operation_recover_transaction_settlement",
         properties: ["operation", "transaction_hash", "idempotency_key", "rpc_url"],
         required: ["operation", "transaction_hash", "idempotency_key", "rpc_url"],
@@ -134,6 +141,7 @@ test("official MCP client proves production stdio descriptor, seventeen tools, a
       ["apn_x402_fetch_approve", { operation: "A".repeat(64), rpc_url: "https://rpc.example" }],
       ["apn_pay_transfer_prepare", { profile: "default", idempotency_key: "payment-001", to: "not-an-address", amount_usdc: "1.0", rpc_url: "https://rpc.example" }],
       ["apn_operation_resume", { operation: "a".repeat(64), rpc_url: "https://rpc.example", wait_seconds: 1 }],
+      ["apn_operation_recover_provider_request", { operation: "a".repeat(64), provider_request_id: "bad request id" }],
       ["apn_operation_recover_transaction_settlement", {
         operation: "a".repeat(64), transaction_hash: "invalid", idempotency_key: "recovery-001", rpc_url: "https://rpc.example",
       }],

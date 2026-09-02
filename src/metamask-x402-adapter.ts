@@ -1,7 +1,9 @@
 import { canonicalJson, isPlainRecord } from "./canonical.js";
+import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import type { Address, Hex } from "./model.js";
 import type { X402SigningIntent, X402SigningPort, X402SigningResult } from "./provider-ports.js";
 import type { MetaMaskProcessResult, MetaMaskProcessRunnerPort } from "./metamask-process-runner.js";
+import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 
 type Exclusive = <T>(work: () => Promise<T>) => Promise<T>;
 
@@ -98,7 +100,7 @@ export class MetaMaskX402Adapter implements X402SigningPort {
     try {
       const data = successfulData(observed);
       if (
-        data === null || data.mode !== "server" || data.chainNamespace !== "eip155" ||
+        data === null || data.mode !== "server" || !isMetaMaskEvmNamespace(data.chainNamespace) ||
         typeof data.address !== "string" || data.address.toLowerCase() !== expected.toLowerCase()
       ) throw new Error("selected signer mismatch");
     } finally { observed.stdout.fill(0); }
@@ -106,22 +108,38 @@ export class MetaMaskX402Adapter implements X402SigningPort {
 }
 
 function parseSigningResult(result: MetaMaskProcessResult, expected: Address): X402SigningResult {
-  const envelope = parseEnvelope(result.stdout);
+  const parsed = parseMetaMaskProcessOutput(result.stdout);
+  if (parsed === null) return ambiguous("provider_response_malformed");
+  const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices);
+  if (pendingNotice.disposition === "invalid") return ambiguous(pendingNotice.reason);
+  const envelope = parsed.envelope;
+  if (envelope === null) return pendingNotice.disposition === "pending" ? pendingNotice : ambiguous("provider_response_malformed");
   if (!isPlainRecord(envelope)) return ambiguous("provider_response_malformed");
-  if (result.exitCode !== 0 || envelope.ok !== true) return parseFailure(envelope);
+  if (result.exitCode !== 0 || envelope.ok !== true) {
+    const failure = parseFailure(envelope);
+    return pendingNotice.disposition === "pending" && failure.disposition === "ambiguous" ? pendingNotice : failure;
+  }
   if (!isPlainRecord(envelope.data)) return ambiguous("provider_response_malformed");
   const data = envelope.data;
   if (
     data.mode !== "server" || typeof data.address !== "string" ||
     data.address.toLowerCase() !== expected.toLowerCase()
   ) return ambiguous("provider_signer_mismatch");
-  return classify(data);
+  return reconcilePendingNotice(classify(data), pendingNotice, data.pollingId);
 }
 
 function parseWatchResult(result: MetaMaskProcessResult, recoveryToken: string): X402SigningResult {
-  const envelope = parseEnvelope(result.stdout);
+  const parsed = parseMetaMaskProcessOutput(result.stdout);
+  if (parsed === null) return ambiguous("provider_response_malformed");
+  const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices, recoveryToken);
+  if (pendingNotice.disposition === "invalid") return ambiguous(pendingNotice.reason);
+  const envelope = parsed.envelope;
+  if (envelope === null) return pendingNotice.disposition === "pending" ? pendingNotice : ambiguous("provider_response_malformed");
   if (!isPlainRecord(envelope)) return ambiguous("provider_response_malformed");
-  if (result.exitCode !== 0 || envelope.ok !== true) return parseFailure(envelope, recoveryToken);
+  if (result.exitCode !== 0 || envelope.ok !== true) {
+    const failure = parseFailure(envelope, recoveryToken);
+    return pendingNotice.disposition === "pending" && failure.disposition === "ambiguous" ? pendingNotice : failure;
+  }
   if (!isPlainRecord(envelope.data) || !isPlainRecord(envelope.data.request) || !isPlainRecord(envelope.data.status)) {
     return ambiguous("provider_response_malformed");
   }
@@ -135,7 +153,10 @@ function parseWatchResult(result: MetaMaskProcessResult, recoveryToken: string):
   if (requestSignature !== undefined && statusSignature !== undefined && requestSignature !== statusSignature) {
     return ambiguous("provider_signature_identity_conflict");
   }
-  return classify({ ...status, signature: statusSignature ?? requestSignature, pollingId: recoveryToken });
+  return reconcilePendingNotice(
+    classify({ ...status, signature: statusSignature ?? requestSignature, pollingId: recoveryToken }),
+    pendingNotice,
+  );
 }
 
 function classify(data: Record<string, unknown>): X402SigningResult {
@@ -173,14 +194,24 @@ function parseFailure(value: Record<string, unknown>, recoveryToken?: string): X
 }
 
 function successfulData(result: MetaMaskProcessResult): Record<string, unknown> | null {
-  const value = parseEnvelope(result.stdout);
+  const value = parseMetaMaskProcessOutput(result.stdout)?.envelope;
   return result.exitCode === 0 && isPlainRecord(value) && value.ok === true && isPlainRecord(value.data)
     ? value.data : null;
 }
 
-function parseEnvelope(bytes: Buffer): unknown {
-  try { return JSON.parse(bytes.toString("utf8")) as unknown; }
-  catch { return null; }
+function reconcilePendingNotice(
+  result: X402SigningResult,
+  notice: ReturnType<typeof classifyMetaMaskPendingNotices>,
+  summaryToken?: unknown,
+): X402SigningResult {
+  if (notice.disposition !== "pending") return result;
+  if (summaryToken !== undefined && (
+    typeof summaryToken !== "string" || !validRecoveryToken(summaryToken) || summaryToken !== notice.recoveryToken
+  )) return ambiguous("provider_recovery_identity_mismatch");
+  if (result.disposition !== "pending") return result;
+  return notice.recoveryToken === result.recoveryToken
+    ? result
+    : ambiguous("provider_recovery_identity_mismatch");
 }
 
 function canonicalSignature(value: unknown): Hex | undefined {

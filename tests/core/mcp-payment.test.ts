@@ -49,9 +49,13 @@ test("payment MCP schemas project the existing catalog scalar contracts", () => 
     property("apn_operation_resume", "wait_seconds").pattern,
     "^(?:[1-9]|[1-9][0-9]|[12][0-9]{2}|300)$",
   );
+  assert.equal(
+    property("apn_operation_recover_provider_request", "provider_request_id").pattern,
+    "^[A-Za-z0-9._:-]{1,256}$",
+  );
 });
 
-test("all eight payment tools bind through the shared catalog binder", () => {
+test("all nine payment tools bind through the shared catalog binder", () => {
   const tools = new Map(projectMcpTools().map((tool) => [tool.name, tool.command]));
   const operation = "a".repeat(64);
   const bind = (name: string, input: Record<string, unknown>) => {
@@ -96,6 +100,15 @@ test("all eight payment tools bind through the shared catalog binder", () => {
   }), {
     request: { command: "operation.resume", operationId: operation, waitSeconds: 300 },
     rpcUrl: "https://rpc.example",
+  });
+  assert.deepEqual(bind("apn_operation_recover_provider_request", {
+    operation, provider_request_id: "request-01234567",
+  }), {
+    request: {
+      command: "operation.recover-provider-request",
+      operationId: operation,
+      providerRequestId: "request-01234567",
+    },
   });
   assert.deepEqual(bind("apn_receipt_get", { operation }), {
     request: { command: "receipt.get", operationId: operation },
