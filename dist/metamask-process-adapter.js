@@ -2,6 +2,7 @@ import { isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { accountBindingHash, metamaskDirectCapabilitySnapshot } from "./provider-profile.js";
 import { MetaMaskDirectAdapter } from "./metamask-direct-adapter.js";
+import { MetaMaskX402Adapter } from "./metamask-x402-adapter.js";
 import { NodeMetaMaskProcessRunner } from "./metamask-process-runner.js";
 export const METAMASK_AGENT_WALLET_PROVIDER_ID = "metamask-agent-wallet";
 export class MetaMaskProcessAdapter {
@@ -9,12 +10,14 @@ export class MetaMaskProcessAdapter {
     exclusive;
     now;
     direct;
+    x402Signer;
     capabilities = metamaskDirectCapabilitySnapshot();
-    constructor(runner = new NodeMetaMaskProcessRunner(), exclusive = async (work) => await work(), now = () => new Date(), direct = new MetaMaskDirectAdapter(runner, exclusive)) {
+    constructor(runner = new NodeMetaMaskProcessRunner(), exclusive = async (work) => await work(), now = () => new Date(), direct = new MetaMaskDirectAdapter(runner, exclusive), x402Signer = new MetaMaskX402Adapter(runner, exclusive)) {
         this.runner = runner;
         this.exclusive = exclusive;
         this.now = now;
         this.direct = direct;
+        this.x402Signer = x402Signer;
     }
     bundle() {
         return {
@@ -24,6 +27,7 @@ export class MetaMaskProcessAdapter {
             lifecycle: this,
             reads: this,
             direct: this.direct,
+            x402Signer: this.x402Signer,
             evidence: { owner: "apn" },
         };
     }

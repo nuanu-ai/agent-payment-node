@@ -242,6 +242,16 @@ export interface X402OperationRecord {
     readonly amountAtomic: string;
     readonly capAtomic: string;
     readonly selectedOffer: X402SelectedOffer;
+    readonly providerSigner?: {
+        readonly schemaVersion: "apn.x402.provider-signer.v1";
+        readonly providerId: string;
+        readonly profileRevision: number;
+        readonly capabilityHash: string;
+        readonly accountBindingHash: string;
+        readonly executionMode: "provider_detached_eip3009_apn_paid_retry";
+        readonly executionOwner: "apn";
+        readonly retryOwner: "apn_state_machine";
+    };
     readonly preparedBlock: {
         readonly number: string;
         readonly hash: `0x${string}`;
@@ -294,7 +304,7 @@ export declare function x402RequestHash(input: {
     readonly canonicalUrl: string;
     readonly capAtomic: string;
 }): string;
-export declare function x402Fingerprint(input: Pick<X402OperationRecord, "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier">): string;
+export declare function x402Fingerprint(input: Pick<X402OperationRecord, "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier" | "providerSigner">): string;
 export declare function x402AuthorizationIntentHash(value: Omit<X402OperationRecord["authorization"], "intentHash">): string;
 export declare function x402OperationBindingHash(operation: X402OperationRecord): string;
 export declare function x402TransactionHintSourceBindingHash(source: TransactionHint["source"], sourceHash: string): string;

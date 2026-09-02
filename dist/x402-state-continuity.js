@@ -5,7 +5,7 @@ export function validateX402AppendOnly(previous, next) {
     const immutableKeys = [
         "schemaVersion", "kind", "operationId", "idempotencyHash", "profile", "profileHash", "requestHash", "fingerprint",
         "resource", "sellerWire", "chainId", "network", "token", "wallet", "payee", "amountAtomic", "capAtomic",
-        "selectedOffer", "preparedBlock", "paymentIdentifier", "authorization", "createdAt",
+        "selectedOffer", "providerSigner", "preparedBlock", "paymentIdentifier", "authorization", "createdAt",
     ];
     for (const key of immutableKeys) {
         if (!sameOptionalCanonical(previous[key], next[key]))

@@ -8,9 +8,11 @@ import type {
   ProviderBalanceObservation,
   ProviderLifecyclePort,
   ProviderWalletReadPort,
+  X402SigningPort,
 } from "./provider-ports.js";
 import { accountBindingHash, metamaskDirectCapabilitySnapshot } from "./provider-profile.js";
 import { MetaMaskDirectAdapter } from "./metamask-direct-adapter.js";
+import { MetaMaskX402Adapter } from "./metamask-x402-adapter.js";
 import { NodeMetaMaskProcessRunner, type MetaMaskProcessRunnerPort } from "./metamask-process-runner.js";
 
 export const METAMASK_AGENT_WALLET_PROVIDER_ID = "metamask-agent-wallet" as const;
@@ -30,6 +32,7 @@ export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWa
     private readonly exclusive: ProviderExclusivePort = async (work) => await work(),
     private readonly now: () => Date = () => new Date(),
     private readonly direct: DirectExecutionPort = new MetaMaskDirectAdapter(runner, exclusive),
+    private readonly x402Signer: X402SigningPort = new MetaMaskX402Adapter(runner, exclusive),
   ) {}
 
   bundle(): ProviderAdapterBundle {
@@ -40,6 +43,7 @@ export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWa
       lifecycle: this,
       reads: this,
       direct: this.direct,
+      x402Signer: this.x402Signer,
       evidence: { owner: "apn" },
     };
   }

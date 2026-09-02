@@ -80,6 +80,12 @@ export function metamaskDirectCapabilitySnapshot() {
             execution_owner: "provider",
             retry_owner: "apn_outer_no_replay_journal",
         },
+        x402: {
+            available: true,
+            mode: "provider_detached_eip3009_apn_paid_retry",
+            execution_owner: "apn",
+            retry_owner: "apn_state_machine",
+        },
         evidence: { available: true, owner: "apn" },
     };
 }
@@ -180,7 +186,11 @@ function assertCapabilitySnapshot(snapshot) {
             invalidProfile();
     if (!new Set(["local_raw_transaction_apn_submit", "provider_atomic_send"]).has(snapshot.direct.mode))
         invalidProfile();
-    if (!new Set(["local_detached_eip3009_apn_paid_retry", "provider_atomic_paid_fetch"]).has(snapshot.x402.mode))
+    if (!new Set([
+        "local_detached_eip3009_apn_paid_retry",
+        "provider_detached_eip3009_apn_paid_retry",
+        "provider_atomic_paid_fetch",
+    ]).has(snapshot.x402.mode))
         invalidProfile();
     if (!["apn", "provider"].includes(snapshot.direct.execution_owner) ||
         !["apn_operation_state", "apn_outer_no_replay_journal"].includes(snapshot.direct.retry_owner) ||
@@ -189,9 +199,9 @@ function assertCapabilitySnapshot(snapshot) {
         !["apn", "provider"].includes(snapshot.evidence.owner))
         invalidProfile();
     const directLocal = snapshot.direct.mode === "local_raw_transaction_apn_submit";
-    const x402Local = snapshot.x402.mode === "local_detached_eip3009_apn_paid_retry";
+    const x402ApnOwned = snapshot.x402.mode !== "provider_atomic_paid_fetch";
     if (directLocal !== (snapshot.direct.execution_owner === "apn" && snapshot.direct.retry_owner === "apn_operation_state") ||
-        x402Local !== (snapshot.x402.execution_owner === "apn" && snapshot.x402.retry_owner === "apn_state_machine"))
+        x402ApnOwned !== (snapshot.x402.execution_owner === "apn" && snapshot.x402.retry_owner === "apn_state_machine"))
         invalidProfile();
 }
 function assertDrift(drift) {

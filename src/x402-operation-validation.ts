@@ -55,7 +55,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
     "proofClass", "nextActions", "createdAt", "updatedAt", "transitions", "integrityHash",
   ];
   const optional = [
-    "paymentIdentifier", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "settlementResponseObservation",
+    "paymentIdentifier", "providerSigner", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "settlementResponseObservation",
     "transactionHint", "authorizationUsedScan", "settlementEvidence", "unusedExpiryEvidence", "resultLink", "receiptLink",
   ];
   allowedKeys(operation, required, optional);
@@ -128,6 +128,23 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   parseAtomic(preparedBlock.number);
   bytes32(preparedBlock.hash);
   timestamp(preparedBlock.observedAt);
+
+  if (operation.providerSigner !== undefined) {
+    const signer = exactRecord(operation.providerSigner, [
+      "schemaVersion", "providerId", "profileRevision", "capabilityHash", "accountBindingHash",
+      "executionMode", "executionOwner", "retryOwner",
+    ]);
+    if (
+      signer.schemaVersion !== "apn.x402.provider-signer.v1" ||
+      typeof signer.providerId !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(signer.providerId) ||
+      signer.providerId === "local" || !Number.isSafeInteger(signer.profileRevision) || Number(signer.profileRevision) < 1 ||
+      typeof signer.capabilityHash !== "string" || typeof signer.accountBindingHash !== "string" ||
+      signer.executionMode !== "provider_detached_eip3009_apn_paid_retry" || signer.executionOwner !== "apn" ||
+      signer.retryOwner !== "apn_state_machine"
+    ) stateCorrupt("x402 provider signer binding is invalid.");
+    hash(signer.capabilityHash);
+    hash(signer.accountBindingHash);
+  }
 
   const authorization = exactRecord(operation.authorization, ["from", "to", "value", "validAfter", "validBefore", "nonce", "createdAt", "intentHash"]);
   address(authorization.from);

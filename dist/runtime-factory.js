@@ -14,6 +14,7 @@ import { TtyForegroundAuthentication } from "./foreground-auth.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { METAMASK_AGENT_WALLET_PROVIDER_ID, MetaMaskProcessAdapter, } from "./metamask-process-adapter.js";
 import { StateProfileRepository } from "./profile-repository.js";
+import { EncryptedProviderAuthorizationStore, } from "./encrypted-provider-authorization-store.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -38,6 +39,9 @@ export function createApnCore(bound, options = {}) {
     ]);
     const foregroundAuthentication = options.foregroundAuthentication ?? (bound.request.command === "wallet.connect" ? new TtyForegroundAuthentication() : undefined);
     const transferApproval = options.approval ?? (bound.request.command === "transfer.approve" ? new TtyTransferApproval() : undefined);
+    const providerAuthorizationStore = options.providerAuthorizationStore ?? (needsProviderAuthorizationStore(bound.request.command)
+        ? new EncryptedProviderAuthorizationStore(state, wrappingSecret)
+        : undefined);
     return new ApnCore({
         state,
         profileRepository,
@@ -54,6 +58,7 @@ export function createApnCore(bound, options = {}) {
         ...(options.ids === undefined ? {} : { ids: options.ids }),
         ...(options.wait === undefined ? {} : { wait: options.wait }),
         ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
+        ...(providerAuthorizationStore === undefined ? {} : { providerAuthorizationStore }),
     });
 }
 export async function executeBoundCommand(bound, options = {}) {
@@ -75,5 +80,8 @@ function needsPolicy(command) {
 }
 function needsHttp(command) {
     return ["x402.inspect", "x402.fetch.prepare", "x402.fetch.approve", "operation.resume"].includes(command);
+}
+function needsProviderAuthorizationStore(command) {
+    return ["x402.fetch.approve", "operation.resume"].includes(command);
 }
 //# sourceMappingURL=runtime-factory.js.map

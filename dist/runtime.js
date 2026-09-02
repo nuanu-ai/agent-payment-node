@@ -20,6 +20,7 @@ export class RuntimeContext {
     rpcUrl;
     providerX402Repository;
     providerTransactionEvidence;
+    providerAuthorizationStore;
     initialized;
     constructor(dependencies) {
         this.state = dependencies.state;
@@ -50,6 +51,8 @@ export class RuntimeContext {
             this.providerX402Repository = dependencies.providerX402Repository;
         if (dependencies.providerTransactionEvidence !== undefined)
             this.providerTransactionEvidence = dependencies.providerTransactionEvidence;
+        if (dependencies.providerAuthorizationStore !== undefined)
+            this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
     }
     async ready() {
         this.initialized ??= this.state.initialize();
@@ -111,6 +114,12 @@ export class RuntimeContext {
         if (this.rpcUrl === undefined)
             throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
         return this.rpcUrl;
+    }
+    requireProviderAuthorizationStore() {
+        if (this.providerAuthorizationStore === undefined) {
+            throw new ApnError("APN_INTERNAL", "The encrypted provider authorization store is unavailable.");
+        }
+        return this.providerAuthorizationStore;
     }
     nativeRequest(operation, payload) {
         return { version: NATIVE_IPC_VERSION, requestId: this.ids.next(), operation, payload };

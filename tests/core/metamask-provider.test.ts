@@ -228,11 +228,14 @@ test("generic APN profile binds, restarts and reads independent Base balance", a
   assert.equal(rpc.balanceCalls, 1);
 });
 
-test("direct Slice advertises provider direct while x402 remains unavailable", () => {
+test("MetaMask profile advertises provider direct and detached APN-owned x402", () => {
   const capabilities = new MetaMaskProcessAdapter(new FixtureRunner()).capabilities;
   assert.equal(capabilities.direct.available, true);
   assert.equal(capabilities.direct.mode, "provider_atomic_send");
-  assert.equal(capabilities.x402.available, false);
+  assert.equal(capabilities.x402.available, true);
+  assert.equal(capabilities.x402.mode, "provider_detached_eip3009_apn_paid_retry");
+  assert.equal(capabilities.x402.execution_owner, "apn");
+  assert.equal(capabilities.x402.retry_owner, "apn_state_machine");
   assert.equal(capabilities.lifecycle.connect, true);
   assert.equal(capabilities.read.address, true);
 });

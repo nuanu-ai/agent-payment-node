@@ -28,6 +28,10 @@ import {
 } from "./metamask-process-adapter.js";
 import { StateProfileRepository } from "./profile-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
+import {
+  EncryptedProviderAuthorizationStore,
+  type ProviderAuthorizationStorePort,
+} from "./encrypted-provider-authorization-store.js";
 
 export interface RuntimeFactoryOptions {
   readonly stateRoot?: string;
@@ -45,6 +49,7 @@ export interface RuntimeFactoryOptions {
   readonly providerRegistry?: ProviderRegistryPort;
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
+  readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
 }
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
@@ -83,6 +88,11 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const transferApproval = options.approval ?? (
     bound.request.command === "transfer.approve" ? new TtyTransferApproval() : undefined
   );
+  const providerAuthorizationStore = options.providerAuthorizationStore ?? (
+    needsProviderAuthorizationStore(bound.request.command)
+      ? new EncryptedProviderAuthorizationStore(state, wrappingSecret)
+      : undefined
+  );
   return new ApnCore({
     state,
     profileRepository,
@@ -99,6 +109,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(options.ids === undefined ? {} : { ids: options.ids }),
     ...(options.wait === undefined ? {} : { wait: options.wait }),
     ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
+    ...(providerAuthorizationStore === undefined ? {} : { providerAuthorizationStore }),
   });
 }
 
@@ -128,4 +139,8 @@ function needsPolicy(command: string): boolean {
 
 function needsHttp(command: string): boolean {
   return ["x402.inspect", "x402.fetch.prepare", "x402.fetch.approve", "operation.resume"].includes(command);
+}
+
+function needsProviderAuthorizationStore(command: string): boolean {
+  return ["x402.fetch.approve", "operation.resume"].includes(command);
 }
