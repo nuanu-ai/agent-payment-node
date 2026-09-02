@@ -56,7 +56,7 @@ class FixtureRunner implements MetaMaskProcessRunnerPort {
   readonly calls: Array<{ readonly argv: readonly string[]; readonly timeoutMs?: number }> = [];
   address: Address = ACCOUNT.address;
   initial: "pending" | "rejected" | "throw" = "pending";
-  watch: "signed" | "denied" | "timeout" = "signed";
+  watch: "signed" | "denied" | "denied_error" | "expired_error" | "timeout" = "signed";
   signer = ACCOUNT;
   signature: Hex | undefined;
 
@@ -81,6 +81,8 @@ class FixtureRunner implements MetaMaskProcessRunnerPort {
     }
     if (argv[0] === "wallet" && argv[1] === "requests" && argv[2] === "watch") {
       if (this.watch === "timeout") return failure("JOB_TIMEOUT");
+      if (this.watch === "denied_error") return failure("TX_DENIED");
+      if (this.watch === "expired_error") return failure("TX_EXPIRED");
       if (this.watch === "denied") return success({
         request: { pollingId: TOKEN, kind: "signature" },
         status: { kind: "signature", status: "DENIED" },
@@ -129,6 +131,19 @@ test("MetaMask x402 adapter sends only the exact frozen EIP-712 payload and watc
   assert.deepEqual(runner.calls.at(-1), {
     argv: ["wallet", "requests", "watch", TOKEN, "--wallet-timeout", "30", "--json"],
     timeoutMs: 35_000,
+  });
+});
+
+test("MetaMask x402 adapter recognizes the exact 6.1.5 terminal error codes", async () => {
+  const runner = new FixtureRunner();
+  const adapter = new MetaMaskX402Adapter(runner);
+  runner.watch = "denied_error";
+  assert.deepEqual(await adapter.observe({ recoveryToken: TOKEN, sender: ACCOUNT.address }), {
+    disposition: "rejected", reason: "provider_denied",
+  });
+  runner.watch = "expired_error";
+  assert.deepEqual(await adapter.observe({ recoveryToken: TOKEN, sender: ACCOUNT.address }), {
+    disposition: "rejected", reason: "provider_expired",
   });
 });
 

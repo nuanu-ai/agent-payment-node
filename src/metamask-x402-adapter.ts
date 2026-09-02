@@ -160,10 +160,10 @@ function classify(data: Record<string, unknown>): X402SigningResult {
 function parseFailure(value: Record<string, unknown>, recoveryToken?: string): X402SigningResult {
   const error = isPlainRecord(value.error) ? value.error : {};
   const code = typeof error.code === "string" ? error.code : undefined;
-  if (code === "SIGNATURE_DENIED" || code === "REQUEST_DENIED") {
+  if (code === "TX_DENIED") {
     return { disposition: "rejected", reason: "provider_denied" };
   }
-  if (code === "SIGNATURE_EXPIRED" || code === "REQUEST_EXPIRED") {
+  if (code === "TX_EXPIRED") {
     return { disposition: "rejected", reason: "provider_expired" };
   }
   if (code === "JOB_TIMEOUT" && recoveryToken !== undefined) {
