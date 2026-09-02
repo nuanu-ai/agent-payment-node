@@ -22,6 +22,10 @@ import type {
   ProviderRegistryPort,
 } from "./provider-ports.js";
 import { ProviderRegistry } from "./provider-registry.js";
+import {
+  METAMASK_AGENT_WALLET_PROVIDER_ID,
+  MetaMaskProcessAdapter,
+} from "./metamask-process-adapter.js";
 import { StateProfileRepository } from "./profile-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 
@@ -60,10 +64,19 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const rpc = options.rpc ?? (bound.rpcUrl === undefined ? undefined : new HttpsBaseRpc(bound.rpcUrl));
   const http = options.http ?? (needsHttp(bound.request.command) ? new HttpsX402Http() : undefined);
   const profileRepository = options.profileRepository ?? new StateProfileRepository(state);
-  const providerRegistry = options.providerRegistry ?? new ProviderRegistry([{
-    provider_id: AWAL_PROVIDER_ID,
-    create: () => new AwalProcessAdapter().bundle(),
-  }]);
+  const providerRegistry = options.providerRegistry ?? new ProviderRegistry([
+    {
+      provider_id: AWAL_PROVIDER_ID,
+      create: () => new AwalProcessAdapter().bundle(),
+    },
+    {
+      provider_id: METAMASK_AGENT_WALLET_PROVIDER_ID,
+      create: () => new MetaMaskProcessAdapter(
+        undefined,
+        async (work) => await state.withLocks([`provider-session:${METAMASK_AGENT_WALLET_PROVIDER_ID}`], work),
+      ).bundle(),
+    },
+  ]);
   const foregroundAuthentication = options.foregroundAuthentication ?? (
     bound.request.command === "wallet.connect" ? new TtyForegroundAuthentication() : undefined
   );

@@ -59,7 +59,7 @@ for (const file of files) {
   for (const needle of forbidden) {
     if (needle === "node:child_process" && [
       "macos-keychain.ts", "macos-advisory-lock.ts", "awal-process-adapter.ts",
-      "awal-direct-adapter.ts", "awal-x402-adapter.ts",
+      "awal-direct-adapter.ts", "awal-x402-adapter.ts", "metamask-process-runner.ts",
     ].some((name) => file === join(sourceRoot, name))) continue;
     if (needle === "--scheme" && file === join(sourceRoot, "awal-x402-adapter.ts")) continue;
     if (needle === "signTypedData" && file === join(sourceRoot, "local-wallet-native.ts")) continue;

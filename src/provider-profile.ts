@@ -7,7 +7,10 @@ export const PROVIDER_PROFILE_VERSION = "apn.provider-profile.v1" as const;
 export const PROVIDER_CAPABILITY_VERSION = "apn.provider-capability.v1" as const;
 export const LOCAL_PROVIDER_ID = "local" as const;
 
-export type ProviderTrustClass = "local_software_wallet" | "provider_managed_non_custodial_tee";
+export type ProviderTrustClass =
+  | "local_software_wallet"
+  | "provider_managed_non_custodial_tee"
+  | "provider_managed_non_custodial_signer";
 export type DirectExecutionMode = "local_raw_transaction_apn_submit" | "provider_atomic_send";
 export type X402ExecutionMode = "local_detached_eip3009_apn_paid_retry" | "provider_atomic_paid_fetch";
 export type ProviderProfileState = "bound" | "drift_blocked" | "rebind_pending";
@@ -135,6 +138,10 @@ export function coinbaseDirectCapabilitySnapshot(): ProviderCapabilitySnapshot {
   };
 }
 
+export function metamaskReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot {
+  return lifecycleReadOnlyCapabilitySnapshot();
+}
+
 export function capabilityHash(snapshot: ProviderCapabilitySnapshot): string {
   assertCapabilitySnapshot(snapshot);
   return hashObject(snapshot);
@@ -198,7 +205,11 @@ export function validateProviderProfile(value: unknown): ProviderProfileRecord {
     typeof profile.provider_id !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profile.provider_id) ||
     typeof profile.public_address !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(profile.public_address) ||
     typeof profile.account_binding_hash !== "string" || !/^[a-f0-9]{64}$/u.test(profile.account_binding_hash) ||
-    !["local_software_wallet", "provider_managed_non_custodial_tee"].includes(profile.trust_class) ||
+    ![
+      "local_software_wallet",
+      "provider_managed_non_custodial_tee",
+      "provider_managed_non_custodial_signer",
+    ].includes(profile.trust_class) ||
     !Number.isSafeInteger(profile.revision) || profile.revision < 1 ||
     typeof profile.capability_hash !== "string" || !/^[a-f0-9]{64}$/u.test(profile.capability_hash) ||
     profile.capability_hash !== capabilityHash(profile.capability_snapshot) ||

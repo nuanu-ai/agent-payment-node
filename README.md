@@ -60,6 +60,7 @@ To create or reuse a provider-managed profile, use the generic foreground path:
 
 ```sh
 apn wallet connect --profile provider-one --provider coinbase-agentic-wallet
+apn wallet connect --profile metamask --provider metamask-agent-wallet
 ```
 
 The CLI first reuses an active provider session without another email or OTP
@@ -69,6 +70,21 @@ access. The documented provider client requires the email and one-time code in
 short-lived child argv; this is a residual local same-user process-table risk,
 not OS-level argv secrecy. APN does not log, persist or return those argv
 values or raw authentication output.
+
+The MetaMask profile is a dedicated MetaMask Agent Wallet server-wallet, not
+the browser extension or the user's main MetaMask account. APN pins the
+official `@metamask/agent-wallet@6.1.5` package internally. When no valid
+provider session exists, the same generic connect command opens MetaMask's own
+Mobile QR login in the foreground terminal; APN never receives or copies the
+QR payload, provider token, seed phrase or private key. It then initializes
+only `server-wallet` with `Guard`, binds the exact selected EVM address, and
+fails closed if a later provider session selects a different address. A normal
+user does not install `mm` separately or add provider skills.
+
+At the current connect/read boundary, MetaMask direct transfer and x402 are
+reported unavailable until their respective vertical Slices add and prove
+those effects. `wallet balance` remains an independent Base RPC observation;
+provider login or address binding is not a balance or spending-authority claim.
 
 `wallet ensure` creates or reuses one stable address. Fund only that public
 address, manually, with a small amount of Base ETH and Base USDC. APN never

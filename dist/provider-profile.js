@@ -67,6 +67,9 @@ export function coinbaseDirectCapabilitySnapshot() {
         evidence: { available: true, owner: "apn" },
     };
 }
+export function metamaskReadOnlyCapabilitySnapshot() {
+    return lifecycleReadOnlyCapabilitySnapshot();
+}
 export function capabilityHash(snapshot) {
     assertCapabilitySnapshot(snapshot);
     return hashObject(snapshot);
@@ -123,7 +126,11 @@ export function validateProviderProfile(value) {
         typeof profile.provider_id !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profile.provider_id) ||
         typeof profile.public_address !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(profile.public_address) ||
         typeof profile.account_binding_hash !== "string" || !/^[a-f0-9]{64}$/u.test(profile.account_binding_hash) ||
-        !["local_software_wallet", "provider_managed_non_custodial_tee"].includes(profile.trust_class) ||
+        ![
+            "local_software_wallet",
+            "provider_managed_non_custodial_tee",
+            "provider_managed_non_custodial_signer",
+        ].includes(profile.trust_class) ||
         !Number.isSafeInteger(profile.revision) || profile.revision < 1 ||
         typeof profile.capability_hash !== "string" || !/^[a-f0-9]{64}$/u.test(profile.capability_hash) ||
         profile.capability_hash !== capabilityHash(profile.capability_snapshot) ||
