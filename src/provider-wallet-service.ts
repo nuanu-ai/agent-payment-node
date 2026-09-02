@@ -179,10 +179,10 @@ export class ProviderWalletService {
     }
     const capability = kind === "direct" ? bound.capability_snapshot.direct : bound.capability_snapshot.x402;
     if (!capability.available) {
-      if (kind === "direct") {
+      if (kind === "direct" || bound.provider_id === "metamask-agent-wallet") {
         throw new ApnError(
           "APN_PROFILE_DRIFT",
-          "The persisted provider profile predates direct-effect binding; explicit foreground rebind is required.",
+          `The persisted provider profile predates ${kind}-effect binding; explicit foreground rebind is required.`,
           { current_revision: String(bound.revision) },
         );
       }

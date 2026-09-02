@@ -197,9 +197,9 @@ export const COMMANDS: readonly CommandDefinition[] = [
     "Advance one frozen x402 request under its stored policy.",
     [operationRequired, rpcRequired],
     "payment_submit",
-    "Rechecks frozen intent and policy, then either persists local authorization or executes the provider-owned paid fetch exactly once.",
+    "Rechecks frozen intent and policy, then obtains one local or provider-detached authorization, or executes one provider-owned paid fetch.",
     "prior_profile_policy",
-    "No per-payment prompt; the frozen operation and existing profile policy are the authorization boundary.",
+    "APN adds no per-payment prompt; a detached provider signer may still require its own MFA.",
     x402States,
     [
       { command_path: ["operation", "status"], when: "To inspect any returned non-terminal state." },

@@ -15,6 +15,7 @@ import type {
 import type { TransferApprovalPort } from "./tty-approval.js";
 import type { ProviderX402Repository } from "./provider-x402-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
+import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
 
 export interface CoreDependencies {
   readonly state: StateStore;
@@ -33,6 +34,7 @@ export interface CoreDependencies {
   readonly rpcUrl?: string;
   readonly providerX402Repository?: ProviderX402Repository;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
+  readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
 }
 
 export class RuntimeContext {
@@ -52,6 +54,7 @@ export class RuntimeContext {
   readonly rpcUrl?: string;
   readonly providerX402Repository?: ProviderX402Repository;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
+  readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
@@ -71,6 +74,7 @@ export class RuntimeContext {
     if (dependencies.rpcUrl !== undefined) this.rpcUrl = dependencies.rpcUrl;
     if (dependencies.providerX402Repository !== undefined) this.providerX402Repository = dependencies.providerX402Repository;
     if (dependencies.providerTransactionEvidence !== undefined) this.providerTransactionEvidence = dependencies.providerTransactionEvidence;
+    if (dependencies.providerAuthorizationStore !== undefined) this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
   }
 
   async ready(): Promise<void> {
@@ -140,6 +144,13 @@ export class RuntimeContext {
   requireRpcUrl(): string {
     if (this.rpcUrl === undefined) throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
     return this.rpcUrl;
+  }
+
+  requireProviderAuthorizationStore(): ProviderAuthorizationStorePort {
+    if (this.providerAuthorizationStore === undefined) {
+      throw new ApnError("APN_INTERNAL", "The encrypted provider authorization store is unavailable.");
+    }
+    return this.providerAuthorizationStore;
   }
 
   nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest {

@@ -39,6 +39,12 @@ export function publicX402Operation(operation, result, settlementWait) {
             urlHash: operation.resource.urlHash,
         },
         payer: operation.wallet,
+        ...(operation.providerSigner === undefined ? {} : {
+            signer: {
+                provider: operation.providerSigner.providerId,
+                mode: operation.providerSigner.executionMode,
+            },
+        }),
         payee: operation.payee,
         amountAtomic: operation.amountAtomic,
         network: operation.network,

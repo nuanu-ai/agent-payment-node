@@ -46,7 +46,9 @@ export class ProviderX402Service {
         await this.context.ready();
         const profile = canonicalProfile(profileInput);
         const stored = await this.context.requireProfileRepository().load(this.context.state.profileHash(profile));
-        return stored !== null && stored.provider_id !== LOCAL_PROVIDER_ID;
+        return stored !== null && stored.provider_id !== LOCAL_PROVIDER_ID &&
+            stored.capability_snapshot.x402.available &&
+            stored.capability_snapshot.x402.mode === "provider_atomic_paid_fetch";
     }
     async prepare(request) {
         const profile = canonicalProfile(request.profile);

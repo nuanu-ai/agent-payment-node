@@ -82,7 +82,7 @@ export interface DirectExecutionPort {
     }>;
 }
 export interface X402ExecutionPort {
-    readonly mode: "local_detached_eip3009_apn_paid_retry" | "provider_atomic_paid_fetch";
+    readonly mode: "local_detached_eip3009_apn_paid_retry" | "provider_detached_eip3009_apn_paid_retry" | "provider_atomic_paid_fetch";
     assertCompatibleIntent?(input: {
         readonly amountAtomic: string;
     }): void;
@@ -104,6 +104,47 @@ export interface X402ExecutionPort {
         readonly invocation: ProviderX402Invocation;
         readonly result: ProviderX402SellerResult;
     }>;
+}
+export interface X402SigningIntent {
+    readonly sender: Address;
+    readonly chainId: "8453";
+    readonly token: Address;
+    readonly tokenDomain: {
+        readonly name: string;
+        readonly version: string;
+    };
+    readonly authorization: {
+        readonly from: Address;
+        readonly to: Address;
+        readonly value: string;
+        readonly validAfter: "0";
+        readonly validBefore: string;
+        readonly nonce: Hex;
+    };
+    readonly humanIntent: string;
+}
+export type X402SigningResult = {
+    readonly disposition: "signed";
+    readonly signature: Hex;
+} | {
+    readonly disposition: "pending";
+    readonly recoveryToken: string;
+    readonly providerState: string;
+} | {
+    readonly disposition: "rejected";
+    readonly reason: "provider_denied" | "provider_expired";
+} | {
+    readonly disposition: "ambiguous";
+    readonly reason: string;
+};
+export interface X402SigningPort {
+    readonly mode: "provider_detached_eip3009_apn_paid_retry";
+    request(input: X402SigningIntent): Promise<X402SigningResult>;
+    observe(input: {
+        readonly recoveryToken: string;
+        readonly sender: Address;
+        readonly waitSeconds?: number;
+    }): Promise<X402SigningResult>;
 }
 export interface ProviderX402Invocation {
     readonly correlation_id: string;
@@ -144,6 +185,7 @@ export interface ProviderAdapterBundle {
     readonly reads: ProviderWalletReadPort;
     readonly direct?: DirectExecutionPort;
     readonly x402?: X402ExecutionPort;
+    readonly x402Signer?: X402SigningPort;
     readonly evidence?: EvidencePort;
 }
 export interface ProviderRegistryPort {

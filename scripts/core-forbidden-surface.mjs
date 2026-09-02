@@ -62,6 +62,7 @@ for (const file of files) {
       "awal-direct-adapter.ts", "awal-x402-adapter.ts", "metamask-process-runner.ts",
     ].some((name) => file === join(sourceRoot, name))) continue;
     if (["--chain-id", "--token"].includes(needle) && file === join(sourceRoot, "metamask-direct-adapter.ts")) continue;
+    if (needle === "--chain-id" && file === join(sourceRoot, "metamask-x402-adapter.ts")) continue;
     if (needle === "--scheme" && file === join(sourceRoot, "awal-x402-adapter.ts")) continue;
     if (needle === "signTypedData" && file === join(sourceRoot, "local-wallet-native.ts")) continue;
     if (text.includes(needle)) violations.push(`${file.slice(productRoot.length + 1)}: ${needle}`);
@@ -108,6 +109,18 @@ for (const file of files) {
     }
     for (const disallowed of ["npx", "execFile(", "process.env.PATH", "shell: true", "fork(", "ipc"]) {
       if (text.includes(disallowed)) violations.push(`src/metamask-direct-adapter.ts: ${disallowed}`);
+    }
+  }
+  if (file === join(sourceRoot, "metamask-x402-adapter.ts")) {
+    for (const required of [
+      "\"wallet\", \"select\"", "\"--chain-namespace\", \"eip155\"", "\"wallet\", \"sign-typed-data\"",
+      "\"--chain-id\", input.chainId", "\"--payload\", payload", "\"--intent\", input.humanIntent",
+      "\"wallet\", \"requests\", \"watch\"",
+    ]) {
+      if (!text.includes(required)) violations.push(`src/metamask-x402-adapter.ts: missing ${required}`);
+    }
+    for (const disallowed of ["npx", "execFile(", "process.env.PATH", "shell: true", "fork(", "ipc", "\"x402\", \"pay\""]) {
+      if (text.includes(disallowed)) violations.push(`src/metamask-x402-adapter.ts: ${disallowed}`);
     }
   }
 }

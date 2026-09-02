@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.3.10 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.4.0 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -81,11 +81,12 @@ only `server-wallet` with `Guard`, binds the exact selected EVM address, and
 fails closed if a later provider session selects a different address. A normal
 user does not install `mm` separately or add provider skills.
 
-MetaMask direct transfer is available through the same generic APN operation
-contract; standard x402 remains reported unavailable until its later vertical
-Slice adds and proves provider signing plus APN-owned paid HTTP. `wallet
-balance` remains an independent Base RPC observation; provider login or address
-binding is not a balance or spending-authority claim.
+MetaMask direct transfer and standard x402 are available through the same
+generic APN operation contract. For x402, MetaMask signs only the exact frozen
+EIP-3009 authorization; APN owns the seller HTTP request, safe retry,
+settlement evidence and receipt. `wallet balance` remains an independent Base
+RPC observation; provider login or address binding is not a balance or
+spending-authority claim.
 
 `wallet ensure` creates or reuses one stable address. Fund only that public
 address, manually, with a small amount of Base ETH and Base USDC. APN never
@@ -187,14 +188,26 @@ apn x402 fetch approve --operation <operation-id> \
 
 For a local-software profile, approve creates exactly one frozen EIP-3009
 authorization; `operation resume` owns the next legal byte-identical paid-request
-or recovery transition under the existing durable rules. For a bound Coinbase
-profile, approve rechecks the stored policy, profile and balance, performs one
-final unpaid GET preflight, durably commits `started`, and invokes exactly one
-AWAL provider-atomic GET. Coinbase owns payment and its internal paid retry;
-status and resume are observation-only and never invoke AWAL pay again. APN
-completes only when the bounded seller result joins one exact successful outgoing
-Base-USDC Transfer in the fixed window from the frozen lower block through the
-earliest block timestamp at or after `started + 240000ms`.
+or recovery transition under the existing durable rules. For a bound MetaMask
+profile, APN re-selects the frozen Guard server-wallet and asks `mm` to sign
+only that EIP-712 payload. If MetaMask returns MFA pending, APN encrypts the
+opaque request reference under `~/.apn`; after restart, resume watches only
+that request and never creates a second signature request. The signature and
+PAYMENT-SIGNATURE header remain protected. APN independently recovers the
+frozen payer before using them, then runs the same APN-owned HTTP, retry,
+seller-result, settlement and receipt state machine as the local profile.
+MetaMask's separate x402 helper is not invoked, and its Guard outflow limit is
+not treated as covering typed-data x402; the owner-approved APN policy remains
+mandatory.
+
+For a bound Coinbase profile, approve rechecks the stored policy, profile and
+balance, performs one final unpaid GET preflight, durably commits `started`,
+and invokes exactly one AWAL provider-atomic GET. Coinbase owns payment and its
+internal paid retry; status and resume are observation-only and never invoke
+AWAL pay again. APN completes only when the bounded seller result joins one
+exact successful outgoing Base-USDC Transfer in the fixed window from the
+frozen lower block through the earliest block timestamp at or after
+`started + 240000ms`.
 
 The AWAL adapter accepts only its exact paid-success envelope and normalizes
 seller `data` as bounded canonical JSON; provider metadata and raw process output
@@ -222,10 +235,12 @@ apn operation resume --operation <operation-id> \
   --wait-seconds 60
 ```
 
-The wait accepts `1..300` seconds. It also bounds observation of one already
-created MetaMask Guard request. After any one permitted paid request or provider
-transfer request, the observation loop cannot create another effect. Timeout
-returns the same durable resumable operation.
+The wait accepts `1..300` seconds. It bounds settlement observation and an
+already created MetaMask direct-transfer Guard request. MetaMask x402 signature
+MFA is recovered by ordinary `operation resume` against the same encrypted
+request reference. After any one permitted paid request, provider transfer or
+signature request, recovery cannot create another effect. Timeout returns the
+same durable resumable operation.
 
 An eligible legacy Coinbase operation that is durably stuck at
 `provider_evidence_capability_gap` can be closed from one independently known
