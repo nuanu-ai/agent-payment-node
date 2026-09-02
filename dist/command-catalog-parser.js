@@ -167,6 +167,10 @@ function validateOptionValue(definition, value) {
             if (!/^0x[0-9a-fA-F]{64}$/u.test(value))
                 invalid();
             return;
+        case "provider_request_id":
+            if (!/^[A-Za-z0-9._:-]{1,256}$/u.test(value))
+                invalid();
+            return;
         case "idempotency_key":
             if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/u.test(value))
                 invalid();

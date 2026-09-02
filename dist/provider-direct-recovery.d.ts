@@ -17,4 +17,5 @@ export declare function observeProviderDirectRequest(adapter: ProviderAdapterBun
     readonly providerEffect: ProviderEffectReference;
 }, waitSeconds?: number): Promise<ProviderDirectRecoveryOutcome>;
 export declare function createProviderEffectReference(recoveryToken: string, providerState: string): ProviderEffectReference;
+export declare function canonicalProviderRecoveryToken(value: unknown): string;
 export declare function sameFrozenProviderProfile(profile: ProviderProfileRecord, operation: OperationRecord, binding: ProviderDirectBinding): boolean;

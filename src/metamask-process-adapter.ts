@@ -14,6 +14,7 @@ import type {
 import { accountBindingHash, metamaskDirectCapabilitySnapshot } from "./provider-profile.js";
 import { MetaMaskDirectAdapter } from "./metamask-direct-adapter.js";
 import { MetaMaskX402Adapter } from "./metamask-x402-adapter.js";
+import { parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 import { NodeMetaMaskProcessRunner, type MetaMaskProcessRunnerPort } from "./metamask-process-runner.js";
 
 export const METAMASK_AGENT_WALLET_PROVIDER_ID = "metamask-agent-wallet" as const;
@@ -148,9 +149,8 @@ function requireAuthenticationMethod(input: string | undefined): typeof METAMASK
 }
 
 function requireSuccess(exitCode: number, bytes: Buffer): Record<string, unknown> {
-  let value: unknown;
-  try { value = JSON.parse(bytes.toString("utf8")) as unknown; }
-  catch { throw providerProtocol(); }
+  const parsed = parseMetaMaskProcessOutput(bytes);
+  const value = parsed?.envelope;
   if (exitCode !== 0 || !isPlainRecord(value) || value.ok !== true || !isPlainRecord(value.data)) {
     throw exitCode === 0 ? providerProtocol() : sessionFailure();
   }

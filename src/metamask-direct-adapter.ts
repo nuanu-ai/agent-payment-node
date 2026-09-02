@@ -1,8 +1,10 @@
 import { isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
+import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import type { Address, Hex } from "./model.js";
 import type { DirectExecutionPort } from "./provider-ports.js";
 import type { MetaMaskProcessResult, MetaMaskProcessRunnerPort } from "./metamask-process-runner.js";
+import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 
 type DirectResult = Awaited<ReturnType<NonNullable<DirectExecutionPort["execute"]>>>;
 type ObserveResult = Awaited<ReturnType<NonNullable<DirectExecutionPort["observe"]>>>;
@@ -93,7 +95,7 @@ export class MetaMaskDirectAdapter implements DirectExecutionPort {
     try {
       const data = successData(observed);
       if (
-        data === null || data.mode !== "server" || data.chainNamespace !== "eip155" ||
+        data === null || data.mode !== "server" || !isMetaMaskEvmNamespace(data.chainNamespace) ||
         typeof data.address !== "string" || data.address.toLowerCase() !== expected.toLowerCase()
       ) throw new Error("selected sender mismatch");
     } finally {
@@ -103,23 +105,41 @@ export class MetaMaskDirectAdapter implements DirectExecutionPort {
 }
 
 function parseTransferResult(result: MetaMaskProcessResult, expected: Address): DirectResult {
-  const value = parseEnvelope(result.stdout);
+  const parsed = parseMetaMaskProcessOutput(result.stdout);
+  if (parsed === null) return { disposition: "ambiguous", reason: "provider_response_malformed" };
+  const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices);
+  if (pendingNotice.disposition === "invalid") return { disposition: "ambiguous", reason: pendingNotice.reason };
+  const value = parsed.envelope;
+  if (value === null) return pendingNotice.disposition === "pending"
+    ? pendingNotice
+    : { disposition: "ambiguous", reason: "provider_response_malformed" };
   if (!isPlainRecord(value)) return { disposition: "ambiguous", reason: "provider_response_malformed" };
-  if (result.exitCode !== 0 || value.ok !== true) return parseProviderFailure(value);
+  if (result.exitCode !== 0 || value.ok !== true) {
+    const failure = parseProviderFailure(value);
+    return pendingNotice.disposition === "pending" && failure.disposition === "ambiguous" ? pendingNotice : failure;
+  }
   if (!isPlainRecord(value.data)) return { disposition: "ambiguous", reason: "provider_response_malformed" };
   const data = value.data;
   if (
     data.mode !== "server" || typeof data.address !== "string" ||
     data.address.toLowerCase() !== expected.toLowerCase()
   ) return { disposition: "ambiguous", reason: "provider_sender_mismatch" };
-  return classifyEffect(data);
+  return reconcilePendingNotice(classifyEffect(data), pendingNotice, data.pollingId);
 }
 
 function parseWatchResult(result: MetaMaskProcessResult, recoveryToken: string): ObserveResult {
-  const value = parseEnvelope(result.stdout);
+  const parsed = parseMetaMaskProcessOutput(result.stdout);
+  if (parsed === null) return { disposition: "ambiguous", reason: "provider_response_malformed" };
+  const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices, recoveryToken);
+  if (pendingNotice.disposition === "invalid") return { disposition: "ambiguous", reason: pendingNotice.reason };
+  const value = parsed.envelope;
+  if (value === null) return pendingNotice.disposition === "pending"
+    ? pendingNotice
+    : { disposition: "ambiguous", reason: "provider_response_malformed" };
   if (!isPlainRecord(value)) return { disposition: "ambiguous", reason: "provider_response_malformed" };
   if (result.exitCode !== 0 || value.ok !== true) {
-    return parseProviderFailure(value, recoveryToken);
+    const failure = parseProviderFailure(value, recoveryToken);
+    return pendingNotice.disposition === "pending" && failure.disposition === "ambiguous" ? pendingNotice : failure;
   }
   if (!isPlainRecord(value.data) || !isPlainRecord(value.data.request) || !isPlainRecord(value.data.status)) {
     return { disposition: "ambiguous", reason: "provider_response_malformed" };
@@ -134,7 +154,10 @@ function parseWatchResult(result: MetaMaskProcessResult, recoveryToken: string):
   if (requestHash !== undefined && statusHash !== undefined && requestHash.toLowerCase() !== statusHash.toLowerCase()) {
     return { disposition: "ambiguous", reason: "provider_transaction_identity_conflict" };
   }
-  return classifyEffect({ ...status, hash: statusHash ?? requestHash, pollingId: recoveryToken });
+  return reconcilePendingNotice(
+    classifyEffect({ ...status, hash: statusHash ?? requestHash, pollingId: recoveryToken }),
+    pendingNotice,
+  );
 }
 
 function classifyEffect(data: Record<string, unknown>): EffectResult {
@@ -166,19 +189,29 @@ function parseProviderFailure(value: Record<string, unknown>, recoveryToken?: st
 }
 
 function isSuccess(result: MetaMaskProcessResult): boolean {
-  const value = parseEnvelope(result.stdout);
+  const value = parseMetaMaskProcessOutput(result.stdout)?.envelope;
   return result.exitCode === 0 && isPlainRecord(value) && value.ok === true && isPlainRecord(value.data);
 }
 
 function successData(result: MetaMaskProcessResult): Record<string, unknown> | null {
-  const value = parseEnvelope(result.stdout);
+  const value = parseMetaMaskProcessOutput(result.stdout)?.envelope;
   return result.exitCode === 0 && isPlainRecord(value) && value.ok === true && isPlainRecord(value.data)
     ? value.data : null;
 }
 
-function parseEnvelope(bytes: Buffer): unknown {
-  try { return JSON.parse(bytes.toString("utf8")) as unknown; }
-  catch { return null; }
+function reconcilePendingNotice(
+  result: EffectResult,
+  notice: ReturnType<typeof classifyMetaMaskPendingNotices>,
+  summaryToken?: unknown,
+): EffectResult {
+  if (notice.disposition !== "pending") return result;
+  if (summaryToken !== undefined && (
+    typeof summaryToken !== "string" || !isRecoveryToken(summaryToken) || summaryToken !== notice.recoveryToken
+  )) return { disposition: "ambiguous", reason: "provider_recovery_identity_mismatch" };
+  if (result.disposition !== "pending") return result;
+  return notice.recoveryToken === result.recoveryToken
+    ? result
+    : { disposition: "ambiguous", reason: "provider_recovery_identity_mismatch" };
 }
 
 function validHash(value: unknown): value is Hex {

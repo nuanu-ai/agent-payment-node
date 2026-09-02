@@ -116,6 +116,13 @@ export const COMMANDS = [
         { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
         { command_path: ["receipt", "get"], when: "After terminal completion." },
     ], ["apn operation resume --operation <operation-id> --rpc-url <https-base-rpc-url> --wait-seconds 60"]),
+    command(["operation", "recover-provider-request"], "apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>", "Bind one independently known provider request to an eligible ambiguous direct transfer without replaying it.", [
+        operationRequired,
+        option("--provider-request-id", "provider_request_id", true, noDefault, ["1_to_256_safe_ascii_characters"], "operator_input"),
+    ], "recovery", "Writes only the opaque provider request reference; it never creates, signs or submits a payment.", "prior_operation_authorization", "The existing frozen transfer and independently obtained provider request ID are the authorization boundary.", allOperationStates, [
+        { command_path: ["operation", "resume"], when: "To watch the exact recovered provider request and verify on-chain evidence." },
+        { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
+    ], ["apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>"]),
     command(["operation", "recover-transaction-settlement"], "apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>", "Terminalize one eligible legacy x402 operation from an independently known exact Base transaction.", [
         operationRequired,
         option("--transaction-hash", "transaction_hash", true, noDefault, ["32_byte_evm_transaction_hash", "canonicalized_to_lowercase"], "public"),

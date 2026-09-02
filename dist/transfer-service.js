@@ -7,14 +7,17 @@ import { appendTransition, sealOperation, sealReceipt } from "./state.js";
 import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, hasExactTransfer, parseEffect, publicOperation, publicReceipt, requireFunding, transferData, validateBalance, validateEconomics, verifyEffect, } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
+import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-recovery.js";
 export class TransferService {
     context;
     operations;
     providerDirect;
+    providerDirectRecovery;
     constructor(context) {
         this.context = context;
         this.operations = new OperationService(context.state);
         this.providerDirect = new ProviderDirectTransferService(context);
+        this.providerDirectRecovery = new ProviderDirectRequestRecoveryService(context);
     }
     async prepare(request) {
         if (await this.providerDirect.canHandle(request.profile))
@@ -232,6 +235,15 @@ export class TransferService {
             operation = await this.submitAndInspect(operation, effect.rawTransaction);
             return publicOperation(operation);
         });
+    }
+    async recoverProviderRequest(operationIdInput, providerRequestId) {
+        const operationId = canonicalOperationId(operationIdInput);
+        await this.context.ready();
+        const found = await this.requiredOperation(operationId);
+        if (found.providerDirect === undefined) {
+            throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not a provider-atomic direct transfer.");
+        }
+        return await this.providerDirectRecovery.recover(operationId, providerRequestId);
     }
     async status(operationIdInput) {
         await this.context.ready();

@@ -935,17 +935,17 @@ test("top-level transient chain, safe, and finalized RPC faults preserve the dur
 });
 
 test("recoverable RPC faults after intermediate fsync return the latest durable operation", async (t) => {
-  await t.test("settlement hint before safe-head recheck", async (nested) => {
+  await t.test("settlement hint before pinned authorization-state read", async (nested) => {
     const fixture = await authorizedFixture(nested, { idempotencyKey: "rpc-fault-after-hint-fsync" });
     await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
     await advanceSafeAndReset(fixture);
     const exposed = await operation(fixture);
     const settlement = configureSettlement(fixture.rpc, exposed);
     fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
-    let safeReads = 0;
+    const authorizationStateRead = `state:${fixture.rpc.safeHead.number}`;
     fixture.rpc.onX402Call = (name) => {
-      if (name === "safe" && ++safeReads === 2) {
-        throw new ApnError("APN_RPC_AMBIGUOUS", "safe-head recheck fault after hint fsync");
+      if (name === authorizationStateRead) {
+        throw new ApnError("APN_RPC_AMBIGUOUS", "pinned authorization-state fault after hint fsync");
       }
     };
 
@@ -1028,12 +1028,49 @@ test("response hint is fsynced before ordered receipt reconciliation and termina
   assert.equal(completed.ok, true, JSON.stringify(completed));
   assert.equal((completed.operation as { readonly state?: unknown } | null)?.state, "completed");
   assert.equal(responseDurableBeforeReceipt, true);
-  assert.deepEqual(fixture.rpc.x402Calls, ["chain", "safe", "receipt", "block:12345", "state:safe", "safe"]);
+  assert.deepEqual(fixture.rpc.x402Calls, ["chain", "safe", "receipt", "block:12345", "state:12345", "block:12345"]);
   const terminal = await operation(fixture);
   const receipt = await fixture.core.context.state.loadX402Receipt(terminal.profileHash, terminal.operationId);
   assert.equal(receipt?.previousLinkHash, terminal.transitions.at(-1)?.previousHash);
   assert.equal(receipt?.settlementResponseHash, terminal.settlementResponseObservation?.settlementResponseHash);
   assert.equal(fixture.rpc.submissions.length, 0);
+});
+
+test("settlement pins the observed safe block while the safe tag advances", async (t) => {
+  const response = paidObservation({
+    paymentResponseHeader: canonicalPaymentResponseHeader({
+      success: true,
+      transaction: X402_TRANSACTION,
+      network: "eip155:8453",
+      payer: X402_TEST_ACCOUNT.address.toLowerCase(),
+      amount: "1250000",
+    }),
+  });
+  const fixture = await authorizedFixture(t, { paidOutcomes: [response], idempotencyKey: "safe-tag-advance-mid-proof" });
+  const exposed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal((exposed.operation as { readonly state?: unknown } | null)?.state, "settlement_pending");
+  const operationBeforeProof = await operation(fixture);
+  const observedSafe = { ...fixture.rpc.safeHead };
+  configureSettlement(fixture.rpc, operationBeforeProof);
+  fixture.rpc.blockHashes.set(observedSafe.number, observedSafe.hash);
+  fixture.rpc.blockTimestamps.set(observedSafe.number, observedSafe.timestamp);
+  fixture.rpc.onX402Call = (name) => {
+    if (name !== "receipt") return;
+    fixture.rpc.safeHead = {
+      ...fixture.rpc.safeHead,
+      number: (BigInt(fixture.rpc.safeHead.number) + 1n).toString(),
+      hash: `0x${"e".repeat(64)}` as Hex,
+    };
+  };
+
+  const completed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal(completed.ok, true, JSON.stringify(completed));
+  assert.equal((completed.operation as { readonly state?: unknown } | null)?.state, "completed");
+  const terminal = await operation(fixture);
+  assert.equal(terminal.settlementEvidence?.safeHead.number, observedSafe.number);
+  assert.equal(terminal.settlementEvidence?.safeHead.hash, observedSafe.hash);
+  assert.equal(terminal.settlementEvidence?.authorizationState.blockTag, "number");
+  assert.equal(terminal.settlementEvidence?.authorizationState.blockNumber, observedSafe.number);
 });
 
 test("a completed unique AuthorizationUsed scan produces a bound hint and scan-backed spent receipt", async (t) => {
@@ -1057,7 +1094,7 @@ test("a completed unique AuthorizationUsed scan produces a bound hint and scan-b
   assert.equal(receipt?.settlementEvidence?.transactionHash, X402_TRANSACTION);
   assert.deepEqual(fixture.rpc.x402Calls, [
     "chain", "safe", "block:12346", "logs:12345-12346", "block:12346", "block:12346",
-    "receipt", "block:12346", "state:safe", "safe",
+    "receipt", "block:12346", "state:12346", "block:12346",
   ]);
 });
 
