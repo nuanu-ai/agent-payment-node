@@ -141,15 +141,14 @@ export class X402RpcReconciler {
             return operation;
         let authorizationState;
         try {
-            authorizationState = await this.rpc.getX402AuthorizationState(operation.wallet, operation.authorization.nonce, { tag: "safe" });
+            authorizationState = await this.rpc.getX402AuthorizationState(operation.wallet, operation.authorization.nonce, { number: safe.number });
         }
         catch {
             return operation;
         }
-        const safeRecheck = await this.rpc.getX402Head("safe");
-        if (!authorizationState.value || authorizationState.blockTag !== "safe" ||
+        if (!authorizationState.value || authorizationState.blockTag !== "number" ||
             authorizationState.blockNumber !== safe.number || authorizationState.blockHash !== safe.hash ||
-            !sameRpcOrigin(authorizationState.rpcOrigin, rpcOrigin) || !sameHead(safe, safeRecheck))
+            !sameRpcOrigin(authorizationState.rpcOrigin, rpcOrigin))
             return operation;
         const body = {
             schemaVersion: "apn.x402.settlement-evidence.v1",
@@ -175,7 +174,7 @@ export class X402RpcReconciler {
                 value: true,
                 blockNumber: authorizationState.blockNumber,
                 blockHash: authorizationState.blockHash,
-                blockTag: "safe",
+                blockTag: "number",
                 observedAt: authorizationState.observedAt,
             },
             rpcOriginHash,

@@ -103,6 +103,13 @@ function bindParsedCatalog(parsed) {
             },
             rpcUrl: value(options, "--rpc-url"),
         };
+        case "operation recover-provider-request": return {
+            request: {
+                command: "operation.recover-provider-request",
+                operationId: value(options, "--operation"),
+                providerRequestId: value(options, "--provider-request-id"),
+            },
+        };
         case "operation recover-transaction-settlement": return {
             request: {
                 command: "operation.recover-transaction-settlement",

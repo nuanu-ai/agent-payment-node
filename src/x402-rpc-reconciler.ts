@@ -184,14 +184,13 @@ export class X402RpcReconciler {
       authorizationState = await this.rpc.getX402AuthorizationState(
         operation.wallet,
         operation.authorization.nonce,
-        { tag: "safe" },
+        { number: safe.number },
       );
     } catch { return operation; }
-    const safeRecheck = await this.rpc.getX402Head("safe");
     if (
-      !authorizationState.value || authorizationState.blockTag !== "safe" ||
+      !authorizationState.value || authorizationState.blockTag !== "number" ||
       authorizationState.blockNumber !== safe.number || authorizationState.blockHash !== safe.hash ||
-      !sameRpcOrigin(authorizationState.rpcOrigin, rpcOrigin) || !sameHead(safe, safeRecheck)
+      !sameRpcOrigin(authorizationState.rpcOrigin, rpcOrigin)
     ) return operation;
 
     const body = {
@@ -218,7 +217,7 @@ export class X402RpcReconciler {
         value: true as const,
         blockNumber: authorizationState.blockNumber,
         blockHash: authorizationState.blockHash,
-        blockTag: "safe" as const,
+        blockTag: "number" as const,
         observedAt: authorizationState.observedAt,
       },
       rpcOriginHash,

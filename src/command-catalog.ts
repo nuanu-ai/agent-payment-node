@@ -19,6 +19,7 @@ export type ScalarType =
   | "wei"
   | "operation_id"
   | "transaction_hash"
+  | "provider_request_id"
   | "idempotency_key"
   | "integer_seconds";
 
@@ -269,6 +270,25 @@ export const COMMANDS: readonly CommandDefinition[] = [
       { command_path: ["receipt", "get"], when: "After terminal completion." },
     ],
     ["apn operation resume --operation <operation-id> --rpc-url <https-base-rpc-url> --wait-seconds 60"],
+  ),
+  command(
+    ["operation", "recover-provider-request"],
+    "apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>",
+    "Bind one independently known provider request to an eligible ambiguous direct transfer without replaying it.",
+    [
+      operationRequired,
+      option("--provider-request-id", "provider_request_id", true, noDefault, ["1_to_256_safe_ascii_characters"], "operator_input"),
+    ],
+    "recovery",
+    "Writes only the opaque provider request reference; it never creates, signs or submits a payment.",
+    "prior_operation_authorization",
+    "The existing frozen transfer and independently obtained provider request ID are the authorization boundary.",
+    allOperationStates,
+    [
+      { command_path: ["operation", "resume"], when: "To watch the exact recovered provider request and verify on-chain evidence." },
+      { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
+    ],
+    ["apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>"],
   ),
   command(
     ["operation", "recover-transaction-settlement"],

@@ -67,7 +67,7 @@ class FixtureRunner implements MetaMaskProcessRunnerPort {
     });
     if (argv[0] === "wallet" && argv[1] === "select") return success({ selected: this.address });
     if (argv[0] === "wallet" && argv[1] === "address") return success({
-      mode: "server", chainNamespace: "eip155", address: this.address,
+      mode: "server", chainNamespace: "evm", address: this.address,
     });
     if (argv[0] === "wallet" && argv[1] === "sign-typed-data") {
       if (this.initial === "throw") throw new Error("provider response lost");
@@ -131,6 +131,32 @@ test("MetaMask x402 adapter sends only the exact frozen EIP-712 payload and watc
   assert.deepEqual(runner.calls.at(-1), {
     argv: ["wallet", "requests", "watch", TOKEN, "--wallet-timeout", "30", "--json"],
     timeoutMs: 35_000,
+  });
+});
+
+test("MetaMask x402 adapter preserves the official streamed MFA recovery identity", async () => {
+  const runner = new FixtureRunner();
+  const intent = sampleIntent();
+  const adapter = new MetaMaskX402Adapter(runner);
+  const originalRunJson = runner.runJson.bind(runner);
+  runner.runJson = async (argv: readonly string[], timeoutMs?: number): Promise<MetaMaskProcessResult> => {
+    if (argv[0] === "wallet" && argv[1] === "sign-typed-data") {
+      runner.signature = await signPayload(runner.signer, requiredFlag(argv, "--payload"));
+      return streamed(
+        [{ kind: "AWAITING_MFA", source: "wallet:sign-typed-data", pollingId: TOKEN }],
+        { mode: "server", address: runner.address, status: "AWAITING_MFA", pollingId: TOKEN },
+      );
+    }
+    if (argv[0] === "wallet" && argv[1] === "requests" && argv[2] === "watch") {
+      return streamed([{ kind: "AWAITING_MFA", pollingId: TOKEN }], undefined, 1);
+    }
+    return await originalRunJson(argv, timeoutMs);
+  };
+  assert.deepEqual(await adapter.request(intent), {
+    disposition: "pending", recoveryToken: TOKEN, providerState: "AWAITING_MFA",
+  });
+  assert.deepEqual(await adapter.observe({ recoveryToken: TOKEN, sender: ACCOUNT.address, waitSeconds: 1 }), {
+    disposition: "pending", recoveryToken: TOKEN, providerState: "AWAITING_MFA",
   });
 });
 
@@ -438,4 +464,18 @@ function success(data: Record<string, unknown>): MetaMaskProcessResult {
 
 function failure(code: string): MetaMaskProcessResult {
   return { exitCode: 1, stdout: Buffer.from(JSON.stringify({ ok: false, error: { code } })) };
+}
+
+function streamed(
+  notices: readonly Record<string, unknown>[],
+  summary?: Record<string, unknown>,
+  exitCode = 0,
+): MetaMaskProcessResult {
+  return {
+    exitCode,
+    stdout: Buffer.from([
+      ...notices.map((notice) => JSON.stringify({ _notice: notice })),
+      ...(summary === undefined ? [] : [JSON.stringify({ _summary: summary })]),
+    ].join("\n")),
+  };
 }
