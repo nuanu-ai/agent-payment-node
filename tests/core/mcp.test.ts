@@ -89,7 +89,7 @@ test("official MCP client proves production stdio descriptor, seventeen tools, a
       { name: "apn_wallet_ensure", properties: ["profile"], required: [], defaults: { profile: "default" } },
       {
         name: "apn_wallet_connect",
-        properties: ["profile", "provider", "expected_revision"],
+        properties: ["profile", "provider", "auth_method", "expected_revision"],
         required: ["profile", "provider"],
         defaults: {},
       },
