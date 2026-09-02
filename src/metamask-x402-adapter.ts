@@ -86,14 +86,14 @@ export class MetaMaskX402Adapter implements X402SigningPort {
 
   private async selectAndCrossCheck(expected: Address): Promise<void> {
     const selected = await this.runner.runJson([
-      "wallet", "select", expected, "--chain-namespace", "eip155", "--json",
+      "wallet", "select", expected, "--chain-namespace", "evm", "--json",
     ]);
     try {
       if (!successfulData(selected)) throw new Error("selection failed");
     } finally { selected.stdout.fill(0); }
 
     const observed = await this.runner.runJson([
-      "wallet", "address", "--chain-namespace", "eip155", "--json",
+      "wallet", "address", "--chain-namespace", "evm", "--json",
     ]);
     try {
       const data = successfulData(observed);

@@ -102,7 +102,7 @@ for (const file of files) {
   }
   if (file === join(sourceRoot, "metamask-direct-adapter.ts")) {
     for (const required of [
-      "\"wallet\", \"select\"", "\"--chain-namespace\", \"eip155\"", "\"transfer\"",
+      "\"wallet\", \"select\"", "\"--chain-namespace\", \"evm\"", "\"transfer\"",
       "\"--chain-id\", String(CHAIN_ID)", "\"--token\", BASE_USDC", "\"wallet\", \"requests\", \"watch\"",
     ]) {
       if (!text.includes(required)) violations.push(`src/metamask-direct-adapter.ts: missing ${required}`);
@@ -113,7 +113,7 @@ for (const file of files) {
   }
   if (file === join(sourceRoot, "metamask-x402-adapter.ts")) {
     for (const required of [
-      "\"wallet\", \"select\"", "\"--chain-namespace\", \"eip155\"", "\"wallet\", \"sign-typed-data\"",
+      "\"wallet\", \"select\"", "\"--chain-namespace\", \"evm\"", "\"wallet\", \"sign-typed-data\"",
       "\"--chain-id\", input.chainId", "\"--payload\", payload", "\"--intent\", input.humanIntent",
       "\"wallet\", \"requests\", \"watch\"",
     ]) {

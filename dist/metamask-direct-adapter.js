@@ -66,7 +66,7 @@ export class MetaMaskDirectAdapter {
     }
     async selectAndCrossCheck(expected) {
         const selected = await this.runner.runJson([
-            "wallet", "select", expected, "--chain-namespace", "eip155", "--json",
+            "wallet", "select", expected, "--chain-namespace", "evm", "--json",
         ]);
         try {
             if (!isSuccess(selected))
@@ -76,7 +76,7 @@ export class MetaMaskDirectAdapter {
             selected.stdout.fill(0);
         }
         const observed = await this.runner.runJson([
-            "wallet", "address", "--chain-namespace", "eip155", "--json",
+            "wallet", "address", "--chain-namespace", "evm", "--json",
         ]);
         try {
             const data = successData(observed);
