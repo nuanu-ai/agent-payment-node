@@ -1,5 +1,5 @@
 import { encodeFunctionData, getAddress, keccak256, parseTransaction, recoverTransactionAddress } from "viem";
-import { exactKeys, isPlainRecord } from "./canonical.js";
+import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2, CHAIN_ID, TRANSFER_TOPIC, USDC_DECIMALS } from "./constants.js";
 import { ApnError, assertInput } from "./errors.js";
 import { multiplyAtomic, parseAtomic } from "./money.js";
@@ -132,6 +132,10 @@ export function publicOperation(operation) {
         expires_at: operation.expiresAt,
         ...(operation.transactionHash === undefined ? {} : { transaction_hash: operation.transactionHash }),
         ...(operation.rawTransactionHash === undefined ? {} : { raw_transaction_hash: operation.rawTransactionHash }),
+        ...(operation.providerEffect === undefined ? {} : {
+            provider_request_reference_hash: sha256(`provider-effect-reference\0${operation.providerDirect?.providerId ?? "unknown"}\0${operation.providerEffect.recoveryToken}`),
+            provider_request_kind: operation.providerEffect.kind,
+        }),
         ...(operation.providerDirect === undefined ? {} : {
             provider: operation.providerDirect.providerId,
             profile_revision: operation.providerDirect.profileRevision,

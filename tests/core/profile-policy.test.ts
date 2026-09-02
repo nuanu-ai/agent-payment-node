@@ -30,6 +30,17 @@ class TestWrappingSecret implements WrappingSecretPort {
   async create(): Promise<Buffer> { return Buffer.from(MASTER); }
 }
 
+class LazyWrappingSecret implements WrappingSecretPort {
+  private value: Buffer | null = null;
+  createCalls = 0;
+  async load(): Promise<Buffer | null> { return this.value === null ? null : Buffer.from(this.value); }
+  async create(): Promise<Buffer> {
+    this.createCalls += 1;
+    this.value ??= Buffer.from(MASTER);
+    return Buffer.from(this.value);
+  }
+}
+
 class RecordingPolicyApproval implements ProfilePolicyApprovalPort {
   readonly intents: ProfilePolicyApprovalIntent[] = [];
   async approve(intent: ProfilePolicyApprovalIntent): Promise<void> { this.intents.push(intent); }
@@ -134,6 +145,29 @@ test("provider rebind invalidates the old encrypted policy and requires a newly 
   assert.deepEqual(approval.intents.map((intent) => intent.change), ["create", "create"]);
   assert.equal((await policy.load(rebound))?.walletBindingHash, rebound.walletBindingHash);
   await assert.rejects(policy.load(first), (error: unknown) => error instanceof ApnError && error.code === "APN_STATE_CORRUPT");
+});
+
+test("a provider-only profile can create its encrypted policy wrapping secret without a local wallet", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  await state.initialize();
+  const wrapping = new LazyWrappingSecret();
+  const approval = new RecordingPolicyApproval();
+  const policy = new EncryptedProfilePolicy(state, wrapping, approval, new TestClock());
+  const binding: ProfilePolicyBinding = {
+    profile: "provider-only",
+    profileHash: state.profileHash("provider-only"),
+    walletAddress: `0x${"4".repeat(40)}`,
+    walletBindingHash: "c".repeat(64),
+  };
+  const created = await policy.set(binding, {
+    maxBalanceUsdcAtomic: "5000000",
+    maxX402AmountAtomic: "1000000",
+  });
+  assert.equal(wrapping.createCalls, 1);
+  assert.equal(created.walletAddress, binding.walletAddress);
+  assert.equal((await policy.load(binding))?.maxX402AmountAtomic, "1000000");
 });
 
 test("same chain balance is classified from owner values and never from a compiled monetary default", async (t) => {

@@ -6,6 +6,7 @@ import type { ForegroundAuthenticationPort, ProviderProfileRepositoryPort, Provi
 import type { TransferApprovalPort } from "./tty-approval.js";
 import type { ProviderX402Repository } from "./provider-x402-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
+import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
 export interface CoreDependencies {
     readonly state: StateStore;
     readonly native?: NativePort;
@@ -23,6 +24,7 @@ export interface CoreDependencies {
     readonly rpcUrl?: string;
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
+    readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
 }
 export declare class RuntimeContext {
     readonly state: StateStore;
@@ -41,6 +43,7 @@ export declare class RuntimeContext {
     readonly rpcUrl?: string;
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
+    readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
     private initialized;
     constructor(dependencies: CoreDependencies);
     ready(): Promise<void>;
@@ -54,5 +57,6 @@ export declare class RuntimeContext {
     requireForegroundAuthentication(): ForegroundAuthenticationPort;
     requireTransferApproval(): TransferApprovalPort;
     requireRpcUrl(): string;
+    requireProviderAuthorizationStore(): ProviderAuthorizationStorePort;
     nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest;
 }

@@ -89,10 +89,7 @@ export class EncryptedProfilePolicy implements ProfilePolicyPort {
       approvedAt: increase ? now : current?.approvedAt ?? now,
       updatedAt: now,
     });
-    const wrapping = await this.wrappingSecret.load();
-    if (wrapping === null) {
-      throw new ApnError("APN_STATE_CORRUPT", "The wallet wrapping secret is missing.");
-    }
+    const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
     try {
       await this.save(binding, policy, wrapping);
       return policy;

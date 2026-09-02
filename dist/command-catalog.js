@@ -9,9 +9,9 @@ const defaultProfile = { kind: "literal", value: "default" };
 const completedStates = { terminal: ["completed", "classified_failure"], non_terminal: [] };
 const mcpServerStates = { terminal: ["server_closed", "classified_failure"], non_terminal: ["serving"] };
 const directStates = {
-    terminal: ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_proven_superseded"],
+    terminal: ["completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert", "failed_proven_superseded"],
     non_terminal: [
-        "awaiting_approval", "started", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
+        "awaiting_approval", "started", "provider_pending", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
         "signed_not_submitted", "submitted_pending", "unknown_finality",
     ],
 };
@@ -63,7 +63,10 @@ export const COMMANDS = [
         profileRequired,
         option("--provider", "provider_id", true, noDefault, ["registered_provider_identifier"], "public"),
         option("--expected-revision", "positive_integer", false, noDefault, ["required_for_rebind", "omitted_for_initial_connect"], "public"),
-    ], "local_write", "Runs foreground provider authentication and atomically writes only safe public profile binding facts.", "foreground_tty", "Authentication and any explicit rebind comparison require the foreground CLI terminal.", completedStates, [], ["apn wallet connect --profile default --provider coinbase-agentic-wallet"]),
+    ], "local_write", "Runs foreground provider authentication and atomically writes only safe public profile binding facts.", "foreground_tty", "Authentication and any explicit rebind comparison require the foreground CLI terminal.", completedStates, [], [
+        "apn wallet connect --profile provider-one --provider coinbase-agentic-wallet",
+        "apn wallet connect --profile metamask --provider metamask-agent-wallet",
+    ]),
     command(["wallet", "status"], "apn wallet status [--profile <profile>]", "Read wallet presence and public identity.", [profileOptional], "local_read", "Returns absent without creating state or accessing Keychain material.", "none", "Never.", completedStates, [], ["apn wallet status --profile default"]),
     command(["wallet", "balance"], "apn wallet balance [--profile <profile>] --rpc-url <https-url>", "Read Base ETH and canonical Base-USDC balances.", [profileOptional, rpcRequired], "network_read", "Reads the configured public Base RPC; never signs or submits.", "none", "Never.", completedStates, [], ["apn wallet balance --profile default --rpc-url <https-base-rpc-url>"]),
     command(["wallet", "policy", "show"], "apn wallet policy show --profile <profile>", "Read the encrypted owner-approved profile policy.", [profileRequired], "local_read", "Reads wallet-bound policy state.", "none", "Never.", completedStates, [], ["apn wallet policy show --profile default"]),
@@ -83,7 +86,7 @@ export const COMMANDS = [
         rpcRequired,
         option("--max-amount-atomic", "atomic_usdc", false, noDefault, ["positive_canonical_integer", "may_only_lower_profile_limit"], "operator_input"),
     ], "payment_prepare", "Reads seller and Base evidence, then durably freezes one purchase intent without signing.", "prior_profile_policy", "An owner-approved profile policy must already bound the purchase.", x402States, [{ command_path: ["x402", "fetch", "approve"], when: "After a successful prepare returns an operation ID." }], ["apn x402 fetch prepare --profile default --url https://seller.example/resource --idempotency-key <idempotency-key> --rpc-url <https-base-rpc-url>"]),
-    command(["x402", "fetch", "approve"], "apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>", "Advance one frozen x402 request under its stored policy.", [operationRequired, rpcRequired], "payment_submit", "Rechecks frozen intent and policy, then either persists local authorization or executes the provider-owned paid fetch exactly once.", "prior_profile_policy", "No per-payment prompt; the frozen operation and existing profile policy are the authorization boundary.", x402States, [
+    command(["x402", "fetch", "approve"], "apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>", "Advance one frozen x402 request under its stored policy.", [operationRequired, rpcRequired], "payment_submit", "Rechecks frozen intent and policy, then obtains one local or provider-detached authorization, or executes one provider-owned paid fetch.", "prior_profile_policy", "APN adds no per-payment prompt; a detached provider signer may still require its own MFA.", x402States, [
         { command_path: ["operation", "status"], when: "To inspect any returned non-terminal state." },
         { command_path: ["operation", "resume"], when: "When documented durable recovery is permitted." },
         { command_path: ["receipt", "get"], when: "After terminal completion." },
@@ -104,7 +107,7 @@ export const COMMANDS = [
         { command_path: ["operation", "resume"], when: "When the returned state documents resumable recovery." },
         { command_path: ["receipt", "get"], when: "When the operation is terminal." },
     ], ["apn operation status --operation <operation-id>"]),
-    command(["operation", "resume"], "apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]", "Perform only the next legal durable recovery transition.", [operationRequired, rpcRequired, option("--wait-seconds", "integer_seconds", false, noDefault, ["canonical_integer_1_through_300", "x402_only"], "operator_input")], "recovery", "Reuses protected effect material and may reconcile or resubmit only when the stored state permits.", "prior_operation_authorization", "Uses the authorization already bound to the durable operation; it cannot widen the frozen effect.", allOperationStates, [
+    command(["operation", "resume"], "apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]", "Perform only the next legal durable recovery transition.", [operationRequired, rpcRequired, option("--wait-seconds", "integer_seconds", false, noDefault, ["canonical_integer_1_through_300", "x402_or_provider_approval_watch"], "operator_input")], "recovery", "Reuses protected effect material and may reconcile or resubmit only when the stored state permits.", "prior_operation_authorization", "Uses the authorization already bound to the durable operation; it cannot widen the frozen effect.", allOperationStates, [
         { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
         { command_path: ["receipt", "get"], when: "After terminal completion." },
     ], ["apn operation resume --operation <operation-id> --rpc-url <https-base-rpc-url> --wait-seconds 60"]),

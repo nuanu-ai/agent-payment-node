@@ -14,8 +14,21 @@ import { appendX402Transition, publicX402Operation, sealX402Operation, sealX402R
 import { X402RpcReconciler } from "./x402-rpc-reconciler.js";
 import { isNativeNotFound, isNativeExpired, isTransientNativeFailure, requestX402Authorization, x402NativeRequest, } from "./x402-native.js";
 import { X402Lifecycle } from "./x402-lifecycle.js";
+import { ProviderX402AuthorizationService } from "./provider-x402-authorization.js";
 export class X402PaidRequest extends X402Lifecycle {
     async recoverPaymentMaterial(operation) {
+        if (operation.providerSigner !== undefined) {
+            const outcome = await this.providerAuthorization().authorize(operation, "get");
+            if (outcome.disposition !== "signed") {
+                throw new ApnError("APN_STATE_CORRUPT", "Authorized provider x402 operation lost its signed material.");
+            }
+            const verified = outcome.material;
+            if (verified.native.signatureHash !== operation.signatureHash ||
+                verified.paymentPayloadHash !== operation.paymentPayloadHash ||
+                verified.paymentHeaderHash !== operation.paymentHeaderHash)
+                throw new ApnError("APN_STATE_CORRUPT", "Recovered provider x402 material differs from durable hashes.");
+            return verified;
+        }
         try {
             const verified = await requestX402Authorization(this.context.requireNative(), x402NativeRequest(this.context.ids.next(), operation, "get"), operation);
             if (verified.native.signatureHash !== operation.signatureHash ||
@@ -55,7 +68,26 @@ export class X402PaidRequest extends X402Lifecycle {
     }
     async completeAuthorization(operation, kind) {
         if (BigInt(Math.floor(this.context.clock.now().getTime() / 1000)) >= BigInt(operation.authorization.validBefore)) {
+            if (operation.providerSigner !== undefined) {
+                return publicX402Operation(await this.commitTerminal(operation, "failed_before_effect"));
+            }
             throw new ApnError("APN_OPERATION_BLOCKED", "Frozen x402 authorization validity has expired.");
+        }
+        if (operation.providerSigner !== undefined) {
+            const outcome = await this.providerAuthorization().authorize(operation, kind);
+            if (outcome.disposition === "pending") {
+                return publicX402Operation(operation);
+            }
+            if (outcome.disposition === "rejected" || outcome.disposition === "ambiguous") {
+                return publicX402Operation(await this.commitTerminal(operation, "failed_before_effect"));
+            }
+            const verified = outcome.material;
+            const authorized = await this.transition(operation, "authorized_not_sent", {
+                signatureHash: verified.native.signatureHash,
+                paymentPayloadHash: verified.paymentPayloadHash,
+                paymentHeaderHash: verified.paymentHeaderHash,
+            });
+            return publicX402Operation(authorized);
         }
         try {
             const verified = await requestX402Authorization(this.context.requireNative(), x402NativeRequest(this.context.ids.next(), operation, kind), operation);
@@ -75,6 +107,9 @@ export class X402PaidRequest extends X402Lifecycle {
                 return publicX402Operation(operation);
             throw error;
         }
+    }
+    providerAuthorization() {
+        return new ProviderX402AuthorizationService(this.context, this.context.requireProviderAuthorizationStore());
     }
     async sendPaidRequest(operation, purpose, verified, terminalizeFromExistingEvidence = false, callerDeadlineMs) {
         if (operation.attempts.length >= 64)

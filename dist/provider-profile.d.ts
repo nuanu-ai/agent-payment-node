@@ -3,9 +3,9 @@ import type { Address, WalletRecord } from "./model.js";
 export declare const PROVIDER_PROFILE_VERSION: "apn.provider-profile.v1";
 export declare const PROVIDER_CAPABILITY_VERSION: "apn.provider-capability.v1";
 export declare const LOCAL_PROVIDER_ID: "local";
-export type ProviderTrustClass = "local_software_wallet" | "provider_managed_non_custodial_tee";
+export type ProviderTrustClass = "local_software_wallet" | "provider_managed_non_custodial_tee" | "provider_managed_non_custodial_signer";
 export type DirectExecutionMode = "local_raw_transaction_apn_submit" | "provider_atomic_send";
-export type X402ExecutionMode = "local_detached_eip3009_apn_paid_retry" | "provider_atomic_paid_fetch";
+export type X402ExecutionMode = "local_detached_eip3009_apn_paid_retry" | "provider_detached_eip3009_apn_paid_retry" | "provider_atomic_paid_fetch";
 export type ProviderProfileState = "bound" | "drift_blocked" | "rebind_pending";
 export interface ProviderCapabilitySnapshot {
     readonly schema_version: typeof PROVIDER_CAPABILITY_VERSION;
@@ -77,6 +77,8 @@ export interface ProviderBindingObservation {
 export declare function localCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function lifecycleReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function coinbaseDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
+export declare function metamaskReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot;
+export declare function metamaskDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function capabilityHash(snapshot: ProviderCapabilitySnapshot): string;
 export declare function accountBindingHash(providerId: string, address: Address): string;
 export declare function markProviderProfileDrift(profile: ProviderProfileRecord, observed: ProviderBindingObservation): ProviderProfileRecord;

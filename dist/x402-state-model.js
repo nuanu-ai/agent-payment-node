@@ -27,6 +27,7 @@ export function x402Fingerprint(input) {
         capAtomic: input.capAtomic,
         selectedOfferHash: input.selectedOffer.offerHash,
         wallet: input.wallet,
+        ...(input.providerSigner === undefined ? {} : { providerSigner: input.providerSigner }),
         acceptedResolvedDefaults: input.selectedOffer.resolved,
         paymentIdentifier: input.paymentIdentifier === undefined
             ? { advertised: false }

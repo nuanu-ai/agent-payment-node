@@ -83,7 +83,10 @@ export class SecureStateStore {
         const canonical = await realpath(this.root);
         if (canonical !== this.root)
             stateSecurity("State root resolves through an alias or symbolic link.");
-        for (const name of ["profiles", "wallets", "policies", "operations", "receipts", "x402-operations", "x402-results", "x402-receipts", "locks"]) {
+        for (const name of [
+            "profiles", "wallets", "policies", "provider-authorizations", "operations", "receipts",
+            "x402-operations", "x402-results", "x402-receipts", "locks",
+        ]) {
             await this.ensureDirectory(name);
         }
     }
