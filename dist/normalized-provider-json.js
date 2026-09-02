@@ -19,6 +19,7 @@ const PROTECTED_TEXT = [
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu,
     /^(?=.{28,}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9_-]+$/u,
 ];
+const PUBLIC_EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 /** Canonicalize one bounded, provider-neutral seller JSON value. */
 export function canonicalizeNormalizedProviderJson(value) {
     const state = { nodes: 0, bytes: 0, output: [], path: new WeakSet() };
@@ -119,7 +120,7 @@ function appendObject(value, depth, state) {
 function validateText(value) {
     if (Buffer.byteLength(value, "utf8") > NORMALIZED_PROVIDER_JSON_LIMITS.maxStringBytes)
         invalid();
-    if (PROTECTED_TEXT.some((pattern) => pattern.test(value)))
+    if (!PUBLIC_EVM_ADDRESS.test(value) && PROTECTED_TEXT.some((pattern) => pattern.test(value)))
         invalid();
 }
 function compactKey(value) {
