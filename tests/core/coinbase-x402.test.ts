@@ -1567,6 +1567,39 @@ test("range recovery accepts legacy start/deadline clock drift and terminalizes 
   assert.equal(effect.calls.length, 1, "same-operation recovery must never replay the provider request");
 });
 
+test("pre-range capability gap remains retryable and terminalizes the saved seller result without replay", async (t) => {
+  const fixture = await setup(t);
+  const operationId = await prepare(fixture.core, "provider-pre-range-capability-gap-retry");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  fixture.clock.advance(240_000);
+  fixture.rpc.safeNumber = 1021n;
+  fixture.rpc.failChain = true;
+
+  const gap = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((gap.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((gap.operation as { reason?: unknown }).reason, "provider_evidence_capability_gap");
+  const afterGap = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(afterGap?.immutableUpperBlock, undefined);
+
+  fixture.rpc.failChain = false;
+  const transfer = exactTransfer(1010n);
+  fixture.rpc.transferLogs = [transfer];
+  fixture.rpc.x402Receipt = {
+    transactionHash: TRANSACTION,
+    status: "success",
+    blockNumber: transfer.blockNumber,
+    blockHash: transfer.blockHash,
+    logs: [transfer],
+    observedAt: fixture.clock.now().toISOString(),
+    rpcOrigin: fixture.rpc.rpcOrigin,
+  };
+  const recovered = await restartedCore(fixture).execute({ command: "operation.resume", operationId });
+  assert.equal((recovered.operation as { state?: unknown }).state, "completed");
+  assert.equal((recovered.operation as { terminal?: unknown }).terminal, true);
+  assert.equal((recovered.operation as { reason?: unknown }).reason, "x402_completed");
+  assert.equal(fixture.effect.calls.length, 1, "settlement reconciliation must never replay the provider request");
+});
+
 test("transient receipt observation joins an existing seller result after restart without provider replay", async (t) => {
   const fixture = await setup(t);
   const operationId = await prepare(fixture.core, "provider-frozen-range-result-retry");
