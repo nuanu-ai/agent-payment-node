@@ -25,8 +25,9 @@ const IDEMPOTENCY = "metamask-direct-001";
 
 class FixtureRunner implements MetaMaskProcessRunnerPort {
   readonly calls: Array<{ readonly argv: readonly string[]; readonly timeoutMs?: number }> = [];
+  addressMode = "server";
   transfer: MetaMaskProcessResult = success({
-    mode: "server-wallet",
+    mode: "server",
     address: SENDER,
     status: "AWAITING_MFA",
     pollingId: TOKEN,
@@ -44,7 +45,7 @@ class FixtureRunner implements MetaMaskProcessRunnerPort {
     });
     if (argv[0] === "wallet" && argv[1] === "select") return success({ selected: SENDER });
     if (argv[0] === "wallet" && argv[1] === "address") return success({
-      mode: "server-wallet", chainNamespace: "eip155", address: SENDER,
+      mode: this.addressMode, chainNamespace: "eip155", address: SENDER,
     });
     if (argv[0] === "transfer") {
       if (this.throwTransfer) throw new Error("provider process lost");
@@ -93,9 +94,18 @@ test("MetaMask direct adapter uses exact sender, canonical Base USDC argv and sa
   });
 });
 
+test("MetaMask direct adapter accepts the exact 6.1.5 server mode and fails safely before transfer on drift", async () => {
+  const runner = new FixtureRunner();
+  runner.addressMode = "server-wallet";
+  assert.deepEqual(await new MetaMaskDirectAdapter(runner).execute({
+    sender: SENDER, recipient: RECIPIENT, amountDecimal: "0.0005",
+  }), { disposition: "not_started", reason: "provider_child_not_created" });
+  assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 0);
+});
+
 test("MetaMask direct adapter classifies denial, timeout and unsafe terminal uncertainty without replay", async () => {
   const denied = new FixtureRunner();
-  denied.transfer = success({ mode: "server-wallet", address: SENDER, status: "DENIED" });
+  denied.transfer = success({ mode: "server", address: SENDER, status: "DENIED" });
   assert.deepEqual(await new MetaMaskDirectAdapter(denied).execute({
     sender: SENDER, recipient: RECIPIENT, amountDecimal: "0.01",
   }), { disposition: "rejected", reason: "provider_denied" });
@@ -169,7 +179,7 @@ test("provider denial is terminal with a durable receipt; lost initial outcome s
   t.after(async () => { await deniedState.cleanup(); await lostState.cleanup(); });
 
   const deniedRunner = new FixtureRunner();
-  deniedRunner.transfer = success({ mode: "server-wallet", address: SENDER, status: "DENIED" });
+  deniedRunner.transfer = success({ mode: "server", address: SENDER, status: "DENIED" });
   const deniedCore = core(deniedState.root, deniedRunner, new TestRpc(), new Approval());
   await connect(deniedCore);
   const deniedId = await prepare(deniedCore, "metamask-denial-001");
