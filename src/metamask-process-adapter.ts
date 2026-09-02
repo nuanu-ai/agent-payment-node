@@ -6,6 +6,7 @@ import type {
   ForegroundAuthenticationPort,
   ProviderAdapterBundle,
   ProviderBalanceObservation,
+  ProviderConnectOptions,
   ProviderLifecyclePort,
   ProviderWalletReadPort,
   X402SigningPort,
@@ -16,6 +17,7 @@ import { MetaMaskX402Adapter } from "./metamask-x402-adapter.js";
 import { NodeMetaMaskProcessRunner, type MetaMaskProcessRunnerPort } from "./metamask-process-runner.js";
 
 export const METAMASK_AGENT_WALLET_PROVIDER_ID = "metamask-agent-wallet" as const;
+export const METAMASK_AGENT_WALLET_AUTHENTICATION_METHODS = ["qr", "browser"] as const;
 
 export type ProviderExclusivePort = <T>(work: () => Promise<T>) => Promise<T>;
 
@@ -26,6 +28,7 @@ interface DoctorStatus {
 
 export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWalletReadPort {
   readonly capabilities = metamaskDirectCapabilitySnapshot();
+  readonly authenticationMethods = METAMASK_AGENT_WALLET_AUTHENTICATION_METHODS;
 
   constructor(
     private readonly runner: MetaMaskProcessRunnerPort = new NodeMetaMaskProcessRunner(),
@@ -48,11 +51,14 @@ export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWa
     };
   }
 
-  async connect(_foreground: ForegroundAuthenticationPort): Promise<void> {
+  async connect(_foreground: ForegroundAuthenticationPort, options: ProviderConnectOptions = {}): Promise<void> {
     await this.exclusive(async () => {
+      const authenticationMethod = requireAuthenticationMethod(options.authenticationMethod);
       let status = await this.doctor();
       if (!status.authenticated) {
-        const exitCode = await this.runner.runForeground(["login", "qr"]);
+        const exitCode = await this.runner.runForeground(authenticationMethod === "browser"
+          ? ["login", "browser", "--otp-pair"]
+          : ["login", "qr"]);
         if (exitCode !== 0) throw authenticationFailure();
         status = await this.doctor();
       }
@@ -131,6 +137,14 @@ export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWa
       result.stdout.fill(0);
     }
   }
+}
+
+function requireAuthenticationMethod(input: string | undefined): typeof METAMASK_AGENT_WALLET_AUTHENTICATION_METHODS[number] {
+  const selected = input ?? "qr";
+  if (selected !== "qr" && selected !== "browser") {
+    throw new ApnError("APN_INVALID_INPUT", "MetaMask Agent Wallet supports only qr or browser authentication.");
+  }
+  return selected;
 }
 
 function requireSuccess(exitCode: number, bytes: Buffer): Record<string, unknown> {

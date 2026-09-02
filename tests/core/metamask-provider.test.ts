@@ -7,6 +7,7 @@ import { runCli } from "../../src/cli.js";
 import type { ForegroundAuthenticationPort } from "../../src/provider-ports.js";
 import { ProviderRegistry } from "../../src/provider-registry.js";
 import {
+  METAMASK_AGENT_WALLET_AUTHENTICATION_METHODS,
   METAMASK_AGENT_WALLET_PROVIDER_ID,
   MetaMaskProcessAdapter,
 } from "../../src/metamask-process-adapter.js";
@@ -170,10 +171,52 @@ test("connect performs only required provider-native QR login and Guard server-w
   ]);
 });
 
+test("browser connect delegates only provider-native OTP pairing and Guard server-wallet init", async () => {
+  const runner = new FixtureRunner();
+  runner.authenticated = false;
+  runner.initialized = false;
+  const adapter = new MetaMaskProcessAdapter(runner);
+  await adapter.connect(foreground, { authenticationMethod: "browser" });
+  assert.deepEqual(adapter.authenticationMethods, METAMASK_AGENT_WALLET_AUTHENTICATION_METHODS);
+  assert.deepEqual(runner.foregroundCalls, [["login", "browser", "--otp-pair"]]);
+  assert.deepEqual(runner.jsonCalls, [
+    ["doctor", "--json"],
+    ["doctor", "--json"],
+    ["init", "--wallet", "server-wallet", "--mode", "guard", "--json"],
+    ["doctor", "--json"],
+    ["wallet", "address", "--chain-namespace", "evm", "--json"],
+  ]);
+});
+
+test("unsupported authentication method fails before provider or profile access", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const runner = new FixtureRunner();
+  runner.authenticated = false;
+  runner.initialized = false;
+  const rejected = await runCli([
+    "wallet", "connect", "--profile", "metamask", "--provider", METAMASK_AGENT_WALLET_PROVIDER_ID,
+    "--auth-method", "password",
+  ], {}, {
+    stateRoot: temporary.root,
+    providerRegistry: registry(runner),
+    foregroundAuthentication: foreground,
+  });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error?.code, "APN_INVALID_INPUT");
+  assert.deepEqual(runner.foregroundCalls, []);
+  assert.deepEqual(runner.jsonCalls, []);
+  const status = await runCli(["wallet", "status", "--profile", "metamask"], {}, {
+    stateRoot: temporary.root,
+    providerRegistry: registry(runner),
+  });
+  assert.equal((status.data as Record<string, unknown>).status, "absent");
+});
+
 test("connected session is reused without login or reinitialization", async () => {
   const runner = new FixtureRunner();
   const adapter = new MetaMaskProcessAdapter(runner);
-  await adapter.connect(foreground);
+  await adapter.connect(foreground, { authenticationMethod: "browser" });
   assert.deepEqual(runner.foregroundCalls, []);
   assert.deepEqual(runner.jsonCalls, [
     ["doctor", "--json"],

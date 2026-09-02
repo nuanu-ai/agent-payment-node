@@ -97,6 +97,7 @@ function scalarPattern(type) {
     switch (type) {
         case "profile": return "^[a-z0-9][a-z0-9._-]{0,63}$";
         case "provider_id": return "^[a-z0-9][a-z0-9._-]{0,63}$";
+        case "provider_auth_method": return "^[a-z][a-z0-9-]{0,31}$";
         case "positive_integer": return "^[1-9][0-9]*$";
         case "atomic_usdc":
         case "wei": return "^[1-9][0-9]*$";

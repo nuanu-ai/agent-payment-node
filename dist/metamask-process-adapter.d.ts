@@ -1,7 +1,8 @@
 import type { Address } from "./model.js";
-import type { DirectExecutionPort, ForegroundAuthenticationPort, ProviderAdapterBundle, ProviderBalanceObservation, ProviderLifecyclePort, ProviderWalletReadPort, X402SigningPort } from "./provider-ports.js";
+import type { DirectExecutionPort, ForegroundAuthenticationPort, ProviderAdapterBundle, ProviderBalanceObservation, ProviderConnectOptions, ProviderLifecyclePort, ProviderWalletReadPort, X402SigningPort } from "./provider-ports.js";
 import { type MetaMaskProcessRunnerPort } from "./metamask-process-runner.js";
 export declare const METAMASK_AGENT_WALLET_PROVIDER_ID: "metamask-agent-wallet";
+export declare const METAMASK_AGENT_WALLET_AUTHENTICATION_METHODS: readonly ["qr", "browser"];
 export type ProviderExclusivePort = <T>(work: () => Promise<T>) => Promise<T>;
 export declare class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWalletReadPort {
     private readonly runner;
@@ -10,9 +11,10 @@ export declare class MetaMaskProcessAdapter implements ProviderLifecyclePort, Pr
     private readonly direct;
     private readonly x402Signer;
     readonly capabilities: import("./provider-profile.js").ProviderCapabilitySnapshot;
+    readonly authenticationMethods: readonly ["qr", "browser"];
     constructor(runner?: MetaMaskProcessRunnerPort, exclusive?: ProviderExclusivePort, now?: () => Date, direct?: DirectExecutionPort, x402Signer?: X402SigningPort);
     bundle(): ProviderAdapterBundle;
-    connect(_foreground: ForegroundAuthenticationPort): Promise<void>;
+    connect(_foreground: ForegroundAuthenticationPort, options?: ProviderConnectOptions): Promise<void>;
     probeStatus(): Promise<void>;
     logout(): Promise<void>;
     observeBalance(): Promise<ProviderBalanceObservation>;

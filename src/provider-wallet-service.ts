@@ -33,7 +33,15 @@ export class ProviderWalletService {
         }
       }
       const adapter = this.context.requireProviderRegistry().resolve(request.providerId);
-      await adapter.lifecycle.connect(this.context.requireForegroundAuthentication());
+      if (
+        request.authenticationMethod !== undefined &&
+        !adapter.lifecycle.authenticationMethods?.includes(request.authenticationMethod)
+      ) {
+        throw new ApnError("APN_INVALID_INPUT", "The requested authentication method is not supported by this wallet provider.");
+      }
+      await adapter.lifecycle.connect(this.context.requireForegroundAuthentication(), {
+        ...(request.authenticationMethod === undefined ? {} : { authenticationMethod: request.authenticationMethod }),
+      });
       const observation = await adapter.reads.observeBalance();
       const observedCapabilityHash = capabilityHash(adapter.capabilities);
       const observed: ProviderBindingObservation = {

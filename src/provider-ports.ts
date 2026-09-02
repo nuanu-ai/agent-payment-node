@@ -17,8 +17,13 @@ export interface ForegroundAuthenticationPort {
   }): Promise<boolean>;
 }
 
+export interface ProviderConnectOptions {
+  readonly authenticationMethod?: string;
+}
+
 export interface ProviderLifecyclePort {
-  connect(foreground: ForegroundAuthenticationPort): Promise<void>;
+  readonly authenticationMethods?: readonly string[];
+  connect(foreground: ForegroundAuthenticationPort, options?: ProviderConnectOptions): Promise<void>;
   probeStatus(): Promise<void>;
   logout(): Promise<void>;
 }
