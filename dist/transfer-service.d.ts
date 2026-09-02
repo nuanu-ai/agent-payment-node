@@ -4,12 +4,14 @@ export declare class TransferService {
     private readonly context;
     private readonly operations;
     private readonly providerDirect;
+    private readonly providerDirectRecovery;
     constructor(context: RuntimeContext);
     prepare(request: Extract<CommandRequest, {
         command: "transfer.prepare";
     }>): Promise<unknown>;
     approve(operationIdInput: string): Promise<unknown>;
     resume(operationIdInput: string, waitSeconds?: number): Promise<unknown>;
+    recoverProviderRequest(operationIdInput: string, providerRequestId: string): Promise<unknown>;
     status(operationIdInput: string): Promise<unknown>;
     receipt(operationIdInput: string): Promise<unknown>;
     private submitAndInspect;

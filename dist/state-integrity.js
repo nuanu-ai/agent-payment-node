@@ -178,7 +178,7 @@ function validateProviderDirect(operation, binding) {
         provider_pending: ["provider_acknowledged", "ambiguous_effect", "failed_provider_rejected"],
         provider_acknowledged: ["evidence_pending", "completed", "failed_confirmed_revert", "ambiguous_effect"],
         evidence_pending: ["completed", "failed_confirmed_revert", "ambiguous_effect"],
-        ambiguous_effect: ["provider_acknowledged", "completed", "failed_provider_rejected", "failed_confirmed_revert"],
+        ambiguous_effect: ["provider_pending", "provider_acknowledged", "completed", "failed_provider_rejected", "failed_confirmed_revert"],
         completed: [],
         failed_before_effect: [],
         failed_provider_rejected: [],

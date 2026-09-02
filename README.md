@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.4.2 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.4.3 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -43,7 +43,7 @@ apn mcp config
 apn mcp serve
 ```
 
-The server exposes exactly seventeen catalog-derived tools: version, Keychain
+The server exposes exactly eighteen catalog-derived tools: version, Keychain
 doctor, wallet and wallet-policy operations plus x402 inspect/prepare/approve,
 direct-transfer prepare/foreground handoff, operation status/resume and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
@@ -171,6 +171,15 @@ stays `ambiguous_effect` and cannot invoke a second transfer. A returned hash is
 still non-terminal until APN independently proves the exact Base receipt and
 canonical-USDC Transfer log.
 
+MetaMask 6.1.5 may emit a notice followed by a summary as newline-delimited
+JSON. APN accepts that exact streaming contract, persists the notice's opaque
+request reference before returning, and rejects unknown records or conflicting
+request identities. If an interrupted invocation is already
+`ambiguous_effect` and the exact request ID is independently known from
+MetaMask, `operation recover-provider-request` binds that one request without
+creating, signing or submitting another transfer; ordinary `operation resume`
+then watches it and still requires the exact Base receipt and Transfer log.
+
 Pinned `awal@2.12.1` parses its decimal argument through JavaScript floating-
 point arithmetic and also treats whole numbers greater than `100` as atomic
 units. Before durable start or child creation, the Coinbase adapter emulates
@@ -266,6 +275,23 @@ seller result. A matching Base-USDC transfer terminalizes once as
 `failed_settled_without_result`; changed operation, transaction or idempotency
 material fails closed.
 
+Recover an independently known provider request without replaying a direct
+transfer:
+
+```sh
+apn operation recover-provider-request \
+  --operation <operation-id> \
+  --provider-request-id <provider-request-id>
+
+apn operation resume --operation <operation-id> \
+  --rpc-url https://rpc.example \
+  --wait-seconds 60
+```
+
+The opaque request ID is accepted only for an eligible ambiguous provider
+transfer, is never returned verbatim, and cannot be rebound to a different
+request or operation.
+
 ## Durable commands
 
 <!-- BEGIN APN COMMAND CATALOG -->
@@ -287,6 +313,7 @@ apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <addre
 apn pay transfer approve --operation <operation-id> --rpc-url <https-url>
 apn operation status --operation <operation-id>
 apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]
+apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
 ```

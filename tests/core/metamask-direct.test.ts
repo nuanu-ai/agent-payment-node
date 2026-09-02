@@ -26,6 +26,7 @@ const IDEMPOTENCY = "metamask-direct-001";
 class FixtureRunner implements MetaMaskProcessRunnerPort {
   readonly calls: Array<{ readonly argv: readonly string[]; readonly timeoutMs?: number }> = [];
   addressMode = "server";
+  chainNamespace = "evm";
   transfer: MetaMaskProcessResult = success({
     mode: "server",
     address: SENDER,
@@ -45,7 +46,7 @@ class FixtureRunner implements MetaMaskProcessRunnerPort {
     });
     if (argv[0] === "wallet" && argv[1] === "select") return success({ selected: SENDER });
     if (argv[0] === "wallet" && argv[1] === "address") return success({
-      mode: this.addressMode, chainNamespace: "eip155", address: SENDER,
+      mode: this.addressMode, chainNamespace: this.chainNamespace, address: SENDER,
     });
     if (argv[0] === "transfer") {
       if (this.throwTransfer) throw new Error("provider process lost");
@@ -94,13 +95,71 @@ test("MetaMask direct adapter uses exact sender, canonical Base USDC argv and sa
   });
 });
 
-test("MetaMask direct adapter accepts the exact 6.1.5 server mode and fails safely before transfer on drift", async () => {
+test("MetaMask direct adapter accepts the official notice-summary stream and notice-only watch timeout", async () => {
+  const runner = new FixtureRunner();
+  runner.transfer = streamed(
+    [{ kind: "AWAITING_MFA", source: "transfer", pollingId: TOKEN }],
+    { mode: "server", address: SENDER, status: "AWAITING_MFA", pollingId: TOKEN },
+  );
+  assert.deepEqual(await new MetaMaskDirectAdapter(runner).execute({
+    sender: SENDER, recipient: RECIPIENT, amountDecimal: "0.001",
+  }), { disposition: "pending", recoveryToken: TOKEN, providerState: "AWAITING_MFA" });
+
+  runner.watch = streamed(
+    [{ kind: "AWAITING_MFA", source: "wallet:requests:watch", pollingId: TOKEN }],
+    undefined,
+    1,
+  );
+  assert.deepEqual(await new MetaMaskDirectAdapter(runner).observe({
+    recoveryToken: TOKEN, sender: SENDER, waitSeconds: 1,
+  }), { disposition: "pending", recoveryToken: TOKEN, providerState: "AWAITING_MFA" });
+});
+
+test("MetaMask direct adapter rejects conflicting or unknown streaming records", async () => {
+  const conflict = new FixtureRunner();
+  conflict.transfer = streamed(
+    [{ kind: "AWAITING_MFA", pollingId: TOKEN }],
+    { mode: "server", address: SENDER, status: "AWAITING_MFA", pollingId: "other-request-01234567" },
+  );
+  assert.deepEqual(await new MetaMaskDirectAdapter(conflict).execute({
+    sender: SENDER, recipient: RECIPIENT, amountDecimal: "0.001",
+  }), { disposition: "ambiguous", reason: "provider_recovery_identity_mismatch" });
+
+  const malformed = new FixtureRunner();
+  malformed.transfer = { exitCode: 0, stdout: Buffer.from('{"_unknown":{}}') };
+  assert.deepEqual(await new MetaMaskDirectAdapter(malformed).execute({
+    sender: SENDER, recipient: RECIPIENT, amountDecimal: "0.001",
+  }), { disposition: "ambiguous", reason: "provider_response_malformed" });
+});
+
+test("MetaMask direct adapter accepts both observed and documented EVM namespace forms", async () => {
+  const observed = new FixtureRunner();
+  observed.chainNamespace = "evm";
+  assert.equal((await new MetaMaskDirectAdapter(observed).execute({
+    sender: SENDER, recipient: RECIPIENT, amountDecimal: "0.0005",
+  })).disposition, "pending");
+
+  const documented = new FixtureRunner();
+  documented.chainNamespace = "eip155";
+  assert.equal((await new MetaMaskDirectAdapter(documented).execute({
+    sender: SENDER, recipient: RECIPIENT, amountDecimal: "0.0005",
+  })).disposition, "pending");
+});
+
+test("MetaMask direct adapter fails safely before transfer on server-mode or namespace drift", async () => {
   const runner = new FixtureRunner();
   runner.addressMode = "server-wallet";
   assert.deepEqual(await new MetaMaskDirectAdapter(runner).execute({
     sender: SENDER, recipient: RECIPIENT, amountDecimal: "0.0005",
   }), { disposition: "not_started", reason: "provider_child_not_created" });
   assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 0);
+
+  const namespaceDrift = new FixtureRunner();
+  namespaceDrift.chainNamespace = "solana";
+  assert.deepEqual(await new MetaMaskDirectAdapter(namespaceDrift).execute({
+    sender: SENDER, recipient: RECIPIENT, amountDecimal: "0.0005",
+  }), { disposition: "not_started", reason: "provider_child_not_created" });
+  assert.equal(namespaceDrift.calls.filter((call) => call.argv[0] === "transfer").length, 0);
 });
 
 test("MetaMask direct adapter classifies denial, timeout and unsafe terminal uncertainty without replay", async () => {
@@ -196,10 +255,33 @@ test("provider denial is terminal with a durable receipt; lost initial outcome s
   const lost = await lostCore.execute({ command: "transfer.approve", operationId: lostId });
   assert.equal((lost.operation as { state?: unknown }).state, "ambiguous_effect");
   const restartedRunner = new FixtureRunner();
-  const resumed = await core(lostState.root, restartedRunner, new TestRpc(), new Approval()).execute({
+  const recoveryRpc = new TestRpc();
+  recoveryRpc.receipt = exactReceipt();
+  const restartedCore = core(lostState.root, restartedRunner, recoveryRpc, new Approval());
+  const resumed = await restartedCore.execute({
     command: "operation.resume", operationId: lostId,
   });
   assert.equal((resumed.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal(restartedRunner.calls.filter((call) => call.argv[0] === "transfer").length, 0);
+
+  const reference = await restartedCore.execute({
+    command: "operation.recover-provider-request", operationId: lostId, providerRequestId: TOKEN,
+  });
+  assert.equal(reference.ok, true, JSON.stringify(reference));
+  assert.equal((reference.operation as { state?: unknown }).state, "provider_pending");
+  assert.equal(JSON.stringify(reference).includes(TOKEN), false);
+  const duplicate = await restartedCore.execute({
+    command: "operation.recover-provider-request", operationId: lostId, providerRequestId: TOKEN,
+  });
+  assert.equal((duplicate.operation as { state?: unknown }).state, "provider_pending");
+  const conflict = await restartedCore.execute({
+    command: "operation.recover-provider-request", operationId: lostId, providerRequestId: "other-request-01234567",
+  });
+  assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+
+  const recovered = await restartedCore.execute({ command: "operation.resume", operationId: lostId, waitSeconds: 1 });
+  assert.equal((recovered.operation as { state?: unknown }).state, "completed");
+  assert.equal((recovered.operation as { transaction_hash?: unknown }).transaction_hash, TX_HASH);
   assert.equal(restartedRunner.calls.filter((call) => call.argv[0] === "transfer").length, 0);
 });
 
@@ -266,6 +348,20 @@ function success(data: Record<string, unknown>): MetaMaskProcessResult {
 
 function failure(code: string): MetaMaskProcessResult {
   return { exitCode: 1, stdout: Buffer.from(JSON.stringify({ ok: false, error: { code } })) };
+}
+
+function streamed(
+  notices: readonly Record<string, unknown>[],
+  summary?: Record<string, unknown>,
+  exitCode = 0,
+): MetaMaskProcessResult {
+  return {
+    exitCode,
+    stdout: Buffer.from([
+      ...notices.map((notice) => JSON.stringify({ _notice: notice })),
+      ...(summary === undefined ? [] : [JSON.stringify({ _summary: summary })]),
+    ].join("\n")),
+  };
 }
 
 function clone(value: MetaMaskProcessResult): MetaMaskProcessResult {

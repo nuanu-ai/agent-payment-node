@@ -1,3 +1,4 @@
+import { ApnError } from "./errors.js";
 export async function observeProviderDirectRequest(adapter, operation, waitSeconds) {
     const direct = adapter.direct;
     if (direct?.observe === undefined) {
@@ -27,6 +28,12 @@ export function createProviderEffectReference(recoveryToken, providerState) {
         recoveryToken,
         providerState,
     };
+}
+export function canonicalProviderRecoveryToken(value) {
+    if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/u.test(value)) {
+        throw new ApnError("APN_INVALID_INPUT", "Provider request ID must be 1-256 safe ASCII characters.");
+    }
+    return value;
 }
 export function sameFrozenProviderProfile(profile, operation, binding) {
     return profile.provider_id === binding.providerId && profile.revision === binding.profileRevision &&
