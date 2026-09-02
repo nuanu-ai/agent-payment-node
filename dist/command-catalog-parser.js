@@ -118,6 +118,10 @@ function validateOptionValue(definition, value) {
             if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value))
                 invalid();
             return;
+        case "provider_auth_method":
+            if (!/^[a-z][a-z0-9-]{0,31}$/u.test(value))
+                invalid();
+            return;
         case "positive_integer":
             if (!/^[1-9][0-9]*$/u.test(value) || !Number.isSafeInteger(Number(value)))
                 invalid();

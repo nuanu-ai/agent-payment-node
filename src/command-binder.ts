@@ -55,6 +55,9 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
         command: "wallet.connect",
         profile: value(options, "--profile"),
         providerId: value(options, "--provider"),
+        ...(options["--auth-method"] === undefined
+          ? {}
+          : { authenticationMethod: options["--auth-method"] }),
         ...(options["--expected-revision"] === undefined
           ? {}
           : { expectedRevision: Number(options["--expected-revision"]) }),

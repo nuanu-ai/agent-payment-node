@@ -61,7 +61,7 @@ async function callTool(tool, input, options) {
     }
 }
 function walletConnectHandoff(request) {
-    return `apn wallet connect --profile ${request.profile} --provider ${request.providerId}${request.expectedRevision === undefined ? "" : ` --expected-revision ${request.expectedRevision}`}`;
+    return `apn wallet connect --profile ${request.profile} --provider ${request.providerId}${request.authenticationMethod === undefined ? "" : ` --auth-method ${request.authenticationMethod}`}${request.expectedRevision === undefined ? "" : ` --expected-revision ${request.expectedRevision}`}`;
 }
 function mcpResult(envelope) {
     return {

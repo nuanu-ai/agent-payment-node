@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.4.0 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.4.1 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -61,6 +61,7 @@ To create or reuse a provider-managed profile, use the generic foreground path:
 ```sh
 apn wallet connect --profile provider-one --provider coinbase-agentic-wallet
 apn wallet connect --profile metamask --provider metamask-agent-wallet
+apn wallet connect --profile metamask --provider metamask-agent-wallet --auth-method browser
 ```
 
 The CLI first reuses an active provider session without another email or OTP
@@ -74,12 +75,17 @@ values or raw authentication output.
 The MetaMask profile is a dedicated MetaMask Agent Wallet server-wallet, not
 the browser extension or the user's main MetaMask account. APN pins the
 official `@metamask/agent-wallet@6.1.5` package internally. When no valid
-provider session exists, the same generic connect command opens MetaMask's own
-Mobile QR login in the foreground terminal; APN never receives or copies the
-QR payload, provider token, seed phrase or private key. It then initializes
-only `server-wallet` with `Guard`, binds the exact selected EVM address, and
-fails closed if a later provider session selects a different address. A normal
-user does not install `mm` separately or add provider skills.
+provider session exists, APN supports MetaMask's own Mobile QR login and
+browser login. Omitting `--auth-method` preserves Mobile QR; selecting
+`--auth-method browser` runs the provider's Google/email dashboard plus
+six-digit OTP-pairing flow. Both stay in the foreground terminal. APN never
+receives or copies the QR payload, browser credentials, provider CLI token,
+seed phrase or private key. It then initializes only `server-wallet` with
+`Guard`, binds the exact selected EVM address, and fails closed if a later
+provider session selects a different address. A normal user does not install
+`mm` separately or add provider skills. Google, email and Mobile QR can resolve
+to different MetaMask server-wallet addresses, so APN always binds the address
+reported by the completed provider session.
 
 MetaMask direct transfer and standard x402 are available through the same
 generic APN operation contract. For x402, MetaMask signs only the exact frozen
@@ -269,7 +275,7 @@ apn mcp serve
 apn mcp config
 apn doctor keychain
 apn wallet ensure [--profile <profile>]
-apn wallet connect --profile <profile> --provider <provider-id> [--expected-revision <positive-integer>]
+apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>]
 apn wallet status [--profile <profile>]
 apn wallet balance [--profile <profile>] --rpc-url <https-url>
 apn wallet policy show --profile <profile>

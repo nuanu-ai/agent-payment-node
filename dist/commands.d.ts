@@ -10,6 +10,7 @@ export type CommandRequest = {
     readonly command: "wallet.connect";
     readonly profile: string;
     readonly providerId: string;
+    readonly authenticationMethod?: string;
     readonly expectedRevision?: number;
 } | {
     readonly command: "wallet.status";
