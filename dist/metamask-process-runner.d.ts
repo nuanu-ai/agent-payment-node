@@ -31,7 +31,7 @@ export interface MetaMaskProcessResult {
     readonly stdout: Buffer;
 }
 export interface MetaMaskProcessRunnerPort {
-    runJson(argv: readonly string[]): Promise<MetaMaskProcessResult>;
+    runJson(argv: readonly string[], timeoutMs?: number): Promise<MetaMaskProcessResult>;
     runForeground(argv: readonly string[]): Promise<number>;
 }
 export declare class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
@@ -43,7 +43,7 @@ export declare class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerP
     private readonly openTerminal;
     private readonly closeTerminal;
     constructor(binResolver?: () => Promise<string>, capturedLaunch?: MetaMaskCapturedLaunchPort, foregroundLaunch?: MetaMaskForegroundLaunchPort, jsonTimeoutMs?: number, foregroundTimeoutMs?: number, openTerminal?: () => number, closeTerminal?: (fd: number) => void);
-    runJson(argv: readonly string[]): Promise<MetaMaskProcessResult>;
+    runJson(argv: readonly string[], timeoutMs?: number): Promise<MetaMaskProcessResult>;
     runForeground(argv: readonly string[]): Promise<number>;
 }
 export {};

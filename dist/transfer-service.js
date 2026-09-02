@@ -191,12 +191,15 @@ export class TransferService {
             return publicOperation(operation);
         });
     }
-    async resume(operationIdInput) {
+    async resume(operationIdInput, waitSeconds) {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const found = await this.requiredOperation(operationId);
         if (found.providerDirect !== undefined)
-            return await this.providerDirect.resume(operationId);
+            return await this.providerDirect.resume(operationId, waitSeconds);
+        if (waitSeconds !== undefined) {
+            throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");
+        }
         const localFound = requiredLocal(found);
         const { profile, profileHash } = localFound;
         return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {

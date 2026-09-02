@@ -43,7 +43,7 @@ apn mcp config
 apn mcp serve
 ```
 
-The server exposes exactly sixteen catalog-derived tools: version, Keychain
+The server exposes exactly seventeen catalog-derived tools: version, Keychain
 doctor, wallet and wallet-policy operations plus x402 inspect/prepare/approve,
 direct-transfer prepare/foreground handoff, operation status/resume and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
@@ -81,10 +81,11 @@ only `server-wallet` with `Guard`, binds the exact selected EVM address, and
 fails closed if a later provider session selects a different address. A normal
 user does not install `mm` separately or add provider skills.
 
-At the current connect/read boundary, MetaMask direct transfer and x402 are
-reported unavailable until their respective vertical Slices add and prove
-those effects. `wallet balance` remains an independent Base RPC observation;
-provider login or address binding is not a balance or spending-authority claim.
+MetaMask direct transfer is available through the same generic APN operation
+contract; standard x402 remains reported unavailable until its later vertical
+Slice adds and proves provider signing plus APN-owned paid HTTP. `wallet
+balance` remains an independent Base RPC observation; provider login or address
+binding is not a balance or spending-authority claim.
 
 `wallet ensure` creates or reuses one stable address. Fund only that public
 address, manually, with a small amount of Base ETH and Base USDC. APN never
@@ -124,8 +125,8 @@ apn pay transfer approve --operation <operation-id> \
 ```
 
 For the default local wallet, prepare freezes recipient, amount, nonce, fees,
-calldata and expiry. For a bound Coinbase profile it instead freezes the public
-profile revision/capability/sender, provider execution ownership, recipient,
+calldata and expiry. For a bound Coinbase or MetaMask profile it instead freezes
+the public profile revision/capability/sender, provider execution ownership, recipient,
 integer atomic amount and canonical decimal, Base/canonical-USDC identity,
 foreground-approval policy and validated RPC binding. Available provider
 balance is never spending authority.
@@ -146,11 +147,22 @@ operation is never readable without its authoritative receipt. If the provider
 reports a different sender before start, APN marks the profile `drift_blocked`
 and returns the exact foreground `wallet connect --expected-revision` rebind
 path instead of suggesting another doomed transfer prepare.
-The direct adapter reuses the existing bounded AWAL process timeout; expiry is
+The Coinbase direct adapter reuses the existing bounded AWAL process timeout; expiry is
 only an ambiguity signal and never authorizes a retry or another provider call.
 Calling direct approval through MCP never opens a TTY or loads signing material;
 it returns the exact operation-bound CLI command to run in that foreground
 terminal.
+
+For MetaMask, APN re-selects and cross-checks the exact bound server-wallet,
+then invokes one canonical Base-USDC `mm transfer` after the same APN foreground
+approval. If Guard requires mobile MFA, APN persists only an opaque provider
+request reference and returns `provider_pending`; it never emits that reference
+in CLI or MCP output. `operation resume --wait-seconds <1..300>` watches only
+that request across restart. Provider denial or expiry terminalizes without a
+transaction claim; timeout remains resumable; loss without a recovery reference
+stays `ambiguous_effect` and cannot invoke a second transfer. A returned hash is
+still non-terminal until APN independently proves the exact Base receipt and
+canonical-USDC Transfer log.
 
 Pinned `awal@2.12.1` parses its decimal argument through JavaScript floating-
 point arithmetic and also treats whole numbers greater than `100` as atomic
@@ -210,10 +222,10 @@ apn operation resume --operation <operation-id> \
   --wait-seconds 60
 ```
 
-The wait accepts `1..300` seconds. After any one permitted paid request, the
-observation loop cannot sign, submit, create another operation, or issue another
-seller/provider paid request. Timeout returns the same durable resumable
-operation.
+The wait accepts `1..300` seconds. It also bounds observation of one already
+created MetaMask Guard request. After any one permitted paid request or provider
+transfer request, the observation loop cannot create another effect. Timeout
+returns the same durable resumable operation.
 
 An eligible legacy Coinbase operation that is durably stuck at
 `provider_evidence_capability_gap` can be closed from one independently known

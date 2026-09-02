@@ -50,7 +50,7 @@ export interface MetaMaskProcessResult {
 }
 
 export interface MetaMaskProcessRunnerPort {
-  runJson(argv: readonly string[]): Promise<MetaMaskProcessResult>;
+  runJson(argv: readonly string[], timeoutMs?: number): Promise<MetaMaskProcessResult>;
   runForeground(argv: readonly string[]): Promise<number>;
 }
 
@@ -65,7 +65,8 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
     private readonly closeTerminal: (fd: number) => void = closeSync,
   ) {}
 
-  async runJson(argv: readonly string[]): Promise<MetaMaskProcessResult> {
+  async runJson(argv: readonly string[], timeoutMs = this.jsonTimeoutMs): Promise<MetaMaskProcessResult> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 305_000) throw providerProtocol();
     const script = await this.binResolver();
     return await new Promise<MetaMaskProcessResult>((resolveResult, reject) => {
       let child: CapturedChild;
@@ -124,7 +125,7 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
       const timeout = setTimeout(() => {
         fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."));
         child.kill();
-      }, this.jsonTimeoutMs);
+      }, timeoutMs);
       child.stdout.on("data", onStdout);
       child.stderr.on("data", onStderr);
       child.once("error", onError);

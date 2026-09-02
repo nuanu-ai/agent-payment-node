@@ -75,9 +75,9 @@ const defaultProfile = { kind: "literal", value: "default" } as const;
 const completedStates = { terminal: ["completed", "classified_failure"], non_terminal: [] } as const;
 const mcpServerStates = { terminal: ["server_closed", "classified_failure"], non_terminal: ["serving"] } as const;
 const directStates = {
-  terminal: ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_proven_superseded"],
+  terminal: ["completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert", "failed_proven_superseded"],
   non_terminal: [
-    "awaiting_approval", "started", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
+    "awaiting_approval", "started", "provider_pending", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
     "signed_not_submitted", "submitted_pending", "unknown_finality",
   ],
 } as const;
@@ -252,7 +252,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
     ["operation", "resume"],
     "apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]",
     "Perform only the next legal durable recovery transition.",
-    [operationRequired, rpcRequired, option("--wait-seconds", "integer_seconds", false, noDefault, ["canonical_integer_1_through_300", "x402_only"], "operator_input")],
+    [operationRequired, rpcRequired, option("--wait-seconds", "integer_seconds", false, noDefault, ["canonical_integer_1_through_300", "x402_or_provider_approval_watch"], "operator_input")],
     "recovery",
     "Reuses protected effect material and may reconcile or resubmit only when the stored state permits.",
     "prior_operation_authorization",

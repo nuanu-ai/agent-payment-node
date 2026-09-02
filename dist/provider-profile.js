@@ -70,6 +70,19 @@ export function coinbaseDirectCapabilitySnapshot() {
 export function metamaskReadOnlyCapabilitySnapshot() {
     return lifecycleReadOnlyCapabilitySnapshot();
 }
+export function metamaskDirectCapabilitySnapshot() {
+    const snapshot = lifecycleReadOnlyCapabilitySnapshot();
+    return {
+        ...snapshot,
+        direct: {
+            available: true,
+            mode: "provider_atomic_send",
+            execution_owner: "provider",
+            retry_owner: "apn_outer_no_replay_journal",
+        },
+        evidence: { available: true, owner: "apn" },
+    };
+}
 export function capabilityHash(snapshot) {
     assertCapabilitySnapshot(snapshot);
     return hashObject(snapshot);

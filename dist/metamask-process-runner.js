@@ -20,7 +20,9 @@ export class NodeMetaMaskProcessRunner {
         this.openTerminal = openTerminal;
         this.closeTerminal = closeTerminal;
     }
-    async runJson(argv) {
+    async runJson(argv, timeoutMs = this.jsonTimeoutMs) {
+        if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 305_000)
+            throw providerProtocol();
         const script = await this.binResolver();
         return await new Promise((resolveResult, reject) => {
             let child;
@@ -86,7 +88,7 @@ export class NodeMetaMaskProcessRunner {
             const timeout = setTimeout(() => {
                 fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."));
                 child.kill();
-            }, this.jsonTimeoutMs);
+            }, timeoutMs);
             child.stdout.on("data", onStdout);
             child.stderr.on("data", onStderr);
             child.once("error", onError);

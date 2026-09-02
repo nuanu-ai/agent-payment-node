@@ -5,6 +5,7 @@ import { formatAtomic, parseDecimal } from "./money.js";
 import { OperationService } from "./operation-service.js";
 import { capabilityHash, LOCAL_PROVIDER_ID, markProviderProfileDrift, } from "./provider-profile.js";
 import { providerDirectReceipt, recoverProviderTerminalOperation } from "./provider-direct-receipt.js";
+import { createProviderEffectReference, observeProviderDirectRequest, sameFrozenProviderProfile, } from "./provider-direct-recovery.js";
 import { appendTransition, sealOperation } from "./state.js";
 import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, hasExactTransfer, publicOperation, publicReceipt, } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
@@ -173,6 +174,7 @@ export class ProviderDirectTransferService {
                 result = await adapter.direct.execute({
                     amountDecimal: operation.amountDecimal,
                     recipient: operation.recipient,
+                    sender: operation.walletAddress,
                 });
             }
             catch {
@@ -184,11 +186,17 @@ export class ProviderDirectTransferService {
             if (result.disposition === "ambiguous") {
                 return publicOperation(await this.transition(operation, "ambiguous_effect", false, result.reason, "provider_effect_no_replay"));
             }
+            if (result.disposition === "rejected") {
+                return publicOperation(await this.transition(operation, "failed_provider_rejected", true, result.reason, "provider_terminal_no_transaction"));
+            }
+            if (result.disposition === "pending") {
+                return publicOperation(await this.transition(operation, "provider_pending", false, "provider_approval_pending", "provider_request_reference", { providerEffect: createProviderEffectReference(result.recoveryToken, result.providerState) }));
+            }
             operation = await this.transition(operation, "provider_acknowledged", false, "provider_transaction_identity_acknowledged", "provider_transaction_hash_only", { transactionHash: result.transactionHash });
             return publicOperation(await this.inspectReceipt(operation));
         });
     }
-    async resume(operationIdInput) {
+    async resume(operationIdInput, waitSeconds) {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const found = await this.requiredOperation(operationId);
@@ -202,6 +210,23 @@ export class ProviderDirectTransferService {
             }
             if (operation.state === "started" && operation.transactionHash === undefined) {
                 operation = await this.transition(operation, "ambiguous_effect", false, "provider_result_missing_after_restart", "provider_effect_no_replay");
+            }
+            if ((operation.state === "provider_pending" || operation.state === "ambiguous_effect") &&
+                operation.providerEffect !== undefined && operation.transactionHash === undefined) {
+                const binding = requiredBinding(operation);
+                const adapter = this.requiredAdapter(binding);
+                const observed = await observeProviderDirectRequest(adapter, operation, waitSeconds);
+                if (observed.disposition === "unchanged")
+                    return publicOperation(operation);
+                if (observed.disposition === "rejected") {
+                    return publicOperation(await this.transition(operation, "failed_provider_rejected", true, observed.reason, "provider_terminal_no_transaction"));
+                }
+                if (observed.disposition === "ambiguous") {
+                    if (operation.state === "ambiguous_effect")
+                        return publicOperation(operation);
+                    return publicOperation(await this.transition(operation, "ambiguous_effect", false, observed.reason, "provider_effect_no_replay"));
+                }
+                operation = await this.transition(operation, "provider_acknowledged", false, "provider_transaction_identity_acknowledged", "provider_transaction_hash_only", { transactionHash: observed.transactionHash });
             }
             if (operation.transactionHash === undefined)
                 return publicOperation(operation);
@@ -241,7 +266,7 @@ export class ProviderDirectTransferService {
         const current = await this.context.requireProfileRepository().load(operation.profileHash);
         if (current === null || current.drift.state !== "bound" || current.capability_snapshot.direct.available !== true ||
             current.capability_snapshot.direct.mode !== "provider_atomic_send" ||
-            !sameFrozenProfile(current, operation, binding))
+            !sameFrozenProviderProfile(current, operation, binding))
             await this.failBeforeEffect(operation, "provider_profile_changed");
     }
     requiredAdapter(binding) {
@@ -370,10 +395,5 @@ function requiredBinding(operation) {
     if (operation.providerDirect === undefined)
         throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not provider-atomic.");
     return operation.providerDirect;
-}
-function sameFrozenProfile(profile, operation, binding) {
-    return profile.provider_id === binding.providerId && profile.revision === binding.profileRevision &&
-        profile.capability_hash === binding.capabilityHash && profile.account_binding_hash === binding.accountBindingHash &&
-        profile.public_address.toLowerCase() === operation.walletAddress.toLowerCase();
 }
 //# sourceMappingURL=provider-direct-transfer.js.map

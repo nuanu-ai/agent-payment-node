@@ -2,13 +2,15 @@ import { isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type { Address } from "./model.js";
 import type {
+  DirectExecutionPort,
   ForegroundAuthenticationPort,
   ProviderAdapterBundle,
   ProviderBalanceObservation,
   ProviderLifecyclePort,
   ProviderWalletReadPort,
 } from "./provider-ports.js";
-import { accountBindingHash, metamaskReadOnlyCapabilitySnapshot } from "./provider-profile.js";
+import { accountBindingHash, metamaskDirectCapabilitySnapshot } from "./provider-profile.js";
+import { MetaMaskDirectAdapter } from "./metamask-direct-adapter.js";
 import { NodeMetaMaskProcessRunner, type MetaMaskProcessRunnerPort } from "./metamask-process-runner.js";
 
 export const METAMASK_AGENT_WALLET_PROVIDER_ID = "metamask-agent-wallet" as const;
@@ -21,12 +23,13 @@ interface DoctorStatus {
 }
 
 export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWalletReadPort {
-  readonly capabilities = metamaskReadOnlyCapabilitySnapshot();
+  readonly capabilities = metamaskDirectCapabilitySnapshot();
 
   constructor(
     private readonly runner: MetaMaskProcessRunnerPort = new NodeMetaMaskProcessRunner(),
     private readonly exclusive: ProviderExclusivePort = async (work) => await work(),
     private readonly now: () => Date = () => new Date(),
+    private readonly direct: DirectExecutionPort = new MetaMaskDirectAdapter(runner, exclusive),
   ) {}
 
   bundle(): ProviderAdapterBundle {
@@ -36,6 +39,8 @@ export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWa
       capabilities: this.capabilities,
       lifecycle: this,
       reads: this,
+      direct: this.direct,
+      evidence: { owner: "apn" },
     };
   }
 

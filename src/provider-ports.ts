@@ -49,9 +49,22 @@ export interface DirectExecutionPort {
   execute?(input: {
     readonly amountDecimal: string;
     readonly recipient: Address;
+    readonly sender: Address;
   }): Promise<
     | { readonly disposition: "acknowledged"; readonly transactionHash: Hex }
+    | { readonly disposition: "pending"; readonly recoveryToken: string; readonly providerState: string }
+    | { readonly disposition: "rejected"; readonly reason: "provider_denied" | "provider_expired" }
     | { readonly disposition: "not_started"; readonly reason: "provider_child_not_created" | "provider_binary_unavailable" }
+    | { readonly disposition: "ambiguous"; readonly reason: string }
+  >;
+  observe?(input: {
+    readonly recoveryToken: string;
+    readonly sender: Address;
+    readonly waitSeconds?: number;
+  }): Promise<
+    | { readonly disposition: "acknowledged"; readonly transactionHash: Hex }
+    | { readonly disposition: "pending"; readonly recoveryToken: string; readonly providerState: string }
+    | { readonly disposition: "rejected"; readonly reason: "provider_denied" | "provider_expired" }
     | { readonly disposition: "ambiguous"; readonly reason: string }
   >;
 }
