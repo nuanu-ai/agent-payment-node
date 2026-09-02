@@ -1,4 +1,4 @@
-export declare const PROVIDER_X402_KNOWN_ENVELOPE_KEYS: readonly ["status", "statusText", "data", "paymentMade", "amountPaid"];
+export declare const PROVIDER_X402_KNOWN_ENVELOPE_KEYS: readonly ["status", "statusText", "data", "paymentMade", "amountPaid", "headers"];
 type KnownEnvelopeKey = typeof PROVIDER_X402_KNOWN_ENVELOPE_KEYS[number];
 type JsonValueType = "null" | "boolean" | "number" | "string" | "array" | "object";
 type RootType = "invalid_json" | JsonValueType;

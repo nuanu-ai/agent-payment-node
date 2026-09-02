@@ -14,7 +14,7 @@ const CONFLICTING_WORDS = new Set([
     "amount", "body", "data", "paid", "payment", "payload", "response", "result", "seller", "status",
 ]);
 export const PROVIDER_X402_KNOWN_ENVELOPE_KEYS = [
-    "status", "statusText", "data", "paymentMade", "amountPaid",
+    "status", "statusText", "data", "paymentMade", "amountPaid", "headers",
 ];
 export function providerX402RejectionShape(bytes) {
     let value;

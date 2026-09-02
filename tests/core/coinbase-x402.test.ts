@@ -110,6 +110,15 @@ class FixtureX402 implements X402ExecutionPort {
   }
 }
 
+class TickingTestClock extends TestClock {
+  armed = false;
+  override now(): Date {
+    const current = super.now();
+    if (this.armed) this.advance(1);
+    return current;
+  }
+}
+
 class ProviderReads {
   statusCalls = 0;
   balanceCalls = 0;
@@ -301,6 +310,7 @@ async function setup(t: TestContext, input: {
   readonly failReceiptStore?: boolean;
   readonly policy?: ProfilePolicyPort;
   readonly rpcUrl?: string;
+  readonly clock?: TestClock;
 } = {}) {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
@@ -335,7 +345,7 @@ async function setup(t: TestContext, input: {
     evidence: { owner: "apn" },
   };
   const registry = new ProviderRegistry([{ provider_id: AWAL_PROVIDER_ID, create: () => bundle }]);
-  const clock = new TestClock();
+  const clock = input.clock ?? new TestClock();
   clock.value = new Date("2026-08-30T00:00:00.000Z");
   const rpc = new ProviderRpc(clock);
   const http = input.http ?? new TestHttp(challengeObservation());
@@ -540,6 +550,42 @@ test("AWAL 2.12.1 source-supported 2xx data result does not require payment meta
     assert.equal("payment_made" in result.result, false);
     assert.equal("amount_paid_atomic" in result.result, false);
   }
+});
+
+test("AWAL paid response discards protocol headers and preserves public EVM addresses in seller data", async () => {
+  const protectedHeader = "PROTECTED_PAYMENT_RESPONSE_CANARY";
+  const result = await executeAwalEnvelope({
+    status: 200,
+    statusText: "OK",
+    data: {
+      items: [{
+        contractAddress: "0x33E0d7d36D31A3d5F83ED57899862045123C20fD",
+        underlyingAsset: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
+      }],
+      page: 1,
+    },
+    headers: { "payment-response": protectedHeader },
+  });
+  assert.equal(result.disposition, "seller_result");
+  assert.equal(JSON.stringify(result).includes(protectedHeader), false);
+  assert.equal(JSON.stringify(result).includes("payment-response"), false);
+  if (result.disposition === "seller_result") {
+    assert.equal(result.result.canonical_json.includes("0x33E0d7d36D31A3d5F83ED57899862045123C20fD"), true);
+  }
+});
+
+test("provider x402 freezes one exact start instant even when the system clock advances between reads", async (t) => {
+  const clock = new TickingTestClock();
+  const fixture = await setup(t, { clock });
+  const operationId = await prepare(fixture.core, "provider-single-start-instant");
+  clock.armed = true;
+  const approved = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  assert.equal(approved.ok, true, JSON.stringify(approved));
+  const stored = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+  assert.equal(stored?.state, "settlement_pending");
+  const startedAt = stored?.transitions.find((transition) => transition.state === "started")?.at;
+  assert.equal(startedAt, stored?.finalPreflight?.observedAt);
+  assert.equal(stored?.evidenceDeadlineAt, new Date(Date.parse(startedAt ?? "") + 240_000).toISOString());
 });
 
 test("source-supported seller result completes only after independent exact settlement proof", async (t) => {
@@ -1485,6 +1531,40 @@ test("transient receipt observation retries the identical frozen interval after 
   assert.equal(canonicalJson((await restarted.execute({ command: "receipt.get", operationId })).receipt), receiptText);
   assert.equal(fixture.rpc.transferRanges.length, 2);
   assert.equal(effect.calls.length, 1);
+});
+
+test("range recovery accepts legacy start/deadline clock drift and terminalizes the same operation", async (t) => {
+  const effect = ambiguousEffect();
+  const fixture = await setup(t, { effect });
+  const operationId = await prepare(fixture.core, "provider-legacy-start-clock-drift");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+
+  const repository = new ProviderX402Repository(fixture.temporary.root);
+  const stored = await repository.findOperation(operationId);
+  assert.notEqual(stored, null);
+  const startedAt = stored?.transitions.find((transition) => transition.state === "started")?.at;
+  assert.equal(typeof startedAt, "string");
+  const legacyObservedAt = new Date(Date.parse(startedAt as string) - 1).toISOString();
+  const { integrityHash: _integrityHash, ...base } = stored as ProviderX402OperationRecord;
+  const legacyBase = {
+    ...base,
+    finalPreflight: { ...base.finalPreflight, observedAt: legacyObservedAt },
+    evidenceDeadlineAt: new Date(Date.parse(legacyObservedAt) + 240_000).toISOString(),
+  };
+  const operationPath = join(
+    fixture.temporary.root, "x402-operations", fixture.profile.profile_hash, `${operationId}.json`,
+  );
+  await writeFile(operationPath, canonicalJson({
+    ...legacyBase,
+    integrityHash: hashObject(legacyBase),
+  }), { mode: 0o600 });
+
+  armExactSettlement(fixture);
+  const recovered = await restartedCore(fixture).execute({ command: "operation.resume", operationId });
+  assert.equal(recovered.ok, true, JSON.stringify(recovered));
+  assert.equal((recovered.operation as { state?: unknown }).state, "failed_settled_without_result");
+  assert.equal((recovered.operation as { transactionHash?: unknown }).transactionHash, TRANSACTION);
+  assert.equal(effect.calls.length, 1, "same-operation recovery must never replay the provider request");
 });
 
 test("transient receipt observation joins an existing seller result after restart without provider replay", async (t) => {
