@@ -86,6 +86,19 @@ test("normalized provider JSON rejects dangerous keys and protected credential-s
   for (const value of dangerous) assert.equal(isSafeNormalizedProviderJson(value), false);
 });
 
+test("normalized provider JSON accepts public checksummed EVM addresses without weakening credential filtering", () => {
+  const result = {
+    contractAddress: "0x33E0d7d36D31A3d5F83ED57899862045123C20fD",
+    underlyingAsset: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
+  };
+  assert.equal(isSafeNormalizedProviderJson(result), true);
+  assert.equal(
+    canonicalizeNormalizedProviderJson(result),
+    '{"contractAddress":"0x33E0d7d36D31A3d5F83ED57899862045123C20fD","underlyingAsset":{"address":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"}}',
+  );
+  assert.equal(isSafeNormalizedProviderJson({ neutral: "AbCdEfGhIjKlMnOpQrStUvWx1234" }), false);
+});
+
 function nestedArrays(depth: number): unknown {
   let value: unknown = null;
   for (let index = 0; index < depth; index += 1) value = [value];

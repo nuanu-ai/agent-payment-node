@@ -219,6 +219,7 @@ function parseSellerResult(bytes: Buffer, expectedAmount: string): ProviderX402S
   catch { throw protocol(); }
   if (!isPlainRecord(value)) throw protocol();
   validateEnvelopeKeys(value);
+  if (Object.hasOwn(value, "headers") && !isPlainRecord(value.headers)) throw protocol();
   const payment = paymentMetadata(value, expectedAmount);
   if (
     !Number.isSafeInteger(value.status) || Number(value.status) < 200 || Number(value.status) > 299 ||
