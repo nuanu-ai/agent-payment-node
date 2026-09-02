@@ -143,7 +143,10 @@ export const COMMANDS: readonly CommandDefinition[] = [
     "Authentication and any explicit rebind comparison require the foreground CLI terminal.",
     completedStates,
     [],
-    ["apn wallet connect --profile default --provider coinbase-agentic-wallet"],
+    [
+      "apn wallet connect --profile provider-one --provider coinbase-agentic-wallet",
+      "apn wallet connect --profile metamask --provider metamask-agent-wallet",
+    ],
   ),
   command(["wallet", "status"], "apn wallet status [--profile <profile>]", "Read wallet presence and public identity.", [profileOptional], "local_read", "Returns absent without creating state or accessing Keychain material.", "none", "Never.", completedStates, [], ["apn wallet status --profile default"]),
   command(["wallet", "balance"], "apn wallet balance [--profile <profile>] --rpc-url <https-url>", "Read Base ETH and canonical Base-USDC balances.", [profileOptional, rpcRequired], "network_read", "Reads the configured public Base RPC; never signs or submits.", "none", "Never.", completedStates, [], ["apn wallet balance --profile default --rpc-url <https-base-rpc-url>"]),
