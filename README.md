@@ -100,14 +100,21 @@ authenticated encrypted envelope under `~/.apn`, and never returns the key or
 raw permission context. Repeating the same idempotency key reuses the same
 pending or committed identity after interruption. `wallet permission list`,
 `sync`, `disable`, and `forget` expose the provider-neutral lifecycle; local
-disable/forget never claims MetaMask-side revocation. Direct transfer and x402
-remain unavailable for this profile until their later execution slices land.
+disable/forget never claims MetaMask-side revocation. Direct Base-USDC transfer
+is available through the common `pay transfer` commands. Standard x402 remains
+unavailable for this profile until its later execution slice lands.
 
-MetaMask direct transfer and standard x402 are available through the same
-generic APN operation contract. For x402, MetaMask signs only the exact frozen
-EIP-3009 authorization; APN owns the seller HTTP request, safe retry,
-settlement evidence and receipt. `wallet balance` remains an independent Base
-RPC observation; provider login or address binding is not a balance or
+An exact Slice 1 Smart Account profile upgrades once, locally and without new
+browser consent, from the prior read-only capability fingerprint to direct
+execution. APN refuses any other capability drift. The owner Smart Account
+remains the USDC sender; the encrypted APN session account is only the delegated
+executor and Base gas payer.
+
+MetaMask Agent Wallet direct transfer and standard x402 are available through
+the same generic APN operation contract. For x402, that server-wallet signs only
+the exact frozen EIP-3009 authorization; APN owns the seller HTTP request, safe
+retry, settlement evidence and receipt. `wallet balance` remains an independent
+Base RPC observation; provider login or address binding is not a balance or
 spending-authority claim.
 
 `wallet ensure` creates or reuses one stable address. Fund only that public
@@ -148,11 +155,14 @@ apn pay transfer approve --operation <operation-id> \
 ```
 
 For the default local wallet, prepare freezes recipient, amount, nonce, fees,
-calldata and expiry. For a bound Coinbase or MetaMask profile it instead freezes
-the public profile revision/capability/sender, provider execution ownership, recipient,
-integer atomic amount and canonical decimal, Base/canonical-USDC identity,
-foreground-approval policy and validated RPC binding. Available provider
-balance is never spending authority.
+calldata and expiry. For a bound Coinbase or MetaMask Agent Wallet profile it
+instead freezes the public profile revision/capability/sender, provider
+execution ownership, recipient, integer atomic amount and canonical decimal,
+Base/canonical-USDC identity, foreground-approval policy and validated RPC
+binding. For a MetaMask Smart Account it additionally freezes the existing
+permission revision, root grant fingerprint, session executor, official
+DelegationManager and permission expiry. Available provider balance is never
+spending authority.
 
 Approval rechecks the applicable frozen facts and requires the exact phrase
 shown in the foreground stdin/stderr TTY. The Coinbase adapter then durably
@@ -175,6 +185,21 @@ only an ambiguity signal and never authorizes a retry or another provider call.
 Calling direct approval through MCP never opens a TTY or loads signing material;
 it returns the exact operation-bound CLI command to run in that foreground
 terminal.
+
+For a MetaMask Smart Account, prepare checks the still-active root grant,
+remaining official ERC-20 allowance, owner USDC and nonzero session gas balance
+without creating a child delegation. After the common APN foreground approval,
+the session derives one deterministic session-to-session child constrained to
+the exact canonical-USDC transfer, one call, the frozen time window and the
+session redeemer. APN submits one EIP-1559 call to the official MetaMask
+DelegationManager. Once that valid signed child exists, APN simulates the exact
+redemption, rechecks nonce stability and precise session gas sufficiency, then
+signs the transaction. The owner Smart Account is the `Transfer` sender; tokens
+are never prefunded into the session account. The signed transaction, child
+context and root permission remain encrypted under `~/.apn`. Ambiguous
+submission may rebroadcast the same sealed bytes at most once; completion still
+requires the exact successful Base receipt and owner-to-recipient USDC log. This
+path does not use Vault, Hub, deposits, a relayer or a new MetaMask popup.
 
 For MetaMask, APN re-selects and cross-checks the exact bound server-wallet,
 then invokes one canonical Base-USDC `mm transfer` after the same APN foreground

@@ -178,6 +178,11 @@ export interface RpcPort {
     readonly to: Address;
     readonly data: Hex;
   }): Promise<FeeEstimate>;
+  estimateTransaction(input: {
+    readonly from: Address;
+    readonly to: Address;
+    readonly data: Hex;
+  }): Promise<FeeEstimate>;
   submitRawTransaction(rawTransaction: Hex): Promise<Hex>;
   getReceipt(transactionHash: Hex): Promise<RpcReceipt | null>;
   getLatestConfirmedNonce(address: Address): Promise<string>;

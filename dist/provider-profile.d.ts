@@ -88,6 +88,7 @@ export declare function lifecycleReadOnlyCapabilitySnapshot(): ProviderCapabilit
 export declare function coinbaseDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function metamaskReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function metamaskDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
+export declare function metamaskSmartAccountLegacyCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function metamaskSmartAccountCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function capabilityHash(snapshot: ProviderCapabilitySnapshot): string;
 export declare function accountBindingHash(providerId: string, address: Address): string;

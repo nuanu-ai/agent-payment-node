@@ -180,7 +180,7 @@ export function metamaskDirectCapabilitySnapshot(): ProviderCapabilitySnapshot {
   };
 }
 
-export function metamaskSmartAccountCapabilitySnapshot(): ProviderCapabilitySnapshot {
+export function metamaskSmartAccountLegacyCapabilitySnapshot(): ProviderCapabilitySnapshot {
   const snapshot = lifecycleReadOnlyCapabilitySnapshot();
   return {
     ...snapshot,
@@ -205,6 +205,20 @@ export function metamaskSmartAccountCapabilitySnapshot(): ProviderCapabilitySnap
       session_custody: "encrypted_local_apn",
       provider_revoke: "unavailable_unproved",
     },
+  };
+}
+
+export function metamaskSmartAccountCapabilitySnapshot(): ProviderCapabilitySnapshot {
+  const snapshot = metamaskSmartAccountLegacyCapabilitySnapshot();
+  return {
+    ...snapshot,
+    direct: {
+      available: true,
+      mode: "delegated_session_transaction",
+      execution_owner: "apn",
+      retry_owner: "apn_operation_state",
+    },
+    evidence: { available: true, owner: "apn" },
   };
 }
 
