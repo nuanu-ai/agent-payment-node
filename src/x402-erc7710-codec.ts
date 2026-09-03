@@ -1,3 +1,4 @@
+import { METAMASK_FACILITATOR_ADDRESSES } from "@metamask/smart-accounts-kit/experimental";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
@@ -5,9 +6,22 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 export function canonicalErc7710Facilitators(
   extra: Readonly<Record<string, unknown>>,
 ): readonly string[] | null {
-  if (!exactKeys(extra, ["assetTransferMethod", "facilitatorAddresses"])) return null;
+  const allowed = new Set([
+    "assetTransferMethod", "facilitatorAddresses", "name", "version", "decimals", "paymentFlow",
+  ]);
+  if (
+    extra.assetTransferMethod !== "erc7710" || Object.keys(extra).some((key) => !allowed.has(key)) ||
+    !optionalBoundedString(extra.name) || !optionalBoundedString(extra.version) ||
+    (extra.decimals !== undefined && extra.decimals !== 6) ||
+    (extra.paymentFlow !== undefined && extra.paymentFlow !== "authorization")
+  ) return null;
   const value = extra.facilitatorAddresses;
+  if (value === undefined) return normalizeAddresses(METAMASK_FACILITATOR_ADDRESSES);
   if (!Array.isArray(value) || value.length === 0 || value.length > 16) return null;
+  return normalizeAddresses(value);
+}
+
+function normalizeAddresses(value: readonly unknown[]): readonly string[] | null {
   const normalized: string[] = [];
   const unique = new Set<string>();
   for (const item of value) {
@@ -18,6 +32,10 @@ export function canonicalErc7710Facilitators(
     normalized.push(address);
   }
   return normalized;
+}
+
+function optionalBoundedString(value: unknown): boolean {
+  return value === undefined || (typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= 128);
 }
 
 export function isStrictErc7710Payload(value: unknown): value is {

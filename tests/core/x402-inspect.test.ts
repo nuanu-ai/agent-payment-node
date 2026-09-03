@@ -152,7 +152,7 @@ test("unsupported-offer filtering retains standard envelope and selected-offer s
   ]) assert.throws(() => decodePaymentRequiredHeader(canonicalPaymentRequiredHeader(challenge)), ApnError);
 });
 
-test("strict wire rejects malformed base64, duplicate JSON keys, unsafe numbers, and unknown fields", () => {
+test("strict wire rejects malformed base64, duplicate JSON keys, unsafe numbers, and unknown core fields", () => {
   const padded = Buffer.from(`${JSON.stringify(X402_PAYMENT_REQUIRED)} `, "utf8").toString("base64");
   for (const header of [
     ` ${canonicalPaymentRequiredHeader()}`,
@@ -164,10 +164,22 @@ test("strict wire rejects malformed base64, duplicate JSON keys, unsafe numbers,
     canonicalPaymentRequiredHeader().slice(0, -4),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, resource: { ...X402_PAYMENT_REQUIRED.resource, description: "x".repeat(49 * 1024) } }),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: Array.from({ length: 17 }, () => X402_REQUIREMENTS) }),
-    canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, unexpected: true }),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, renamedFlow: "authorization" }] }),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, amount: 1 }] }),
   ]) assert.throws(() => decodePaymentRequiredHeader(header), ApnError, header.slice(0, 32));
+});
+
+test("unknown top-level presentation fields are discarded before APN authority binding", () => {
+  const decoded = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
+    ...X402_PAYMENT_REQUIRED,
+    message: "Payment required",
+    developerNote: "Install a browser helper",
+    futurePresentation: { nested: true },
+  }));
+  assert.deepEqual(decoded, X402_PAYMENT_REQUIRED);
+  assert.equal("message" in decoded, false);
+  assert.equal("developerNote" in decoded, false);
+  assert.equal("futurePresentation" in decoded, false);
 });
 
 test("payment-identifier stays strict while unknown challenge extensions are ignored", () => {
