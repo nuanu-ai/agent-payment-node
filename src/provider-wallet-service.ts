@@ -16,6 +16,7 @@ import type {
   ProviderPermissionLifecyclePort,
 } from "./provider-ports.js";
 import type { BalanceSnapshot } from "./ports.js";
+import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalIdempotencyKey } from "./transfer-policy.js";
 import { canonicalProfile, publicProvenance, validateBalance } from "./wallet-policy.js";
@@ -29,13 +30,14 @@ export class ProviderWalletService {
     const profileHash = this.context.state.profileHash(profile);
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
       const repository = this.context.requireProfileRepository();
-      const existing = await repository.load(profileHash);
+      let existing = await repository.load(profileHash);
       if (existing !== null) {
         if (existing.provider_id !== request.providerId) {
           throw new ApnError("APN_PROFILE_DRIFT", "The APN profile is already bound to a different provider.");
         }
       }
       const adapter = this.context.requireProviderRegistry().resolve(request.providerId);
+      if (existing !== null) existing = await upgradeProviderProfile(adapter, existing, repository);
       if (hasPermissionIntent(request) && adapter.permissions === undefined) {
         throw new ApnError("APN_INVALID_INPUT", "Permission arguments are valid only for a permission-lifecycle provider.");
       }
@@ -122,9 +124,10 @@ export class ProviderWalletService {
     await this.context.ready();
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
       const repository = this.context.requireProfileRepository();
-      const current = await repository.load(profileHash);
+      let current = await repository.load(profileHash);
       if (current === null) throw new ApnError("APN_STATE_CORRUPT", "Provider profile disappeared during status.");
       const adapter = this.context.requireProviderRegistry().resolve(current.provider_id);
+      current = await upgradeProviderProfile(adapter, current, repository);
       if (adapter.permissions !== undefined) {
         let permission = await adapter.permissions.read(profileHash);
         if (permission === null) {
@@ -166,11 +169,12 @@ export class ProviderWalletService {
     if (existing === null || existing.provider_id === "local") return null;
     await this.context.ready();
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-      const bound = await this.context.requireProfileRepository().load(profileHash);
+      let bound = await this.context.requireProfileRepository().load(profileHash);
       if (bound === null || bound.provider_id === "local") {
         throw new ApnError("APN_STATE_CORRUPT", "Provider profile changed during balance read.");
       }
       const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
+      bound = await upgradeProviderProfile(adapter, bound, this.context.requireProfileRepository());
       if (adapter.permissions !== undefined) {
         let permission = await adapter.permissions.read(profileHash);
         if (permission === null) {
@@ -233,23 +237,27 @@ export class ProviderWalletService {
     if (this.context.profileRepository === undefined) return;
     const profile = canonicalProfile(profileInput);
     const profileHash = this.context.state.profileHash(profile);
-    const bound = await this.context.requireProfileRepository().load(profileHash);
-    if (bound === null || bound.provider_id === "local") return;
-    if (bound.drift.state !== "bound") {
-      throw new ApnError("APN_PROFILE_DRIFT", "Provider profile drift blocks new payment effects.");
-    }
-    const capability = kind === "direct" ? bound.capability_snapshot.direct : bound.capability_snapshot.x402;
-    if (!capability.available) {
-      if (bound.capability_snapshot.permission === undefined &&
-        (kind === "direct" || bound.provider_id === "metamask-agent-wallet")) {
-        throw new ApnError(
-          "APN_PROFILE_DRIFT",
-          `The persisted provider profile predates ${kind}-effect binding; explicit foreground rebind is required.`,
-          { current_revision: String(bound.revision) },
-        );
+    await this.context.ready();
+    await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+      const repository = this.context.requireProfileRepository();
+      let bound = await repository.load(profileHash);
+      if (bound === null || bound.provider_id === "local") return;
+      const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
+      bound = await upgradeProviderProfile(adapter, bound, repository);
+      if (bound.drift.state !== "bound") {
+        throw new ApnError("APN_PROFILE_DRIFT", "Provider profile drift blocks new payment effects.");
       }
-      throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This provider profile does not support the requested payment effect in this APN version.");
-    }
+      const capability = kind === "direct" ? bound.capability_snapshot.direct : bound.capability_snapshot.x402;
+      if (!capability.available) {
+        if (bound.capability_snapshot.permission === undefined &&
+          (kind === "direct" || bound.provider_id === "metamask-agent-wallet")) {
+          throw new ApnError("APN_PROFILE_DRIFT", `The persisted provider profile predates ${kind}-effect binding; explicit foreground rebind is required.`, {
+            current_revision: String(bound.revision),
+          });
+        }
+        throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This provider profile does not support the requested payment effect in this APN version.");
+      }
+    });
   }
 
   private async connectPermissionProfile(
@@ -331,12 +339,13 @@ function alignPermissionProfile(
   permission: ProviderPermissionBinding,
 ): ProviderProfileRecord {
   const observed = permissionObservation(adapter, permission);
+  if (permission.revision < profile.revision && sameBinding(profile, observed)) return profile;
   if (profile.revision === permission.revision && profile.observed_at === permission.observed_at && sameBinding(profile, observed)) {
     return profile;
   }
   return {
     ...profile,
-    revision: permission.revision,
+    revision: Math.max(profile.revision, permission.revision),
     observed_at: permission.observed_at,
     public_address: permission.owner_address,
     account_binding_hash: observed.accountBindingHash,
@@ -350,8 +359,8 @@ function alignPermissionRevision(
   profile: ProviderProfileRecord,
   permission: ProviderPermissionBinding,
 ): ProviderProfileRecord {
-  if (profile.revision === permission.revision && profile.observed_at === permission.observed_at) return profile;
-  return { ...profile, revision: permission.revision, observed_at: permission.observed_at };
+  if (profile.observed_at === permission.observed_at) return profile;
+  return { ...profile, revision: Math.max(profile.revision + 1, permission.revision), observed_at: permission.observed_at };
 }
 
 function permissionBalance(

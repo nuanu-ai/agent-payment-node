@@ -1,7 +1,7 @@
 import type { Address, Hex } from "./model.js";
 import type { SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
 import type { SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
-import type { ProviderAdapterBundle, ProviderPermissionBinding, ProviderPermissionConnectIntent, ProviderPermissionLifecyclePort } from "./provider-ports.js";
+import type { DirectExecutionPort, ProviderAdapterBundle, ProviderPermissionBinding, ProviderPermissionConnectIntent, ProviderPermissionLifecyclePort } from "./provider-ports.js";
 export { METAMASK_SMART_ACCOUNT_PROVIDER_ID } from "./metamask-smart-account-record.js";
 export interface SessionKeyFactoryPort {
     create(): {
@@ -20,9 +20,11 @@ export declare class MetaMaskSmartAccountAdapter implements ProviderPermissionLi
     private readonly consent;
     private readonly sessionKeys;
     private readonly now;
+    private readonly direct;
     readonly capabilities: import("./provider-profile.js").ProviderCapabilitySnapshot;
-    constructor(store: SmartAccountPermissionStorePort, consent: SmartAccountConsentPort, sessionKeys?: SessionKeyFactoryPort, now?: () => Date);
+    constructor(store: SmartAccountPermissionStorePort, consent: SmartAccountConsentPort, sessionKeys?: SessionKeyFactoryPort, now?: () => Date, direct?: DirectExecutionPort);
     bundle(): ProviderAdapterBundle;
+    private upgradeProfile;
     connect(intent: ProviderPermissionConnectIntent): Promise<ProviderPermissionBinding>;
     activate(profileHash: string): Promise<ProviderPermissionBinding>;
     read(profileHash: string): Promise<ProviderPermissionBinding | null>;

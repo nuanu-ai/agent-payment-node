@@ -1,4 +1,4 @@
-import type { Address, Hex } from "./model.js";
+import type { Address, Hex, ProviderDirectBinding } from "./model.js";
 import type { ProviderCapabilitySnapshot, ProviderProfileRecord } from "./provider-profile.js";
 import type { ProviderX402RejectionShape } from "./provider-x402-rejection-shape.js";
 export interface ForegroundAuthenticationPort {
@@ -72,18 +72,43 @@ export interface ProviderWalletReadPort {
     observeBalance(): Promise<ProviderBalanceObservation>;
     crossCheckAddress(expected: Address): Promise<void>;
 }
+export interface ProviderProfileMigrationPort {
+    upgrade(profile: ProviderProfileRecord): Promise<ProviderProfileRecord>;
+}
+export interface ProviderDirectPrepareInput {
+    readonly operationId: string;
+    readonly profileHash: string;
+    readonly profileRevision: number;
+    readonly sender: Address;
+    readonly recipient: Address;
+    readonly amountAtomic: string;
+    readonly amountDecimal: string;
+    readonly rpcUrl: string;
+    readonly preparedAt: string;
+    readonly expiresAt: string;
+}
+export interface ProviderDelegatedDirectPreparation {
+    readonly permissionRevision: number;
+    readonly rootGrantFingerprint: string;
+    readonly sessionAddress: Address;
+    readonly delegationManager: Address;
+    readonly permissionExpiresAtUnix: number;
+}
+export interface ProviderDirectExecutionInput extends ProviderDirectPrepareInput {
+    readonly requestHash: string;
+    readonly fingerprint: string;
+    readonly binding: ProviderDirectBinding;
+}
 export interface DirectExecutionPort {
-    readonly mode: "local_raw_transaction_apn_submit" | "provider_atomic_send";
+    readonly mode: "local_raw_transaction_apn_submit" | "provider_atomic_send" | "delegated_session_transaction";
+    prepare?(input: ProviderDirectPrepareInput): Promise<ProviderDelegatedDirectPreparation>;
+    preflight?(input: ProviderDirectExecutionInput): Promise<void>;
     assertCompatibleIntent?(input: {
         readonly amountAtomic: string;
         readonly amountDecimal: string;
         readonly recipient: Address;
     }): void;
-    execute?(input: {
-        readonly amountDecimal: string;
-        readonly recipient: Address;
-        readonly sender: Address;
-    }): Promise<{
+    execute?(input: ProviderDirectExecutionInput): Promise<{
         readonly disposition: "acknowledged";
         readonly transactionHash: Hex;
     } | {
@@ -227,6 +252,7 @@ export interface ProviderAdapterBundle {
     readonly x402Signer?: X402SigningPort;
     readonly evidence?: EvidencePort;
     readonly permissions?: ProviderPermissionLifecyclePort;
+    readonly profileMigration?: ProviderProfileMigrationPort;
 }
 export interface ProviderRegistryPort {
     resolve(providerId: string): ProviderAdapterBundle;

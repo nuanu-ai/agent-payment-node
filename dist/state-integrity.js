@@ -134,12 +134,17 @@ function validateProviderDirect(operation, binding) {
         !isPlainRecord(binding) || !exactKeys(binding, [
         "schemaVersion", "providerId", "profileRevision", "capabilityHash", "accountBindingHash", "executionMode",
         "executionOwner", "retryOwner", "rpcBindingHash", "rpcOriginHash", "policy",
+        ...(binding.executionMode === "delegated_session_transaction" ? [
+            "permissionRevision", "rootGrantFingerprint", "sessionAddress", "delegationManager", "permissionExpiresAtUnix",
+        ] : []),
     ]) || binding.schemaVersion !== "apn.provider-direct.v1" ||
         !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(binding.providerId) ||
         !Number.isSafeInteger(binding.profileRevision) || binding.profileRevision < 1 ||
         !/^[a-f0-9]{64}$/u.test(binding.capabilityHash) || !/^[a-f0-9]{64}$/u.test(binding.accountBindingHash) ||
-        binding.executionMode !== "provider_atomic_send" || binding.executionOwner !== "provider" ||
-        binding.retryOwner !== "apn_outer_no_replay_journal" ||
+        !((binding.executionMode === "provider_atomic_send" && binding.executionOwner === "provider" &&
+            binding.retryOwner === "apn_outer_no_replay_journal") ||
+            (binding.executionMode === "delegated_session_transaction" && binding.executionOwner === "apn" &&
+                binding.retryOwner === "apn_operation_state" && validDelegatedBinding(binding))) ||
         !/^[a-f0-9]{64}$/u.test(binding.rpcBindingHash) || !/^[a-f0-9]{64}$/u.test(binding.rpcOriginHash) ||
         !isPlainRecord(binding.policy) || !exactKeys(binding.policy, ["identity", "verdict", "foregroundApprovalRequired"]) ||
         binding.policy.identity !== "apn.direct.foreground-approval.v1" ||
@@ -198,6 +203,15 @@ function validateProviderDirect(operation, binding) {
             stateCorrupt("Provider direct state transition is invalid.");
         }
     }
+}
+function validDelegatedBinding(binding) {
+    if (binding.executionMode !== "delegated_session_transaction")
+        return false;
+    return Number.isSafeInteger(binding.permissionRevision) && binding.permissionRevision > 0 &&
+        /^[a-f0-9]{64}$/u.test(binding.rootGrantFingerprint) &&
+        /^0x[0-9a-fA-F]{40}$/u.test(binding.sessionAddress) &&
+        /^0x[0-9a-fA-F]{40}$/u.test(binding.delegationManager) &&
+        Number.isSafeInteger(binding.permissionExpiresAtUnix) && binding.permissionExpiresAtUnix > 0;
 }
 function validateProviderEffectReference(reference) {
     if (!isPlainRecord(reference) || !exactKeys(reference, ["schemaVersion", "kind", "recoveryToken", "providerState"]) ||

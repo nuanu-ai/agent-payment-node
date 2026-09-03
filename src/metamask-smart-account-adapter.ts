@@ -20,12 +20,19 @@ import {
 import type { SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
 import type { SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
 import type {
+  DirectExecutionPort,
   ProviderAdapterBundle,
   ProviderPermissionBinding,
   ProviderPermissionConnectIntent,
   ProviderPermissionLifecyclePort,
 } from "./provider-ports.js";
-import { metamaskSmartAccountCapabilitySnapshot } from "./provider-profile.js";
+import {
+  accountBindingHash,
+  capabilityHash,
+  metamaskSmartAccountCapabilitySnapshot,
+  metamaskSmartAccountLegacyCapabilitySnapshot,
+  type ProviderProfileRecord,
+} from "./provider-profile.js";
 
 export { METAMASK_SMART_ACCOUNT_PROVIDER_ID } from "./metamask-smart-account-record.js";
 
@@ -48,6 +55,7 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
     private readonly consent: SmartAccountConsentPort,
     private readonly sessionKeys: SessionKeyFactoryPort = new LocalSessionKeyFactory(),
     private readonly now: () => Date = () => new Date(),
+    private readonly direct: DirectExecutionPort = unavailableDirectExecution(),
   ) {}
 
   bundle(): ProviderAdapterBundle {
@@ -65,7 +73,38 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
         observeBalance: async () => unsupportedInternalPath(),
         crossCheckAddress: async () => unsupportedInternalPath(),
       },
+      direct: this.direct,
       permissions: this,
+      profileMigration: { upgrade: async (profile) => await this.upgradeProfile(profile) },
+    };
+  }
+
+  private async upgradeProfile(profile: ProviderProfileRecord): Promise<ProviderProfileRecord> {
+    const currentHash = capabilityHash(this.capabilities);
+    if (profile.capability_hash === currentHash) return profile;
+    const legacy = metamaskSmartAccountLegacyCapabilitySnapshot();
+    if (
+      profile.provider_id !== METAMASK_SMART_ACCOUNT_PROVIDER_ID ||
+      profile.trust_class !== "external_owner_delegated_local_session" ||
+      profile.capability_hash !== capabilityHash(legacy) ||
+      hashObject(profile.capability_snapshot) !== hashObject(legacy) ||
+      profile.drift.state !== "bound"
+    ) throw new ApnError("APN_PROFILE_DRIFT", "Smart Account capability state is not eligible for automatic upgrade.");
+    const record = await this.store.load(profile.profile_hash);
+    const instant = this.instant();
+    if (
+      record === null || !isGrantedPermissionRecord(record) || record.phase !== "active" ||
+      instant.unix >= record.granted_expires_at_unix || record.profile !== profile.profile ||
+      record.profile_hash !== profile.profile_hash || record.owner_address.toLowerCase() !== profile.public_address.toLowerCase() ||
+      accountBindingHash(METAMASK_SMART_ACCOUNT_PROVIDER_ID, record.owner_address) !== profile.account_binding_hash ||
+      profile.revision !== record.revision
+    ) throw new ApnError("APN_PROFILE_DRIFT", "Smart Account permission binding is not eligible for automatic upgrade.");
+    return {
+      ...profile,
+      revision: Math.max(profile.revision, record.revision) + 1,
+      capability_snapshot: this.capabilities,
+      capability_hash: currentHash,
+      observed_at: monotonicTimestamp(profile.observed_at, instant.iso),
     };
   }
 
@@ -247,11 +286,12 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
     change: Partial<Pick<GrantedSmartAccountPermissionRecord, "phase" | "revocation_freshness" | "last_foreground_sync_at">>,
     instant: { readonly unix: number; readonly iso: string },
   ): Promise<ProviderPermissionBinding> {
+    const updatedAt = monotonicTimestamp(record.updated_at, instant.iso);
     const next: GrantedSmartAccountPermissionRecord = {
       ...record,
       ...change,
       revision: record.revision + 1,
-      updated_at: instant.iso,
+      updated_at: updatedAt,
       max_observed_unix: Math.max(record.max_observed_unix, instant.unix),
     };
     await this.store.save(next);
@@ -269,7 +309,7 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
       ...record,
       phase: "expired",
       revision: record.revision + 1,
-      updated_at: instant.iso,
+      updated_at: monotonicTimestamp(record.updated_at, instant.iso),
       max_observed_unix: Math.max(record.max_observed_unix, instant.unix),
     };
     await this.store.save(expired);
@@ -338,4 +378,18 @@ function terminalLifecycle(state: string): never {
 }
 function unsupportedInternalPath(): never {
   throw new ApnError("APN_INTERNAL", "Smart Account access must use the common permission lifecycle path.");
+}
+
+function monotonicTimestamp(previous: string, observed: string): string {
+  return new Date(Math.max(Date.parse(observed), Date.parse(previous) + 1)).toISOString();
+}
+
+function unavailableDirectExecution(): DirectExecutionPort {
+  return {
+    mode: "delegated_session_transaction",
+    prepare: async () => {
+      throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Smart Account direct execution requires an explicit Base RPC.");
+    },
+    execute: async () => ({ disposition: "not_started", reason: "provider_binary_unavailable" }),
+  };
 }

@@ -7,7 +7,7 @@ export function publicPermissionProfile(profile, permission, reused) {
         address: permission.owner_address,
         account_binding_hash: profile.account_binding_hash,
         trust_class: profile.trust_class,
-        revision: permission.revision,
+        revision: profile.revision,
         capability_hash: profile.capability_hash,
         capabilities: profile.capability_snapshot,
         observed_at: permission.observed_at,
@@ -39,14 +39,14 @@ export function publicPermissionProfile(profile, permission, reused) {
                 action: "Fund the owner Smart Account manually only; APN performs no funding action.",
                 session_gas_address: permission.session_address,
             } } : {}),
-        next_actions: permissionNextActions(profile.profile, { ...permission, state }),
+        next_actions: permissionNextActions(profile.profile, profile.revision, { ...permission, state }),
     };
 }
-function permissionNextActions(profile, permission) {
+function permissionNextActions(profile, profileRevision, permission) {
     if (permission.state === "active") {
         return [
             `Use apn wallet balance --profile ${profile} with an explicit Base RPC URL`,
-            `Use apn wallet permission sync --profile ${profile} --expected-revision ${permission.revision} for foreground provider freshness`,
+            `Use apn wallet permission sync --profile ${profile} --expected-revision ${profileRevision} for foreground provider freshness`,
         ];
     }
     if (permission.state === "disabled") {
