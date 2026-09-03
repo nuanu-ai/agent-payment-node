@@ -97,6 +97,10 @@ export class StateStore extends SecureStateStore {
     await this.ensureDirectory(join("profiles", profile.profile_hash));
     await this.writeJson(join("profiles", profile.profile_hash, "profile.json"), profile);
   }
+  async removeProviderProfile(profileHash: string): Promise<void> {
+    stateIdentifier(profileHash, "profile hash");
+    await this.removeFile(join("profiles", profileHash, "profile.json"));
+  }
   async loadEncryptedWalletEnvelope(profile: string): Promise<unknown | null> {
     return await this.readJson(join("wallets", `${profile}.json`));
   }
@@ -491,9 +495,6 @@ export class StateStore extends SecureStateStore {
     }
     return profiles.sort();
   }
-
 }
 
-function storedSchema(value: unknown): unknown {
-  return isPlainRecord(value) ? value.schemaVersion : undefined;
-}
+function storedSchema(value: unknown): unknown { return isPlainRecord(value) ? value.schemaVersion : undefined; }

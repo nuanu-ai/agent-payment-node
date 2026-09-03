@@ -1069,8 +1069,12 @@ test("settlement pins the observed safe block while the safe tag advances", asyn
   const terminal = await operation(fixture);
   assert.equal(terminal.settlementEvidence?.safeHead.number, observedSafe.number);
   assert.equal(terminal.settlementEvidence?.safeHead.hash, observedSafe.hash);
-  assert.equal(terminal.settlementEvidence?.authorizationState.blockTag, "number");
-  assert.equal(terminal.settlementEvidence?.authorizationState.blockNumber, observedSafe.number);
+  assert.equal(terminal.settlementEvidence?.schemaVersion, "apn.x402.settlement-evidence.v1");
+  if (terminal.settlementEvidence?.schemaVersion !== "apn.x402.settlement-evidence.v1") {
+    throw new Error("expected EIP-3009 settlement evidence");
+  }
+  assert.equal(terminal.settlementEvidence.authorizationState.blockTag, "number");
+  assert.equal(terminal.settlementEvidence.authorizationState.blockNumber, observedSafe.number);
 });
 
 test("a completed unique AuthorizationUsed scan produces a bound hint and scan-backed spent receipt", async (t) => {

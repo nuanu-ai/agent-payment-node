@@ -89,6 +89,58 @@ export function metamaskDirectCapabilitySnapshot() {
         evidence: { available: true, owner: "apn" },
     };
 }
+export function metamaskSmartAccountLegacyCapabilitySnapshot() {
+    const snapshot = lifecycleReadOnlyCapabilitySnapshot();
+    return {
+        ...snapshot,
+        direct: {
+            available: false,
+            mode: "delegated_session_transaction",
+            execution_owner: "apn",
+            retry_owner: "apn_operation_state",
+        },
+        x402: {
+            available: false,
+            mode: "delegated_erc7710_apn_paid_retry",
+            execution_owner: "apn",
+            retry_owner: "apn_state_machine",
+        },
+        evidence: { available: false, owner: "apn" },
+        permission: {
+            available: true,
+            protocol: "erc7715",
+            consent: "foreground_browser",
+            owner_custody: "external_metamask",
+            session_custody: "encrypted_local_apn",
+            provider_revoke: "unavailable_unproved",
+        },
+    };
+}
+export function metamaskSmartAccountCapabilitySnapshot() {
+    const snapshot = metamaskSmartAccountLegacyCapabilitySnapshot();
+    return {
+        ...snapshot,
+        direct: {
+            available: true,
+            mode: "delegated_session_transaction",
+            execution_owner: "apn",
+            retry_owner: "apn_operation_state",
+        },
+        evidence: { available: true, owner: "apn" },
+    };
+}
+export function metamaskSmartAccountX402CapabilitySnapshot() {
+    const snapshot = metamaskSmartAccountCapabilitySnapshot();
+    return {
+        ...snapshot,
+        x402: {
+            available: true,
+            mode: "delegated_erc7710_apn_paid_retry",
+            execution_owner: "apn",
+            retry_owner: "apn_state_machine",
+        },
+    };
+}
 export function capabilityHash(snapshot) {
     assertCapabilitySnapshot(snapshot);
     return hashObject(snapshot);
@@ -149,6 +201,7 @@ export function validateProviderProfile(value) {
             "local_software_wallet",
             "provider_managed_non_custodial_tee",
             "provider_managed_non_custodial_signer",
+            "external_owner_delegated_local_session",
         ].includes(profile.trust_class) ||
         !Number.isSafeInteger(profile.revision) || profile.revision < 1 ||
         typeof profile.capability_hash !== "string" || !/^[a-f0-9]{64}$/u.test(profile.capability_hash) ||
@@ -163,6 +216,7 @@ export function validateProviderProfile(value) {
 function assertCapabilitySnapshot(snapshot) {
     if (!isPlainRecord(snapshot) || !exactKeys(snapshot, [
         "schema_version", "network", "asset", "lifecycle", "read", "direct", "x402", "evidence",
+        ...(snapshot.permission === undefined ? [] : ["permission"]),
     ]) || snapshot.schema_version !== PROVIDER_CAPABILITY_VERSION)
         invalidProfile();
     if (snapshot.network?.caip2 !== CHAIN_CAIP2 || snapshot.network.chain !== "base" ||
@@ -184,12 +238,15 @@ function assertCapabilitySnapshot(snapshot) {
     ])
         if (typeof value !== "boolean")
             invalidProfile();
-    if (!new Set(["local_raw_transaction_apn_submit", "provider_atomic_send"]).has(snapshot.direct.mode))
+    if (!new Set([
+        "local_raw_transaction_apn_submit", "provider_atomic_send", "delegated_session_transaction",
+    ]).has(snapshot.direct.mode))
         invalidProfile();
     if (!new Set([
         "local_detached_eip3009_apn_paid_retry",
         "provider_detached_eip3009_apn_paid_retry",
         "provider_atomic_paid_fetch",
+        "delegated_erc7710_apn_paid_retry",
     ]).has(snapshot.x402.mode))
         invalidProfile();
     if (!["apn", "provider"].includes(snapshot.direct.execution_owner) ||
@@ -198,10 +255,17 @@ function assertCapabilitySnapshot(snapshot) {
         !["apn_state_machine", "apn_outer_no_replay_journal"].includes(snapshot.x402.retry_owner) ||
         !["apn", "provider"].includes(snapshot.evidence.owner))
         invalidProfile();
-    const directLocal = snapshot.direct.mode === "local_raw_transaction_apn_submit";
+    const directApnOwned = snapshot.direct.mode !== "provider_atomic_send";
     const x402ApnOwned = snapshot.x402.mode !== "provider_atomic_paid_fetch";
-    if (directLocal !== (snapshot.direct.execution_owner === "apn" && snapshot.direct.retry_owner === "apn_operation_state") ||
+    if (directApnOwned !== (snapshot.direct.execution_owner === "apn" && snapshot.direct.retry_owner === "apn_operation_state") ||
         x402ApnOwned !== (snapshot.x402.execution_owner === "apn" && snapshot.x402.retry_owner === "apn_state_machine"))
+        invalidProfile();
+    if (snapshot.permission !== undefined && (!isPlainRecord(snapshot.permission) || !exactKeys(snapshot.permission, [
+        "available", "protocol", "consent", "owner_custody", "session_custody", "provider_revoke",
+    ]) || snapshot.permission.available !== true || snapshot.permission.protocol !== "erc7715" ||
+        snapshot.permission.consent !== "foreground_browser" || snapshot.permission.owner_custody !== "external_metamask" ||
+        snapshot.permission.session_custody !== "encrypted_local_apn" ||
+        snapshot.permission.provider_revoke !== "unavailable_unproved"))
         invalidProfile();
 }
 function assertDrift(drift) {

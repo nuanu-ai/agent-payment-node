@@ -223,9 +223,12 @@ export class HttpsBaseRpc {
         return rpcQuantity(await this.call("eth_getTransactionCount", [address, "pending"])).toString();
     }
     async estimateDirectTransfer(input) {
-        await this.assertBaseChain();
         if (input.to !== BASE_USDC)
             throw new ApnError("APN_INVALID_INPUT", "Only exact Base USDC is supported.");
+        return await this.estimateTransaction(input);
+    }
+    async estimateTransaction(input) {
+        await this.assertBaseChain();
         const gas = rpcQuantity(await this.call("eth_estimateGas", [{ from: input.from, to: input.to, data: input.data, value: "0x0" }]));
         const priority = rpcQuantity(await this.call("eth_maxPriorityFeePerGas", []));
         const block = record(await this.call("eth_getBlockByNumber", ["latest", false]), "latest block");

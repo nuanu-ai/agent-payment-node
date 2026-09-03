@@ -4,6 +4,7 @@ export declare function validateHttpObservation(value: unknown, attemptNumber: s
 export declare function validateSettlementResponseObservation(value: unknown, operation: Record<string, unknown>, attempts: readonly X402Attempt[]): SettlementResponseObservation;
 export declare function validateNormalizedSettlement(value: unknown, classification: SettlementResponseObservation["classification"], operation: Record<string, unknown>): void;
 export declare function validateTransactionHint(value: unknown): TransactionHint;
+export declare function validateTransferMethodEvidence(method: "eip3009" | "erc7710", transactionHint: TransactionHint | undefined, authorizationUsedScan: AuthorizationUsedScan | undefined, settlementEvidence: SettlementEvidence | undefined, unusedExpiryEvidence: UnusedExpiryEvidence | undefined): void;
 export declare function validateAuthorizationUsedScan(value: unknown, operation: Record<string, unknown>): AuthorizationUsedScan;
 export declare function validateSettlementEvidence(value: unknown, operation?: Record<string, unknown>): SettlementEvidence;
 export declare function validateUnusedExpiryEvidence(value: unknown, operation?: Record<string, unknown>): UnusedExpiryEvidence;

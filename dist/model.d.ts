@@ -9,15 +9,12 @@ export interface Economics {
     readonly maxPriorityFeePerGasAtomic: string;
     readonly maximumGasCostAtomic: string;
 }
-export interface ProviderDirectBinding {
+interface ProviderDirectBindingBase {
     readonly schemaVersion: "apn.provider-direct.v1";
     readonly providerId: string;
     readonly profileRevision: number;
     readonly capabilityHash: string;
     readonly accountBindingHash: string;
-    readonly executionMode: "provider_atomic_send";
-    readonly executionOwner: "provider";
-    readonly retryOwner: "apn_outer_no_replay_journal";
     readonly rpcBindingHash: string;
     readonly rpcOriginHash: string;
     readonly policy: {
@@ -26,6 +23,22 @@ export interface ProviderDirectBinding {
         readonly foregroundApprovalRequired: true;
     };
 }
+export interface ProviderAtomicDirectBinding extends ProviderDirectBindingBase {
+    readonly executionMode: "provider_atomic_send";
+    readonly executionOwner: "provider";
+    readonly retryOwner: "apn_outer_no_replay_journal";
+}
+export interface ProviderDelegatedDirectBinding extends ProviderDirectBindingBase {
+    readonly executionMode: "delegated_session_transaction";
+    readonly executionOwner: "apn";
+    readonly retryOwner: "apn_operation_state";
+    readonly permissionRevision: number;
+    readonly rootGrantFingerprint: string;
+    readonly sessionAddress: Address;
+    readonly delegationManager: Address;
+    readonly permissionExpiresAtUnix: number;
+}
+export type ProviderDirectBinding = ProviderAtomicDirectBinding | ProviderDelegatedDirectBinding;
 export interface ProviderEffectReference {
     readonly schemaVersion: "apn.provider-effect-reference.v1";
     readonly kind: "transaction";
@@ -96,3 +109,4 @@ export interface ReceiptRecord {
     readonly operationIntegrityHash: string;
     readonly integrityHash: string;
 }
+export {};

@@ -39,6 +39,12 @@ async function callTool(tool, input, options) {
             const handoff = walletConnectHandoff(bound.request);
             return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "Wallet provider authentication must continue in the foreground CLI.", { cli_handoff: handoff, foreground_auth: true }));
         }
+        if (bound.request.command === "wallet.permission.sync") {
+            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "MetaMask permission sync must continue in the foreground CLI.", {
+                cli_handoff: `apn wallet permission sync --profile ${bound.request.profile} --expected-revision ${bound.request.expectedRevision}`,
+                foreground_auth: true,
+            }));
+        }
         const policyApproval = bound.request.command === "wallet.policy.set"
             ? new RejectingMcpPolicyApproval(bound.request)
             : undefined;
@@ -61,7 +67,7 @@ async function callTool(tool, input, options) {
     }
 }
 function walletConnectHandoff(request) {
-    return `apn wallet connect --profile ${request.profile} --provider ${request.providerId}${request.authenticationMethod === undefined ? "" : ` --auth-method ${request.authenticationMethod}`}${request.expectedRevision === undefined ? "" : ` --expected-revision ${request.expectedRevision}`}`;
+    return `apn wallet connect --profile ${request.profile} --provider ${request.providerId}${request.authenticationMethod === undefined ? "" : ` --auth-method ${request.authenticationMethod}`}${request.expectedRevision === undefined ? "" : ` --expected-revision ${request.expectedRevision}`}${request.permissionCapUsdcAtomic === undefined ? "" : ` --permission-cap-usdc-atomic ${request.permissionCapUsdcAtomic}`}${request.permissionExpiresAt === undefined ? "" : ` --permission-expires-at ${request.permissionExpiresAt}`}${request.idempotencyKey === undefined ? "" : " --idempotency-key <same-idempotency-key>"}`;
 }
 function mcpResult(envelope) {
     return {

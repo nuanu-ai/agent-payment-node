@@ -170,6 +170,9 @@ export class TestRpc implements RpcPort {
     if (input.to !== BASE_USDC) throw new Error("wrong token");
     return this.fees;
   }
+  async estimateTransaction(_input: { readonly from: Address; readonly to: Address; readonly data: Hex }): Promise<FeeEstimate> {
+    return this.fees;
+  }
   async submitRawTransaction(rawTransaction: Hex): Promise<Hex> {
     this.submissions.push(rawTransaction);
     if (this.submitError !== null) throw this.submitError;

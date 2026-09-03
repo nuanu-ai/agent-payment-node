@@ -265,8 +265,12 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   }
 
   async estimateDirectTransfer(input: { readonly from: Address; readonly to: Address; readonly data: Hex }): Promise<FeeEstimate> {
-    await this.assertBaseChain();
     if (input.to !== BASE_USDC) throw new ApnError("APN_INVALID_INPUT", "Only exact Base USDC is supported.");
+    return await this.estimateTransaction(input);
+  }
+
+  async estimateTransaction(input: { readonly from: Address; readonly to: Address; readonly data: Hex }): Promise<FeeEstimate> {
+    await this.assertBaseChain();
     const gas = rpcQuantity(await this.call("eth_estimateGas", [{ from: input.from, to: input.to, data: input.data, value: "0x0" }]));
     const priority = rpcQuantity(await this.call("eth_maxPriorityFeePerGas", []));
     const block = record(await this.call("eth_getBlockByNumber", ["latest", false]), "latest block");

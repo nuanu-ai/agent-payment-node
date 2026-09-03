@@ -22,6 +22,10 @@ const TOOL_NAMES = [
   "apn_doctor_keychain",
   "apn_wallet_ensure",
   "apn_wallet_connect",
+  "apn_wallet_permission_list",
+  "apn_wallet_permission_sync",
+  "apn_wallet_permission_disable",
+  "apn_wallet_permission_forget",
   "apn_wallet_status",
   "apn_wallet_balance",
   "apn_wallet_policy_show",
@@ -49,7 +53,7 @@ class RecordingPolicyApproval implements ProfilePolicyApprovalPort {
   async approve(intent: ProfilePolicyApprovalIntent): Promise<void> { this.intents.push(intent); }
 }
 
-test("official MCP client proves production stdio descriptor, eighteen tools, application failures and clean close", async () => {
+test("official MCP client proves production stdio descriptor, twenty-two tools, application failures and clean close", async () => {
   const executable = process.env.APN_INSTALLED_BIN ?? resolve("bin/apn.js");
   const config = spawnSync(executable, ["mcp", "config"], { cwd: resolve("."), encoding: "utf8" });
   assert.equal(config.status, 0, config.stderr);
@@ -90,10 +94,14 @@ test("official MCP client proves production stdio descriptor, eighteen tools, ap
       { name: "apn_wallet_ensure", properties: ["profile"], required: [], defaults: { profile: "default" } },
       {
         name: "apn_wallet_connect",
-        properties: ["profile", "provider", "auth_method", "expected_revision"],
+        properties: ["profile", "provider", "auth_method", "expected_revision", "permission_cap_usdc_atomic", "permission_expires_at", "idempotency_key"],
         required: ["profile", "provider"],
         defaults: {},
       },
+      { name: "apn_wallet_permission_list", properties: ["profile"], required: ["profile"], defaults: {} },
+      { name: "apn_wallet_permission_sync", properties: ["profile", "expected_revision"], required: ["profile", "expected_revision"], defaults: {} },
+      { name: "apn_wallet_permission_disable", properties: ["profile", "expected_revision"], required: ["profile", "expected_revision"], defaults: {} },
+      { name: "apn_wallet_permission_forget", properties: ["profile", "expected_revision"], required: ["profile", "expected_revision"], defaults: {} },
       { name: "apn_wallet_status", properties: ["profile"], required: [], defaults: { profile: "default" } },
       { name: "apn_wallet_balance", properties: ["profile", "rpc_url"], required: ["rpc_url"], defaults: { profile: "default" } },
       { name: "apn_wallet_policy_show", properties: ["profile"], required: ["profile"], defaults: {} },

@@ -9,5 +9,8 @@ export class StateProfileRepository {
     async save(profile) {
         await this.state.writeProviderProfile(profile);
     }
+    async remove(profileHash) {
+        await this.state.removeProviderProfile(profileHash);
+    }
 }
 //# sourceMappingURL=profile-repository.js.map

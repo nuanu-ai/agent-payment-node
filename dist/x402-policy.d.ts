@@ -25,7 +25,7 @@ export declare function canonicalPrepareUrl(value: string): URL;
 export declare function positiveCap(value: unknown): string;
 export declare function freshChallenge(http: HttpPort, canonicalUrl: string): Promise<FreshChallenge>;
 export declare function candidatesWithinCap(challenge: FreshChallenge, capAtomic: string): readonly InspectCandidate[];
-export declare function selectPrepareOffer(challenge: FreshChallenge, underCap: readonly InspectCandidate[], evidence: X402PrepareEvidence, wallet: Address, context: PrepareEvidenceContext): SelectedPrepareOffer;
+export declare function selectPrepareOffer(challenge: FreshChallenge, underCap: readonly InspectCandidate[], evidence: X402PrepareEvidence, wallet: Address, context: PrepareEvidenceContext, transferMethod?: "eip3009" | "erc7710"): SelectedPrepareOffer;
 export declare function tokenDomainSeparator(name: string, version: string): `0x${string}`;
 export declare function paymentIdentifierState(paymentRequired: PaymentRequired, operationId: string): X402OperationRecord["paymentIdentifier"] | undefined;
 export declare function materializePaymentIdentifier(paymentIdentifier: X402OperationRecord["paymentIdentifier"] | undefined): unknown | undefined;

@@ -61,6 +61,8 @@ for (const file of files) {
       "macos-keychain.ts", "macos-advisory-lock.ts", "awal-process-adapter.ts",
       "awal-direct-adapter.ts", "awal-x402-adapter.ts", "metamask-process-runner.ts",
     ].some((name) => file === join(sourceRoot, name))) continue;
+    if (["node:child_process", "createServer(", "http://"].includes(needle) &&
+      file === join(sourceRoot, "metamask-smart-account-consent.ts")) continue;
     if (["--chain-id", "--token"].includes(needle) && file === join(sourceRoot, "metamask-direct-adapter.ts")) continue;
     if (needle === "--chain-id" && file === join(sourceRoot, "metamask-x402-adapter.ts")) continue;
     if (needle === "--scheme" && file === join(sourceRoot, "awal-x402-adapter.ts")) continue;

@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.4.3 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.5.0 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -43,8 +43,8 @@ apn mcp config
 apn mcp serve
 ```
 
-The server exposes exactly eighteen catalog-derived tools: version, Keychain
-doctor, wallet and wallet-policy operations plus x402 inspect/prepare/approve,
+The server exposes exactly twenty-two catalog-derived tools: version, Keychain
+doctor, wallet, provider-permission and wallet-policy operations plus x402 inspect/prepare/approve,
 direct-transfer prepare/foreground handoff, operation status/resume and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
 
@@ -62,6 +62,10 @@ To create or reuse a provider-managed profile, use the generic foreground path:
 apn wallet connect --profile provider-one --provider coinbase-agentic-wallet
 apn wallet connect --profile metamask --provider metamask-agent-wallet
 apn wallet connect --profile metamask --provider metamask-agent-wallet --auth-method browser
+apn wallet connect --profile smart-account --provider metamask-smart-account --auth-method browser \
+  --permission-cap-usdc-atomic 2000000 \
+  --permission-expires-at 2000000000 \
+  --idempotency-key smart-account-connect-0001
 ```
 
 The CLI first reuses an active provider session without another email or OTP
@@ -87,11 +91,32 @@ provider session selects a different address. A normal user does not install
 to different MetaMask server-wallet addresses, so APN always binds the address
 reported by the completed provider session.
 
-MetaMask direct transfer and standard x402 are available through the same
-generic APN operation contract. For x402, MetaMask signs only the exact frozen
-EIP-3009 authorization; APN owns the seller HTTP request, safe retry,
-settlement evidence and receipt. `wallet balance` remains an independent Base
-RPC observation; provider login or address binding is not a balance or
+The `metamask-smart-account` profile is a separate browser-extension flow. The
+human selects an already-active official MetaMask Smart Account on Base and
+reviews the exact caller-supplied USDC cap and absolute expiry; APN supplies no
+monetary or lifetime default. MetaMask keeps the owner key. APN creates one
+session account, stores its key and the validated ERC-7715 grant only inside an
+authenticated encrypted envelope under `~/.apn`, and never returns the key or
+raw permission context. Repeating the same idempotency key reuses the same
+pending or committed identity after interruption. `wallet permission list`,
+`sync`, `disable`, and `forget` expose the provider-neutral lifecycle; local
+disable/forget never claims MetaMask-side revocation. Direct Base-USDC transfer
+is available through the common `pay transfer` commands. Standard x402 is
+available when the selected Base offer explicitly advertises
+`extra.assetTransferMethod: "erc7710"`; APN rejects EIP-3009-only offers for
+this profile before creating any payment effect.
+
+An existing Smart Account profile created by the connect/permission capability
+can upgrade once, locally and without new browser consent, to the complete
+direct-transfer and ERC-7710 x402 capability fingerprint. APN refuses any other
+capability drift. The owner Smart Account remains the USDC sender; the encrypted
+APN session account is only the delegated executor and Base gas payer.
+
+MetaMask Agent Wallet direct transfer and standard x402 are available through
+the same generic APN operation contract. For x402, that server-wallet signs only
+the exact frozen EIP-3009 authorization; APN owns the seller HTTP request, safe
+retry, settlement evidence and receipt. `wallet balance` remains an independent
+Base RPC observation; provider login or address binding is not a balance or
 spending-authority claim.
 
 `wallet ensure` creates or reuses one stable address. Fund only that public
@@ -132,11 +157,14 @@ apn pay transfer approve --operation <operation-id> \
 ```
 
 For the default local wallet, prepare freezes recipient, amount, nonce, fees,
-calldata and expiry. For a bound Coinbase or MetaMask profile it instead freezes
-the public profile revision/capability/sender, provider execution ownership, recipient,
-integer atomic amount and canonical decimal, Base/canonical-USDC identity,
-foreground-approval policy and validated RPC binding. Available provider
-balance is never spending authority.
+calldata and expiry. For a bound Coinbase or MetaMask Agent Wallet profile it
+instead freezes the public profile revision/capability/sender, provider
+execution ownership, recipient, integer atomic amount and canonical decimal,
+Base/canonical-USDC identity, foreground-approval policy and validated RPC
+binding. For a MetaMask Smart Account it additionally freezes the existing
+permission revision, root grant fingerprint, session executor, official
+DelegationManager and permission expiry. Available provider balance is never
+spending authority.
 
 Approval rechecks the applicable frozen facts and requires the exact phrase
 shown in the foreground stdin/stderr TTY. The Coinbase adapter then durably
@@ -159,6 +187,21 @@ only an ambiguity signal and never authorizes a retry or another provider call.
 Calling direct approval through MCP never opens a TTY or loads signing material;
 it returns the exact operation-bound CLI command to run in that foreground
 terminal.
+
+For a MetaMask Smart Account, prepare checks the still-active root grant,
+remaining official ERC-20 allowance, owner USDC and nonzero session gas balance
+without creating a child delegation. After the common APN foreground approval,
+the session derives one deterministic session-to-session child constrained to
+the exact canonical-USDC transfer, one call, the frozen time window and the
+session redeemer. APN submits one EIP-1559 call to the official MetaMask
+DelegationManager. Once that valid signed child exists, APN simulates the exact
+redemption, rechecks nonce stability and precise session gas sufficiency, then
+signs the transaction. The owner Smart Account is the `Transfer` sender; tokens
+are never prefunded into the session account. The signed transaction, child
+context and root permission remain encrypted under `~/.apn`. Ambiguous
+submission may rebroadcast the same sealed bytes at most once; completion still
+requires the exact successful Base receipt and owner-to-recipient USDC log. This
+path does not use Vault, Hub, deposits, a relayer or a new MetaMask popup.
 
 For MetaMask, APN re-selects and cross-checks the exact bound server-wallet,
 then invokes one canonical Base-USDC `mm transfer` after the same APN foreground
@@ -301,7 +344,11 @@ apn mcp serve
 apn mcp config
 apn doctor keychain
 apn wallet ensure [--profile <profile>]
-apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>]
+apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>]
+apn wallet permission list --profile <profile>
+apn wallet permission sync --profile <profile> --expected-revision <positive-integer>
+apn wallet permission disable --profile <profile> --expected-revision <positive-integer>
+apn wallet permission forget --profile <profile> --expected-revision <positive-integer>
 apn wallet status [--profile <profile>]
 apn wallet balance [--profile <profile>] --rpc-url <https-url>
 apn wallet policy show --profile <profile>

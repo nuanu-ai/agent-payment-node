@@ -4,22 +4,32 @@ import { ApnError } from "./errors.js";
 import { formatAtomic, parseDecimal } from "./money.js";
 import { OperationService } from "./operation-service.js";
 import { capabilityHash, LOCAL_PROVIDER_ID, markProviderProfileDrift, } from "./provider-profile.js";
-import { providerDirectReceipt, recoverProviderTerminalOperation } from "./provider-direct-receipt.js";
+import { providerDirectReceipt } from "./provider-direct-receipt.js";
 import { createProviderEffectReference, observeProviderDirectRequest, sameFrozenProviderProfile, } from "./provider-direct-recovery.js";
+import { ProviderDirectState } from "./provider-direct-state.js";
+import { providerDirectExecutionInput } from "./provider-direct-execution-input.js";
 import { appendTransition, sealOperation } from "./state.js";
-import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, hasExactTransfer, publicOperation, publicReceipt, } from "./transfer-policy.js";
+import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, publicOperation, publicReceipt, } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 const DIRECT_POLICY = {
     identity: "apn.direct.foreground-approval.v1",
     verdict: "foreground_approval_required",
     foregroundApprovalRequired: true,
 };
+const DELEGATED_PRE_EFFECT_CODES = new Set([
+    "APN_INSUFFICIENT_USDC", "APN_INSUFFICIENT_GAS", "APN_PERMISSION_INACTIVE",
+    "APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "APN_PROFILE_DRIFT", "APN_PROVIDER_UNAVAILABLE",
+    "APN_PROVIDER_PROTOCOL", "APN_RPC_PROTOCOL", "APN_CHAIN_MISMATCH",
+    "APN_RPC_AMBIGUOUS", "APN_RPC_CONFIG",
+]);
 export class ProviderDirectTransferService {
     context;
     operations;
+    durable;
     constructor(context) {
         this.context = context;
         this.operations = new OperationService(context.state);
+        this.durable = new ProviderDirectState(context);
     }
     async canHandle(profileInput) {
         if (this.context.profileRepository === undefined)
@@ -78,25 +88,50 @@ export class ProviderDirectTransferService {
             const rpcIdentity = await this.context.requireRpc().assertBaseChain();
             const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
             const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
-            const providerDirect = {
+            const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
+            const commonBinding = {
                 schemaVersion: "apn.provider-direct.v1",
                 providerId: bound.provider_id,
                 profileRevision: bound.revision,
                 capabilityHash: bound.capability_hash,
                 accountBindingHash: bound.account_binding_hash,
-                executionMode: "provider_atomic_send",
-                executionOwner: "provider",
-                retryOwner: "apn_outer_no_replay_journal",
                 rpcBindingHash,
                 rpcOriginHash: sha256(`direct-rpc-origin\0${rpcIdentity.rpcOrigin}`),
                 policy: DIRECT_POLICY,
             };
+            let providerDirect;
+            if (bound.capability_snapshot.direct.mode === "delegated_session_transaction") {
+                if (adapter.direct?.mode !== "delegated_session_transaction" || adapter.direct.prepare === undefined) {
+                    throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The bound delegated direct effect is unavailable.");
+                }
+                const delegated = await adapter.direct.prepare({
+                    operationId, profileHash, profileRevision: bound.revision, sender: bound.public_address,
+                    recipient, amountAtomic: amount.atomic, amountDecimal, rpcUrl: this.context.requireRpcUrl(),
+                    preparedAt: preparedAt.toISOString(), expiresAt: expiresAt.toISOString(),
+                });
+                providerDirect = {
+                    ...commonBinding,
+                    executionMode: "delegated_session_transaction",
+                    executionOwner: "apn",
+                    retryOwner: "apn_operation_state",
+                    ...delegated,
+                };
+            }
+            else {
+                providerDirect = {
+                    ...commonBinding,
+                    executionMode: "provider_atomic_send",
+                    executionOwner: "provider",
+                    retryOwner: "apn_outer_no_replay_journal",
+                };
+            }
             const fingerprint = hashObject({ ...materialRequest, operationId, idempotencyHash, providerDirect });
             const initial = {
                 at: preparedAt.toISOString(),
                 state: "awaiting_approval",
                 terminal: false,
-                reason: "prepared_provider_atomic_send",
+                reason: providerDirect.executionMode === "provider_atomic_send"
+                    ? "prepared_provider_atomic_send" : "prepared_delegated_session_transaction",
                 proofClass: "durable_provider_intent",
             };
             const operation = sealOperation({
@@ -122,7 +157,7 @@ export class ProviderDirectTransferService {
                 proofClass: initial.proofClass,
                 transitions: appendTransition([], initial),
             });
-            await this.persist(operation);
+            await this.durable.persist(operation);
             return publicOperation(operation);
         });
     }
@@ -135,7 +170,7 @@ export class ProviderDirectTransferService {
             `operation:${operationId}`,
         ], async () => {
             let operation = await this.requiredOperation(operationId);
-            operation = await this.recoverOrphanTerminal(operation);
+            operation = await this.durable.recoverOrphanTerminal(operation);
             if (operation.terminal || operation.state !== "awaiting_approval")
                 return publicOperation(operation);
             if (this.context.clock.now().getTime() >= Date.parse(operation.expiresAt)) {
@@ -164,36 +199,26 @@ export class ProviderDirectTransferService {
                 });
             }
             catch (error) {
-                await this.transition(operation, "failed_before_effect", true, "provider_amount_encoding_incompatible", "provider_pre_effect_compatibility_failure");
+                await this.durable.transition(operation, "failed_before_effect", true, "provider_amount_encoding_incompatible", "provider_pre_effect_compatibility_failure");
                 throw error;
             }
-            await this.reobserveProvider(operation, binding, adapter);
-            operation = await this.transition(operation, "started", false, "provider_effect_started", "durable_provider_no_replay");
+            if (binding.executionMode === "provider_atomic_send")
+                await this.reobserveProvider(operation, binding, adapter);
+            operation = await this.durable.transition(operation, "started", false, "provider_effect_started", "durable_provider_no_replay");
             let result;
             try {
-                result = await adapter.direct.execute({
-                    amountDecimal: operation.amountDecimal,
-                    recipient: operation.recipient,
-                    sender: operation.walletAddress,
-                });
+                result = await adapter.direct.execute(binding.executionMode === "provider_atomic_send"
+                    ? {
+                        amountDecimal: operation.amountDecimal,
+                        recipient: operation.recipient,
+                        sender: operation.walletAddress,
+                    }
+                    : providerDirectExecutionInput(this.context, operation, binding));
             }
-            catch {
-                return publicOperation(await this.transition(operation, "ambiguous_effect", false, "provider_invocation_outcome_unknown", "provider_effect_no_replay"));
+            catch (error) {
+                return await this.handleExecutionFailure(operation, binding, error);
             }
-            if (result.disposition === "not_started") {
-                return publicOperation(await this.transition(operation, "failed_before_effect", true, result.reason, "provider_child_not_created"));
-            }
-            if (result.disposition === "ambiguous") {
-                return publicOperation(await this.transition(operation, "ambiguous_effect", false, result.reason, "provider_effect_no_replay"));
-            }
-            if (result.disposition === "rejected") {
-                return publicOperation(await this.transition(operation, "failed_provider_rejected", true, result.reason, "provider_terminal_no_transaction"));
-            }
-            if (result.disposition === "pending") {
-                return publicOperation(await this.transition(operation, "provider_pending", false, "provider_approval_pending", "provider_request_reference", { providerEffect: createProviderEffectReference(result.recoveryToken, result.providerState) }));
-            }
-            operation = await this.transition(operation, "provider_acknowledged", false, "provider_transaction_identity_acknowledged", "provider_transaction_hash_only", { transactionHash: result.transactionHash });
-            return publicOperation(await this.inspectReceipt(operation));
+            return await this.applyExecutionResult(operation, binding, result);
         });
     }
     async resume(operationIdInput, waitSeconds) {
@@ -202,14 +227,24 @@ export class ProviderDirectTransferService {
         const found = await this.requiredOperation(operationId);
         return await this.context.state.withLocks([`profile:${found.profileHash}`, `operation:${operationId}`], async () => {
             let operation = await this.requiredOperation(operationId);
-            operation = await this.recoverOrphanTerminal(operation);
+            operation = await this.durable.recoverOrphanTerminal(operation);
             if (operation.terminal)
                 return publicOperation(operation);
             if (operation.state === "awaiting_approval") {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Operation still requires transfer approve.");
             }
             if (operation.state === "started" && operation.transactionHash === undefined) {
-                operation = await this.transition(operation, "ambiguous_effect", false, "provider_result_missing_after_restart", "provider_effect_no_replay");
+                const binding = requiredBinding(operation);
+                if (binding.executionMode === "delegated_session_transaction") {
+                    const adapter = this.requiredAdapter(binding);
+                    try {
+                        return await this.applyExecutionResult(operation, binding, await adapter.direct.execute(providerDirectExecutionInput(this.context, operation, binding)));
+                    }
+                    catch (error) {
+                        return await this.handleExecutionFailure(operation, binding, error);
+                    }
+                }
+                operation = await this.durable.transition(operation, "ambiguous_effect", false, "provider_result_missing_after_restart", "provider_effect_no_replay");
             }
             if ((operation.state === "provider_pending" || operation.state === "ambiguous_effect") &&
                 operation.providerEffect !== undefined && operation.transactionHash === undefined) {
@@ -219,18 +254,18 @@ export class ProviderDirectTransferService {
                 if (observed.disposition === "unchanged")
                     return publicOperation(operation);
                 if (observed.disposition === "rejected") {
-                    return publicOperation(await this.transition(operation, "failed_provider_rejected", true, observed.reason, "provider_terminal_no_transaction"));
+                    return publicOperation(await this.durable.transition(operation, "failed_provider_rejected", true, observed.reason, "provider_terminal_no_transaction"));
                 }
                 if (observed.disposition === "ambiguous") {
                     if (operation.state === "ambiguous_effect")
                         return publicOperation(operation);
-                    return publicOperation(await this.transition(operation, "ambiguous_effect", false, observed.reason, "provider_effect_no_replay"));
+                    return publicOperation(await this.durable.transition(operation, "ambiguous_effect", false, observed.reason, "provider_effect_no_replay"));
                 }
-                operation = await this.transition(operation, "provider_acknowledged", false, "provider_transaction_identity_acknowledged", "provider_transaction_hash_only", { transactionHash: observed.transactionHash });
+                operation = await this.durable.transition(operation, "provider_acknowledged", false, "provider_transaction_identity_acknowledged", "provider_transaction_hash_only", { transactionHash: observed.transactionHash });
             }
             if (operation.transactionHash === undefined)
                 return publicOperation(operation);
-            return publicOperation(await this.inspectReceipt(operation));
+            return publicOperation(await this.durable.inspectReceipt(operation));
         });
     }
     async receipt(operationIdInput) {
@@ -242,7 +277,7 @@ export class ProviderDirectTransferService {
             `operation:${operationId}`,
         ], async () => {
             let operation = await this.requiredOperation(operationId);
-            operation = await this.recoverOrphanTerminal(operation);
+            operation = await this.durable.recoverOrphanTerminal(operation);
             let receipt = await this.context.state.loadReceipt(operation.profileHash, operation.operationId);
             if (receipt === null || receipt.operationIntegrityHash !== operation.integrityHash) {
                 if (operation.terminal) {
@@ -265,13 +300,28 @@ export class ProviderDirectTransferService {
         }
         const current = await this.context.requireProfileRepository().load(operation.profileHash);
         if (current === null || current.drift.state !== "bound" || current.capability_snapshot.direct.available !== true ||
-            current.capability_snapshot.direct.mode !== "provider_atomic_send" ||
+            current.capability_snapshot.direct.mode !== binding.executionMode ||
+            current.capability_snapshot.direct.execution_owner !== binding.executionOwner ||
+            current.capability_snapshot.direct.retry_owner !== binding.retryOwner ||
             !sameFrozenProviderProfile(current, operation, binding))
             await this.failBeforeEffect(operation, "provider_profile_changed");
+        if (binding.executionMode === "delegated_session_transaction") {
+            const adapter = this.requiredAdapter(binding);
+            const preflight = adapter.direct.preflight;
+            if (preflight === undefined) {
+                await this.failBeforeEffect(operation, "delegated_preflight_unavailable");
+            }
+            try {
+                await preflight.call(adapter.direct, providerDirectExecutionInput(this.context, operation, binding));
+            }
+            catch (error) {
+                await this.failBeforeEffect(operation, "delegated_preflight_failed", error instanceof ApnError ? error : undefined);
+            }
+        }
     }
     requiredAdapter(binding) {
         const adapter = this.context.requireProviderRegistry().resolve(binding.providerId);
-        if (adapter.direct?.mode !== "provider_atomic_send" || adapter.direct.execute === undefined ||
+        if (adapter.direct?.mode !== binding.executionMode || adapter.direct.execute === undefined ||
             capabilityHash(adapter.capabilities) !== binding.capabilityHash ||
             adapter.capabilities.direct.available !== true || adapter.capabilities.direct.mode !== binding.executionMode ||
             adapter.capabilities.evidence.available !== true || adapter.capabilities.evidence.owner !== "apn")
@@ -299,57 +349,39 @@ export class ProviderDirectTransferService {
             await this.failBeforeEffect(operation, "provider_sender_changed", new ApnError("APN_PROFILE_DRIFT", "Provider sender changed before effect; explicit foreground rebind is required.", { cli_handoff: rebindHandoff, current_revision: String(binding.profileRevision) }));
         }
     }
-    async inspectReceipt(operation) {
-        if (operation.transactionHash === undefined)
-            return operation;
-        if (operation.terminal || ![
-            "provider_acknowledged", "evidence_pending", "ambiguous_effect",
-        ].includes(operation.state))
-            return operation;
-        const binding = requiredBinding(operation);
-        let receipt;
-        try {
-            if (sha256(`direct-rpc\0${this.context.requireRpcUrl()}`) !== binding.rpcBindingHash) {
-                throw new Error("rpc binding drift");
-            }
-            const rpc = this.context.requireRpc();
-            const identity = await rpc.assertBaseChain();
-            if (sha256(`direct-rpc-origin\0${identity.rpcOrigin}`) !== binding.rpcOriginHash)
-                throw new Error("rpc origin drift");
-            receipt = await rpc.getReceipt(operation.transactionHash);
-        }
-        catch {
-            return await this.receiptPending(operation, "receipt_evidence_unavailable");
-        }
-        if (receipt === null)
-            return await this.receiptPending(operation, "receipt_evidence_pending");
-        if (receipt.rpcOrigin.length === 0 ||
-            sha256(`direct-rpc-origin\0${receipt.rpcOrigin}`) !== binding.rpcOriginHash ||
-            receipt.transactionHash.toLowerCase() !== operation.transactionHash.toLowerCase())
-            return await this.receiptAmbiguous(operation, "receipt_identity_mismatch");
-        if (receipt.status === "reverted")
-            return await this.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", {}, receipt);
-        if (!hasExactTransfer(receipt, operation)) {
-            return await this.receiptAmbiguous(operation, "successful_receipt_missing_exact_transfer", receipt);
-        }
-        return await this.transition(operation, "completed", true, "confirmed_exact_usdc_transfer", "confirmed_receipt_and_exact_transfer_log", {}, receipt);
+    async applyExecutionResult(operation, binding, result) {
+        if (result.disposition === "not_started")
+            return publicOperation(await this.durable.transition(operation, "failed_before_effect", true, result.reason, "provider_child_not_created"));
+        if (result.disposition === "ambiguous")
+            return publicOperation(await this.durable.transition(operation, "ambiguous_effect", false, result.reason, "provider_effect_no_replay", binding.executionMode === "delegated_session_transaction"
+                ? { providerEffect: createProviderEffectReference(operation.operationId, "SUBMISSION_AMBIGUOUS") } : {}));
+        if (result.disposition === "rejected")
+            return publicOperation(await this.durable.transition(operation, "failed_provider_rejected", true, result.reason, "provider_terminal_no_transaction"));
+        if (result.disposition === "pending")
+            return publicOperation(await this.durable.transition(operation, "provider_pending", false, binding.executionMode === "delegated_session_transaction" ? "delegated_submission_ambiguous" : "provider_approval_pending", "provider_request_reference", { providerEffect: createProviderEffectReference(result.recoveryToken, result.providerState) }));
+        const acknowledged = await this.durable.transition(operation, "provider_acknowledged", false, "provider_transaction_identity_acknowledged", "provider_transaction_hash_only", { transactionHash: result.transactionHash });
+        return publicOperation(await this.durable.inspectReceipt(acknowledged));
     }
-    async receiptPending(operation, reason) {
-        if (operation.state === "evidence_pending" || operation.state === "ambiguous_effect")
-            return operation;
-        return await this.transition(operation, "evidence_pending", false, reason, "provider_transaction_hash_only");
-    }
-    async receiptAmbiguous(operation, reason, receipt) {
-        if (operation.state === "ambiguous_effect")
-            return operation;
-        return await this.transition(operation, "ambiguous_effect", false, reason, "provider_effect_no_replay", {}, receipt);
+    async handleExecutionFailure(operation, binding, error) {
+        if (error instanceof ApnError && error.code === "APN_STATE_CORRUPT")
+            throw error;
+        if (binding.executionMode === "delegated_session_transaction" &&
+            error instanceof ApnError && DELEGATED_PRE_EFFECT_CODES.has(error.code)) {
+            await this.durable.transition(operation, "failed_before_effect", true, `delegated_${error.code.toLowerCase()}`, "durable_pre_effect_failure");
+            throw error;
+        }
+        return publicOperation(await this.durable.transition(operation, "ambiguous_effect", false, "provider_invocation_outcome_unknown", "provider_effect_no_replay", binding.executionMode === "delegated_session_transaction"
+            ? { providerEffect: createProviderEffectReference(operation.operationId, "SUBMISSION_AMBIGUOUS") } : {}));
     }
     async requiredProviderProfile(profileHash) {
         const profile = await this.context.requireProfileRepository().load(profileHash);
         if (profile === null || profile.drift.state !== "bound" || profile.capability_snapshot.direct.available !== true ||
-            profile.capability_snapshot.direct.mode !== "provider_atomic_send" ||
-            profile.capability_snapshot.direct.execution_owner !== "provider" ||
-            profile.capability_snapshot.direct.retry_owner !== "apn_outer_no_replay_journal")
+            !((profile.capability_snapshot.direct.mode === "provider_atomic_send" &&
+                profile.capability_snapshot.direct.execution_owner === "provider" &&
+                profile.capability_snapshot.direct.retry_owner === "apn_outer_no_replay_journal") ||
+                (profile.capability_snapshot.direct.mode === "delegated_session_transaction" &&
+                    profile.capability_snapshot.direct.execution_owner === "apn" &&
+                    profile.capability_snapshot.direct.retry_owner === "apn_operation_state")))
             throw new ApnError("APN_PROFILE_DRIFT", "The provider profile is not bound for direct payment effects.");
         return profile;
     }
@@ -360,35 +392,9 @@ export class ProviderDirectTransferService {
         requiredBinding(operation);
         return operation;
     }
-    async recoverOrphanTerminal(operation) {
-        const receipt = await this.context.state.loadReceipt(operation.profileHash, operation.operationId);
-        const recovered = recoverProviderTerminalOperation(operation, receipt);
-        if (recovered === null)
-            return operation;
-        await this.context.state.writeOperation(recovered);
-        return recovered;
-    }
     async failBeforeEffect(operation, reason, failure) {
-        await this.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
+        await this.durable.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
         throw failure ?? new ApnError("APN_REPREPARE_REQUIRED", "Frozen transfer inputs changed before approval; prepare a new operation.");
-    }
-    async transition(operation, state, terminal, reason, proofClass, extra = {}, rpcReceipt) {
-        const at = this.context.clock.now().toISOString();
-        const transitions = appendTransition(operation.transitions, { at, state, terminal, reason, proofClass });
-        const { integrityHash: _previousIntegrityHash, ...base } = operation;
-        const updated = sealOperation({ ...base, ...extra, state, terminal, reason, proofClass, transitions });
-        await this.persist(updated, rpcReceipt);
-        return updated;
-    }
-    async persist(operation, rpcReceipt) {
-        const receipt = providerDirectReceipt(operation, rpcReceipt);
-        if (operation.terminal) {
-            await this.context.state.writeReceipt(operation.profileHash, receipt);
-            await this.context.state.writeOperation(operation);
-            return;
-        }
-        await this.context.state.writeOperation(operation);
-        await this.context.state.writeReceipt(operation.profileHash, receipt);
     }
 }
 function requiredBinding(operation) {

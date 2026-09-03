@@ -2,22 +2,18 @@ import { randomBytes } from "node:crypto";
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { ApnError } from "./errors.js";
-import { OperationService } from "./operation-service.js";
 import { canonicalIdempotencyKey } from "./transfer-policy.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { assertUnattendedX402Balance, effectiveX402Cap, requireProfilePolicy, } from "./profile-policy.js";
-import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
-import { observePaidX402Response } from "./x402-http.js";
 import { candidatesWithinCap, canonicalPrepareUrl, freshChallenge, paymentIdentifierState, positiveCap, selectPrepareOffer, } from "./x402-policy.js";
-import { appendX402Transition, publicX402Operation, sealX402Operation, sealX402Receipt, sealX402Result, x402AuthorizationIntentHash, x402Fingerprint, x402OperationBindingHash, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-integrity.js";
-import { X402RpcReconciler } from "./x402-rpc-reconciler.js";
-import { isNativeNotFound, isNativeExpired, isTransientNativeFailure, requestX402Authorization, x402NativeRequest, } from "./x402-native.js";
+import { appendX402Transition, publicX402Operation, sealX402Operation, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, } from "./x402-state-integrity.js";
 import { X402PaidRequest } from "./x402-paid-request.js";
 import { assertWaitRpcProvenance, boundedX402ReadPort, isPostExposureWaitState, isRecoverableX402RpcObservationFailure, x402ReadPort, } from "./x402-service-rpc.js";
 import { ProviderX402Service } from "./provider-x402-service.js";
 import { isCode } from "./secure-state-store.js";
 import { resolveX402Payer } from "./x402-payer.js";
+import { reconcileX402Method } from "./x402-method-reconciliation.js";
 export class X402Service extends X402PaidRequest {
     providerX402;
     constructor(context) {
@@ -66,6 +62,9 @@ export class X402Service extends X402PaidRequest {
             const rpc = this.context.requireRpc();
             const discovered = await freshChallenge(http, canonicalUrl);
             const underCap = candidatesWithinCap(discovered, capAtomic);
+            const createdAtDate = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
+            const createdAt = createdAtDate.toISOString();
+            const createdAtUnix = Math.floor(createdAtDate.getTime() / 1000).toString();
             const invocationStartedAtMs = this.context.clock.now().getTime();
             const chain = await rpc.assertBaseChain();
             const evidence = await rpc.getX402PrepareEvidence(wallet);
@@ -74,19 +73,37 @@ export class X402Service extends X402PaidRequest {
                 rpcOriginHash: sha256(chain.rpcOrigin),
                 invocationStartedAtMs,
                 invocationCompletedAtMs,
-            });
+            }, payer.transferMethod);
             assertUnattendedX402Balance(profilePolicy, evidence.usdcAtomic);
+            const delegatedMaterial = payer.delegated === undefined ? undefined : await payer.delegated.port.prepare({
+                profile,
+                profileHash,
+                profileRevision: payer.delegated.profileRevision,
+                capabilityHash: payer.delegated.capabilityHash,
+                accountBindingHash: payer.delegated.accountBindingHash,
+                wallet,
+                token: BASE_USDC,
+                payee: selected.payee,
+                amountAtomic: selected.amountAtomic,
+                capAtomic,
+                offerHash: selected.selectedOffer.offerHash,
+                requirements: selected.requirements,
+                facilitatorAddresses: selected.selectedOffer.resolved.assetTransferMethod === "erc7710"
+                    ? selected.selectedOffer.resolved.facilitatorAddresses
+                    : [],
+                preparedAtUnix: createdAtUnix,
+                maxTimeoutSeconds: selected.maxTimeoutSeconds,
+                rpcOriginHash: sha256(chain.rpcOrigin),
+            });
             const paymentIdentifier = paymentIdentifierState(discovered.paymentRequired, operationId);
             const resourceCanonicalJson = canonicalJson(discovered.paymentRequired.resource);
-            const createdAtDate = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
-            const createdAt = createdAtDate.toISOString();
-            const createdAtUnix = Math.floor(createdAtDate.getTime() / 1000).toString();
             const authorizationBase = {
                 from: wallet,
                 to: selected.payee.toLowerCase(),
                 value: selected.amountAtomic,
                 validAfter: "0",
-                validBefore: (BigInt(createdAtUnix) + BigInt(selected.maxTimeoutSeconds)).toString(),
+                validBefore: delegatedMaterial?.effectiveExpiryUnix ??
+                    (BigInt(createdAtUnix) + BigInt(selected.maxTimeoutSeconds)).toString(),
                 nonce: `0x${randomBytes(32).toString("hex")}`,
                 createdAt: createdAtUnix,
             };
@@ -108,6 +125,7 @@ export class X402Service extends X402PaidRequest {
                 selectedOffer: selected.selectedOffer,
                 wallet,
                 ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
+                ...(delegatedMaterial === undefined ? {} : { delegatedMaterial }),
                 ...(paymentIdentifier === undefined ? {} : { paymentIdentifier }),
             };
             const initial = {
@@ -140,6 +158,7 @@ export class X402Service extends X402PaidRequest {
                 capAtomic,
                 selectedOffer: selected.selectedOffer,
                 ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
+                ...(delegatedMaterial === undefined ? {} : { delegatedMaterial }),
                 preparedBlock: {
                     number: evidence.block.number,
                     hash: evidence.block.hash,
@@ -284,11 +303,13 @@ export class X402Service extends X402PaidRequest {
             let completeZeroScanValidated = false;
             let completeZeroScanRead = false;
             if (x402Rpc !== null) {
-                let reconciled;
                 try {
-                    reconciled = await new X402RpcReconciler(x402Rpc, this.context.clock, {
+                    const reconciled = await reconcileX402Method(x402Rpc, this.context.clock, {
                         persist: async (next) => await this.context.state.writeX402Operation(next),
-                    }).reconcile(operation);
+                    }, operation);
+                    operation = reconciled.operation;
+                    completeZeroScanValidated = reconciled.completeZeroScanValidated;
+                    completeZeroScanRead = reconciled.completeZeroScanRead;
                 }
                 catch (error) {
                     if (isRecoverableX402RpcObservationFailure(error)) {
@@ -299,15 +320,20 @@ export class X402Service extends X402PaidRequest {
                     }
                     throw error;
                 }
-                operation = reconciled.operation;
-                completeZeroScanValidated = reconciled.completeZeroScanValidated;
-                completeZeroScanRead = reconciled.completeZeroScanRead;
                 operation = await this.finishReconciledEvidence(operation);
                 if (operation.terminal)
                     return publicX402Operation(operation);
             }
             if (operation.state === "authorized_not_sent") {
-                if (x402Rpc !== null) {
+                if (operation.selectedOffer.resolved.assetTransferMethod === "erc7710") {
+                    if (this.authorizationExpired(operation)) {
+                        return publicX402Operation(await this.commitTerminal(operation, "failed_before_effect"));
+                    }
+                    verified = await this.recoverPaymentMaterial(operation);
+                    if (verified === undefined)
+                        return publicX402Operation(operation);
+                }
+                else if (x402Rpc !== null) {
                     if (!completeZeroScanValidated)
                         return publicX402Operation(operation);
                     verified = await this.recoverPaymentMaterial(operation);
@@ -349,7 +375,8 @@ export class X402Service extends X402PaidRequest {
             }
             const scanStatus = operation.authorizationUsedScan?.status;
             const paymentAttemptCount = operation.attempts.filter((attempt) => attempt.purpose === "payment").length;
-            if (operation.transactionHint === undefined && operation.settlementResponseObservation === undefined &&
+            if (operation.selectedOffer.resolved.assetTransferMethod === "eip3009" &&
+                operation.transactionHint === undefined && operation.settlementResponseObservation === undefined &&
                 operation.settlementEvidence === undefined && operation.resultLink === undefined &&
                 scanStatus === "complete" && operation.authorizationUsedScan?.candidates.length === 0 &&
                 completeZeroScanValidated && completeZeroScanRead && paymentAttemptCount === 1 && operation.attempts.length === 1 &&
@@ -430,10 +457,10 @@ export class X402Service extends X402PaidRequest {
                 if (x402Rpc === null)
                     throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
                 try {
-                    const reconciled = await new X402RpcReconciler(x402Rpc, this.context.clock, {
+                    next = (await reconcileX402Method(x402Rpc, this.context.clock, {
                         persist: async (value) => await this.context.state.writeX402Operation(value),
-                    }).reconcile(next);
-                    next = await this.finishReconciledEvidence(reconciled.operation);
+                    }, next)).operation;
+                    next = await this.finishReconciledEvidence(next);
                 }
                 catch (error) {
                     if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS")
