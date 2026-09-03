@@ -18,8 +18,10 @@
         "@metamask/7715-permission-types": "2.0.0",
         "@metamask/agent-wallet": "6.1.5",
         "@metamask/smart-accounts-kit": "2.0.0",
+        "@metamask/x402": "1.0.0",
         "@modelcontextprotocol/server": "2.0.0",
         "@x402/core": "2.23.0",
+        "@x402/evm": "2.23.0",
         "awal": "2.12.1",
         "viem": "2.55.19",
         "zod": "4.4.3"
@@ -462,6 +464,22 @@
       },
       "engines": {
         "node": "^18.18 || ^20.14 || >=22"
+      }
+    },
+    "node_modules/@metamask/x402": {
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/@metamask/x402/-/x402-1.0.0.tgz",
+      "integrity": "sha512-jgQ7iCBKPE+k3dPCgEIBKrt1xFLfwyaXVBIa9dxuN5dkXTkQs9X9gmY4V/7wRqN32WoeV4qhEj/L/6qcHw+i9g==",
+      "license": "(MIT-0 OR Apache-2.0)",
+      "dependencies": {
+        "@metamask/utils": "^11.4.0"
+      },
+      "engines": {
+        "node": ">=20"
+      },
+      "peerDependencies": {
+        "@x402/core": "^2.12.0",
+        "@x402/evm": "^2.12.0"
       }
     },
     "node_modules/@modelcontextprotocol/client": {
@@ -1180,6 +1198,26 @@
       }
     },
     "node_modules/@x402/core/node_modules/zod": {
+      "version": "3.25.76",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-3.25.76.tgz",
+      "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==",
+      "license": "MIT",
+      "funding": {
+        "url": "https://github.com/sponsors/colinhacks"
+      }
+    },
+    "node_modules/@x402/evm": {
+      "version": "2.23.0",
+      "resolved": "https://registry.npmjs.org/@x402/evm/-/evm-2.23.0.tgz",
+      "integrity": "sha512-Ikaya5c0/qV/pdFRGfGSdlUX3ELZaUgrddsmmXZHPANtIAQ5uFH15+O+9Bt4PqdAXqCuS43WskJ7HgiLn/uW2g==",
+      "license": "Apache-2.0",
+      "dependencies": {
+        "@x402/core": "~2.23.0",
+        "viem": "^2.48.11",
+        "zod": "^3.24.2"
+      }
+    },
+    "node_modules/@x402/evm/node_modules/zod": {
       "version": "3.25.76",
       "resolved": "https://registry.npmjs.org/zod/-/zod-3.25.76.tgz",
       "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==",

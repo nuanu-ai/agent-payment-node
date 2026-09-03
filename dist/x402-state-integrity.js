@@ -39,10 +39,17 @@ export function publicX402Operation(operation, result, settlementWait) {
             urlHash: operation.resource.urlHash,
         },
         payer: operation.wallet,
+        paymentMethod: operation.selectedOffer.resolved.assetTransferMethod,
         ...(operation.providerSigner === undefined ? {} : {
             signer: {
                 provider: operation.providerSigner.providerId,
                 mode: operation.providerSigner.executionMode,
+            },
+        }),
+        ...(operation.delegatedMaterial === undefined ? {} : {
+            signer: {
+                provider: operation.delegatedMaterial.providerId,
+                mode: "delegated_erc7710_apn_paid_retry",
             },
         }),
         payee: operation.payee,
@@ -54,11 +61,11 @@ export function publicX402Operation(operation, result, settlementWait) {
         ...(operation.settlementEvidence === undefined ? {} : {
             blockNumber: operation.settlementEvidence.transactionBlock.number,
             blockHash: operation.settlementEvidence.transactionBlock.hash,
-            authorizationState: {
-                value: true,
-                blockNumber: operation.settlementEvidence.authorizationState.blockNumber,
-                blockHash: operation.settlementEvidence.authorizationState.blockHash,
-            },
+            ...(operation.settlementEvidence.schemaVersion === "apn.x402.settlement-evidence.v1" ? { authorizationState: {
+                    value: true,
+                    blockNumber: operation.settlementEvidence.authorizationState.blockNumber,
+                    blockHash: operation.settlementEvidence.authorizationState.blockHash,
+                } } : { settlementMethod: "erc7710" }),
         }),
         ...(result === undefined ? {} : {
             result: { resultHash: result.resultHash, mediaType: result.mediaType, byteLength: result.byteLength },

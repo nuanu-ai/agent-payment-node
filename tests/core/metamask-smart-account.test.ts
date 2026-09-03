@@ -1,19 +1,36 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { createErc20TokenAllowanceCaveats } from "@metamask/7715-permission-types";
+import {
+  ANY_BENEFICIARY,
+  createRedeemerTerms,
+  decodeAllowedCalldataTerms,
+  decodeERC20TransferAmountTerms,
+  decodeRedeemerTerms,
+  decodeTimestampTerms,
+  decodeValueLteTerms,
+  hashDelegation,
+} from "@metamask/delegation-core";
 import { ROOT_AUTHORITY } from "@metamask/smart-accounts-kit";
-import { decodeDelegations, encodeDelegations } from "@metamask/smart-accounts-kit/utils";
-import { encodePacked, keccak256 } from "viem";
+import { METAMASK_FACILITATOR_ADDRESSES } from "@metamask/smart-accounts-kit/experimental";
+import {
+  SIGNABLE_DELEGATION_TYPED_DATA,
+  decodeDelegations,
+  encodeDelegations,
+  toDelegationStruct,
+} from "@metamask/smart-accounts-kit/utils";
+import { encodePacked, keccak256, pad, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { sha256 } from "../../src/canonical.js";
+import { canonicalJson, sha256 } from "../../src/canonical.js";
 import { ApnCore } from "../../src/core.js";
 import { runCli } from "../../src/cli.js";
 import { BASE_USDC } from "../../src/constants.js";
 import { EncryptedSmartAccountPermissionStore } from "../../src/encrypted-smart-account-permission-store.js";
 import { EncryptedSmartAccountDirectEffectStore } from "../../src/encrypted-smart-account-direct-effect-store.js";
+import { EncryptedSmartAccountX402MaterialStore } from "../../src/encrypted-smart-account-x402-material-store.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import {
   METAMASK_SMART_ACCOUNT_PROVIDER_ID,
@@ -27,6 +44,11 @@ import {
   type SmartAccountAllowancePort,
   type SmartAccountDelegationEnginePort,
 } from "../../src/metamask-smart-account-direct.js";
+import {
+  MetaMaskSmartAccountX402Adapter,
+  OfficialSmartAccountX402Engine,
+  type SmartAccountX402EnginePort,
+} from "../../src/metamask-smart-account-x402.js";
 import type {
   SmartAccountConsentPort,
   SmartAccountConsentRequest,
@@ -38,6 +60,10 @@ import {
   METAMASK_PERMISSION_TYPES_VERSION,
   METAMASK_SMART_ACCOUNTS_KIT_INTEGRITY,
   METAMASK_SMART_ACCOUNTS_KIT_VERSION,
+  METAMASK_X402_INTEGRITY,
+  METAMASK_X402_VERSION,
+  X402_EVM_INTEGRITY,
+  X402_EVM_VERSION,
 } from "../../src/metamask-smart-account-package.js";
 import { smartAccountEnvironment, validateSmartAccountObservation } from "../../src/metamask-smart-account-grant.js";
 import type { Address, Hex } from "../../src/model.js";
@@ -49,14 +75,28 @@ import { ProviderRegistry } from "../../src/provider-registry.js";
 import { StateProfileRepository } from "../../src/profile-repository.js";
 import { HttpsBaseRpc } from "../../src/rpc.js";
 import { StateStore } from "../../src/state.js";
+import { decodePaymentSignatureHeader, encodePaymentSignatureHeader } from "../../src/x402-codec.js";
+import {
+  appendX402Transition,
+  sealX402Operation,
+  type X402OperationRecord,
+} from "../../src/x402-state-integrity.js";
 import {
   accountBindingHash,
   capabilityHash,
   lifecycleReadOnlyCapabilitySnapshot,
+  metamaskSmartAccountCapabilitySnapshot,
   metamaskSmartAccountLegacyCapabilitySnapshot,
 } from "../../src/provider-profile.js";
 import type { TransferApprovalPort } from "../../src/tty-approval.js";
-import { RAW_TRANSACTION, TestRpc, temporaryState } from "./helpers.js";
+import { RAW_TRANSACTION, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
+import { QueuedHttp, RecoveryRpc, challengeObservation, paidObservation, transferLog } from "./x402-helpers.js";
+import {
+  X402_TRANSACTION,
+  X402_URL,
+  canonicalPaymentRequiredHeader,
+  canonicalPaymentResponseHeader,
+} from "./x402-vectors.js";
 
 // All Smart Account fixtures in this file are deterministic, no-browser and no-money.
 
@@ -69,6 +109,9 @@ const CAP = "2000000";
 const IDEMPOTENCY_KEY = "smart-account-connect-0001";
 const PROFILE = "smart-account";
 const DIRECT_RECIPIENT = "0x4444444444444444444444444444444444444444" as Address;
+const SMART_X402_AMOUNT = "1000";
+const SMART_X402_PAYEE = "0x2222222222222222222222222222222222222222" as Address;
+const SMART_X402_FACILITATOR = METAMASK_FACILITATOR_ADDRESSES[0] as Address;
 
 class FixtureAllowance implements SmartAccountAllowancePort {
   availableAtomic = CAP;
@@ -123,6 +166,80 @@ class SmartAccountRpc extends TestRpc {
   override async getPendingNonce(_address: Address): Promise<string> {
     this.nonceCalls += 1;
     return this.nonceSequence.shift() ?? this.nonceAtomic;
+  }
+}
+
+class SmartAccountX402Rpc extends RecoveryRpc {
+  ownerUsdcAtomic = "10000000";
+  observedUnix = NOW;
+  readonly balanceAddresses: Address[] = [];
+
+  override async getBalances(address: Address) {
+    this.balanceCalls += 1;
+    this.balanceAddresses.push(address);
+    return {
+      ...this.balances,
+      address,
+      usdcAtomic: address.toLowerCase() === OWNER.toLowerCase() ? this.ownerUsdcAtomic : "0",
+      ethAtomic: "0",
+      observedAt: new Date(this.observedUnix * 1_000).toISOString(),
+    };
+  }
+
+  override async getX402PrepareEvidence(address: Address) {
+    this.x402PrepareCalls += 1;
+    return {
+      ...this.x402Evidence,
+      address,
+      usdcAtomic: this.ownerUsdcAtomic,
+      tokenName: "ignored-for-erc7710",
+      tokenVersion: "ignored-for-erc7710",
+      domainSeparator: "0x01" as Hex,
+      observedAt: new Date(this.observedUnix * 1_000).toISOString(),
+      block: {
+        number: "12345",
+        hash: `0x${"b".repeat(64)}` as Hex,
+        timestamp: (BigInt(this.observedUnix) - 1n).toString(),
+      },
+    };
+  }
+}
+
+class MutableSmartAccountClock {
+  unix = NOW;
+  now(): Date { return new Date(this.unix * 1_000); }
+  advance(seconds: number): void { this.unix += seconds; }
+}
+
+class RecordingSmartAccountX402Engine implements SmartAccountX402EnginePort {
+  calls = 0;
+  lastInput: Parameters<SmartAccountX402EnginePort["create"]>[0] | null = null;
+  lastPayload: Awaited<ReturnType<SmartAccountX402EnginePort["create"]>> | null = null;
+  private readonly official = new OfficialSmartAccountX402Engine();
+
+  async create(input: Parameters<SmartAccountX402EnginePort["create"]>[0]) {
+    this.calls += 1;
+    this.lastInput = input;
+    this.lastPayload = await this.official.create(input);
+    return this.lastPayload;
+  }
+}
+
+type SmartAccountX402EngineInput = Parameters<SmartAccountX402EnginePort["create"]>[0];
+type SmartAccountX402EngineOutput = Awaited<ReturnType<SmartAccountX402EnginePort["create"]>>;
+
+class MutatingSmartAccountX402Engine implements SmartAccountX402EnginePort {
+  calls = 0;
+  private readonly official = new OfficialSmartAccountX402Engine();
+
+  constructor(private readonly mutate: (
+    payload: SmartAccountX402EngineOutput,
+    input: SmartAccountX402EngineInput,
+  ) => SmartAccountX402EngineOutput | Promise<SmartAccountX402EngineOutput>) {}
+
+  async create(input: SmartAccountX402EngineInput): Promise<SmartAccountX402EngineOutput> {
+    this.calls += 1;
+    return await this.mutate(await this.official.create(input), input);
   }
 }
 
@@ -198,13 +315,18 @@ test("pinned official MetaMask packages and no-money capability bundle are exact
   assert.equal(lock.packages["node_modules/@metamask/smart-accounts-kit"].integrity, METAMASK_SMART_ACCOUNTS_KIT_INTEGRITY);
   assert.equal(lock.packages["node_modules/@metamask/7715-permission-types"].version, METAMASK_PERMISSION_TYPES_VERSION);
   assert.equal(lock.packages["node_modules/@metamask/7715-permission-types"].integrity, METAMASK_PERMISSION_TYPES_INTEGRITY);
+  assert.equal(lock.packages["node_modules/@metamask/x402"].version, METAMASK_X402_VERSION);
+  assert.equal(lock.packages["node_modules/@metamask/x402"].integrity, METAMASK_X402_INTEGRITY);
+  assert.equal(lock.packages["node_modules/@x402/evm"].version, X402_EVM_VERSION);
+  assert.equal(lock.packages["node_modules/@x402/evm"].integrity, X402_EVM_INTEGRITY);
   const fixture = await makeFixture();
   try {
     const bundle = fixture.adapter.bundle();
     assert.equal(bundle.provider_id, METAMASK_SMART_ACCOUNT_PROVIDER_ID);
     assert.equal(bundle.capabilities.direct.available, true);
     assert.equal(bundle.capabilities.direct.mode, "delegated_session_transaction");
-    assert.equal(bundle.capabilities.x402.available, false);
+    assert.equal(bundle.capabilities.x402.available, true);
+    assert.equal(bundle.capabilities.x402.mode, "delegated_erc7710_apn_paid_retry");
     assert.equal(bundle.capabilities.permission?.protocol, "erc7715");
   } finally { await fixture.temporary.cleanup(); }
 });
@@ -328,17 +450,13 @@ test("strict grant validation rejects widened cap, dependencies and inactive Sma
   assert.throws(() => validateSmartAccountObservation(unsupportedRules, request), /does not advertise/);
 });
 
-test("Slice 2 keeps x402 unavailable without reopening browser consent", async () => {
-  const rpc = new TestRpc();
-  const fixture = await makeFixture({ rpc });
+test("Slice 3 capability is local and does not reopen browser consent", async () => {
+  const fixture = await makeFixture();
   try {
     assert.equal((await fixture.core.execute(connectCommand())).ok, true);
-    const x402 = await fixture.core.execute({
-      command: "x402.fetch.prepare", profile: PROFILE, idempotencyKey: "smart-x402-blocked-001",
-      url: "https://example.com/paid", maxAmountAtomic: "10000",
-    });
-    assert.equal(x402.error?.code, "APN_PROVIDER_EFFECT_UNAVAILABLE");
-    assert.equal(rpc.balanceCalls, 0);
+    const status = await fixture.core.execute({ command: "wallet.status", profile: PROFILE });
+    assert.equal((status.data as any).capabilities.x402.available, true);
+    assert.equal((status.data as any).capabilities.x402.mode, "delegated_erc7710_apn_paid_retry");
     assert.equal(fixture.consent.requestCalls, 1);
   } finally { await fixture.temporary.cleanup(); }
 });
@@ -544,12 +662,12 @@ test("the exact Slice 1 profile upgrades once without consent and arbitrary capa
     });
     const upgraded = await fixture.core.execute({ command: "wallet.permission.list", profile: PROFILE });
     assert.equal(upgraded.ok, true);
-    assert.equal((upgraded.data as any).revision, 2);
+    assert.equal((upgraded.data as any).revision, 3);
     assert.equal((upgraded.data as any).permission.revision, 1);
     assert.equal((upgraded.data as any).capabilities.direct.mode, "delegated_session_transaction");
     assert.equal(fixture.consent.requestCalls, 1);
     const reused = await fixture.core.execute({ command: "wallet.status", profile: PROFILE });
-    assert.equal((reused.data as any).revision, 2);
+    assert.equal((reused.data as any).revision, 3);
     assert.equal(fixture.consent.requestCalls, 1);
 
     const stored = await fixture.state.loadProviderProfile(profileHash);
@@ -589,14 +707,50 @@ test("common transfer prepare performs the exact Slice 1 migration before freezi
     assert.equal(prepared.ok, true, JSON.stringify(prepared));
     const operationId = String((prepared.operation as any).operation_id);
     const operation = await runtime.state.findOperation(operationId);
-    assert.equal(operation?.providerDirect?.profileRevision, 2);
+    assert.equal(operation?.providerDirect?.profileRevision, 3);
     assert.equal(operation?.providerDirect?.executionMode, "delegated_session_transaction");
     if (operation?.providerDirect?.executionMode !== "delegated_session_transaction") throw new Error("missing delegated binding");
     assert.equal(operation.providerDirect.permissionRevision, 1);
-    assert.equal((await runtime.state.loadProviderProfile(profileHash))?.revision, 2);
+    assert.equal((await runtime.state.loadProviderProfile(profileHash))?.revision, 3);
     assert.equal(fixture.consent.requestCalls, 1);
     assert.equal(engine.createCalls, 0);
     assert.equal(rpc.submissions.length, 0);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("common x402 prepare upgrades the exact Slice 2 capability once before freezing ERC-7710 authority", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const profileHash = fixture.state.profileHash(PROFILE);
+    const current = await fixture.state.loadProviderProfile(profileHash);
+    assert.ok(current !== null);
+    const slice2 = metamaskSmartAccountCapabilitySnapshot();
+    await fixture.state.writeProviderProfile({
+      ...current,
+      revision: 2,
+      capability_snapshot: slice2,
+      capability_hash: capabilityHash(slice2),
+    });
+    const rpc = new SmartAccountX402Rpc();
+    const engine = new RecordingSmartAccountX402Engine();
+    const runtime = smartAccountX402Runtime(
+      fixture,
+      rpc,
+      new QueuedHttp([smartAccountX402Challenge()]),
+      new MutableSmartAccountClock(),
+      engine,
+    );
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-migrated-x402-0001"));
+    assert.equal(prepared.ok, true, JSON.stringify(prepared));
+    const operation = await runtime.state.findX402Operation(publicOperationId(prepared.operation));
+    assert.equal(operation?.delegatedMaterial?.profileRevision, 3);
+    assert.equal(operation?.delegatedMaterial?.method, "erc7710");
+    const upgraded = await fixture.state.loadProviderProfile(profileHash);
+    assert.equal(upgraded?.revision, 3);
+    assert.equal(upgraded?.capability_snapshot.x402.mode, "delegated_erc7710_apn_paid_retry");
+    assert.equal(fixture.consent.requestCalls, 1);
+    assert.equal(engine.calls, 0);
   } finally { await fixture.temporary.cleanup(); }
 });
 
@@ -973,6 +1127,635 @@ test("common CLI and MCP direct surfaces preserve one Smart Account operation an
   } finally { await fixture.temporary.cleanup(); }
 });
 
+test("Smart Account ERC-7710 completes the common x402 lifecycle across restart without session funding", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountX402Rpc();
+    const clock = new MutableSmartAccountClock();
+    const engine = new RecordingSmartAccountX402Engine();
+    const http = new QueuedHttp([smartAccountX402Challenge(), smartAccountX402PaidSuccess()]);
+    const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-x402-complete-0001"));
+    assert.equal(prepared.ok, true, JSON.stringify(prepared));
+    const operationId = publicOperationId(prepared.operation);
+    const frozen = await runtime.state.findX402Operation(operationId);
+    assert.equal(frozen?.selectedOffer.resolved.assetTransferMethod, "erc7710");
+    assert.equal(frozen?.delegatedMaterial?.facilitatorAddresses[0], SMART_X402_FACILITATOR.toLowerCase());
+    assert.equal(engine.calls, 0);
+    assert.equal(await runtime.materials.load(operationId), null);
+    assert.equal(http.calls.length, 1);
+    assert.equal(rpc.balanceAddresses.some((address) => address.toLowerCase() === SESSION.toLowerCase()), false);
+
+    const approved = await runtime.core.execute({ command: "x402.fetch.approve", operationId });
+    assert.equal(approved.ok, true, JSON.stringify(approved));
+    assert.equal((approved.operation as any).state, "authorized_not_sent");
+    assert.equal(engine.calls, 1);
+    assert.equal(http.calls.length, 1);
+    const material = await runtime.materials.load(operationId);
+    assert.ok(material !== null);
+    assert.equal(material.phase, "sealed");
+
+    const permission = await runtime.permissions.load(runtime.state.profileHash(PROFILE));
+    assert.ok(permission !== null && isGrantedPermissionRecord(permission));
+    const payload = engine.lastPayload;
+    assert.ok(payload !== null && typeof payload.payload === "object" && payload.payload !== null);
+    const wire = payload.payload as { delegationManager: Address; permissionContext: Hex; delegator: Address };
+    assert.deepEqual(Object.keys(wire).sort(), ["delegationManager", "delegator", "permissionContext"]);
+    const chain = decodeDelegations(wire.permissionContext);
+    assert.equal(chain.length, 2);
+    assert.equal(encodeDelegations([chain[1]!]).toLowerCase(), permission.grant_context.toLowerCase());
+    assert.equal(chain[0]?.delegate.toLowerCase(), ANY_BENEFICIARY.toLowerCase());
+    assert.equal(chain[0]?.delegator.toLowerCase(), SESSION.toLowerCase());
+    assert.equal(
+      chain[0]?.authority.toLowerCase(),
+      hashDelegation(toDelegationStruct(chain[1]!)).toLowerCase(),
+    );
+    assert.equal(
+      chain[0]?.salt.toLowerCase(),
+      keccak256(toHex(`apn.smart-account.x402\0${operationId}\0${frozen?.fingerprint}`)).toLowerCase(),
+    );
+    assert.equal(wire.delegator.toLowerCase(), OWNER.toLowerCase());
+    assert.equal(wire.delegationManager.toLowerCase(), permission.delegation_manager.toLowerCase());
+    assert.equal(canonicalJson(payload.accepted), frozen?.selectedOffer.declaredCanonicalJson);
+    assert.deepEqual(decodePaymentSignatureHeader(material.payment_header), payload);
+    assert.equal(encodePaymentSignatureHeader(payload), material.payment_header);
+    assertExactSmartAccountX402Caveats(chain[0]!.caveats, NOW, NOW + 60);
+
+    const encrypted = await readFile(join(
+      fixture.temporary.root, "smart-account-x402-materials", `${operationId}.json`,
+    ), "utf8");
+    for (const protectedValue of [
+      permission.session_private_key,
+      permission.grant_context,
+      material.payment_header,
+      material.child_permission_context,
+    ]) assert.equal(encrypted.includes(protectedValue), false);
+
+    const restarted = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+    const sent = await restarted.core.execute({ command: "operation.resume", operationId });
+    assert.equal(sent.ok, true, JSON.stringify(sent));
+    assert.equal((sent.operation as any).state, "settlement_pending");
+    assert.equal(sent.data, null, "seller result remains protected before settlement proof");
+    assert.equal(engine.calls, 1);
+    assert.equal(http.calls.length, 2);
+    assert.equal(http.calls[1]?.paymentSignature, material.payment_header);
+    assert.equal((await restarted.materials.load(operationId))?.phase, "exposed");
+    const resultPending = await restarted.state.findX402Operation(operationId);
+    assert.ok(resultPending?.resultLink !== undefined);
+    assert.equal(resultPending?.settlementEvidence, undefined);
+
+    // Post-exposure recovery must not require the already-spent owner balance.
+    rpc.ownerUsdcAtomic = "0";
+    armSmartAccountX402Settlement(rpc, resultPending!);
+    const completedRuntime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+    const completed = await completedRuntime.core.execute({ command: "operation.resume", operationId });
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+    assert.equal((completed.operation as any).state, "completed");
+    assert.deepEqual((completed.data as any).body, { forecast: "sunny" });
+    assert.equal(engine.calls, 1);
+    assert.equal(http.calls.length, 2);
+    assert.equal(rpc.x402Calls.some((call) => call.startsWith("logs:") || call.startsWith("state:")), false);
+    assert.equal(rpc.balanceAddresses.some((address) => address.toLowerCase() === SESSION.toLowerCase()), false);
+
+    const cold = new ApnCore({ state: new StateStore(fixture.temporary.root, { lockWaitMs: 1_000 }) });
+    const status = await cold.execute({ command: "operation.status", operationId });
+    const receipt = await cold.execute({ command: "receipt.get", operationId });
+    assert.equal((status.operation as any).state, "completed");
+    assert.equal((receipt.receipt as any).transferMethod, "erc7710");
+    assert.equal((receipt.receipt as any).settlementEvidence.schemaVersion, "apn.x402.erc7710-settlement-evidence.v1");
+    assert.equal((receipt.receipt as any).settlementEvidence.transfer.from, OWNER.toLowerCase());
+    assert.equal((receipt.receipt as any).settlementEvidence.transfer.to, SMART_X402_PAYEE.toLowerCase());
+    const safeOutput = JSON.stringify([prepared, approved, sent, completed, status, receipt]);
+    assert.equal(safeOutput.includes(permission.session_private_key), false);
+    assert.equal(safeOutput.includes(permission.grant_context), false);
+    assert.equal(safeOutput.includes(material.payment_header), false);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("Smart Account x402 rejects non-explicit, malformed and unapproved offers before child or paid effect", async (t) => {
+  const otherFacilitator = "0x5555555555555555555555555555555555555555" as Address;
+  const cases: ReadonlyArray<{
+    readonly label: string;
+    readonly extra?: Readonly<Record<string, unknown>>;
+    readonly approved?: readonly Address[];
+  }> = [
+    {
+      label: "EIP-3009 only",
+      extra: { assetTransferMethod: "eip3009", name: "USD Coin", version: "2" },
+    },
+    { label: "absent method", extra: {} },
+    {
+      label: "malformed duplicate facilitator",
+      extra: {
+        assetTransferMethod: "erc7710",
+        facilitatorAddresses: [SMART_X402_FACILITATOR, SMART_X402_FACILITATOR],
+      },
+    },
+    {
+      label: "non-approved facilitator",
+      extra: { assetTransferMethod: "erc7710", facilitatorAddresses: [SMART_X402_FACILITATOR] },
+      approved: [otherFacilitator],
+    },
+  ];
+  for (const item of cases) await t.test(item.label, async () => {
+    const fixture = await makeFixture();
+    try {
+      assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+      const rpc = new SmartAccountX402Rpc();
+      const http = new QueuedHttp([
+        smartAccountX402Challenge(item.extra === undefined ? {} : { extra: item.extra }),
+      ]);
+      const engine = new RecordingSmartAccountX402Engine();
+      const runtime = smartAccountX402Runtime(
+        fixture,
+        rpc,
+        http,
+        new MutableSmartAccountClock(),
+        engine,
+        item.approved === undefined ? {} : { approvedFacilitators: item.approved },
+      );
+      const result = await runtime.core.execute(smartAccountX402Prepare(`smart-account-offer-${item.label.replaceAll(" ", "-")}`));
+      assert.equal(result.ok, false, JSON.stringify(result));
+      assert.equal(result.error?.code, "APN_X402_UNSUPPORTED_OFFER");
+      assert.equal(engine.calls, 0);
+      assert.equal(http.calls.length, 1);
+      assert.equal(http.calls.some((call) => call.paymentSignature !== undefined), false);
+      assert.equal(rpc.submissions.length, 0);
+    } finally { await fixture.temporary.cleanup(); }
+  });
+});
+
+test("Smart Account x402 readiness, cap and expiry gates fail before material or paid HTTP", async (t) => {
+  const cases: ReadonlyArray<{
+    readonly label: string;
+    readonly callerCap?: string;
+    readonly allowance?: string;
+    readonly ownerBalance?: string;
+    readonly clockAdvance?: number;
+    readonly expectedCode: string;
+  }> = [
+    { label: "offer over caller cap", callerCap: "999", expectedCode: "APN_X402_OFFER_EXCEEDS_LIMIT" },
+    { label: "root allowance insufficient", allowance: "999", expectedCode: "APN_PERMISSION_ALLOWANCE_INSUFFICIENT" },
+    { label: "owner balance insufficient", ownerBalance: "999", expectedCode: "APN_INSUFFICIENT_USDC" },
+    { label: "root permission expired", clockAdvance: 3_601, expectedCode: "APN_PERMISSION_INACTIVE" },
+  ];
+  for (const item of cases) await t.test(item.label, async () => {
+    const fixture = await makeFixture();
+    try {
+      assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+      const rpc = new SmartAccountX402Rpc();
+      if (item.ownerBalance !== undefined) rpc.ownerUsdcAtomic = item.ownerBalance;
+      const allowance = new FixtureAllowance();
+      if (item.allowance !== undefined) allowance.availableAtomic = item.allowance;
+      const clock = new MutableSmartAccountClock();
+      if (item.clockAdvance !== undefined) clock.advance(item.clockAdvance);
+      rpc.observedUnix = clock.unix;
+      const http = new QueuedHttp([smartAccountX402Challenge()]);
+      const engine = new RecordingSmartAccountX402Engine();
+      const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine, { allowance });
+      const result = await runtime.core.execute(smartAccountX402Prepare(
+        `smart-account-gate-${item.label.replaceAll(" ", "-")}`,
+        item.callerCap,
+      ));
+      assert.equal(result.ok, false, JSON.stringify(result));
+      assert.equal(result.error?.code, item.expectedCode, JSON.stringify(result));
+      assert.equal(engine.calls, 0);
+      assert.equal(http.calls.some((call) => call.paymentSignature !== undefined), false);
+      assert.equal(rpc.submissions.length, 0);
+    } finally { await fixture.temporary.cleanup(); }
+  });
+});
+
+test("Smart Account x402 requires the common approval and treats pre-exposure expiry as proven no-effect", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountX402Rpc();
+    const clock = new MutableSmartAccountClock();
+    const engine = new RecordingSmartAccountX402Engine();
+    const http = new QueuedHttp([smartAccountX402Challenge()]);
+    const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-approval-expiry-0001"));
+    const operationId = publicOperationId(prepared.operation);
+
+    const unapproved = await runtime.core.execute({ command: "operation.resume", operationId });
+    assert.equal(unapproved.error?.code, "APN_OPERATION_BLOCKED");
+    assert.equal(engine.calls, 0);
+    assert.equal(await runtime.materials.load(operationId), null);
+    assert.equal(http.calls.length, 1);
+
+    clock.advance(61);
+    const expired = await runtime.core.execute({ command: "x402.fetch.approve", operationId });
+    assert.equal(expired.ok, true, JSON.stringify(expired));
+    assert.equal((expired.operation as any).state, "failed_before_effect");
+    assert.equal((expired.operation as any).terminal, true);
+    assert.equal(expired.proof_class, "x402_proven_no_effect");
+    assert.equal(engine.calls, 0);
+    assert.equal(await runtime.materials.load(operationId), null);
+    assert.equal(http.calls.length, 1);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("Smart Account permission drift after prepare blocks approval before child, seal or paid HTTP", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountX402Rpc();
+    const http = new QueuedHttp([smartAccountX402Challenge()]);
+    const engine = new RecordingSmartAccountX402Engine();
+    const runtime = smartAccountX402Runtime(
+      fixture, rpc, http, new MutableSmartAccountClock(), engine,
+    );
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-permission-drift-0001"));
+    const operationId = publicOperationId(prepared.operation);
+    const disabled = await fixture.core.execute({
+      command: "wallet.permission.disable", profile: PROFILE, expectedRevision: 1,
+    });
+    assert.equal(disabled.ok, true, JSON.stringify(disabled));
+    const rejected = await runtime.core.execute({ command: "x402.fetch.approve", operationId });
+    assert.equal(rejected.ok, false, JSON.stringify(rejected));
+    assert.equal(rejected.error?.code, "APN_PROFILE_DRIFT");
+    assert.equal(engine.calls, 0);
+    assert.equal(await runtime.materials.load(operationId), null);
+    assert.equal(http.calls.length, 1);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("Smart Account x402 exact replay converges while conflicting intent has zero additional reads or effects", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountX402Rpc();
+    const clock = new MutableSmartAccountClock();
+    const engine = new RecordingSmartAccountX402Engine();
+    const http = new QueuedHttp([smartAccountX402Challenge()]);
+    const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+    const request = smartAccountX402Prepare("smart-account-idempotency-0001");
+    const prepared = await runtime.core.execute(request);
+    const operationId = publicOperationId(prepared.operation);
+    const counts = [http.calls.length, rpc.x402PrepareCalls, rpc.balanceCalls, engine.calls];
+
+    const duplicate = await runtime.core.execute(request);
+    assert.equal(publicOperationId(duplicate.operation), operationId);
+    assert.deepEqual([http.calls.length, rpc.x402PrepareCalls, rpc.balanceCalls, engine.calls], counts);
+    const conflict = await runtime.core.execute({ ...request, url: "https://seller.example/different" });
+    assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+    assert.deepEqual([http.calls.length, rpc.x402PrepareCalls, rpc.balanceCalls, engine.calls], counts);
+    assert.equal(await runtime.materials.load(operationId), null);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("Smart Account rejects malformed or widened official material before encrypted seal and paid exposure", async (t) => {
+  const wrongAddress = "0x5555555555555555555555555555555555555555" as Address;
+  const mutations: ReadonlyArray<{
+    readonly label: string;
+    readonly mutate: ConstructorParameters<typeof MutatingSmartAccountX402Engine>[0];
+  }> = [
+    {
+      label: "wrong delegation manager",
+      mutate: (payload) => mutateSmartAccountPayload(payload, (wire) => ({
+        ...wire, delegationManager: wrongAddress,
+      })),
+    },
+    {
+      label: "wrong delegator",
+      mutate: (payload) => mutateSmartAccountPayload(payload, (wire) => ({
+        ...wire, delegator: wrongAddress,
+      })),
+    },
+    {
+      label: "extra delegation in chain",
+      mutate: (payload) => mutateSmartAccountPayload(payload, (wire) => {
+        const chain = decodeDelegations(wire.permissionContext);
+        return { ...wire, permissionContext: encodeDelegations([...chain, chain[1]!]) };
+      }),
+    },
+    {
+      label: "wrong signed redeemer",
+      mutate: async (payload) => await mutateSmartAccountPayloadRedeemer(payload, wrongAddress),
+    },
+  ];
+  for (const item of mutations) await t.test(item.label, async () => {
+    const fixture = await makeFixture();
+    try {
+      assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+      const rpc = new SmartAccountX402Rpc();
+      const http = new QueuedHttp([smartAccountX402Challenge()]);
+      const engine = new MutatingSmartAccountX402Engine(item.mutate);
+      const runtime = smartAccountX402Runtime(
+        fixture, rpc, http, new MutableSmartAccountClock(), engine,
+      );
+      const prepared = await runtime.core.execute(smartAccountX402Prepare(
+        `smart-account-material-${item.label.replaceAll(" ", "-")}`,
+      ));
+      const operationId = publicOperationId(prepared.operation);
+      const rejected = await runtime.core.execute({ command: "x402.fetch.approve", operationId });
+      assert.equal(rejected.ok, false, JSON.stringify(rejected));
+      assert.equal(rejected.error?.code, "APN_PROVIDER_PROTOCOL");
+      assert.equal(engine.calls, 1);
+      assert.equal(await runtime.materials.load(operationId), null);
+      assert.equal(http.calls.length, 1);
+      assert.equal(http.calls.some((call) => call.paymentSignature !== undefined), false);
+      assert.equal(rpc.submissions.length, 0);
+      assert.equal((await runtime.state.findX402Operation(operationId))?.state, "authorization_material_pending");
+    } finally { await fixture.temporary.cleanup(); }
+  });
+});
+
+test("Smart Account encrypted x402 material is single-assignment and authenticated before exposure", async (t) => {
+  await t.test("conflicting second material", async () => {
+    const fixture = await makeFixture();
+    try {
+      assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+      const runtime = smartAccountX402Runtime(
+        fixture,
+        new SmartAccountX402Rpc(),
+        new QueuedHttp([smartAccountX402Challenge()]),
+        new MutableSmartAccountClock(),
+        new RecordingSmartAccountX402Engine(),
+      );
+      const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-material-conflict-0001"));
+      const operationId = publicOperationId(prepared.operation);
+      assert.equal((await runtime.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
+      const existing = await runtime.materials.load(operationId);
+      assert.ok(existing !== null);
+      const { material_identity_hash: _identity, integrity_hash: _integrity, ...unsealed } = existing;
+      const differentInstant = new Date((NOW + 1) * 1_000).toISOString();
+      await assert.rejects(
+        runtime.materials.seal({ ...unsealed, sealed_at: differentInstant, updated_at: differentInstant }),
+        (error: unknown) => error instanceof ApnError && error.code === "APN_IDEMPOTENCY_CONFLICT",
+      );
+    } finally { await fixture.temporary.cleanup(); }
+  });
+
+  await t.test("authenticated envelope corruption", async () => {
+    const fixture = await makeFixture();
+    try {
+      assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+      const http = new QueuedHttp([smartAccountX402Challenge()]);
+      const engine = new RecordingSmartAccountX402Engine();
+      const runtime = smartAccountX402Runtime(
+        fixture, new SmartAccountX402Rpc(), http, new MutableSmartAccountClock(), engine,
+      );
+      const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-material-corrupt-0001"));
+      const operationId = publicOperationId(prepared.operation);
+      assert.equal((await runtime.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
+      const path = join(fixture.temporary.root, "smart-account-x402-materials", `${operationId}.json`);
+      const envelope = JSON.parse(await readFile(path, "utf8")) as {
+        cipher: { tag: string };
+      } & Record<string, unknown>;
+      envelope.cipher.tag = `${envelope.cipher.tag[0] === "A" ? "B" : "A"}${envelope.cipher.tag.slice(1)}`;
+      await writeFile(path, JSON.stringify(envelope), { mode: 0o600 });
+      const resumed = await runtime.core.execute({ command: "operation.resume", operationId });
+      assert.equal(resumed.error?.code, "APN_STATE_CORRUPT", JSON.stringify(resumed));
+      assert.equal(http.calls.length, 1);
+      assert.equal(engine.calls, 1);
+    } finally { await fixture.temporary.cleanup(); }
+  });
+});
+
+test("Smart Account authorization recovers the same deterministic material across both seal crash boundaries", async (t) => {
+  for (const boundary of ["before_seal", "after_seal"] as const) await t.test(boundary, async () => {
+    const fixture = await makeFixture();
+    try {
+      assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+      const rpc = new SmartAccountX402Rpc();
+      const http = new QueuedHttp([smartAccountX402Challenge()]);
+      const clock = new MutableSmartAccountClock();
+      const engine = new RecordingSmartAccountX402Engine();
+      const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+      const prepared = await runtime.core.execute(smartAccountX402Prepare(`smart-account-crash-${boundary}-0001`));
+      const operationId = publicOperationId(prepared.operation);
+      const operation = await runtime.state.findX402Operation(operationId);
+      assert.ok(operation !== null);
+      if (boundary === "after_seal") await runtime.x402.materialize(operation);
+      await runtime.state.writeX402Operation(authorizationMaterialPending(operation));
+
+      const recoveredRuntime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+      const recovered = await recoveredRuntime.core.execute({ command: "operation.resume", operationId });
+      assert.equal(recovered.ok, true, JSON.stringify(recovered));
+      assert.equal((recovered.operation as any).state, "authorized_not_sent");
+      assert.equal(engine.calls, 1, "the boundary must converge on one material construction");
+      assert.equal((await recoveredRuntime.materials.load(operationId))?.phase, "sealed");
+      assert.equal(http.calls.length, 1);
+    } finally { await fixture.temporary.cleanup(); }
+  });
+});
+
+test("ambiguous Smart Account paid HTTP remains unknown after expiry without replacement payment or EIP-3009 claims", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountX402Rpc();
+    const clock = new MutableSmartAccountClock();
+    const http = new QueuedHttp([smartAccountX402Challenge(), new Error("injected lost paid response")]);
+    const engine = new RecordingSmartAccountX402Engine();
+    const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-http-ambiguous-0001"));
+    const operationId = publicOperationId(prepared.operation);
+    assert.equal((await runtime.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
+
+    const exposed = await runtime.core.execute({ command: "operation.resume", operationId });
+    assert.equal((exposed.operation as any).state, "effect_unknown");
+    const durable = await runtime.state.findX402Operation(operationId);
+    assert.deepEqual(durable?.attempts.map((attempt) => [attempt.purpose, attempt.phase]), [["payment", "ambiguous"]]);
+    assert.equal((await runtime.materials.load(operationId))?.phase, "exposed");
+    clock.advance(61);
+    rpc.observedUnix = clock.unix;
+    const recovered = await smartAccountX402Runtime(fixture, rpc, http, clock, engine).core.execute({
+      command: "operation.resume", operationId,
+    });
+    assert.equal((recovered.operation as any).state, "effect_unknown");
+    assert.equal((recovered.operation as any).terminal, false);
+    assert.equal(recovered.proof_class, "x402_unknown_finality");
+    assert.equal(http.calls.length, 2, "challenge plus one ambiguous paid request only");
+    assert.equal(engine.calls, 1);
+    assert.equal(rpc.x402Calls.some((call) => call.startsWith("logs:") || call.startsWith("state:")), false);
+    assert.equal(rpc.submissions.length, 0);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("concurrent Smart Account resume calls expose one sealed header exactly once", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountX402Rpc();
+    const clock = new MutableSmartAccountClock();
+    const http = new QueuedHttp([smartAccountX402Challenge(), smartAccountX402PaidSuccess()]);
+    const engine = new RecordingSmartAccountX402Engine();
+    const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-concurrent-resume-0001"));
+    const operationId = publicOperationId(prepared.operation);
+    assert.equal((await runtime.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
+    const [first, second] = await Promise.all([
+      runtime.core.execute({ command: "operation.resume", operationId }),
+      runtime.core.execute({ command: "operation.resume", operationId }),
+    ]);
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.equal((await runtime.state.findX402Operation(operationId))?.attempts.length, 1);
+    assert.equal(http.calls.length, 2);
+    assert.equal(http.calls.filter((call) => call.paymentSignature !== undefined).length, 1);
+    assert.equal(engine.calls, 1);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("wrong, reverted or absent ERC-7710 settlement never completes or replays paid HTTP", async (t) => {
+  const cases = ["missing", "reverted", "wrong_transaction", "wrong_transfer", "not_safe"] as const;
+  for (const classification of cases) await t.test(classification, async () => {
+    const fixture = await makeFixture();
+    try {
+      assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+      const rpc = new SmartAccountX402Rpc();
+      const clock = new MutableSmartAccountClock();
+      const http = new QueuedHttp([smartAccountX402Challenge(), smartAccountX402PaidSuccess()]);
+      const engine = new RecordingSmartAccountX402Engine();
+      const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+      const prepared = await runtime.core.execute(smartAccountX402Prepare(`smart-account-settlement-${classification}`));
+      const operationId = publicOperationId(prepared.operation);
+      await runtime.core.execute({ command: "x402.fetch.approve", operationId });
+      await runtime.core.execute({ command: "operation.resume", operationId });
+      const operation = await runtime.state.findX402Operation(operationId);
+      assert.ok(operation !== null);
+      if (classification !== "missing") armSmartAccountX402Settlement(rpc, operation);
+      if (classification === "reverted") rpc.x402Receipt = { ...rpc.x402Receipt!, status: "reverted" };
+      if (classification === "wrong_transaction") {
+        const wrong = `0x${"e".repeat(64)}` as Hex;
+        rpc.x402Receipt = { ...rpc.x402Receipt!, transactionHash: wrong };
+      }
+      if (classification === "wrong_transfer") {
+        rpc.x402Receipt = {
+          ...rpc.x402Receipt!,
+          logs: [transferLog({
+            from: operation.wallet,
+            to: DIRECT_RECIPIENT,
+            value: operation.amountAtomic,
+            transactionHash: X402_TRANSACTION as Hex,
+            blockNumber: rpc.x402Receipt!.blockNumber,
+            blockHash: rpc.x402Receipt!.blockHash,
+          })],
+        };
+      }
+      if (classification === "not_safe") {
+        rpc.safeHead = { ...rpc.safeHead, number: (BigInt(rpc.x402Receipt!.blockNumber) - 1n).toString() };
+      }
+      const resumed = await runtime.core.execute({ command: "operation.resume", operationId });
+      assert.equal(resumed.ok, true, JSON.stringify(resumed));
+      assert.equal((resumed.operation as any).state, "settlement_pending");
+      assert.equal((resumed.operation as any).terminal, false);
+      assert.equal((await runtime.state.findX402Operation(operationId))?.settlementEvidence, undefined);
+      const replay = await runtime.core.execute({ command: "operation.resume", operationId });
+      assert.equal((replay.operation as any).state, "settlement_pending");
+      assert.equal(http.calls.length, 2);
+      assert.equal(engine.calls, 1);
+      assert.equal(rpc.x402Calls.some((call) => call.startsWith("logs:") || call.startsWith("state:")), false);
+    } finally { await fixture.temporary.cleanup(); }
+  });
+});
+
+test("proven ERC-7710 settlement without a seller result closes with a safe common failure receipt", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountX402Rpc();
+    const clock = new MutableSmartAccountClock();
+    const noResult = smartAccountX402PaidSuccess({ status: 204, bodyText: "" });
+    const http = new QueuedHttp([smartAccountX402Challenge(), noResult]);
+    const engine = new RecordingSmartAccountX402Engine();
+    const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-settled-no-result-0001"));
+    const operationId = publicOperationId(prepared.operation);
+    await runtime.core.execute({ command: "x402.fetch.approve", operationId });
+    const sent = await runtime.core.execute({ command: "operation.resume", operationId });
+    assert.equal((sent.operation as any).state, "settlement_pending");
+    const operation = await runtime.state.findX402Operation(operationId);
+    assert.ok(operation !== null && operation.resultLink === undefined);
+    armSmartAccountX402Settlement(rpc, operation);
+    const closed = await smartAccountX402Runtime(fixture, rpc, http, clock, engine).core.execute({
+      command: "operation.resume", operationId,
+    });
+    assert.equal((closed.operation as any).state, "failed_settled_without_result");
+    assert.equal((closed.operation as any).terminal, true);
+    assert.equal(closed.proof_class, "x402_settled_result_unavailable");
+    assert.equal((closed.receipt as any).transferMethod, "erc7710");
+    assert.equal((closed.receipt as any).settlementEvidence.schemaVersion, "apn.x402.erc7710-settlement-evidence.v1");
+    assert.equal(http.calls.length, 2);
+    assert.equal(engine.calls, 1);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("common CLI and MCP x402 surfaces share one Smart Account ERC-7710 operation and receipt", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountX402Rpc();
+    const clock = new MutableSmartAccountClock();
+    const http = new QueuedHttp([smartAccountX402Challenge(), smartAccountX402PaidSuccess()]);
+    const engine = new RecordingSmartAccountX402Engine();
+    const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+    const options = {
+      stateRoot: fixture.temporary.root,
+      wrappingSecret: fixture.wrapping,
+      providerRegistry: runtime.registry,
+      rpc,
+      http,
+      policy: runtime.policy,
+      clock,
+      ids: { next: () => "12345678-1234-4234-8234-123456789abc" },
+    } as const;
+    const prepared = await runCli([
+      "x402", "fetch", "prepare", "--profile", PROFILE, "--url", X402_URL,
+      "--idempotency-key", "smart-account-cli-mcp-x402-0001",
+      "--max-amount-atomic", CAP, "--rpc-url", "https://rpc.example",
+    ], {}, options);
+    assert.equal(prepared.ok, true, JSON.stringify(prepared));
+    const operationId = publicOperationId(prepared.operation);
+    const server = createMcpServer(options);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: "smart-account-x402-parity", version: "1.0.0" });
+    await client.connect(clientTransport);
+    try {
+      const approved = mcpEnvelope(await client.callTool({
+        name: "apn_x402_fetch_approve",
+        arguments: { operation: operationId, rpc_url: "https://rpc.example" },
+      }));
+      assert.equal((approved.operation as any).state, "authorized_not_sent", JSON.stringify(approved));
+      const sent = mcpEnvelope(await client.callTool({
+        name: "apn_operation_resume",
+        arguments: { operation: operationId, rpc_url: "https://rpc.example" },
+      }));
+      assert.equal((sent.operation as any).state, "settlement_pending", JSON.stringify(sent));
+      const operation = await runtime.state.findX402Operation(operationId);
+      assert.ok(operation !== null);
+      armSmartAccountX402Settlement(rpc, operation);
+      const completed = await runCli([
+        "operation", "resume", "--operation", operationId, "--rpc-url", "https://rpc.example",
+      ], {}, options);
+      assert.equal((completed.operation as any).state, "completed", JSON.stringify(completed));
+      const receipt = mcpEnvelope(await client.callTool({
+        name: "apn_receipt_get", arguments: { operation: operationId },
+      }));
+      assert.equal((receipt.receipt as any).transferMethod, "erc7710");
+      assert.equal((receipt.receipt as any).settlementEvidence.methodBinding.method, "erc7710");
+      assert.equal(engine.calls, 1);
+      assert.equal(http.calls.length, 2);
+      const safe = JSON.stringify([prepared, approved, sent, completed, receipt]);
+      const material = await runtime.materials.load(operationId);
+      const permission = await runtime.permissions.load(runtime.state.profileHash(PROFILE));
+      assert.ok(material !== null && permission !== null && isGrantedPermissionRecord(permission));
+      for (const secret of [material.payment_header, material.child_permission_context, permission.session_private_key]) {
+        assert.equal(safe.includes(secret), false);
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  } finally { await fixture.temporary.cleanup(); }
+});
+
 function connectCommand() {
   return {
     command: "wallet.connect" as const,
@@ -1090,6 +1873,269 @@ function directRuntime(
       clock: { now: () => new Date(NOW * 1_000) },
       ids: { next: () => "12345678-1234-4234-8234-123456789abc" },
     }),
+  };
+}
+
+function smartAccountX402Runtime(
+  fixture: Awaited<ReturnType<typeof makeFixture>>,
+  rpc: SmartAccountX402Rpc,
+  http: QueuedHttp,
+  clock: MutableSmartAccountClock,
+  engine: SmartAccountX402EnginePort,
+  options: {
+    readonly allowance?: SmartAccountAllowancePort;
+    readonly policy?: TestProfilePolicy;
+    readonly approvedFacilitators?: readonly Address[];
+  } = {},
+) {
+  const state = new StateStore(fixture.temporary.root, { lockWaitMs: 1_000 });
+  const permissions = new EncryptedSmartAccountPermissionStore(state, fixture.wrapping);
+  const materials = new EncryptedSmartAccountX402MaterialStore(state, fixture.wrapping);
+  const x402 = new MetaMaskSmartAccountX402Adapter(
+    permissions,
+    materials,
+    rpc,
+    options.allowance ?? new FixtureAllowance(),
+    engine,
+    () => clock.now(),
+    options.approvedFacilitators ?? [SMART_X402_FACILITATOR],
+  );
+  const adapter = new MetaMaskSmartAccountAdapter(
+    permissions,
+    fixture.consent,
+    fixture.sessions,
+    () => clock.now(),
+    undefined,
+    x402,
+  );
+  const registry = new ProviderRegistry([
+    { provider_id: METAMASK_SMART_ACCOUNT_PROVIDER_ID, create: () => adapter.bundle() },
+  ]);
+  const policy = options.policy ?? new TestProfilePolicy({
+    maxBalanceUsdcAtomic: "10000000",
+    maxX402AmountAtomic: CAP,
+  });
+  return {
+    state,
+    permissions,
+    materials,
+    registry,
+    policy,
+    x402,
+    core: new ApnCore({
+      state,
+      profileRepository: new StateProfileRepository(state),
+      providerRegistry: registry,
+      policy,
+      rpc,
+      http,
+      clock,
+      ids: { next: () => "12345678-1234-4234-8234-123456789abc" },
+    }),
+  };
+}
+
+function smartAccountX402Challenge(input: {
+  readonly extra?: Readonly<Record<string, unknown>>;
+  readonly amount?: string;
+  readonly maxTimeoutSeconds?: number;
+} = {}) {
+  const extra = input.extra ?? {
+    assetTransferMethod: "erc7710",
+    facilitatorAddresses: [SMART_X402_FACILITATOR],
+  };
+  return challengeObservation({
+    finalUrl: X402_URL,
+    header: canonicalPaymentRequiredHeader({
+      x402Version: 2,
+      resource: {
+        url: X402_URL,
+        description: "Smart Account deterministic result",
+        mimeType: "application/json",
+      },
+      accepts: [{
+        scheme: "exact",
+        network: "eip155:8453",
+        amount: input.amount ?? SMART_X402_AMOUNT,
+        asset: BASE_USDC,
+        payTo: SMART_X402_PAYEE,
+        maxTimeoutSeconds: input.maxTimeoutSeconds ?? 60,
+        extra,
+      }],
+    }),
+  });
+}
+
+function smartAccountX402PaidSuccess(input: {
+  readonly status?: number;
+  readonly bodyText?: string;
+} = {}) {
+  const instant = new Date(NOW * 1_000).toISOString();
+  return paidObservation({
+    finalUrl: X402_URL,
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.bodyText === undefined ? {} : { bodyText: input.bodyText }),
+    startedAt: instant,
+    observedAt: instant,
+    paymentResponseHeader: canonicalPaymentResponseHeader({
+      success: true,
+      transaction: X402_TRANSACTION,
+      network: "eip155:8453",
+      payer: OWNER.toLowerCase(),
+      amount: SMART_X402_AMOUNT,
+    }),
+  });
+}
+
+function smartAccountX402Prepare(idempotencyKey: string, maxAmountAtomic = CAP) {
+  return {
+    command: "x402.fetch.prepare" as const,
+    profile: PROFILE,
+    url: X402_URL,
+    idempotencyKey,
+    maxAmountAtomic,
+  };
+}
+
+function publicOperationId(value: unknown): string {
+  if (value === null || typeof value !== "object" || !("operationId" in value) ||
+    typeof (value as { operationId?: unknown }).operationId !== "string") {
+    throw new Error("expected public x402 operation id");
+  }
+  return (value as { operationId: string }).operationId;
+}
+
+function assertExactSmartAccountX402Caveats(
+  caveats: readonly { readonly enforcer: Hex; readonly terms: Hex; readonly args: Hex }[],
+  after: number,
+  before: number,
+): void {
+  const environment = smartAccountEnvironment();
+  const at = (address: Hex | undefined) => caveats.find((item) =>
+    item.enforcer.toLowerCase() === requiredHex(address).toLowerCase());
+  const value = at(environment.caveatEnforcers.ValueLteEnforcer)!;
+  const transfer = at(environment.caveatEnforcers.ERC20TransferAmountEnforcer)!;
+  const calldata = at(environment.caveatEnforcers.AllowedCalldataEnforcer)!;
+  const timestamp = at(environment.caveatEnforcers.TimestampEnforcer)!;
+  const redeemer = at(environment.caveatEnforcers.RedeemerEnforcer)!;
+  assert.equal(caveats.length, 5);
+  assert.deepEqual([value.args, transfer.args, calldata.args, timestamp.args, redeemer.args], [
+    "0x00", "0x00", "0x", "0x00", "0x",
+  ]);
+  assert.equal(decodeValueLteTerms(value.terms).maxValue, 0n);
+  const decodedTransfer = decodeERC20TransferAmountTerms(transfer.terms);
+  assert.equal(decodedTransfer.tokenAddress.toLowerCase(), BASE_USDC.toLowerCase());
+  assert.equal(decodedTransfer.maxAmount, BigInt(SMART_X402_AMOUNT));
+  assert.deepEqual(decodeAllowedCalldataTerms(calldata.terms), {
+    startIndex: 4,
+    value: pad(SMART_X402_PAYEE, { size: 32 }),
+  });
+  assert.deepEqual(decodeTimestampTerms(timestamp.terms), {
+    afterThreshold: after,
+    beforeThreshold: before,
+  });
+  assert.deepEqual(decodeRedeemerTerms(redeemer.terms).redeemers.map((item) => item.toLowerCase()), [
+    SMART_X402_FACILITATOR.toLowerCase(),
+  ]);
+}
+
+function authorizationMaterialPending(operation: X402OperationRecord): X402OperationRecord {
+  const { integrityHash: _integrity, ...body } = operation;
+  const transition = {
+    at: operation.updatedAt,
+    state: "authorization_material_pending" as const,
+    terminal: false,
+    reason: "x402_authorization_material_pending" as const,
+    proofClass: "x402_authorization_recovery" as const,
+  };
+  return sealX402Operation({
+    ...body,
+    state: transition.state,
+    finalityClass: "pre_effect",
+    terminal: false,
+    reason: transition.reason,
+    proofClass: transition.proofClass,
+    nextActions: ["operation.resume", "operation.status"],
+    transitions: appendX402Transition(operation.transitions, transition),
+  });
+}
+
+type SmartAccountWirePayload = {
+  readonly delegationManager: Address;
+  readonly permissionContext: Hex;
+  readonly delegator: Address;
+};
+
+function mutateSmartAccountPayload(
+  payment: SmartAccountX402EngineOutput,
+  mutate: (wire: SmartAccountWirePayload) => SmartAccountWirePayload,
+): SmartAccountX402EngineOutput {
+  const wire = payment.payload as SmartAccountWirePayload;
+  return { ...payment, payload: mutate(wire) };
+}
+
+async function mutateSmartAccountPayloadRedeemer(
+  payment: SmartAccountX402EngineOutput,
+  redeemer: Address,
+): Promise<SmartAccountX402EngineOutput> {
+  const wire = payment.payload as SmartAccountWirePayload;
+  const chain = decodeDelegations(wire.permissionContext);
+  const child = chain[0]!;
+  const environment = smartAccountEnvironment();
+  const enforcer = requiredHex(environment.caveatEnforcers.RedeemerEnforcer);
+  const caveats = child.caveats.map((caveat) => caveat.enforcer.toLowerCase() === enforcer.toLowerCase()
+    ? { ...caveat, terms: createRedeemerTerms({ redeemers: [redeemer] }) }
+    : caveat);
+  const unsigned = { ...child, caveats, signature: "0x" as Hex };
+  const signature = await privateKeyToAccount(SESSION_PRIVATE_KEY).signTypedData({
+    domain: {
+      chainId: 8453,
+      name: "DelegationManager",
+      version: "1",
+      verifyingContract: wire.delegationManager,
+    },
+    types: SIGNABLE_DELEGATION_TYPED_DATA,
+    primaryType: "Delegation",
+    message: toDelegationStruct(unsigned),
+  });
+  return {
+    ...payment,
+    payload: {
+      ...wire,
+      permissionContext: encodeDelegations([{ ...unsigned, signature }, ...chain.slice(1)]),
+    },
+  };
+}
+
+function armSmartAccountX402Settlement(rpc: SmartAccountX402Rpc, operation: X402OperationRecord): void {
+  const blockNumber = "12350";
+  const blockHash = `0x${"d".repeat(64)}` as Hex;
+  const observedAt = new Date((NOW + 10) * 1_000).toISOString();
+  rpc.safeHead = {
+    queriedTag: "safe",
+    number: blockNumber,
+    hash: blockHash,
+    timestamp: (BigInt(NOW) + 10n).toString(),
+    observedAt,
+    rpcOrigin: rpc.rpcOrigin,
+  };
+  rpc.blockHashes.set(blockNumber, blockHash);
+  rpc.blockTimestamps.set(blockNumber, rpc.safeHead.timestamp);
+  rpc.x402Receipt = {
+    transactionHash: X402_TRANSACTION as Hex,
+    status: "success",
+    blockNumber,
+    blockHash,
+    logs: [transferLog({
+      from: operation.wallet,
+      to: operation.payee,
+      value: operation.amountAtomic,
+      transactionHash: X402_TRANSACTION as Hex,
+      blockNumber,
+      blockHash,
+    })],
+    observedAt,
+    rpcOrigin: rpc.rpcOrigin,
   };
 }
 

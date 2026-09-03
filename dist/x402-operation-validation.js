@@ -3,8 +3,8 @@ import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { parseAtomic } from "./money.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js";
 import { X402_STATE_VERSION, TRANSITION_VERSION, ZERO_HASH, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-model.js";
-import { validateAttempts, validateAuthorizationUsedScan, validateSettlementEvidence, validateSettlementResponseObservation, validateTransactionHint, validateUnusedExpiryEvidence, } from "./x402-evidence-validation.js";
-import { address, allowedKeys, bytes32, canonicalText, exactRecord, hash, positive, record, stateCorrupt, timestamp, transactionHash, } from "./x402-state-validation-primitives.js";
+import { validateAttempts, validateAuthorizationUsedScan, validateSettlementEvidence, validateSettlementResponseObservation, validateTransferMethodEvidence, validateTransactionHint, validateUnusedExpiryEvidence, } from "./x402-evidence-validation.js";
+import { address, allowedKeys, bytes32, canonicalText, exactRecord, hash, positive, record, stateCorrupt, timestamp, } from "./x402-state-validation-primitives.js";
 export function validateX402OperationUnsafe(value) {
     const operation = record(value);
     const required = [
@@ -14,7 +14,7 @@ export function validateX402OperationUnsafe(value) {
         "proofClass", "nextActions", "createdAt", "updatedAt", "transitions", "integrityHash",
     ];
     const optional = [
-        "paymentIdentifier", "providerSigner", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "settlementResponseObservation",
+        "paymentIdentifier", "providerSigner", "delegatedMaterial", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "paymentContextHash", "settlementResponseObservation",
         "transactionHint", "authorizationUsedScan", "settlementEvidence", "unusedExpiryEvidence", "resultLink", "receiptLink",
     ];
     allowedKeys(operation, required, optional);
@@ -53,10 +53,22 @@ export function validateX402OperationUnsafe(value) {
     if (BigInt(selectedOffer.index) >= 16n)
         stateCorrupt("x402 selected offer index exceeds the supported seller list bound.");
     const requirements = canonicalText(selectedOffer.declaredCanonicalJson);
-    const resolved = exactRecord(selectedOffer.resolved, ["tokenName", "tokenVersion", "assetTransferMethod", "paymentFlow"]);
-    if (typeof resolved.tokenName !== "string" || typeof resolved.tokenVersion !== "string" ||
+    const resolvedRecord = record(selectedOffer.resolved);
+    const resolved = resolvedRecord.assetTransferMethod === "erc7710"
+        ? exactRecord(resolvedRecord, ["assetTransferMethod", "paymentFlow", "facilitatorAddresses"])
+        : exactRecord(resolvedRecord, ["tokenName", "tokenVersion", "assetTransferMethod", "paymentFlow"]);
+    if (resolved.assetTransferMethod === "erc7710") {
+        if (resolved.paymentFlow !== "delegatedErc20Transfer" || !Array.isArray(resolved.facilitatorAddresses) ||
+            resolved.facilitatorAddresses.length === 0 || resolved.facilitatorAddresses.length > 16 ||
+            new Set(resolved.facilitatorAddresses).size !== resolved.facilitatorAddresses.length) {
+            stateCorrupt("x402 ERC-7710 resolved offer is invalid.");
+        }
+        for (const facilitator of resolved.facilitatorAddresses)
+            address(facilitator);
+    }
+    else if (typeof resolved.tokenName !== "string" || typeof resolved.tokenVersion !== "string" ||
         resolved.assetTransferMethod !== "eip3009" || resolved.paymentFlow !== "transferWithAuthorization")
-        stateCorrupt("x402 resolved offer defaults are invalid.");
+        stateCorrupt("x402 EIP-3009 resolved offer defaults are invalid.");
     hash(selectedOffer.offerHash);
     if (selectedOffer.offerHash !== domainHash("apn.x402.offer.v1", selectedOffer.declaredCanonicalJson))
         stateCorrupt("x402 offer hash is invalid.");
@@ -81,10 +93,14 @@ export function validateX402OperationUnsafe(value) {
     if (candidates.length !== 1)
         stateCorrupt("x402 frozen offer is no longer statically compatible.");
     const candidate = candidates[0];
+    const methodFieldsMatch = candidate?.assetTransferMethod === "erc7710" && resolved.assetTransferMethod === "erc7710"
+        ? canonicalJson(candidate.facilitatorAddresses) === canonicalJson(resolved.facilitatorAddresses)
+        : candidate?.assetTransferMethod === "eip3009" && resolved.assetTransferMethod === "eip3009" &&
+            candidate.tokenName === resolved.tokenName && candidate.tokenVersion === resolved.tokenVersion;
     if (candidate === undefined || candidate.offerHash !== selectedOffer.offerHash || candidate.asset !== operation.token ||
         candidate.amountAtomic !== operation.amountAtomic || candidate.payTo !== operation.payee ||
-        candidate.tokenName !== resolved.tokenName || candidate.tokenVersion !== resolved.tokenVersion ||
-        candidate.assetTransferMethod !== resolved.assetTransferMethod || candidate.paymentFlow !== resolved.paymentFlow)
+        candidate.assetTransferMethod !== resolved.assetTransferMethod || candidate.paymentFlow !== resolved.paymentFlow ||
+        !methodFieldsMatch)
         stateCorrupt("x402 frozen offer economics disagree with protected state.");
     const preparedBlock = exactRecord(operation.preparedBlock, ["number", "hash", "observedAt"]);
     parseAtomic(preparedBlock.number);
@@ -105,6 +121,34 @@ export function validateX402OperationUnsafe(value) {
         hash(signer.capabilityHash);
         hash(signer.accountBindingHash);
     }
+    if (operation.delegatedMaterial !== undefined) {
+        const binding = exactRecord(operation.delegatedMaterial, [
+            "schemaVersion", "method", "providerId", "profileRevision", "capabilityHash", "accountBindingHash",
+            "permissionRevision", "rootGrantFingerprint", "sessionAddress", "delegationManager",
+            "facilitatorAddresses", "effectiveExpiryUnix", "rpcOriginHash",
+        ]);
+        if (binding.schemaVersion !== "apn.x402.delegated-material-binding.v1" || binding.method !== "erc7710" ||
+            typeof binding.providerId !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(binding.providerId) ||
+            !Number.isSafeInteger(binding.profileRevision) || Number(binding.profileRevision) < 1 ||
+            !Number.isSafeInteger(binding.permissionRevision) || Number(binding.permissionRevision) < 1 ||
+            !Array.isArray(binding.facilitatorAddresses) || binding.facilitatorAddresses.length === 0 ||
+            binding.facilitatorAddresses.length > 16 || new Set(binding.facilitatorAddresses).size !== binding.facilitatorAddresses.length ||
+            resolved.assetTransferMethod !== "erc7710" ||
+            canonicalJson(binding.facilitatorAddresses) !== canonicalJson(resolved.facilitatorAddresses))
+            stateCorrupt("x402 delegated material binding is invalid.");
+        hash(binding.capabilityHash);
+        hash(binding.accountBindingHash);
+        hash(binding.rootGrantFingerprint);
+        hash(binding.rpcOriginHash);
+        address(binding.sessionAddress);
+        address(binding.delegationManager);
+        positive(binding.effectiveExpiryUnix);
+        for (const facilitator of binding.facilitatorAddresses)
+            address(facilitator);
+    }
+    if ((resolved.assetTransferMethod === "erc7710") !== (operation.delegatedMaterial !== undefined) ||
+        operation.providerSigner !== undefined && operation.delegatedMaterial !== undefined)
+        stateCorrupt("x402 transfer method and provider binding disagree.");
     const authorization = exactRecord(operation.authorization, ["from", "to", "value", "validAfter", "validBefore", "nonce", "createdAt", "intentHash"]);
     address(authorization.from);
     address(authorization.to);
@@ -114,7 +158,11 @@ export function validateX402OperationUnsafe(value) {
     bytes32(authorization.nonce);
     hash(authorization.intentHash);
     if (authorization.from !== operation.wallet || authorization.to !== operation.payee || authorization.value !== operation.amountAtomic ||
-        authorization.validAfter !== "0" || BigInt(authorization.validBefore) !== BigInt(authorization.createdAt) + BigInt(candidate.maxTimeoutSeconds))
+        authorization.validAfter !== "0" ||
+        (resolved.assetTransferMethod === "eip3009"
+            ? BigInt(authorization.validBefore) !== BigInt(authorization.createdAt) + BigInt(candidate.maxTimeoutSeconds)
+            : BigInt(authorization.validBefore) !== BigInt(operation.delegatedMaterial === undefined ? "0" : String(record(operation.delegatedMaterial).effectiveExpiryUnix)) ||
+                BigInt(authorization.validBefore) > BigInt(authorization.createdAt) + BigInt(candidate.maxTimeoutSeconds)))
         stateCorrupt("x402 authorization economics are invalid.");
     const { intentHash: _intentHash, ...intent } = authorization;
     if (authorization.intentHash !== x402AuthorizationIntentHash(intent))
@@ -126,6 +174,11 @@ export function validateX402OperationUnsafe(value) {
     for (const key of signatureKeys)
         if (operation[key] !== undefined)
             hash(operation[key]);
+    if (operation.paymentContextHash !== undefined)
+        hash(operation.paymentContextHash);
+    if ((resolved.assetTransferMethod === "erc7710" && signatureCount !== 0) !== (operation.paymentContextHash !== undefined)) {
+        stateCorrupt("x402 delegated payment context hash is incomplete.");
+    }
     const attempts = validateAttempts(operation.attempts, operation);
     const settlementResponseObservation = operation.settlementResponseObservation === undefined
         ? undefined : validateSettlementResponseObservation(operation.settlementResponseObservation, operation, attempts);
@@ -133,6 +186,7 @@ export function validateX402OperationUnsafe(value) {
     const authorizationUsedScan = operation.authorizationUsedScan === undefined ? undefined : validateAuthorizationUsedScan(operation.authorizationUsedScan, operation);
     const settlementEvidence = operation.settlementEvidence === undefined ? undefined : validateSettlementEvidence(operation.settlementEvidence, operation);
     const unusedExpiryEvidence = operation.unusedExpiryEvidence === undefined ? undefined : validateUnusedExpiryEvidence(operation.unusedExpiryEvidence, operation);
+    validateTransferMethodEvidence(resolved.assetTransferMethod, transactionHint, authorizationUsedScan, settlementEvidence, unusedExpiryEvidence);
     if (operation.resultLink !== undefined) {
         const link = exactRecord(operation.resultLink, ["resultHash", "resultIntegrityHash"]);
         hash(link.resultHash);
@@ -219,7 +273,7 @@ const STATE_SHAPE = {
 const LEGAL_NEXT = {
     awaiting_approval: ["authorization_material_pending", "failed_before_effect"],
     authorization_material_pending: ["authorization_material_pending", "authorized_not_sent", "failed_before_effect"],
-    authorized_not_sent: ["authorized_not_sent", "paid_request_pending", "effect_unknown", "failed_expired_unused"],
+    authorized_not_sent: ["authorized_not_sent", "paid_request_pending", "effect_unknown", "failed_before_effect", "failed_expired_unused"],
     paid_request_pending: ["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed"],
     settlement_pending: ["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed", "failed_settled_without_result"],
     effect_unknown: ["effect_unknown", "settlement_pending", "paid_request_pending", "seller_result_recovery_pending", "completed", "failed_expired_unused", "failed_settled_without_result"],
@@ -331,7 +385,10 @@ export function validateStateSummary(operation, evidence) {
             attempt.observation?.status !== "200")
             stateCorrupt("x402 completed state lacks an observed successful paid response.");
     }
-    if (state === "failed_before_effect" && (evidence.signatureCount !== 0 || evidence.attempts.length !== 0 || !noResponseEvidence || hasResultLink || !hasReceiptLink))
+    const delegatedPreExposureMaterial = record(record(operation.selectedOffer).resolved).assetTransferMethod === "erc7710" &&
+        evidence.signatureCount === 3;
+    if (state === "failed_before_effect" && ((evidence.signatureCount !== 0 && !delegatedPreExposureMaterial) || evidence.attempts.length !== 0 ||
+        !noResponseEvidence || hasResultLink || !hasReceiptLink))
         stateCorrupt("x402 failed-before-effect evidence is invalid.");
     if (state === "failed_expired_unused" && (evidence.signatureCount !== 3 || evidence.unusedExpiryEvidence === undefined || evidence.settlementResponseObservation !== undefined ||
         evidence.transactionHint !== undefined || evidence.settlementEvidence !== undefined ||

@@ -1,5 +1,7 @@
-import type { PaymentPayload, PaymentRequired } from "@x402/core/types";
+import type { PaymentPayload, PaymentRequired, PaymentRequirements } from "@x402/core/types";
 import type { InspectCandidate } from "./x402-model.js";
+export type X402PaymentPayload = PaymentPayload;
+export type X402PaymentRequirements = PaymentRequirements;
 export declare function encodeCanonicalBase64Json(value: unknown): string;
 export declare function decodeCanonicalBase64Json(value: string): unknown;
 export declare function encodePaymentRequiredHeader(value: PaymentRequired): string;

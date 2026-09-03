@@ -173,7 +173,7 @@ test("fresh prepare freezes first fully payable seller entry and exact duplicate
   const publicOperation = operationRecord(prepared);
   assert.deepEqual(Object.keys(publicOperation), [
     "schemaVersion", "kind", "operationId", "state", "finalityClass", "terminal", "reason", "proofClass",
-    "nextActions", "createdAt", "updatedAt", "resource", "payer", "payee", "amountAtomic", "network", "token",
+    "nextActions", "createdAt", "updatedAt", "resource", "payer", "paymentMethod", "payee", "amountAtomic", "network", "token",
     "paymentIdentifier", "integrityHash",
   ]);
   assert.equal(publicOperation.state, "awaiting_approval");

@@ -1,3 +1,4 @@
+import type { X402DelegatedMaterialBinding } from "./provider-ports.js";
 export declare const ZERO_HASH: string;
 export declare const X402_STATE_VERSION: "apn.x402.state.v1";
 export declare const TRANSITION_VERSION: "apn.x402.transition.v1";
@@ -6,17 +7,27 @@ export type X402FinalityClass = "pre_effect" | "unknown_finality" | "known_settl
 export type X402Reason = "x402_awaiting_authorization" | "x402_authorization_material_pending" | "x402_authorized_not_sent" | "x402_paid_request_pending" | "x402_settlement_pending" | "x402_effect_unknown" | "x402_seller_result_recovery_pending" | "x402_completed" | "x402_failed_before_effect" | "x402_failed_expired_unused" | "x402_failed_settled_without_result";
 export type X402ProofClass = "x402_frozen_offer" | "x402_authorization_recovery" | "x402_authorization_verified" | "x402_unknown_finality" | "x402_settlement_verified_result_pending" | "x402_safe_settlement" | "x402_proven_no_effect" | "x402_expired_unused_finalized" | "x402_settled_result_unavailable";
 export type SafeNextAction = "x402.fetch.approve" | "operation.resume" | "operation.status" | "receipt.get" | "use.archival_rpc";
-export interface X402SelectedOffer {
+interface X402SelectedOfferBase {
     readonly index: string;
     readonly declaredCanonicalJson: string;
+    readonly offerHash: string;
+}
+export interface X402SelectedEip3009Offer extends X402SelectedOfferBase {
     readonly resolved: {
         readonly tokenName: string;
         readonly tokenVersion: string;
         readonly assetTransferMethod: "eip3009";
         readonly paymentFlow: "transferWithAuthorization";
     };
-    readonly offerHash: string;
 }
+export interface X402SelectedErc7710Offer extends X402SelectedOfferBase {
+    readonly resolved: {
+        readonly assetTransferMethod: "erc7710";
+        readonly paymentFlow: "delegatedErc20Transfer";
+        readonly facilitatorAddresses: readonly `0x${string}`[];
+    };
+}
+export type X402SelectedOffer = X402SelectedEip3009Offer | X402SelectedErc7710Offer;
 export interface X402HttpObservation {
     readonly attemptNumber: string;
     readonly purpose: "payment" | "result_recovery";
@@ -85,7 +96,7 @@ export interface AuthorizationUsedScan {
     readonly updatedAt: string;
     readonly evidenceHash: string;
 }
-export interface SettlementEvidence {
+export interface Eip3009SettlementEvidence {
     readonly schemaVersion: "apn.x402.settlement-evidence.v1";
     readonly network: "eip155:8453";
     readonly chainId: "8453";
@@ -130,6 +141,47 @@ export interface SettlementEvidence {
     readonly rpcOriginHash: string;
     readonly evidenceHash: string;
 }
+export interface Erc7710SettlementEvidence {
+    readonly schemaVersion: "apn.x402.erc7710-settlement-evidence.v1";
+    readonly network: "eip155:8453";
+    readonly chainId: "8453";
+    readonly token: `0x${string}`;
+    readonly transactionHash: `0x${string}`;
+    readonly safeHead: {
+        readonly number: string;
+        readonly hash: `0x${string}`;
+        readonly observedAt: string;
+    };
+    readonly transactionBlock: {
+        readonly number: string;
+        readonly hash: `0x${string}`;
+        readonly timestamp: string;
+    };
+    readonly receiptStatus: "1";
+    readonly blockHashRechecked: true;
+    readonly transfer: {
+        readonly logIndex: string;
+        readonly from: `0x${string}`;
+        readonly to: `0x${string}`;
+        readonly value: string;
+        readonly blockNumber: string;
+        readonly blockHash: `0x${string}`;
+        readonly transactionHash: `0x${string}`;
+    };
+    readonly methodBinding: {
+        readonly paymentResponseHash: string;
+        readonly operationBindingHash: string;
+        readonly offerHash: string;
+        readonly method: "erc7710";
+        readonly delegationManager: `0x${string}`;
+        readonly delegator: `0x${string}`;
+        readonly childHash: string;
+        readonly permissionContextHash: string;
+    };
+    readonly rpcOriginHash: string;
+    readonly evidenceHash: string;
+}
+export type SettlementEvidence = Eip3009SettlementEvidence | Erc7710SettlementEvidence;
 export interface UnusedExpiryEvidence {
     readonly schemaVersion: "apn.x402.unused-expiry-evidence.v1";
     readonly network: "eip155:8453";
@@ -190,6 +242,7 @@ export interface X402ReceiptRecord {
     readonly amountAtomic: string;
     readonly network: "eip155:8453";
     readonly token: `0x${string}`;
+    readonly transferMethod?: "eip3009" | "erc7710";
     readonly paymentIdentifier?: string;
     readonly settlementResponseHash?: string;
     readonly settlementEvidence?: SettlementEvidence;
@@ -252,6 +305,7 @@ export interface X402OperationRecord {
         readonly executionOwner: "apn";
         readonly retryOwner: "apn_state_machine";
     };
+    readonly delegatedMaterial?: X402DelegatedMaterialBinding;
     readonly preparedBlock: {
         readonly number: string;
         readonly hash: `0x${string}`;
@@ -275,6 +329,7 @@ export interface X402OperationRecord {
     readonly signatureHash?: string;
     readonly paymentPayloadHash?: string;
     readonly paymentHeaderHash?: string;
+    readonly paymentContextHash?: string;
     readonly attempts: readonly X402Attempt[];
     readonly settlementResponseObservation?: SettlementResponseObservation;
     readonly transactionHint?: TransactionHint;
@@ -304,9 +359,10 @@ export declare function x402RequestHash(input: {
     readonly canonicalUrl: string;
     readonly capAtomic: string;
 }): string;
-export declare function x402Fingerprint(input: Pick<X402OperationRecord, "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier" | "providerSigner">): string;
+export declare function x402Fingerprint(input: Pick<X402OperationRecord, "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier" | "providerSigner" | "delegatedMaterial">): string;
 export declare function x402AuthorizationIntentHash(value: Omit<X402OperationRecord["authorization"], "intentHash">): string;
 export declare function x402OperationBindingHash(operation: X402OperationRecord): string;
 export declare function x402TransactionHintSourceBindingHash(source: TransactionHint["source"], sourceHash: string): string;
 export declare function appendX402Transition(previous: readonly X402Transition[], input: Omit<X402Transition, "sequence" | "previousHash" | "hash">): readonly X402Transition[];
 export declare function sealX402Operation(value: Omit<X402OperationRecord, "integrityHash">): X402OperationRecord;
+export {};

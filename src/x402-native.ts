@@ -57,6 +57,7 @@ export interface X402NativeAuthorizationMaterial {
 
 export interface VerifiedX402PaymentMaterial {
   readonly native: X402NativeAuthorizationMaterial;
+  readonly materialHash: string;
   readonly paymentPayloadHash: string;
   readonly paymentHeaderHash: string;
   readonly paymentHeader: string;
@@ -81,6 +82,7 @@ export function x402NativeRequest(
 }
 
 export function x402NativeCreatePayload(operation: X402OperationRecord): X402NativeCreatePayload {
+  const resolved = eip3009Resolved(operation);
   const posture = paymentIdentifierPosture(operation);
   return {
     profile: operation.profile,
@@ -98,8 +100,8 @@ export function x402NativeCreatePayload(operation: X402OperationRecord): X402Nat
     payee: operation.payee,
     amountAtomic: operation.amountAtomic,
     tokenDomain: {
-      name: operation.selectedOffer.resolved.tokenName,
-      version: operation.selectedOffer.resolved.tokenVersion,
+      name: resolved.tokenName,
+      version: resolved.tokenVersion,
     },
     authorization: frozenAuthorization(operation),
     paymentIdentifierPosture: posture,
@@ -113,6 +115,7 @@ export function x402NativeRecoveryPayload(
   operation: X402OperationRecord,
   expectedSignatureHash?: string,
 ): X402NativeRecoveryPayload {
+  const resolved = eip3009Resolved(operation);
   return {
     profile: operation.profile,
     operationId: operation.operationId,
@@ -121,8 +124,8 @@ export function x402NativeRecoveryPayload(
     chainId: "8453",
     token: operation.token,
     tokenDomain: {
-      name: operation.selectedOffer.resolved.tokenName,
-      version: operation.selectedOffer.resolved.tokenVersion,
+      name: resolved.tokenName,
+      version: resolved.tokenVersion,
     },
     authorization: publicAuthorization(operation),
     intentHash: operation.authorization.intentHash,
@@ -142,6 +145,7 @@ export async function verifyAndConstructX402PaymentMaterial(
   value: unknown,
   operation: X402OperationRecord,
 ): Promise<VerifiedX402PaymentMaterial> {
+  const resolved = eip3009Resolved(operation);
   const native = parseNativeMaterial(value);
   if (canonicalJson(native.authorization) !== canonicalJson(publicAuthorization(operation))) {
     throw protocol("Native authorization fields differ from the frozen operation.");
@@ -155,8 +159,8 @@ export async function verifyAndConstructX402PaymentMaterial(
   try {
     recovered = await recoverTypedDataAddress({
       domain: {
-        name: operation.selectedOffer.resolved.tokenName,
-        version: operation.selectedOffer.resolved.tokenVersion,
+        name: resolved.tokenName,
+        version: resolved.tokenVersion,
         chainId: 8453,
         verifyingContract: BASE_USDC,
       },
@@ -213,7 +217,15 @@ export async function verifyAndConstructX402PaymentMaterial(
   const paymentHeader = encodePaymentSignatureHeader(payload);
   const paymentPayloadHash = domainHash("apn.x402.payment-payload.v1", canonicalJson(payload));
   const paymentHeaderHash = domainHash("apn.x402.payment-header.v1", Buffer.from(paymentHeader, "ascii"));
-  return { native, paymentPayloadHash, paymentHeaderHash, paymentHeader };
+  return { native, materialHash: native.signatureHash, paymentPayloadHash, paymentHeaderHash, paymentHeader };
+}
+
+function eip3009Resolved(operation: X402OperationRecord) {
+  const resolved = operation.selectedOffer.resolved;
+  if (resolved.assetTransferMethod !== "eip3009") {
+    throw new ApnError("APN_STATE_CORRUPT", "EIP-3009 material path received a different x402 transfer method.");
+  }
+  return resolved;
 }
 
 export function isNativeNotFound(error: unknown): boolean {

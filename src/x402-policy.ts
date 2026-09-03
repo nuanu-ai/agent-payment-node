@@ -77,23 +77,29 @@ export function selectPrepareOffer(
   evidence: X402PrepareEvidence,
   wallet: Address,
   context: PrepareEvidenceContext,
+  transferMethod: "eip3009" | "erc7710" = "eip3009",
 ): SelectedPrepareOffer {
-  validatePrepareEvidence(evidence, wallet, context);
+  validatePrepareEvidence(evidence, wallet, context, transferMethod);
   const balance = parseAtomic(evidence.usdcAtomic);
+  let hasMatchingMethod = false;
   let hasSufficientBalance = false;
   for (const candidate of underCap) {
+    if (candidate.assetTransferMethod !== transferMethod) continue;
+    hasMatchingMethod = true;
     const amount = parseAtomic(candidate.amountAtomic, { positive: true });
     if (amount > balance) continue;
     hasSufficientBalance = true;
-    if (candidate.tokenName !== evidence.tokenName || candidate.tokenVersion !== evidence.tokenVersion) continue;
-    if (tokenDomainSeparator(candidate.tokenName, candidate.tokenVersion) !== evidence.domainSeparator) continue;
+    if (candidate.assetTransferMethod === "eip3009" && (
+      candidate.tokenName !== evidence.tokenName || candidate.tokenVersion !== evidence.tokenVersion ||
+      tokenDomainSeparator(candidate.tokenName, candidate.tokenVersion) !== evidence.domainSeparator
+    )) continue;
     const index = Number(candidate.index);
     const requirements = challenge.paymentRequired.accepts[index];
     if (requirements === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Selected seller index is missing from the fresh challenge.");
     const declaredCanonicalJson = canonicalJson(requirements);
     return {
       requirements,
-      selectedOffer: {
+      selectedOffer: candidate.assetTransferMethod === "eip3009" ? {
         index: candidate.index,
         declaredCanonicalJson,
         resolved: {
@@ -103,12 +109,22 @@ export function selectPrepareOffer(
           paymentFlow: "transferWithAuthorization",
         },
         offerHash: domainHash("apn.x402.offer.v1", declaredCanonicalJson),
+      } : {
+        index: candidate.index,
+        declaredCanonicalJson,
+        resolved: {
+          assetTransferMethod: "erc7710",
+          paymentFlow: "delegatedErc20Transfer",
+          facilitatorAddresses: candidate.facilitatorAddresses as readonly `0x${string}`[],
+        },
+        offerHash: domainHash("apn.x402.offer.v1", declaredCanonicalJson),
       },
       amountAtomic: candidate.amountAtomic,
       payee: candidate.payTo as Address,
       maxTimeoutSeconds: Number(candidate.maxTimeoutSeconds),
     };
   }
+  if (!hasMatchingMethod) throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer matches the payer transfer method.");
   if (!hasSufficientBalance) throw new ApnError("APN_INSUFFICIENT_USDC", "USDC balance is insufficient for every offer within the explicit cap.");
   throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer matches the pinned token domain.");
 }
@@ -145,17 +161,25 @@ export function materializePaymentIdentifier(
   return { ...declaration, info: { ...declaration.info, id: paymentIdentifier.value } };
 }
 
-function validatePrepareEvidence(evidence: X402PrepareEvidence, wallet: Address, context: PrepareEvidenceContext): void {
+function validatePrepareEvidence(
+  evidence: X402PrepareEvidence,
+  wallet: Address,
+  context: PrepareEvidenceContext,
+  transferMethod: "eip3009" | "erc7710",
+): void {
   const observedAtMs = Date.parse(evidence.observedAt);
   if (
     evidence.address.toLowerCase() !== wallet.toLowerCase() || evidence.queriedTag !== "safe" ||
-    typeof evidence.tokenName !== "string" || evidence.tokenName.length === 0 || Buffer.byteLength(evidence.tokenName, "utf8") > 128 ||
-    typeof evidence.tokenVersion !== "string" || evidence.tokenVersion.length === 0 || Buffer.byteLength(evidence.tokenVersion, "utf8") > 128 ||
-    !BYTES32.test(evidence.domainSeparator) || !HASH.test(evidence.rpcOriginHash) || evidence.rpcOriginHash !== context.rpcOriginHash ||
+    !HASH.test(evidence.rpcOriginHash) || evidence.rpcOriginHash !== context.rpcOriginHash ||
     !UTC.test(evidence.observedAt) || !Number.isFinite(observedAtMs) ||
     observedAtMs < context.invocationStartedAtMs || observedAtMs > context.invocationCompletedAtMs ||
     !BYTES32.test(evidence.block.hash) || /^0x0{64}$/u.test(evidence.block.hash)
   ) throw new ApnError("APN_RPC_PROTOCOL", "x402 prepare RPC evidence is invalid or mismatched.");
+  if (transferMethod === "eip3009" && (
+    typeof evidence.tokenName !== "string" || evidence.tokenName.length === 0 || Buffer.byteLength(evidence.tokenName, "utf8") > 128 ||
+    typeof evidence.tokenVersion !== "string" || evidence.tokenVersion.length === 0 || Buffer.byteLength(evidence.tokenVersion, "utf8") > 128 ||
+    !BYTES32.test(evidence.domainSeparator)
+  )) throw new ApnError("APN_RPC_PROTOCOL", "x402 EIP-3009 token-domain evidence is invalid.");
   let blockNumber: bigint;
   let blockTimestamp: bigint;
   try {

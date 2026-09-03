@@ -35,7 +35,7 @@ export function validateX402ReceiptUnsafe(value) {
     const receipt = allowedRecord(value, [
         "schemaVersion", "kind", "operationId", "terminalState", "reason", "proofClass", "resource", "fingerprint", "offerHash",
         "payer", "payee", "amountAtomic", "network", "token", "operationBindingHash", "previousLinkHash", "createdAt", "integrityHash",
-    ], ["paymentIdentifier", "settlementResponseHash", "settlementEvidence", "unusedExpiryEvidence", "result"]);
+    ], ["transferMethod", "paymentIdentifier", "settlementResponseHash", "settlementEvidence", "unusedExpiryEvidence", "result"]);
     if (receipt.schemaVersion !== "apn.x402.receipt.v1" || receipt.kind !== "x402_fetch" || receipt.network !== CHAIN_CAIP2 || receipt.token !== BASE_USDC.toLowerCase())
         stateCorrupt("x402 receipt discriminant is invalid.");
     hash(receipt.operationId);
@@ -51,12 +51,19 @@ export function validateX402ReceiptUnsafe(value) {
     address(receipt.payer);
     address(receipt.payee);
     positive(receipt.amountAtomic);
+    if (receipt.transferMethod !== undefined && receipt.transferMethod !== "eip3009" && receipt.transferMethod !== "erc7710") {
+        stateCorrupt("x402 receipt transfer method is invalid.");
+    }
     if (receipt.paymentIdentifier !== undefined && (typeof receipt.paymentIdentifier !== "string" || !/^apn_[a-f0-9]{64}$/u.test(receipt.paymentIdentifier)))
         stateCorrupt("x402 receipt payment identifier is invalid.");
     if (receipt.settlementResponseHash !== undefined)
         hash(receipt.settlementResponseHash);
     const settlementEvidence = receipt.settlementEvidence === undefined ? undefined : validateSettlementEvidence(receipt.settlementEvidence);
     const unusedExpiryEvidence = receipt.unusedExpiryEvidence === undefined ? undefined : validateUnusedExpiryEvidence(receipt.unusedExpiryEvidence);
+    if ((settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" && receipt.transferMethod !== "erc7710") ||
+        (settlementEvidence?.schemaVersion === "apn.x402.settlement-evidence.v1" && receipt.transferMethod === "erc7710") ||
+        (unusedExpiryEvidence !== undefined && receipt.transferMethod === "erc7710"))
+        stateCorrupt("x402 receipt transfer method conflicts with its evidence.");
     if (receipt.result !== undefined) {
         const result = exactRecord(receipt.result, ["resultHash", "mediaType", "byteLength", "resultIntegrityHash"]);
         hash(result.resultHash);
