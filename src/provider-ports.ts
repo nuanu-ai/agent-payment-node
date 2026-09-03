@@ -21,6 +21,54 @@ export interface ProviderConnectOptions {
   readonly authenticationMethod?: string;
 }
 
+export type ProviderPermissionState =
+  | "pending_consent"
+  | "grant_committed_pending_profile"
+  | "active"
+  | "disabled"
+  | "expired"
+  | "revoked"
+  | "drift_blocked";
+
+export type ProviderRevocationFreshness =
+  | "never_synced"
+  | "confirmed_present"
+  | "confirmed_absent"
+  | "unverified";
+
+export interface ProviderPermissionConnectIntent {
+  readonly profile: string;
+  readonly profileHash: string;
+  readonly authenticationMethod: "browser";
+  readonly idempotencyKey: string;
+  readonly capAtomic: string;
+  readonly expiresAtUnix: number;
+}
+
+export interface ProviderPermissionBinding {
+  readonly owner_address: Address;
+  readonly session_address: Address;
+  readonly state: ProviderPermissionState;
+  readonly revision: number;
+  readonly requested_cap_atomic: string;
+  readonly granted_cap_atomic: string;
+  readonly starts_at_unix: number;
+  readonly expires_at_unix: number;
+  readonly grant_fingerprint: string;
+  readonly last_foreground_sync_at?: string;
+  readonly revocation_freshness: ProviderRevocationFreshness;
+  readonly observed_at: string;
+}
+
+export interface ProviderPermissionLifecyclePort {
+  connect(intent: ProviderPermissionConnectIntent): Promise<ProviderPermissionBinding>;
+  activate(profileHash: string): Promise<ProviderPermissionBinding>;
+  read(profileHash: string): Promise<ProviderPermissionBinding | null>;
+  sync(profileHash: string, expectedRevision: number): Promise<ProviderPermissionBinding>;
+  disable(profileHash: string, expectedRevision: number): Promise<ProviderPermissionBinding>;
+  forget(profileHash: string, expectedRevision: number): Promise<{ readonly warning: string }>;
+}
+
 export interface ProviderLifecyclePort {
   readonly authenticationMethods?: readonly string[];
   connect(foreground: ForegroundAuthenticationPort, options?: ProviderConnectOptions): Promise<void>;
@@ -152,6 +200,7 @@ export interface EvidencePort {
 export interface ProviderProfileRepositoryPort {
   load(profileHash: string): Promise<ProviderProfileRecord | null>;
   save(profile: ProviderProfileRecord): Promise<void>;
+  remove(profileHash: string): Promise<void>;
 }
 
 export interface OperationRepositoryPort {
@@ -172,6 +221,7 @@ export interface ProviderAdapterBundle {
   readonly x402?: X402ExecutionPort;
   readonly x402Signer?: X402SigningPort;
   readonly evidence?: EvidencePort;
+  readonly permissions?: ProviderPermissionLifecyclePort;
 }
 
 export interface ProviderRegistryPort {

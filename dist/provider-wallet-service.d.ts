@@ -9,4 +9,5 @@ export declare class ProviderWalletService {
     status(profileInput: string): Promise<unknown | null>;
     balance(profileInput: string): Promise<unknown | null>;
     assertPaymentAvailable(profileInput: string, kind: "direct" | "x402"): Promise<void>;
+    private connectPermissionProfile;
 }

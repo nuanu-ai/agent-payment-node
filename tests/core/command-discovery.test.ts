@@ -32,7 +32,7 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["mcp", "doctor", "wallet", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "--version",
   "mcp serve",
@@ -40,6 +40,10 @@ const EXPECTED_COMMANDS = [
   "doctor keychain",
   "wallet ensure",
   "wallet connect",
+  "wallet permission list",
+  "wallet permission sync",
+  "wallet permission disable",
+  "wallet permission forget",
   "wallet status",
   "wallet balance",
   "wallet policy show",
@@ -116,16 +120,35 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  apn wallet <command> [options]",
     "",
     "Subgroups:",
+    "  apn wallet permission <command> [options] — Inspect and manage bounded provider permission state.",
     "  apn wallet policy <command> [options] — Inspect or change owner-approved wallet policy.",
     "",
     "Commands:",
     "  apn wallet ensure [--profile <profile>] — Create or reuse one encrypted disposable wallet.",
-    "  apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] — Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.",
+    "  apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>] — Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.",
     "  apn wallet status [--profile <profile>] — Read wallet presence and public identity.",
     "  apn wallet balance [--profile <profile>] --rpc-url <https-url> — Read Base ETH and canonical Base-USDC balances.",
     "",
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet <child>",
+  ].join("\n"));
+  assert.equal(renderHelp(["wallet", "permission"]), [
+    "Inspect and manage bounded provider permission state.",
+    "",
+    "Usage:",
+    "  apn wallet permission <command> [options]",
+    "",
+    "Subgroups:",
+    "  (none)",
+    "",
+    "Commands:",
+    "  apn wallet permission list --profile <profile> — Read the locally persisted bounded provider permission without contacting the provider.",
+    "  apn wallet permission sync --profile <profile> --expected-revision <positive-integer> — Foreground-sync the exact persisted permission against MetaMask granted permissions.",
+    "  apn wallet permission disable --profile <profile> --expected-revision <positive-integer> — Disable one local provider permission binding without claiming provider-side revocation.",
+    "  apn wallet permission forget --profile <profile> --expected-revision <positive-integer> — Delete the local session, permission material and profile binding.",
+    "",
+    "Machine contract: apn help --json",
+    "Detailed help: apn help wallet permission <child>",
   ].join("\n"));
   assert.equal(renderHelp(["wallet", "policy"]), [
     "Inspect or change owner-approved wallet policy.",

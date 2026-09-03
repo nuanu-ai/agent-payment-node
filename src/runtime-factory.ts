@@ -32,6 +32,20 @@ import {
   EncryptedProviderAuthorizationStore,
   type ProviderAuthorizationStorePort,
 } from "./encrypted-provider-authorization-store.js";
+import {
+  EncryptedSmartAccountPermissionStore,
+  type SmartAccountPermissionStorePort,
+} from "./encrypted-smart-account-permission-store.js";
+import {
+  METAMASK_SMART_ACCOUNT_PROVIDER_ID,
+  LocalSessionKeyFactory,
+  MetaMaskSmartAccountAdapter,
+  type SessionKeyFactoryPort,
+} from "./metamask-smart-account-adapter.js";
+import {
+  LoopbackMetaMaskConsent,
+  type SmartAccountConsentPort,
+} from "./metamask-smart-account-consent.js";
 
 export interface RuntimeFactoryOptions {
   readonly stateRoot?: string;
@@ -50,6 +64,9 @@ export interface RuntimeFactoryOptions {
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+  readonly smartAccountPermissionStore?: SmartAccountPermissionStorePort;
+  readonly smartAccountConsent?: SmartAccountConsentPort;
+  readonly smartAccountSessionKeys?: SessionKeyFactoryPort;
 }
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
@@ -69,6 +86,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const rpc = options.rpc ?? (bound.rpcUrl === undefined ? undefined : new HttpsBaseRpc(bound.rpcUrl));
   const http = options.http ?? (needsHttp(bound.request.command) ? new HttpsX402Http() : undefined);
   const profileRepository = options.profileRepository ?? new StateProfileRepository(state);
+  const smartAccountPermissionStore = options.smartAccountPermissionStore ??
+    new EncryptedSmartAccountPermissionStore(state, wrappingSecret);
+  const smartAccountConsent = options.smartAccountConsent ?? new LoopbackMetaMaskConsent();
   const providerRegistry = options.providerRegistry ?? new ProviderRegistry([
     {
       provider_id: AWAL_PROVIDER_ID,
@@ -81,9 +101,20 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         async (work) => await state.withLocks([`provider-session:${METAMASK_AGENT_WALLET_PROVIDER_ID}`], work),
       ).bundle(),
     },
+    {
+      provider_id: METAMASK_SMART_ACCOUNT_PROVIDER_ID,
+      create: () => new MetaMaskSmartAccountAdapter(
+        smartAccountPermissionStore,
+        smartAccountConsent,
+        options.smartAccountSessionKeys ?? new LocalSessionKeyFactory(),
+        options.clock?.now ?? (() => new Date()),
+      ).bundle(),
+    },
   ]);
   const foregroundAuthentication = options.foregroundAuthentication ?? (
-    bound.request.command === "wallet.connect" ? new TtyForegroundAuthentication() : undefined
+    bound.request.command === "wallet.connect" && bound.request.providerId !== METAMASK_SMART_ACCOUNT_PROVIDER_ID
+      ? new TtyForegroundAuthentication()
+      : undefined
   );
   const transferApproval = options.approval ?? (
     bound.request.command === "transfer.approve" ? new TtyTransferApproval() : undefined

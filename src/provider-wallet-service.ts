@@ -1,14 +1,23 @@
 import { CHAIN_CAIP2, BASE_USDC, ETH_DECIMALS, USDC_DECIMALS } from "./constants.js";
 import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
-import { formatAtomic } from "./money.js";
+import { formatAtomic, parseAtomic } from "./money.js";
 import {
+  accountBindingHash,
   capabilityHash,
   markProviderProfileDrift,
   type ProviderBindingObservation,
   type ProviderProfileRecord,
 } from "./provider-profile.js";
+import { publicPermissionProfile } from "./provider-permission-output.js";
+import type {
+  ProviderAdapterBundle,
+  ProviderPermissionBinding,
+  ProviderPermissionLifecyclePort,
+} from "./provider-ports.js";
+import type { BalanceSnapshot } from "./ports.js";
 import type { RuntimeContext } from "./runtime.js";
+import { canonicalIdempotencyKey } from "./transfer-policy.js";
 import { canonicalProfile, publicProvenance, validateBalance } from "./wallet-policy.js";
 
 export class ProviderWalletService {
@@ -21,18 +30,24 @@ export class ProviderWalletService {
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
       const repository = this.context.requireProfileRepository();
       const existing = await repository.load(profileHash);
-      if (existing === null && request.expectedRevision !== undefined) {
-        throw revisionConflict("Initial provider connection must omit --expected-revision.");
-      }
       if (existing !== null) {
         if (existing.provider_id !== request.providerId) {
           throw new ApnError("APN_PROFILE_DRIFT", "The APN profile is already bound to a different provider.");
         }
-        if (request.expectedRevision !== undefined && request.expectedRevision !== existing.revision) {
-          throw revisionConflict("The expected profile revision is stale.");
-        }
       }
       const adapter = this.context.requireProviderRegistry().resolve(request.providerId);
+      if (hasPermissionIntent(request) && adapter.permissions === undefined) {
+        throw new ApnError("APN_INVALID_INPUT", "Permission arguments are valid only for a permission-lifecycle provider.");
+      }
+      if (adapter.permissions !== undefined) {
+        return await this.connectPermissionProfile(request, profile, profileHash, existing, adapter, adapter.permissions);
+      }
+      if (existing === null && request.expectedRevision !== undefined) {
+        throw revisionConflict("Initial provider connection must omit --expected-revision.");
+      }
+      if (existing !== null && request.expectedRevision !== undefined && request.expectedRevision !== existing.revision) {
+        throw revisionConflict("The expected profile revision is stale.");
+      }
       if (
         request.authenticationMethod !== undefined &&
         !adapter.lifecycle.authenticationMethods?.includes(request.authenticationMethod)
@@ -110,6 +125,21 @@ export class ProviderWalletService {
       const current = await repository.load(profileHash);
       if (current === null) throw new ApnError("APN_STATE_CORRUPT", "Provider profile disappeared during status.");
       const adapter = this.context.requireProviderRegistry().resolve(current.provider_id);
+      if (adapter.permissions !== undefined) {
+        let permission = await adapter.permissions.read(profileHash);
+        if (permission === null) {
+          throw new ApnError("APN_STATE_CORRUPT", "The Smart Account profile has no committed permission record.");
+        }
+        if (permission.state === "grant_committed_pending_profile") {
+          permission = await adapter.permissions.activate(profileHash);
+        }
+        const observed = permissionObservation(adapter, permission);
+        const checked = sameBinding(current, observed)
+          ? alignPermissionProfile(current, adapter, permission)
+          : alignPermissionRevision(markProviderProfileDrift(current, observed), permission);
+        if (checked !== current) await repository.save(checked);
+        return publicPermissionProfile(checked, permission, true);
+      }
       await adapter.lifecycle.probeStatus();
       const observation = await adapter.reads.observeBalance();
       await adapter.reads.crossCheckAddress(observation.address);
@@ -139,6 +169,29 @@ export class ProviderWalletService {
       const bound = await this.context.requireProfileRepository().load(profileHash);
       if (bound === null || bound.provider_id === "local") {
         throw new ApnError("APN_STATE_CORRUPT", "Provider profile changed during balance read.");
+      }
+      const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
+      if (adapter.permissions !== undefined) {
+        let permission = await adapter.permissions.read(profileHash);
+        if (permission === null) {
+          throw new ApnError("APN_STATE_CORRUPT", "The Smart Account profile has no committed permission record.");
+        }
+        if (permission.state === "grant_committed_pending_profile") {
+          permission = await adapter.permissions.activate(profileHash);
+        }
+        const observed = permissionObservation(adapter, permission);
+        if (!sameBinding(bound, observed) || bound.drift.state !== "bound") {
+          const drifted = bound.drift.state === "bound" ? markProviderProfileDrift(bound, observed) : bound;
+          if (drifted !== bound) await this.context.requireProfileRepository().save(drifted);
+          throw new ApnError("APN_PROFILE_DRIFT", "Provider identity or capabilities changed; balance remains unavailable until a new foreground identity is created.");
+        }
+        const [owner, session] = await Promise.all([
+          this.context.requireRpc().getBalances(permission.owner_address),
+          this.context.requireRpc().getBalances(permission.session_address),
+        ]);
+        validateBalance(owner, permission.owner_address);
+        validateBalance(session, permission.session_address);
+        return permissionBalance(profile, bound, permission, owner, session);
       }
       const snapshot = await this.context.requireRpc().getBalances(bound.public_address);
       validateBalance(snapshot, bound.public_address);
@@ -187,7 +240,8 @@ export class ProviderWalletService {
     }
     const capability = kind === "direct" ? bound.capability_snapshot.direct : bound.capability_snapshot.x402;
     if (!capability.available) {
-      if (kind === "direct" || bound.provider_id === "metamask-agent-wallet") {
+      if (bound.capability_snapshot.permission === undefined &&
+        (kind === "direct" || bound.provider_id === "metamask-agent-wallet")) {
         throw new ApnError(
           "APN_PROFILE_DRIFT",
           `The persisted provider profile predates ${kind}-effect binding; explicit foreground rebind is required.`,
@@ -197,6 +251,162 @@ export class ProviderWalletService {
       throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This provider profile does not support the requested payment effect in this APN version.");
     }
   }
+
+  private async connectPermissionProfile(
+    request: Extract<CommandRequest, { readonly command: "wallet.connect" }>,
+    profile: string,
+    profileHash: string,
+    existing: ProviderProfileRecord | null,
+    adapter: ProviderAdapterBundle,
+    permissions: ProviderPermissionLifecyclePort,
+  ): Promise<unknown> {
+    if (request.authenticationMethod !== "browser") {
+      throw new ApnError("APN_INVALID_INPUT", "MetaMask Smart Account connect requires --auth-method browser.");
+    }
+    if (request.expectedRevision !== undefined) {
+      throw new ApnError("APN_INVALID_INPUT", "Permission-lifecycle connect does not accept --expected-revision; retry with the same idempotency key.");
+    }
+    const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
+    const capAtomic = parseAtomic(request.permissionCapUsdcAtomic, { positive: true }).toString();
+    if (!Number.isSafeInteger(request.permissionExpiresAt) || Number(request.permissionExpiresAt) <= 0) {
+      throw new ApnError("APN_INVALID_INPUT", "Permission expiry must be a positive absolute Unix timestamp.");
+    }
+    if (existing !== null && await permissions.read(profileHash) === null) {
+      throw new ApnError("APN_STATE_CORRUPT", "The Smart Account profile has no committed permission record.");
+    }
+    const permission = await permissions.connect({
+      profile,
+      profileHash,
+      authenticationMethod: "browser",
+      idempotencyKey,
+      capAtomic,
+      expiresAtUnix: Number(request.permissionExpiresAt),
+    });
+    const observed = permissionObservation(adapter, permission);
+    let bound: ProviderProfileRecord;
+    if (existing === null) {
+      bound = boundProfile({
+        profile,
+        profileHash,
+        providerId: adapter.provider_id,
+        revision: permission.revision,
+        capabilities: adapter.capabilities,
+        ...observed,
+      });
+      await this.context.requireProfileRepository().save(bound);
+    } else {
+      if (!sameBinding(existing, observed) || existing.drift.state !== "bound") {
+        throw new ApnError("APN_PROFILE_DRIFT", "The persisted Smart Account binding differs from the exact committed permission.");
+      }
+      bound = alignPermissionProfile(existing, adapter, permission);
+      if (bound !== existing) await this.context.requireProfileRepository().save(bound);
+    }
+    const active = await permissions.activate(profileHash);
+    const aligned = alignPermissionProfile(bound, adapter, active);
+    if (aligned !== bound) await this.context.requireProfileRepository().save(aligned);
+    return publicPermissionProfile(aligned, active, existing !== null);
+  }
+}
+
+function hasPermissionIntent(request: Extract<CommandRequest, { readonly command: "wallet.connect" }>): boolean {
+  return request.permissionCapUsdcAtomic !== undefined || request.permissionExpiresAt !== undefined || request.idempotencyKey !== undefined;
+}
+
+function permissionObservation(
+  adapter: ProviderAdapterBundle,
+  permission: ProviderPermissionBinding,
+): ProviderBindingObservation {
+  return {
+    address: permission.owner_address,
+    accountBindingHash: accountBindingHash(adapter.provider_id, permission.owner_address),
+    capabilityHash: capabilityHash(adapter.capabilities),
+    observedAt: permission.observed_at,
+    trustClass: adapter.trust_class,
+  };
+}
+
+function alignPermissionProfile(
+  profile: ProviderProfileRecord,
+  adapter: ProviderAdapterBundle,
+  permission: ProviderPermissionBinding,
+): ProviderProfileRecord {
+  const observed = permissionObservation(adapter, permission);
+  if (profile.revision === permission.revision && profile.observed_at === permission.observed_at && sameBinding(profile, observed)) {
+    return profile;
+  }
+  return {
+    ...profile,
+    revision: permission.revision,
+    observed_at: permission.observed_at,
+    public_address: permission.owner_address,
+    account_binding_hash: observed.accountBindingHash,
+    capability_snapshot: adapter.capabilities,
+    capability_hash: observed.capabilityHash,
+    trust_class: adapter.trust_class,
+  };
+}
+
+function alignPermissionRevision(
+  profile: ProviderProfileRecord,
+  permission: ProviderPermissionBinding,
+): ProviderProfileRecord {
+  if (profile.revision === permission.revision && profile.observed_at === permission.observed_at) return profile;
+  return { ...profile, revision: permission.revision, observed_at: permission.observed_at };
+}
+
+function permissionBalance(
+  profile: string,
+  bound: ProviderProfileRecord,
+  permission: ProviderPermissionBinding,
+  owner: BalanceSnapshot,
+  session: BalanceSnapshot,
+): unknown {
+  const balances = (snapshot: typeof owner) => ({
+    ETH: { atomic: snapshot.ethAtomic, decimal: formatAtomic(snapshot.ethAtomic, ETH_DECIMALS), decimals: ETH_DECIMALS },
+    USDC: {
+      atomic: snapshot.usdcAtomic,
+      decimal: formatAtomic(snapshot.usdcAtomic, USDC_DECIMALS),
+      decimals: USDC_DECIMALS,
+      contract: BASE_USDC,
+    },
+  });
+  return {
+    profile,
+    provider: bound.provider_id,
+    revision: bound.revision,
+    capability_hash: bound.capability_hash,
+    status: permission.state,
+    funding_address: permission.owner_address,
+    explorer_url: `https://basescan.org/address/${permission.owner_address}`,
+    chain: CHAIN_CAIP2,
+    proof_class: "chain_verified_public_read",
+    balances: balances(owner),
+    provenance: publicProvenance(owner),
+    accounts: {
+      owner_smart_account: {
+        address: permission.owner_address,
+        role: "funding_and_usdc_owner",
+        balances: balances(owner),
+        provenance: publicProvenance(owner),
+      },
+      session_execution_account: {
+        address: permission.session_address,
+        role: "delegated_execution_and_gas",
+        balances: balances(session),
+        provenance: publicProvenance(session),
+        gas_readiness: parseAtomic(session.ethAtomic) === 0n
+          ? "not_ready_zero_balance"
+          : "unverified_sufficiency_nonzero",
+      },
+    },
+    funding_guidance: {
+      action: `Manually send only Base USDC to owner Smart Account ${permission.owner_address}; future delegated execution also requires Base ETH at session ${permission.session_address}.`,
+      warning: "This read performs no funding action and does not prove future effect availability or gas sufficiency.",
+    },
+    next_actions: permission.state === "active"
+      ? ["Fund manually only if intended", "Re-run apn wallet balance"]
+      : ["Review the permission lifecycle state before any future effect."],
+  };
 }
 
 function boundProfile(input: {

@@ -40,7 +40,9 @@
     "prepack": "npm run build && npm test"
   },
   "dependencies": {
+    "@metamask/7715-permission-types": "2.0.0",
     "@metamask/agent-wallet": "6.1.5",
+    "@metamask/smart-accounts-kit": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@x402/core": "2.23.0",
     "awal": "2.12.1",

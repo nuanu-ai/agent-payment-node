@@ -34,6 +34,10 @@ const allOperationStates = {
     terminal: [...directStates.terminal, ...x402States.terminal.filter((state) => !directStates.terminal.includes(state))],
     non_terminal: [...directStates.non_terminal, ...x402States.non_terminal.filter((state) => !directStates.non_terminal.includes(state))],
 };
+const permissionStates = {
+    terminal: ["active", "disabled", "expired", "revoked", "drift_blocked", "forgotten", "classified_failure"],
+    non_terminal: ["pending_consent", "grant_committed_pending_profile"],
+};
 const profileOptional = option("--profile", "profile", false, defaultProfile, ["matches_[a-z0-9][a-z0-9._-]{0,63}"], "public");
 const profileRequired = option("--profile", "profile", true, noDefault, ["matches_[a-z0-9][a-z0-9._-]{0,63}"], "public");
 const rpcRequired = option("--rpc-url", "https_url", true, noDefault, [
@@ -45,6 +49,7 @@ export const COMMAND_GROUPS = [
     { path: ["mcp"], summary: "Serve and discover the local APN MCP transport.", kind: "group" },
     { path: ["doctor"], summary: "Inspect local APN prerequisites.", kind: "group" },
     { path: ["wallet"], summary: "Create, inspect and configure the disposable wallet.", kind: "group" },
+    { path: ["wallet", "permission"], summary: "Inspect and manage bounded provider permission state.", kind: "group" },
     { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
     { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
     { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
@@ -59,7 +64,7 @@ export const COMMANDS = [
     command(["mcp", "config"], "apn mcp config", "Print the provider-neutral APN MCP launch descriptor.", [], "none", "Returns immutable launch metadata without reading or changing client configuration.", "none", "Never.", completedStates, [], ["apn mcp config"], "text"),
     command(["doctor", "keychain"], "apn doctor keychain", "Check whether the ordinary login Keychain command path is usable.", [], "local_read", "Reads Keychain availability without creating wallet material.", "none", "Never.", completedStates, [], ["apn doctor keychain"]),
     command(["wallet", "ensure"], "apn wallet ensure [--profile <profile>]", "Create or reuse one encrypted disposable wallet.", [profileOptional], "local_write", "May create ~/.apn state and one Keychain wrapping secret.", "none", "Wallet creation itself is non-interactive.", completedStates, [], ["apn wallet ensure --profile default"]),
-    command(["wallet", "connect"], "apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>]", "Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.", [
+    command(["wallet", "connect"], "apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>]", "Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.", [
         profileRequired,
         option("--provider", "provider_id", true, noDefault, ["registered_provider_identifier"], "public"),
         option("--auth-method", "provider_auth_method", false, noDefault, [
@@ -67,11 +72,29 @@ export const COMMANDS = [
             "metamask_agent_wallet_values_qr_or_browser",
         ], "public"),
         option("--expected-revision", "positive_integer", false, noDefault, ["required_for_rebind", "omitted_for_initial_connect"], "public"),
-    ], "local_write", "Runs foreground provider authentication and atomically writes only safe public profile binding facts.", "foreground_tty", "Authentication and any explicit rebind comparison require the foreground CLI terminal.", completedStates, [], [
+        option("--permission-cap-usdc-atomic", "atomic_usdc", false, noDefault, [
+            "required_only_for_permission_lifecycle_providers",
+            "caller_supplied_without_default",
+        ], "operator_input"),
+        option("--permission-expires-at", "positive_integer", false, noDefault, [
+            "future_absolute_unix_seconds",
+            "required_only_for_permission_lifecycle_providers",
+            "caller_supplied_without_default",
+        ], "operator_input"),
+        option("--idempotency-key", "idempotency_key", false, noDefault, [
+            "required_only_for_permission_lifecycle_providers",
+            "never_echoed_in_safe_output",
+        ], "operator_input"),
+    ], "local_write", "Runs foreground provider authentication and may persist an encrypted local session plus exact provider grant and safe public binding facts.", "foreground_tty", "Authentication stays foreground: terminal-native providers use the CLI terminal and Smart Account permission consent opens the browser.", completedStates, [], [
         "apn wallet connect --profile provider-one --provider coinbase-agentic-wallet",
         "apn wallet connect --profile metamask --provider metamask-agent-wallet",
         "apn wallet connect --profile metamask --provider metamask-agent-wallet --auth-method browser",
+        "apn wallet connect --profile smart-account --provider metamask-smart-account --auth-method browser --permission-cap-usdc-atomic 2000000 --permission-expires-at 2000000000 --idempotency-key smart-account-connect-0001",
     ]),
+    command(["wallet", "permission", "list"], "apn wallet permission list --profile <profile>", "Read the locally persisted bounded provider permission without contacting the provider.", [profileRequired], "local_read", "Reads only safe permission identity, bounds, lifecycle, revision and freshness metadata.", "none", "Never.", permissionStates, [], ["apn wallet permission list --profile smart-account"]),
+    command(["wallet", "permission", "sync"], "apn wallet permission sync --profile <profile> --expected-revision <positive-integer>", "Foreground-sync the exact persisted permission against MetaMask granted permissions.", [profileRequired, option("--expected-revision", "positive_integer", true, noDefault, ["must_equal_current_permission_revision"], "public")], "local_write", "Opens bounded foreground provider consent, then records only confirmed presence, absence, drift or unverified freshness.", "foreground_tty", "The human selects the bound account in the foreground MetaMask browser; MCP returns a CLI handoff.", permissionStates, [], ["apn wallet permission sync --profile smart-account --expected-revision 1"]),
+    command(["wallet", "permission", "disable"], "apn wallet permission disable --profile <profile> --expected-revision <positive-integer>", "Disable one local provider permission binding without claiming provider-side revocation.", [profileRequired, option("--expected-revision", "positive_integer", true, noDefault, ["must_equal_current_permission_revision"], "public")], "local_write", "Revision-guards and durably disables future APN effects while retaining safe audit metadata.", "none", "Never; this is local disable, not provider revoke.", permissionStates, [], ["apn wallet permission disable --profile smart-account --expected-revision 1"]),
+    command(["wallet", "permission", "forget"], "apn wallet permission forget --profile <profile> --expected-revision <positive-integer>", "Delete the local session, permission material and profile binding.", [profileRequired, option("--expected-revision", "positive_integer", true, noDefault, ["must_equal_current_permission_revision"], "public")], "local_write", "Deletes only local protected state and warns that MetaMask-side authority may remain.", "none", "Caller must intentionally name the current revision; no provider revoke is implied.", { terminal: ["forgotten", "classified_failure"], non_terminal: [] }, [], ["apn wallet permission forget --profile smart-account --expected-revision 1"]),
     command(["wallet", "status"], "apn wallet status [--profile <profile>]", "Read wallet presence and public identity.", [profileOptional], "local_read", "Returns absent without creating state or accessing Keychain material.", "none", "Never.", completedStates, [], ["apn wallet status --profile default"]),
     command(["wallet", "balance"], "apn wallet balance [--profile <profile>] --rpc-url <https-url>", "Read Base ETH and canonical Base-USDC balances.", [profileOptional, rpcRequired], "network_read", "Reads the configured public Base RPC; never signs or submits.", "none", "Never.", completedStates, [], ["apn wallet balance --profile default --rpc-url <https-base-rpc-url>"]),
     command(["wallet", "policy", "show"], "apn wallet policy show --profile <profile>", "Read the encrypted owner-approved profile policy.", [profileRequired], "local_read", "Reads wallet-bound policy state.", "none", "Never.", completedStates, [], ["apn wallet policy show --profile default"]),

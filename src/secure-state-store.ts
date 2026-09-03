@@ -295,6 +295,42 @@ export class SecureStateStore {
     }
   }
 
+  protected async removeFile(relativePath: string): Promise<boolean> {
+    const target = this.resolveRelative(relativePath);
+    const parent = dirname(target);
+    await this.assertNoSymlinkAncestors(target);
+    let parentBefore: Stats;
+    try {
+      parentBefore = await stat(parent);
+    } catch (error) {
+      if (isCode(error, "ENOENT")) return false;
+      throw error;
+    }
+    validateDirectory(parentBefore, parent === this.root);
+    let handle: FileHandle;
+    try {
+      handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (error) {
+      if (isCode(error, "ENOENT")) return false;
+      if (isCode(error, "ELOOP")) stateSecurity("State file is a symbolic link.");
+      throw error;
+    }
+    try {
+      validateFile(await handle.stat());
+      const parentAfter = await stat(parent);
+      if (parentAfter.dev !== parentBefore.dev || parentAfter.ino !== parentBefore.ino) {
+        stateSecurity("State parent changed during a protected delete.");
+      }
+      await unlink(target);
+      const directory = await open(parent, constants.O_RDONLY);
+      try { await directory.sync(); }
+      finally { await directory.close(); }
+      return true;
+    } finally {
+      await handle.close();
+    }
+  }
+
   private async acquireLock(key: string, waitMs: number, strictDeadline: boolean): Promise<HeldLock> {
     const lockName = `${sha256(`lock\0${key}`)}.lock`;
     const path = this.resolveRelative(join("locks", lockName));

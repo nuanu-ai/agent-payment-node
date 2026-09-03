@@ -6,4 +6,5 @@ export declare class StateProfileRepository implements ProviderProfileRepository
     constructor(state: StateStore);
     load(profileHash: string): Promise<ProviderProfileRecord | null>;
     save(profile: ProviderProfileRecord): Promise<void>;
+    remove(profileHash: string): Promise<void>;
 }
