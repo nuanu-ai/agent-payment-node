@@ -29,7 +29,7 @@ export interface InspectReadiness {
     readonly tokenDomain: "unverified";
     readonly payment: "unverified";
 }
-export interface InspectCandidate {
+interface InspectCandidateBase {
     readonly index: string;
     readonly scheme: "exact";
     readonly network: "eip155:8453";
@@ -37,13 +37,21 @@ export interface InspectCandidate {
     readonly amountAtomic: string;
     readonly payTo: string;
     readonly maxTimeoutSeconds: string;
+    readonly offerHash: string;
+    readonly readiness: InspectReadiness;
+}
+export interface Eip3009InspectCandidate extends InspectCandidateBase {
     readonly tokenName: string;
     readonly tokenVersion: string;
     readonly assetTransferMethod: "eip3009";
     readonly paymentFlow: "transferWithAuthorization";
-    readonly offerHash: string;
-    readonly readiness: InspectReadiness;
 }
+export interface Erc7710InspectCandidate extends InspectCandidateBase {
+    readonly assetTransferMethod: "erc7710";
+    readonly paymentFlow: "delegatedErc20Transfer";
+    readonly facilitatorAddresses: readonly string[];
+}
+export type InspectCandidate = Eip3009InspectCandidate | Erc7710InspectCandidate;
 export interface InspectResult {
     readonly kind: "x402_inspection";
     readonly x402Version: "2";
@@ -54,3 +62,4 @@ export interface InspectResult {
     };
     readonly candidates: readonly InspectCandidate[];
 }
+export {};

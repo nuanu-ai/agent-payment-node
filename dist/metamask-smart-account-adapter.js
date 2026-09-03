@@ -4,7 +4,7 @@ import { ApnError } from "./errors.js";
 import { assertSmartAccountPreflight, validateSmartAccountObservation, } from "./metamask-smart-account-grant.js";
 import { assertMetaMaskSmartAccountPackageIdentity } from "./metamask-smart-account-package.js";
 import { isGrantedPermissionRecord, METAMASK_SMART_ACCOUNT_PROVIDER_ID, projectPermissionBinding, SMART_ACCOUNT_PERMISSION_RECORD_VERSION, } from "./metamask-smart-account-record.js";
-import { accountBindingHash, capabilityHash, metamaskSmartAccountCapabilitySnapshot, metamaskSmartAccountLegacyCapabilitySnapshot, } from "./provider-profile.js";
+import { accountBindingHash, capabilityHash, metamaskSmartAccountCapabilitySnapshot, metamaskSmartAccountLegacyCapabilitySnapshot, metamaskSmartAccountX402CapabilitySnapshot, } from "./provider-profile.js";
 export { METAMASK_SMART_ACCOUNT_PROVIDER_ID } from "./metamask-smart-account-record.js";
 export class LocalSessionKeyFactory {
     create() {
@@ -18,13 +18,15 @@ export class MetaMaskSmartAccountAdapter {
     sessionKeys;
     now;
     direct;
-    capabilities = metamaskSmartAccountCapabilitySnapshot();
-    constructor(store, consent, sessionKeys = new LocalSessionKeyFactory(), now = () => new Date(), direct = unavailableDirectExecution()) {
+    x402Material;
+    capabilities = metamaskSmartAccountX402CapabilitySnapshot();
+    constructor(store, consent, sessionKeys = new LocalSessionKeyFactory(), now = () => new Date(), direct = unavailableDirectExecution(), x402Material = unavailableX402Material()) {
         this.store = store;
         this.consent = consent;
         this.sessionKeys = sessionKeys;
         this.now = now;
         this.direct = direct;
+        this.x402Material = x402Material;
     }
     bundle() {
         return {
@@ -42,6 +44,7 @@ export class MetaMaskSmartAccountAdapter {
                 crossCheckAddress: async () => unsupportedInternalPath(),
             },
             direct: this.direct,
+            x402Material: this.x402Material,
             permissions: this,
             profileMigration: { upgrade: async (profile) => await this.upgradeProfile(profile) },
         };
@@ -51,10 +54,17 @@ export class MetaMaskSmartAccountAdapter {
         if (profile.capability_hash === currentHash)
             return profile;
         const legacy = metamaskSmartAccountLegacyCapabilitySnapshot();
+        const direct = metamaskSmartAccountCapabilitySnapshot();
         if (profile.provider_id !== METAMASK_SMART_ACCOUNT_PROVIDER_ID ||
             profile.trust_class !== "external_owner_delegated_local_session" ||
-            profile.capability_hash !== capabilityHash(legacy) ||
-            hashObject(profile.capability_snapshot) !== hashObject(legacy) ||
+            ![
+                capabilityHash(legacy),
+                capabilityHash(direct),
+            ].includes(profile.capability_hash) ||
+            ![
+                hashObject(legacy),
+                hashObject(direct),
+            ].includes(hashObject(profile.capability_snapshot)) ||
             profile.drift.state !== "bound")
             throw new ApnError("APN_PROFILE_DRIFT", "Smart Account capability state is not eligible for automatic upgrade.");
         const record = await this.store.load(profile.profile_hash);
@@ -63,13 +73,14 @@ export class MetaMaskSmartAccountAdapter {
             instant.unix >= record.granted_expires_at_unix || record.profile !== profile.profile ||
             record.profile_hash !== profile.profile_hash || record.owner_address.toLowerCase() !== profile.public_address.toLowerCase() ||
             accountBindingHash(METAMASK_SMART_ACCOUNT_PROVIDER_ID, record.owner_address) !== profile.account_binding_hash ||
-            profile.revision !== record.revision)
+            profile.revision !== record.revision + (profile.capability_hash === capabilityHash(direct) ? 1 : 0))
             throw new ApnError("APN_PROFILE_DRIFT", "Smart Account permission binding is not eligible for automatic upgrade.");
+        const target = profile.capability_hash === capabilityHash(legacy) ? direct : this.capabilities;
         return {
             ...profile,
             revision: Math.max(profile.revision, record.revision) + 1,
-            capability_snapshot: this.capabilities,
-            capability_hash: currentHash,
+            capability_snapshot: target,
+            capability_hash: capabilityHash(target),
             observed_at: monotonicTimestamp(profile.observed_at, instant.iso),
         };
     }
@@ -333,6 +344,18 @@ function unavailableDirectExecution() {
             throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Smart Account direct execution requires an explicit Base RPC.");
         },
         execute: async () => ({ disposition: "not_started", reason: "provider_binary_unavailable" }),
+    };
+}
+function unavailableX402Material() {
+    const unavailable = async () => {
+        throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Smart Account x402 requires an explicit Base RPC.");
+    };
+    return {
+        method: "erc7710",
+        prepare: unavailable,
+        materialize: unavailable,
+        recover: unavailable,
+        markExposed: unavailable,
     };
 }
 //# sourceMappingURL=metamask-smart-account-adapter.js.map

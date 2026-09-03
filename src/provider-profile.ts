@@ -222,6 +222,19 @@ export function metamaskSmartAccountCapabilitySnapshot(): ProviderCapabilitySnap
   };
 }
 
+export function metamaskSmartAccountX402CapabilitySnapshot(): ProviderCapabilitySnapshot {
+  const snapshot = metamaskSmartAccountCapabilitySnapshot();
+  return {
+    ...snapshot,
+    x402: {
+      available: true,
+      mode: "delegated_erc7710_apn_paid_retry",
+      execution_owner: "apn",
+      retry_owner: "apn_state_machine",
+    },
+  };
+}
+
 export function capabilityHash(snapshot: ProviderCapabilitySnapshot): string {
   assertCapabilitySnapshot(snapshot);
   return hashObject(snapshot);

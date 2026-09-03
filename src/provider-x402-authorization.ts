@@ -180,13 +180,17 @@ export function providerAuthorizationBinding(operation: X402OperationRecord): Pr
 }
 
 export function signingIntent(operation: X402OperationRecord): X402SigningIntent {
+  const resolved = operation.selectedOffer.resolved;
+  if (resolved.assetTransferMethod !== "eip3009") {
+    corrupt("Provider EIP-3009 signer received a different x402 transfer method.");
+  }
   return {
     sender: operation.wallet,
     chainId: operation.chainId,
     token: operation.token,
     tokenDomain: {
-      name: operation.selectedOffer.resolved.tokenName,
-      version: operation.selectedOffer.resolved.tokenVersion,
+      name: resolved.tokenName,
+      version: resolved.tokenVersion,
     },
     authorization: {
       from: operation.authorization.from,

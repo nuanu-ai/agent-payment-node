@@ -20,6 +20,7 @@ import type {
   ForegroundAuthenticationPort,
   ProviderProfileRepositoryPort,
   ProviderRegistryPort,
+  X402PaymentMaterialPort,
 } from "./provider-ports.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import {
@@ -51,6 +52,8 @@ import {
   MetaMaskSmartAccountDirectAdapter,
   OfficialSmartAccountAllowance,
 } from "./metamask-smart-account-direct.js";
+import { EncryptedSmartAccountX402MaterialStore } from "./encrypted-smart-account-x402-material-store.js";
+import { MetaMaskSmartAccountX402Adapter } from "./metamask-smart-account-x402.js";
 
 export interface RuntimeFactoryOptions {
   readonly stateRoot?: string;
@@ -72,6 +75,7 @@ export interface RuntimeFactoryOptions {
   readonly smartAccountPermissionStore?: SmartAccountPermissionStorePort;
   readonly smartAccountConsent?: SmartAccountConsentPort;
   readonly smartAccountSessionKeys?: SessionKeyFactoryPort;
+  readonly smartAccountX402Material?: X402PaymentMaterialPort;
 }
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
@@ -94,16 +98,31 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const smartAccountPermissionStore = options.smartAccountPermissionStore ??
     new EncryptedSmartAccountPermissionStore(state, wrappingSecret);
   const smartAccountConsent = options.smartAccountConsent ?? new LoopbackMetaMaskConsent();
-  const smartAccountDirect = rpc !== undefined && bound.rpcUrl !== undefined
+  const smartAccountAllowance = rpc !== undefined && bound.rpcUrl !== undefined
+    ? new OfficialSmartAccountAllowance(bound.rpcUrl)
+    : undefined;
+  const smartAccountDirect = rpc !== undefined && bound.rpcUrl !== undefined && smartAccountAllowance !== undefined
     ? new MetaMaskSmartAccountDirectAdapter(
         smartAccountPermissionStore,
         new EncryptedSmartAccountDirectEffectStore(state, wrappingSecret),
         rpc,
-        new OfficialSmartAccountAllowance(bound.rpcUrl),
+        smartAccountAllowance,
         undefined,
         () => options.clock?.now() ?? new Date(),
-      )
+    )
     : undefined;
+  const smartAccountX402 = options.smartAccountX402Material ?? (
+    rpc !== undefined && smartAccountAllowance !== undefined
+      ? new MetaMaskSmartAccountX402Adapter(
+          smartAccountPermissionStore,
+          new EncryptedSmartAccountX402MaterialStore(state, wrappingSecret),
+          rpc,
+          smartAccountAllowance,
+          undefined,
+          () => options.clock?.now() ?? new Date(),
+        )
+      : undefined
+  );
   const providerRegistry = options.providerRegistry ?? new ProviderRegistry([
     {
       provider_id: AWAL_PROVIDER_ID,
@@ -124,6 +143,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         options.smartAccountSessionKeys ?? new LocalSessionKeyFactory(),
         () => options.clock?.now() ?? new Date(),
         smartAccountDirect,
+        smartAccountX402,
       ).bundle(),
     },
   ]);

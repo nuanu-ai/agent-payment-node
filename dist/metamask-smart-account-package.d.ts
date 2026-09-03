@@ -4,4 +4,8 @@ export declare const METAMASK_SMART_ACCOUNTS_KIT_SHASUM: "0293e1745851c63f0f0447
 export declare const METAMASK_PERMISSION_TYPES_VERSION: "2.0.0";
 export declare const METAMASK_PERMISSION_TYPES_INTEGRITY: "sha512-NS6NolXd7fDQhMZoEmzyQcLuJ9NtIPntKOAEOMdFQuR8y1HWpN6PYx1BrY6OgHmJ1D/P4vuWlCooDlh+L8CmVw==";
 export declare const METAMASK_PERMISSION_TYPES_SHASUM: "3eee5b343e1382aed62feaf7d703fb826742fbe7";
+export declare const METAMASK_X402_VERSION: "1.0.0";
+export declare const METAMASK_X402_INTEGRITY: "sha512-jgQ7iCBKPE+k3dPCgEIBKrt1xFLfwyaXVBIa9dxuN5dkXTkQs9X9gmY4V/7wRqN32WoeV4qhEj/L/6qcHw+i9g==";
+export declare const X402_EVM_VERSION: "2.23.0";
+export declare const X402_EVM_INTEGRITY: "sha512-Ikaya5c0/qV/pdFRGfGSdlUX3ELZaUgrddsmmXZHPANtIAQ5uFH15+O+9Bt4PqdAXqCuS43WskJ7HgiLn/uW2g==";
 export declare function assertMetaMaskSmartAccountPackageIdentity(): Promise<void>;

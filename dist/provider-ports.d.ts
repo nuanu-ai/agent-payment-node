@@ -1,6 +1,7 @@
 import type { Address, Hex, ProviderDirectBinding } from "./model.js";
 import type { ProviderCapabilitySnapshot, ProviderProfileRecord } from "./provider-profile.js";
 import type { ProviderX402RejectionShape } from "./provider-x402-rejection-shape.js";
+import type { X402OperationRecord } from "./x402-state-integrity.js";
 export interface ForegroundAuthenticationPort {
     readIdentity(): Promise<string>;
     readChallengeResponse(): Promise<string>;
@@ -168,6 +169,53 @@ export interface X402ExecutionPort {
         readonly result: ProviderX402SellerResult;
     }>;
 }
+export interface X402DelegatedMaterialBinding {
+    readonly schemaVersion: "apn.x402.delegated-material-binding.v1";
+    readonly method: "erc7710";
+    readonly providerId: string;
+    readonly profileRevision: number;
+    readonly capabilityHash: string;
+    readonly accountBindingHash: string;
+    readonly permissionRevision: number;
+    readonly rootGrantFingerprint: string;
+    readonly sessionAddress: Address;
+    readonly delegationManager: Address;
+    readonly facilitatorAddresses: readonly Address[];
+    readonly effectiveExpiryUnix: string;
+    readonly rpcOriginHash: string;
+}
+export interface X402MaterialPrepareInput {
+    readonly profile: string;
+    readonly profileHash: string;
+    readonly profileRevision: number;
+    readonly capabilityHash: string;
+    readonly accountBindingHash: string;
+    readonly wallet: Address;
+    readonly token: Address;
+    readonly payee: Address;
+    readonly amountAtomic: string;
+    readonly capAtomic: string;
+    readonly offerHash: string;
+    readonly requirements: Readonly<Record<string, unknown>>;
+    readonly facilitatorAddresses: readonly Address[];
+    readonly preparedAtUnix: string;
+    readonly maxTimeoutSeconds: number;
+    readonly rpcOriginHash: string;
+}
+export interface X402SealedPaymentMaterial {
+    readonly materialHash: string;
+    readonly contextHash?: string;
+    readonly paymentPayloadHash: string;
+    readonly paymentHeaderHash: string;
+    readonly paymentHeader: string;
+}
+export interface X402PaymentMaterialPort {
+    readonly method: "erc7710";
+    prepare(input: X402MaterialPrepareInput): Promise<X402DelegatedMaterialBinding>;
+    materialize(operation: X402OperationRecord): Promise<X402SealedPaymentMaterial>;
+    recover(operation: X402OperationRecord): Promise<X402SealedPaymentMaterial>;
+    markExposed(operation: X402OperationRecord): Promise<void>;
+}
 export interface X402SigningIntent {
     readonly sender: Address;
     readonly chainId: "8453";
@@ -250,6 +298,7 @@ export interface ProviderAdapterBundle {
     readonly direct?: DirectExecutionPort;
     readonly x402?: X402ExecutionPort;
     readonly x402Signer?: X402SigningPort;
+    readonly x402Material?: X402PaymentMaterialPort;
     readonly evidence?: EvidencePort;
     readonly permissions?: ProviderPermissionLifecyclePort;
     readonly profileMigration?: ProviderProfileMigrationPort;

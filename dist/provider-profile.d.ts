@@ -90,6 +90,7 @@ export declare function metamaskReadOnlyCapabilitySnapshot(): ProviderCapability
 export declare function metamaskDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function metamaskSmartAccountLegacyCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function metamaskSmartAccountCapabilitySnapshot(): ProviderCapabilitySnapshot;
+export declare function metamaskSmartAccountX402CapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function capabilityHash(snapshot: ProviderCapabilitySnapshot): string;
 export declare function accountBindingHash(providerId: string, address: Address): string;
 export declare function markProviderProfileDrift(profile: ProviderProfileRecord, observed: ProviderBindingObservation): ProviderProfileRecord;

@@ -1,18 +1,7 @@
-import { randomBytes } from "node:crypto";
-import { canonicalJson, domainHash, sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
-import { canonicalIdempotencyKey } from "./transfer-policy.js";
-import { canonicalOperationId } from "./transfer-policy.js";
-import { canonicalProfile } from "./wallet-policy.js";
-import { assertUnattendedX402Balance, effectiveX402Cap, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
-import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
-import { observePaidX402Response } from "./x402-http.js";
-import { candidatesWithinCap, canonicalPrepareUrl, freshChallenge, paymentIdentifierState, positiveCap, selectPrepareOffer, } from "./x402-policy.js";
-import { appendX402Transition, publicX402Operation, sealX402Operation, sealX402Receipt, sealX402Result, x402AuthorizationIntentHash, x402Fingerprint, x402OperationBindingHash, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-integrity.js";
-import { X402RpcReconciler } from "./x402-rpc-reconciler.js";
-import { isNativeNotFound, isNativeExpired, isTransientNativeFailure, requestX402Authorization, x402NativeRequest, } from "./x402-native.js";
+import { appendX402Transition, sealX402Operation, sealX402Receipt, sealX402Result, x402OperationBindingHash, } from "./x402-state-integrity.js";
 import { settlementResponseTransaction, terminalClassification } from "./x402-service-rpc.js";
 export class X402Lifecycle {
     context;
@@ -149,6 +138,7 @@ export class X402Lifecycle {
             amountAtomic: operation.amountAtomic,
             network: operation.network,
             token: operation.token,
+            transferMethod: operation.selectedOffer.resolved.assetTransferMethod,
             ...(operation.paymentIdentifier === undefined ? {} : { paymentIdentifier: operation.paymentIdentifier.value }),
             ...(operation.settlementResponseObservation === undefined ? {} : {
                 settlementResponseHash: operation.settlementResponseObservation.settlementResponseHash,

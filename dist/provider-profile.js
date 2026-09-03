@@ -129,6 +129,18 @@ export function metamaskSmartAccountCapabilitySnapshot() {
         evidence: { available: true, owner: "apn" },
     };
 }
+export function metamaskSmartAccountX402CapabilitySnapshot() {
+    const snapshot = metamaskSmartAccountCapabilitySnapshot();
+    return {
+        ...snapshot,
+        x402: {
+            available: true,
+            mode: "delegated_erc7710_apn_paid_retry",
+            execution_owner: "apn",
+            retry_owner: "apn_state_machine",
+        },
+    };
+}
 export function capabilityHash(snapshot) {
     assertCapabilitySnapshot(snapshot);
     return hashObject(snapshot);
