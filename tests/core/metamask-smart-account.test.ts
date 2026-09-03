@@ -3,7 +3,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { createErc20TokenAllowanceCaveats } from "@metamask/7715-permission-types";
+import {
+  ALL_METAMASK_FACILITATOR_ADDRESSES,
+  METAMASK_FACILITATOR_ADDRESSES_DEV,
+  createErc20TokenAllowanceCaveats,
+} from "@metamask/7715-permission-types";
 import {
   ANY_BENEFICIARY,
   createRedeemerTerms,
@@ -1238,7 +1242,7 @@ test("Smart Account ERC-7710 freezes the approved facilitator set independent of
   const fixture = await makeFixture();
   try {
     assert.equal((await fixture.core.execute(connectCommand())).ok, true);
-    const approved = METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase() as Address);
+    const approved = ALL_METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase() as Address);
     const offered = [...approved].reverse();
     const runtime = smartAccountX402Runtime(
       fixture,
@@ -1258,6 +1262,9 @@ test("Smart Account ERC-7710 freezes the approved facilitator set independent of
     assert.deepEqual(frozen?.selectedOffer.resolved.assetTransferMethod === "erc7710"
       ? frozen.selectedOffer.resolved.facilitatorAddresses
       : [], [...approved].sort());
+    assert.equal(frozen?.delegatedMaterial?.facilitatorAddresses.includes(
+      METAMASK_FACILITATOR_ADDRESSES_DEV[0].toLowerCase() as Address,
+    ), true);
   } finally { await fixture.temporary.cleanup(); }
 });
 

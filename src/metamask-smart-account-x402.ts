@@ -9,9 +9,9 @@ import {
 } from "@metamask/delegation-core";
 import type { PermissionContext } from "@metamask/smart-accounts-kit";
 import {
-  METAMASK_FACILITATOR_ADDRESSES,
   createx402DelegationProvider,
 } from "@metamask/smart-accounts-kit/experimental";
+import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "@metamask/7715-permission-types";
 import {
   SIGNABLE_DELEGATION_TYPED_DATA,
   decodeDelegations,
@@ -98,7 +98,7 @@ export class MetaMaskSmartAccountX402Adapter implements X402PaymentMaterialPort 
     private readonly allowance: SmartAccountAllowancePort,
     private readonly engine: SmartAccountX402EnginePort = new OfficialSmartAccountX402Engine(),
     private readonly now: () => Date = () => new Date(),
-    private readonly approvedFacilitators: readonly Address[] = METAMASK_FACILITATOR_ADDRESSES,
+    private readonly approvedFacilitators: readonly Address[] = ALL_METAMASK_FACILITATOR_ADDRESSES,
   ) {}
 
   async prepare(input: X402MaterialPrepareInput): Promise<X402DelegatedMaterialBinding> {

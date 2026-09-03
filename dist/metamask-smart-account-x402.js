@@ -1,5 +1,6 @@
 import { ANY_BENEFICIARY, decodeAllowedCalldataTerms, decodeERC20TransferAmountTerms, decodeRedeemerTerms, decodeTimestampTerms, decodeValueLteTerms, hashDelegation, } from "@metamask/delegation-core";
-import { METAMASK_FACILITATOR_ADDRESSES, createx402DelegationProvider, } from "@metamask/smart-accounts-kit/experimental";
+import { createx402DelegationProvider, } from "@metamask/smart-accounts-kit/experimental";
+import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "@metamask/7715-permission-types";
 import { SIGNABLE_DELEGATION_TYPED_DATA, decodeDelegations, encodeDelegations, toDelegationStruct, } from "@metamask/smart-accounts-kit/utils";
 import { x402Erc7710Client } from "@metamask/x402";
 import { getAddress, keccak256, pad, recoverTypedDataAddress, toHex } from "viem";
@@ -54,7 +55,7 @@ export class MetaMaskSmartAccountX402Adapter {
     now;
     approvedFacilitators;
     method = "erc7710";
-    constructor(permissions, materials, rpc, allowance, engine = new OfficialSmartAccountX402Engine(), now = () => new Date(), approvedFacilitators = METAMASK_FACILITATOR_ADDRESSES) {
+    constructor(permissions, materials, rpc, allowance, engine = new OfficialSmartAccountX402Engine(), now = () => new Date(), approvedFacilitators = ALL_METAMASK_FACILITATOR_ADDRESSES) {
         this.permissions = permissions;
         this.materials = materials;
         this.rpc = rpc;
