@@ -3,6 +3,7 @@ import test from "node:test";
 import { METAMASK_FACILITATOR_ADDRESSES } from "@metamask/smart-accounts-kit/experimental";
 import { BASE_USDC } from "../../src/constants.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "../../src/x402-codec.js";
+import { sameDelegationSalt } from "../../src/metamask-smart-account-x402.js";
 import { metamaskSmartAccountX402CapabilitySnapshot } from "../../src/provider-profile.js";
 import { canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 import type { PaymentRequired } from "@x402/core/types";
@@ -57,6 +58,36 @@ test("strict inspection accepts only explicit ERC-7710 offers without EIP-3009 t
   }
 });
 
+test("ERC-7710 facilitator sets are canonical regardless of seller order", () => {
+  const facilitators = [
+    "0x3333333333333333333333333333333333333333",
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222",
+  ];
+  const paymentRequired: PaymentRequired = {
+    x402Version: 2,
+    resource: { url: URL },
+    accepts: [{
+      scheme: "exact",
+      network: "eip155:8453",
+      amount: "1000",
+      asset: BASE_USDC,
+      payTo: "0x2222222222222222222222222222222222222222",
+      maxTimeoutSeconds: 60,
+      extra: { assetTransferMethod: "erc7710", facilitatorAddresses: facilitators },
+    }],
+  };
+
+  const [candidate] = inspectCandidates(paymentRequired, URL);
+  assert.ok(candidate !== undefined && candidate.assetTransferMethod === "erc7710");
+  assert.deepEqual(candidate.facilitatorAddresses, [...facilitators].sort());
+});
+
+test("ERC-7710 deterministic salt comparison accepts equivalent uint256 encodings", () => {
+  assert.equal(sameDelegationSalt("0x01", `0x${"0".repeat(62)}01`), true);
+  assert.equal(sameDelegationSalt("0x01", "0x02"), false);
+});
+
 test("current official seller shape uses the pinned MetaMask facilitator set when none is published", () => {
   const decoded = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
     x402Version: 2,
@@ -81,7 +112,7 @@ test("current official seller shape uses the pinned MetaMask facilitator set whe
   }));
   const [candidate] = inspectCandidates(decoded, URL);
   assert.ok(candidate !== undefined && candidate.assetTransferMethod === "erc7710");
-  assert.deepEqual(candidate.facilitatorAddresses, METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase()));
+  assert.deepEqual(candidate.facilitatorAddresses, METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase()).sort());
   assert.equal("message" in decoded, false);
   assert.equal("developerNote" in decoded, false);
 

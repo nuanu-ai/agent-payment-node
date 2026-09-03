@@ -29,7 +29,7 @@ function normalizeAddresses(value) {
         unique.add(address);
         normalized.push(address);
     }
-    return normalized;
+    return normalized.sort();
 }
 function optionalBoundedString(value) {
     return value === undefined || (typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= 128);

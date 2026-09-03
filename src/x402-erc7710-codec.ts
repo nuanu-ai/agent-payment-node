@@ -31,7 +31,7 @@ function normalizeAddresses(value: readonly unknown[]): readonly string[] | null
     unique.add(address);
     normalized.push(address);
   }
-  return normalized;
+  return normalized.sort();
 }
 
 function optionalBoundedString(value: unknown): boolean {
