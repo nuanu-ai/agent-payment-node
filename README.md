@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.4.3 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.5.0 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -101,14 +101,16 @@ raw permission context. Repeating the same idempotency key reuses the same
 pending or committed identity after interruption. `wallet permission list`,
 `sync`, `disable`, and `forget` expose the provider-neutral lifecycle; local
 disable/forget never claims MetaMask-side revocation. Direct Base-USDC transfer
-is available through the common `pay transfer` commands. Standard x402 remains
-unavailable for this profile until its later execution slice lands.
+is available through the common `pay transfer` commands. Standard x402 is
+available when the selected Base offer explicitly advertises
+`extra.assetTransferMethod: "erc7710"`; APN rejects EIP-3009-only offers for
+this profile before creating any payment effect.
 
-An exact Slice 1 Smart Account profile upgrades once, locally and without new
-browser consent, from the prior read-only capability fingerprint to direct
-execution. APN refuses any other capability drift. The owner Smart Account
-remains the USDC sender; the encrypted APN session account is only the delegated
-executor and Base gas payer.
+An existing Smart Account profile created by the connect/permission capability
+can upgrade once, locally and without new browser consent, to the complete
+direct-transfer and ERC-7710 x402 capability fingerprint. APN refuses any other
+capability drift. The owner Smart Account remains the USDC sender; the encrypted
+APN session account is only the delegated executor and Base gas payer.
 
 MetaMask Agent Wallet direct transfer and standard x402 are available through
 the same generic APN operation contract. For x402, that server-wallet signs only
