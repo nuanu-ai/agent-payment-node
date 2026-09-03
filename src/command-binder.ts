@@ -61,6 +61,39 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
         ...(options["--expected-revision"] === undefined
           ? {}
           : { expectedRevision: Number(options["--expected-revision"]) }),
+        ...(options["--permission-cap-usdc-atomic"] === undefined
+          ? {}
+          : { permissionCapUsdcAtomic: options["--permission-cap-usdc-atomic"] }),
+        ...(options["--permission-expires-at"] === undefined
+          ? {}
+          : { permissionExpiresAt: Number(options["--permission-expires-at"]) }),
+        ...(options["--idempotency-key"] === undefined
+          ? {}
+          : { idempotencyKey: options["--idempotency-key"] }),
+      },
+    };
+    case "wallet permission list": return {
+      request: { command: "wallet.permission.list", profile: value(options, "--profile") },
+    };
+    case "wallet permission sync": return {
+      request: {
+        command: "wallet.permission.sync",
+        profile: value(options, "--profile"),
+        expectedRevision: Number(value(options, "--expected-revision")),
+      },
+    };
+    case "wallet permission disable": return {
+      request: {
+        command: "wallet.permission.disable",
+        profile: value(options, "--profile"),
+        expectedRevision: Number(value(options, "--expected-revision")),
+      },
+    };
+    case "wallet permission forget": return {
+      request: {
+        command: "wallet.permission.forget",
+        profile: value(options, "--profile"),
+        expectedRevision: Number(value(options, "--expected-revision")),
       },
     };
     case "wallet status": return { request: { command: "wallet.status", profile: value(options, "--profile") } };

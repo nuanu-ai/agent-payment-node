@@ -43,8 +43,8 @@ apn mcp config
 apn mcp serve
 ```
 
-The server exposes exactly eighteen catalog-derived tools: version, Keychain
-doctor, wallet and wallet-policy operations plus x402 inspect/prepare/approve,
+The server exposes exactly twenty-two catalog-derived tools: version, Keychain
+doctor, wallet, provider-permission and wallet-policy operations plus x402 inspect/prepare/approve,
 direct-transfer prepare/foreground handoff, operation status/resume and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
 
@@ -62,6 +62,10 @@ To create or reuse a provider-managed profile, use the generic foreground path:
 apn wallet connect --profile provider-one --provider coinbase-agentic-wallet
 apn wallet connect --profile metamask --provider metamask-agent-wallet
 apn wallet connect --profile metamask --provider metamask-agent-wallet --auth-method browser
+apn wallet connect --profile smart-account --provider metamask-smart-account --auth-method browser \
+  --permission-cap-usdc-atomic 2000000 \
+  --permission-expires-at 2000000000 \
+  --idempotency-key smart-account-connect-0001
 ```
 
 The CLI first reuses an active provider session without another email or OTP
@@ -86,6 +90,18 @@ provider session selects a different address. A normal user does not install
 `mm` separately or add provider skills. Google, email and Mobile QR can resolve
 to different MetaMask server-wallet addresses, so APN always binds the address
 reported by the completed provider session.
+
+The `metamask-smart-account` profile is a separate browser-extension flow. The
+human selects an already-active official MetaMask Smart Account on Base and
+reviews the exact caller-supplied USDC cap and absolute expiry; APN supplies no
+monetary or lifetime default. MetaMask keeps the owner key. APN creates one
+session account, stores its key and the validated ERC-7715 grant only inside an
+authenticated encrypted envelope under `~/.apn`, and never returns the key or
+raw permission context. Repeating the same idempotency key reuses the same
+pending or committed identity after interruption. `wallet permission list`,
+`sync`, `disable`, and `forget` expose the provider-neutral lifecycle; local
+disable/forget never claims MetaMask-side revocation. Direct transfer and x402
+remain unavailable for this profile until their later execution slices land.
 
 MetaMask direct transfer and standard x402 are available through the same
 generic APN operation contract. For x402, MetaMask signs only the exact frozen
@@ -301,7 +317,11 @@ apn mcp serve
 apn mcp config
 apn doctor keychain
 apn wallet ensure [--profile <profile>]
-apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>]
+apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>]
+apn wallet permission list --profile <profile>
+apn wallet permission sync --profile <profile> --expected-revision <positive-integer>
+apn wallet permission disable --profile <profile> --expected-revision <positive-integer>
+apn wallet permission forget --profile <profile> --expected-revision <positive-integer>
 apn wallet status [--profile <profile>]
 apn wallet balance [--profile <profile>] --rpc-url <https-url>
 apn wallet policy show --profile <profile>

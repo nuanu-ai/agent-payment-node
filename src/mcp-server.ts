@@ -58,6 +58,16 @@ async function callTool(
         { cli_handoff: handoff, foreground_auth: true },
       ));
     }
+    if (bound.request.command === "wallet.permission.sync") {
+      return failureEnvelope(bound.request.command, randomUUID(), new ApnError(
+        "APN_FOREGROUND_AUTH_REQUIRED",
+        "MetaMask permission sync must continue in the foreground CLI.",
+        {
+          cli_handoff: `apn wallet permission sync --profile ${bound.request.profile} --expected-revision ${bound.request.expectedRevision}`,
+          foreground_auth: true,
+        },
+      ));
+    }
     const policyApproval = bound.request.command === "wallet.policy.set"
       ? new RejectingMcpPolicyApproval(bound.request)
       : undefined;
@@ -83,6 +93,12 @@ function walletConnectHandoff(request: Extract<import("./commands.js").CommandRe
     request.authenticationMethod === undefined ? "" : ` --auth-method ${request.authenticationMethod}`
   }${
     request.expectedRevision === undefined ? "" : ` --expected-revision ${request.expectedRevision}`
+  }${
+    request.permissionCapUsdcAtomic === undefined ? "" : ` --permission-cap-usdc-atomic ${request.permissionCapUsdcAtomic}`
+  }${
+    request.permissionExpiresAt === undefined ? "" : ` --permission-expires-at ${request.permissionExpiresAt}`
+  }${
+    request.idempotencyKey === undefined ? "" : " --idempotency-key <same-idempotency-key>"
   }`;
 }
 

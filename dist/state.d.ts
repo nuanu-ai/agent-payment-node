@@ -12,6 +12,7 @@ export declare class StateStore extends SecureStateStore {
     writeWallet(wallet: WalletRecord): Promise<void>;
     loadProviderProfile(profileHash: string): Promise<ProviderProfileRecord | null>;
     writeProviderProfile(profile: ProviderProfileRecord): Promise<void>;
+    removeProviderProfile(profileHash: string): Promise<void>;
     loadEncryptedWalletEnvelope(profile: string): Promise<unknown | null>;
     writeEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void>;
     loadEncryptedPolicyEnvelope(profile: string): Promise<unknown | null>;

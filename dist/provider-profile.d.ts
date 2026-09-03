@@ -3,10 +3,18 @@ import type { Address, WalletRecord } from "./model.js";
 export declare const PROVIDER_PROFILE_VERSION: "apn.provider-profile.v1";
 export declare const PROVIDER_CAPABILITY_VERSION: "apn.provider-capability.v1";
 export declare const LOCAL_PROVIDER_ID: "local";
-export type ProviderTrustClass = "local_software_wallet" | "provider_managed_non_custodial_tee" | "provider_managed_non_custodial_signer";
-export type DirectExecutionMode = "local_raw_transaction_apn_submit" | "provider_atomic_send";
-export type X402ExecutionMode = "local_detached_eip3009_apn_paid_retry" | "provider_detached_eip3009_apn_paid_retry" | "provider_atomic_paid_fetch";
+export type ProviderTrustClass = "local_software_wallet" | "provider_managed_non_custodial_tee" | "provider_managed_non_custodial_signer" | "external_owner_delegated_local_session";
+export type DirectExecutionMode = "local_raw_transaction_apn_submit" | "provider_atomic_send" | "delegated_session_transaction";
+export type X402ExecutionMode = "local_detached_eip3009_apn_paid_retry" | "provider_detached_eip3009_apn_paid_retry" | "provider_atomic_paid_fetch" | "delegated_erc7710_apn_paid_retry";
 export type ProviderProfileState = "bound" | "drift_blocked" | "rebind_pending";
+export interface ProviderPermissionCapability {
+    readonly available: true;
+    readonly protocol: "erc7715";
+    readonly consent: "foreground_browser";
+    readonly owner_custody: "external_metamask";
+    readonly session_custody: "encrypted_local_apn";
+    readonly provider_revoke: "unavailable_unproved";
+}
 export interface ProviderCapabilitySnapshot {
     readonly schema_version: typeof PROVIDER_CAPABILITY_VERSION;
     readonly network: {
@@ -44,6 +52,7 @@ export interface ProviderCapabilitySnapshot {
         readonly available: boolean;
         readonly owner: "apn" | "provider";
     };
+    readonly permission?: ProviderPermissionCapability;
 }
 export interface ProviderDrift {
     readonly state: ProviderProfileState;
@@ -79,6 +88,7 @@ export declare function lifecycleReadOnlyCapabilitySnapshot(): ProviderCapabilit
 export declare function coinbaseDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function metamaskReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function metamaskDirectCapabilitySnapshot(): ProviderCapabilitySnapshot;
+export declare function metamaskSmartAccountCapabilitySnapshot(): ProviderCapabilitySnapshot;
 export declare function capabilityHash(snapshot: ProviderCapabilitySnapshot): string;
 export declare function accountBindingHash(providerId: string, address: Address): string;
 export declare function markProviderProfileDrift(profile: ProviderProfileRecord, observed: ProviderBindingObservation): ProviderProfileRecord;

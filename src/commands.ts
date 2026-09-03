@@ -10,7 +10,14 @@ export type CommandRequest =
     readonly providerId: string;
     readonly authenticationMethod?: string;
     readonly expectedRevision?: number;
+    readonly permissionCapUsdcAtomic?: string;
+    readonly permissionExpiresAt?: number;
+    readonly idempotencyKey?: string;
   }
+  | { readonly command: "wallet.permission.list"; readonly profile: string }
+  | { readonly command: "wallet.permission.sync"; readonly profile: string; readonly expectedRevision: number }
+  | { readonly command: "wallet.permission.disable"; readonly profile: string; readonly expectedRevision: number }
+  | { readonly command: "wallet.permission.forget"; readonly profile: string; readonly expectedRevision: number }
   | { readonly command: "wallet.status"; readonly profile: string }
   | { readonly command: "wallet.balance"; readonly profile: string }
   | { readonly command: "wallet.policy.show"; readonly profile: string }

@@ -26,6 +26,7 @@ export declare class SecureStateStore {
     protected assertNoSymlinkAncestors(target: string): Promise<void>;
     protected readJson(relativePath: string): Promise<unknown | null>;
     protected writeJson(relativePath: string, value: unknown): Promise<void>;
+    protected removeFile(relativePath: string): Promise<boolean>;
     private acquireLock;
     private validateOpenedLock;
     private releaseLock;
