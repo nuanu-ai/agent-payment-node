@@ -53,12 +53,13 @@ export function encodePaymentRequiredHeader(value: PaymentRequired): string {
 }
 
 export function decodePaymentRequiredHeader(value: string): PaymentRequired {
-  const strict = decodeCanonicalBase64Json(value);
+  const wire = decodeCanonicalBase64Json(value);
+  const strict = paymentRequiredCoreFields(wire);
   validatePaymentRequired(strict);
   let official: PaymentRequired;
   try { official = decodeOfficialPaymentRequiredHeader(value); }
   catch { throw protocol("Official x402 v2 representation rejected PAYMENT-REQUIRED."); }
-  if (JSON.stringify(official) !== JSON.stringify(strict)) {
+  if (canonicalJson(paymentRequiredCoreFields(official)) !== canonicalJson(strict)) {
     throw protocol("Official and strict x402 representations disagree.");
   }
   return paymentRequiredWithSupportedExtensions(strict);
@@ -347,6 +348,17 @@ function paymentRequiredWithSupportedExtensions(value: PaymentRequired): Payment
   const { extensions: _ignored, ...paymentRequired } = value;
   if (!Object.hasOwn(extensions, "payment-identifier")) return paymentRequired;
   return { ...paymentRequired, extensions: { "payment-identifier": extensions["payment-identifier"] } };
+}
+
+function paymentRequiredCoreFields(value: unknown): PaymentRequired {
+  const wire = record(value, "PAYMENT-REQUIRED");
+  return {
+    x402Version: wire.x402Version,
+    ...(Object.hasOwn(wire, "error") ? { error: wire.error } : {}),
+    resource: wire.resource,
+    accepts: wire.accepts,
+    ...(Object.hasOwn(wire, "extensions") ? { extensions: wire.extensions } : {}),
+  } as PaymentRequired;
 }
 
 function validateEvmSignature(value: unknown): void {
