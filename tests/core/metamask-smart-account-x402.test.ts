@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { METAMASK_FACILITATOR_ADDRESSES } from "@metamask/smart-accounts-kit/experimental";
+import {
+  ALL_METAMASK_FACILITATOR_ADDRESSES,
+  METAMASK_FACILITATOR_ADDRESSES_DEV,
+} from "@metamask/7715-permission-types";
 import { BASE_USDC } from "../../src/constants.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "../../src/x402-codec.js";
 import { sameDelegationSalt } from "../../src/metamask-smart-account-x402.js";
@@ -112,7 +115,8 @@ test("current official seller shape uses the pinned MetaMask facilitator set whe
   }));
   const [candidate] = inspectCandidates(decoded, URL);
   assert.ok(candidate !== undefined && candidate.assetTransferMethod === "erc7710");
-  assert.deepEqual(candidate.facilitatorAddresses, METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase()).sort());
+  assert.deepEqual(candidate.facilitatorAddresses, ALL_METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase()).sort());
+  assert.equal(candidate.facilitatorAddresses.includes(METAMASK_FACILITATOR_ADDRESSES_DEV[0].toLowerCase()), true);
   assert.equal("message" in decoded, false);
   assert.equal("developerNote" in decoded, false);
 
