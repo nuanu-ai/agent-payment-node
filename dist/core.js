@@ -11,6 +11,7 @@ import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
+import { ProviderPermissionService } from "./provider-permission-service.js";
 export class ApnCore {
     context;
     wallet;
@@ -18,6 +19,7 @@ export class ApnCore {
     operations;
     x402;
     providerWallet;
+    providerPermissions;
     providerTransactionRecovery;
     constructor(dependencies) {
         this.context = new RuntimeContext(dependencies);
@@ -26,6 +28,7 @@ export class ApnCore {
         this.operations = new OperationService(this.context.state, this.context.providerX402Repository);
         this.x402 = new X402Service(this.context);
         this.providerWallet = new ProviderWalletService(this.context);
+        this.providerPermissions = new ProviderPermissionService(this.context);
         this.providerTransactionRecovery = new ProviderX402TransactionRecoveryService(this.context);
     }
     async execute(request) {
@@ -49,6 +52,11 @@ export class ApnCore {
             case "doctor.keychain": return dataOutcome(await this.wallet.doctorKeychain(), "encrypted_apn_home_status");
             case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
             case "wallet.connect": return dataOutcome(await this.providerWallet.connect(request), "provider_profile_binding");
+            case "wallet.permission.list":
+            case "wallet.permission.sync":
+            case "wallet.permission.disable":
+            case "wallet.permission.forget":
+                return dataOutcome(await this.providerPermissions.execute(request), "provider_permission_binding");
             case "wallet.status": {
                 const providerStatus = await this.providerWallet.status(request.profile);
                 return providerStatus === null

@@ -6,9 +6,12 @@ import type { ClockPort, HttpPort, IdPort, NativePort, RpcPort, WaitPort } from 
 import { type ProfilePolicyApprovalPort } from "./policy-approval.js";
 import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
-import type { ForegroundAuthenticationPort, ProviderProfileRepositoryPort, ProviderRegistryPort } from "./provider-ports.js";
+import type { ForegroundAuthenticationPort, ProviderProfileRepositoryPort, ProviderRegistryPort, X402PaymentMaterialPort } from "./provider-ports.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import { type ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
+import { type SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
+import { type SessionKeyFactoryPort } from "./metamask-smart-account-adapter.js";
+import { type SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
 export interface RuntimeFactoryOptions {
     readonly stateRoot?: string;
     readonly native?: NativePort;
@@ -26,6 +29,10 @@ export interface RuntimeFactoryOptions {
     readonly foregroundAuthentication?: ForegroundAuthenticationPort;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+    readonly smartAccountPermissionStore?: SmartAccountPermissionStorePort;
+    readonly smartAccountConsent?: SmartAccountConsentPort;
+    readonly smartAccountSessionKeys?: SessionKeyFactoryPort;
+    readonly smartAccountX402Material?: X402PaymentMaterialPort;
 }
 export declare function createApnCore(bound: BoundCommand, options?: RuntimeFactoryOptions): ApnCore;
 export declare function executeBoundCommand(bound: BoundCommand, options?: RuntimeFactoryOptions): Promise<OutputEnvelope>;

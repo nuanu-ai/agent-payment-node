@@ -28,6 +28,7 @@ export function x402Fingerprint(input) {
         selectedOfferHash: input.selectedOffer.offerHash,
         wallet: input.wallet,
         ...(input.providerSigner === undefined ? {} : { providerSigner: input.providerSigner }),
+        ...(input.delegatedMaterial === undefined ? {} : { delegatedMaterial: input.delegatedMaterial }),
         acceptedResolvedDefaults: input.selectedOffer.resolved,
         paymentIdentifier: input.paymentIdentifier === undefined
             ? { advertised: false }
@@ -48,6 +49,7 @@ export function x402OperationBindingHash(operation) {
         payer: operation.wallet,
         operationId: operation.operationId,
         ...(operation.paymentIdentifier === undefined ? {} : { paymentIdentifier: operation.paymentIdentifier.value }),
+        ...(operation.delegatedMaterial === undefined ? {} : { delegatedMaterial: operation.delegatedMaterial }),
     }));
 }
 export function x402TransactionHintSourceBindingHash(source, sourceHash) {

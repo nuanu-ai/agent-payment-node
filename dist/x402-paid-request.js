@@ -1,29 +1,28 @@
-import { randomBytes } from "node:crypto";
-import { canonicalJson, domainHash, sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { OperationService } from "./operation-service.js";
-import { canonicalIdempotencyKey } from "./transfer-policy.js";
-import { canonicalOperationId } from "./transfer-policy.js";
-import { canonicalProfile } from "./wallet-policy.js";
-import { assertUnattendedX402Balance, effectiveX402Cap, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
+import { assertUnattendedX402Balance, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
 import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
 import { observePaidX402Response } from "./x402-http.js";
-import { candidatesWithinCap, canonicalPrepareUrl, freshChallenge, paymentIdentifierState, positiveCap, selectPrepareOffer, } from "./x402-policy.js";
-import { appendX402Transition, publicX402Operation, sealX402Operation, sealX402Receipt, sealX402Result, x402AuthorizationIntentHash, x402Fingerprint, x402OperationBindingHash, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-integrity.js";
-import { X402RpcReconciler } from "./x402-rpc-reconciler.js";
+import { publicX402Operation, x402TransactionHintSourceBindingHash, } from "./x402-state-integrity.js";
 import { isNativeNotFound, isNativeExpired, isTransientNativeFailure, requestX402Authorization, x402NativeRequest, } from "./x402-native.js";
 import { X402Lifecycle } from "./x402-lifecycle.js";
 import { ProviderX402AuthorizationService } from "./provider-x402-authorization.js";
 export class X402PaidRequest extends X402Lifecycle {
     async recoverPaymentMaterial(operation) {
+        if (operation.delegatedMaterial !== undefined) {
+            if (operation.attempts.length === 0)
+                await this.assertDelegatedPolicy(operation);
+            const verified = await this.delegatedMaterialPort(operation).recover(operation);
+            this.assertMaterialHashes(operation, verified);
+            return verified;
+        }
         if (operation.providerSigner !== undefined) {
             const outcome = await this.providerAuthorization().authorize(operation, "get");
             if (outcome.disposition !== "signed") {
                 throw new ApnError("APN_STATE_CORRUPT", "Authorized provider x402 operation lost its signed material.");
             }
             const verified = outcome.material;
-            if (verified.native.signatureHash !== operation.signatureHash ||
+            if (verified.materialHash !== operation.signatureHash ||
                 verified.paymentPayloadHash !== operation.paymentPayloadHash ||
                 verified.paymentHeaderHash !== operation.paymentHeaderHash)
                 throw new ApnError("APN_STATE_CORRUPT", "Recovered provider x402 material differs from durable hashes.");
@@ -31,7 +30,7 @@ export class X402PaidRequest extends X402Lifecycle {
         }
         try {
             const verified = await requestX402Authorization(this.context.requireNative(), x402NativeRequest(this.context.ids.next(), operation, "get"), operation);
-            if (verified.native.signatureHash !== operation.signatureHash ||
+            if (verified.materialHash !== operation.signatureHash ||
                 verified.paymentPayloadHash !== operation.paymentPayloadHash ||
                 verified.paymentHeaderHash !== operation.paymentHeaderHash)
                 throw new ApnError("APN_STATE_CORRUPT", "Recovered x402 payment material differs from durable hashes.");
@@ -68,10 +67,24 @@ export class X402PaidRequest extends X402Lifecycle {
     }
     async completeAuthorization(operation, kind) {
         if (BigInt(Math.floor(this.context.clock.now().getTime() / 1000)) >= BigInt(operation.authorization.validBefore)) {
-            if (operation.providerSigner !== undefined) {
+            if (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined) {
                 return publicX402Operation(await this.commitTerminal(operation, "failed_before_effect"));
             }
             throw new ApnError("APN_OPERATION_BLOCKED", "Frozen x402 authorization validity has expired.");
+        }
+        if (operation.delegatedMaterial !== undefined) {
+            await this.assertDelegatedPolicy(operation);
+            const port = this.delegatedMaterialPort(operation);
+            const material = kind === "create"
+                ? await port.materialize(operation)
+                : await port.recover(operation);
+            const authorized = await this.transition(operation, "authorized_not_sent", {
+                signatureHash: material.materialHash,
+                ...(material.contextHash === undefined ? {} : { paymentContextHash: material.contextHash }),
+                paymentPayloadHash: material.paymentPayloadHash,
+                paymentHeaderHash: material.paymentHeaderHash,
+            });
+            return publicX402Operation(authorized);
         }
         if (operation.providerSigner !== undefined) {
             const outcome = await this.providerAuthorization().authorize(operation, kind);
@@ -83,7 +96,7 @@ export class X402PaidRequest extends X402Lifecycle {
             }
             const verified = outcome.material;
             const authorized = await this.transition(operation, "authorized_not_sent", {
-                signatureHash: verified.native.signatureHash,
+                signatureHash: verified.materialHash,
                 paymentPayloadHash: verified.paymentPayloadHash,
                 paymentHeaderHash: verified.paymentHeaderHash,
             });
@@ -132,6 +145,9 @@ export class X402PaidRequest extends X402Lifecycle {
             const pending = await this.beginPaidAttempt(operation, purpose);
             if (pending.attempts.at(-1)?.purpose !== purpose || pending.attempts.at(-1)?.phase !== "pending") {
                 throw new ApnError("APN_STATE_CORRUPT", "Resumed x402 attempt is not the durable pending purpose.");
+            }
+            if (operation.delegatedMaterial !== undefined) {
+                await this.delegatedMaterialPort(operation).markExposed(operation);
             }
             let rawResponse;
             try {
@@ -225,6 +241,48 @@ export class X402PaidRequest extends X402Lifecycle {
             if (isTransientNativeFailure(error) || isNativeExpired(error))
                 return publicX402Operation(operation);
             throw error;
+        }
+    }
+    delegatedMaterialPort(operation) {
+        const binding = operation.delegatedMaterial;
+        if (binding === undefined)
+            throw new ApnError("APN_STATE_CORRUPT", "Delegated x402 binding is missing.");
+        const adapter = this.context.requireProviderRegistry().resolve(binding.providerId);
+        if (adapter.x402Material?.method !== binding.method || adapter.capabilities.x402.mode !== "delegated_erc7710_apn_paid_retry") {
+            throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The frozen delegated x402 payment-material adapter is unavailable.");
+        }
+        return adapter.x402Material;
+    }
+    async assertDelegatedPolicy(operation) {
+        const binding = operation.delegatedMaterial;
+        if (binding === undefined)
+            throw new ApnError("APN_STATE_CORRUPT", "Delegated x402 binding is missing.");
+        const profile = await this.context.requireProfileRepository().load(operation.profileHash);
+        if (profile === null || profile.provider_id !== binding.providerId || profile.revision !== binding.profileRevision ||
+            profile.capability_hash !== binding.capabilityHash || profile.account_binding_hash !== binding.accountBindingHash ||
+            profile.public_address.toLowerCase() !== operation.wallet || profile.drift.state !== "bound" ||
+            profile.capability_snapshot.x402.mode !== "delegated_erc7710_apn_paid_retry" ||
+            profile.capability_snapshot.x402.execution_owner !== "apn" ||
+            profile.capability_snapshot.x402.retry_owner !== "apn_state_machine")
+            throw new ApnError("APN_PROFILE_DRIFT", "The Smart Account profile no longer matches the frozen x402 authority.");
+        const policy = requireProfilePolicy(await this.context.requirePolicy().load(policyBinding(profile)));
+        if (BigInt(operation.capAtomic) > BigInt(policy.maxX402AmountAtomic)) {
+            throw new ApnError("APN_X402_PROFILE_LIMIT_EXCEEDED", "The current profile maximum is below the frozen x402 cap.");
+        }
+        const balance = await this.context.requireRpc().getBalances(operation.wallet);
+        if (balance.address.toLowerCase() !== operation.wallet) {
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC balance response does not match the frozen Smart Account owner.");
+        }
+        assertUnattendedX402Balance(policy, balance.usdcAtomic);
+        if (BigInt(balance.usdcAtomic) < BigInt(operation.amountAtomic)) {
+            throw new ApnError("APN_INSUFFICIENT_USDC", "Owner Smart Account USDC is insufficient for this x402 payment.");
+        }
+    }
+    assertMaterialHashes(operation, material) {
+        if (material.materialHash !== operation.signatureHash || material.paymentPayloadHash !== operation.paymentPayloadHash ||
+            material.contextHash !== operation.paymentContextHash ||
+            material.paymentHeaderHash !== operation.paymentHeaderHash) {
+            throw new ApnError("APN_STATE_CORRUPT", "Recovered delegated x402 material differs from durable hashes.");
         }
     }
 }

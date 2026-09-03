@@ -8,11 +8,15 @@ import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleRespon
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { canonicalErc7710Facilitators, isStrictErc7710Payload } from "./x402-erc7710-codec.js";
 import type { InspectCandidate } from "./x402-model.js";
+import { decodeCanonicalBase64, parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
+
+export type X402PaymentPayload = PaymentPayload;
+export type X402PaymentRequirements = PaymentRequirements;
 
 const MAX_DECODED_X402_BYTES = 48 * 1024;
 const MAX_ACCEPTS = 16;
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const LOWER_ADDRESS = /^0x[0-9a-f]{40}$/u;
 const BYTES32 = /^0x[0-9a-f]{64}$/u;
@@ -49,12 +53,13 @@ export function encodePaymentRequiredHeader(value: PaymentRequired): string {
 }
 
 export function decodePaymentRequiredHeader(value: string): PaymentRequired {
-  const strict = decodeCanonicalBase64Json(value);
+  const wire = decodeCanonicalBase64Json(value);
+  const strict = paymentRequiredCoreFields(wire);
   validatePaymentRequired(strict);
   let official: PaymentRequired;
   try { official = decodeOfficialPaymentRequiredHeader(value); }
   catch { throw protocol("Official x402 v2 representation rejected PAYMENT-REQUIRED."); }
-  if (JSON.stringify(official) !== JSON.stringify(strict)) {
+  if (canonicalJson(paymentRequiredCoreFields(official)) !== canonicalJson(strict)) {
     throw protocol("Official and strict x402 representations disagree.");
   }
   return paymentRequiredWithSupportedExtensions(strict);
@@ -188,7 +193,32 @@ function inspectCandidate(requirements: PaymentRequirements, index: number): Ins
     !ADDRESS.test(requirements.asset) || requirements.asset.toLowerCase() !== BASE_USDC.toLowerCase() ||
     !POSITIVE_UINT.test(requirements.amount) || !ADDRESS.test(requirements.payTo) || /^0x0{40}$/iu.test(requirements.payTo) ||
     !Number.isInteger(requirements.maxTimeoutSeconds) || requirements.maxTimeoutSeconds < 30 || requirements.maxTimeoutSeconds > 300 ||
-    !isPlainRecord(extra) || typeof extra.name !== "string" || extra.name.length === 0 ||
+    !isPlainRecord(extra)
+  ) return null;
+  const declaredCanonicalJson = canonicalJson(requirements);
+  const base = {
+    index: index.toString(),
+    scheme: "exact" as const,
+    network: CHAIN_CAIP2,
+    asset: requirements.asset.toLowerCase(),
+    amountAtomic: requirements.amount,
+    payTo: requirements.payTo.toLowerCase(),
+    maxTimeoutSeconds: requirements.maxTimeoutSeconds.toString(),
+    offerHash: domainHash("apn.x402.offer.v1", declaredCanonicalJson),
+    readiness: READINESS,
+  };
+  if (extra.assetTransferMethod === "erc7710") {
+    const facilitatorAddresses = canonicalErc7710Facilitators(extra);
+    if (facilitatorAddresses === null) return null;
+    return {
+      ...base,
+      assetTransferMethod: "erc7710",
+      paymentFlow: "delegatedErc20Transfer",
+      facilitatorAddresses,
+    };
+  }
+  if (
+    typeof extra.name !== "string" || extra.name.length === 0 ||
     Buffer.byteLength(extra.name, "utf8") > 128 ||
     typeof extra.version !== "string" || extra.version.length === 0 ||
     Buffer.byteLength(extra.version, "utf8") > 128 ||
@@ -196,21 +226,12 @@ function inspectCandidate(requirements: PaymentRequirements, index: number): Ins
     (extra.assetTransferMethod !== undefined && extra.assetTransferMethod !== "eip3009") ||
     (extra.paymentFlow !== undefined && extra.paymentFlow !== "authorization")
   ) return null;
-  const declaredCanonicalJson = canonicalJson(requirements);
   return {
-    index: index.toString(),
-    scheme: "exact",
-    network: CHAIN_CAIP2,
-    asset: requirements.asset.toLowerCase(),
-    amountAtomic: requirements.amount,
-    payTo: requirements.payTo.toLowerCase(),
-    maxTimeoutSeconds: requirements.maxTimeoutSeconds.toString(),
+    ...base,
     tokenName: extra.name,
     tokenVersion: extra.version,
     assetTransferMethod: "eip3009",
     paymentFlow: "transferWithAuthorization",
-    offerHash: domainHash("apn.x402.offer.v1", declaredCanonicalJson),
-    readiness: READINESS,
   };
 }
 
@@ -236,9 +257,14 @@ function validatePaymentPayload(value: unknown): asserts value is PaymentPayload
   validateResource(paymentPayload.resource);
   validateRequirements(paymentPayload.accepted);
   const accepted = paymentPayload.accepted as PaymentRequirements;
-  if (inspectCandidate(accepted, 0) === null) throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported.");
-
+  const candidate = inspectCandidate(accepted, 0);
+  if (candidate === null) throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported.");
   const payload = record(paymentPayload.payload, "exact-EVM payload");
+  if (candidate.assetTransferMethod === "erc7710") {
+    if (!isStrictErc7710Payload(payload)) throw protocol("PAYMENT-SIGNATURE ERC-7710 payload shape is invalid.");
+    if (paymentPayload.extensions !== undefined) validatePaymentPayloadExtensions(paymentPayload.extensions);
+    return;
+  }
   allowedKeys(payload, ["signature", "authorization"], []);
   validateEvmSignature(payload.signature);
   const authorization = record(payload.authorization, "exact-EVM authorization");
@@ -324,6 +350,17 @@ function paymentRequiredWithSupportedExtensions(value: PaymentRequired): Payment
   return { ...paymentRequired, extensions: { "payment-identifier": extensions["payment-identifier"] } };
 }
 
+function paymentRequiredCoreFields(value: unknown): PaymentRequired {
+  const wire = record(value, "PAYMENT-REQUIRED");
+  return {
+    x402Version: wire.x402Version,
+    ...(Object.hasOwn(wire, "error") ? { error: wire.error } : {}),
+    resource: wire.resource,
+    accepts: wire.accepts,
+    ...(Object.hasOwn(wire, "extensions") ? { extensions: wire.extensions } : {}),
+  } as PaymentRequired;
+}
+
 function validateEvmSignature(value: unknown): void {
   if (typeof value !== "string" || !/^0x[0-9a-f]{130}$/u.test(value)) {
     throw protocol("PAYMENT-SIGNATURE EVM signature is not canonical.");
@@ -356,94 +393,6 @@ function validatePaymentIdentifierSchema(value: unknown): void {
   if (!Array.isArray(schema.required) || schema.required.length !== 1 || schema.required[0] !== "required") {
     throw protocol("payment-identifier required-member schema is invalid.");
   }
-}
-
-function decodeCanonicalBase64(value: string): Uint8Array {
-  if (value.length === 0 || value.length % 4 !== 0 || !BASE64.test(value) || Buffer.byteLength(value, "ascii") > 64 * 1024) {
-    throw protocol("x402 header is not canonical base64.");
-  }
-  const bytes = Buffer.from(value, "base64");
-  if (bytes.length > MAX_DECODED_X402_BYTES || bytes.toString("base64") !== value) {
-    throw protocol("x402 header is oversized or has non-canonical pad bits.");
-  }
-  return bytes;
-}
-
-function parseJsonWithDuplicateRejection(text: string): unknown {
-  let offset = 0;
-  const skipWhitespace = (): void => { while (/\s/u.test(text[offset] ?? "")) offset += 1; };
-  const parseValue = (): unknown => {
-    skipWhitespace();
-    const token = text[offset];
-    if (token === "{") return parseObject();
-    if (token === "[") return parseArray();
-    if (token === '"') return parseString();
-    if (text.startsWith("true", offset)) { offset += 4; return true; }
-    if (text.startsWith("false", offset)) { offset += 5; return false; }
-    if (text.startsWith("null", offset)) { offset += 4; return null; }
-    const match = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/u.exec(text.slice(offset));
-    if (match === null) throw protocol("x402 JSON syntax is invalid.");
-    offset += match[0].length;
-    const number = Number(match[0]);
-    if (!Number.isSafeInteger(number)) throw protocol("x402 JSON contains an unsafe or non-integral number.");
-    return number;
-  };
-  const parseObject = (): Record<string, unknown> => {
-    offset += 1;
-    skipWhitespace();
-    const object: Record<string, unknown> = {};
-    const keys = new Set<string>();
-    if (text[offset] === "}") { offset += 1; return object; }
-    while (true) {
-      skipWhitespace();
-      if (text[offset] !== '"') throw protocol("x402 JSON object key is invalid.");
-      const key = parseString();
-      if (keys.has(key)) throw protocol("x402 JSON contains a duplicate member name.");
-      keys.add(key);
-      skipWhitespace();
-      if (text[offset] !== ":") throw protocol("x402 JSON object separator is invalid.");
-      offset += 1;
-      object[key] = parseValue();
-      skipWhitespace();
-      if (text[offset] === "}") { offset += 1; return object; }
-      if (text[offset] !== ",") throw protocol("x402 JSON object delimiter is invalid.");
-      offset += 1;
-    }
-  };
-  const parseArray = (): unknown[] => {
-    offset += 1;
-    skipWhitespace();
-    const array: unknown[] = [];
-    if (text[offset] === "]") { offset += 1; return array; }
-    while (true) {
-      array.push(parseValue());
-      skipWhitespace();
-      if (text[offset] === "]") { offset += 1; return array; }
-      if (text[offset] !== ",") throw protocol("x402 JSON array delimiter is invalid.");
-      offset += 1;
-    }
-  };
-  const parseString = (): string => {
-    const start = offset;
-    offset += 1;
-    let escaped = false;
-    while (offset < text.length) {
-      const character = text[offset];
-      if (!escaped && character === '"') {
-        offset += 1;
-        try { return JSON.parse(text.slice(start, offset)) as string; }
-        catch { throw protocol("x402 JSON string is invalid."); }
-      }
-      if (!escaped && character === "\\") escaped = true;
-      else escaped = false;
-      offset += 1;
-    }
-    throw protocol("x402 JSON string is unterminated.");
-  };
-  const value = parseValue();
-  skipWhitespace();
-  if (offset !== text.length) throw protocol("x402 JSON has trailing data.");
-  return value;
 }
 
 function resourceMatches(value: string, requested: string): boolean {

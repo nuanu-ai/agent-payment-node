@@ -50,6 +50,7 @@ export interface X402NativeAuthorizationMaterial {
 }
 export interface VerifiedX402PaymentMaterial {
     readonly native: X402NativeAuthorizationMaterial;
+    readonly materialHash: string;
     readonly paymentPayloadHash: string;
     readonly paymentHeaderHash: string;
     readonly paymentHeader: string;

@@ -3,6 +3,7 @@ import type { RuntimeContext } from "./runtime.js";
 export declare class ProviderDirectTransferService {
     private readonly context;
     private readonly operations;
+    private readonly durable;
     constructor(context: RuntimeContext);
     canHandle(profileInput: string): Promise<boolean>;
     prepare(request: Extract<CommandRequest, {
@@ -14,13 +15,9 @@ export declare class ProviderDirectTransferService {
     private assertFrozenPreconditions;
     private requiredAdapter;
     private reobserveProvider;
-    private inspectReceipt;
-    private receiptPending;
-    private receiptAmbiguous;
+    private applyExecutionResult;
+    private handleExecutionFailure;
     private requiredProviderProfile;
     private requiredOperation;
-    private recoverOrphanTerminal;
     private failBeforeEffect;
-    private transition;
-    private persist;
 }

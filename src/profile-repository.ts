@@ -12,4 +12,8 @@ export class StateProfileRepository implements ProviderProfileRepositoryPort {
   async save(profile: ProviderProfileRecord): Promise<void> {
     await this.state.writeProviderProfile(profile);
   }
+
+  async remove(profileHash: string): Promise<void> {
+    await this.state.removeProviderProfile(profileHash);
+  }
 }

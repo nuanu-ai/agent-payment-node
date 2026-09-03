@@ -1,5 +1,6 @@
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { x402OperationBindingHash } from "./x402-state-model.js";
 import { address, allowedRecord, bytes32, canonicalText, exactRecord, hash, mediaType, positive, record, stateCorrupt, timestamp, transactionHash, uint, } from "./x402-state-validation-primitives.js";
 export function validateAttempts(value, operation) {
     if (!Array.isArray(value) || value.length > 64)
@@ -126,6 +127,19 @@ export function validateTransactionHint(value) {
     timestamp(hint.observedAt);
     return hint;
 }
+export function validateTransferMethodEvidence(method, transactionHint, authorizationUsedScan, settlementEvidence, unusedExpiryEvidence) {
+    if (method === "erc7710") {
+        if (authorizationUsedScan !== undefined || unusedExpiryEvidence !== undefined ||
+            transactionHint?.source === "authorization_used_log" ||
+            settlementEvidence !== undefined && settlementEvidence.schemaVersion !== "apn.x402.erc7710-settlement-evidence.v1") {
+            stateCorrupt("x402 ERC-7710 operation contains EIP-3009-only evidence.");
+        }
+        return;
+    }
+    if (settlementEvidence !== undefined && settlementEvidence.schemaVersion !== "apn.x402.settlement-evidence.v1") {
+        stateCorrupt("x402 EIP-3009 operation contains ERC-7710 settlement evidence.");
+    }
+}
 export function validateAuthorizationUsedScan(value, operation) {
     const scan = allowedRecord(value, ["schemaVersion", "searchStartBlock", "nextFromBlock", "targetSafeHead", "candidates", "status", "updatedAt", "evidenceHash"], ["lastCompletedChunk", "unavailableReason"]);
     if (scan.schemaVersion !== "apn.x402.authorization-used-scan.v1")
@@ -206,6 +220,12 @@ export function validateAuthorizationUsedScan(value, operation) {
     return scan;
 }
 export function validateSettlementEvidence(value, operation) {
+    const candidate = record(value);
+    return candidate.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1"
+        ? validateErc7710SettlementEvidence(candidate, operation)
+        : validateEip3009SettlementEvidence(candidate, operation);
+}
+function validateEip3009SettlementEvidence(value, operation) {
     const evidence = exactRecord(value, [
         "schemaVersion", "network", "chainId", "token", "transactionHash", "safeHead", "transactionBlock", "receiptStatus",
         "blockHashRechecked", "authorizationUsed", "transfer", "authorizationState", "rpcOriginHash", "evidenceHash",
@@ -278,6 +298,75 @@ export function validateSettlementEvidence(value, operation) {
     const { evidenceHash: _hash, ...body } = evidence;
     if (evidence.evidenceHash !== domainHash("apn.x402.settlement-evidence.v1", canonicalJson(body)))
         stateCorrupt("x402 settlement evidence hash is invalid.");
+    return evidence;
+}
+function validateErc7710SettlementEvidence(value, operation) {
+    const evidence = exactRecord(value, [
+        "schemaVersion", "network", "chainId", "token", "transactionHash", "safeHead", "transactionBlock",
+        "receiptStatus", "blockHashRechecked", "transfer", "methodBinding", "rpcOriginHash", "evidenceHash",
+    ]);
+    if (evidence.schemaVersion !== "apn.x402.erc7710-settlement-evidence.v1" || evidence.network !== CHAIN_CAIP2 ||
+        evidence.chainId !== "8453" || evidence.token !== BASE_USDC.toLowerCase() || evidence.receiptStatus !== "1" ||
+        evidence.blockHashRechecked !== true)
+        stateCorrupt("x402 ERC-7710 settlement discriminant is invalid.");
+    transactionHash(evidence.transactionHash);
+    const safeHead = exactRecord(evidence.safeHead, ["number", "hash", "observedAt"]);
+    positive(safeHead.number);
+    bytes32(safeHead.hash);
+    timestamp(safeHead.observedAt);
+    const transactionBlock = exactRecord(evidence.transactionBlock, ["number", "hash", "timestamp"]);
+    positive(transactionBlock.number);
+    bytes32(transactionBlock.hash);
+    uint(transactionBlock.timestamp);
+    if (BigInt(transactionBlock.number) > BigInt(safeHead.number)) {
+        stateCorrupt("x402 ERC-7710 settlement block is newer than the safe head.");
+    }
+    if (transactionBlock.number === safeHead.number && transactionBlock.hash !== safeHead.hash) {
+        stateCorrupt("x402 ERC-7710 settlement block conflicts with the safe head.");
+    }
+    const transfer = exactRecord(evidence.transfer, ["logIndex", "from", "to", "value", "blockNumber", "blockHash", "transactionHash"]);
+    uint(transfer.logIndex);
+    address(transfer.from);
+    address(transfer.to);
+    positive(transfer.value);
+    positive(transfer.blockNumber);
+    bytes32(transfer.blockHash);
+    transactionHash(transfer.transactionHash);
+    if (transfer.blockNumber !== transactionBlock.number || transfer.blockHash !== transactionBlock.hash ||
+        transfer.transactionHash !== evidence.transactionHash)
+        stateCorrupt("x402 ERC-7710 transfer log binding is invalid.");
+    const binding = exactRecord(evidence.methodBinding, [
+        "paymentResponseHash", "operationBindingHash", "offerHash", "method", "delegationManager", "delegator",
+        "childHash", "permissionContextHash",
+    ]);
+    if (binding.method !== "erc7710")
+        stateCorrupt("x402 ERC-7710 method binding is invalid.");
+    hash(binding.paymentResponseHash);
+    hash(binding.operationBindingHash);
+    hash(binding.offerHash);
+    address(binding.delegationManager);
+    address(binding.delegator);
+    hash(binding.childHash);
+    hash(binding.permissionContextHash);
+    if (operation !== undefined) {
+        const delegated = record(operation.delegatedMaterial);
+        const offer = record(operation.selectedOffer);
+        const response = record(operation.settlementResponseObservation);
+        if (transfer.from !== operation.wallet || transfer.to !== operation.payee || transfer.value !== operation.amountAtomic ||
+            binding.paymentResponseHash !== response.settlementResponseHash || binding.offerHash !== offer.offerHash ||
+            binding.delegationManager !== delegated.delegationManager || binding.delegator !== operation.wallet ||
+            binding.childHash !== operation.signatureHash || binding.permissionContextHash !== operation.paymentContextHash ||
+            evidence.rpcOriginHash !== delegated.rpcOriginHash ||
+            binding.operationBindingHash !== x402OperationBindingHash(operation)) {
+            stateCorrupt("x402 ERC-7710 evidence conflicts with the frozen operation.");
+        }
+    }
+    hash(evidence.rpcOriginHash);
+    hash(evidence.evidenceHash);
+    const { evidenceHash: _hash, ...body } = evidence;
+    if (evidence.evidenceHash !== domainHash("apn.x402.erc7710-settlement-evidence.v1", canonicalJson(body))) {
+        stateCorrupt("x402 ERC-7710 settlement evidence hash is invalid.");
+    }
     return evidence;
 }
 export function validateUnusedExpiryEvidence(value, operation) {

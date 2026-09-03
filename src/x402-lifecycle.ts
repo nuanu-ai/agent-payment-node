@@ -1,60 +1,19 @@
-import { randomBytes } from "node:crypto";
-import { canonicalJson, domainHash, sha256 } from "./canonical.js";
-import type { CommandRequest } from "./commands.js";
-import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
 import type { RuntimeContext } from "./runtime.js";
-import { canonicalIdempotencyKey } from "./transfer-policy.js";
-import { canonicalOperationId } from "./transfer-policy.js";
-import { canonicalProfile } from "./wallet-policy.js";
-import {
-  assertUnattendedX402Balance,
-  effectiveX402Cap,
-  policyBinding,
-  requireProfilePolicy,
-} from "./profile-policy.js";
-import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
-import { observePaidX402Response, type PaidHttpResult } from "./x402-http.js";
-import type { RpcPort, X402RpcPort } from "./ports.js";
-import {
-  candidatesWithinCap,
-  canonicalPrepareUrl,
-  freshChallenge,
-  paymentIdentifierState,
-  positiveCap,
-  selectPrepareOffer,
-} from "./x402-policy.js";
+import type { PaidHttpResult } from "./x402-http.js";
 import {
   appendX402Transition,
-  publicX402Operation,
   sealX402Operation,
   sealX402Receipt,
   sealX402Result,
-  x402AuthorizationIntentHash,
-  x402Fingerprint,
   x402OperationBindingHash,
-  x402RequestHash,
-  x402TransactionHintSourceBindingHash,
-  type SettlementResponseObservation,
-  type TransactionHint,
   type X402Attempt,
   type X402OperationRecord,
-  type X402ProofClass,
-  type X402Reason,
   type X402State,
   type X402TerminalState,
-  type X402SettlementWaitProjection,
 } from "./x402-state-integrity.js";
-import { X402RpcReconciler } from "./x402-rpc-reconciler.js";
-import {
-  isNativeNotFound,
-  isNativeExpired,
-  isTransientNativeFailure,
-  requestX402Authorization,
-  x402NativeRequest,
-  type VerifiedX402PaymentMaterial,
-} from "./x402-native.js";
 import { settlementResponseTransaction, terminalClassification } from "./x402-service-rpc.js";
 
 export class X402Lifecycle {
@@ -214,6 +173,7 @@ export class X402Lifecycle {
       amountAtomic: operation.amountAtomic,
       network: operation.network,
       token: operation.token,
+      transferMethod: operation.selectedOffer.resolved.assetTransferMethod,
       ...(operation.paymentIdentifier === undefined ? {} : { paymentIdentifier: operation.paymentIdentifier.value }),
       ...(operation.settlementResponseObservation === undefined ? {} : {
         settlementResponseHash: operation.settlementResponseObservation.settlementResponseHash,
@@ -270,7 +230,7 @@ export class X402Lifecycle {
     operation: X402OperationRecord,
     state: X402State,
     additions: Partial<Pick<X402OperationRecord,
-      | "signatureHash" | "paymentPayloadHash" | "paymentHeaderHash" | "attempts"
+      | "signatureHash" | "paymentPayloadHash" | "paymentHeaderHash" | "paymentContextHash" | "attempts"
       | "settlementResponseObservation" | "transactionHint" | "authorizationUsedScan"
       | "settlementEvidence" | "unusedExpiryEvidence" | "resultLink" | "receiptLink"
     >> = {},
