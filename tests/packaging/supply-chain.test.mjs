@@ -94,6 +94,9 @@ test("build and attestation permissions are isolated", () => {
   const publish = jobBlock(release, "publish");
 
   for (const block of [supplyBuild, releaseBuild]) {
+    assert.match(block, /runs-on:\s*macos-15/);
+    assert.match(block, /test "\$\(uname -s\)" = "Darwin"/);
+    assert.match(block, /test "\$\(uname -m\)" = "arm64"/);
     assert.match(block, /permissions:\n\s+contents: read/);
     assert.doesNotMatch(block, /:\s*write/);
     assert.match(block, /npm ci --ignore-scripts/);
