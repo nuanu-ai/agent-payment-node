@@ -34,6 +34,7 @@
     "test:legacy-native-contract": "cargo fmt --check && cargo test --offline --locked && cargo clippy --offline --locked --all-targets -- -D warnings",
     "test:legacy-cask-syntax": "node scripts/core-package-syntax.mjs",
     "test:legacy-cask-behavior": "node --test --test-concurrency=1 tests/packaging/*.test.mjs",
+    "test:supply-chain": "node --test --test-concurrency=1 tests/packaging/supply-chain.test.mjs",
     "test:source": "npm run test:core",
     "build:test": "tsc -p tsconfig.test.json",
     "integration:assemble-app": "node scripts/assemble-macos-app.mjs",
