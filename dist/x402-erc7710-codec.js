@@ -1,4 +1,4 @@
-import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "@metamask/7715-permission-types";
+import { ALL_METAMASK_FACILITATOR_ADDRESSES, METAMASK_FACILITATOR_ADDRESSES, } from "@metamask/7715-permission-types";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 export function canonicalErc7710Facilitators(extra) {
@@ -17,6 +17,23 @@ export function canonicalErc7710Facilitators(extra) {
         return null;
     return normalizeAddresses(value);
 }
+export function frozenErc7710FacilitatorsMatch(extra, frozen) {
+    if (!Array.isArray(frozen))
+        return false;
+    const normalizedFrozen = normalizeAddresses(frozen);
+    if (normalizedFrozen === null)
+        return false;
+    if (extra.facilitatorAddresses !== undefined) {
+        if (!Array.isArray(extra.facilitatorAddresses))
+            return false;
+        const normalizedDeclared = normalizeAddresses(extra.facilitatorAddresses);
+        return normalizedDeclared !== null && sameAddresses(normalizedFrozen, normalizedDeclared);
+    }
+    const current = normalizeAddresses(ALL_METAMASK_FACILITATOR_ADDRESSES);
+    const legacy = normalizeAddresses(METAMASK_FACILITATOR_ADDRESSES);
+    return (current !== null && sameAddresses(normalizedFrozen, current)) ||
+        (legacy !== null && sameAddresses(normalizedFrozen, legacy));
+}
 function normalizeAddresses(value) {
     const normalized = [];
     const unique = new Set();
@@ -30,6 +47,9 @@ function normalizeAddresses(value) {
         normalized.push(address);
     }
     return normalized.sort();
+}
+function sameAddresses(left, right) {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 function optionalBoundedString(value) {
     return value === undefined || (typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= 128);
