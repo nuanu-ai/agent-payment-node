@@ -1,5 +1,5 @@
 export declare const OUTPUT_VERSION: "apn.cli.v1";
-export declare const PRODUCT_VERSION: "0.5.2";
+export declare const PRODUCT_VERSION: "0.5.3";
 export declare const STATE_VERSION: "apn.state.v1";
 export declare const NATIVE_IPC_VERSION: "apn.native.v1";
 export declare const CHAIN_ID: 8453;
