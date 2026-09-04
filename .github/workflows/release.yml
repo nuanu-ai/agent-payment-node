@@ -22,7 +22,7 @@ concurrency:
 jobs:
   build:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: macos-15
     permissions:
       contents: read
     steps:
@@ -48,6 +48,13 @@ jobs:
         with:
           node-version: "24.15.0"
           cache: npm
+
+      - name: Verify the declared release platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
 
       - name: Validate the owner-supplied immutable identities
         shell: bash
