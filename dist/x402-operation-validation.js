@@ -2,6 +2,7 @@ import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { parseAtomic } from "./money.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js";
+import { frozenErc7710FacilitatorsMatch } from "./x402-erc7710-codec.js";
 import { X402_STATE_VERSION, TRANSITION_VERSION, ZERO_HASH, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-model.js";
 import { validateAttempts, validateAuthorizationUsedScan, validateSettlementEvidence, validateSettlementResponseObservation, validateTransferMethodEvidence, validateTransactionHint, validateUnusedExpiryEvidence, } from "./x402-evidence-validation.js";
 import { address, allowedKeys, bytes32, canonicalText, exactRecord, hash, positive, record, stateCorrupt, timestamp, } from "./x402-state-validation-primitives.js";
@@ -94,7 +95,7 @@ export function validateX402OperationUnsafe(value) {
         stateCorrupt("x402 frozen offer is no longer statically compatible.");
     const candidate = candidates[0];
     const methodFieldsMatch = candidate?.assetTransferMethod === "erc7710" && resolved.assetTransferMethod === "erc7710"
-        ? canonicalJson(candidate.facilitatorAddresses) === canonicalJson(resolved.facilitatorAddresses)
+        ? frozenErc7710FacilitatorsMatch(record(record(requirements).extra), resolved.facilitatorAddresses)
         : candidate?.assetTransferMethod === "eip3009" && resolved.assetTransferMethod === "eip3009" &&
             candidate.tokenName === resolved.tokenName && candidate.tokenVersion === resolved.tokenVersion;
     if (candidate === undefined || candidate.offerHash !== selectedOffer.offerHash || candidate.asset !== operation.token ||
