@@ -53,3 +53,4 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
 }
 export declare function classifyX402LogAvailabilityMessage(message: string): "pruned" | "range_unavailable" | null;
 export { isPublicIp } from "./network-policy.js";
+export declare function acceptRpcHttpBody(status: number | undefined, allowJsonRpcClientError: boolean): boolean;

@@ -1660,6 +1660,17 @@ test("ambiguous Smart Account paid HTTP finalizes unused only after expiry and a
     clock.advance(61);
     rpc.observedUnix = clock.unix;
     armSmartAccountExpiredRange(rpc, durable as X402OperationRecord);
+    let finalizedReads = 0;
+    rpc.onX402Call = (name) => {
+      if (name !== "finalized" || ++finalizedReads !== 2) return;
+      const previous = rpc.finalizedHead;
+      const number = (BigInt(previous.number) + 1n).toString();
+      const hash = `0x${"e".repeat(64)}` as Hex;
+      const timestamp = (BigInt(previous.timestamp) + 2n).toString();
+      rpc.finalizedHead = { ...previous, number, hash, timestamp, observedAt: new Date(Number(timestamp) * 1_000).toISOString() };
+      rpc.blockHashes.set(number, hash);
+      rpc.blockTimestamps.set(number, timestamp);
+    };
     const recovered = await smartAccountX402Runtime(fixture, rpc, http, clock, engine).core.execute({
       command: "operation.resume", operationId,
     });
