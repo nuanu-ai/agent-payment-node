@@ -384,7 +384,7 @@ export function classifyX402LogAvailabilityMessage(
   if (/\b(?:rate[ -]limit(?:ed|ing)?|request limit|too many requests)\b/u.test(text)) return null;
   if (/\b(?:pruned|missing trie|historical state|history unavailable)\b/u.test(text)) return "pruned";
   const rangeSubject = /\b(?:block(?:s)?|range|logs?|results?|query|window)\b/u.test(text);
-  const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most)\b/u.test(text);
+  const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most|up to)\b/u.test(text);
   return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
 

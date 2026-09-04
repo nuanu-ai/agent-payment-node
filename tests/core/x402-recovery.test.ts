@@ -849,6 +849,7 @@ test("RPC log availability classifier separates history/range gaps from rate lim
   assert.equal(classifyX402LogAvailabilityMessage("historical state pruned"), "pruned");
   assert.equal(classifyX402LogAvailabilityMessage("block range limit exceeded"), "range_unavailable");
   assert.equal(classifyX402LogAvailabilityMessage("query returned more than 10000 results"), "range_unavailable");
+  assert.equal(classifyX402LogAvailabilityMessage("You can make eth_getLogs requests with up to a 10 block range"), "range_unavailable");
   assert.equal(classifyX402LogAvailabilityMessage("rate limit exceeded"), null);
   assert.equal(classifyX402LogAvailabilityMessage("historical state request was rate limited"), null);
   assert.equal(classifyX402LogAvailabilityMessage("logs query was rate-limited"), null);
