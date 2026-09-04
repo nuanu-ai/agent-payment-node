@@ -158,6 +158,30 @@ const post = async (outcome) => {
   setTimeout(() => window.close(), 250);
 };
 const classify = (error) => error && Number(error.code) === 4001 ? "user_rejected" : "provider_protocol";
+const discoverMetaMaskProvider = async () => {
+  const announced = [];
+  const announce = (event) => {
+    const detail = event && event.detail;
+    const info = detail && detail.info;
+    const provider = detail && detail.provider;
+    if (info && info.rdns === "io.metamask" && provider && typeof provider.request === "function" &&
+      provider.isMetaMask === true && !announced.includes(provider)) announced.push(provider);
+  };
+  globalThis.addEventListener("eip6963:announceProvider", announce);
+  globalThis.dispatchEvent(new Event("eip6963:requestProvider"));
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  globalThis.removeEventListener("eip6963:announceProvider", announce);
+  if (announced.length === 1) return announced[0];
+  if (announced.length > 1) return undefined;
+  const injected = globalThis.ethereum;
+  const providers = Array.isArray(injected && injected.providers) ? injected.providers : [];
+  const legacy = providers.filter((provider) => provider && typeof provider.request === "function" &&
+    provider.isMetaMask === true && provider.isRabby !== true && provider.isBraveWallet !== true);
+  if (legacy.length === 1) return legacy[0];
+  if (legacy.length > 1) return undefined;
+  return injected && typeof injected.request === "function" && injected.isMetaMask === true &&
+    injected.isRabby !== true && injected.isBraveWallet !== true ? injected : undefined;
+};
 const accountCode = async (provider, owner) => await provider.request({ method: "eth_getCode", params: [owner, "latest"] });
 const active = (code) => typeof code === "string" && code.toLowerCase() === ("0xef0100" + config.implementation.slice(2)).toLowerCase();
 const sameAccount = async (provider, owner) => {
@@ -166,8 +190,8 @@ const sameAccount = async (provider, owner) => {
 };
 (async () => {
   try {
-    const provider = globalThis.ethereum;
-    if (!provider || typeof provider.request !== "function" || provider.isMetaMask !== true) return await post({ ok: false, code: "missing_provider" });
+    const provider = await discoverMetaMaskProvider();
+    if (!provider) return await post({ ok: false, code: "missing_provider" });
     const accounts = await provider.request({ method: "eth_requestAccounts", params: [] });
     if (!Array.isArray(accounts) || accounts.length === 0) return await post({ ok: false, code: "provider_protocol" });
     const owner = String(accounts[0]);
