@@ -310,12 +310,12 @@ export function validateStateSummary(operation, evidence) {
     }
     const noResponseEvidence = evidence.settlementResponseObservation === undefined && evidence.transactionHint === undefined &&
         evidence.authorizationUsedScan === undefined && evidence.settlementEvidence === undefined && evidence.unusedExpiryEvidence === undefined;
-    const noEffectEvidence = evidence.settlementResponseObservation === undefined && evidence.transactionHint === undefined &&
-        evidence.settlementEvidence === undefined && evidence.unusedExpiryEvidence === undefined;
-    const preterminalUnusedExpiry = evidence.unusedExpiryEvidence !== undefined &&
-        evidence.settlementResponseObservation === undefined && evidence.transactionHint === undefined &&
-        evidence.settlementEvidence === undefined && evidence.authorizationUsedScan?.status === "complete" &&
-        evidence.authorizationUsedScan.candidates.length === 0;
+    const noEffectEvidence = evidence.settlementResponseObservation === undefined && evidence.transactionHint === undefined && evidence.settlementEvidence === undefined && evidence.unusedExpiryEvidence === undefined;
+    const erc7710UnusedExpiry = evidence.unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1";
+    const completeUnusedExpiryScan = erc7710UnusedExpiry ? evidence.authorizationUsedScan === undefined
+        : evidence.authorizationUsedScan?.status === "complete" && evidence.authorizationUsedScan.candidates.length === 0;
+    const preterminalUnusedExpiry = evidence.unusedExpiryEvidence !== undefined && evidence.settlementResponseObservation === undefined &&
+        evidence.transactionHint === undefined && evidence.settlementEvidence === undefined && completeUnusedExpiryScan;
     const hasResultLink = operation.resultLink !== undefined;
     const hasReceiptLink = operation.receiptLink !== undefined;
     const lastAttempt = evidence.attempts.at(-1);
@@ -393,8 +393,8 @@ export function validateStateSummary(operation, evidence) {
         stateCorrupt("x402 failed-before-effect evidence is invalid.");
     if (state === "failed_expired_unused" && (evidence.signatureCount !== 3 || evidence.unusedExpiryEvidence === undefined || evidence.settlementResponseObservation !== undefined ||
         evidence.transactionHint !== undefined || evidence.settlementEvidence !== undefined ||
-        evidence.authorizationUsedScan?.status !== "complete" || evidence.authorizationUsedScan.candidates.length !== 0 ||
-        BigInt(evidence.authorizationUsedScan.nextFromBlock) !== BigInt(evidence.authorizationUsedScan.targetSafeHead.number) + 1n ||
+        !completeUnusedExpiryScan || (!erc7710UnusedExpiry && (evidence.authorizationUsedScan === undefined ||
+        BigInt(evidence.authorizationUsedScan.nextFromBlock) !== BigInt(evidence.authorizationUsedScan.targetSafeHead.number) + 1n)) ||
         hasResultLink || !hasReceiptLink))
         stateCorrupt("x402 expired-unused evidence is invalid.");
     if (state === "failed_settled_without_result") {
