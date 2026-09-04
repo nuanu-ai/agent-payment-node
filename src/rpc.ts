@@ -348,7 +348,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const id = (++this.sequence).toString();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params });
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs());
+    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), true);
     let value: unknown;
     try { value = JSON.parse(raw) as unknown; } catch { throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not valid JSON."); }
     const message = record(value, "JSON-RPC response");
@@ -393,6 +393,7 @@ async function postJson(
   body: string,
   addresses: readonly PinnedAddress[],
   timeoutMs: number,
+  allowJsonRpcClientError = false,
 ): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const selected = addresses[0];
@@ -406,7 +407,9 @@ async function postJson(
       if ((response.statusCode ?? 0) >= 300 && (response.statusCode ?? 0) < 400) {
         response.resume(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC redirects are forbidden.")); return;
       }
-      if (response.statusCode !== 200) { response.resume(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status.")); return; }
+      if (!acceptRpcHttpBody(response.statusCode, allowJsonRpcClientError)) {
+        response.resume(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status.")); return;
+      }
       const declared = Number(response.headers["content-length"] ?? "0");
       if (Number.isFinite(declared) && declared > MAX_RPC_RESPONSE_BYTES) { response.destroy(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC response exceeds the size limit.")); return; }
       const chunks: Buffer[] = [];
@@ -426,6 +429,9 @@ async function postJson(
 }
 
 export { isPublicIp } from "./network-policy.js";
+export function acceptRpcHttpBody(status: number | undefined, allowJsonRpcClientError: boolean): boolean {
+  return status === 200 || (allowJsonRpcClientError && status === 400);
+}
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new ApnError("APN_RPC_PROTOCOL", `RPC ${label} is invalid.`);
   return value as Record<string, unknown>;
