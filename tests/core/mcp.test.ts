@@ -327,7 +327,13 @@ test("direct MCP approval returns the exact foreground handoff before custody an
   }));
   assert.equal(rejected.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.deepEqual(rejected.error?.details, {
-    approval_boundary: "foreground_tty", operation_id: operationId, profile: "default", cli_handoff: handoff,
+    approval_boundary: "foreground_tty",
+    operation_id: operationId,
+    profile: "default",
+    cli_handoff: handoff,
+    cli_handoff_argv: [
+      "apn", "pay", "transfer", "approve", "--operation", operationId, "--rpc-url", "https://rpc.example/",
+    ],
   });
   assert.deepEqual(rejected.next_actions, [handoff]);
   assert.equal(hostileNativeCalls, 0);
@@ -336,6 +342,74 @@ test("direct MCP approval returns the exact foreground handoff before custody an
   assert.equal(wrappingCreates, 0);
   assert.equal(rpc.submissions.length, 0);
   assert.doesNotMatch(JSON.stringify(rejected), /fingerprint|phrase|HOSTILE|KEYCHAIN/iu);
+
+  const hostileRpcUrl = "https://rpc.example/; APN_SHELL_META_SHOULD_STAY_DATA";
+  const canonicalHostileRpcUrl = "https://rpc.example/;%20APN_SHELL_META_SHOULD_STAY_DATA";
+  const hostileHandoff = `apn pay transfer approve --operation ${operationId} --rpc-url '${canonicalHostileRpcUrl}'`;
+  const hostileRejected = decodeResult(await connection.client.callTool({
+    name: "apn_pay_transfer_approve",
+    arguments: { operation: operationId, rpc_url: hostileRpcUrl },
+  }));
+  const hostileDetails = hostileRejected.error?.details as Readonly<Record<string, unknown>> | undefined;
+  assert.equal(hostileRejected.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
+  assert.deepEqual(hostileDetails?.cli_handoff_argv, [
+    "apn", "pay", "transfer", "approve", "--operation", operationId, "--rpc-url", canonicalHostileRpcUrl,
+  ]);
+  assert.equal(hostileDetails?.cli_handoff, hostileHandoff);
+  assert.deepEqual(hostileRejected.next_actions, [hostileHandoff]);
+  assert.equal(hostileNativeCalls, 0);
+  assert.equal(hostileApprovalCalls, 0);
+  assert.equal(wrappingLoads, 0);
+  assert.equal(wrappingCreates, 0);
+  assert.equal(rpc.submissions.length, 0);
+
+  for (const hostileRpcUrl of [
+    "https://rpc.example/space marker",
+    "https://rpc.example/amp&marker",
+    "https://rpc.example/pipe|marker",
+    "https://rpc.example/single'marker",
+    'https://rpc.example/double"marker',
+    "https://rpc.example/back`marker",
+    "https://rpc.example/dollar$(marker)",
+    "https://rpc.example/back\\slash",
+  ]) {
+    const corpusRejected = decodeResult(await connection.client.callTool({
+      name: "apn_pay_transfer_approve",
+      arguments: { operation: operationId, rpc_url: hostileRpcUrl },
+    }));
+    const corpusDetails = corpusRejected.error?.details as Readonly<Record<string, unknown>> | undefined;
+    assert.equal(corpusRejected.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED", hostileRpcUrl);
+    assert.deepEqual(corpusDetails?.cli_handoff_argv, [
+      "apn",
+      "pay",
+      "transfer",
+      "approve",
+      "--operation",
+      operationId,
+      "--rpc-url",
+      new URL(hostileRpcUrl).toString(),
+    ], hostileRpcUrl);
+    assert.equal(typeof corpusDetails?.cli_handoff, "string", hostileRpcUrl);
+    assert.deepEqual(corpusRejected.next_actions, [corpusDetails?.cli_handoff], hostileRpcUrl);
+  }
+  assert.equal(hostileNativeCalls, 0);
+  assert.equal(hostileApprovalCalls, 0);
+  assert.equal(wrappingLoads, 0);
+  assert.equal(wrappingCreates, 0);
+  assert.equal(rpc.submissions.length, 0);
+
+  const controlRejected = decodeResult(await connection.client.callTool({
+    name: "apn_pay_transfer_approve",
+    arguments: { operation: operationId, rpc_url: "https://rpc.example/\nAPN_CONTROL_MUST_BE_REJECTED" },
+  }));
+  assert.equal(controlRejected.error?.code, "APN_INVALID_INPUT");
+  assert.equal(controlRejected.error?.details, undefined);
+  assert.deepEqual(controlRejected.next_actions, []);
+  assert.equal(hostileNativeCalls, 0);
+  assert.equal(hostileApprovalCalls, 0);
+  assert.equal(wrappingLoads, 0);
+  assert.equal(wrappingCreates, 0);
+  assert.equal(rpc.submissions.length, 0);
 
   const status = decodeResult(await connection.client.callTool({
     name: "apn_operation_status", arguments: { operation: operationId },
@@ -401,6 +475,7 @@ test("MCP policy creation and increases fail closed before write while a pure de
     assert.equal(increased.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
     assert.equal(increased.error?.details?.approval_boundary, "foreground_tty");
     assert.equal(increased.error?.details?.cli_handoff, handoff);
+    assert.deepEqual(increased.error?.details?.cli_handoff_argv, handoff.split(" "));
     assert.deepEqual(increased.next_actions, [handoff]);
     assert.deepEqual(await readFile(policyPath), before, "every increase must fail before policy persistence");
   }

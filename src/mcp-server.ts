@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ProtocolError, ProtocolErrorCode, Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { bindMcpInput } from "./command-binder.js";
+import { cliHandoffDetails, createCliHandoff, type CliHandoff } from "./cli-handoff.js";
 import type { OutputEnvelope } from "./commands.js";
 import { PRODUCT_VERSION } from "./constants.js";
 import { RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
@@ -55,15 +56,20 @@ async function callTool(
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError(
         "APN_FOREGROUND_AUTH_REQUIRED",
         "Wallet provider authentication must continue in the foreground CLI.",
-        { cli_handoff: handoff, foreground_auth: true },
+        { ...cliHandoffDetails(handoff), foreground_auth: true },
       ));
     }
     if (bound.request.command === "wallet.permission.sync") {
+      const handoff = createCliHandoff([
+        "apn", "wallet", "permission", "sync",
+        "--profile", bound.request.profile,
+        "--expected-revision", String(bound.request.expectedRevision),
+      ]);
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError(
         "APN_FOREGROUND_AUTH_REQUIRED",
         "MetaMask permission sync must continue in the foreground CLI.",
         {
-          cli_handoff: `apn wallet permission sync --profile ${bound.request.profile} --expected-revision ${bound.request.expectedRevision}`,
+          ...cliHandoffDetails(handoff),
           foreground_auth: true,
         },
       ));
@@ -88,18 +94,20 @@ async function callTool(
   }
 }
 
-function walletConnectHandoff(request: Extract<import("./commands.js").CommandRequest, { readonly command: "wallet.connect" }>): string {
-  return `apn wallet connect --profile ${request.profile} --provider ${request.providerId}${
-    request.authenticationMethod === undefined ? "" : ` --auth-method ${request.authenticationMethod}`
-  }${
-    request.expectedRevision === undefined ? "" : ` --expected-revision ${request.expectedRevision}`
-  }${
-    request.permissionCapUsdcAtomic === undefined ? "" : ` --permission-cap-usdc-atomic ${request.permissionCapUsdcAtomic}`
-  }${
-    request.permissionExpiresAt === undefined ? "" : ` --permission-expires-at ${request.permissionExpiresAt}`
-  }${
-    request.idempotencyKey === undefined ? "" : " --idempotency-key <same-idempotency-key>"
-  }`;
+function walletConnectHandoff(
+  request: Extract<import("./commands.js").CommandRequest, { readonly command: "wallet.connect" }>,
+): CliHandoff {
+  const argv = ["apn", "wallet", "connect", "--profile", request.profile, "--provider", request.providerId];
+  if (request.authenticationMethod !== undefined) argv.push("--auth-method", request.authenticationMethod);
+  if (request.expectedRevision !== undefined) argv.push("--expected-revision", String(request.expectedRevision));
+  if (request.permissionCapUsdcAtomic !== undefined) {
+    argv.push("--permission-cap-usdc-atomic", request.permissionCapUsdcAtomic);
+  }
+  if (request.permissionExpiresAt !== undefined) {
+    argv.push("--permission-expires-at", String(request.permissionExpiresAt));
+  }
+  if (request.idempotencyKey !== undefined) argv.push("--idempotency-key", "<same-idempotency-key>");
+  return createCliHandoff(argv);
 }
 
 function mcpResult(envelope: OutputEnvelope): {

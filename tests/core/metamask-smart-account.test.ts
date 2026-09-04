@@ -630,7 +630,7 @@ test("actual CLI and MCP surfaces share lifecycle state while foreground consent
         },
       }));
       assert.equal(handoff.error?.code, "APN_FOREGROUND_AUTH_REQUIRED");
-      assert.match(String(handoff.error?.details?.cli_handoff), /--idempotency-key <same-idempotency-key>$/u);
+      assert.match(String(handoff.error?.details?.cli_handoff), /--idempotency-key '<same-idempotency-key>'$/u);
       assert.equal(JSON.stringify(handoff).includes(IDEMPOTENCY_KEY), false);
       assert.equal(consent.requestCalls, 1);
 
@@ -644,6 +644,9 @@ test("actual CLI and MCP surfaces share lifecycle state while foreground consent
         name: "apn_wallet_permission_sync", arguments: { profile: PROFILE, expected_revision: "1" },
       }));
       assert.equal(syncHandoff.error?.code, "APN_FOREGROUND_AUTH_REQUIRED");
+      assert.deepEqual(syncHandoff.error?.details?.cli_handoff_argv, [
+        "apn", "wallet", "permission", "sync", "--profile", PROFILE, "--expected-revision", "1",
+      ]);
       assert.equal(consent.syncCalls, 0);
 
       const disabled = mcpEnvelope(await client.callTool({
