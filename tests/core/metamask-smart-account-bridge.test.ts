@@ -38,6 +38,9 @@ test("loopback consent keeps its capability in the fragment and serves an exact 
     assert.equal(script.includes(fragmentToken), false);
     assert.match(script, /wallet_requestExecutionPermissions/u);
     assert.match(script, /wallet_getGrantedExecutionPermissions/u);
+    assert.match(script, /eip6963:requestProvider/u);
+    assert.match(script, /info\.rdns === "io\.metamask"/u);
+    assert.match(script, /provider\.isRabby !== true/u);
     assert.match(script, /allowance\.ruleTypes\.includes\("expiry"\)/u);
     assert.match(script, /"capAtomic":"2000000"/u);
     assert.match(script, /history\.replaceState\(null, "", "\/"\)/u);
