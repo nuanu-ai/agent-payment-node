@@ -108,14 +108,19 @@ function assertManifestShape(manifest) {
 }
 
 function assertFormula(formula, manifest) {
-  const urls = [...formula.matchAll(/^\s*url\s+"([^"]+)"\s*$/gm)].map((match) => match[1]);
-  const digests = [...formula.matchAll(/^\s*sha256\s+"([0-9a-f]+)"\s*$/gm)].map((match) => match[1]);
-  if (urls.length !== 1 || digests.length !== 1) {
+  const lines = formula.split(/\r?\n/);
+  const urlDeclarations = lines.filter((line) => /^\s*url\b/.test(line));
+  const digestDeclarations = lines.filter((line) => /^\s*sha256\b/.test(line));
+  if (urlDeclarations.length !== 1 || digestDeclarations.length !== 1) {
     throw new Error("Formula must declare exactly one URL and SHA-256 digest");
   }
+  const url = urlDeclarations[0].match(/^\s*url\s+"([^"]+)"\s*$/)?.[1];
+  const digest = digestDeclarations[0].match(/^\s*sha256\s+"([0-9a-f]{64})"\s*$/)?.[1];
+  if (url === undefined) throw new Error("Formula URL declaration must be one static quoted value");
+  if (digest === undefined) throw new Error("Formula SHA-256 declaration must be one exact static digest");
   const expectedUrl = `https://github.com/${manifest.repository}/releases/download/v${manifest.package.version}/${manifest.artifact.name}`;
-  if (urls[0] !== expectedUrl) throw new Error("Formula URL is not the exact versioned release artifact");
-  if (digests[0] !== manifest.artifact.sha256) throw new Error("Formula SHA-256 digest differs from the release manifest");
+  if (url !== expectedUrl) throw new Error("Formula URL is not the exact versioned release artifact");
+  if (digest !== manifest.artifact.sha256) throw new Error("Formula SHA-256 digest differs from the release manifest");
 }
 
 async function createManifest(arguments_) {

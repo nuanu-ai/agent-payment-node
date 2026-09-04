@@ -45,6 +45,20 @@ function jobBlock(workflow, jobName) {
   return lines.slice(start, end).join("\n");
 }
 
+function stepBlock(job, stepName) {
+  const lines = job.split("\n");
+  const start = lines.findIndex((line) => line === `      - name: ${stepName}`);
+  if (start === -1) return "";
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^      - name: /.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
 function runNode(script, arguments_) {
   return spawnSync(process.execPath, [script, ...arguments_], {
     cwd: sourceRoot,
@@ -97,6 +111,10 @@ test("build and attestation permissions are isolated", () => {
   const attest = jobBlock(supplyChain, "attest");
   const releaseBuild = jobBlock(release, "build");
   const publish = jobBlock(release, "publish");
+  const releaseAttestationVerification = stepBlock(
+    publish,
+    "Verify artifact attestation before publication",
+  );
 
   for (const block of [supplyBuild, releaseBuild]) {
     assert.match(block, /runs-on:\s*macos-15/);
@@ -121,6 +139,11 @@ test("build and attestation permissions are isolated", () => {
   assert.doesNotMatch(publish, /node scripts\//);
   assert.doesNotMatch(publish, /npm (?:ci|run|pack)/);
   assert.match(publish, /sha256sum/);
+  assert.match(
+    releaseAttestationVerification,
+    /RELEASE_TAG: \$\{\{ inputs\.tag \}\}/,
+    "the attestation verification step must receive the validated release tag",
+  );
   assert.match(release, /^on:\n  workflow_dispatch:/m);
   assert.doesNotMatch(release, /^\s+push:/m);
 });
@@ -219,6 +242,39 @@ test("release manifest binds artifact, SBOM, source and Formula digest", async (
     "--formula", formula,
   ]);
   assert.equal(verify.status, 0, `${verify.stdout}\n${verify.stderr}`);
+
+  await writeFile(formula, (await readFile(formula, "utf8")).replace(
+    "end\n",
+    "  sha256 :no_check\nend\n",
+  ));
+  const disabledDigest = runNode(verifySupplyChain, [
+    "verify",
+    "--artifact", artifact,
+    "--sbom", sbom,
+    "--manifest", manifest,
+    "--formula", formula,
+  ]);
+  assert.notEqual(disabledDigest.status, 0);
+  assert.match(`${disabledDigest.stdout}\n${disabledDigest.stderr}`, /digest|sha256/i);
+
+  await writeFile(formula, (await readFile(formula, "utf8")).replace(
+    "  sha256 :no_check\n",
+    "  url ENV.fetch(\"APN_RELEASE_URL\")\n",
+  ));
+  const dynamicUrl = runNode(verifySupplyChain, [
+    "verify",
+    "--artifact", artifact,
+    "--sbom", sbom,
+    "--manifest", manifest,
+    "--formula", formula,
+  ]);
+  assert.notEqual(dynamicUrl.status, 0);
+  assert.match(`${dynamicUrl.stdout}\n${dynamicUrl.stderr}`, /url/i);
+
+  await writeFile(formula, (await readFile(formula, "utf8")).replace(
+    "  url ENV.fetch(\"APN_RELEASE_URL\")\n",
+    "",
+  ));
 
   await writeFile(formula, (await readFile(formula, "utf8")).replace(
     "/download/v0.5.5/",
