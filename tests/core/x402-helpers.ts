@@ -11,6 +11,7 @@ import type {
   X402RpcLog,
   X402RpcPort,
   X402RpcReceipt,
+  X402TransferLogs,
 } from "../../src/ports.js";
 import { domainHash } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
@@ -223,7 +224,9 @@ export class RecoveryRpc extends TestRpc implements X402RpcPort {
     return this.logOutcomes.shift() ?? { kind: "complete", logs: [] };
   }
 
-  async getX402TransferLogs(): Promise<{ readonly kind: "complete"; readonly logs: readonly X402RpcLog[] }> {
+  async getX402TransferLogs(_input: {
+    readonly from: Address; readonly fromBlock: string; readonly toBlock: string;
+  }): Promise<X402TransferLogs> {
     return { kind: "complete", logs: [] };
   }
 }

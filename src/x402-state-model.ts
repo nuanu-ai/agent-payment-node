@@ -194,7 +194,7 @@ export interface Erc7710SettlementEvidence {
 
 export type SettlementEvidence = Eip3009SettlementEvidence | Erc7710SettlementEvidence;
 
-export interface UnusedExpiryEvidence {
+export interface Eip3009UnusedExpiryEvidence {
   readonly schemaVersion: "apn.x402.unused-expiry-evidence.v1";
   readonly network: "eip155:8453";
   readonly chainId: "8453";
@@ -212,6 +212,42 @@ export interface UnusedExpiryEvidence {
   readonly rpcOriginHash: string;
   readonly evidenceHash: string;
 }
+
+export interface Erc7710UnusedExpiryEvidence {
+  readonly schemaVersion: "apn.x402.erc7710-unused-expiry-evidence.v1";
+  readonly network: "eip155:8453";
+  readonly chainId: "8453";
+  readonly token: `0x${string}`;
+  readonly effectiveExpiryUnix: string;
+  readonly searchStartBlock: {
+    readonly number: string; readonly hash: `0x${string}`; readonly observedAt: string;
+  };
+  readonly expiryBlock: {
+    readonly number: string; readonly hash: `0x${string}`; readonly timestamp: string; readonly observedAt: string;
+  };
+  readonly finalizedHead: {
+    readonly number: string; readonly hash: `0x${string}`; readonly timestamp: string; readonly observedAt: string;
+  };
+  readonly scan: {
+    readonly fromBlock: string;
+    readonly toBlock: string;
+    readonly matchingTransferCount: "0";
+    readonly completedAt: string;
+  };
+  readonly methodBinding: {
+    readonly operationBindingHash: string;
+    readonly offerHash: string;
+    readonly method: "erc7710";
+    readonly delegationManager: `0x${string}`;
+    readonly delegator: `0x${string}`;
+    readonly childHash: string;
+    readonly permissionContextHash: string;
+  };
+  readonly rpcOriginHash: string;
+  readonly evidenceHash: string;
+}
+
+export type UnusedExpiryEvidence = Eip3009UnusedExpiryEvidence | Erc7710UnusedExpiryEvidence;
 
 export interface X402ResultRecord {
   readonly schemaVersion: "apn.x402.result.v1";

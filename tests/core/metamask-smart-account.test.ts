@@ -73,7 +73,7 @@ import { smartAccountEnvironment, validateSmartAccountObservation } from "../../
 import type { Address, Hex } from "../../src/model.js";
 import { ApnError } from "../../src/errors.js";
 import { createMcpServer } from "../../src/mcp-server.js";
-import type { RpcReceipt } from "../../src/ports.js";
+import type { RpcReceipt, X402TransferLogs } from "../../src/ports.js";
 import type { DirectExecutionPort, ProviderProfileRepositoryPort } from "../../src/provider-ports.js";
 import { ProviderRegistry } from "../../src/provider-registry.js";
 import { StateProfileRepository } from "../../src/profile-repository.js";
@@ -179,6 +179,8 @@ class SmartAccountX402Rpc extends RecoveryRpc {
   ownerUsdcAtomic = "10000000";
   observedUnix = NOW;
   readonly balanceAddresses: Address[] = [];
+  readonly transferCalls: { readonly fromBlock: string; readonly toBlock: string }[] = [];
+  transferOutcomes: X402TransferLogs[] = [];
 
   override async getBalances(address: Address) {
     this.balanceCalls += 1;
@@ -208,6 +210,13 @@ class SmartAccountX402Rpc extends RecoveryRpc {
         timestamp: (BigInt(this.observedUnix) - 1n).toString(),
       },
     };
+  }
+
+  override async getX402TransferLogs(input: {
+    readonly from: Address; readonly fromBlock: string; readonly toBlock: string;
+  }): Promise<X402TransferLogs> {
+    this.transferCalls.push({ fromBlock: input.fromBlock, toBlock: input.toBlock });
+    return this.transferOutcomes.shift() ?? { kind: "complete", logs: [] };
   }
 }
 
@@ -1630,7 +1639,7 @@ test("Smart Account authorization recovers the same deterministic material acros
   });
 });
 
-test("ambiguous Smart Account paid HTTP remains unknown after expiry without replacement payment or EIP-3009 claims", async () => {
+test("ambiguous Smart Account paid HTTP finalizes unused only after expiry and a complete exact-transfer scan", async () => {
   const fixture = await makeFixture();
   try {
     assert.equal((await fixture.core.execute(connectCommand())).ok, true);
@@ -1650,17 +1659,72 @@ test("ambiguous Smart Account paid HTTP remains unknown after expiry without rep
     assert.equal((await runtime.materials.load(operationId))?.phase, "exposed");
     clock.advance(61);
     rpc.observedUnix = clock.unix;
+    armSmartAccountExpiredRange(rpc, durable as X402OperationRecord);
     const recovered = await smartAccountX402Runtime(fixture, rpc, http, clock, engine).core.execute({
       command: "operation.resume", operationId,
     });
-    assert.equal((recovered.operation as any).state, "effect_unknown");
-    assert.equal((recovered.operation as any).terminal, false);
-    assert.equal(recovered.proof_class, "x402_unknown_finality");
+    assert.equal((recovered.operation as any).state, "failed_expired_unused", JSON.stringify(recovered));
+    assert.equal((recovered.operation as any).terminal, true);
+    assert.equal(recovered.proof_class, "x402_expired_unused_finalized");
+    assert.equal((recovered.receipt as any).unusedExpiryEvidence.schemaVersion,
+      "apn.x402.erc7710-unused-expiry-evidence.v1");
+    assert.equal((recovered.receipt as any).unusedExpiryEvidence.scan.matchingTransferCount, "0");
     assert.equal(http.calls.length, 2, "challenge plus one ambiguous paid request only");
     assert.equal(engine.calls, 1);
-    assert.equal(rpc.x402Calls.some((call) => call.startsWith("logs:") || call.startsWith("state:")), false);
+    assert.ok(rpc.transferCalls.length > 0);
+    assert.equal(rpc.x402Calls.some((call) => call.startsWith("state:")), false);
     assert.equal(rpc.submissions.length, 0);
+
+    const restarted = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+    const durableTerminal = await restarted.core.execute({ command: "operation.status", operationId });
+    assert.equal((durableTerminal.operation as any).state, "failed_expired_unused");
+    assert.equal(http.calls.length, 2, "restart cannot replay the paid request");
   } finally { await fixture.temporary.cleanup(); }
+});
+
+test("Smart Account expired-unused recovery remains unknown without complete negative evidence", async (t) => {
+  for (const posture of ["not-finalized", "range-unavailable", "matching-transfer"] as const) await t.test(posture, async () => {
+    const fixture = await makeFixture();
+    try {
+      assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+      const rpc = new SmartAccountX402Rpc();
+      const clock = new MutableSmartAccountClock();
+      const http = new QueuedHttp([smartAccountX402Challenge(), new Error("injected lost paid response")]);
+      const engine = new RecordingSmartAccountX402Engine();
+      const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
+      const prepared = await runtime.core.execute(smartAccountX402Prepare(`smart-account-expiry-negative-${posture}`));
+      const operationId = publicOperationId(prepared.operation);
+      assert.equal((await runtime.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
+      assert.equal((await runtime.core.execute({ command: "operation.resume", operationId }).then((item) => item.operation as any)).state,
+        "effect_unknown");
+      const operation = await runtime.state.findX402Operation(operationId) as X402OperationRecord;
+      clock.advance(61);
+      rpc.observedUnix = clock.unix;
+      armSmartAccountExpiredRange(rpc, operation);
+      if (posture === "not-finalized") {
+        rpc.finalizedHead = { ...rpc.finalizedHead, timestamp: (BigInt(operation.authorization.validBefore) - 1n).toString() };
+        rpc.blockTimestamps.set(rpc.finalizedHead.number, rpc.finalizedHead.timestamp);
+      } else if (posture === "range-unavailable") {
+        rpc.transferOutcomes = Array.from({ length: 12 }, () => ({ kind: "range_unavailable" as const }));
+      } else {
+        const expiryBlock = rpc.finalizedHead.number;
+        rpc.transferOutcomes = [{ kind: "complete", logs: [transferLog({
+          from: operation.wallet,
+          to: operation.payee,
+          value: operation.amountAtomic,
+          transactionHash: X402_TRANSACTION as Hex,
+          blockNumber: expiryBlock,
+          blockHash: rpc.finalizedHead.hash,
+        })] }];
+      }
+      const recovered = await runtime.core.execute({ command: "operation.resume", operationId });
+      assert.equal((recovered.operation as any).state, "effect_unknown", JSON.stringify(recovered));
+      assert.equal((recovered.operation as any).terminal, false);
+      assert.equal((await runtime.state.findX402Operation(operationId))?.unusedExpiryEvidence, undefined);
+      assert.equal(http.calls.length, 2);
+      assert.equal(engine.calls, 1);
+    } finally { await fixture.temporary.cleanup(); }
+  });
 });
 
 test("concurrent Smart Account resume calls expose one sealed header exactly once", async () => {
@@ -2223,6 +2287,26 @@ function armSmartAccountX402Settlement(rpc: SmartAccountX402Rpc, operation: X402
     observedAt,
     rpcOrigin: rpc.rpcOrigin,
   };
+}
+
+function armSmartAccountExpiredRange(rpc: SmartAccountX402Rpc, operation: X402OperationRecord): void {
+  const blockNumber = (BigInt(operation.preparedBlock.number) + 5n).toString();
+  const blockHash = `0x${"c".repeat(64)}` as Hex;
+  const timestamp = (BigInt(operation.authorization.validBefore) + 1n).toString();
+  const observedAt = new Date(Number(timestamp) * 1_000).toISOString();
+  rpc.safeHead = {
+    queriedTag: "safe",
+    number: blockNumber,
+    hash: blockHash,
+    timestamp,
+    observedAt,
+    rpcOrigin: rpc.rpcOrigin,
+  };
+  rpc.finalizedHead = { ...rpc.safeHead, queriedTag: "finalized" };
+  rpc.blockHashes.set(operation.preparedBlock.number, operation.preparedBlock.hash);
+  rpc.blockTimestamps.set(operation.preparedBlock.number, operation.authorization.createdAt);
+  rpc.blockHashes.set(blockNumber, blockHash);
+  rpc.blockTimestamps.set(blockNumber, timestamp);
 }
 
 function exactSmartAccountReceipt(transactionHash: Hex, amountAtomic: string): RpcReceipt {
