@@ -216,7 +216,12 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           gh attestation verify "apn-out/nuanu-ai-apn-${version}.tgz" \
-            --repo "$GITHUB_REPOSITORY"
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners
 
       - name: Publish once through an immutable release
         shell: bash
