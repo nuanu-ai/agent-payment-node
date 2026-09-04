@@ -128,10 +128,12 @@ to different MetaMask server-wallet addresses, so APN always binds the address
 reported by the completed provider session.
 
 The `metamask-smart-account` profile is a separate browser-extension flow. The
-human selects an already-active official MetaMask Smart Account on Base and
-reviews the exact caller-supplied USDC cap and absolute expiry; APN supplies no
-monetary or lifetime default. MetaMask keeps the owner key. APN creates one
-session account, stores its key and the validated ERC-7715 grant only inside an
+browser lists every request-capable EIP-6963 or legacy injected provider and
+requires an explicit human click even when only one is present. Its source,
+name, RDNS and UUID are self-reported unverified hints—not selection authority; icons are not rendered. The human chooses the wallet
+they installed, selects an already-active official MetaMask Smart Account on
+Base and reviews the exact caller-supplied USDC cap and absolute expiry; APN supplies no default. MetaMask keeps the owner key.
+APN creates one session account, stores its key and the validated ERC-7715 grant only inside an
 authenticated encrypted envelope under `~/.apn`, and never returns the key or
 raw permission context. Repeating the same idempotency key reuses the same
 pending or committed identity after interruption. `wallet permission list`,
