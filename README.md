@@ -490,9 +490,9 @@ proof are included; live Coinbase/provider and paid acceptance are recorded as
 separate release gates. Hub, contracts, remote MCP, other providers, Stellar,
 Solana and TRON are outside this release.
 
-The published npm archive includes `npm-shrinkwrap.json`; Formula installation
-therefore resolves the exact integrity-pinned production dependency closure
-recorded by this release.
+The published npm archive includes `npm-shrinkwrap.json`, so Formula installation resolves the exact
+integrity-pinned production closure. It preserves direct MetaMask pins and overrides only the
+`@metamask/utils` UUID edge to patched `uuid@11.1.1`; packaging exercises ESM/CommonJS exports and the audit gate rejects `GHSA-w5hq-g745-h8pq`.
 
 The former signed-app/Cask path is retained only as a deferred historical
 track under `packaging/`; it is not required by the Formula installation.
