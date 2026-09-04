@@ -80,6 +80,11 @@ test("workflow dependencies are GitHub-owned and pinned to full commit SHAs", ()
   for (const workflow of workflowTexts) {
     assert.match(workflow, /^permissions:\n  contents: read$/m);
     assert.doesNotMatch(workflow, /pull-requests:\s*write/);
+    assert.match(workflow, /--signer-workflow/);
+    assert.match(workflow, /--signer-digest "\$GITHUB_SHA"/);
+    assert.match(workflow, /--source-digest "\$GITHUB_SHA"/);
+    assert.match(workflow, /--source-ref "\$GITHUB_REF"/);
+    assert.match(workflow, /--deny-self-hosted-runners/);
     const checkoutCount = (workflow.match(/persist-credentials:\s*false/g) ?? []).length;
     assert.ok(checkoutCount >= 1, "checkout must not persist credentials");
   }
