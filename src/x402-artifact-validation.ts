@@ -56,7 +56,8 @@ export function validateX402ReceiptUnsafe(value: unknown): X402ReceiptRecord {
   if (
     (settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" && receipt.transferMethod !== "erc7710") ||
     (settlementEvidence?.schemaVersion === "apn.x402.settlement-evidence.v1" && receipt.transferMethod === "erc7710") ||
-    (unusedExpiryEvidence !== undefined && receipt.transferMethod === "erc7710")
+    (unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1" && receipt.transferMethod !== "erc7710") ||
+    (unusedExpiryEvidence?.schemaVersion === "apn.x402.unused-expiry-evidence.v1" && receipt.transferMethod === "erc7710")
   ) stateCorrupt("x402 receipt transfer method conflicts with its evidence.");
   if (receipt.result !== undefined) {
     const result = exactRecord(receipt.result, ["resultHash", "mediaType", "byteLength", "resultIntegrityHash"]);

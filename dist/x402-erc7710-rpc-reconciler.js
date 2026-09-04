@@ -13,12 +13,17 @@ export class X402Erc7710RpcReconciler {
     }
     async reconcile(operation) {
         if (operation.selectedOffer.resolved.assetTransferMethod !== "erc7710" ||
-            operation.settlementEvidence !== undefined || operation.transactionHint === undefined ||
-            operation.settlementResponseObservation === undefined || operation.signatureHash === undefined ||
-            operation.paymentContextHash === undefined || operation.delegatedMaterial === undefined)
+            operation.settlementEvidence !== undefined || operation.unusedExpiryEvidence !== undefined ||
+            operation.delegatedMaterial === undefined)
             return operation;
         const chain = await this.rpc.assertBaseChain();
         if (sha256(chain.rpcOrigin) !== operation.delegatedMaterial.rpcOriginHash)
+            return operation;
+        if (this.canProveExpiredUnused(operation)) {
+            return await this.reconcileExpiredUnused(operation, chain.rpcOrigin);
+        }
+        if (operation.transactionHint === undefined || operation.settlementResponseObservation === undefined ||
+            operation.signatureHash === undefined || operation.paymentContextHash === undefined)
             return operation;
         const safe = await this.rpc.getX402Head("safe");
         if (!validX402Head(safe) || !sameRpcOrigin(safe.rpcOrigin, chain.rpcOrigin))
@@ -115,5 +120,190 @@ export class X402Erc7710RpcReconciler {
         await this.store.persist(next);
         return next;
     }
+    canProveExpiredUnused(operation) {
+        return operation.state === "effect_unknown" && operation.transactionHint === undefined &&
+            operation.settlementResponseObservation === undefined && operation.settlementEvidence === undefined &&
+            operation.resultLink === undefined && operation.signatureHash !== undefined &&
+            operation.paymentContextHash !== undefined &&
+            operation.attempts.some((attempt) => attempt.purpose === "payment" && attempt.phase !== "pending");
+    }
+    async reconcileExpiredUnused(operation, rpcOrigin) {
+        const binding = operation.delegatedMaterial;
+        if (binding === undefined)
+            return operation;
+        let finalized;
+        try {
+            finalized = await this.rpc.getX402Head("finalized");
+        }
+        catch {
+            return operation;
+        }
+        if (!validX402Head(finalized) || !sameRpcOrigin(finalized.rpcOrigin, rpcOrigin) ||
+            BigInt(finalized.timestamp) < BigInt(binding.effectiveExpiryUnix) ||
+            BigInt(finalized.number) < BigInt(operation.preparedBlock.number))
+            return operation;
+        let canonicalFinalized;
+        let startBlock;
+        try {
+            canonicalFinalized = await this.rpc.getX402Block(finalized.number);
+            startBlock = await this.rpc.getX402Block(operation.preparedBlock.number);
+        }
+        catch {
+            return operation;
+        }
+        if (!sameBlock(canonicalFinalized, finalized, rpcOrigin) ||
+            startBlock.number !== operation.preparedBlock.number || startBlock.hash !== operation.preparedBlock.hash ||
+            !sameRpcOrigin(startBlock.rpcOrigin, rpcOrigin) ||
+            BigInt(startBlock.timestamp) >= BigInt(binding.effectiveExpiryUnix))
+            return operation;
+        const expiryBlock = await this.firstExpiredBlock(startBlock.number, finalized.number, binding.effectiveExpiryUnix, rpcOrigin);
+        if (expiryBlock === null)
+            return operation;
+        const noExactTransfer = await this.scanExactTransfers(operation, startBlock.number, expiryBlock.number);
+        if (!noExactTransfer)
+            return operation;
+        let finalizedRecheck;
+        let startRecheck;
+        let expiryRecheck;
+        try {
+            finalizedRecheck = await this.rpc.getX402Head("finalized");
+            startRecheck = await this.rpc.getX402Block(startBlock.number);
+            expiryRecheck = await this.rpc.getX402Block(expiryBlock.number);
+        }
+        catch {
+            return operation;
+        }
+        if (!sameHead(finalized, finalizedRecheck) || !sameBlock(startBlock, startRecheck, rpcOrigin) ||
+            !sameBlock(expiryBlock, expiryRecheck, rpcOrigin))
+            return operation;
+        const completedAt = this.clock.now().toISOString();
+        const body = {
+            schemaVersion: "apn.x402.erc7710-unused-expiry-evidence.v1",
+            network: CHAIN_CAIP2,
+            chainId: "8453",
+            token: BASE_USDC.toLowerCase(),
+            effectiveExpiryUnix: binding.effectiveExpiryUnix,
+            searchStartBlock: {
+                number: operation.preparedBlock.number,
+                hash: operation.preparedBlock.hash,
+                observedAt: operation.preparedBlock.observedAt,
+            },
+            expiryBlock: {
+                number: expiryBlock.number,
+                hash: expiryBlock.hash,
+                timestamp: expiryBlock.timestamp,
+                observedAt: expiryBlock.observedAt,
+            },
+            finalizedHead: {
+                number: finalized.number,
+                hash: finalized.hash,
+                timestamp: finalized.timestamp,
+                observedAt: finalized.observedAt,
+            },
+            scan: {
+                fromBlock: operation.preparedBlock.number,
+                toBlock: expiryBlock.number,
+                matchingTransferCount: "0",
+                completedAt,
+            },
+            methodBinding: {
+                operationBindingHash: x402OperationBindingHash(operation),
+                offerHash: operation.selectedOffer.offerHash,
+                method: "erc7710",
+                delegationManager: binding.delegationManager,
+                delegator: operation.wallet,
+                childHash: operation.signatureHash,
+                permissionContextHash: operation.paymentContextHash,
+            },
+            rpcOriginHash: sha256(rpcOrigin),
+        };
+        const evidence = {
+            ...body,
+            evidenceHash: domainHash("apn.x402.erc7710-unused-expiry-evidence.v1", canonicalJson(body)),
+        };
+        const { integrityHash: _integrity, ...withoutIntegrity } = operation;
+        const next = sealX402Operation({
+            ...withoutIntegrity,
+            unusedExpiryEvidence: evidence,
+            updatedAt: completedAt,
+            transitions: appendX402Transition(operation.transitions, {
+                at: completedAt,
+                state: operation.state,
+                terminal: false,
+                reason: operation.reason,
+                proofClass: operation.proofClass,
+            }),
+        });
+        await this.store.persist(next);
+        return next;
+    }
+    async firstExpiredBlock(startNumber, finalizedNumber, expiryUnix, rpcOrigin) {
+        let low = BigInt(startNumber);
+        let high = BigInt(finalizedNumber);
+        while (low + 1n < high) {
+            const middle = (low + high) / 2n;
+            let block;
+            try {
+                block = await this.rpc.getX402Block(middle.toString());
+            }
+            catch {
+                return null;
+            }
+            if (block.number !== middle.toString() || !sameRpcOrigin(block.rpcOrigin, rpcOrigin))
+                return null;
+            if (BigInt(block.timestamp) >= BigInt(expiryUnix))
+                high = middle;
+            else
+                low = middle;
+        }
+        let block;
+        try {
+            block = await this.rpc.getX402Block(high.toString());
+        }
+        catch {
+            return null;
+        }
+        if (block.number !== high.toString() || !sameRpcOrigin(block.rpcOrigin, rpcOrigin) ||
+            BigInt(block.timestamp) < BigInt(expiryUnix))
+            return null;
+        return block;
+    }
+    async scanExactTransfers(operation, startNumber, endNumber) {
+        let from = BigInt(startNumber);
+        const end = BigInt(endNumber);
+        let chunkSize = 2048n;
+        while (from <= end) {
+            const to = from + chunkSize - 1n < end ? from + chunkSize - 1n : end;
+            let result;
+            try {
+                result = await this.rpc.getX402TransferLogs({
+                    from: operation.wallet,
+                    fromBlock: from.toString(),
+                    toBlock: to.toString(),
+                });
+            }
+            catch {
+                return false;
+            }
+            if (result.kind === "range_unavailable" && chunkSize > 1n) {
+                chunkSize = chunkSize / 2n;
+                continue;
+            }
+            if (result.kind !== "complete")
+                return false;
+            if (result.logs.some((log) => matchingTransfer(log, operation)))
+                return false;
+            from = to + 1n;
+        }
+        return true;
+    }
+}
+function sameHead(left, right) {
+    return left.number === right.number && left.hash === right.hash && left.timestamp === right.timestamp &&
+        left.rpcOrigin === right.rpcOrigin;
+}
+function sameBlock(left, right, rpcOrigin) {
+    return left.number === right.number && left.hash === right.hash && left.timestamp === right.timestamp &&
+        left.rpcOrigin === rpcOrigin && right.rpcOrigin === rpcOrigin;
 }
 //# sourceMappingURL=x402-erc7710-rpc-reconciler.js.map

@@ -1897,7 +1897,10 @@ test("expiry requires finalized timestamp, false state, and complete zero scan",
   const expired = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal((expired.operation as { readonly state?: unknown } | null)?.state, "failed_expired_unused", JSON.stringify(expired));
   const terminal = await operation(fixture);
-  assert.deepEqual(terminal.unusedExpiryEvidence?.absence, {
+  const unused = terminal.unusedExpiryEvidence;
+  assert.equal(unused?.schemaVersion, "apn.x402.unused-expiry-evidence.v1");
+  if (unused?.schemaVersion !== "apn.x402.unused-expiry-evidence.v1") throw new Error("expected EIP-3009 unused evidence");
+  assert.deepEqual(unused.absence, {
     localSettlement: false,
     httpSettlement: false,
     authorizationUsed: false,
