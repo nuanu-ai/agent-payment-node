@@ -6,6 +6,7 @@ import {
 } from "@metamask/7715-permission-types";
 import { BASE_USDC } from "../../src/constants.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "../../src/x402-codec.js";
+import { frozenErc7710FacilitatorsMatch } from "../../src/x402-erc7710-codec.js";
 import { sameDelegationSalt } from "../../src/metamask-smart-account-x402.js";
 import { metamaskSmartAccountX402CapabilitySnapshot } from "../../src/provider-profile.js";
 import { canonicalPaymentRequiredHeader } from "./x402-vectors.js";
@@ -89,6 +90,25 @@ test("ERC-7710 facilitator sets are canonical regardless of seller order", () =>
 test("ERC-7710 deterministic salt comparison accepts equivalent uint256 encodings", () => {
   assert.equal(sameDelegationSalt("0x01", `0x${"0".repeat(62)}01`), true);
   assert.equal(sameDelegationSalt("0x01", "0x02"), false);
+});
+
+test("frozen ERC-7710 facilitator validation preserves the official legacy default only", () => {
+  const legacy = ALL_METAMASK_FACILITATOR_ADDRESSES.slice(0, 3);
+  assert.equal(frozenErc7710FacilitatorsMatch(
+    { assetTransferMethod: "erc7710" }, [...legacy].reverse(),
+  ), true);
+  assert.equal(frozenErc7710FacilitatorsMatch(
+    { assetTransferMethod: "erc7710" }, ALL_METAMASK_FACILITATOR_ADDRESSES,
+  ), true);
+  assert.equal(frozenErc7710FacilitatorsMatch(
+    { assetTransferMethod: "erc7710" }, legacy.slice(0, 2),
+  ), false);
+  assert.equal(frozenErc7710FacilitatorsMatch(
+    { assetTransferMethod: "erc7710", facilitatorAddresses: legacy }, [...legacy].reverse(),
+  ), true);
+  assert.equal(frozenErc7710FacilitatorsMatch(
+    { assetTransferMethod: "erc7710", facilitatorAddresses: legacy }, ALL_METAMASK_FACILITATOR_ADDRESSES,
+  ), false);
 });
 
 test("current official seller shape uses the pinned MetaMask facilitator set when none is published", () => {
