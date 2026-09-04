@@ -1,4 +1,5 @@
 import { hashObject, sha256 } from "./canonical.js";
+import { cliHandoffDetails, createCliHandoff } from "./cli-handoff.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { formatAtomic, parseDecimal } from "./money.js";
@@ -338,7 +339,12 @@ export class ProviderDirectTransferService {
             const profile = await repository.load(operation.profileHash);
             if (profile === null)
                 throw new ApnError("APN_STATE_CORRUPT", "Provider profile disappeared during sender recheck.");
-            const rebindHandoff = `apn wallet connect --profile ${operation.profile} --provider ${binding.providerId} --expected-revision ${binding.profileRevision}`;
+            const rebindHandoff = createCliHandoff([
+                "apn", "wallet", "connect",
+                "--profile", operation.profile,
+                "--provider", binding.providerId,
+                "--expected-revision", String(binding.profileRevision),
+            ]);
             await repository.save(markProviderProfileDrift(profile, {
                 address: observed.address,
                 accountBindingHash: observed.account_binding_hash,
@@ -346,7 +352,7 @@ export class ProviderDirectTransferService {
                 observedAt: observed.observed_at,
                 trustClass: adapter.trust_class,
             }));
-            await this.failBeforeEffect(operation, "provider_sender_changed", new ApnError("APN_PROFILE_DRIFT", "Provider sender changed before effect; explicit foreground rebind is required.", { cli_handoff: rebindHandoff, current_revision: String(binding.profileRevision) }));
+            await this.failBeforeEffect(operation, "provider_sender_changed", new ApnError("APN_PROFILE_DRIFT", "Provider sender changed before effect; explicit foreground rebind is required.", { ...cliHandoffDetails(rebindHandoff), current_revision: String(binding.profileRevision) }));
         }
     }
     async applyExecutionResult(operation, binding, result) {

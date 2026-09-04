@@ -8,6 +8,7 @@ import {
   type CommandOption,
 } from "./command-catalog.js";
 import { renderHelp } from "./command-help.js";
+import { containsRawControlCharacters } from "./cli-handoff.js";
 import { ApnError, asApnError } from "./errors.js";
 
 export interface ParsedCatalogCommand {
@@ -127,6 +128,7 @@ function longestCatalogPrefix(argv: readonly string[]): CommandDefinition | Comm
 
 function validateOptionValue(definition: CommandOption, value: string): void {
   const invalid = (): never => { throw new ApnError("APN_INVALID_INPUT", `${definition.name} does not satisfy its declared ${definition.type} contract.`); };
+  if (containsRawControlCharacters(value)) invalid();
   switch (definition.type) {
     case "string": if (value.length === 0) invalid(); return;
     case "profile": if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value)) invalid(); return;

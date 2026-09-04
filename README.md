@@ -70,11 +70,12 @@ apn wallet connect --profile smart-account --provider metamask-smart-account --a
 
 The CLI first reuses an active provider session without another email or OTP
 prompt. If no session is active, it collects provider authentication only in
-the foreground. MCP returns the exact CLI handoff before provider process
-access. The documented provider client requires the email and one-time code in
-short-lived child argv; this is a residual local same-user process-table risk,
-not OS-level argv secrecy. APN does not log, persist or return those argv
-values or raw authentication output.
+the foreground. MCP returns canonical structured `cli_handoff_argv` before
+provider process access; the human-readable `cli_handoff` and `next_actions`
+are one centrally quoted POSIX projection. The documented provider client
+requires the email and one-time code in short-lived child argv; this is a
+residual local same-user process-table risk, not OS-level argv secrecy. APN does
+not log, persist or return those argv values or raw authentication output.
 
 The MetaMask profile is a dedicated MetaMask Agent Wallet server-wallet, not
 the browser extension or the user's main MetaMask account. APN pins the
@@ -185,8 +186,9 @@ path instead of suggesting another doomed transfer prepare.
 The Coinbase direct adapter reuses the existing bounded AWAL process timeout; expiry is
 only an ambiguity signal and never authorizes a retry or another provider call.
 Calling direct approval through MCP never opens a TTY or loads signing material;
-it returns the exact operation-bound CLI command to run in that foreground
-terminal.
+it returns canonical operation-bound argv plus a shell-quoted foreground
+terminal projection. Raw control characters are rejected before either handoff
+is returned.
 
 For a MetaMask Smart Account, prepare checks the still-active root grant,
 remaining official ERC-20 allowance, owner USDC and nonzero session gas balance

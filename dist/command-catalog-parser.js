@@ -1,6 +1,7 @@
 import { usageFailureEnvelope } from "./command-discovery-output.js";
 import { COMMAND_GROUPS, COMMAND_MANIFEST, COMMANDS, } from "./command-catalog.js";
 import { renderHelp } from "./command-help.js";
+import { containsRawControlCharacters } from "./cli-handoff.js";
 import { ApnError, asApnError } from "./errors.js";
 export function parseCatalogArgv(argv) {
     const definition = longestCommandPrefix(argv);
@@ -105,6 +106,8 @@ function longestCatalogPrefix(argv) {
 }
 function validateOptionValue(definition, value) {
     const invalid = () => { throw new ApnError("APN_INVALID_INPUT", `${definition.name} does not satisfy its declared ${definition.type} contract.`); };
+    if (containsRawControlCharacters(value))
+        invalid();
     switch (definition.type) {
         case "string":
             if (value.length === 0)

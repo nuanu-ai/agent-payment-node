@@ -1,4 +1,5 @@
 import { COMMANDS } from "./command-catalog.js";
+import { cliHandoffDetails, createCliHandoff } from "./cli-handoff.js";
 import { ApnError } from "./errors.js";
 export class RejectingMcpPolicyApproval {
     request;
@@ -14,7 +15,7 @@ export class RejectingMcpPolicyApproval {
             (this.request.maxBalanceEthWei !== undefined && intent.maxBalanceEthWei !== this.request.maxBalanceEthWei)) {
             throw new ApnError("APN_INTERNAL", "The policy approval handoff does not match the validated request.");
         }
-        throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Run the exact policy command in a foreground terminal.", { cli_handoff: this.handoff, approval_boundary: "foreground_tty" });
+        throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Run the exact policy command in a foreground terminal.", { ...cliHandoffDetails(this.handoff), approval_boundary: "foreground_tty" });
     }
 }
 function policyHandoff(request) {
@@ -33,6 +34,6 @@ function policyHandoff(request) {
         if (value !== undefined)
             tokens.push(option.name, value);
     }
-    return tokens.join(" ");
+    return createCliHandoff(tokens);
 }
 //# sourceMappingURL=mcp-policy-approval.js.map

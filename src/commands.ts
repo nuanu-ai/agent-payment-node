@@ -1,4 +1,5 @@
 import type { Address } from "./model.js";
+import type { ErrorDetails } from "./errors.js";
 
 export type CommandRequest =
   | { readonly command: "version" }
@@ -80,7 +81,7 @@ export interface OutputEnvelope {
   readonly error: null | {
     readonly code: string;
     readonly message: string;
-    readonly details?: Readonly<Record<string, string | boolean>>;
+    readonly details?: ErrorDetails;
   };
   readonly next_actions: readonly string[];
 }
