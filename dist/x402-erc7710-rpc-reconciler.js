@@ -163,17 +163,24 @@ export class X402Erc7710RpcReconciler {
         if (!noExactTransfer)
             return operation;
         let finalizedRecheck;
+        let finalizedAnchorRecheck;
         let startRecheck;
         let expiryRecheck;
         try {
             finalizedRecheck = await this.rpc.getX402Head("finalized");
+            finalizedAnchorRecheck = await this.rpc.getX402Block(finalized.number);
             startRecheck = await this.rpc.getX402Block(startBlock.number);
             expiryRecheck = await this.rpc.getX402Block(expiryBlock.number);
         }
         catch {
             return operation;
         }
-        if (!sameHead(finalized, finalizedRecheck) || !sameBlock(startBlock, startRecheck, rpcOrigin) ||
+        if (!validX402Head(finalizedRecheck) || !sameRpcOrigin(finalizedRecheck.rpcOrigin, rpcOrigin) ||
+            BigInt(finalizedRecheck.number) < BigInt(finalized.number) ||
+            !sameBlock(canonicalFinalized, finalizedAnchorRecheck, rpcOrigin) ||
+            (finalizedRecheck.number === finalized.number &&
+                (finalizedRecheck.hash !== finalized.hash || finalizedRecheck.timestamp !== finalized.timestamp)) ||
+            !sameBlock(startBlock, startRecheck, rpcOrigin) ||
             !sameBlock(expiryBlock, expiryRecheck, rpcOrigin))
             return operation;
         const completedAt = this.clock.now().toISOString();
@@ -297,10 +304,6 @@ export class X402Erc7710RpcReconciler {
         }
         return true;
     }
-}
-function sameHead(left, right) {
-    return left.number === right.number && left.hash === right.hash && left.timestamp === right.timestamp &&
-        left.rpcOrigin === right.rpcOrigin;
 }
 function sameBlock(left, right, rpcOrigin) {
     return left.number === right.number && left.hash === right.hash && left.timestamp === right.timestamp &&

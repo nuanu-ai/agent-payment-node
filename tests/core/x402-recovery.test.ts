@@ -6,7 +6,7 @@ import { ApnError } from "../../src/errors.js";
 import type { Hex } from "../../src/model.js";
 import type { HttpGetRequest, HttpObservation } from "../../src/x402-model.js";
 import type { WaitPort, X402RpcPort, X402RpcReceipt } from "../../src/ports.js";
-import { classifyX402LogAvailabilityMessage } from "../../src/rpc.js";
+import { acceptRpcHttpBody, classifyX402LogAvailabilityMessage } from "../../src/rpc.js";
 import {
   appendX402Transition,
   sealX402Operation,
@@ -846,6 +846,9 @@ test("pre-send AuthorizationUsed candidates reset durably after a canonical reor
 });
 
 test("RPC log availability classifier separates history/range gaps from rate limiting", () => {
+  assert.equal(acceptRpcHttpBody(200, false), true);
+  assert.equal(acceptRpcHttpBody(400, true), true);
+  for (const status of [undefined, 400, 401, 429, 500]) assert.equal(acceptRpcHttpBody(status, false), false);
   assert.equal(classifyX402LogAvailabilityMessage("historical state pruned"), "pruned");
   assert.equal(classifyX402LogAvailabilityMessage("block range limit exceeded"), "range_unavailable");
   assert.equal(classifyX402LogAvailabilityMessage("query returned more than 10000 results"), "range_unavailable");

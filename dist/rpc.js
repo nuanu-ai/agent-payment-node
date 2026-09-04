@@ -311,7 +311,7 @@ export class HttpsBaseRpc {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params });
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs());
+        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), true);
         let value;
         try {
             value = JSON.parse(raw);
@@ -355,7 +355,7 @@ export function classifyX402LogAvailabilityMessage(message) {
     const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most|up to)\b/u.test(text);
     return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
-async function postJson(endpoint, body, addresses, timeoutMs) {
+async function postJson(endpoint, body, addresses, timeoutMs, allowJsonRpcClientError = false) {
     return await new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
@@ -373,7 +373,7 @@ async function postJson(endpoint, body, addresses, timeoutMs) {
                 reject(new ApnError("APN_RPC_PROTOCOL", "RPC redirects are forbidden."));
                 return;
             }
-            if (response.statusCode !== 200) {
+            if (!acceptRpcHttpBody(response.statusCode, allowJsonRpcClientError)) {
                 response.resume();
                 reject(new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status."));
                 return;
@@ -404,6 +404,9 @@ async function postJson(endpoint, body, addresses, timeoutMs) {
     });
 }
 export { isPublicIp } from "./network-policy.js";
+export function acceptRpcHttpBody(status, allowJsonRpcClientError) {
+    return status === 200 || (allowJsonRpcClientError && status === 400);
+}
 function record(value, label) {
     if (value === null || typeof value !== "object" || Array.isArray(value))
         throw new ApnError("APN_RPC_PROTOCOL", `RPC ${label} is invalid.`);
