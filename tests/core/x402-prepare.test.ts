@@ -400,7 +400,7 @@ test("prepare binds current-invocation safe evidence without inventing a block-a
   }
 });
 
-test("production prepare RPC pins every eth_call to one safe block and rejects a hash change around the call set", async (t) => {
+test("production prepare RPC pins every eth_call and rechecks the exact block identity", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
@@ -432,9 +432,9 @@ test("production prepare RPC pins every eth_call to one safe block and rejects a
   });
   assert.equal(result.error?.code, "APN_RPC_PROTOCOL");
   assert.equal(http.calls.length, 1);
-  assert.equal(blockReads, 2, "safe block identity must be read around the pinned eth_call set");
+  assert.equal(blockReads, 2, "the safe head and exact pinned block must both be read");
   const blockTags = mutableCalls.filter(([method]) => method === "eth_getBlockByNumber").map(([, params]) => params);
-  assert.deepEqual(blockTags, [["safe", false], ["safe", false]], "both identity reads must observe the current safe head");
+  assert.deepEqual(blockTags, [["safe", false], [tag, false]], "the second identity read must recheck the pinned height, not a newer safe head");
   const callTags = mutableCalls.filter(([method]) => method === "eth_call").map(([, params]) => (params[1]));
   assert.deepEqual(callTags, [tag, tag, tag, tag]);
   assert.deepEqual(await readdir(join(temporary.root, "x402-operations", new StateStore(temporary.root).profileHash("default"))).catch(() => []), []);
@@ -464,7 +464,7 @@ test("production prepare RPC pins every eth_call to one safe block and rejects a
     await assert.rejects(variant.getX402PrepareEvidence(WALLET), { code: "APN_RPC_PROTOCOL" }, label);
     assert.deepEqual(
       variantCalls.filter(([method]) => method === "eth_getBlockByNumber").map(([, params]) => params),
-      [["safe", false], ["safe", false]],
+      [["safe", false], [tag, false]],
       label,
     );
   }

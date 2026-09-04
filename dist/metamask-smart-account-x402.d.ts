@@ -2,7 +2,7 @@ import type { SmartAccountX402MaterialStorePort } from "./encrypted-smart-accoun
 import type { SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
 import { type GrantedSmartAccountPermissionRecord } from "./metamask-smart-account-record.js";
 import type { SmartAccountAllowancePort } from "./metamask-smart-account-direct.js";
-import type { Address } from "./model.js";
+import type { Address, Hex } from "./model.js";
 import type { RpcPort } from "./ports.js";
 import type { X402DelegatedMaterialBinding, X402MaterialPrepareInput, X402PaymentMaterialPort, X402SealedPaymentMaterial } from "./provider-ports.js";
 import { type X402PaymentPayload as PaymentPayload } from "./x402-codec.js";
@@ -36,3 +36,4 @@ export declare class MetaMaskSmartAccountX402Adapter implements X402PaymentMater
     private nowUnix;
     private instant;
 }
+export declare function sameDelegationSalt(actual: Hex, expected: Hex): boolean;
