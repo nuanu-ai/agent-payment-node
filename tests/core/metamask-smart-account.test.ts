@@ -83,6 +83,8 @@ import { decodePaymentSignatureHeader, encodePaymentSignatureHeader } from "../.
 import {
   appendX402Transition,
   sealX402Operation,
+  validateX402Operation,
+  x402Fingerprint,
   type X402OperationRecord,
 } from "../../src/x402-state-integrity.js";
 import {
@@ -1265,6 +1267,56 @@ test("Smart Account ERC-7710 freezes the approved facilitator set independent of
     assert.equal(frozen?.delegatedMaterial?.facilitatorAddresses.includes(
       METAMASK_FACILITATOR_ADDRESSES_DEV[0].toLowerCase() as Address,
     ), true);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("Smart Account ERC-7710 reloads a legacy default facilitator binding after the official set expands", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const runtime = smartAccountX402Runtime(
+      fixture,
+      new SmartAccountX402Rpc(),
+      new QueuedHttp([smartAccountX402Challenge({ extra: { assetTransferMethod: "erc7710" } })]),
+      new MutableSmartAccountClock(),
+      new RecordingSmartAccountX402Engine(),
+      { approvedFacilitators: ALL_METAMASK_FACILITATOR_ADDRESSES as readonly Address[] },
+    );
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-x402-legacy-facilitators-0001"));
+    assert.equal(prepared.ok, true, JSON.stringify(prepared));
+    const current = await runtime.state.findX402Operation(publicOperationId(prepared.operation));
+    assert.ok(current !== null && current.delegatedMaterial !== undefined &&
+      current.selectedOffer.resolved.assetTransferMethod === "erc7710");
+    const legacy = METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase() as Address);
+    const { integrityHash: _integrity, ...currentBody } = current;
+    const legacyBody = {
+      ...currentBody,
+      selectedOffer: {
+        ...current.selectedOffer,
+        resolved: { ...current.selectedOffer.resolved, facilitatorAddresses: legacy },
+      },
+      delegatedMaterial: { ...current.delegatedMaterial, facilitatorAddresses: legacy },
+    };
+    const legacyOperation = sealX402Operation({
+      ...legacyBody,
+      fingerprint: x402Fingerprint(legacyBody as unknown as X402OperationRecord),
+    });
+    assert.equal(validateX402Operation(legacyOperation).operationId, current.operationId);
+
+    const unknown = [legacy[0]!, legacy[1]!] as const;
+    const unknownBody = {
+      ...legacyBody,
+      selectedOffer: {
+        ...legacyBody.selectedOffer,
+        resolved: { ...legacyBody.selectedOffer.resolved, facilitatorAddresses: unknown },
+      },
+      delegatedMaterial: { ...legacyBody.delegatedMaterial, facilitatorAddresses: unknown },
+    };
+    const unknownOperation = sealX402Operation({
+      ...unknownBody,
+      fingerprint: x402Fingerprint(unknownBody as unknown as X402OperationRecord),
+    });
+    assert.throws(() => validateX402Operation(unknownOperation), { code: "APN_STATE_CORRUPT" });
   } finally { await fixture.temporary.cleanup(); }
 });
 
