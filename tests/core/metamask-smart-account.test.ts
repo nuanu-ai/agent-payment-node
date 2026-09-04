@@ -3,7 +3,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { createErc20TokenAllowanceCaveats } from "@metamask/7715-permission-types";
+import {
+  ALL_METAMASK_FACILITATOR_ADDRESSES,
+  METAMASK_FACILITATOR_ADDRESSES_DEV,
+  createErc20TokenAllowanceCaveats,
+} from "@metamask/7715-permission-types";
 import {
   ANY_BENEFICIARY,
   createRedeemerTerms,
@@ -1231,6 +1235,36 @@ test("Smart Account ERC-7710 completes the common x402 lifecycle across restart 
     assert.equal(safeOutput.includes(permission.session_private_key), false);
     assert.equal(safeOutput.includes(permission.grant_context), false);
     assert.equal(safeOutput.includes(material.payment_header), false);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("Smart Account ERC-7710 freezes the approved facilitator set independent of seller order", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const approved = ALL_METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase() as Address);
+    const offered = [...approved].reverse();
+    const runtime = smartAccountX402Runtime(
+      fixture,
+      new SmartAccountX402Rpc(),
+      new QueuedHttp([smartAccountX402Challenge({
+        extra: { assetTransferMethod: "erc7710", facilitatorAddresses: offered },
+      })]),
+      new MutableSmartAccountClock(),
+      new RecordingSmartAccountX402Engine(),
+      { approvedFacilitators: approved },
+    );
+
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-x402-facilitator-order-0001"));
+    assert.equal(prepared.ok, true, JSON.stringify(prepared));
+    const frozen = await runtime.state.findX402Operation(publicOperationId(prepared.operation));
+    assert.deepEqual(frozen?.delegatedMaterial?.facilitatorAddresses, [...approved].sort());
+    assert.deepEqual(frozen?.selectedOffer.resolved.assetTransferMethod === "erc7710"
+      ? frozen.selectedOffer.resolved.facilitatorAddresses
+      : [], [...approved].sort());
+    assert.equal(frozen?.delegatedMaterial?.facilitatorAddresses.includes(
+      METAMASK_FACILITATOR_ADDRESSES_DEV[0].toLowerCase() as Address,
+    ), true);
   } finally { await fixture.temporary.cleanup(); }
 });
 

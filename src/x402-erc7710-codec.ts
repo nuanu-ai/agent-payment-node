@@ -1,4 +1,4 @@
-import { METAMASK_FACILITATOR_ADDRESSES } from "@metamask/smart-accounts-kit/experimental";
+import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "@metamask/7715-permission-types";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
@@ -16,7 +16,7 @@ export function canonicalErc7710Facilitators(
     (extra.paymentFlow !== undefined && extra.paymentFlow !== "authorization")
   ) return null;
   const value = extra.facilitatorAddresses;
-  if (value === undefined) return normalizeAddresses(METAMASK_FACILITATOR_ADDRESSES);
+  if (value === undefined) return normalizeAddresses(ALL_METAMASK_FACILITATOR_ADDRESSES);
   if (!Array.isArray(value) || value.length === 0 || value.length > 16) return null;
   return normalizeAddresses(value);
 }
@@ -31,7 +31,7 @@ function normalizeAddresses(value: readonly unknown[]): readonly string[] | null
     unique.add(address);
     normalized.push(address);
   }
-  return normalized;
+  return normalized.sort();
 }
 
 function optionalBoundedString(value: unknown): boolean {

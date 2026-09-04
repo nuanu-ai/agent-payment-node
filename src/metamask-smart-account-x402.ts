@@ -9,9 +9,9 @@ import {
 } from "@metamask/delegation-core";
 import type { PermissionContext } from "@metamask/smart-accounts-kit";
 import {
-  METAMASK_FACILITATOR_ADDRESSES,
   createx402DelegationProvider,
 } from "@metamask/smart-accounts-kit/experimental";
+import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "@metamask/7715-permission-types";
 import {
   SIGNABLE_DELEGATION_TYPED_DATA,
   decodeDelegations,
@@ -98,7 +98,7 @@ export class MetaMaskSmartAccountX402Adapter implements X402PaymentMaterialPort 
     private readonly allowance: SmartAccountAllowancePort,
     private readonly engine: SmartAccountX402EnginePort = new OfficialSmartAccountX402Engine(),
     private readonly now: () => Date = () => new Date(),
-    private readonly approvedFacilitators: readonly Address[] = METAMASK_FACILITATOR_ADDRESSES,
+    private readonly approvedFacilitators: readonly Address[] = ALL_METAMASK_FACILITATOR_ADDRESSES,
   ) {}
 
   async prepare(input: X402MaterialPrepareInput): Promise<X402DelegatedMaterialBinding> {
@@ -271,11 +271,21 @@ async function validateOfficialMaterial(
   const chain = decodeDelegations(delegationPayload.permissionContext);
   if (chain.length !== 2 || chain[0] === undefined || chain[1] === undefined) protocol("ERC-7710 child/root chain is invalid.");
   const [child, root] = chain;
-  if (encodeDelegations([root]).toLowerCase() !== record.grant_context.toLowerCase() ||
-    child.delegate.toLowerCase() !== ANY_BENEFICIARY.toLowerCase() ||
-    child.delegator.toLowerCase() !== binding.sessionAddress ||
-    child.authority.toLowerCase() !== hashDelegation(toDelegationStruct(root)).toLowerCase() ||
-    child.salt.toLowerCase() !== deterministicSalt(operation).toLowerCase()) protocol("ERC-7710 child authority or deterministic identity is invalid.");
+  if (encodeDelegations([root]).toLowerCase() !== record.grant_context.toLowerCase()) {
+    protocol("ERC-7710 root permission context differs from the committed grant.");
+  }
+  if (child.delegate.toLowerCase() !== ANY_BENEFICIARY.toLowerCase()) {
+    protocol("ERC-7710 child beneficiary is not the required open beneficiary.");
+  }
+  if (child.delegator.toLowerCase() !== binding.sessionAddress) {
+    protocol("ERC-7710 child delegator differs from the frozen session account.");
+  }
+  if (child.authority.toLowerCase() !== hashDelegation(toDelegationStruct(root)).toLowerCase()) {
+    protocol("ERC-7710 child authority does not bind the committed root grant.");
+  }
+  if (!sameDelegationSalt(child.salt, deterministicSalt(operation))) {
+    protocol("ERC-7710 child salt differs from the deterministic operation identity.");
+  }
   const recovered = await recoverTypedDataAddress({
     domain: { chainId: CHAIN_ID, name: "DelegationManager", version: "1", verifyingContract: binding.delegationManager },
     types: SIGNABLE_DELEGATION_TYPED_DATA,
@@ -375,6 +385,9 @@ function materialProjection(record: NonNullable<Awaited<ReturnType<SmartAccountX
 
 function deterministicSalt(operation: X402OperationRecord): Hex {
   return keccak256(toHex(`apn.smart-account.x402\0${operation.operationId}\0${operation.fingerprint}`));
+}
+export function sameDelegationSalt(actual: Hex, expected: Hex): boolean {
+  return BigInt(actual) === BigInt(expected);
 }
 function intersection(offered: readonly Address[], approved: readonly Address[]): readonly Address[] {
   const allowed = new Set(approved.map(lower));

@@ -63,12 +63,12 @@ export class HttpsBaseRpc {
             this.call("eth_call", [{ to: BASE_USDC, data: "0x54fd4d50" }, tag]),
             this.call("eth_call", [{ to: BASE_USDC, data: "0x3644e515" }, tag]),
         ]);
-        const recheckedBlock = record(await this.call("eth_getBlockByNumber", ["safe", false]), "rechecked safe block");
+        const recheckedBlock = record(await this.call("eth_getBlockByNumber", [tag, false]), "rechecked pinned block");
         const recheckedNumber = rpcQuantity(recheckedBlock.number).toString();
         const recheckedHash = rpcHex(recheckedBlock.hash, 32);
         const recheckedTimestamp = rpcQuantity(recheckedBlock.timestamp).toString();
         if (recheckedNumber !== number || recheckedHash !== hash || recheckedTimestamp !== timestamp) {
-            throw new ApnError("APN_RPC_PROTOCOL", "RPC safe block identity changed around the pinned x402 reads.");
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC pinned block identity changed around the x402 reads.");
         }
         return {
             address,
