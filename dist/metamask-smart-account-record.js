@@ -70,6 +70,18 @@ export function projectPermissionBinding(record, nowUnix) {
         observed_at: record.updated_at,
     };
 }
+export function projectPendingPermissionBinding(record) {
+    return {
+        session_address: record.session_address,
+        state: "pending_consent",
+        revision: record.revision,
+        requested_cap_atomic: record.requested_cap_atomic,
+        starts_at_unix: record.starts_at_unix,
+        expires_at_unix: record.requested_expires_at_unix,
+        revocation_freshness: record.revocation_freshness,
+        observed_at: record.updated_at,
+    };
+}
 function validateGrantedFields(value) {
     if (typeof value.owner_address !== "string" || !ADDRESS.test(value.owner_address) ||
         typeof value.granted_cap_atomic !== "string" || !POSITIVE.test(value.granted_cap_atomic) ||

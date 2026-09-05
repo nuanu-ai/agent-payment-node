@@ -7,4 +7,5 @@ export declare class ProviderRegistry implements ProviderRegistryPort {
         readonly create: () => ProviderAdapterBundle;
     }[]);
     resolve(providerId: string): ProviderAdapterBundle;
+    permissionAdapters(): readonly ProviderAdapterBundle[];
 }

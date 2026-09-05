@@ -61,10 +61,22 @@ export interface ProviderPermissionBinding {
   readonly observed_at: string;
 }
 
+export interface ProviderPendingPermissionBinding {
+  readonly session_address: Address;
+  readonly state: "pending_consent";
+  readonly revision: number;
+  readonly requested_cap_atomic: string;
+  readonly starts_at_unix: number;
+  readonly expires_at_unix: number;
+  readonly revocation_freshness: ProviderRevocationFreshness;
+  readonly observed_at: string;
+}
+
 export interface ProviderPermissionLifecyclePort {
   connect(intent: ProviderPermissionConnectIntent): Promise<ProviderPermissionBinding>;
   activate(profileHash: string): Promise<ProviderPermissionBinding>;
   read(profileHash: string): Promise<ProviderPermissionBinding | null>;
+  readPending?(profileHash: string): Promise<ProviderPendingPermissionBinding | null>;
   sync(profileHash: string, expectedRevision: number): Promise<ProviderPermissionBinding>;
   disable(profileHash: string, expectedRevision: number): Promise<ProviderPermissionBinding>;
   forget(profileHash: string, expectedRevision: number): Promise<{ readonly warning: string }>;
@@ -309,4 +321,5 @@ export interface ProviderAdapterBundle {
 
 export interface ProviderRegistryPort {
   resolve(providerId: string): ProviderAdapterBundle;
+  permissionAdapters?(): readonly ProviderAdapterBundle[];
 }

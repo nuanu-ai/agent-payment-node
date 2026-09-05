@@ -11,7 +11,12 @@ test("MetaMask Smart Account exposes direct transfer through its provider bundle
   assert.equal(capabilities.direct.retry_owner, "apn_operation_state");
 
   const adapter = new MetaMaskSmartAccountAdapter(
-    { load: async () => null, save: async () => undefined, remove: async () => undefined },
+    {
+      load: async () => null,
+      save: async () => undefined,
+      remove: async () => undefined,
+      compareAndSet: async () => false,
+    },
     { request: async () => ({}), sync: async () => ({}) },
   );
   assert.equal(adapter.bundle().direct?.mode, "delegated_session_transaction");

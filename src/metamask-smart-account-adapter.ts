@@ -11,6 +11,7 @@ import { assertMetaMaskSmartAccountPackageIdentity } from "./metamask-smart-acco
 import {
   isGrantedPermissionRecord,
   METAMASK_SMART_ACCOUNT_PROVIDER_ID,
+  projectPendingPermissionBinding,
   projectPermissionBinding,
   SMART_ACCOUNT_PERMISSION_RECORD_VERSION,
   type GrantedSmartAccountPermissionRecord,
@@ -25,6 +26,7 @@ import type {
   ProviderPermissionBinding,
   ProviderPermissionConnectIntent,
   ProviderPermissionLifecyclePort,
+  ProviderPendingPermissionBinding,
   X402PaymentMaterialPort,
 } from "./provider-ports.js";
 import {
@@ -158,16 +160,17 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
     }
     if (instant.unix >= record.requested_expires_at_unix) invalidInput("The pending permission intent expired before consent.");
     await assertMetaMaskSmartAccountPackageIdentity();
-    const request = requestShape(record, instant.unix);
+    const pending = record;
     const observation = await this.consent.request({
-      sessionAddress: record.session_address,
-      capAtomic: record.requested_cap_atomic,
-      startsAtUnix: record.starts_at_unix,
-      expiresAtUnix: record.requested_expires_at_unix,
+      sessionAddress: pending.session_address,
+      capAtomic: pending.requested_cap_atomic,
+      startsAtUnix: pending.starts_at_unix,
+      expiresAtUnix: pending.requested_expires_at_unix,
     });
-    const grant = validateSmartAccountObservation(observation, request);
+    const commitInstant = this.instant();
+    const grant = validateSmartAccountObservation(observation, requestShape(pending, commitInstant.unix));
     const committed: GrantedSmartAccountPermissionRecord = {
-      ...record,
+      ...pending,
       phase: "grant_committed_pending_profile",
       owner_address: grant.ownerAddress,
       granted_cap_atomic: grant.grantedCapAtomic,
@@ -176,11 +179,11 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
       grant_fingerprint: grant.grantFingerprint,
       delegation_manager: grant.delegationManager,
       permission_response: grant.permissionResponse,
-      updated_at: instant.iso,
-      max_observed_unix: instant.unix,
+      updated_at: monotonicTimestamp(pending.updated_at, commitInstant.iso),
+      max_observed_unix: Math.max(pending.max_observed_unix, commitInstant.unix),
     };
-    await this.store.save(committed);
-    return projectPermissionBinding(committed, instant.unix);
+    if (!await this.store.compareAndSet(pending, committed)) staleConsentResult();
+    return projectPermissionBinding(committed, commitInstant.unix);
   }
 
   async activate(profileHash: string): Promise<ProviderPermissionBinding> {
@@ -204,6 +207,13 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
     if (record === null || !isGrantedPermissionRecord(record)) return null;
     const instant = this.instant();
     return projectPermissionBinding(await this.materializeExpiry(record, instant), instant.unix);
+  }
+
+  async readPending(profileHash: string): Promise<ProviderPendingPermissionBinding | null> {
+    const record = await this.store.load(profileHash);
+    return record === null || isGrantedPermissionRecord(record)
+      ? null
+      : projectPendingPermissionBinding(record);
   }
 
   async sync(profileHash: string, expectedRevision: number): Promise<ProviderPermissionBinding> {
@@ -278,7 +288,9 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
     const record = await this.store.load(profileHash);
     if (record !== null) {
       assertRevision(record, expectedRevision);
-      await this.store.remove(profileHash);
+      if (!await this.store.compareAndSet(record, null)) {
+        throw new ApnError("APN_PROFILE_REVISION_CONFLICT", "The Smart Account permission changed during local cancellation.");
+      }
     }
     return {
       warning: "Local APN session and permission material were deleted. MetaMask-side authority may still exist; review it in MetaMask.",
@@ -387,6 +399,13 @@ function terminalConnect(state: string): never {
 }
 function terminalLifecycle(state: string): never {
   throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", `Smart Account permission is ${state} and cannot be reactivated by this command.`);
+}
+function staleConsentResult(): never {
+  throw new ApnError(
+    "APN_PROVIDER_PROTOCOL",
+    "The MetaMask consent result no longer matches the active pending intent and was not committed.",
+    { retryable: false },
+  );
 }
 function unsupportedInternalPath(): never {
   throw new ApnError("APN_INTERNAL", "Smart Account access must use the common permission lifecycle path.");

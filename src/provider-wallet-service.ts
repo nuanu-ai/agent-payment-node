@@ -9,7 +9,8 @@ import {
   type ProviderBindingObservation,
   type ProviderProfileRecord,
 } from "./provider-profile.js";
-import { publicPermissionProfile } from "./provider-permission-output.js";
+import { findPendingProviderPermission } from "./provider-permission-discovery.js";
+import { publicPendingPermissionProfile, publicPermissionProfile } from "./provider-permission-output.js";
 import type {
   ProviderAdapterBundle,
   ProviderPermissionBinding,
@@ -119,13 +120,21 @@ export class ProviderWalletService {
     if (this.context.profileRepository === undefined) return null;
     const profile = canonicalProfile(profileInput);
     const profileHash = this.context.state.profileHash(profile);
-    const existing = await this.context.requireProfileRepository().load(profileHash);
-    if (existing === null || existing.provider_id === "local") return null;
+    const repository = this.context.requireProfileRepository();
+    const initial = await repository.load(profileHash);
+    if (initial === null || initial.provider_id === "local") {
+      if (this.context.providerRegistry === undefined) return null;
+      const pending = await findPendingProviderPermission(this.context.requireProviderRegistry(), profileHash);
+      if (pending === null) return null;
+    }
     await this.context.ready();
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-      const repository = this.context.requireProfileRepository();
       let current = await repository.load(profileHash);
-      if (current === null) throw new ApnError("APN_STATE_CORRUPT", "Provider profile disappeared during status.");
+      if (current === null || current.provider_id === "local") {
+        if (this.context.providerRegistry === undefined) return null;
+        const pending = await findPendingProviderPermission(this.context.requireProviderRegistry(), profileHash);
+        return pending === null ? null : publicPendingPermissionProfile(profile, pending.adapter, pending.permission);
+      }
       const adapter = this.context.requireProviderRegistry().resolve(current.provider_id);
       current = await upgradeProviderProfile(adapter, current, repository);
       if (adapter.permissions !== undefined) {
