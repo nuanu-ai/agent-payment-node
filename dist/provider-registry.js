@@ -28,5 +28,10 @@ export class ProviderRegistry {
         this.adapters.set(providerId, adapter);
         return adapter;
     }
+    permissionAdapters() {
+        return [...this.factories.keys()]
+            .map((providerId) => this.resolve(providerId))
+            .filter((adapter) => adapter.permissions !== undefined);
+    }
 }
 //# sourceMappingURL=provider-registry.js.map

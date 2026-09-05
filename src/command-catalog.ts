@@ -184,7 +184,16 @@ export const COMMANDS: readonly CommandDefinition[] = [
     "none",
     "Never.",
     permissionStates,
-    [],
+    [
+      {
+        command_path: ["wallet", "connect"],
+        when: "status is pending_consent and the caller can retry the exact original provider, cap, expiry and idempotency key",
+      },
+      {
+        command_path: ["wallet", "permission", "forget"],
+        when: "status is pending_consent and the caller has reviewed possible provider-side authority before cancelling the exact local revision",
+      },
+    ],
     ["apn wallet permission list --profile smart-account"],
   ),
   command(
