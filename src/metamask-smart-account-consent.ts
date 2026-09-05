@@ -158,29 +158,73 @@ const post = async (outcome) => {
   setTimeout(() => window.close(), 250);
 };
 const classify = (error) => error && Number(error.code) === 4001 ? "user_rejected" : "provider_protocol";
-const discoverMetaMaskProvider = async () => {
-  const announced = [];
+const displayText = (record, key) => {
+  try {
+    const value = record && record[key];
+    if (typeof value !== "string" || value.trim() === "") return "Unavailable";
+    return value.trim().slice(0, 160).replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, "�");
+  } catch { return "Unavailable"; }
+};
+const requestCapable = (provider) => {
+  try { return provider && typeof provider.request === "function"; }
+  catch { return false; }
+};
+const discoverProviders = async () => {
+  const candidates = [];
+  const add = (provider, source, info) => {
+    if (!requestCapable(provider) || candidates.some((candidate) => candidate.provider === provider)) return;
+    candidates.push({
+      provider,
+      source,
+      name: displayText(info, "name"),
+      rdns: displayText(info, "rdns"),
+      uuid: displayText(info, "uuid"),
+    });
+  };
   const announce = (event) => {
-    const detail = event && event.detail;
-    const info = detail && detail.info;
-    const provider = detail && detail.provider;
-    if (info && info.rdns === "io.metamask" && provider && typeof provider.request === "function" &&
-      provider.isMetaMask === true && !announced.includes(provider)) announced.push(provider);
+    try {
+      const detail = event && event.detail;
+      add(detail && detail.provider, "EIP-6963 announcement", detail && detail.info);
+    } catch { /* Ignore malformed or accessor-hostile announcements. */ }
   };
   globalThis.addEventListener("eip6963:announceProvider", announce);
-  globalThis.dispatchEvent(new Event("eip6963:requestProvider"));
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  globalThis.removeEventListener("eip6963:announceProvider", announce);
-  if (announced.length === 1) return announced[0];
-  if (announced.length > 1) return undefined;
-  const injected = globalThis.ethereum;
-  const providers = Array.isArray(injected && injected.providers) ? injected.providers : [];
-  const legacy = providers.filter((provider) => provider && typeof provider.request === "function" &&
-    provider.isMetaMask === true && provider.isRabby !== true && provider.isBraveWallet !== true);
-  if (legacy.length === 1) return legacy[0];
-  if (legacy.length > 1) return undefined;
-  return injected && typeof injected.request === "function" && injected.isMetaMask === true &&
-    injected.isRabby !== true && injected.isBraveWallet !== true ? injected : undefined;
+  try {
+    globalThis.dispatchEvent(new Event("eip6963:requestProvider"));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } finally { globalThis.removeEventListener("eip6963:announceProvider", announce); }
+  try {
+    const injected = globalThis.ethereum;
+    const providers = Array.isArray(injected && injected.providers) ? injected.providers : [];
+    for (const provider of providers) add(provider, "Legacy ethereum.providers", undefined);
+    add(injected, "Legacy globalThis.ethereum", undefined);
+  } catch { /* Ignore malformed or accessor-hostile legacy injection. */ }
+  return candidates;
+};
+const chooseProvider = async (candidates) => {
+  if (candidates.length === 0) return undefined;
+  setStatus("Choose the injected wallet provider you installed and intend to use. Identity metadata is self-reported and unverified.");
+  const list = document.getElementById("providers");
+  const buttons = [];
+  return await new Promise((resolve) => {
+    let selected = false;
+    candidates.forEach((candidate, index) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = String(index + 1) + ". Source: " + candidate.source + "; Name: " + candidate.name +
+        "; RDNS: " + candidate.rdns + "; UUID: " + candidate.uuid + "; identity metadata is unverified";
+      button.addEventListener("click", () => {
+        if (selected) return;
+        selected = true;
+        for (const choice of buttons) choice.disabled = true;
+        setStatus("Wallet provider selected. Continue in that wallet to review the exact Base USDC cap and expiry.");
+        resolve(candidate.provider);
+      });
+      buttons.push(button);
+      item.appendChild(button);
+      list.appendChild(item);
+    });
+  });
 };
 const accountCode = async (provider, owner) => await provider.request({ method: "eth_getCode", params: [owner, "latest"] });
 const active = (code) => typeof code === "string" && code.toLowerCase() === ("0xef0100" + config.implementation.slice(2)).toLowerCase();
@@ -190,7 +234,7 @@ const sameAccount = async (provider, owner) => {
 };
 (async () => {
   try {
-    const provider = await discoverMetaMaskProvider();
+    const provider = await chooseProvider(await discoverProviders());
     if (!provider) return await post({ ok: false, code: "missing_provider" });
     const accounts = await provider.request({ method: "eth_requestAccounts", params: [] });
     if (!Array.isArray(accounts) || accounts.length === 0) return await post({ ok: false, code: "provider_protocol" });
@@ -225,7 +269,7 @@ const sameAccount = async (provider, owner) => {
   } catch (error) { await post({ ok: false, code: classify(error) }); }
 })();`;
 
-const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>APN MetaMask permission</title></head><body><main><h1>APN MetaMask Smart Account</h1><p id="status">Continue in MetaMask to review the exact Base USDC cap and expiry.</p></main><script src="/app.js"></script></body></html>`;
+const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>APN MetaMask permission</title></head><body><main><h1>APN MetaMask Smart Account</h1><p id="status">Finding injected wallet providers…</p><p>Provider identity metadata is self-reported and unverified. Choose the wallet you installed and intend to use. Provider icons are not displayed.</p><ol id="providers" aria-label="Injected wallet providers"></ol></main><script src="/app.js"></script></body></html>`;
 
 function securityHeaders(): Record<string, string> {
   return {
