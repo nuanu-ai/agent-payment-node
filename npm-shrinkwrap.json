@@ -20,7 +20,7 @@
         "@metamask/smart-accounts-kit": "2.0.0",
         "@metamask/x402": "1.0.0",
         "@modelcontextprotocol/server": "2.0.0",
-        "@x402/core": "2.23.0",
+        "@x402/core": "2.24.0",
         "@x402/evm": "2.23.0",
         "awal": "2.12.1",
         "viem": "2.55.19",
@@ -1189,9 +1189,9 @@
       }
     },
     "node_modules/@x402/core": {
-      "version": "2.23.0",
-      "resolved": "https://registry.npmjs.org/@x402/core/-/core-2.23.0.tgz",
-      "integrity": "sha512-EFeV0nXbTPPe5FXaD6y9vMgqc+k/ujLXCrUPrQXkmHjHyjC3Ir5tTL1e2FPSkx2+GUGzfpt1wVZb36639ygkWw==",
+      "version": "2.24.0",
+      "resolved": "https://registry.npmjs.org/@x402/core/-/core-2.24.0.tgz",
+      "integrity": "sha512-zKFbG+RgUhBXT9RcBQZGPW1cZXL9xpiTv68XSSuO1SMoobudmVvxYgP/bhoxJuAoqJjjEceeAhT4/EcA/wolrQ==",
       "license": "Apache-2.0",
       "dependencies": {
         "zod": "^3.24.2"
@@ -1214,6 +1214,15 @@
       "dependencies": {
         "@x402/core": "~2.23.0",
         "viem": "^2.48.11",
+        "zod": "^3.24.2"
+      }
+    },
+    "node_modules/@x402/evm/node_modules/@x402/core": {
+      "version": "2.23.0",
+      "resolved": "https://registry.npmjs.org/@x402/core/-/core-2.23.0.tgz",
+      "integrity": "sha512-EFeV0nXbTPPe5FXaD6y9vMgqc+k/ujLXCrUPrQXkmHjHyjC3Ir5tTL1e2FPSkx2+GUGzfpt1wVZb36639ygkWw==",
+      "license": "Apache-2.0",
+      "dependencies": {
         "zod": "^3.24.2"
       }
     },
@@ -1240,15 +1249,6 @@
         "jose": "^5.9.6",
         "tweetnacl": "^1.0.3",
         "viem": "^2.48.11",
-        "zod": "^3.24.2"
-      }
-    },
-    "node_modules/@x402/extensions/node_modules/@x402/core": {
-      "version": "2.24.0",
-      "resolved": "https://registry.npmjs.org/@x402/core/-/core-2.24.0.tgz",
-      "integrity": "sha512-zKFbG+RgUhBXT9RcBQZGPW1cZXL9xpiTv68XSSuO1SMoobudmVvxYgP/bhoxJuAoqJjjEceeAhT4/EcA/wolrQ==",
-      "license": "Apache-2.0",
-      "dependencies": {
         "zod": "^3.24.2"
       }
     },
