@@ -658,6 +658,7 @@ test("MCP connect returns the exact foreground handoff before provider compositi
   const handoff = `apn wallet connect --profile provider-one --provider ${AWAL_PROVIDER_ID} --expected-revision 4`;
   assert.equal(envelope.error?.code, "APN_FOREGROUND_AUTH_REQUIRED");
   assert.equal(envelope.error?.details?.cli_handoff, handoff);
+  assert.deepEqual(envelope.error?.details?.cli_handoff_argv, handoff.split(" "));
   assert.deepEqual(envelope.next_actions, [handoff]);
   const browserResult = await client.callTool({
     name: "apn_wallet_connect",
@@ -667,6 +668,7 @@ test("MCP connect returns the exact foreground handoff before provider compositi
   const browserHandoff = "apn wallet connect --profile metamask --provider metamask-agent-wallet --auth-method browser";
   assert.equal(browserEnvelope.error?.code, "APN_FOREGROUND_AUTH_REQUIRED");
   assert.equal(browserEnvelope.error?.details?.cli_handoff, browserHandoff);
+  assert.deepEqual(browserEnvelope.error?.details?.cli_handoff_argv, browserHandoff.split(" "));
   assert.deepEqual(browserEnvelope.next_actions, [browserHandoff]);
   assert.equal(resolves, 0);
 });
@@ -1528,6 +1530,7 @@ test("profile revision, capability, observed sender and RPC drift all stop befor
         const rebindHandoff = `apn wallet connect --profile ${profile} --provider ${AWAL_PROVIDER_ID} --expected-revision 1`;
         assert.equal(approved.error?.code, "APN_PROFILE_DRIFT");
         assert.equal(approved.error?.details?.cli_handoff, rebindHandoff);
+        assert.deepEqual(approved.error?.details?.cli_handoff_argv, rebindHandoff.split(" "));
         assert.deepEqual(approved.next_actions, [rebindHandoff]);
         const driftedProfile = JSON.parse(await readFile(profilePath, "utf8")) as {
           readonly revision: number;
