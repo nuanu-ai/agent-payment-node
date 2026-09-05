@@ -33,4 +33,10 @@ export class ProviderRegistry implements ProviderRegistryPort {
     this.adapters.set(providerId, adapter);
     return adapter;
   }
+
+  permissionAdapters(): readonly ProviderAdapterBundle[] {
+    return [...this.factories.keys()]
+      .map((providerId) => this.resolve(providerId))
+      .filter((adapter) => adapter.permissions !== undefined);
+  }
 }

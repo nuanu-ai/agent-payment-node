@@ -3,6 +3,7 @@ import { ApnError } from "./errors.js";
 import type { Address, Hex } from "./model.js";
 import type {
   ProviderPermissionBinding,
+  ProviderPendingPermissionBinding,
   ProviderPermissionState,
   ProviderRevocationFreshness,
 } from "./provider-ports.js";
@@ -120,6 +121,21 @@ export function projectPermissionBinding(
     expires_at_unix: record.granted_expires_at_unix,
     grant_fingerprint: record.grant_fingerprint,
     ...(record.last_foreground_sync_at === undefined ? {} : { last_foreground_sync_at: record.last_foreground_sync_at }),
+    revocation_freshness: record.revocation_freshness,
+    observed_at: record.updated_at,
+  };
+}
+
+export function projectPendingPermissionBinding(
+  record: PendingSmartAccountPermissionRecord,
+): ProviderPendingPermissionBinding {
+  return {
+    session_address: record.session_address,
+    state: "pending_consent",
+    revision: record.revision,
+    requested_cap_atomic: record.requested_cap_atomic,
+    starts_at_unix: record.starts_at_unix,
+    expires_at_unix: record.requested_expires_at_unix,
     revocation_freshness: record.revocation_freshness,
     observed_at: record.updated_at,
   };

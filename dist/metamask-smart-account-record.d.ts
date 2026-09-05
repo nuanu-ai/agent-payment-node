@@ -1,5 +1,5 @@
 import type { Address, Hex } from "./model.js";
-import type { ProviderPermissionBinding, ProviderPermissionState, ProviderRevocationFreshness } from "./provider-ports.js";
+import type { ProviderPermissionBinding, ProviderPendingPermissionBinding, ProviderPermissionState, ProviderRevocationFreshness } from "./provider-ports.js";
 export declare const SMART_ACCOUNT_PERMISSION_RECORD_VERSION: "apn.metamask-smart-account-permission.v1";
 export declare const METAMASK_SMART_ACCOUNT_PROVIDER_ID: "metamask-smart-account";
 interface PermissionRecordBase {
@@ -39,4 +39,5 @@ export type SmartAccountPermissionRecord = PendingSmartAccountPermissionRecord |
 export declare function validateSmartAccountPermissionRecord(value: unknown): SmartAccountPermissionRecord;
 export declare function isGrantedPermissionRecord(record: SmartAccountPermissionRecord): record is GrantedSmartAccountPermissionRecord;
 export declare function projectPermissionBinding(record: GrantedSmartAccountPermissionRecord, nowUnix: number): ProviderPermissionBinding;
+export declare function projectPendingPermissionBinding(record: PendingSmartAccountPermissionRecord): ProviderPendingPermissionBinding;
 export {};
