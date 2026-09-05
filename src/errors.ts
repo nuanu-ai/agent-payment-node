@@ -44,14 +44,17 @@ export type ErrorCode =
   | "APN_RECEIPT_NOT_FOUND"
   | "APN_INTERNAL";
 
+export type ErrorDetail = string | boolean | readonly string[];
+export type ErrorDetails = Readonly<Record<string, ErrorDetail>>;
+
 export class ApnError extends Error {
   readonly code: ErrorCode;
-  readonly details?: Readonly<Record<string, string | boolean>>;
+  readonly details?: ErrorDetails;
 
   constructor(
     code: ErrorCode,
     message: string,
-    details?: Readonly<Record<string, string | boolean>>,
+    details?: ErrorDetails,
   ) {
     super(message);
     this.name = "ApnError";

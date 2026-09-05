@@ -224,7 +224,12 @@ test("catalog parser derives requiredness, defaults, duplicate rejection and sca
   for (const [path, option, invalidValues] of [
     [["wallet", "status"], "--profile", ["UPPER", "", "a".repeat(65)]],
     [["wallet", "connect"], "--auth-method", ["UPPER", "email_otp", "", `a${"b".repeat(32)}`]],
-    [["wallet", "balance"], "--rpc-url", ["http://rpc.example", "https://user:pass@rpc.example", "https://rpc.example/#fragment"]],
+    [["wallet", "balance"], "--rpc-url", [
+      "http://rpc.example",
+      "https://user:pass@rpc.example",
+      "https://rpc.example/#fragment",
+      "https://rpc.example/\nAPN_CONTROL_MUST_BE_REJECTED",
+    ]],
     [["pay", "transfer", "prepare"], "--to", ["0x1234", "recipient"]],
     [["pay", "transfer", "prepare"], "--amount-usdc", ["0", "01", "1.0000001"]],
     [["operation", "status"], "--operation", ["A".repeat(64), "a".repeat(63)]],

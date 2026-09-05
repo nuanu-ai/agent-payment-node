@@ -1,8 +1,10 @@
 export type ErrorCode = "APN_INVALID_INPUT" | "APN_UNSUPPORTED_COMMAND" | "APN_STATE_SECURITY" | "APN_STATE_CORRUPT" | "APN_IDEMPOTENCY_CONFLICT" | "APN_STATE_BUSY" | "APN_NATIVE_CHANNEL_REQUIRED" | "APN_NATIVE_PROTOCOL" | "APN_NATIVE_REJECTED" | "APN_HTTP_CONFIG" | "APN_HTTP_PROTOCOL" | "APN_HTTP_AMBIGUOUS" | "APN_X402_UNSUPPORTED_OFFER" | "APN_X402_CAP_EXCEEDED" | "APN_X402_PROFILE_LIMIT_EXCEEDED" | "APN_X402_OFFER_EXCEEDS_LIMIT" | "APN_X402_PAYMENT_AMBIGUOUS" | "APN_X402_SETTLEMENT_INVALID" | "APN_X402_RESULT_INVALID" | "APN_X402_RECOVERY_AMBIGUOUS" | "APN_RPC_CONFIG" | "APN_RPC_PROTOCOL" | "APN_RPC_AMBIGUOUS" | "APN_CHAIN_MISMATCH" | "APN_WALLET_MISMATCH" | "APN_WALLET_POLICY_REQUIRED" | "APN_FOREGROUND_AUTH_REQUIRED" | "APN_PROVIDER_UNAVAILABLE" | "APN_PROVIDER_PROTOCOL" | "APN_PROVIDER_SESSION_REQUIRED" | "APN_PROVIDER_EFFECT_UNAVAILABLE" | "APN_PROFILE_DRIFT" | "APN_PROFILE_REVISION_CONFLICT" | "APN_FOREGROUND_APPROVAL_REQUIRED" | "APN_WALLET_OVERFUNDED_FOR_UNATTENDED_X402" | "APN_INSUFFICIENT_USDC" | "APN_INSUFFICIENT_GAS" | "APN_PERMISSION_INACTIVE" | "APN_PERMISSION_ALLOWANCE_INSUFFICIENT" | "APN_REPREPARE_REQUIRED" | "APN_OPERATION_BLOCKED" | "APN_OPERATION_NOT_FOUND" | "APN_RECEIPT_NOT_FOUND" | "APN_INTERNAL";
+export type ErrorDetail = string | boolean | readonly string[];
+export type ErrorDetails = Readonly<Record<string, ErrorDetail>>;
 export declare class ApnError extends Error {
     readonly code: ErrorCode;
-    readonly details?: Readonly<Record<string, string | boolean>>;
-    constructor(code: ErrorCode, message: string, details?: Readonly<Record<string, string | boolean>>);
+    readonly details?: ErrorDetails;
+    constructor(code: ErrorCode, message: string, details?: ErrorDetails);
 }
 export declare function asApnError(error: unknown): ApnError;
 export declare function assertInput(condition: unknown, message: string): asserts condition;
