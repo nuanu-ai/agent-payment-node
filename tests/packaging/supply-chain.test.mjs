@@ -12,6 +12,7 @@ const generateSbom = resolve(sourceRoot, "scripts/generate-sbom.mjs");
 const verifySupplyChain = resolve(sourceRoot, "scripts/verify-supply-chain.mjs");
 const supplyChainWorkflow = resolve(sourceRoot, ".github/workflows/supply-chain.yml");
 const releaseWorkflow = resolve(sourceRoot, ".github/workflows/release.yml");
+const packageVersion = JSON.parse(readFileSync(resolve(sourceRoot, "package.json"), "utf8")).version;
 
 const requiredPolicyFiles = [
   ".github/CODEOWNERS",
@@ -207,9 +208,9 @@ test("two clean npm packs are byte-identical", async (context) => {
 test("release manifest binds artifact, SBOM, source and Formula digest", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "apn-manifest-contract-"));
   context.after(async () => rm(root, { recursive: true, force: true }));
-  const artifact = join(root, "nuanu-ai-apn-0.5.5.tgz");
-  const sbom = join(root, "nuanu-ai-apn-0.5.5.spdx.json");
-  const manifest = join(root, "nuanu-ai-apn-0.5.5.release.json");
+  const artifact = join(root, `nuanu-ai-apn-${packageVersion}.tgz`);
+  const sbom = join(root, `nuanu-ai-apn-${packageVersion}.spdx.json`);
+  const manifest = join(root, `nuanu-ai-apn-${packageVersion}.release.json`);
   const formula = join(root, "apn.rb");
   await writeFile(artifact, "deterministic candidate artifact");
   const generated = runNode(generateSbom, [
@@ -229,7 +230,7 @@ test("release manifest binds artifact, SBOM, source and Formula digest", async (
   const releaseManifest = JSON.parse(await readFile(manifest, "utf8"));
   await writeFile(formula, [
     "class Apn < Formula",
-    `  url \"https://github.com/nuanu-ai/agent-payment-node/releases/download/v0.5.5/${basename(artifact)}\"`,
+    `  url \"https://github.com/nuanu-ai/agent-payment-node/releases/download/v${packageVersion}/${basename(artifact)}\"`,
     `  sha256 \"${releaseManifest.artifact.sha256}\"`,
     "end",
     "",
@@ -277,7 +278,7 @@ test("release manifest binds artifact, SBOM, source and Formula digest", async (
   ));
 
   await writeFile(formula, (await readFile(formula, "utf8")).replace(
-    "/download/v0.5.5/",
+    `/download/v${packageVersion}/`,
     "/latest/download/",
   ));
   const mutableUrl = runNode(verifySupplyChain, [
@@ -292,7 +293,7 @@ test("release manifest binds artifact, SBOM, source and Formula digest", async (
 
   await writeFile(formula, (await readFile(formula, "utf8")).replace(
     "/latest/download/",
-    "/download/v0.5.5/",
+    `/download/v${packageVersion}/`,
   ));
 
   await writeFile(formula, (await readFile(formula, "utf8")).replace(
