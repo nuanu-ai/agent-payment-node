@@ -1,0 +1,6 @@
+* @Oscorped
+
+/.github/ @Oscorped
+/scripts/generate-sbom.mjs @Oscorped
+/scripts/verify-supply-chain.mjs @Oscorped
+/SECURITY.md @Oscorped
