@@ -1,5 +1,48 @@
-import type { ProviderPermissionBinding } from "./provider-ports.js";
+import { capabilityHash } from "./provider-profile.js";
+import type {
+  ProviderAdapterBundle,
+  ProviderPendingPermissionBinding,
+  ProviderPermissionBinding,
+} from "./provider-ports.js";
 import type { ProviderProfileRecord } from "./provider-profile.js";
+
+export function publicPendingPermissionProfile(
+  profile: string,
+  adapter: ProviderAdapterBundle,
+  permission: ProviderPendingPermissionBinding,
+): unknown {
+  return {
+    profile,
+    provider: adapter.provider_id,
+    status: "pending_consent",
+    trust_class: adapter.trust_class,
+    revision: permission.revision,
+    capability_hash: capabilityHash(adapter.capabilities),
+    capabilities: adapter.capabilities,
+    observed_at: permission.observed_at,
+    reused: true,
+    proof_class: "provider_permission_pending_local_state",
+    permission: {
+      protocol: "erc7715",
+      owner_smart_account: "unconfirmed",
+      session_account: permission.session_address,
+      requested_cap_usdc_atomic: permission.requested_cap_atomic,
+      starts_at_unix: permission.starts_at_unix,
+      expires_at_unix: permission.expires_at_unix,
+      state: "pending_consent",
+      revision: permission.revision,
+      revocation_freshness: permission.revocation_freshness,
+      owner_custody: "external_metamask_unconfirmed",
+      session_custody: "encrypted_local_apn",
+      provider_revoke: "unavailable_unproved",
+    },
+    warning: "The local consent intent is pending. MetaMask-side authority may already exist after a timeout; review it before replacing the intent.",
+    next_actions: [
+      "Retry wallet connect with the exact original provider, cap, expiry and idempotency key to reuse this session.",
+      `After reviewing MetaMask, cancel only the local pending intent with apn wallet permission forget --profile ${profile} --expected-revision ${permission.revision}.`,
+    ],
+  };
+}
 
 export function publicPermissionProfile(
   profile: ProviderProfileRecord,

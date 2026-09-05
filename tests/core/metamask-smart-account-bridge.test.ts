@@ -344,6 +344,21 @@ test("loopback consent deadline also bounds a browser opener that never resolves
   assert.ok(Date.now() - started < 1_000);
 });
 
+test("loopback consent refuses the exact callback after its deadline", async () => {
+  let opened!: URL;
+  const consent = new LoopbackMetaMaskConsent(async (openedUrl) => {
+    opened = new URL(openedUrl);
+  }, 10);
+  await assert.rejects(consent.request(REQUEST), (error: any) =>
+    error.code === "APN_PROVIDER_UNAVAILABLE" && error.details?.retryable === true
+  );
+  await assert.rejects(fetch(`${opened.origin}/callback`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: opened.origin },
+    body: JSON.stringify({ token: opened.hash.slice(1), outcome: { ok: true, value: {} } }),
+  }));
+});
+
 test("loopback consent maps browser launch failure without leaking its cause", async () => {
   const consent = new LoopbackMetaMaskConsent(async () => { throw new Error("PROTECTED_CANARY"); }, 1_000);
   await assert.rejects(consent.request(REQUEST), (error: any) =>

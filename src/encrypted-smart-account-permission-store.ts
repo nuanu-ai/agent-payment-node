@@ -36,12 +36,16 @@ export interface SmartAccountPermissionStorePort {
   load(profileHash: string): Promise<SmartAccountPermissionRecord | null>;
   save(record: SmartAccountPermissionRecord): Promise<void>;
   remove(profileHash: string): Promise<void>;
+  compareAndSet(
+    expected: SmartAccountPermissionRecord,
+    replacement: SmartAccountPermissionRecord | null,
+  ): Promise<boolean>;
 }
 
 export class EncryptedSmartAccountPermissionStore implements SmartAccountPermissionStorePort {
   private readonly files: PermissionEnvelopeState;
 
-  constructor(state: StateStore, private readonly wrappingSecret: WrappingSecretPort) {
+  constructor(private readonly state: StateStore, private readonly wrappingSecret: WrappingSecretPort) {
     this.files = new PermissionEnvelopeState(state.root);
   }
 
@@ -93,6 +97,22 @@ export class EncryptedSmartAccountPermissionStore implements SmartAccountPermiss
 
   async remove(profileHash: string): Promise<void> {
     await this.files.remove(profileHash);
+  }
+
+  async compareAndSet(
+    expected: SmartAccountPermissionRecord,
+    replacement: SmartAccountPermissionRecord | null,
+  ): Promise<boolean> {
+    if (replacement !== null && replacement.profile_hash !== expected.profile_hash) {
+      throw new ApnError("APN_INTERNAL", "Smart Account permission replacement identity is invalid.");
+    }
+    return await this.state.withLocks([`smart-account-permission:${expected.profile_hash}`], async () => {
+      const current = await this.load(expected.profile_hash);
+      if (current === null || canonicalJson(current) !== canonicalJson(expected)) return false;
+      if (replacement === null) await this.remove(expected.profile_hash);
+      else await this.save(replacement);
+      return true;
+    });
   }
 }
 

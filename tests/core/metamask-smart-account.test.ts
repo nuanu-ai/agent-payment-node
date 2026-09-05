@@ -277,12 +277,21 @@ class FixedSessionFactory implements SessionKeyFactoryPort {
 
 class FixtureConsent implements SmartAccountConsentPort {
   requestCalls = 0;
+  failRequestCount = 0;
   syncCalls = 0;
   lastResponse: Record<string, unknown> | null = null;
   syncMode: "present" | "absent" | "drift" | "throw" = "present";
 
   async request(input: SmartAccountConsentRequest): Promise<unknown> {
     this.requestCalls += 1;
+    if (this.failRequestCount > 0) {
+      this.failRequestCount -= 1;
+      throw new ApnError(
+        "APN_PROVIDER_UNAVAILABLE",
+        "MetaMask foreground consent timed out safely; retry the same connect intent.",
+        { retryable: true },
+      );
+    }
     const observation = validObservation(input);
     this.lastResponse = structuredClone(observation.permission_responses[0]) as Record<string, unknown>;
     return observation;
@@ -399,6 +408,125 @@ test("connect is idempotent, encrypted, restart-safe and exposes only safe permi
     assert.equal((status.data as any).permission.grant_fingerprint, (first.data as any).permission.grant_fingerprint);
     assert.equal(fixture.consent.requestCalls, 1);
   } finally { await fixture.temporary.cleanup(); }
+});
+
+test("timed-out consent stays visible after restart and exact retry reuses the session", async () => {
+  const fixture = await makeFixture({ failFirstConsentRequest: true });
+  try {
+    const timedOut = await fixture.core.execute(connectCommand());
+    assert.equal(timedOut.ok, false);
+    assert.equal(timedOut.error?.code, "APN_PROVIDER_UNAVAILABLE");
+    assert.equal(fixture.sessions.calls, 1);
+    assert.equal(fixture.consent.requestCalls, 1);
+
+    const restarted = fixture.restart();
+    const status = await restarted.execute({ command: "wallet.status", profile: PROFILE });
+    const listed = await restarted.execute({ command: "wallet.permission.list", profile: PROFILE });
+    for (const result of [status, listed]) {
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal((result.data as any).status, "pending_consent");
+      assert.equal((result.data as any).revision, 1);
+      assert.equal((result.data as any).permission.session_account, SESSION);
+      assert.equal((result.data as any).permission.requested_cap_usdc_atomic, CAP);
+      assert.match((result.data as any).warning, /may already exist/);
+      assert.equal(JSON.stringify(result).includes(IDEMPOTENCY_KEY), false);
+      assert.equal(JSON.stringify(result).includes(SESSION_PRIVATE_KEY), false);
+    }
+
+    const changed = await restarted.execute({
+      ...connectCommand(),
+      permissionCapUsdcAtomic: "3000000",
+    });
+    assert.equal(changed.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+    assert.equal(fixture.sessions.calls, 1);
+    assert.equal(fixture.consent.requestCalls, 1);
+
+    const recovered = await restarted.execute(connectCommand());
+    assert.equal(recovered.ok, true, JSON.stringify(recovered));
+    assert.equal((recovered.data as any).status, "active");
+    assert.equal((recovered.data as any).permission.session_account, SESSION);
+    assert.equal(fixture.sessions.calls, 1);
+    assert.equal(fixture.consent.requestCalls, 2);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("explicit pending cancellation is revision-guarded and permits a changed replacement intent", async () => {
+  const fixture = await makeFixture({ failFirstConsentRequest: true });
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).error?.code, "APN_PROVIDER_UNAVAILABLE");
+    const stale = await fixture.restart().execute({
+      command: "wallet.permission.forget",
+      profile: PROFILE,
+      expectedRevision: 2,
+    });
+    assert.equal(stale.error?.code, "APN_PROFILE_REVISION_CONFLICT");
+    const forgotten = await fixture.restart().execute({
+      command: "wallet.permission.forget",
+      profile: PROFILE,
+      expectedRevision: 1,
+    });
+    assert.equal(forgotten.ok, true, JSON.stringify(forgotten));
+    assert.equal((forgotten.data as any).status, "forgotten");
+    assert.equal((forgotten.data as any).provider_revoke, "not_performed");
+    assert.match((forgotten.data as any).warning, /may still exist/);
+
+    const replacement = await fixture.restart().execute({
+      ...connectCommand(),
+      permissionCapUsdcAtomic: "3000000",
+      idempotencyKey: "smart-account-connect-replacement-0002",
+    });
+    assert.equal(replacement.ok, true, JSON.stringify(replacement));
+    assert.equal(fixture.sessions.calls, 2);
+    assert.equal(fixture.consent.requestCalls, 2);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("a consent result cannot commit after its pending revision was cancelled", async () => {
+  const temporary = await temporaryState();
+  const wrapping = new TestWrappingSecret();
+  const state = new StateStore(temporary.root, { lockWaitMs: 1_000 });
+  const store = new EncryptedSmartAccountPermissionStore(state, wrapping);
+  let resolveRequest!: (value: unknown) => void;
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const consent: SmartAccountConsentPort = {
+    request: async (input) => await new Promise<unknown>((resolve) => {
+      resolveRequest = resolve;
+      markStarted();
+      void input;
+    }),
+    sync: async () => { throw new Error("must not sync"); },
+  };
+  const adapter = new MetaMaskSmartAccountAdapter(
+    store,
+    consent,
+    new FixedSessionFactory(),
+    () => new Date(NOW * 1_000),
+  );
+  const profileHash = state.profileHash(PROFILE);
+  try {
+    await state.initialize();
+    const connecting = adapter.connect({
+      profile: PROFILE,
+      profileHash,
+      authenticationMethod: "browser",
+      idempotencyKey: IDEMPOTENCY_KEY,
+      capAtomic: CAP,
+      expiresAtUnix: EXPIRY,
+    });
+    await started;
+    await adapter.forget(profileHash, 1);
+    resolveRequest(validObservation({
+      sessionAddress: SESSION,
+      capAtomic: CAP,
+      startsAtUnix: NOW,
+      expiresAtUnix: EXPIRY,
+    }));
+    await assert.rejects(connecting, (error: any) =>
+      error.code === "APN_PROVIDER_PROTOCOL" && /was not committed/u.test(error.message)
+    );
+    assert.equal(await store.load(profileHash), null);
+  } finally { await temporary.cleanup(); }
 });
 
 test("authenticated protected state rejects a session-to-key binding change", async () => {
@@ -661,6 +789,61 @@ test("actual CLI and MCP surfaces share lifecycle state while foreground consent
       await client.close();
       await server.close();
     }
+  } finally { await temporary.cleanup(); }
+});
+
+test("actual CLI and MCP expose and cancel the same pending consent after restart", async () => {
+  const temporary = await temporaryState();
+  const wrappingSecret = new TestWrappingSecret();
+  const consent = new FixtureConsent();
+  consent.failRequestCount = 1;
+  const sessions = new FixedSessionFactory();
+  const options = {
+    stateRoot: temporary.root,
+    wrappingSecret,
+    smartAccountConsent: consent,
+    smartAccountSessionKeys: sessions,
+    clock: { now: () => new Date(NOW * 1_000) },
+  } as const;
+  const connectArgv = [
+    "wallet", "connect", "--profile", PROFILE,
+    "--provider", METAMASK_SMART_ACCOUNT_PROVIDER_ID,
+    "--auth-method", "browser",
+    "--permission-cap-usdc-atomic", CAP,
+    "--permission-expires-at", String(EXPIRY),
+    "--idempotency-key", IDEMPOTENCY_KEY,
+  ];
+  try {
+    const timedOut = await runCli(connectArgv, {}, options);
+    assert.equal(timedOut.error?.code, "APN_PROVIDER_UNAVAILABLE");
+    const cliStatus = await runCli(["wallet", "status", "--profile", PROFILE], {}, options);
+    assert.equal((cliStatus.data as any).status, "pending_consent");
+
+    const server = createMcpServer(options);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: "pending-smart-account-parity", version: "1.0.0" });
+    await client.connect(clientTransport);
+    try {
+      const listed = mcpEnvelope(await client.callTool({
+        name: "apn_wallet_permission_list", arguments: { profile: PROFILE },
+      }));
+      assert.equal((listed.data as any).status, "pending_consent");
+      assert.equal((listed.data as any).permission.session_account, SESSION);
+      assert.equal(JSON.stringify(listed).includes(IDEMPOTENCY_KEY), false);
+      assert.equal(JSON.stringify(listed).includes(SESSION_PRIVATE_KEY), false);
+
+      const forgotten = mcpEnvelope(await client.callTool({
+        name: "apn_wallet_permission_forget", arguments: { profile: PROFILE, expected_revision: "1" },
+      }));
+      assert.equal((forgotten.data as any).status, "forgotten");
+      assert.equal((forgotten.data as any).provider_revoke, "not_performed");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+    const absent = await runCli(["wallet", "status", "--profile", PROFILE], {}, options);
+    assert.equal((absent.data as any).status, "absent");
   } finally { await temporary.cleanup(); }
 });
 
@@ -1935,11 +2118,13 @@ function connectCommand() {
 async function makeFixture(options: {
   readonly failFirstProfileSave?: boolean;
   readonly failFirstProfileRemove?: boolean;
+  readonly failFirstConsentRequest?: boolean;
   readonly rpc?: TestRpc;
 } = {}) {
   const temporary = await temporaryState();
   const wrapping = new TestWrappingSecret();
   const consent = new FixtureConsent();
+  if (options.failFirstConsentRequest === true) consent.failRequestCount = 1;
   const sessions = new FixedSessionFactory();
   let now = NOW;
   const setNow = (value: number) => { now = value; };

@@ -9,9 +9,11 @@ import { isGrantedPermissionRecord, validateSmartAccountPermissionRecord, } from
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 const ENVELOPE_VERSION = "apn.metamask-smart-account-permission-envelope.v1";
 export class EncryptedSmartAccountPermissionStore {
+    state;
     wrappingSecret;
     files;
     constructor(state, wrappingSecret) {
+        this.state = state;
         this.wrappingSecret = wrappingSecret;
         this.files = new PermissionEnvelopeState(state.root);
     }
@@ -71,6 +73,21 @@ export class EncryptedSmartAccountPermissionStore {
     }
     async remove(profileHash) {
         await this.files.remove(profileHash);
+    }
+    async compareAndSet(expected, replacement) {
+        if (replacement !== null && replacement.profile_hash !== expected.profile_hash) {
+            throw new ApnError("APN_INTERNAL", "Smart Account permission replacement identity is invalid.");
+        }
+        return await this.state.withLocks([`smart-account-permission:${expected.profile_hash}`], async () => {
+            const current = await this.load(expected.profile_hash);
+            if (current === null || canonicalJson(current) !== canonicalJson(expected))
+                return false;
+            if (replacement === null)
+                await this.remove(expected.profile_hash);
+            else
+                await this.save(replacement);
+            return true;
+        });
     }
 }
 class PermissionEnvelopeState extends SecureStateStore {
