@@ -1,0 +1,248 @@
+name: Publish immutable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag protected by the repository ruleset
+        required: true
+        type: string
+      commit:
+        description: Full commit SHA the protected tag must resolve to
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - name: Validate immutable dispatch input syntax
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+      - name: Check out the declared source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Use the pinned release Node toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15.0"
+          cache: npm
+
+      - name: Verify the declared release platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
+
+      - name: Validate the owner-supplied immutable identities
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_COMMIT: ${{ inputs.commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$DEFAULT_BRANCH" = "main"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "v$(node -p "require('./package.json').version")" = "$RELEASE_TAG"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$EXPECTED_COMMIT"
+          git merge-base --is-ancestor "$EXPECTED_COMMIT" "origin/$DEFAULT_BRANCH"
+
+      - name: Install the exact dependency graph without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Build and verify reproducible release bytes
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          npm run build:ts
+          version=$(node -p "require('./package.json').version")
+          artifact_name="nuanu-ai-apn-${version}.tgz"
+          sbom_name="nuanu-ai-apn-${version}.spdx.json"
+          manifest_name="nuanu-ai-apn-${version}.release.json"
+          mkdir -p "$RUNNER_TEMP/pack-one" "$RUNNER_TEMP/pack-two" "$RUNNER_TEMP/apn-out"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack-one" --json > "$RUNNER_TEMP/pack-one.json"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack-two" --json > "$RUNNER_TEMP/pack-two.json"
+          test -f "$RUNNER_TEMP/pack-one/$artifact_name"
+          test -f "$RUNNER_TEMP/pack-two/$artifact_name"
+          cmp "$RUNNER_TEMP/pack-one/$artifact_name" "$RUNNER_TEMP/pack-two/$artifact_name"
+          cp "$RUNNER_TEMP/pack-one/$artifact_name" "$RUNNER_TEMP/apn-out/$artifact_name"
+          source_date_epoch=$(git show -s --format=%ct "$EXPECTED_COMMIT")
+          node scripts/generate-sbom.mjs \
+            --output "$RUNNER_TEMP/apn-out/$sbom_name" \
+            --source-date-epoch "$source_date_epoch"
+          node scripts/verify-supply-chain.mjs create \
+            --artifact "$RUNNER_TEMP/apn-out/$artifact_name" \
+            --sbom "$RUNNER_TEMP/apn-out/$sbom_name" \
+            --output "$RUNNER_TEMP/apn-out/$manifest_name" \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit "$EXPECTED_COMMIT"
+          node scripts/verify-supply-chain.mjs verify \
+            --artifact "$RUNNER_TEMP/apn-out/$artifact_name" \
+            --sbom "$RUNNER_TEMP/apn-out/$sbom_name" \
+            --manifest "$RUNNER_TEMP/apn-out/$manifest_name"
+
+      - name: Upload exact release candidate bytes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apn-release-${{ inputs.commit }}
+          path: ${{ runner.temp }}/apn-out/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Validate immutable dispatch input syntax
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+      - name: Check out the declared source commit and protected tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download exact release bytes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: apn-release-${{ inputs.commit }}
+          path: apn-out
+
+      - name: Recheck source, tag and downloaded bytes without target code execution
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_COMMIT: ${{ inputs.commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$DEFAULT_BRANCH" = "main"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$EXPECTED_COMMIT"
+          git merge-base --is-ancestor "$EXPECTED_COMMIT" "origin/$DEFAULT_BRANCH"
+          version="${RELEASE_TAG#v}"
+          package_name=$(jq -er '.name | select(type == "string" and length > 0)' package.json)
+          test "$(jq -er '.version' package.json)" = "$version"
+          artifact="apn-out/nuanu-ai-apn-${version}.tgz"
+          sbom="apn-out/nuanu-ai-apn-${version}.spdx.json"
+          manifest="apn-out/nuanu-ai-apn-${version}.release.json"
+          test -f "$artifact"
+          test -f "$sbom"
+          test -f "$manifest"
+          test "$(find apn-out -maxdepth 1 -type f | wc -l | tr -d ' ')" = "3"
+          jq -e \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg commit "$EXPECTED_COMMIT" \
+            --arg package_name "$package_name" \
+            --arg version "$version" \
+            --arg artifact_name "${artifact##*/}" \
+            --arg sbom_name "${sbom##*/}" \
+            'keys == ["artifact", "commit", "package", "repository", "sbom", "schemaVersion"] and
+             .schemaVersion == "apn.release-manifest.v1" and
+             .repository == $repository and .commit == $commit and
+             (.package | keys == ["name", "version"]) and
+             .package.name == $package_name and .package.version == $version and
+             (.artifact | keys == ["bytes", "name", "sha256"]) and
+             .artifact.name == $artifact_name and
+             (.artifact.bytes | type == "number" and . > 0 and floor == .) and
+             (.artifact.sha256 | test("^[0-9a-f]{64}$")) and
+             (.sbom | keys == ["bytes", "format", "name", "sha256"]) and
+             .sbom.name == $sbom_name and .sbom.format == "SPDX-2.3" and
+             (.sbom.bytes | type == "number" and . > 0 and floor == .) and
+             (.sbom.sha256 | test("^[0-9a-f]{64}$"))' \
+            "$manifest" >/dev/null
+          test "$(sha256sum "$artifact" | cut -d ' ' -f 1)" = "$(jq -r '.artifact.sha256' "$manifest")"
+          test "$(stat -c '%s' "$artifact")" = "$(jq -r '.artifact.bytes' "$manifest")"
+          test "$(sha256sum "$sbom" | cut -d ' ' -f 1)" = "$(jq -r '.sbom.sha256' "$manifest")"
+          test "$(stat -c '%s' "$sbom")" = "$(jq -r '.sbom.bytes' "$manifest")"
+          jq -e --arg name "$package_name" --arg version "$version" \
+            '.spdxVersion == "SPDX-2.3" and .name == ($name + "@" + $version)' \
+            "$sbom" >/dev/null
+          tar -xOf "$artifact" package/package.json | \
+            jq -e --arg name "$package_name" --arg version "$version" \
+              '.name == $name and .version == $version' >/dev/null
+          test "v${version}" = "$RELEASE_TAG"
+
+      - name: Attest artifact, SBOM and release manifest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: apn-out/*
+
+      - name: Verify artifact attestation before publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          gh attestation verify "apn-out/nuanu-ai-apn-${version}.tgz" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners
+
+      - name: Publish once through an immutable release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          artifact="apn-out/nuanu-ai-apn-${version}.tgz"
+          sbom="apn-out/nuanu-ai-apn-${version}.spdx.json"
+          manifest="apn-out/nuanu-ai-apn-${version}.release.json"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "release already exists; refusing to replace it" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --draft \
+            --verify-tag \
+            --title "$RELEASE_TAG" \
+            --generate-notes \
+            "$artifact" "$sbom" "$manifest"
+          gh release edit "$RELEASE_TAG" --draft=false

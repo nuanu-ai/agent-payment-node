@@ -1,0 +1,139 @@
+name: Supply chain
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the pinned release Node toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15.0"
+          cache: npm
+
+      - name: Verify the declared release platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
+
+      - name: Install the exact dependency graph without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Build and verify reproducible supply-chain artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:ts
+          version=$(node -p "require('./package.json').version")
+          artifact_name="nuanu-ai-apn-${version}.tgz"
+          sbom_name="nuanu-ai-apn-${version}.spdx.json"
+          manifest_name="nuanu-ai-apn-${version}.release.json"
+          mkdir -p "$RUNNER_TEMP/pack-one" "$RUNNER_TEMP/pack-two" "$RUNNER_TEMP/apn-out"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack-one" --json > "$RUNNER_TEMP/pack-one.json"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack-two" --json > "$RUNNER_TEMP/pack-two.json"
+          test -f "$RUNNER_TEMP/pack-one/$artifact_name"
+          test -f "$RUNNER_TEMP/pack-two/$artifact_name"
+          cmp "$RUNNER_TEMP/pack-one/$artifact_name" "$RUNNER_TEMP/pack-two/$artifact_name"
+          cp "$RUNNER_TEMP/pack-one/$artifact_name" "$RUNNER_TEMP/apn-out/$artifact_name"
+          source_date_epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+          node scripts/generate-sbom.mjs \
+            --output "$RUNNER_TEMP/apn-out/$sbom_name" \
+            --source-date-epoch "$source_date_epoch"
+          node scripts/verify-supply-chain.mjs create \
+            --artifact "$RUNNER_TEMP/apn-out/$artifact_name" \
+            --sbom "$RUNNER_TEMP/apn-out/$sbom_name" \
+            --output "$RUNNER_TEMP/apn-out/$manifest_name" \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit "$GITHUB_SHA"
+          node scripts/verify-supply-chain.mjs verify \
+            --artifact "$RUNNER_TEMP/apn-out/$artifact_name" \
+            --sbom "$RUNNER_TEMP/apn-out/$sbom_name" \
+            --manifest "$RUNNER_TEMP/apn-out/$manifest_name"
+
+      - name: Upload exact candidate bytes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apn-supply-chain-${{ github.sha }}
+          path: ${{ runner.temp }}/apn-out/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  attest:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out verifier source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the pinned release Node toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15.0"
+
+      - name: Download exact candidate bytes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: apn-supply-chain-${{ github.sha }}
+          path: apn-out
+
+      - name: Recheck the downloaded manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          node scripts/verify-supply-chain.mjs verify \
+            --artifact "apn-out/nuanu-ai-apn-${version}.tgz" \
+            --sbom "apn-out/nuanu-ai-apn-${version}.spdx.json" \
+            --manifest "apn-out/nuanu-ai-apn-${version}.release.json"
+
+      - name: Attest artifact, SBOM and manifest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: apn-out/*
+
+      - name: Verify the published artifact attestation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          gh attestation verify "apn-out/nuanu-ai-apn-${version}.tgz" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/supply-chain.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners
