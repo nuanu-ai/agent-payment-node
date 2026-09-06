@@ -1,6 +1,7 @@
 import { isPlainRecord } from "./canonical.js";
 import { parseCatalogArgv, parseCatalogInput, } from "./command-catalog.js";
 import { ApnError } from "./errors.js";
+import { evmChain, evmDecimals, evmToken } from "./evm-asset.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
 export function bindArgv(argv) {
     return bindParsedCatalog(parseCatalogArgv(argv));
@@ -89,6 +90,10 @@ function bindParsedCatalog(parsed) {
             request: { command: "wallet.balance", profile: value(options, "--profile") },
             rpcUrl: value(options, "--rpc-url"),
         };
+        case "wallet balance-asset": return {
+            request: { command: "wallet.balance", profile: value(options, "--profile"), asset: bindAsset(options) },
+            rpcUrl: value(options, "--rpc-url"),
+        };
         case "wallet policy show": return { request: { command: "wallet.policy.show", profile: value(options, "--profile") } };
         case "wallet policy set": return {
             request: {
@@ -125,6 +130,14 @@ function bindParsedCatalog(parsed) {
             },
             rpcUrl: value(options, "--rpc-url"),
         };
+        case "pay transfer prepare-asset": return {
+            request: {
+                command: "transfer.prepare", profile: value(options, "--profile"), asset: bindAsset(options),
+                recipient: value(options, "--to"), amount: value(options, "--amount"), maxFeeWei: value(options, "--max-fee-wei"),
+                idempotencyKey: value(options, "--idempotency-key"),
+            },
+            rpcUrl: value(options, "--rpc-url"),
+        };
         case "pay transfer approve": return {
             request: { command: "transfer.approve", operationId: value(options, "--operation") },
             rpcUrl: value(options, "--rpc-url"),
@@ -157,6 +170,15 @@ function bindParsedCatalog(parsed) {
         case "receipt get": return { request: { command: "receipt.get", operationId: value(options, "--operation") } };
         default: throw new ApnError("APN_INTERNAL", "The command catalog has no request binding.");
     }
+}
+function bindAsset(options) {
+    const decimals = options["--decimals"];
+    if (decimals !== undefined && !/^(?:0|[1-9][0-9]{0,2})$/u.test(decimals))
+        throw new ApnError("APN_INVALID_INPUT", "Asset decimals must be a canonical integer from 0 through 255.");
+    return {
+        chainId: evmChain(value(options, "--chain")), token: evmToken(value(options, "--asset")),
+        ...(decimals === undefined ? {} : { decimals: evmDecimals(Number(decimals)) }),
+    };
 }
 function value(options, name) {
     const selected = options[name];

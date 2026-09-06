@@ -1,6 +1,8 @@
 import type { Address } from "./model.js";
+import type { EvmDirectBinding } from "./evm-direct.js";
 export declare const TTY_APPROVAL_DEADLINE_MS = 60000;
 export interface TransferApprovalIntent {
+    readonly evm?: EvmDirectBinding;
     readonly profile: string;
     readonly operationId: string;
     readonly fingerprint: string;

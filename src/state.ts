@@ -16,7 +16,8 @@ import { canonicalJson, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { MacosAdvisoryLock, type AdvisoryLockPort } from "./macos-advisory-lock.js";
 import { validateProviderProfile, type ProviderProfileRecord } from "./provider-profile.js";
-import { assertProviderTerminalReceiptAuthority } from "./provider-direct-receipt.js";
+import { assertDirectTerminalReceiptAuthority } from "./direct-terminal-receipt.js";
+import { validateEvmOperationWrite } from "./evm-operation-write.js";
 import type {
   OperationRecord,
   ReceiptRecord,
@@ -119,12 +120,11 @@ export class StateStore extends SecureStateStore {
     const value = await this.readJson(join("operations", profileHash, `${operationId}.json`));
     if (value === null) return null;
     const operation = validateOperation(value);
-    if (operation.providerDirect !== undefined && operation.terminal) {
-      assertProviderTerminalReceiptAuthority(operation, await this.loadReceipt(profileHash, operationId));
+    if ((operation.providerDirect !== undefined || operation.evm !== undefined) && operation.terminal) {
+      assertDirectTerminalReceiptAuthority(operation, await this.loadReceipt(profileHash, operationId));
     }
     return operation;
   }
-
   async findOperation(operationId: string): Promise<OperationRecord | null> {
     const operationsRoot = this.resolveRelative("operations");
     const entries = await readdir(operationsRoot, { withFileTypes: true });
@@ -143,9 +143,9 @@ export class StateStore extends SecureStateStore {
   }
   async writeOperation(operation: OperationRecord): Promise<void> {
     await this.ensureDirectory(join("operations", operation.profileHash));
+    validateEvmOperationWrite(operation, await this.readJson(join("operations", operation.profileHash, `${operation.operationId}.json`)));
     await this.writeJson(join("operations", operation.profileHash, `${operation.operationId}.json`), operation);
   }
-
   async listOperations(profileHash: string): Promise<readonly OperationRecord[]> {
     const directory = join("operations", profileHash);
     await this.ensureDirectory(directory);

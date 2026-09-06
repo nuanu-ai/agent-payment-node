@@ -6,9 +6,9 @@ import { cliHandoffDetails, createCliHandoff } from "./cli-handoff.js";
 import { PRODUCT_VERSION } from "./constants.js";
 import { RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
 import { MCP_TOOLS } from "./mcp-projection.js";
-import { RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
+import { genericTransferHandoff, RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
 import { failureEnvelope } from "./output.js";
-import { executeBoundCommand } from "./runtime-factory.js";
+import { createApnCore, executeBoundCommand } from "./runtime-factory.js";
 import { ApnError } from "./errors.js";
 export function createMcpServer(options = {}) {
     const server = new Server({ name: "agent-payment-node", version: PRODUCT_VERSION }, { capabilities: { tools: {} } });
@@ -58,10 +58,15 @@ async function callTool(tool, input, options) {
             if (bound.rpcUrl === undefined)
                 throw new Error("The bound transfer approval is missing its required RPC URL.");
             const { native: _injectedNative, approval: _injectedApproval, ...sharedOptions } = options;
-            return await executeBoundCommand(bound, {
-                ...sharedOptions,
-                approval: new RejectingMcpTransferApproval(bound.request, bound.rpcUrl),
-            });
+            const approval = new RejectingMcpTransferApproval(bound.request, bound.rpcUrl);
+            const core = createApnCore(bound, { ...sharedOptions, approval });
+            try {
+                await genericTransferHandoff(core, bound.request, approval);
+            }
+            catch (error) {
+                return failureEnvelope(bound.request.command, randomUUID(), error);
+            }
+            return await core.execute(bound.request);
         }
         return await executeBoundCommand(bound, {
             ...options,

@@ -1,7 +1,11 @@
-import { hashObject } from "./canonical.js";
+import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { prepareEvmTransfer } from "./evm-transfer-prepare.js";
+import { requireEvmRpc } from "./evm-direct.js";
+import { checkEvmTransferFunding, evmCustodyPayload } from "./evm-transfer-approval.js";
+import { checkTransferApproval } from "./transfer-approval-check.js";
 import { parseAtomic, parseDecimal } from "./money.js";
 import type { Economics, Hex, OperationRecord, ReceiptRecord } from "./model.js";
 import { OperationService } from "./operation-service.js";
@@ -38,6 +42,11 @@ export class TransferService {
   }
 
   async prepare(request: Extract<CommandRequest, { command: "transfer.prepare" }>): Promise<unknown> {
+    if (request.asset !== undefined) {
+      if (await this.providerDirect.canHandle(request.profile)) throw new ApnError("APN_PROVIDER_UNAVAILABLE", "Generic EVM direct transfer is available only for the local wallet; external profiles retain their explicit Base-USDC capabilities.");
+      return await prepareEvmTransfer(this.context, this.operations, request, (operation) => this.persist(operation));
+    }
+    if (request.maxFeeWei !== undefined) throw new ApnError("APN_INVALID_INPUT", "Generic fee budget requires explicit chain and asset selection.");
     if (await this.providerDirect.canHandle(request.profile)) return await this.providerDirect.prepare(request);
     const profile = canonicalProfile(request.profile);
     const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
@@ -154,31 +163,9 @@ export class TransferService {
         await this.failBeforeEffect(operation, "approval_window_expired");
       }
       const rpc = this.context.requireRpc();
-      await rpc.assertBaseChain();
-      const [balances, nonceAtomic, currentFees] = await Promise.all([
-        rpc.getBalances(operation.walletAddress),
-        rpc.getPendingNonce(operation.walletAddress),
-        rpc.estimateDirectTransfer({ from: operation.walletAddress, to: BASE_USDC, data: operation.transactionData }),
-      ]);
-      validateBalance(balances, operation.walletAddress);
-      if (parseAtomic(nonceAtomic).toString() !== operation.economics.nonceAtomic) {
-        await this.failBeforeEffect(operation, "pending_nonce_changed");
-      }
-      try {
-        requireFunding(balances, operation.amountAtomic, operation.economics.maximumGasCostAtomic);
-      } catch (error) {
-        if (error instanceof ApnError && ["APN_INSUFFICIENT_USDC", "APN_INSUFFICIENT_GAS"].includes(error.code)) {
-          await this.failBeforeEffect(operation, "funding_changed");
-        }
-        throw error;
-      }
-      const fresh = validateEconomics(nonceAtomic, currentFees);
-      if (
-        fresh.gasLimitAtomic !== operation.economics.gasLimitAtomic ||
-        fresh.maxFeePerGasAtomic !== operation.economics.maxFeePerGasAtomic ||
-        fresh.maxPriorityFeePerGasAtomic !== operation.economics.maxPriorityFeePerGasAtomic
-      ) await this.failBeforeEffect(operation, "fee_economics_changed");
-      const effect = parseEffect(await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", {
+      await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason));
+      if (operation.evm !== undefined) operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect");
+      const effect = parseEffect(await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", operation.evm === undefined ? {
         profile,
         operationId: operation.operationId,
         fingerprint: operation.fingerprint,
@@ -201,7 +188,7 @@ export class TransferService {
           amountDecimal: operation.amountDecimal,
           expiresAt: operation.expiresAt,
         },
-      })));
+      } : evmCustodyPayload(operation))));
       await verifyEffect(effect, operation);
       operation = await this.transition(
         operation,
@@ -229,6 +216,21 @@ export class TransferService {
     return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
       let operation = requiredLocal(await this.requiredOperation(operationId));
       if (operation.terminal) return publicOperation(operation);
+      if (operation.evm !== undefined) {
+        await requireEvmRpc(this.context.requireRpc()).assertChain(operation.chainId);
+        if (operation.state === "started") {
+          const stored = await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
+            profile, operationId, fingerprint: operation.fingerprint, expectedPayloadHash: hashObject(evmCustodyPayload(operation)),
+          }));
+          if (isPlainRecord(stored) && exactKeys(stored, ["found"]) && stored.found === false) await this.failBeforeEffect(operation, "no_durable_signature_created");
+          const recovered = parseEffect(stored);
+          await verifyEffect(recovered, operation);
+          operation = await this.transition(operation, "signed_not_submitted", false, "same_signature_recovered", "native_transaction_hash", {
+            transactionHash: recovered.transactionHash, rawTransactionHash: recovered.rawTransactionHash,
+          });
+        }
+        if (operation.state !== "awaiting_approval") await verifyEffect(await this.effectFor(operation), operation);
+      }
       if (operation.state === "awaiting_approval") {
         throw new ApnError("APN_OPERATION_BLOCKED", "Operation still requires transfer approve.");
       }
@@ -239,13 +241,7 @@ export class TransferService {
       if (operation.terminal) return publicOperation(operation);
       const superseding = await this.proveSuperseding(operation, this.context.requireRpc());
       if (superseding !== null) return publicOperation(superseding);
-      const effect = parseEffect(await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
-        profile,
-        operationId: operation.operationId,
-        fingerprint: operation.fingerprint,
-        expectedTransactionHash: operation.transactionHash,
-        expectedRawTransactionHash: operation.rawTransactionHash,
-      })));
+      const effect = await this.effectFor(operation);
       await verifyEffect(effect, operation);
       if (effect.transactionHash !== operation.transactionHash || effect.rawTransactionHash !== operation.rawTransactionHash) {
         throw new ApnError("APN_NATIVE_PROTOCOL", "Recovered effect material differs from the durable binding.");
@@ -286,6 +282,7 @@ export class TransferService {
   private async submitAndInspect(operationInput: LocalOperationRecord, rawTransaction: Hex): Promise<LocalOperationRecord> {
     let operation = operationInput;
     const rpc = this.context.requireRpc();
+    if (operation.evm !== undefined) await checkEvmTransferFunding(rpc, operation, false);
     try {
       const returnedHash = await rpc.submitRawTransaction(rawTransaction);
       if (returnedHash.toLowerCase() !== operation.transactionHash?.toLowerCase()) {
@@ -308,7 +305,8 @@ export class TransferService {
     if (operation.transactionHash === undefined) return operation;
     let receipt: RpcReceipt | null;
     try {
-      receipt = await rpc.getReceipt(operation.transactionHash);
+      receipt = operation.evm === undefined ? await rpc.getReceipt(operation.transactionHash) :
+        await requireEvmRpc(rpc).receipt(operation.chainId, operation.transactionHash);
     } catch {
       return operation;
     }
@@ -316,25 +314,33 @@ export class TransferService {
     if (receipt.transactionHash.toLowerCase() !== operation.transactionHash.toLowerCase()) {
       return await this.transition(operation, "unknown_finality", false, "receipt_hash_mismatch", "invalid_receipt");
     }
+    if (operation.evm !== undefined) {
+      try { receipt = { ...receipt, evmEvidence: await requireEvmRpc(rpc).evidence(operation, receipt) }; }
+      catch { return await this.transition(operation, "unknown_finality", false, "evm_effect_evidence_unavailable", "inclusion_effect_unproven"); }
+      if (receipt.evmEvidence?.transactionVerified !== true) return await this.transition(operation, "unknown_finality", false, "evm_transaction_mismatch", "invalid_receipt");
+    }
     if (receipt.status === "reverted") {
       return await this.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", {}, receipt);
     }
-    if (!hasExactTransfer(receipt, operation)) {
+    const native = operation.evm?.asset.kind === "native";
+    if (!native && (!hasExactTransfer(receipt, operation) || (operation.evm !== undefined && receipt.evmEvidence?.tokenBalanceDeltasVerified !== true))) {
       return await this.transition(operation, "unknown_finality", false, "successful_receipt_missing_exact_transfer", "invalid_receipt", {}, receipt);
     }
     return await this.transition(
-      operation, "completed", true, "confirmed_exact_usdc_transfer", "confirmed_receipt_and_exact_transfer_log", {}, receipt,
+      operation, "completed", true, operation.evm === undefined ? "confirmed_exact_usdc_transfer" : native ? "confirmed_exact_native_transfer" : "confirmed_exact_erc20_transfer",
+      operation.evm === undefined ? "confirmed_receipt_and_exact_transfer_log" : native ? "included_native_transaction_and_receipt" : "included_transfer_event_and_block_balance_deltas", {}, receipt,
     );
   }
 
   private async proveSuperseding(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord | null> {
-    const latest = parseAtomic(await rpc.getLatestConfirmedNonce(operation.walletAddress));
+    const latest = parseAtomic(operation.evm === undefined ? await rpc.getLatestConfirmedNonce(operation.walletAddress) :
+      await requireEvmRpc(rpc).nonce(operation.chainId, operation.walletAddress, "latest"));
     if (latest <= parseAtomic(operation.economics.nonceAtomic)) return null;
-    const hash = await rpc.getConfirmedTransactionAtNonce(
+    const hash = operation.evm === undefined ? await rpc.getConfirmedTransactionAtNonce(
       operation.walletAddress,
       operation.economics.nonceAtomic,
       operation.preparedBlockNumberAtomic,
-    );
+    ) : await requireEvmRpc(rpc).confirmedAtNonce(operation.chainId, operation.walletAddress, operation.economics.nonceAtomic, operation.preparedBlockNumberAtomic);
     if (hash !== null && hash.toLowerCase() !== operation.transactionHash?.toLowerCase()) {
       return await this.transition(operation, "failed_proven_superseded", true, "confirmed_different_transaction_at_nonce", "confirmed_superseding_nonce");
     }
@@ -351,6 +357,13 @@ export class TransferService {
     const operation = await this.context.state.findOperation(operationId);
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
     return operation;
+  }
+
+  private async effectFor(operation: OperationRecord) {
+    return parseEffect(await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
+      profile: operation.profile, operationId: operation.operationId, fingerprint: operation.fingerprint,
+      expectedTransactionHash: operation.transactionHash, expectedRawTransactionHash: operation.rawTransactionHash,
+    })));
   }
 
   private async failBeforeEffect(operation: LocalOperationRecord, reason: string): Promise<never> {
@@ -376,7 +389,7 @@ export class TransferService {
   }
 
   private async persist(operation: OperationRecord, rpcReceipt?: RpcReceipt): Promise<void> {
-    await this.context.state.writeOperation(operation);
+    if (operation.evm === undefined) await this.context.state.writeOperation(operation);
     const receiptBase: Omit<ReceiptRecord, "integrityHash"> = {
       schemaVersion: STATE_VERSION,
       operationId: operation.operationId,
@@ -384,15 +397,18 @@ export class TransferService {
       terminal: operation.terminal,
       reason: operation.reason,
       proofClass: operation.proofClass,
+      ...(operation.evm === undefined ? {} : { evm: operation.evm, amountAtomic: operation.amountAtomic }),
       ...(operation.transactionHash === undefined ? {} : { transactionHash: operation.transactionHash }),
       ...(rpcReceipt === undefined ? {} : {
         blockNumberAtomic: rpcReceipt.blockNumberAtomic,
-        exactTransferLog: hasExactTransfer(rpcReceipt, operation),
+        ...(operation.evm?.asset.kind === "native" ? {} : { exactTransferLog: hasExactTransfer(rpcReceipt, operation) }),
+        ...(rpcReceipt.evmEvidence === undefined ? {} : { evmEvidence: rpcReceipt.evmEvidence }),
       }),
-      createdAt: this.context.clock.now().toISOString(),
+      createdAt: operation.evm === undefined ? this.context.clock.now().toISOString() : operation.transitions.at(-1)!.at,
       operationIntegrityHash: operation.integrityHash,
     };
     await this.context.state.writeReceipt(operation.profileHash, sealReceipt(receiptBase));
+    if (operation.evm !== undefined) await this.context.state.writeOperation(operation);
   }
 }
 

@@ -9,6 +9,7 @@ import { inspectX402 } from "./x402-http.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
+import { evmWalletBalance } from "./evm-wallet-balance.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
 import { ProviderPermissionService } from "./provider-permission-service.js";
@@ -63,7 +64,8 @@ export class ApnCore {
                     ? dataOutcome(await this.wallet.status(request.profile), "encrypted_apn_home_status")
                     : dataOutcome(providerStatus, "provider_profile_binding");
             }
-            case "wallet.balance": return dataOutcome(await this.providerWallet.balance(request.profile) ?? await this.wallet.balance(request.profile), "chain_verified_public_read");
+            case "wallet.balance": return dataOutcome(request.asset === undefined ? await this.providerWallet.balance(request.profile) ?? await this.wallet.balance(request.profile) :
+                await evmWalletBalance(this.context, request.profile, request.asset), "chain_verified_public_read");
             case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile), "encrypted_profile_policy_status");
             case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
             case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest), "seller_challenge_static");
