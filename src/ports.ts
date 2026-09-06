@@ -1,3 +1,4 @@
+import type { EvmChainId } from "./evm-asset.js";
 import type { Address, Hex } from "./model.js";
 import type { EvmRpcPort, EvmTransferEvidence } from "./evm-ports.js";
 
@@ -148,6 +149,7 @@ export type X402TransferLogs =
 
 /** Read-only x402 RPC surface. It intentionally has no transaction submission method. */
 export interface X402RpcPort {
+  assertX402Chain?(chainId: EvmChainId): Promise<{ readonly chainId: EvmChainId; readonly rpcOrigin: string }>;
   withTotalTimeout?(milliseconds: number): X402RpcPort;
   assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }>;
   getX402Head(tag: "safe" | "finalized"): Promise<X402RpcHead>;
@@ -172,6 +174,7 @@ export interface X402RpcPort {
 }
 
 export interface RpcPort {
+  forX402Network?(chainId: EvmChainId): RpcPort & X402RpcPort;
   readonly evm?: EvmRpcPort;
   assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }>;
   getBalances(address: Address): Promise<BalanceSnapshot>;

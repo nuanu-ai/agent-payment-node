@@ -1,4 +1,4 @@
-import { BASE_USDC } from "./constants.js";
+import { networkPolicyBinding, x402Network } from "./x402-network.js";
 import { ApnError } from "./errors.js";
 import { evmUint, publicEvmAsset, type EvmAssetSelection } from "./evm-asset.js";
 import { requireEvmRpc } from "./evm-direct.js";
@@ -18,10 +18,9 @@ export async function evmWalletBalance(context: RuntimeContext, profileInput: st
     if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
     const snapshot = await requireEvmRpc(context.requireRpc()).balance(wallet.address, selection);
     if (snapshot.address !== wallet.address || snapshot.asset.chainId !== selection.chainId) throw new ApnError("APN_ASSET_MISMATCH", "Asset balance belongs to a different wallet or chain.");
-    const policy = await context.policy?.load(policyBinding(wallet));
-    const basePolicy = snapshot.asset.chainId === 8453 ? policy : undefined;
-    const limit = snapshot.asset.kind === "native" ? basePolicy?.maxBalanceEthWei :
-      snapshot.asset.address === BASE_USDC ? basePolicy?.maxBalanceUsdcAtomic : undefined;
+    const policy = await context.policy?.load(networkPolicyBinding(policyBinding(wallet), selection.chainId));
+    const limit = snapshot.asset.kind === "native" ? policy?.maxBalanceEthWei :
+      snapshot.asset.address === x402Network(selection.chainId).token ? policy?.maxBalanceUsdcAtomic : undefined;
     const atomic = evmUint(snapshot.assetAtomic), native = evmUint(snapshot.nativeAtomic);
     return {
       profile, funding_address: wallet.address, chain: `eip155:${snapshot.asset.chainId}`, asset: publicEvmAsset(snapshot.asset),

@@ -1,5 +1,5 @@
 import { canonicalJson, domainHash } from "./canonical.js";
-import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { validX402Tuple } from "./x402-network.js";
 import { validateSettlementEvidence, validateUnusedExpiryEvidence } from "./x402-evidence-validation.js";
 import { validateStateTuple } from "./x402-operation-validation.js";
 import type { X402ReceiptRecord, X402ResultRecord } from "./x402-state-model.js";
@@ -43,7 +43,7 @@ export function validateX402ReceiptUnsafe(value: unknown): X402ReceiptRecord {
     "schemaVersion", "kind", "operationId", "terminalState", "reason", "proofClass", "resource", "fingerprint", "offerHash",
     "payer", "payee", "amountAtomic", "network", "token", "operationBindingHash", "previousLinkHash", "createdAt", "integrityHash",
   ], ["transferMethod", "paymentIdentifier", "settlementResponseHash", "settlementEvidence", "unusedExpiryEvidence", "result"]);
-  if (receipt.schemaVersion !== "apn.x402.receipt.v1" || receipt.kind !== "x402_fetch" || receipt.network !== CHAIN_CAIP2 || receipt.token !== BASE_USDC.toLowerCase()) stateCorrupt("x402 receipt discriminant is invalid.");
+  if (receipt.schemaVersion !== "apn.x402.receipt.v1" || receipt.kind !== "x402_fetch" || !validX402Tuple(typeof receipt.network === "string" ? receipt.network.slice(7) : null, receipt.network, receipt.token)) stateCorrupt("x402 receipt discriminant is invalid.");
   hash(receipt.operationId);
   const terminalState = validateStateTuple(receipt.terminalState, true, receipt.reason, receipt.proofClass);
   if (!["completed", "failed_before_effect", "failed_expired_unused", "failed_settled_without_result"].includes(terminalState)) stateCorrupt("x402 receipt terminal state is invalid.");
@@ -53,10 +53,12 @@ export function validateX402ReceiptUnsafe(value: unknown): X402ReceiptRecord {
   if (receipt.transferMethod !== undefined && receipt.transferMethod !== "eip3009" && receipt.transferMethod !== "erc7710") {
     stateCorrupt("x402 receipt transfer method is invalid.");
   }
+  if (receipt.transferMethod === "erc7710" && receipt.network !== "eip155:8453") stateCorrupt("ERC-7710 receipt network is unsupported.");
   if (receipt.paymentIdentifier !== undefined && (typeof receipt.paymentIdentifier !== "string" || !/^apn_[a-f0-9]{64}$/u.test(receipt.paymentIdentifier))) stateCorrupt("x402 receipt payment identifier is invalid.");
   if (receipt.settlementResponseHash !== undefined) hash(receipt.settlementResponseHash);
   const settlementEvidence = receipt.settlementEvidence === undefined ? undefined : validateSettlementEvidence(receipt.settlementEvidence);
   const unusedExpiryEvidence = receipt.unusedExpiryEvidence === undefined ? undefined : validateUnusedExpiryEvidence(receipt.unusedExpiryEvidence);
+  if ([settlementEvidence, unusedExpiryEvidence].some((evidence) => evidence !== undefined && (evidence.network !== receipt.network || evidence.token !== receipt.token))) stateCorrupt("Receipt evidence belongs to another network or token.");
   if (
     (settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" && receipt.transferMethod !== "erc7710") ||
     (settlementEvidence?.schemaVersion === "apn.x402.settlement-evidence.v1" && receipt.transferMethod === "erc7710") ||

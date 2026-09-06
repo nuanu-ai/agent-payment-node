@@ -1,5 +1,6 @@
 import type { RuntimeContext } from "./runtime.js";
 import type { CommandRequest } from "./commands.js";
+import type { EvmChainId } from "./evm-asset.js";
 export declare class WalletService {
     private readonly context;
     constructor(context: RuntimeContext);
@@ -9,7 +10,7 @@ export declare class WalletService {
     status(profileInput: string): Promise<unknown>;
     private initializedStatus;
     balance(profileInput: string): Promise<unknown>;
-    policyShow(profileInput: string): Promise<unknown>;
+    policyShow(profileInput: string, chainId?: EvmChainId): Promise<unknown>;
     policySet(request: Extract<CommandRequest, {
         readonly command: "wallet.policy.set";
     }>): Promise<unknown>;

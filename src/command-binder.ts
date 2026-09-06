@@ -107,20 +107,26 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
       request: { command: "wallet.balance", profile: value(options, "--profile"), asset: bindAsset(options) },
       rpcUrl: value(options, "--rpc-url"),
     };
-    case "wallet policy show": return { request: { command: "wallet.policy.show", profile: value(options, "--profile") } };
+    case "wallet policy show-network":
+    case "wallet policy show": return { request: { command: "wallet.policy.show", profile: value(options, "--profile"), ...bindNetwork(options) } };
+    case "wallet policy set-network":
     case "wallet policy set": return {
       request: {
         command: "wallet.policy.set",
+        ...bindNetwork(options),
         profile: value(options, "--profile"),
         maxBalanceUsdcAtomic: value(options, "--max-balance-usdc-atomic"),
         maxX402AmountAtomic: value(options, "--max-x402-amount-atomic"),
         ...(options["--max-balance-eth-wei"] === undefined ? {} : { maxBalanceEthWei: options["--max-balance-eth-wei"] }),
       },
     };
-    case "x402 inspect": return { request: { command: "x402.inspect", url: value(options, "--url"), ...bindX402HttpRequest(options) } };
+    case "x402 inspect-network":
+    case "x402 inspect": return { request: { command: "x402.inspect", url: value(options, "--url"), ...bindX402HttpRequest(options), ...bindNetwork(options) } };
+    case "x402 fetch prepare-network":
     case "x402 fetch prepare": return {
       request: {
         command: "x402.fetch.prepare",
+        ...bindNetwork(options),
         ...bindX402HttpRequest(options),
         profile: value(options, "--profile"),
         url: value(options, "--url"),
@@ -183,6 +189,10 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     case "receipt get": return { request: { command: "receipt.get", operationId: value(options, "--operation") } };
     default: throw new ApnError("APN_INTERNAL", "The command catalog has no request binding.");
   }
+}
+
+function bindNetwork(options: Readonly<Record<string, string>>) {
+  return options["--chain"] === undefined ? {} : { chainId: evmChain(options["--chain"]) };
 }
 
 function bindAsset(options: Readonly<Record<string, string>>): EvmAssetSelection {

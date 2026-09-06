@@ -60,6 +60,10 @@ const EXPECTED_COMMANDS = [
   "operation recover-provider-request",
   "operation recover-transaction-settlement",
   "receipt get",
+  "wallet policy show-network",
+  "wallet policy set-network",
+  "x402 inspect-network",
+  "x402 fetch prepare-network",
 ];
 
 test("one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields", () => {
@@ -165,6 +169,8 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "Commands:",
     "  apn wallet policy show --profile <profile> — Read the encrypted owner-approved profile policy.",
     "  apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] — Create, lower or raise owner-approved balance and x402 limits.",
+    "  apn wallet policy show-network --chain <caip2> --profile <profile> — Read the encrypted owner-approved profile policy. Explicit local-wallet network selection; no cross-network authority inheritance.",
+    "  apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] — Create, lower or raise owner-approved balance and x402 limits. Explicit local-wallet network selection; no cross-network authority inheritance.",
     "",
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet policy <child>",

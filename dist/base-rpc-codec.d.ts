@@ -1,0 +1,10 @@
+import type { Address, Hex } from "./model.js";
+import type { X402RpcLog } from "./ports.js";
+export declare function record(value: unknown, label: string): Record<string, unknown>;
+export declare function rpcQuantity(value: unknown): bigint;
+export declare function rpcHex(value: unknown, byteLength?: number): Hex;
+export declare function rpcAddress(value: unknown): Address;
+export declare function nonzeroBytes32(value: unknown, label: string): Hex;
+export declare function x402RpcLog(value: unknown): X402RpcLog;
+export declare function rpcString(value: unknown, label: string): string;
+export declare function rpcUint256Data(value: unknown, label: string): string;

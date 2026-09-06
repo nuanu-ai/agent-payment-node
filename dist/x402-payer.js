@@ -1,8 +1,9 @@
 import { ApnError } from "./errors.js";
+import { networkPolicyBinding } from "./x402-network.js";
 import { policyBinding } from "./profile-policy.js";
 import { LOCAL_PROVIDER_ID } from "./provider-profile.js";
 import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
-export async function resolveX402Payer(context, profileHash) {
+export async function resolveX402Payer(context, profileHash, chainId = 8453) {
     let provider = context.profileRepository === undefined
         ? null
         : await context.requireProfileRepository().load(profileHash);
@@ -12,10 +13,12 @@ export async function resolveX402Payer(context, profileHash) {
             throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
         return {
             wallet: wallet.address.toLowerCase(),
-            policy: policyBinding(wallet),
+            policy: networkPolicyBinding(policyBinding(wallet), chainId),
             transferMethod: "eip3009",
         };
     }
+    if (chainId !== 8453)
+        throw new ApnError("APN_PROVIDER_UNAVAILABLE", "External x402 profile has no declared support on this network.");
     const repository = context.requireProfileRepository();
     const adapter = context.requireProviderRegistry().resolve(provider.provider_id);
     provider = await upgradeProviderProfile(adapter, provider, repository);

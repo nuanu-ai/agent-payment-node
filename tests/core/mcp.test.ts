@@ -42,6 +42,10 @@ const TOOL_NAMES = [
   "apn_operation_recover_provider_request",
   "apn_operation_recover_transaction_settlement",
   "apn_receipt_get",
+  "apn_wallet_policy_show_network",
+  "apn_wallet_policy_set_network",
+  "apn_x402_inspect_network",
+  "apn_x402_fetch_prepare_network",
 ] as const;
 const MASTER = Buffer.from("55".repeat(32), "hex");
 
@@ -55,7 +59,7 @@ class RecordingPolicyApproval implements ProfilePolicyApprovalPort {
   async approve(intent: ProfilePolicyApprovalIntent): Promise<void> { this.intents.push(intent); }
 }
 
-test("official MCP client proves production stdio descriptor, twenty-two tools, application failures and clean close", async () => {
+test("official MCP client proves production stdio descriptor, the exact tool set, application failures and clean close", async () => {
   const executable = process.env.APN_INSTALLED_BIN ?? resolve("bin/apn.js");
   const config = spawnSync(executable, ["mcp", "config"], { cwd: resolve("."), encoding: "utf8" });
   assert.equal(config.status, 0, config.stderr);
@@ -135,6 +139,10 @@ test("official MCP client proves production stdio descriptor, twenty-two tools, 
         defaults: {},
       },
       { name: "apn_receipt_get", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_wallet_policy_show_network", properties: ["chain", "profile"], required: ["chain", "profile"], defaults: {} },
+      { name: "apn_wallet_policy_set_network", properties: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei"], required: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"], defaults: {} },
+      { name: "apn_x402_inspect_network", properties: ["chain", "method", "headers_json", "body_base64", "url"], required: ["chain", "url"], defaults: {} },
+      { name: "apn_x402_fetch_prepare_network", properties: ["chain", "profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["chain", "profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
     ]);
     const listedBytes = JSON.stringify(listed);
     assert.equal(listedBytes.includes(MASTER.toString("hex")), false);

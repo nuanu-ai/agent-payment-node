@@ -1,5 +1,5 @@
 import type { Address } from "./model.js";
-import type { EvmAssetSelection } from "./evm-asset.js";
+import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import type { ErrorDetails } from "./errors.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
 export type CommandRequest = {
@@ -43,8 +43,10 @@ export type CommandRequest = {
 } | {
     readonly command: "wallet.policy.show";
     readonly profile: string;
+    readonly chainId?: EvmChainId;
 } | {
     readonly command: "wallet.policy.set";
+    readonly chainId?: EvmChainId;
     readonly profile: string;
     readonly maxBalanceUsdcAtomic: string;
     readonly maxX402AmountAtomic: string;
@@ -53,8 +55,10 @@ export type CommandRequest = {
     readonly command: "x402.inspect";
     readonly url: string;
     readonly httpRequest?: X402HttpRequestV1;
+    readonly chainId?: EvmChainId;
 } | {
     readonly command: "x402.fetch.prepare";
+    readonly chainId?: EvmChainId;
     readonly httpRequest?: X402HttpRequestV1;
     readonly profile: string;
     readonly url: string;
