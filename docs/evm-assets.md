@@ -1,8 +1,8 @@
 # Explicit EVM assets (unreleased source)
 
-The first two EVM expansion Slices enable Base (`eip155:8453`) and Ethereum
-mainnet (`eip155:1`) for the local encrypted disposable wallet. Arbitrum remains
-disabled until its sequential Slice. Public APN/Homebrew remains 0.5.8; these source changes do not
+The local EVM expansion enables exactly Base (`eip155:8453`), Ethereum mainnet
+(`eip155:1`) and Arbitrum One (`eip155:42161`) for the local encrypted disposable
+wallet. Public APN/Homebrew remains 0.5.8; these source changes do not
 alter that published artifact. No new mainnet payment is claimed here.
 
 ## One direct-transfer journey
@@ -33,6 +33,14 @@ Variable L1/operator fees may change at inclusion. Missing oracle evidence fails
 closed. Changing nonce or transaction fee fields requires a new operation before
 signing; a signed operation is never replaced or repriced automatically.
 
+Arbitrum uses its full inclusive `eth_estimateGas` result: L2 execution and L1
+posting are paid within one gas envelope. Its `feeModel: arbitrum-inclusive`
+is frozen and shown at approval and in receipts; zero *separate* L1/operator
+surcharges do not mean posting is free. APN never calls the Base oracle or
+adds posting costs twice. Priority fee is zero. Before submission, a higher
+inclusive gas or fee estimate blocks the existing signed operation rather than
+replacing it; resume only that operation when its frozen envelope suffices.
+
 Exact foreground TTY approval precedes private-key access. MCP
 `apn_wallet_balance_asset` and `apn_pay_transfer_prepare_asset` use the same
 catalog/core. MCP direct approval returns the existing CLI handoff; it cannot
@@ -54,14 +62,19 @@ authorize or strand the operation. Status and receipt do not resume effects.
   concurrent token activity, fee-on-transfer/rebasing behavior, false-return
   tokens, or unavailable historical reads can leave delivery unproven. A hash
   or successful receipt alone never proves an exact generic token payment.
-- Completion reports **inclusion only**, not irrevocable finality. Terminal
+- Base/Ethereum completion reports **inclusion only**, not irrevocable finality.
+  Arbitrum additionally requires rechecked selected-RPC `safe` inclusion for
+  success/revert and safe-chain nonce supersession; a sequencer-only receipt
+  stays nonterminal. Its receipt says `rpc_safe_inclusion`, with observed safe
+  block identity. This trusts the RPC and is not a trustless rollup proof or
+  an independent challenge-finality guarantee. Terminal
   receipt fields must prove the same immutable operation; absent/altered receipt
   fails closed. No custodial aggregate balance or automatic funding is implied.
 - Existing Base-USDC/ETH profile policy is Base-asset-specific. Other token
   balances are explicitly unassessed; generic direct permission is the exact
   operation approval, never conversion or reuse of a USDC allowance.
 
-## Ethereum x402 and policy
+## Ethereum / Arbitrum x402 and policy
 
 Use `wallet policy set-network --chain eip155:1` with explicit
 `--max-balance-usdc-atomic` and `--max-x402-amount-atomic`, then
@@ -69,11 +82,14 @@ Use `wallet policy set-network --chain eip155:1` with explicit
 existing URL, HTTP, RPC and idempotency options. Policy creation/increases require
 foreground TTY approval; MCP returns the exact CLI handoff. Decreases are
 noninteractive. `show-network` reports only the selected policy. Explicit Base
-selection aliases the legacy Base policy; Ethereum never inherits it.
+selection aliases the legacy Base policy. For Arbitrum use `--chain eip155:42161`
+with the same commands and the selected-network RPC. All three policies are
+separate; neither Ethereum nor Arbitrum inherits another network allowance.
 
 Ethereum x402 supports only exact EIP-3009 canonical Ethereum USDC at
 `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`. Name, version and domain separator
-are independently read at a pinned safe block. Arbitrary ERC-20 direct support
+are independently read at a pinned safe block. Arbitrum uses native USDC at
+`0xaf88d065e77c8cC2239327C5EDb3A432268e5831`, not bridged USDC.e. Arbitrary ERC-20 direct support
 does not imply other x402 tokens or ERC-7710/Permit2 support. External wallet
 profiles are refused before provider execution on non-Base networks.
 
@@ -85,16 +101,16 @@ safe/finalized chain evidence. Resume takes its network from the frozen operatio
 not a new caller override. GET and absent/empty/nonempty POST envelopes remain
 immutable across the same-material retry and result recovery.
 
-These are unreleased local capabilities. A production Ethereum merchant and
-facilitator have not been qualified by a paid run. Fresh native, non-USDC and
+These are unreleased local capabilities. Production Ethereum and Arbitrum
+merchant/facilitator paths have not been qualified by a paid run. Fresh native, non-USDC and
 x402 mainnet rows remain required and held; protocol documentation and synthetic
 fixtures do not establish merchant availability or live settlement.
 
 ## Capability boundary
 
-| Profile | Base / Ethereum native and arbitrary ERC-20 direct | Base-USDC direct | Standard x402 |
+| Profile | Base / Ethereum / Arbitrum native and arbitrary ERC-20 direct | Base-USDC direct | Standard x402 |
 | --- | --- | --- | --- |
-| Local encrypted wallet | Source/test capability; fresh paid proof held | Existing journey preserved | Existing Base-USDC plus unreleased Ethereum-USDC exact EIP-3009 |
+| Local encrypted wallet | Source/test capability; fresh paid proof held | Existing journey preserved | Existing Base-USDC plus unreleased Ethereum/Arbitrum-USDC exact EIP-3009 |
 | Coinbase Agentic Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route; pinned AWAL rejects present bodies, including empty |
 | MetaMask Agent Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route |
 | MetaMask Smart Account | Explicitly unsupported | Existing bounded consent route | Existing advertised ERC-7710 route |

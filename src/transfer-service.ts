@@ -2,6 +2,7 @@ import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
 import { prepareEvmTransfer } from "./evm-transfer-prepare.js";
 import { requireEvmRpc } from "./evm-direct.js";
 import { checkEvmTransferFunding, evmCustodyPayload } from "./evm-transfer-approval.js";
@@ -315,7 +316,12 @@ export class TransferService {
       return await this.transition(operation, "unknown_finality", false, "receipt_hash_mismatch", "invalid_receipt");
     }
     if (operation.evm !== undefined) {
-      try { receipt = { ...receipt, evmEvidence: await requireEvmRpc(rpc).evidence(operation, receipt) }; }
+      try {
+        receipt = { ...receipt, evmEvidence: await requireEvmRpc(rpc).evidence(operation, receipt) };
+        if (operation.chainId === 42161 && !hasSafeEvmInclusion(receipt.evmEvidence, receipt.blockNumberAtomic)) {
+          throw new ApnError("APN_RPC_PROTOCOL", "Arbitrum receipt lacks selected RPC safe inclusion evidence.");
+        }
+      }
       catch { return await this.transition(operation, "unknown_finality", false, "evm_effect_evidence_unavailable", "inclusion_effect_unproven"); }
       if (receipt.evmEvidence?.transactionVerified !== true) return await this.transition(operation, "unknown_finality", false, "evm_transaction_mismatch", "invalid_receipt");
     }

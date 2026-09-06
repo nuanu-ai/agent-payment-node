@@ -9,10 +9,10 @@ export interface X402PolicyNetwork {
     readonly token: Address;
 }
 export declare function x402Network(value?: unknown): {
-    chainId: 1 | 8453;
+    chainId: 1 | 8453 | 42161;
     chainText: X402ChainText;
     network: X402Network;
-    token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" | "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+    token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" | "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" | "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 };
 export declare function validX402Tuple(chain: unknown, network: unknown, token: unknown): boolean;
 export declare function validPolicyNetwork(value: unknown): boolean;

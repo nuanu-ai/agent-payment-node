@@ -43,7 +43,10 @@ export class TtyTransferApproval {
                 `Amount: ${intent.amountDecimal} ${intent.evm === undefined ? "USDC" : intent.evm.asset.kind === "native" ? "ETH" : "token"} (${intent.amountAtomic} atomic)`,
                 ...(intent.evm === undefined ? [] : [
                     `Decimals: ${intent.evm.asset.decimals} (${intent.evm.asset.decimalsSource})`,
-                    `Maximum execution fee: ${intent.evm.feeQuote.maximumExecutionFeeWei} wei`,
+                    ...(intent.evm.feeQuote.feeModel === "arbitrum-inclusive" ? [
+                        "Fee model: Arbitrum inclusive gas (L2 execution plus L1 posting; no separate surcharge)",
+                        `Maximum inclusive transaction fee: ${intent.evm.feeQuote.maximumExecutionFeeWei} wei`,
+                    ] : [`Maximum execution fee: ${intent.evm.feeQuote.maximumExecutionFeeWei} wei`]),
                     `L1 data fee upper estimate: ${intent.evm.feeQuote.l1DataFeeUpperWei} wei`,
                     `Operator fee estimate: ${intent.evm.feeQuote.operatorFeeUpperWei} wei`,
                     `Pre-submission total fee quote budget: ${intent.evm.maxFeeWei} wei`,
