@@ -8,8 +8,8 @@ import type {
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 
-const scalarTypes = new Set<ScalarType>(["string", "profile", "provider_id", "provider_auth_method", "positive_integer", "https_url", "address", "decimal_usdc", "atomic_usdc", "wei", "operation_id", "transaction_hash", "provider_request_id", "idempotency_key", "integer_seconds"]);
-const effectClasses = new Set<EffectClass>(["none", "local_read", "network_read", "local_write", "payment_prepare", "payment_submit", "recovery"]);
+const scalarTypes = new Set<ScalarType>(["string", "base64", "profile", "provider_id", "provider_auth_method", "positive_integer", "https_url", "address", "decimal_usdc", "atomic_usdc", "wei", "operation_id", "transaction_hash", "provider_request_id", "idempotency_key", "integer_seconds"]);
+const effectClasses = new Set<EffectClass>(["none", "local_read", "network_read", "network_request", "local_write", "payment_prepare", "payment_submit", "recovery"]);
 const approvalClasses = new Set<ApprovalClass>(["none", "foreground_tty", "prior_profile_policy", "prior_operation_authorization"]);
 const sensitivities = new Set<CommandOption["sensitivity"]>(["public", "operator_input", "sensitive_input"]);
 const protectedExampleContent = /private[-_ ]?key|mnemonic|wrapping[-_ ]?secret|raw[-_ ]?signed[-_ ]?transaction|payment[-_ ]?header|reusable[-_ ]?authorization/iu;

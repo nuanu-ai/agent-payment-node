@@ -1,5 +1,6 @@
 import type { Address } from "./model.js";
 import type { ErrorDetails } from "./errors.js";
+import type { X402HttpRequestV1 } from "./x402-http-request.js";
 export type CommandRequest = {
     readonly command: "version";
 } | {
@@ -49,8 +50,10 @@ export type CommandRequest = {
 } | {
     readonly command: "x402.inspect";
     readonly url: string;
+    readonly httpRequest?: X402HttpRequestV1;
 } | {
     readonly command: "x402.fetch.prepare";
+    readonly httpRequest?: X402HttpRequestV1;
     readonly profile: string;
     readonly url: string;
     readonly maxAmountAtomic?: string;

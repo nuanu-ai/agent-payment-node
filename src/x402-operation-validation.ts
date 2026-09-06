@@ -3,6 +3,7 @@ import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { parseAtomic } from "./money.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js";
 import { frozenErc7710FacilitatorsMatch } from "./x402-erc7710-codec.js";
+import { isX402ResultStatus, validateX402Resource } from "./x402-http-request.js";
 import {
   X402_STATE_VERSION,
   TRANSITION_VERSION,
@@ -64,12 +65,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   if (typeof operation.profile !== "string" || operation.profile.length === 0) stateCorrupt("x402 profile is invalid.");
   if (operation.profileHash !== sha256(`profile\0${operation.profile}`)) stateCorrupt("x402 profile hash is invalid.");
 
-  const resource = exactRecord(operation.resource, ["canonicalUrl", "origin", "path", "urlHash"]);
-  if (typeof resource.canonicalUrl !== "string" || typeof resource.origin !== "string" || typeof resource.path !== "string") stateCorrupt("x402 resource is invalid.");
-  hash(resource.urlHash);
-  const endpoint = new URL(resource.canonicalUrl);
-  if (endpoint.toString() !== resource.canonicalUrl || endpoint.protocol !== "https:" || endpoint.username !== "" || endpoint.password !== "" || endpoint.hash !== "" || Buffer.byteLength(resource.canonicalUrl, "utf8") > 2048) stateCorrupt("x402 canonical URL is invalid.");
-  if (resource.origin !== endpoint.origin || resource.path !== endpoint.pathname || resource.urlHash !== sha256(resource.canonicalUrl)) stateCorrupt("x402 public resource binding is invalid.");
+  const resource = validateX402Resource(operation.resource);
 
   const sellerWire = exactRecord(operation.sellerWire, ["resourceCanonicalJson", "resourceHash"]);
   const resourceValue = canonicalText(sellerWire.resourceCanonicalJson);
@@ -254,7 +250,8 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   }
 
   const typed = operation as unknown as X402OperationRecord;
-  if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic })) stateCorrupt("x402 request hash is invalid.");
+  if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic,
+    ...(resource.httpRequest === undefined ? {} : { httpRequest: resource.httpRequest }) })) stateCorrupt("x402 request hash is invalid.");
   if (typed.fingerprint !== x402Fingerprint(typed)) stateCorrupt("x402 request fingerprint is invalid.");
   const { integrityHash: _ignored, ...withoutIntegrity } = typed;
   if (typed.integrityHash !== domainHash(X402_STATE_VERSION, canonicalJson(withoutIntegrity))) stateCorrupt("x402 operation integrity hash is invalid.");
@@ -373,7 +370,7 @@ export function validateStateSummary(
       : undefined;
     if (
       response?.classification !== "success" || attempt?.phase !== "observed" ||
-      attempt.observation?.status !== "200" || attempt.observation.bodyHash !== resultLink.resultHash
+      !isX402ResultStatus(operation.resource, attempt.observation?.status) || attempt.observation?.bodyHash !== resultLink.resultHash
     ) stateCorrupt("x402 result link does not bind its designated successful response.");
   }
   if (evidence.settlementEvidence !== undefined && evidence.transactionHint === undefined) {
@@ -438,7 +435,7 @@ export function validateStateSummary(
     if (
       response?.classification !== "success" || evidence.transactionHint?.source !== "payment_response" ||
       (attempt?.purpose !== "payment" && attempt?.purpose !== "result_recovery") || attempt.phase !== "observed" ||
-      attempt.observation?.status !== "200"
+      !isX402ResultStatus(operation.resource, attempt.observation?.status)
     ) stateCorrupt("x402 completed state lacks an observed successful paid response.");
   }
   const delegatedPreExposureMaterial = record(record(operation.selectedOffer).resolved).assetTransferMethod === "erc7710" &&

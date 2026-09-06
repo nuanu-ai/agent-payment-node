@@ -1,14 +1,12 @@
-import { canonicalJson, domainHash, hashObject, sha256 } from "./canonical.js";
+import { canonicalJson, hashObject, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { appendProviderX402Transition, sealProviderX402Operation, } from "./provider-x402-model.js";
 import { freezeProviderPolicy } from "./provider-x402-policy.js";
-const BODY_DIGEST = domainHash("apn.x402.absent-body.v1", canonicalJson({ state: "absent" }));
+import { providerHttpRequest } from "./provider-x402-http-request.js";
 export function stagedProviderX402Operation(input) {
     const canonicalUrl = input.endpoint.toString();
-    const requestMetadata = { method: "GET", bodyState: "absent", headers: "none" };
-    const requestDigest = domainHash("apn.provider-x402.request.v1", canonicalJson({
-        canonicalUrl, ...requestMetadata, bodyDigest: BODY_DIGEST,
-    }));
+    const request = providerHttpRequest(input.endpoint, input.httpRequest);
+    const { method, bodyState, bodyDigest, requestDigest } = request;
     const requirement = {
         x402Version: "2",
         scheme: "exact",
@@ -38,7 +36,7 @@ export function stagedProviderX402Operation(input) {
         profile: input.profile,
         profileHash: input.profileHash,
         provider,
-        request: { canonicalUrl, method: "GET", bodyState: "absent", bodyDigest: BODY_DIGEST, requestDigest },
+        request: { canonicalUrl, method, bodyState, bodyDigest, requestDigest },
         requirement,
         policy,
         rpcBindingHash,
@@ -51,7 +49,7 @@ export function stagedProviderX402Operation(input) {
         proofClass: "x402_frozen_offer",
     };
     return sealProviderX402Operation({
-        schemaVersion: "apn.provider-x402.state.v1",
+        schemaVersion: input.httpRequest === undefined ? "apn.provider-x402.state.v1" : "apn.provider-x402.state.v2",
         kind: "x402_fetch",
         executionMode: "provider_atomic_paid_fetch",
         operationId: input.operationId,
@@ -61,17 +59,7 @@ export function stagedProviderX402Operation(input) {
         requestHash: input.requestHash,
         fingerprint,
         provider,
-        request: {
-            canonicalUrl,
-            origin: input.endpoint.origin,
-            path: input.endpoint.pathname,
-            urlHash: sha256(canonicalUrl),
-            method: "GET",
-            bodyState: "absent",
-            bodyDigest: BODY_DIGEST,
-            metadataDigest: hashObject(requestMetadata),
-            requestDigest,
-        },
+        request,
         requirement,
         policy,
         rpcBindingHash,

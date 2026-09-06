@@ -42,8 +42,8 @@ export function parseJsonWithDuplicateRejection(text) {
             throw protocol("x402 JSON syntax is invalid.");
         offset += match[0].length;
         const number = Number(match[0]);
-        if (!Number.isSafeInteger(number))
-            throw protocol("x402 JSON contains an unsafe or non-integral number.");
+        if (!Number.isFinite(number) || Math.abs(number) > Number.MAX_SAFE_INTEGER)
+            throw protocol("x402 JSON contains an unsafe number.");
         return number;
     };
     const parseObject = () => {

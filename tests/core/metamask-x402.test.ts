@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { normalizeX402HttpRequest } from "../../src/x402-http-request.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -173,14 +174,18 @@ test("MetaMask x402 adapter recognizes the exact 6.1.5 terminal error codes", as
   });
 });
 
-test("MetaMask profile completes one APN-owned x402 journey across restart with one signing request", async (t) => {
+for (const method of ["legacy GET", "POST"]) {
+test(`MetaMask profile completes ${method} across restart with one signing request`, async (t) => {
+  const requestFields = method === "POST" ? { httpRequest: normalizeX402HttpRequest({
+    schemaVersion: "apn.http-request.v1", url: X402_URL, method, headers: { "content-type": "application/json" }, bodyBase64: "e30=",
+  }) } : {};
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   const wrapping = new TestWrappingSecret();
   const initialRunner = new FixtureRunner();
   const rpc = new RecoveryRpc();
   rpc.x402Evidence = { ...rpc.x402Evidence, address: ACCOUNT.address };
-  const http = new QueuedHttp([challenge(), paidSuccess()]);
+  const http = new QueuedHttp([challenge(), method === "POST" ? paidSuccess({ status: 204, bodyText: "" }) : paidSuccess()]);
   const clock = new TestClock();
   const initial = core(temporary.root, initialRunner, wrapping, rpc, http, clock);
   await connect(initial);
@@ -190,6 +195,7 @@ test("MetaMask profile completes one APN-owned x402 journey across restart with 
     url: X402_URL,
     maxAmountAtomic: "2000000",
     idempotencyKey: "metamask-x402-complete-001",
+    ...requestFields,
   });
   assert.equal(prepared.ok, true, JSON.stringify(prepared));
   const operationId = requiredOperationId(prepared);
@@ -224,6 +230,7 @@ test("MetaMask profile completes one APN-owned x402 journey across restart with 
   assert.equal(sent.ok, true, JSON.stringify(sent));
   assert.equal((sent.operation as { state?: unknown }).state, "settlement_pending");
   assert.equal(http.calls.filter((call) => call.paymentSignature !== undefined).length, 1);
+  assert.deepEqual(http.calls.map((call) => call.httpRequest), [requestFields.httpRequest, requestFields.httpRequest]);
   const durable = await restarted.context.state.findX402Operation(operationId);
   assert.notEqual(durable, null);
   armSettlement(rpc, durable as X402OperationRecord);
@@ -239,11 +246,14 @@ test("MetaMask profile completes one APN-owned x402 journey across restart with 
     url: X402_URL,
     maxAmountAtomic: "2000000",
     idempotencyKey: "metamask-x402-complete-001",
+    ...requestFields,
   });
   assert.equal(requiredOperationId(duplicate), operationId);
   assert.equal(restartedRunner.calls.filter((call) => call.argv[1] === "sign-typed-data").length, 0);
   assert.equal(http.calls.filter((call) => call.paymentSignature !== undefined).length, 1);
 });
+
+}
 
 test("denial and expiry close before HTTP while a lost initial response is never replayed", async (t) => {
   const deniedState = await temporaryState();
@@ -361,8 +371,8 @@ function challenge() {
   return challengeObservation({ header: canonicalPaymentRequiredHeader(X402_PAYMENT_REQUIRED) });
 }
 
-function paidSuccess() {
-  return paidObservation({ paymentResponseHeader: canonicalPaymentResponseHeader({
+function paidSuccess(input: { readonly status?: number; readonly bodyText?: string } = {}) {
+  return paidObservation({ ...input, paymentResponseHeader: canonicalPaymentResponseHeader({
     success: true,
     transaction: X402_TRANSACTION,
     network: "eip155:8453",

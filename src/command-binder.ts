@@ -7,6 +7,7 @@ import {
 } from "./command-catalog.js";
 import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
+import { bindX402HttpRequest } from "./x402-http-request.js";
 
 export interface BoundCommand {
   readonly request: CommandRequest;
@@ -111,10 +112,11 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
         ...(options["--max-balance-eth-wei"] === undefined ? {} : { maxBalanceEthWei: options["--max-balance-eth-wei"] }),
       },
     };
-    case "x402 inspect": return { request: { command: "x402.inspect", url: value(options, "--url") } };
+    case "x402 inspect": return { request: { command: "x402.inspect", url: value(options, "--url"), ...bindX402HttpRequest(options) } };
     case "x402 fetch prepare": return {
       request: {
         command: "x402.fetch.prepare",
+        ...bindX402HttpRequest(options),
         profile: value(options, "--profile"),
         url: value(options, "--url"),
         ...(options["--max-amount-atomic"] === undefined ? {} : { maxAmountAtomic: options["--max-amount-atomic"] }),

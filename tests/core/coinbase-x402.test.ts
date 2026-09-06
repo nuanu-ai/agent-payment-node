@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { assertAwalHttpRequest } from "../../src/provider-x402-http-request.js";
+import { normalizeX402HttpRequest, type X402HttpRequestV1 } from "../../src/x402-http-request.js";
 import { EventEmitter } from "node:events";
 import { access, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -29,6 +31,8 @@ import type {
 } from "../../src/provider-ports.js";
 import {
   providerX402InvocationIntentHash,
+  sealProviderX402Operation,
+  validateProviderX402Operation,
   type ProviderX402OperationRecord,
   type ProviderX402ReceiptRecord,
   type ProviderX402RangeSettlementEvidence,
@@ -74,8 +78,9 @@ const TRANSACTION = `0x${"c".repeat(64)}` as Hex;
 const SCRIPT_PATH_CANARY = "/PROTECTED_SCRIPT_PATH_CANARY/node_modules/awal/dist/index.js";
 
 class FixtureX402 implements X402ExecutionPort {
+  readonly assertCompatibleRequest = assertAwalHttpRequest;
   readonly mode = "provider_atomic_paid_fetch" as const;
-  readonly calls: Array<{ readonly url: string; readonly amountAtomic: string; readonly correlationId: string }> = [];
+  readonly calls: Array<{ readonly url: string; readonly amountAtomic: string; readonly correlationId: string; readonly httpRequest?: X402HttpRequestV1 }> = [];
   primeCalls = 0;
   result: Awaited<ReturnType<NonNullable<X402ExecutionPort["execute"]>>> = {
     disposition: "seller_result",
@@ -88,6 +93,7 @@ class FixtureX402 implements X402ExecutionPort {
   async prime(): Promise<void> { this.primeCalls += 1; }
   async execute(input: {
     readonly url: string;
+    readonly httpRequest?: X402HttpRequestV1;
     readonly amountAtomic: string;
     readonly correlationId: string;
     readonly requestDigest: string;
@@ -1003,6 +1009,37 @@ test("protected seller values cannot cross CLI or MCP output surfaces", async (t
       assert.equal(effect.calls.length, 1);
     });
   }
+});
+
+test("Coinbase freezes absent-body POST across restart and refuses present bodies before seller or provider effects", async (t) => {
+  const fixture = await setup(t);
+  const httpRequest = normalizeX402HttpRequest({ schemaVersion: "apn.http-request.v1", url: X402_URL, method: "POST",
+    headers: { "idempotency-key": "seller-opaque-001" }, bodyBase64: null });
+  const request = { command: "x402.fetch.prepare" as const, profile: "provider-one", url: X402_URL,
+    idempotencyKey: "provider-generic-001", maxAmountAtomic: "2000000", httpRequest };
+  for (const bodyBase64 of ["", "e30=", "AAH/"]) {
+    const rejected = await fixture.core.execute({ ...request, httpRequest: { ...httpRequest, bodyBase64 } });
+    assert.equal(rejected.error?.code, "APN_PROVIDER_PROTOCOL");
+    assert.equal(fixture.http.calls.length, 0);
+    assert.equal(fixture.effect.calls.length, 0);
+  }
+  const prepared = await fixture.core.execute(request);
+  assert.equal(prepared.ok, true, JSON.stringify(prepared));
+  const operationId = (prepared.operation as { operationId: string }).operationId;
+  const stored = await new ProviderX402Repository(fixture.temporary.root).loadOperation(fixture.profile.profile_hash, operationId);
+  assert.equal(stored?.schemaVersion, "apn.provider-x402.state.v2");
+  assert.throws(() => validateProviderX402Operation(sealProviderX402Operation({ ...stored!, schemaVersion: "apn.provider-x402.state.v1" })));
+  const restarted = restartedCore(fixture);
+  assert.equal((await restarted.execute(request)).ok, true);
+  assert.equal((await restarted.execute({ ...request, httpRequest: { ...httpRequest, method: "PUT" } })).error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  assert.equal(fixture.http.calls.length, 1);
+  assert.equal((await restarted.execute({ command: "x402.fetch.approve", operationId })).ok, true);
+  assert.deepEqual(fixture.http.calls.map((call) => call.httpRequest), [httpRequest, httpRequest]);
+  assert.deepEqual(fixture.effect.calls[0]?.httpRequest, httpRequest);
+  armExactSettlement(fixture);
+  const completed = await restartedCore(fixture).execute({ command: "operation.resume", operationId });
+  assert.equal((completed.operation as { state: string }).state, "completed", JSON.stringify(completed));
+  assert.equal(fixture.effect.calls.length, 1);
 });
 
 test("provider x402 joins normalized seller result with the sole exact fixed-window Base-USDC transfer", async (t) => {

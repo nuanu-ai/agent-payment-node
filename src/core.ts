@@ -76,7 +76,7 @@ export class ApnCore {
       );
       case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile), "encrypted_profile_policy_status");
       case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
-      case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url), "seller_challenge_static");
+      case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest), "seller_challenge_static");
       case "x402.fetch.prepare": {
         await this.providerWallet.assertPaymentAvailable(request.profile, "x402");
         return operationOutcome(await this.x402.prepare(request));

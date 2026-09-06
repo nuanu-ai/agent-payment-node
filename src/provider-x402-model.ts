@@ -18,9 +18,12 @@ import {
   type ProviderX402TransactionRecoveryBinding,
 } from "./provider-x402-transaction-recovery-model.js";
 import { validateProviderX402RejectionShape } from "./provider-x402-rejection-shape.js";
+import { validateProviderHttpRequest } from "./provider-x402-http-request.js";
+import { x402HttpRequestBinding, type X402HttpRequestV1 } from "./x402-http-request.js";
 export type { ProviderX402TransactionRecoveryBinding } from "./provider-x402-transaction-recovery-model.js";
 
 export const PROVIDER_X402_STATE_VERSION = "apn.provider-x402.state.v1" as const;
+export const PROVIDER_X402_HTTP_STATE_VERSION = "apn.provider-x402.state.v2" as const;
 export type ProviderX402State =
   | "preparing"
   | "awaiting_approval"
@@ -99,7 +102,7 @@ export type ProviderX402SettlementEvidence =
   | ProviderX402TransactionSettlementEvidence;
 
 export interface ProviderX402OperationRecord {
-  readonly schemaVersion: typeof PROVIDER_X402_STATE_VERSION;
+  readonly schemaVersion: typeof PROVIDER_X402_STATE_VERSION | typeof PROVIDER_X402_HTTP_STATE_VERSION;
   readonly kind: "x402_fetch";
   readonly executionMode: "provider_atomic_paid_fetch";
   readonly operationId: string;
@@ -122,8 +125,9 @@ export interface ProviderX402OperationRecord {
     readonly origin: string;
     readonly path: string;
     readonly urlHash: string;
-    readonly method: "GET";
-    readonly bodyState: "absent";
+    readonly method: string;
+    readonly bodyState: "absent" | "present";
+    readonly httpRequest?: X402HttpRequestV1;
     readonly bodyDigest: string;
     readonly metadataDigest: string;
     readonly requestDigest: string;
@@ -194,6 +198,7 @@ export interface ProviderX402ReceiptRecord {
 }
 
 export function providerX402RequestHash(input: {
+  readonly httpRequest?: X402HttpRequestV1;
   readonly profile: string;
   readonly canonicalUrl: string;
   readonly rpcUrl: string;
@@ -204,7 +209,8 @@ export function providerX402RequestHash(input: {
     profile: input.profile,
     canonicalUrl: input.canonicalUrl,
     rpcUrl: input.rpcUrl,
-    methodShape: "GET_absent_body",
+    methodShape: input.httpRequest === undefined ? "GET_absent_body" : "apn.http-request.v1",
+    ...x402HttpRequestBinding(input.httpRequest),
     callerCapAtomic: input.callerCapAtomic ?? null,
   });
 }
@@ -249,14 +255,13 @@ export function validateProviderX402Operation(value: unknown): ProviderX402Opera
   const without = { ...operation, integrityHash: undefined } as Record<string, unknown>;
   delete without.integrityHash;
   if (
-    operation.schemaVersion !== PROVIDER_X402_STATE_VERSION || operation.kind !== "x402_fetch" ||
+    operation.schemaVersion !== (operation.request?.httpRequest === undefined ? PROVIDER_X402_STATE_VERSION : PROVIDER_X402_HTTP_STATE_VERSION) || operation.kind !== "x402_fetch" ||
     operation.executionMode !== "provider_atomic_paid_fetch" || !hash(operation.operationId) ||
     !hash(operation.idempotencyHash) || !hash(operation.profileHash) || !hash(operation.requestHash) ||
     !hash(operation.fingerprint) || operation.fingerprint !== providerX402FrozenFingerprint(operation) ||
     operation.integrityHash !== hashObject(without) ||
     operation.provider?.executionOwner !== "provider" ||
-    operation.provider.retryOwner !== "apn_outer_no_replay_journal" || operation.request?.method !== "GET" ||
-    operation.request.bodyState !== "absent" || operation.requirement?.x402Version !== "2" ||
+    operation.provider.retryOwner !== "apn_outer_no_replay_journal" || operation.requirement?.x402Version !== "2" ||
     operation.requirement.scheme !== "exact" || operation.requirement.network !== CHAIN_CAIP2 ||
     operation.requirement.token !== BASE_USDC.toLowerCase() || operation.requirement.decimals !== 6 ||
     !positive(operation.requirement.amountAtomic) || operation.policy?.verdict !== "authorized_by_existing_profile_policy" ||
@@ -267,6 +272,7 @@ export function validateProviderX402Operation(value: unknown): ProviderX402Opera
     operation.transitions.at(-1)?.proofClass !== operation.proofClass ||
     operation.terminal !== ["completed", "failed_before_effect", "failed_settled_without_result"].includes(operation.state)
   ) corrupt();
+  validateProviderHttpRequest(operation.request);
   validateTransitions(operation.transitions);
   if (operation.invocation !== undefined) validateInvocation(operation.invocation, operation);
   if (operation.sellerResult !== undefined) validateSellerResult(operation.sellerResult, operation.requirement.amountAtomic);
