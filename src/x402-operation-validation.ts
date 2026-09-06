@@ -1,5 +1,5 @@
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { validX402Tuple, x402Network } from "./x402-network.js";
 import { parseAtomic } from "./money.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js";
 import { frozenErc7710FacilitatorsMatch } from "./x402-erc7710-codec.js";
@@ -72,7 +72,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   hash(sellerWire.resourceHash);
   if (sellerWire.resourceHash !== domainHash("apn.x402.resource.v1", sellerWire.resourceCanonicalJson as string)) stateCorrupt("x402 seller resource hash is invalid.");
 
-  if (operation.chainId !== "8453" || operation.network !== CHAIN_CAIP2 || operation.token !== BASE_USDC.toLowerCase()) stateCorrupt("x402 chain or token binding is invalid.");
+  if (!validX402Tuple(operation.chainId, operation.network, operation.token) || (operation.chainId !== "8453" && (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined))) stateCorrupt("x402 chain or token binding is invalid.");
   address(operation.wallet);
   address(operation.payee);
   const amount = parseAtomic(operation.amountAtomic, { positive: true });
@@ -120,7 +120,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   };
   const header = Buffer.from(canonicalJson(paymentRequired), "utf8").toString("base64");
   const decoded = decodePaymentRequiredHeader(header);
-  const candidates = inspectCandidates(decoded, resource.canonicalUrl as string);
+  const candidates = inspectCandidates(decoded, resource.canonicalUrl as string, x402Network(operation.network).chainId);
   if (candidates.length !== 1) stateCorrupt("x402 frozen offer is no longer statically compatible.");
   const candidate = candidates[0];
   const methodFieldsMatch = candidate?.assetTransferMethod === "erc7710" && resolved.assetTransferMethod === "erc7710"
@@ -250,7 +250,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   }
 
   const typed = operation as unknown as X402OperationRecord;
-  if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic,
+  if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic, chainId: x402Network(typed.network).chainId,
     ...(resource.httpRequest === undefined ? {} : { httpRequest: resource.httpRequest }) })) stateCorrupt("x402 request hash is invalid.");
   if (typed.fingerprint !== x402Fingerprint(typed)) stateCorrupt("x402 request fingerprint is invalid.");
   const { integrityHash: _ignored, ...withoutIntegrity } = typed;

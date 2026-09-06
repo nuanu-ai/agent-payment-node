@@ -5,6 +5,7 @@ import { sealWallet } from "./state.js";
 import { assertWalletMatches, canonicalProfile, parseWalletDescribe, parseWalletEnsure, publicProvenance, publicWallet, validateBalance, } from "./wallet-policy.js";
 import { fundingPosture, policyBinding, publicProfilePolicy } from "./profile-policy.js";
 import { projectLegacyLocalProfile } from "./provider-profile.js";
+import { assertLocalNetworkProfile, networkPolicyBinding } from "./x402-network.js";
 export class WalletService {
     context;
     constructor(context) {
@@ -136,13 +137,14 @@ export class WalletService {
             };
         });
     }
-    async policyShow(profileInput) {
+    async policyShow(profileInput, chainId) {
         const profile = canonicalProfile(profileInput);
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-            const binding = await this.policyBindingForProfile(profileHash);
-            return publicProfilePolicy(profile, await this.context.requirePolicy().load(binding));
+            await assertLocalNetworkProfile(this.context, profile, chainId);
+            const binding = networkPolicyBinding(await this.policyBindingForProfile(profileHash), chainId);
+            return publicProfilePolicy(profile, await this.context.requirePolicy().load(binding), chainId);
         });
     }
     async policySet(request) {
@@ -150,13 +152,14 @@ export class WalletService {
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-            const binding = await this.policyBindingForProfile(profileHash);
+            await assertLocalNetworkProfile(this.context, profile, request.chainId);
+            const binding = networkPolicyBinding(await this.policyBindingForProfile(profileHash), request.chainId);
             const policy = await this.context.requirePolicy().set(binding, {
                 maxBalanceUsdcAtomic: request.maxBalanceUsdcAtomic,
                 maxX402AmountAtomic: request.maxX402AmountAtomic,
                 ...(request.maxBalanceEthWei === undefined ? {} : { maxBalanceEthWei: request.maxBalanceEthWei }),
             });
-            return publicProfilePolicy(profile, policy);
+            return publicProfilePolicy(profile, policy, request.chainId);
         });
     }
     async policyBindingForProfile(profileHash) {

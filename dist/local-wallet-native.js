@@ -1,3 +1,4 @@
+import { validX402Tuple } from "./x402-network.js";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
@@ -145,7 +146,7 @@ export class LocalWalletNative {
                 domain: {
                     name: intent.tokenDomain.name,
                     version: intent.tokenDomain.version,
-                    chainId: CHAIN_ID,
+                    chainId: Number(intent.chainId),
                     verifyingContract: intent.token,
                 },
                 types: {
@@ -312,11 +313,9 @@ function parseX402Common(payload, create) {
     const operationId = hash(payload.operationId, "operation ID");
     const fingerprint = hash(payload.fingerprint, "fingerprint");
     const wallet = x402Address(payload.wallet, "wallet");
-    if (payload.chainId !== "8453")
-        throw protocol("x402 chain is unsupported.");
     const token = x402Address(payload.token, "token");
-    if (!addressEqual(token, BASE_USDC))
-        throw protocol("x402 token is unsupported.");
+    if (!validX402Tuple(payload.chainId, `eip155:${String(payload.chainId)}`, token))
+        throw protocol("x402 network or token is unsupported.");
     const tokenDomain = exactRecord(payload.tokenDomain, ["name", "version"]);
     if (typeof tokenDomain.name !== "string" || tokenDomain.name.length === 0 || typeof tokenDomain.version !== "string" || tokenDomain.version.length === 0)
         throw protocol("x402 token domain is invalid.");
@@ -331,7 +330,7 @@ function parseX402Common(payload, create) {
         throw protocol("x402 authorization binding is invalid.");
     const intentHash = hash(payload.intentHash, "x402 intent hash");
     return {
-        profile, operationId, fingerprint, wallet, chainId: "8453", token,
+        profile, operationId, fingerprint, wallet, chainId: payload.chainId, token,
         tokenDomain: { name: tokenDomain.name, version: tokenDomain.version },
         authorization: { from, to, value, validAfter: "0", validBefore, nonce },
         intentHash,

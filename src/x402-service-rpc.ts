@@ -1,3 +1,5 @@
+import type { EvmChainId } from "./evm-asset.js";
+import { x402Network } from "./x402-network.js";
 import { ApnError } from "./errors.js";
 import type { RpcPort, X402RpcPort } from "./ports.js";
 import type {
@@ -6,17 +8,42 @@ import type {
   X402ProofClass,
   X402Reason,
   X402TerminalState,
+  X402SettlementWaitProjection,
 } from "./x402-state-integrity.js";
 
-export function x402ReadPort(rpc: RpcPort): X402RpcPort | null {
-  const value = rpc as Partial<X402RpcPort>;
+export function selectX402Rpc(rpc: RpcPort, chainId: EvmChainId = 8453): RpcPort {
+  x402Network(chainId);
+  if (chainId === 8453) return rpc;
+  if (rpc.forX402Network === undefined) throw new ApnError("APN_RPC_CONFIG", "RPC adapter lacks explicit x402 network support.");
+  return rpc.forX402Network(chainId);
+}
+
+export function boundedX402PrepareRpc(rpc: RpcPort, timeoutMs: number): Pick<RpcPort, "assertBaseChain" | "getX402PrepareEvidence"> & Partial<X402RpcPort> {
+  const bounded = (rpc as Partial<X402RpcPort>).withTotalTimeout?.(timeoutMs);
+  if (bounded === undefined || typeof (bounded as Partial<RpcPort>).getX402PrepareEvidence !== "function") {
+    throw new ApnError("APN_RPC_CONFIG", "Bounded first-exposure checks require network-aware prepare reads.");
+  }
+  return bounded as X402RpcPort & Pick<RpcPort, "getX402PrepareEvidence">;
+}
+
+export async function assertX402RpcChain(rpc: Pick<RpcPort, "assertBaseChain"> & Partial<X402RpcPort>, chainId: EvmChainId = 8453) {
+  const chain = rpc.assertX402Chain === undefined && chainId === 8453 ? await rpc.assertBaseChain() :
+    await rpc.assertX402Chain?.(chainId);
+  if (chain === undefined || chain.chainId !== chainId || !chain.rpcOrigin) {
+    throw new ApnError("APN_CHAIN_MISMATCH", "RPC does not prove the frozen x402 network.");
+  }
+  return chain;
+}
+
+export function x402ReadPort(rpc: RpcPort, chainId: EvmChainId = 8453): X402RpcPort | null {
+  const value = selectX402Rpc(rpc, chainId) as Partial<X402RpcPort>;
   return typeof value.getX402Head === "function" && typeof value.getX402Block === "function" &&
     typeof value.getX402Receipt === "function" && typeof value.getX402AuthorizationState === "function" &&
     typeof value.getX402AuthorizationUsedLogs === "function" ? value as X402RpcPort : null;
 }
 
-export function boundedX402ReadPort(rpc: RpcPort, timeoutMs: number): X402RpcPort | null {
-  const port = x402ReadPort(rpc);
+export function boundedX402ReadPort(rpc: RpcPort, timeoutMs: number, chainId: EvmChainId = 8453): X402RpcPort | null {
+  const port = x402ReadPort(rpc, chainId);
   if (port === null || typeof port.withTotalTimeout !== "function") return null;
   return port.withTotalTimeout(timeoutMs);
 }
@@ -25,10 +52,7 @@ export async function assertWaitRpcProvenance(
   rpc: X402RpcPort,
   operation: X402OperationRecord,
 ): Promise<void> {
-  const chain = await rpc.assertBaseChain();
-  if (chain.chainId !== 8453 || typeof chain.rpcOrigin !== "string" || chain.rpcOrigin.length === 0) {
-    throw new ApnError("APN_CHAIN_MISMATCH", "Settlement wait RPC is not Base chain ID 8453.");
-  }
+  const chain = await assertX402RpcChain(rpc, x402Network(operation.network).chainId);
   const safe = await rpc.getX402Head("safe");
   const observedAt = Date.parse(safe.observedAt);
   if (
@@ -82,4 +106,12 @@ export function settlementResponseTransaction(response: SettlementResponseObserv
   } catch {
     return undefined;
   }
+}
+
+export function remainingWaitMs(deadline: number, nowMs: number): number {
+  return Math.floor(deadline - nowMs);
+}
+
+export function waitTimeout(seconds: number, observations: number): X402SettlementWaitProjection {
+  return { outcome: "timeout", requestedSeconds: seconds.toString(), observationCount: observations.toString() };
 }

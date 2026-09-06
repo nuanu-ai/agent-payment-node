@@ -1,21 +1,42 @@
+import { x402Network } from "./x402-network.js";
 import { ApnError } from "./errors.js";
-export function x402ReadPort(rpc) {
-    const value = rpc;
+export function selectX402Rpc(rpc, chainId = 8453) {
+    x402Network(chainId);
+    if (chainId === 8453)
+        return rpc;
+    if (rpc.forX402Network === undefined)
+        throw new ApnError("APN_RPC_CONFIG", "RPC adapter lacks explicit x402 network support.");
+    return rpc.forX402Network(chainId);
+}
+export function boundedX402PrepareRpc(rpc, timeoutMs) {
+    const bounded = rpc.withTotalTimeout?.(timeoutMs);
+    if (bounded === undefined || typeof bounded.getX402PrepareEvidence !== "function") {
+        throw new ApnError("APN_RPC_CONFIG", "Bounded first-exposure checks require network-aware prepare reads.");
+    }
+    return bounded;
+}
+export async function assertX402RpcChain(rpc, chainId = 8453) {
+    const chain = rpc.assertX402Chain === undefined && chainId === 8453 ? await rpc.assertBaseChain() :
+        await rpc.assertX402Chain?.(chainId);
+    if (chain === undefined || chain.chainId !== chainId || !chain.rpcOrigin) {
+        throw new ApnError("APN_CHAIN_MISMATCH", "RPC does not prove the frozen x402 network.");
+    }
+    return chain;
+}
+export function x402ReadPort(rpc, chainId = 8453) {
+    const value = selectX402Rpc(rpc, chainId);
     return typeof value.getX402Head === "function" && typeof value.getX402Block === "function" &&
         typeof value.getX402Receipt === "function" && typeof value.getX402AuthorizationState === "function" &&
         typeof value.getX402AuthorizationUsedLogs === "function" ? value : null;
 }
-export function boundedX402ReadPort(rpc, timeoutMs) {
-    const port = x402ReadPort(rpc);
+export function boundedX402ReadPort(rpc, timeoutMs, chainId = 8453) {
+    const port = x402ReadPort(rpc, chainId);
     if (port === null || typeof port.withTotalTimeout !== "function")
         return null;
     return port.withTotalTimeout(timeoutMs);
 }
 export async function assertWaitRpcProvenance(rpc, operation) {
-    const chain = await rpc.assertBaseChain();
-    if (chain.chainId !== 8453 || typeof chain.rpcOrigin !== "string" || chain.rpcOrigin.length === 0) {
-        throw new ApnError("APN_CHAIN_MISMATCH", "Settlement wait RPC is not Base chain ID 8453.");
-    }
+    const chain = await assertX402RpcChain(rpc, x402Network(operation.network).chainId);
     const safe = await rpc.getX402Head("safe");
     const observedAt = Date.parse(safe.observedAt);
     if (safe.queriedTag !== "safe" || safe.rpcOrigin !== chain.rpcOrigin ||
@@ -61,5 +82,11 @@ export function settlementResponseTransaction(response) {
     catch {
         return undefined;
     }
+}
+export function remainingWaitMs(deadline, nowMs) {
+    return Math.floor(deadline - nowMs);
+}
+export function waitTimeout(seconds, observations) {
+    return { outcome: "timeout", requestedSeconds: seconds.toString(), observationCount: observations.toString() };
 }
 //# sourceMappingURL=x402-service-rpc.js.map

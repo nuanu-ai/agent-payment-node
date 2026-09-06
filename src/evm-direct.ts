@@ -52,6 +52,7 @@ export function validateEvmFeeQuote(value: unknown, economics?: Economics): EvmF
   const execution = evmUint(quote.maximumExecutionFeeWei, true);
   const total = execution + evmUint(quote.l1DataFeeUpperWei) + evmUint(quote.operatorFeeUpperWei);
   if (evmUint(quote.totalQuoteWei, true) !== total || quote.totalFeeEnforcedOnchain !== false ||
+      (quote.chainId === 1 && (quote.l1DataFeeUpperWei !== "0" || quote.operatorFeeUpperWei !== "0")) ||
       (economics !== undefined && economics.maximumGasCostAtomic !== quote.maximumExecutionFeeWei) ||
       typeof quote.blockHash !== "string" || !/^0x[0-9a-f]{64}$/u.test(quote.blockHash) ||
       quote.blockHash === `0x${"0".repeat(64)}` ||

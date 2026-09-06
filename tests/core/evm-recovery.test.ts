@@ -4,12 +4,13 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { hashObject } from "../../src/canonical.js";
-import { runCli } from "../../src/cli.js";
+import * as cliRuntime from "../../src/cli.js";
+import { testRuntime } from "./installed-runtime.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { ApnCore } from "../../src/core.js";
 import { evmDirectFingerprint } from "../../src/evm-direct.js";
 import { evmCustodyPayload } from "../../src/evm-transfer-approval.js";
-import { createMcpServer } from "../../src/mcp-server.js";
+import * as mcpRuntime from "../../src/mcp-server.js";
 import type { OperationRecord } from "../../src/model.js";
 import { parseEvmNativeIntent } from "../../src/evm-native-intent.js";
 import type { ProviderProfileRecord } from "../../src/provider-profile.js";
@@ -17,10 +18,15 @@ import { sealOperation, validateOperation } from "../../src/state-integrity.js";
 import { EVM_REQUEST, EVM_TOKEN, evmCore } from "./evm-helpers.js";
 import { temporaryState } from "./helpers.js";
 
-test("a real terminated process leaves started state and a separate process resumes exactly once without signing", async (context) => {
+const { runCli } = await testRuntime(cliRuntime, "cli.js");
+const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
+
+for (const chainId of [8453, 1] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process resumes exactly once without signing`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); await setup.core.wallet.ensure("default");
-  const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
+  setup.rpc.chainId = chainId;
+  if (chainId === 1) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { ...EVM_REQUEST.asset, chainId } }) as { operation_id: string };
   const worker = fileURLToPath(new URL("./evm-crash-worker.js", import.meta.url));
   const crashed = spawnSync(process.execPath, [worker, "sign-crash", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(crashed.status, 74, crashed.stderr);
@@ -33,15 +39,18 @@ test("a real terminated process leaves started state and a separate process resu
   assert.equal(replay.status, 0, replay.stderr); assert.equal(JSON.parse(replay.stdout).submissions, 0);
 });
 
-test("MCP generic prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation", async (context) => {
+for (const chainId of [8453, 1] as const) for (const asset of ["native", EVM_TOKEN] as const) test(`MCP ${chainId}/${asset} prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root); await setup.core.wallet.ensure("default");
+  const setup = evmCore(temporary.root);
+  setup.rpc.sender = (await setup.core.wallet.ensure("default") as { address: `0x${string}` }).address;
+  setup.rpc.chainId = chainId;
+  if (chainId === 1) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   const server = createMcpServer({ stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair(); await server.connect(serverTransport);
   const client = new Client({ name: "apn-evm-parity-test", version: "1.0.0" }); await client.connect(clientTransport);
   context.after(async () => { await client.close(); await server.close(); });
   const invoke = async (name: string, input: Record<string, string>) => (await client.callTool({ name, arguments: input })).structuredContent as unknown as OutputEnvelope;
-  const selection = { profile: "default", chain: "eip155:8453", asset: "native", rpc_url: "https://rpc.example" };
+  const selection = { profile: "default", chain: `eip155:${chainId}`, asset, rpc_url: "https://rpc.example" };
   const balance = await invoke("apn_wallet_balance_asset", selection); assert.equal(balance.ok, true, JSON.stringify(balance));
   const prepared = await invoke("apn_pay_transfer_prepare_asset", { ...selection, to: EVM_REQUEST.recipient, amount: EVM_REQUEST.amount, max_fee_wei: EVM_REQUEST.maxFeeWei, idempotency_key: EVM_REQUEST.idempotencyKey });
   assert.equal(prepared.ok, true, JSON.stringify(prepared));
@@ -82,6 +91,10 @@ test("generic external profiles fail before RPC, signing or provider calls", asy
     } });
     await assert.rejects(core.transfer.prepare(EVM_REQUEST), { code: "APN_PROVIDER_UNAVAILABLE" });
     assert.equal(setup.rpc.genericBalanceCalls, 0); assert.equal(setup.approval.intents.length, 0);
+    const unsupported = await core.execute({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" } });
+    assert.equal(unsupported.error?.code, "APN_PROVIDER_UNAVAILABLE");
+    const x402 = await core.execute({ command: "x402.fetch.prepare", profile: "default", chainId: 1, url: "https://seller.example/resource", idempotencyKey: "eth-provider-no-effect" });
+    assert.equal(x402.error?.code, "APN_PROVIDER_UNAVAILABLE");
   }
 });
 

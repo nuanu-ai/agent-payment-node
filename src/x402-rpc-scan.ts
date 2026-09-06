@@ -1,5 +1,4 @@
 import { canonicalJson, domainHash } from "./canonical.js";
-import { BASE_USDC } from "./constants.js";
 import type { ClockPort, X402RpcHead, X402RpcLog, X402RpcPort } from "./ports.js";
 import {
   x402TransactionHintSourceBindingHash,
@@ -265,14 +264,14 @@ export function candidateFromLog(log: X402RpcLog, operation: X402OperationRecord
 }
 
 export function matchingAuthorizationUsed(log: X402RpcLog, operation: X402OperationRecord): boolean {
-  return log.address.toLowerCase() === BASE_USDC.toLowerCase() && log.topics.length === 3 &&
+  return log.address.toLowerCase() === operation.token.toLowerCase() && log.topics.length === 3 &&
     log.topics[0]?.toLowerCase() === AUTHORIZATION_USED_TOPIC && log.topics[1]?.toLowerCase() === paddedAddress(operation.wallet) &&
     log.topics[2]?.toLowerCase() === operation.authorization.nonce && log.data === "0x";
 }
 
 export function matchingTransfer(log: X402RpcLog, operation: X402OperationRecord): boolean {
   if (
-    log.address.toLowerCase() !== BASE_USDC.toLowerCase() || log.topics.length !== 3 ||
+    log.address.toLowerCase() !== operation.token.toLowerCase() || log.topics.length !== 3 ||
     log.topics[0]?.toLowerCase() !== TRANSFER_TOPIC || log.topics[1]?.toLowerCase() !== paddedAddress(operation.wallet) ||
     log.topics[2]?.toLowerCase() !== paddedAddress(operation.payee) || !/^0x[0-9a-f]{64}$/u.test(log.data)
   ) return false;

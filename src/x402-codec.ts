@@ -1,3 +1,5 @@
+import { x402Network, type X402Network } from "./x402-network.js";
+import type { EvmChainId } from "./evm-asset.js";
 import {
   decodePaymentRequiredHeader as decodeOfficialPaymentRequiredHeader,
   decodePaymentResponseHeader as decodeOfficialPaymentResponseHeader,
@@ -6,7 +8,7 @@ import {
 } from "@x402/core/http";
 import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse } from "@x402/core/types";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
-import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { CHAIN_CAIP2 } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { canonicalErc7710Facilitators, isStrictErc7710Payload } from "./x402-erc7710-codec.js";
 import type { InspectCandidate } from "./x402-model.js";
@@ -99,7 +101,7 @@ export interface DecodedPaymentResponse {
 
 export function decodeAndNormalizePaymentResponseHeader(
   value: string,
-  expected: { readonly payer: string; readonly amountAtomic: string },
+  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network },
 ): DecodedPaymentResponse {
   try { return decodeAndNormalizePaymentResponseHeaderUnsafe(value, expected); }
   catch (error) {
@@ -110,7 +112,7 @@ export function decodeAndNormalizePaymentResponseHeader(
 
 function decodeAndNormalizePaymentResponseHeaderUnsafe(
   value: string,
-  expected: { readonly payer: string; readonly amountAtomic: string },
+  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network },
 ): DecodedPaymentResponse {
   const strict = decodeCanonicalBase64Json(value);
   const response = record(strict, "PAYMENT-RESPONSE");
@@ -127,7 +129,7 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
     typeof response.transaction !== "string" || !TRANSACTION_HASH.test(response.transaction) ||
     /^0x0{64}$/u.test(response.transaction)
   ) throw settlement("PAYMENT-RESPONSE transaction is invalid.");
-  if (response.network !== CHAIN_CAIP2) throw settlement("PAYMENT-RESPONSE network is invalid.");
+  if (response.network !== (expected.network ?? CHAIN_CAIP2)) throw settlement("PAYMENT-RESPONSE network is invalid.");
 
   let payer: string | undefined;
   if (response.payer !== undefined) {
@@ -161,7 +163,7 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
     ...(response.errorReason === undefined ? {} : { errorReason: response.errorReason }),
     ...(payer === undefined ? {} : { payer }),
     transaction: response.transaction,
-    network: CHAIN_CAIP2,
+    network: expected.network ?? CHAIN_CAIP2,
     ...(response.amount === undefined ? {} : { amount: response.amount }),
   };
   const normalizedCanonicalJson = canonicalJson(normalized);
@@ -174,21 +176,22 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
   };
 }
 
-export function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string): readonly InspectCandidate[] {
+export function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, chainId: EvmChainId = 8453): readonly InspectCandidate[] {
   if (paymentRequired.x402Version !== 2 || !resourceMatches(paymentRequired.resource.url, requestedUrl)) return [];
   const output: InspectCandidate[] = [];
   paymentRequired.accepts.forEach((requirements, index) => {
-    const candidate = inspectCandidate(requirements, index);
+    const candidate = inspectCandidate(requirements, index, chainId);
     if (candidate !== null) output.push(candidate);
   });
   return output;
 }
 
-function inspectCandidate(requirements: PaymentRequirements, index: number): InspectCandidate | null {
+function inspectCandidate(requirements: PaymentRequirements, index: number, chainId: EvmChainId = 8453): InspectCandidate | null {
+  const selected = x402Network(chainId);
   const extra = requirements.extra;
   if (
-    requirements.scheme !== "exact" || requirements.network !== CHAIN_CAIP2 ||
-    !ADDRESS.test(requirements.asset) || requirements.asset.toLowerCase() !== BASE_USDC.toLowerCase() ||
+    requirements.scheme !== "exact" || requirements.network !== selected.network ||
+    !ADDRESS.test(requirements.asset) || requirements.asset.toLowerCase() !== selected.token.toLowerCase() ||
     !POSITIVE_UINT.test(requirements.amount) || !ADDRESS.test(requirements.payTo) || /^0x0{40}$/iu.test(requirements.payTo) ||
     !Number.isInteger(requirements.maxTimeoutSeconds) || requirements.maxTimeoutSeconds < 30 || requirements.maxTimeoutSeconds > 300 ||
     !isPlainRecord(extra)
@@ -197,7 +200,7 @@ function inspectCandidate(requirements: PaymentRequirements, index: number): Ins
   const base = {
     index: index.toString(),
     scheme: "exact" as const,
-    network: CHAIN_CAIP2,
+    network: selected.network,
     asset: requirements.asset.toLowerCase(),
     amountAtomic: requirements.amount,
     payTo: requirements.payTo.toLowerCase(),
@@ -206,6 +209,7 @@ function inspectCandidate(requirements: PaymentRequirements, index: number): Ins
     readiness: READINESS,
   };
   if (extra.assetTransferMethod === "erc7710") {
+    if (chainId !== 8453) return null;
     const facilitatorAddresses = canonicalErc7710Facilitators(extra);
     if (facilitatorAddresses === null) return null;
     return {
@@ -255,7 +259,7 @@ function validatePaymentPayload(value: unknown): asserts value is PaymentPayload
   validateResource(paymentPayload.resource);
   validateRequirements(paymentPayload.accepted);
   const accepted = paymentPayload.accepted as PaymentRequirements;
-  const candidate = inspectCandidate(accepted, 0);
+  const candidate = inspectCandidate(accepted, 0, x402Network(accepted.network).chainId);
   if (candidate === null) throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported.");
   const payload = record(paymentPayload.payload, "exact-EVM payload");
   if (candidate.assetTransferMethod === "erc7710") {

@@ -1,6 +1,5 @@
 import { recoverTypedDataAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
-import { BASE_USDC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { encodePaymentSignatureHeader } from "./x402-codec.js";
 import { materializePaymentIdentifier } from "./x402-policy.js";
@@ -29,7 +28,7 @@ export function x402NativeCreatePayload(operation) {
         operationId: operation.operationId,
         fingerprint: operation.fingerprint,
         wallet: operation.wallet,
-        chainId: "8453",
+        chainId: operation.chainId,
         token: operation.token,
         resource: {
             origin: operation.resource.origin,
@@ -57,7 +56,7 @@ export function x402NativeRecoveryPayload(operation, expectedSignatureHash) {
         operationId: operation.operationId,
         fingerprint: operation.fingerprint,
         wallet: operation.wallet,
-        chainId: "8453",
+        chainId: operation.chainId,
         token: operation.token,
         tokenDomain: {
             name: resolved.tokenName,
@@ -88,8 +87,8 @@ export async function verifyAndConstructX402PaymentMaterial(value, operation) {
             domain: {
                 name: resolved.tokenName,
                 version: resolved.tokenVersion,
-                chainId: 8453,
-                verifyingContract: BASE_USDC,
+                chainId: Number(operation.chainId),
+                verifyingContract: operation.token,
             },
             types: {
                 TransferWithAuthorization: [

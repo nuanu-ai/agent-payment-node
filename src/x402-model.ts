@@ -1,3 +1,4 @@
+import type { X402Network } from "./x402-network.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
 
 export interface HttpGetRequest {
@@ -40,7 +41,7 @@ export interface InspectReadiness {
 interface InspectCandidateBase {
   readonly index: string;
   readonly scheme: "exact";
-  readonly network: "eip155:8453";
+  readonly network: X402Network;
   readonly asset: string;
   readonly amountAtomic: string;
   readonly payTo: string;

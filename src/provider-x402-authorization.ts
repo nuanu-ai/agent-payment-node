@@ -180,6 +180,7 @@ export function providerAuthorizationBinding(operation: X402OperationRecord): Pr
 }
 
 export function signingIntent(operation: X402OperationRecord): X402SigningIntent {
+  if (operation.chainId !== "8453") corrupt("Provider signing is declared only on Base.");
   const resolved = operation.selectedOffer.resolved;
   if (resolved.assetTransferMethod !== "eip3009") {
     corrupt("Provider EIP-3009 signer received a different x402 transfer method.");
