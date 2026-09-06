@@ -4,6 +4,7 @@ import { decodeAbiParameters } from "viem";
 import { sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { EvmRpc } from "./evm-rpc.js";
 import { parseAtomic } from "./money.js";
 import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses } from "./network-policy.js";
 const AUTHORIZATION_STATE_SELECTOR = "0xe94a0102";
@@ -12,6 +13,7 @@ const MAX_X402_LOGS = 256;
 const MAX_X402_TOPICS = 4;
 const MAX_X402_LOG_DATA_BYTES = 4096;
 export class HttpsBaseRpc {
+    evm;
     endpoint;
     rpcOrigin;
     sequence = 0n;
@@ -21,6 +23,7 @@ export class HttpsBaseRpc {
         const parsed = parsePublicHttpsUrl(endpoint, "APN_RPC_CONFIG", "RPC endpoint");
         this.endpoint = parsed;
         this.rpcOrigin = parsed.origin;
+        this.evm = new EvmRpc((method, params) => this.call(method, params), this.rpcOrigin);
         this.totalDeadlineMs = options.totalDeadlineMs;
     }
     withTotalTimeout(milliseconds) {

@@ -1,5 +1,11 @@
 import { cliHandoffDetails, createCliHandoff } from "./cli-handoff.js";
 import { ApnError } from "./errors.js";
+export async function genericTransferHandoff(core, request, approval) {
+    await core.context.ready();
+    const operation = await core.context.state.findOperation(request.operationId);
+    if (operation?.evm !== undefined && operation.state === "awaiting_approval")
+        await approval.approve(operation);
+}
 export class RejectingMcpTransferApproval {
     request;
     rpcUrl;

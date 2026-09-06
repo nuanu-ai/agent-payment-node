@@ -1,6 +1,9 @@
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { validateEvmTransferEvidence } from "./direct-terminal-receipt.js";
+import { validateEvmDirectBinding, validateEvmOperation } from "./evm-direct.js";
+import { evmUint } from "./evm-asset.js";
 import { formatAtomic, parseAtomic } from "./money.js";
 import type {
   OperationRecord,
@@ -73,7 +76,7 @@ export function validateOperation(value: unknown): OperationRecord {
   ];
   const optionalKeys = [
     "transactionData", "economics", "preparedBlockNumberAtomic", "providerDirect", "providerEffect",
-    "transactionHash", "rawTransactionHash", "lastSubmissionAt",
+    "transactionHash", "rawTransactionHash", "lastSubmissionAt", "evm",
   ];
   const actualKeys = Object.keys(value);
   if (
@@ -95,10 +98,11 @@ export function validateOperation(value: unknown): OperationRecord {
   ) stateCorrupt("Operation summary does not match its transition chain.");
   parseAtomic(operation.amountAtomic, { positive: true });
   if (
-    operation.amountDecimal !== formatAtomic(operation.amountAtomic, USDC_DECIMALS) || operation.chainId !== CHAIN_ID ||
-    operation.token !== BASE_USDC || !/^0x[0-9a-fA-F]{40}$/u.test(operation.walletAddress) ||
+    (operation.evm === undefined && (operation.amountDecimal !== formatAtomic(operation.amountAtomic, USDC_DECIMALS) ||
+    operation.chainId !== CHAIN_ID || operation.token !== BASE_USDC)) || !/^0x[0-9a-fA-F]{40}$/u.test(operation.walletAddress) ||
     !/^0x[0-9a-fA-F]{40}$/u.test(operation.recipient)
   ) stateCorrupt("Operation frozen transfer identity is invalid.");
+  if (operation.evm !== undefined) validateEvmOperation(operation);
   if (operation.providerDirect === undefined) validateLocalDirect(operation);
   else validateProviderDirect(operation, operation.providerDirect);
   return operation;
@@ -110,7 +114,7 @@ export function validateReceipt(value: unknown): ReceiptRecord {
     "schemaVersion", "operationId", "state", "terminal", "reason", "proofClass", "createdAt",
     "operationIntegrityHash", "integrityHash",
   ];
-  const optionalKeys = ["transactionHash", "blockNumberAtomic", "exactTransferLog"];
+  const optionalKeys = ["transactionHash", "blockNumberAtomic", "exactTransferLog", "evm", "amountAtomic", "evmEvidence"];
   const actualKeys = Object.keys(value);
   if (
     requiredKeys.some((key) => !actualKeys.includes(key)) ||
@@ -120,6 +124,11 @@ export function validateReceipt(value: unknown): ReceiptRecord {
   if (receipt.schemaVersion !== STATE_VERSION || receipt.integrityHash !== hashObject(withoutIntegrity(receipt))) {
     stateCorrupt("Receipt integrity validation failed.");
   }
+  if (receipt.evm !== undefined) {
+    validateEvmDirectBinding(receipt.evm);
+    evmUint(receipt.amountAtomic, true);
+    if (receipt.evmEvidence !== undefined) validateEvmTransferEvidence(receipt.evmEvidence);
+  } else if (receipt.amountAtomic !== undefined || receipt.evmEvidence !== undefined) stateCorrupt("Receipt asset fields have no binding.");
   return receipt;
 }
 

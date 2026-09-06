@@ -1,4 +1,5 @@
 import type { Address } from "./model.js";
+import type { EvmAssetSelection } from "./evm-asset.js";
 import type { ErrorDetails } from "./errors.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
 export type CommandRequest = {
@@ -38,6 +39,7 @@ export type CommandRequest = {
 } | {
     readonly command: "wallet.balance";
     readonly profile: string;
+    readonly asset?: EvmAssetSelection;
 } | {
     readonly command: "wallet.policy.show";
     readonly profile: string;
@@ -67,6 +69,8 @@ export type CommandRequest = {
     readonly idempotencyKey: string;
     readonly recipient: Address | string;
     readonly amount: string;
+    readonly asset?: EvmAssetSelection;
+    readonly maxFeeWei?: string;
 } | {
     readonly command: "transfer.approve";
     readonly operationId: string;

@@ -2,11 +2,13 @@ import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import type { Address } from "./model.js";
+import type { EvmDirectBinding } from "./evm-direct.js";
 
 export const TTY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
 
 export interface TransferApprovalIntent {
+  readonly evm?: EvmDirectBinding;
   readonly profile: string;
   readonly operationId: string;
   readonly fingerprint: string;
@@ -73,11 +75,19 @@ export class TtyTransferApproval implements TransferApprovalPort {
         "\nAgent Payment Node approval",
         `Profile: ${intent.profile}`,
         `Operation: ${intent.operationId}`,
-        `Chain: Base (${CHAIN_ID})`,
-        `Token: ${BASE_USDC}`,
+        `Chain: ${intent.evm === undefined ? `Base (${CHAIN_ID})` : `eip155:${intent.evm.asset.chainId}`}`,
+        `Token: ${intent.evm === undefined ? BASE_USDC : intent.evm.asset.kind === "native" ? "native ETH" : intent.evm.asset.address}`,
         `Sender: ${intent.walletAddress}`,
         `Recipient: ${intent.recipient}`,
-        `Amount: ${intent.amountDecimal} USDC (${intent.amountAtomic} atomic)`,
+        `Amount: ${intent.amountDecimal} ${intent.evm === undefined ? "USDC" : intent.evm.asset.kind === "native" ? "ETH" : "token"} (${intent.amountAtomic} atomic)`,
+        ...(intent.evm === undefined ? [] : [
+          `Decimals: ${intent.evm.asset.decimals} (${intent.evm.asset.decimalsSource})`,
+          `Maximum execution fee: ${intent.evm.feeQuote.maximumExecutionFeeWei} wei`,
+          `L1 data fee upper estimate: ${intent.evm.feeQuote.l1DataFeeUpperWei} wei`,
+          `Operator fee estimate: ${intent.evm.feeQuote.operatorFeeUpperWei} wei`,
+          `Pre-submission total fee quote budget: ${intent.evm.maxFeeWei} wei`,
+          "Data/operator fees may vary at inclusion; the total quote budget is NOT an onchain-enforced total fee cap.",
+        ]),
         ...(intent.providerId === undefined ? [] : [`Provider: ${intent.providerId}`]),
         ...(intent.policyIdentity === undefined ? [] : [`Policy: ${intent.policyIdentity}`]),
         ...(intent.nonceAtomic === undefined ? [] : [`Nonce: ${intent.nonceAtomic}`]),
