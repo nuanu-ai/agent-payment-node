@@ -7,6 +7,10 @@ export declare const EVM_NETWORKS: readonly [{
     readonly chainId: 1;
     readonly name: "Ethereum";
     readonly caip2: "eip155:1";
+}, {
+    readonly chainId: 42161;
+    readonly name: "Arbitrum One";
+    readonly caip2: "eip155:42161";
 }];
 export type EvmChainId = typeof EVM_NETWORKS[number]["chainId"];
 export declare const NATIVE_ASSET_ADDRESS: "0x0000000000000000000000000000000000000000";

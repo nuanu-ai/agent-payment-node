@@ -11,6 +11,7 @@ export interface EvmBalanceSnapshot extends RpcProvenance {
 
 export interface EvmFeeQuote extends RpcProvenance {
   readonly chainId: EvmChainId;
+  readonly feeModel?: "arbitrum-inclusive";
   readonly l1DataFeeUpperWei: string;
   readonly operatorFeeUpperWei: string;
   readonly maximumExecutionFeeWei: string;
@@ -24,6 +25,8 @@ export interface EvmTransferEvidence {
   readonly tokenBalanceDeltasVerified: boolean;
   readonly senderDeltaAtomic?: string;
   readonly recipientDeltaAtomic?: string;
+  readonly safeBlockNumberAtomic?: string;
+  readonly safeBlockHash?: Hex;
 }
 
 export interface EvmTransactionInput {

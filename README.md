@@ -9,9 +9,9 @@ APN 0.5.8 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
-This unreleased source tree additionally implements explicit local-wallet Base
-and Ethereum native ETH / arbitrary ERC-20 direct transfers, plus independently
-network-bound Ethereum-USDC EIP-3009 x402. This is not a new public
+This unreleased source tree additionally implements explicit local-wallet Base,
+Ethereum and Arbitrum One native ETH / arbitrary ERC-20 direct transfers, plus
+independently network-bound Ethereum/Arbitrum canonical-USDC EIP-3009 x402. This is not a new public
 0.5.8 artifact or a Homebrew update. See [EVM asset transfers](docs/evm-assets.md)
 for the source-only capability, exact fee budget and evidence boundaries.
 

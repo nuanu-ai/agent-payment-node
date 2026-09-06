@@ -26,6 +26,14 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
       throw new ApnError("APN_REPREPARE_REQUIRED", "Nonce or execution fee economics changed before approval.");
     }
   }
+  if (!beforeSigning && operation.chainId === 42161) {
+    const fees = await rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic));
+    const current = validateEconomics(operation.economics.nonceAtomic, fees);
+    if (BigInt(current.gasLimitAtomic) > BigInt(operation.economics.gasLimitAtomic) ||
+        BigInt(current.maxFeePerGasAtomic) > BigInt(operation.economics.maxFeePerGasAtomic)) {
+      throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "Current Arbitrum inclusive gas or price exceeds the frozen signed envelope; retain this operation without replacement.");
+    }
+  }
   const quote = await rpc.feeQuote(operation.chainId, operation.economics);
   requireEvmFunding(balance, operation.amountAtomic, quote, binding.maxFeeWei);
 }

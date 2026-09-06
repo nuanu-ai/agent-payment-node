@@ -5,6 +5,7 @@ import { formatAtomic, parseAtomic, parseDecimal } from "./money.js";
 export const EVM_NETWORKS = [
     { chainId: 8453, name: "Base", caip2: "eip155:8453" },
     { chainId: 1, name: "Ethereum", caip2: "eip155:1" },
+    { chainId: 42161, name: "Arbitrum One", caip2: "eip155:42161" },
 ];
 export const NATIVE_ASSET_ADDRESS = "0x0000000000000000000000000000000000000000";
 export const MAX_EVM_UINT = (1n << 256n) - 1n;
