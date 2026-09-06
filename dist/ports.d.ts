@@ -1,4 +1,5 @@
 import type { Address, Hex } from "./model.js";
+import type { EvmRpcPort, EvmTransferEvidence } from "./evm-ports.js";
 export type { HttpGetRequest, HttpObservation, HttpPort } from "./x402-model.js";
 export interface ClockPort {
     now(): Date;
@@ -56,9 +57,11 @@ export interface RpcLog {
     readonly data: Hex;
 }
 export interface RpcReceipt {
+    readonly evmEvidence?: EvmTransferEvidence;
     readonly transactionHash: Hex;
     readonly status: "success" | "reverted";
     readonly blockNumberAtomic: string;
+    readonly blockHash?: Hex;
     readonly logs: readonly RpcLog[];
     readonly observedAt: string;
     readonly rpcOrigin: string;
@@ -150,6 +153,7 @@ export interface X402RpcPort {
     }): Promise<X402TransferLogs>;
 }
 export interface RpcPort {
+    readonly evm?: EvmRpcPort;
     assertBaseChain(): Promise<{
         readonly chainId: 8453;
         readonly rpcOrigin: string;

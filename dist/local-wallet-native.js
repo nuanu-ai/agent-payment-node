@@ -4,6 +4,8 @@ import { domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./cano
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID } from "./constants.js";
 import { EncryptedWalletStore, } from "./encrypted-wallet-store.js";
 import { ApnError } from "./errors.js";
+import { MAX_DIRECT_TRANSACTION_BYTES } from "./evm-asset.js";
+import { parseEvmNativeIntent } from "./evm-native-intent.js";
 import { formatAtomic } from "./money.js";
 import { transferData } from "./transfer-policy.js";
 import { TtyTransferApproval } from "./tty-approval.js";
@@ -60,7 +62,7 @@ export class LocalWalletNative {
         }
     }
     async approveAndSign(payload) {
-        const intent = parseDirectIntent(payload);
+        const intent = payload.evm === undefined ? parseDirectIntent(payload) : parseEvmNativeIntent(payload);
         // Human approval must complete before the Keychain-backed wallet envelope
         // is loaded. This keeps the raw signing key out of memory while approval is
         // pending, refused, interrupted, or expired.
@@ -78,9 +80,9 @@ export class LocalWalletNative {
             const account = privateKeyToAccount(secret.privateKey);
             const rawTransaction = await account.signTransaction({
                 type: "eip1559",
-                chainId: CHAIN_ID,
-                to: BASE_USDC,
-                value: 0n,
+                chainId: intent.evm?.asset.chainId ?? CHAIN_ID,
+                to: intent.evm?.transactionTo ?? BASE_USDC,
+                value: BigInt(intent.evm?.valueAtomic ?? "0"),
                 data: intent.transactionData,
                 nonce: Number(BigInt(intent.nonceAtomic)),
                 gas: BigInt(intent.gasLimitAtomic),
@@ -88,6 +90,8 @@ export class LocalWalletNative {
                 maxPriorityFeePerGas: BigInt(intent.maxPriorityFeePerGasAtomic),
                 accessList: [],
             });
+            if (intent.evm !== undefined && (rawTransaction.length - 2) / 2 > MAX_DIRECT_TRANSACTION_BYTES)
+                throw protocol("Signed transaction exceeds its data-fee quote size bound.");
             const transactionHash = keccak256(rawTransaction);
             const effect = {
                 payloadHash,
@@ -105,8 +109,16 @@ export class LocalWalletNative {
         return await this.withWallet(recovery.profile, async (_identity, secret) => {
             const slot = effectSlot("apn-effect-v1", recovery.profile, recovery.operationId, recovery.fingerprint);
             const effect = secret.directEffects[slot];
-            if (effect === undefined)
+            if (effect === undefined) {
+                if ("expectedPayloadHash" in recovery)
+                    return { found: false };
                 throw rejected("APN_EFFECT_NOT_FOUND", "Direct-transfer effect material was not found.");
+            }
+            if ("expectedPayloadHash" in recovery) {
+                if (effect.payloadHash !== recovery.expectedPayloadHash)
+                    throw rejected("APN_EFFECT_MISMATCH", "Stored signature does not match the frozen started operation.");
+                return publicDirectEffect(effect);
+            }
             if (effect.transactionHash.toLowerCase() !== recovery.expectedTransactionHash.toLowerCase() ||
                 effect.rawTransactionHash.toLowerCase() !== recovery.expectedRawTransactionHash.toLowerCase())
                 throw rejected("APN_EFFECT_MISMATCH", "Direct-transfer recovery binding does not match.");
@@ -245,6 +257,10 @@ function parseDirectIntent(payload) {
     };
 }
 function parseDirectRecovery(payload) {
+    if (payload.expectedPayloadHash !== undefined) {
+        exactRecord(payload, ["profile", "operationId", "fingerprint", "expectedPayloadHash"]);
+        return { profile: canonicalProfile(payload.profile), operationId: hash(payload.operationId, "operation ID"), fingerprint: hash(payload.fingerprint, "fingerprint"), expectedPayloadHash: hash(payload.expectedPayloadHash, "payload hash") };
+    }
     exactRecord(payload, ["profile", "operationId", "fingerprint", "expectedTransactionHash", "expectedRawTransactionHash"]);
     return {
         profile: canonicalProfile(payload.profile),

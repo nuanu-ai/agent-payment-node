@@ -1,6 +1,8 @@
+import { EvmRpc } from "./evm-rpc.js";
 import type { Address, Hex } from "./model.js";
 import type { BalanceSnapshot, FeeEstimate, RpcPort, RpcReceipt, X402AuthorizationState, X402AuthorizationUsedLogs, X402BlockReference, X402PrepareEvidence, X402RpcBlock, X402RpcHead, X402RpcPort, X402RpcReceipt, X402TransferLogs } from "./ports.js";
 export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
+    readonly evm: EvmRpc;
     readonly endpoint: URL;
     readonly rpcOrigin: string;
     private sequence;

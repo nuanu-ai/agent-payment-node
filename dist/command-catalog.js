@@ -1,4 +1,5 @@
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
+import { EVM_COMMANDS } from "./evm-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
 import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
 export { renderHelp, renderReadmeCommandReference };
@@ -65,6 +66,7 @@ export const COMMAND_GROUPS = [
     { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ];
 export const COMMANDS = [
+    ...EVM_COMMANDS,
     command(["--version"], "apn --version", "Report installed APN and CLI contract versions.", [], "none", "Reads immutable build metadata only.", "none", "Never.", completedStates, [], ["apn --version"]),
     command(["mcp", "serve"], "apn mcp serve", "Serve the selected APN commands over local MCP stdio.", [], "none", "Starts only a local child-process stdio session.", "none", "Never.", mcpServerStates, [], ["apn mcp serve"], "text"),
     command(["mcp", "config"], "apn mcp config", "Print the provider-neutral APN MCP launch descriptor.", [], "none", "Returns immutable launch metadata without reading or changing client configuration.", "none", "Never.", completedStates, [], ["apn mcp config"], "text"),
