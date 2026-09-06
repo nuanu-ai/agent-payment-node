@@ -1,6 +1,7 @@
 import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { x402Network } from "./x402-network.js";
 const POLICY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
 export class TtyProfilePolicyApproval {
@@ -35,8 +36,8 @@ export class TtyProfilePolicyApproval {
                 "\nAgent Payment Node policy approval",
                 `Change: ${intent.change}`,
                 `Profile: ${intent.profile}`,
-                `Chain: Base (${CHAIN_ID})`,
-                `Token: ${BASE_USDC}`,
+                intent.x402Network === undefined ? `Chain: Base (${CHAIN_ID})` : `Chain: ${x402Network(intent.x402Network.chainId).network}`,
+                `Token: ${intent.x402Network?.token ?? BASE_USDC}`,
                 `Wallet: ${intent.walletAddress}`,
                 `Maximum wallet USDC: ${intent.maxBalanceUsdcAtomic} atomic`,
                 `Maximum unattended x402: ${intent.maxX402AmountAtomic} atomic`,

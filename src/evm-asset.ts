@@ -4,8 +4,11 @@ import { ApnError } from "./errors.js";
 import { formatAtomic, parseAtomic, parseDecimal } from "./money.js";
 import type { Address } from "./model.js";
 
-export type EvmChainId = 8453;
-export const EVM_NETWORKS = [{ chainId: 8453, name: "Base", caip2: "eip155:8453" }] as const;
+export const EVM_NETWORKS = [
+  { chainId: 8453, name: "Base", caip2: "eip155:8453" },
+  { chainId: 1, name: "Ethereum", caip2: "eip155:1" },
+] as const;
+export type EvmChainId = typeof EVM_NETWORKS[number]["chainId"];
 export const NATIVE_ASSET_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 export const MAX_EVM_UINT = (1n << 256n) - 1n;
 export const MAX_DIRECT_TRANSACTION_BYTES = 512;

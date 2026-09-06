@@ -1,3 +1,4 @@
+import type { EvmChainId } from "../../src/evm-asset.js";
 import type { HttpGetRequest, HttpObservation, HttpPort } from "../../src/x402-model.js";
 import type { Address, Hex } from "../../src/model.js";
 import type {
@@ -14,11 +15,13 @@ import type {
   X402TransferLogs,
 } from "../../src/ports.js";
 import { domainHash } from "../../src/canonical.js";
-import { ApnError } from "../../src/errors.js";
+import * as errorRuntime from "../../src/errors.js";
+import { testRuntime } from "./installed-runtime.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { TestRpc } from "./helpers.js";
 import { canonicalPaymentRequiredHeader, X402_URL } from "./x402-vectors.js";
 
+const { ApnError } = await testRuntime(errorRuntime, "errors.js");
 const PRIVATE_KEY = `0x${"0".repeat(63)}1` as Hex;
 export const X402_TEST_ACCOUNT = privateKeyToAccount(PRIVATE_KEY);
 
@@ -84,6 +87,7 @@ export class ExactX402Native implements NativePort {
     if (request.operation !== "x402Exact.approveAndAuthorize") throw new Error(`unexpected native operation ${request.operation}`);
     const payload = request.payload as {
       readonly token: `0x${string}`;
+      readonly chainId: string;
       readonly tokenDomain: { readonly name: string; readonly version: string };
       readonly authorization: {
         readonly from: `0x${string}`; readonly to: `0x${string}`; readonly value: string;
@@ -94,7 +98,7 @@ export class ExactX402Native implements NativePort {
       domain: {
         name: payload.tokenDomain.name,
         version: payload.tokenDomain.version,
-        chainId: 8453,
+        chainId: Number(payload.chainId),
         verifyingContract: payload.token,
       },
       types: {
@@ -154,6 +158,19 @@ export class RecoveryRpc extends TestRpc implements X402RpcPort {
   blockHashes = new Map<string, Hex>();
   blockTimestamps = new Map<string, string>();
   onX402Call?: (name: string) => void | Promise<void>;
+
+  forX402Network(chainId: EvmChainId): RecoveryRpc {
+    if (chainId !== this.chainId) throw new ApnError("APN_CHAIN_MISMATCH", "Wrong synthetic x402 network.");
+    return this;
+  }
+
+  async assertX402Chain(chainId: EvmChainId) {
+    if (chainId === 8453) return await this.assertBaseChain();
+    this.x402Calls.push("chain");
+    await this.onX402Call?.("chain");
+    if (chainId !== this.chainId) throw new ApnError("APN_CHAIN_MISMATCH", "Wrong synthetic x402 network.");
+    return { chainId, rpcOrigin: this.rpcOrigin };
+  }
 
   withTotalTimeout(_milliseconds: number): X402RpcPort { return this; }
 

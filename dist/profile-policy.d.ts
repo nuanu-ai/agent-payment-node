@@ -1,7 +1,10 @@
+import { type X402PolicyNetwork } from "./x402-network.js";
+import type { EvmChainId } from "./evm-asset.js";
 import type { Address, WalletRecord } from "./model.js";
 import type { ProviderProfileRecord } from "./provider-profile.js";
 export declare const PROFILE_POLICY_VERSION: "apn.profile-policy.v1";
 export interface ProfilePolicyBinding {
+    readonly x402Network?: X402PolicyNetwork;
     readonly profile: string;
     readonly profileHash: string;
     readonly walletAddress: Address;
@@ -29,7 +32,7 @@ export declare function policyBinding(wallet: WalletRecord | ProviderProfileReco
 export declare function canonicalPolicyInput(input: ProfilePolicySetInput): ProfilePolicySetInput;
 export declare function sealProfilePolicy(value: Omit<ProfilePolicyRecord, "integrityHash">): ProfilePolicyRecord;
 export declare function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBinding): ProfilePolicyRecord;
-export declare function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null): unknown;
+export declare function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, chainId?: EvmChainId): unknown;
 export declare function fundingPosture(usdcAtomic: string, ethAtomic: string, policy: ProfilePolicyRecord | null): unknown;
 export declare function requireProfilePolicy(policy: ProfilePolicyRecord | null): ProfilePolicyRecord;
 export declare function effectiveX402Cap(policy: ProfilePolicyRecord, callerCapInput?: string): string;

@@ -1,3 +1,4 @@
+import type { EvmChainId } from "./evm-asset.js";
 import { request as httpsRequest } from "node:https";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import { isIP } from "node:net";
@@ -82,7 +83,7 @@ export class HttpsX402Http implements HttpPort {
   }
 }
 
-export async function inspectX402(http: HttpPort, value: string, request?: X402HttpRequestV1): Promise<InspectResult> {
+export async function inspectX402(http: HttpPort, value: string, request?: X402HttpRequestV1, chainId: EvmChainId = 8453): Promise<InspectResult> {
   const endpoint = parsePublicHttpsUrl(value, "APN_HTTP_CONFIG", "Seller URL", 2048);
   const canonicalUrl = endpoint.toString();
   if (canonicalUrl !== value) throw httpError("APN_HTTP_CONFIG", "Seller URL must use its canonical WHATWG serialization.");
@@ -90,7 +91,7 @@ export async function inspectX402(http: HttpPort, value: string, request?: X402H
   const observation = await http.get({ url: canonicalUrl, ...(httpRequest === undefined ? {} : { httpRequest }) });
   validateInspectObservation(observation, endpoint);
   const paymentRequired = decodePaymentRequiredHeader(singleControlHeader(observation.rawHeaderPairs, "payment-required"));
-  const candidates = inspectCandidates(paymentRequired, canonicalUrl);
+  const candidates = inspectCandidates(paymentRequired, canonicalUrl, chainId);
   if (candidates.length === 0) throw httpError("APN_X402_UNSUPPORTED_OFFER", "Seller challenge has no supported x402 offer.");
   return {
     kind: "x402_inspection",

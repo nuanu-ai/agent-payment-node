@@ -1,3 +1,7 @@
+import { encodeAbiParameters } from "viem";
+import { HttpsBaseRpc } from "../../src/rpc.js";
+import { tokenDomainSeparator } from "../../src/x402-policy.js";
+import { x402Network } from "../../src/x402-network.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeFunctionData, toHex } from "viem";
@@ -133,4 +137,59 @@ test("on-chain evidence verifies signed fields and exact pinned token deltas; lo
   wrongParent = false; const before = balanceCalls;
   assert.equal((await rpc.evidence(operation, { ...receipt, status: "reverted" })).transactionVerified, true);
   assert.equal(balanceCalls, before);
+});
+
+test("Ethereum fees are execution-only without Base oracle calls, while chain mismatch still fails closed", async () => {
+  const wire = new Wire(); wire.chain = "0x1";
+  const rpc = new EvmRpc(wire.call, "https://rpc.example");
+  const quote = await rpc.feeQuote(1, ECONOMICS);
+  assert.equal(quote.l1DataFeeUpperWei, "0"); assert.equal(quote.operatorFeeUpperWei, "0");
+  assert.equal(quote.totalQuoteWei, ECONOMICS.maximumGasCostAtomic);
+  assert.equal(wire.calls.filter(({ method }) => method === "eth_call").length, 0);
+  const balance = await rpc.balance(WALLET, { chainId: 1, token: EVM_TOKEN });
+  assert.equal(balance.asset.chainId, 1); assert.equal(balance.asset.decimals, 8);
+  wire.chain = "0x2105";
+  await assert.rejects(rpc.feeQuote(1, ECONOMICS), { code: "APN_CHAIN_MISMATCH" });
+});
+
+test("production x402 RPC binds Ethereum token, chain, log filters and bounded copies without weakening Base assertions", async () => {
+  const base = new HttpsBaseRpc("https://rpc.example");
+  const ethereum = base.forX402Network(1); assert.notEqual(base, ethereum);
+  let chain = "0x1";
+  const calls: Array<{ method: string; params: readonly unknown[] }> = [];
+  const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+    calls.push({ method, params });
+    if (method === "eth_chainId") return chain;
+    if (method === "eth_getBlockByNumber") return { number: "0x3039", hash: EVM_BLOCK_HASH, timestamp: "0x6a91d200" };
+    if (method === "eth_getLogs") return [];
+    if (method === "eth_call") {
+      const input = params[0] as { to: string; data: string };
+      assert.equal(input.to, x402Network(1).token); assert.equal(params[1], "0x3039");
+      if (input.data.startsWith("0x70a08231")) return toHex(50000000n, { size: 32 });
+      if (input.data === "0x06fdde03") return encodeAbiParameters([{ type: "string" }], ["USD Coin"]);
+      if (input.data === "0x54fd4d50") return encodeAbiParameters([{ type: "string" }], ["2"]);
+      if (input.data === "0x3644e515") return tokenDomainSeparator("USD Coin", "2", 1);
+      if (input.data.startsWith("0xe94a0102")) return toHex(0n, { size: 32 });
+    }
+    throw new Error(`unexpected synthetic read ${method}`);
+  };
+  const wire = (rpc: unknown) => {
+    (rpc as { call: typeof call }).call = call;
+    (rpc as { callX402Logs: (params: readonly unknown[]) => Promise<unknown> }).callX402Logs = async (params) => ({ kind: "complete", value: await call("eth_getLogs", params) });
+  };
+  wire(ethereum); wire(base);
+  assert.equal((await ethereum.assertX402Chain(1)).chainId, 1);
+  await assert.rejects(ethereum.assertBaseChain(), { code: "APN_CHAIN_MISMATCH" });
+  await assert.rejects(ethereum.assertX402Chain(8453), { code: "APN_CHAIN_MISMATCH" });
+  assert.equal((await ethereum.getX402PrepareEvidence(WALLET)).domainSeparator, tokenDomainSeparator("USD Coin", "2", 1));
+  await ethereum.getX402AuthorizationState(WALLET, HASH, { tag: "safe" });
+  await ethereum.getX402AuthorizationUsedLogs({ authorizer: WALLET, nonce: HASH, fromBlock: "12345", toBlock: "12345" });
+  const filter = calls.find(({ method }) => method === "eth_getLogs")!.params[0] as { address: string };
+  assert.equal(filter.address, x402Network(1).token);
+  const bounded = ethereum.withTotalTimeout(20000); wire(bounded);
+  assert.equal((await bounded.assertX402Chain!(1)).chainId, 1);
+  chain = "0x2105";
+  await assert.rejects(bounded.assertX402Chain!(1), { code: "APN_CHAIN_MISMATCH" });
+  assert.equal((await base.assertBaseChain()).chainId, 8453);
+  assert.equal(calls.some(({ method }) => method.startsWith("eth_send")), false);
 });

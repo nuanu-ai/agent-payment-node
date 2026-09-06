@@ -1,4 +1,5 @@
-import { hashObject, isPlainRecord } from "./canonical.js";
+import { canonicalJson, hashObject, isPlainRecord } from "./canonical.js";
+import { validPolicyNetwork, x402Network } from "./x402-network.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 export const PROFILE_POLICY_VERSION = "apn.profile-policy.v1";
@@ -20,13 +21,13 @@ export function policyBinding(wallet) {
     };
 }
 export function canonicalPolicyInput(input) {
-    const maxBalanceUsdcAtomic = canonicalPositive(input.maxBalanceUsdcAtomic, "Base-USDC balance limit");
+    const maxBalanceUsdcAtomic = canonicalPositive(input.maxBalanceUsdcAtomic, "selected-network USDC balance limit");
     const maxX402AmountAtomic = canonicalPositive(input.maxX402AmountAtomic, "per-x402 limit");
     const maxBalanceEthWei = input.maxBalanceEthWei === undefined
         ? undefined
-        : canonicalPositive(input.maxBalanceEthWei, "Base-ETH balance limit");
+        : canonicalPositive(input.maxBalanceEthWei, "selected-network ETH balance limit");
     if (BigInt(maxX402AmountAtomic) > BigInt(maxBalanceUsdcAtomic)) {
-        throw new ApnError("APN_INVALID_INPUT", "The per-x402 limit cannot exceed the Base-USDC balance limit.");
+        throw new ApnError("APN_INVALID_INPUT", "The per-x402 limit cannot exceed the selected-network USDC balance limit.");
     }
     return {
         maxBalanceUsdcAtomic,
@@ -44,12 +45,12 @@ export function validateProfilePolicy(value, binding) {
         "schemaVersion", "profile", "profileHash", "walletAddress", "walletBindingHash",
         "maxBalanceUsdcAtomic", "maxX402AmountAtomic", "approvedAt", "updatedAt", "integrityHash",
     ];
-    const allowed = [...required, "maxBalanceEthWei"];
+    const allowed = [...required, "maxBalanceEthWei", "x402Network"];
     if (required.some((key) => !(key in value)) || Object.keys(value).some((key) => !allowed.includes(key))) {
         corrupt("Profile policy has an unexpected schema.");
     }
     const policy = value;
-    if (policy.schemaVersion !== PROFILE_POLICY_VERSION ||
+    if (policy.schemaVersion !== PROFILE_POLICY_VERSION || !validPolicyNetwork(policy.x402Network) ||
         typeof policy.profile !== "string" || typeof policy.profileHash !== "string" || !HASH.test(policy.profileHash) ||
         typeof policy.walletAddress !== "string" || typeof policy.walletBindingHash !== "string" || !HASH.test(policy.walletBindingHash) ||
         typeof policy.approvedAt !== "string" || !canonicalTimestamp(policy.approvedAt) ||
@@ -70,14 +71,17 @@ export function validateProfilePolicy(value, binding) {
         corrupt("Profile policy approval time is newer than its update time.");
     }
     if (binding !== undefined && (policy.profile !== binding.profile || policy.profileHash !== binding.profileHash ||
-        policy.walletAddress !== binding.walletAddress || policy.walletBindingHash !== binding.walletBindingHash))
+        policy.walletAddress !== binding.walletAddress || policy.walletBindingHash !== binding.walletBindingHash ||
+        canonicalJson(policy.x402Network ?? null) !== canonicalJson(binding.x402Network ?? null)))
         corrupt("Profile policy does not bind the current wallet identity.");
     return policy;
 }
-export function publicProfilePolicy(profile, policy) {
+export function publicProfilePolicy(profile, policy, chainId) {
+    const selected = chainId === undefined ? {} : { chain: x402Network(chainId).network, token: x402Network(chainId).token };
     if (policy === null) {
         return {
             configured: false,
+            ...selected,
             policy_version: null,
             profile,
             limits: {
@@ -89,11 +93,12 @@ export function publicProfilePolicy(profile, policy) {
             updated_at: null,
             integrity_status: "not_present",
             proof_class: "encrypted_profile_policy_status",
-            next_actions: ["apn wallet policy set"],
+            next_actions: [chainId === undefined ? "apn wallet policy set" : `apn wallet policy set-network --chain eip155:${chainId}`],
         };
     }
     return {
         configured: true,
+        ...selected,
         policy_version: policy.schemaVersion,
         profile: policy.profile,
         limits: {
@@ -171,7 +176,7 @@ export function effectiveX402Cap(policy, callerCapInput) {
 export function assertUnattendedX402Balance(policy, usdcAtomic) {
     const balance = parseAtomic(usdcAtomic);
     if (balance > BigInt(policy.maxBalanceUsdcAtomic)) {
-        throw new ApnError("APN_WALLET_OVERFUNDED_FOR_UNATTENDED_X402", "The disposable wallet exceeds its owner-approved Base-USDC balance limit; unattended x402 is blocked.");
+        throw new ApnError("APN_WALLET_OVERFUNDED_FOR_UNATTENDED_X402", "The disposable wallet exceeds its owner-approved selected-network USDC balance limit; unattended x402 is blocked.");
     }
 }
 export function policyIncrease(current, next) {

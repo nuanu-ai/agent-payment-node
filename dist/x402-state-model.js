@@ -1,3 +1,4 @@
+import { x402Network } from "./x402-network.js";
 import { canonicalJson, domainHash, hashObject, sha256 } from "./canonical.js";
 import { x402HttpRequestBinding } from "./x402-http-request.js";
 const HASH = /^[a-f0-9]{64}$/u;
@@ -11,6 +12,7 @@ export function x402RequestHash(input) {
     return hashObject({
         ...x402HttpRequestBinding(input.httpRequest),
         method: "x402.fetch.prepare",
+        ...((input.chainId ?? 8453) === 8453 ? {} : { network: x402Network(input.chainId).network }),
         profile: input.profile,
         canonicalUrl: input.canonicalUrl,
         capAtomic: input.capAtomic,
@@ -44,6 +46,7 @@ export function x402AuthorizationIntentHash(value) {
 export function x402OperationBindingHash(operation) {
     return domainHash("apn.x402.binding.v1", canonicalJson({
         version: 1,
+        ...(operation.chainId === "8453" ? {} : { network: operation.network, chainId: operation.chainId, token: operation.token }),
         x402Version: 2,
         method: operation.resource.httpRequest?.method ?? "GET",
         ...x402HttpRequestBinding(operation.resource.httpRequest),

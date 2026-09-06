@@ -1,3 +1,4 @@
+import type { X402ChainText } from "./x402-network.js";
 import type { NativePort, NativeRequest } from "./ports.js";
 import type { X402OperationRecord } from "./x402-state-integrity.js";
 export type PaymentIdentifierPosture = "absent" | "optional" | "required";
@@ -8,7 +9,7 @@ export interface X402NativeCreatePayload {
     readonly operationId: string;
     readonly fingerprint: string;
     readonly wallet: `0x${string}`;
-    readonly chainId: "8453";
+    readonly chainId: X402ChainText;
     readonly token: `0x${string}`;
     readonly resource: {
         readonly origin: string;
@@ -33,7 +34,7 @@ export interface X402NativeRecoveryPayload {
     readonly operationId: string;
     readonly fingerprint: string;
     readonly wallet: `0x${string}`;
-    readonly chainId: "8453";
+    readonly chainId: X402ChainText;
     readonly token: `0x${string}`;
     readonly tokenDomain: {
         readonly name: string;

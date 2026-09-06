@@ -32,6 +32,10 @@ const SELECTED_PATHS = [
   "operation recover-provider-request",
   "operation recover-transaction-settlement",
   "receipt get",
+  "wallet policy show-network",
+  "wallet policy set-network",
+  "x402 inspect-network",
+  "x402 fetch prepare-network",
 ] as const;
 
 export interface ProjectedMcpTool {

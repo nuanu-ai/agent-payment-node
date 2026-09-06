@@ -1,15 +1,20 @@
 import { keccak256, pad, parseTransaction, toHex } from "viem";
-import { ApnCore } from "../../src/core.js";
-import { ApnError } from "../../src/errors.js";
+import * as coreRuntime from "../../src/core.js";
+import { testRuntime } from "./installed-runtime.js";
+import * as errorRuntime from "../../src/errors.js";
 import { resolveEvmAsset } from "../../src/evm-asset.js";
 import type { EvmRpcPort } from "../../src/evm-ports.js";
-import { LocalWalletNative } from "../../src/local-wallet-native.js";
+import * as nativeRuntime from "../../src/local-wallet-native.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { Address, Hex } from "../../src/model.js";
 import type { NativePort } from "../../src/ports.js";
 import { StateStore } from "../../src/state.js";
 import type { TransferApprovalIntent, TransferApprovalPort } from "../../src/tty-approval.js";
 import { RECIPIENT, TestClock, TestRpc } from "./helpers.js";
+
+const { ApnError } = await testRuntime(errorRuntime, "errors.js");
+const { ApnCore } = await testRuntime(coreRuntime, "core.js");
+const { LocalWalletNative } = await testRuntime(nativeRuntime, "local-wallet-native.js");
 
 export const EVM_TOKEN = "0x4444444444444444444444444444444444444444" as Address;
 export const EVM_BLOCK_HASH = `0x${"b".repeat(64)}` as Hex;

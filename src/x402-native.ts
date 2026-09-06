@@ -1,6 +1,6 @@
 import { recoverTypedDataAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
-import { BASE_USDC } from "./constants.js";
+import type { X402ChainText } from "./x402-network.js";
 import { ApnError } from "./errors.js";
 import type { NativePort, NativeRequest } from "./ports.js";
 import { encodePaymentSignatureHeader } from "./x402-codec.js";
@@ -22,7 +22,7 @@ export interface X402NativeCreatePayload {
   readonly operationId: string;
   readonly fingerprint: string;
   readonly wallet: `0x${string}`;
-  readonly chainId: "8453";
+  readonly chainId: X402ChainText;
   readonly token: `0x${string}`;
   readonly resource: { readonly origin: string; readonly path: string; readonly urlHash: string };
   readonly capAtomic: string;
@@ -41,7 +41,7 @@ export interface X402NativeRecoveryPayload {
   readonly operationId: string;
   readonly fingerprint: string;
   readonly wallet: `0x${string}`;
-  readonly chainId: "8453";
+  readonly chainId: X402ChainText;
   readonly token: `0x${string}`;
   readonly tokenDomain: { readonly name: string; readonly version: string };
   readonly authorization: PublicAuthorization;
@@ -89,7 +89,7 @@ export function x402NativeCreatePayload(operation: X402OperationRecord): X402Nat
     operationId: operation.operationId,
     fingerprint: operation.fingerprint,
     wallet: operation.wallet,
-    chainId: "8453",
+    chainId: operation.chainId,
     token: operation.token,
     resource: {
       origin: operation.resource.origin,
@@ -121,7 +121,7 @@ export function x402NativeRecoveryPayload(
     operationId: operation.operationId,
     fingerprint: operation.fingerprint,
     wallet: operation.wallet,
-    chainId: "8453",
+    chainId: operation.chainId,
     token: operation.token,
     tokenDomain: {
       name: resolved.tokenName,
@@ -161,8 +161,8 @@ export async function verifyAndConstructX402PaymentMaterial(
       domain: {
         name: resolved.tokenName,
         version: resolved.tokenVersion,
-        chainId: 8453,
-        verifyingContract: BASE_USDC,
+        chainId: Number(operation.chainId),
+        verifyingContract: operation.token,
       },
       types: {
         TransferWithAuthorization: [
