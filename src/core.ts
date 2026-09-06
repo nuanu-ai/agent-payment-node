@@ -10,6 +10,7 @@ import { inspectX402 } from "./x402-http.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
+import { evmWalletBalance } from "./evm-wallet-balance.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
 import { ProviderPermissionService } from "./provider-permission-service.js";
@@ -71,7 +72,8 @@ export class ApnCore {
           : dataOutcome(providerStatus, "provider_profile_binding");
       }
       case "wallet.balance": return dataOutcome(
-        await this.providerWallet.balance(request.profile) ?? await this.wallet.balance(request.profile),
+        request.asset === undefined ? await this.providerWallet.balance(request.profile) ?? await this.wallet.balance(request.profile) :
+          await evmWalletBalance(this.context, request.profile, request.asset),
         "chain_verified_public_read",
       );
       case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile), "encrypted_profile_policy_status");

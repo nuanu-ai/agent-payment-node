@@ -6,7 +6,8 @@ import { canonicalJson, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { MacosAdvisoryLock } from "./macos-advisory-lock.js";
 import { validateProviderProfile } from "./provider-profile.js";
-import { assertProviderTerminalReceiptAuthority } from "./provider-direct-receipt.js";
+import { assertDirectTerminalReceiptAuthority } from "./direct-terminal-receipt.js";
+import { validateEvmOperationWrite } from "./evm-operation-write.js";
 import { validateOperation, validateReceipt, validateWallet } from "./state-integrity.js";
 import { isCode, SecureStateStore, stateCorrupt, stateIdentifier, stateSecurity, validateDirectory, } from "./secure-state-store.js";
 import { sameOptionalCanonical, validateX402AppendOnly, validateX402ScanContinuity, } from "./x402-state-continuity.js";
@@ -80,8 +81,8 @@ export class StateStore extends SecureStateStore {
         if (value === null)
             return null;
         const operation = validateOperation(value);
-        if (operation.providerDirect !== undefined && operation.terminal) {
-            assertProviderTerminalReceiptAuthority(operation, await this.loadReceipt(profileHash, operationId));
+        if ((operation.providerDirect !== undefined || operation.evm !== undefined) && operation.terminal) {
+            assertDirectTerminalReceiptAuthority(operation, await this.loadReceipt(profileHash, operationId));
         }
         return operation;
     }
@@ -104,6 +105,7 @@ export class StateStore extends SecureStateStore {
     }
     async writeOperation(operation) {
         await this.ensureDirectory(join("operations", operation.profileHash));
+        validateEvmOperationWrite(operation, await this.readJson(join("operations", operation.profileHash, `${operation.operationId}.json`)));
         await this.writeJson(join("operations", operation.profileHash, `${operation.operationId}.json`), operation);
     }
     async listOperations(profileHash) {

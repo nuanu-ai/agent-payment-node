@@ -18,6 +18,7 @@ export declare class TransferService {
     private inspectReceipt;
     private proveSuperseding;
     private requiredOperation;
+    private effectFor;
     private failBeforeEffect;
     private transition;
     private persist;
