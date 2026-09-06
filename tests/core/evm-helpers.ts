@@ -63,7 +63,7 @@ export class EvmTestRpc extends TestRpc {
     },
     nonce: async (chainId, _address, tag) => { await this.evm.assertChain(chainId); return tag === "pending" ? this.nonceAtomic : this.latestNonceAtomic; },
     estimate: async () => this.fees,
-    feeQuote: async (chainId, economics) => ({ chainId, maximumExecutionFeeWei: economics.maximumGasCostAtomic,
+    feeQuote: async (chainId, economics) => ({ chainId, ...(chainId === 42161 ? { feeModel: "arbitrum-inclusive" as const } : {}), maximumExecutionFeeWei: economics.maximumGasCostAtomic,
       l1DataFeeUpperWei: this.l1Fee.toString(), operatorFeeUpperWei: this.operatorFee.toString(),
       totalQuoteWei: (BigInt(economics.maximumGasCostAtomic) + this.l1Fee + this.operatorFee).toString(), totalFeeEnforcedOnchain: false,
       blockNumberAtomic: "12345", blockHash: EVM_BLOCK_HASH, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin }),
@@ -78,7 +78,7 @@ export class EvmTestRpc extends TestRpc {
         logs: data === undefined || !this.transferLogEnabled ? [] : [{ address: transaction.to! as Address,
           topics: [TRANSFER_TOPIC, pad(this.sender, { size: 32 }), pad(RECIPIENT, { size: 32 })], data: toHex(BigInt(`0x${data.slice(-64)}`), { size: 32 }) }] };
     },
-    evidence: async (operation) => ({ blockHash: EVM_BLOCK_HASH, transactionVerified: this.transactionVerified,
+    evidence: async (operation) => ({ ...(operation.chainId === 42161 ? { safeBlockNumberAtomic: "12346", safeBlockHash: EVM_BLOCK_HASH } : {}), blockHash: EVM_BLOCK_HASH, transactionVerified: this.transactionVerified,
       tokenBalanceDeltasVerified: operation.evm?.asset.kind === "erc20" && this.deltasVerified,
       ...(operation.evm?.asset.kind === "erc20" ? { senderDeltaAtomic: operation.amountAtomic, recipientDeltaAtomic: this.deltasVerified ? operation.amountAtomic : "0" } : {}) }),
     confirmedAtNonce: async () => this.confirmedAtNonce,
