@@ -1,4 +1,5 @@
 import type { X402DelegatedMaterialBinding } from "./provider-ports.js";
+import { type X402HttpRequestV1 } from "./x402-http-request.js";
 export declare const ZERO_HASH: string;
 export declare const X402_STATE_VERSION: "apn.x402.state.v1";
 export declare const TRANSITION_VERSION: "apn.x402.transition.v1";
@@ -253,14 +254,14 @@ export interface Erc7710UnusedExpiryEvidence {
 }
 export type UnusedExpiryEvidence = Eip3009UnusedExpiryEvidence | Erc7710UnusedExpiryEvidence;
 export interface X402ResultRecord {
-    readonly schemaVersion: "apn.x402.result.v1";
+    readonly schemaVersion: "apn.x402.result.v1" | "apn.x402.result.v2";
     readonly operationId: string;
     readonly mediaType: string;
-    readonly bodyEncoding: "utf8";
+    readonly bodyEncoding: "utf8" | "base64";
     readonly bodyText: string;
     readonly resultHash: string;
     readonly byteLength: string;
-    readonly responseStatus: "200";
+    readonly responseStatus: string;
     readonly createdAt: string;
     readonly integrityHash: string;
 }
@@ -324,6 +325,7 @@ export interface X402OperationRecord {
         readonly origin: string;
         readonly path: string;
         readonly urlHash: string;
+        readonly httpRequest?: X402HttpRequestV1;
     };
     readonly sellerWire: {
         readonly resourceCanonicalJson: string;
@@ -400,6 +402,7 @@ export declare function x402RequestHash(input: {
     readonly profile: string;
     readonly canonicalUrl: string;
     readonly capAtomic: string;
+    readonly httpRequest?: X402HttpRequestV1;
 }): string;
 export declare function x402Fingerprint(input: Pick<X402OperationRecord, "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier" | "providerSigner" | "delegatedMaterial">): string;
 export declare function x402AuthorizationIntentHash(value: Omit<X402OperationRecord["authorization"], "intentHash">): string;

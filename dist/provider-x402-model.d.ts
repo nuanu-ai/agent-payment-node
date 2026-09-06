@@ -4,8 +4,10 @@ import type { ProfilePolicyRecord } from "./profile-policy.js";
 import type { X402RpcBlock, X402RpcHead, X402RpcLog } from "./ports.js";
 import { type X402SettlementWaitProjection } from "./x402-state-integrity.js";
 import { type ProviderX402TransactionRecoveryBinding } from "./provider-x402-transaction-recovery-model.js";
+import { type X402HttpRequestV1 } from "./x402-http-request.js";
 export type { ProviderX402TransactionRecoveryBinding } from "./provider-x402-transaction-recovery-model.js";
 export declare const PROVIDER_X402_STATE_VERSION: "apn.provider-x402.state.v1";
+export declare const PROVIDER_X402_HTTP_STATE_VERSION: "apn.provider-x402.state.v2";
 export type ProviderX402State = "preparing" | "awaiting_approval" | "started" | "settlement_pending" | "ambiguous_effect" | "completed" | "failed_before_effect" | "failed_settled_without_result";
 export interface ProviderX402Transition {
     readonly sequence: string;
@@ -68,7 +70,7 @@ export interface ProviderX402TransactionSettlementEvidence {
 }
 export type ProviderX402SettlementEvidence = ProviderX402RangeSettlementEvidence | ProviderX402TransactionSettlementEvidence;
 export interface ProviderX402OperationRecord {
-    readonly schemaVersion: typeof PROVIDER_X402_STATE_VERSION;
+    readonly schemaVersion: typeof PROVIDER_X402_STATE_VERSION | typeof PROVIDER_X402_HTTP_STATE_VERSION;
     readonly kind: "x402_fetch";
     readonly executionMode: "provider_atomic_paid_fetch";
     readonly operationId: string;
@@ -91,8 +93,9 @@ export interface ProviderX402OperationRecord {
         readonly origin: string;
         readonly path: string;
         readonly urlHash: string;
-        readonly method: "GET";
-        readonly bodyState: "absent";
+        readonly method: string;
+        readonly bodyState: "absent" | "present";
+        readonly httpRequest?: X402HttpRequestV1;
         readonly bodyDigest: string;
         readonly metadataDigest: string;
         readonly requestDigest: string;
@@ -164,6 +167,7 @@ export interface ProviderX402ReceiptRecord {
     readonly integrityHash: string;
 }
 export declare function providerX402RequestHash(input: {
+    readonly httpRequest?: X402HttpRequestV1;
     readonly profile: string;
     readonly canonicalUrl: string;
     readonly rpcUrl: string;

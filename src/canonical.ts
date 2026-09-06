@@ -9,7 +9,7 @@ export function canonicalJson(value: unknown): string {
 
 function toCanonical(value: unknown): Canonical {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number" && Number.isSafeInteger(value)) return value;
+  if (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER) return value;
   if (Array.isArray(value)) return value.map(toCanonical);
   if (typeof value === "object") {
     const output: { [key: string]: Canonical } = {};

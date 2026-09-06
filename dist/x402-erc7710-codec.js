@@ -2,10 +2,7 @@ import { ALL_METAMASK_FACILITATOR_ADDRESSES, METAMASK_FACILITATOR_ADDRESSES, } f
 import { exactKeys, isPlainRecord } from "./canonical.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 export function canonicalErc7710Facilitators(extra) {
-    const allowed = new Set([
-        "assetTransferMethod", "facilitatorAddresses", "name", "version", "decimals", "paymentFlow",
-    ]);
-    if (extra.assetTransferMethod !== "erc7710" || Object.keys(extra).some((key) => !allowed.has(key)) ||
+    if (extra.assetTransferMethod !== "erc7710" ||
         !optionalBoundedString(extra.name) || !optionalBoundedString(extra.version) ||
         (extra.decimals !== undefined && extra.decimals !== 6) ||
         (extra.paymentFlow !== undefined && extra.paymentFlow !== "authorization"))

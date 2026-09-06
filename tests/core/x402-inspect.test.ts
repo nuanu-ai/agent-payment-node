@@ -123,7 +123,7 @@ test("unsupported-offer filtering retains standard envelope and selected-offer s
   };
   const malformedEip3009 = {
     ...X402_REQUIREMENTS,
-    extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "eip3009", unexpected: true },
+    extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "eip3009", decimals: 18 },
   };
   const malformedFlow = {
     ...X402_REQUIREMENTS,
@@ -164,7 +164,6 @@ test("strict wire rejects malformed base64, duplicate JSON keys, unsafe numbers,
     canonicalPaymentRequiredHeader().slice(0, -4),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, resource: { ...X402_PAYMENT_REQUIRED.resource, description: "x".repeat(49 * 1024) } }),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: Array.from({ length: 17 }, () => X402_REQUIREMENTS) }),
-    canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, renamedFlow: "authorization" }] }),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, amount: 1 }] }),
   ]) assert.throws(() => decodePaymentRequiredHeader(header), ApnError, header.slice(0, 32));
 });
@@ -565,12 +564,13 @@ test("production seller adapter is GET-only and rejects non-public or credential
   ]) await assert.rejects(http.get({ url }), ApnError, url);
 });
 
-test("CLI parses only the GET-only effect-free inspect surface", async () => {
+test("CLI inspection accepts HTTP methods but no RPC, cap or unsafe tunnel controls", async () => {
   const { parseArgv } = await import("../../src/cli.js");
   assert.deepEqual(parseArgv(["x402", "inspect", "--url", X402_URL]), {
     request: { command: "x402.inspect", url: X402_URL },
   });
   assert.throws(() => parseArgv(["x402", "inspect", "--url", X402_URL, "--rpc-url", "https://rpc.example"]), ApnError);
   assert.throws(() => parseArgv(["x402", "inspect", "--url", X402_URL, "--max-amount-atomic", "1"]), ApnError);
-  assert.throws(() => parseArgv(["x402", "inspect", "--url", X402_URL, "--method", "HEAD"]), ApnError);
+  assert.equal((parseArgv(["x402", "inspect", "--url", X402_URL, "--method", "HEAD"]).request as { httpRequest?: { method: string } }).httpRequest?.method, "HEAD");
+  assert.throws(() => parseArgv(["x402", "inspect", "--url", X402_URL, "--method", "CONNECT"]), ApnError);
 });

@@ -165,6 +165,7 @@ export interface DirectExecutionPort {
 }
 
 export interface X402ExecutionPort {
+  assertCompatibleRequest?(request: import("./x402-http-request.js").X402HttpRequestV1): void;
   readonly mode:
     | "local_detached_eip3009_apn_paid_retry"
     | "provider_detached_eip3009_apn_paid_retry"
@@ -173,6 +174,7 @@ export interface X402ExecutionPort {
   prime?(): Promise<void>;
   execute?(input: {
     readonly url: string;
+    readonly httpRequest?: import("./x402-http-request.js").X402HttpRequestV1;
     readonly amountAtomic: string;
     readonly correlationId: string;
     readonly requestDigest: string;

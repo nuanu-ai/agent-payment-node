@@ -1,5 +1,6 @@
 import { canonicalJson, domainHash, hashObject, sha256 } from "./canonical.js";
 import type { X402DelegatedMaterialBinding } from "./provider-ports.js";
+import { x402HttpRequestBinding, type X402HttpRequestV1 } from "./x402-http-request.js";
 
 const HASH = /^[a-f0-9]{64}$/u;
 const ADDRESS = /^0x[0-9a-f]{40}$/u;
@@ -250,14 +251,14 @@ export interface Erc7710UnusedExpiryEvidence {
 export type UnusedExpiryEvidence = Eip3009UnusedExpiryEvidence | Erc7710UnusedExpiryEvidence;
 
 export interface X402ResultRecord {
-  readonly schemaVersion: "apn.x402.result.v1";
+  readonly schemaVersion: "apn.x402.result.v1" | "apn.x402.result.v2";
   readonly operationId: string;
   readonly mediaType: string;
-  readonly bodyEncoding: "utf8";
+  readonly bodyEncoding: "utf8" | "base64";
   readonly bodyText: string;
   readonly resultHash: string;
   readonly byteLength: string;
-  readonly responseStatus: "200";
+  readonly responseStatus: string;
   readonly createdAt: string;
   readonly integrityHash: string;
 }
@@ -311,7 +312,7 @@ export interface X402OperationRecord {
   readonly profileHash: string;
   readonly requestHash: string;
   readonly fingerprint: string;
-  readonly resource: { readonly canonicalUrl: string; readonly origin: string; readonly path: string; readonly urlHash: string };
+  readonly resource: { readonly canonicalUrl: string; readonly origin: string; readonly path: string; readonly urlHash: string; readonly httpRequest?: X402HttpRequestV1 };
   readonly sellerWire: { readonly resourceCanonicalJson: string; readonly resourceHash: string };
   readonly chainId: "8453";
   readonly network: "eip155:8453";
@@ -368,8 +369,9 @@ export interface X402OperationRecord {
   readonly integrityHash: string;
 }
 
-export function x402RequestHash(input: { readonly profile: string; readonly canonicalUrl: string; readonly capAtomic: string }): string {
+export function x402RequestHash(input: { readonly profile: string; readonly canonicalUrl: string; readonly capAtomic: string; readonly httpRequest?: X402HttpRequestV1 }): string {
   return hashObject({
+    ...x402HttpRequestBinding(input.httpRequest),
     method: "x402.fetch.prepare",
     profile: input.profile,
     canonicalUrl: input.canonicalUrl,
@@ -384,7 +386,8 @@ export function x402Fingerprint(input: Pick<X402OperationRecord,
     kind: input.kind,
     profile: input.profile,
     operationId: input.operationId,
-    method: "GET",
+    method: input.resource.httpRequest?.method ?? "GET",
+    ...x402HttpRequestBinding(input.resource.httpRequest),
     canonicalFullUrl: input.resource.canonicalUrl,
     chainId: input.chainId,
     network: input.network,
@@ -409,7 +412,8 @@ export function x402OperationBindingHash(operation: X402OperationRecord): string
   return domainHash("apn.x402.binding.v1", canonicalJson({
     version: 1,
     x402Version: 2,
-    method: "GET",
+    method: operation.resource.httpRequest?.method ?? "GET",
+    ...x402HttpRequestBinding(operation.resource.httpRequest),
     canonicalFullUrl: operation.resource.canonicalUrl,
     resource: JSON.parse(operation.sellerWire.resourceCanonicalJson) as unknown,
     acceptedResolvedDefaults: operation.selectedOffer.resolved,

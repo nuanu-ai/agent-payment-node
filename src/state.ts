@@ -48,7 +48,7 @@ import {
 } from "./x402-state-integrity.js";
 
 export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./state-integrity.js";
-const PROVIDER_X402_OPERATION_SCHEMA = "apn.provider-x402.state.v1";
+const PROVIDER_X402_OPERATION_SCHEMAS = new Set<unknown>(["apn.provider-x402.state.v1", "apn.provider-x402.state.v2"]);
 const PROVIDER_X402_RECEIPT_SCHEMA = "apn.provider-x402.receipt.v1";
 
 export class StateStore extends SecureStateStore {
@@ -177,7 +177,7 @@ export class StateStore extends SecureStateStore {
     stateIdentifier(operationId, "x402 operation ID");
     const value = await this.readJson(join("x402-operations", profileHash, `${operationId}.json`));
     if (value === null) return null;
-    if (storedSchema(value) === PROVIDER_X402_OPERATION_SCHEMA) return null;
+    if (PROVIDER_X402_OPERATION_SCHEMAS.has(storedSchema(value))) return null;
     const operation = validateX402Operation(value);
     if (operation.profileHash !== profileHash || operation.operationId !== operationId) {
       stateCorrupt("x402 operation path binding is invalid.");
@@ -206,7 +206,7 @@ export class StateStore extends SecureStateStore {
     stateIdentifier(operation.operationId, "x402 operation ID");
     const path = join("x402-operations", operation.profileHash, `${operation.operationId}.json`);
     const stored = await this.readJson(path);
-    if (stored !== null && storedSchema(stored) === PROVIDER_X402_OPERATION_SCHEMA) {
+    if (stored !== null && PROVIDER_X402_OPERATION_SCHEMAS.has(storedSchema(stored))) {
       stateCorrupt("Local x402 operation path is occupied by another strategy.");
     }
     const previous = stored === null ? null : validateX402Operation(stored);
@@ -231,7 +231,7 @@ export class StateStore extends SecureStateStore {
       }
       const value = await this.readJson(join(directory, entry.name));
       if (value === null) stateCorrupt("x402 operation disappeared during validation.");
-      if (storedSchema(value) === PROVIDER_X402_OPERATION_SCHEMA) continue;
+      if (PROVIDER_X402_OPERATION_SCHEMAS.has(storedSchema(value))) continue;
       const operation = validateX402Operation(value);
       const operationId = entry.name.slice(0, -".json".length);
       if (operation.profileHash !== profileHash || operation.operationId !== operationId) {
@@ -426,7 +426,7 @@ export class StateStore extends SecureStateStore {
       if (
         linkedResult.operationId !== operation.operationId || linkedResult.integrityHash !== operation.resultLink.resultIntegrityHash ||
         linkedResult.resultHash !== operation.resultLink.resultHash || response?.classification !== "success" ||
-        attempt?.phase !== "observed" || attempt.observation?.status !== "200" ||
+        attempt?.phase !== "observed" || attempt.observation?.status !== result.responseStatus ||
         attempt.observation.bodyHash !== result.resultHash || attempt.observation.bodyByteLength !== result.byteLength ||
         attempt.observation.mediaType !== result.mediaType
       ) stateCorrupt("x402 linked result graph is inconsistent.");

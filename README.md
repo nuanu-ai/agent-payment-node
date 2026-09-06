@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.7 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
+APN 0.5.8 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
 and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
@@ -298,8 +298,8 @@ not treated as covering typed-data x402; the owner-approved APN policy remains
 mandatory.
 
 For a bound Coinbase profile, approve rechecks the stored policy, profile and
-balance, performs one final unpaid GET preflight, durably commits `started`,
-and invokes exactly one AWAL provider-atomic GET. Coinbase owns payment and its
+balance, performs one final unpaid request preflight, durably commits `started`,
+and invokes exactly one AWAL provider-atomic request. Coinbase owns payment and its
 internal paid retry; status and resume are observation-only and never invoke
 AWAL pay again. APN completes only when the bounded seller result joins one
 exact successful outgoing Base-USDC Transfer in the fixed window from the
@@ -376,6 +376,48 @@ request or operation.
 
 ## Durable commands
 
+### Generic HTTP requests (v0.5.8)
+
+APN v0.5.8 accepts `--method`, `--headers-json` and `--body-base64` on
+`x402 inspect` and `x402 fetch prepare`. The corresponding MCP fields are
+`method`, `headers_json` and `body_base64`. Earlier releases do not include
+this change; upgrade to v0.5.8 or later to enable POST.
+
+Body bytes are opaque: APN does not parse JSON or validate seller-specific
+fields such as `planId`. Omit `--body-base64` for an absent body; pass an empty
+string for a present zero-byte body. JSON, form, binary and custom content types
+use the same transport. Methods default to GET; CONNECT and TRACE are forbidden.
+Supply the seller's application idempotency header or body field yourself;
+APN's `--idempotency-key` is a separate local operation identity.
+
+The versioned envelope freezes URL, method, normalized safe headers, body
+presence and exact bytes into idempotency, authorization and receipt bindings.
+Challenge inspection and paid retries use that same request. Existing GET
+operations keep their original fingerprints and recovery behavior. Request
+envelopes use `apn.http-request.v1`; generic Coinbase operations use
+`apn.provider-x402.state.v2` so old clients cannot silently replay them as GET.
+Request payloads are retained in owner-only operation files (0600), not encrypted or
+included in public status/receipts. An unpaid POST can still have application
+side effects on a nonconforming seller; inspection is not a general read-only
+HTTP guarantee.
+
+Local, MetaMask Agent Wallet and MetaMask Smart Account use APN-owned HTTP.
+Coinbase AWAL 2.12.1 can forward methods and headers for absent-body requests,
+but its JSON-only body interface cannot guarantee opaque bytes. APN rejects
+present Coinbase bodies, including zero bytes, before seller/provider effects;
+it never silently changes the payload, exports a key or switches wallets.
+
+Generic requests retain bounded opaque 2xx results, including binary bytes and
+empty responses, as `apn.x402.result.v2` with base64 `bodyText`. Legacy GET result
+records remain unchanged. Public generic result data identifies
+`body_encoding: "base64"`; decode `body` to recover exact response bytes. Bounded non-security
+seller metadata is tolerated; amounts, recipients, networks, transfer methods,
+token domains and facilitator consent remain checked. Request bodies are bounded to 64 KiB, headers to
+32 entries / 8 KiB, and responses to 256 KiB. Credential/payment/header injection,
+private destinations, redirects, unsafe TLS and unbounded retries stay forbidden.
+The payment rail remains x402 v2 exact on Base USDC; this is not all-chain,
+all-asset or all-x402-version support. No live payment acceptance is implied.
+
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
 apn --version
@@ -392,8 +434,8 @@ apn wallet status [--profile <profile>]
 apn wallet balance [--profile <profile>] --rpc-url <https-url>
 apn wallet policy show --profile <profile>
 apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
-apn x402 inspect --url <https-url>
-apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]
+apn x402 inspect --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
+apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
 apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
 apn pay transfer approve --operation <operation-id> --rpc-url <https-url>

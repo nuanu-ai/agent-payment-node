@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { normalizeX402HttpRequest } from "../../src/x402-http-request.js";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -1328,17 +1329,22 @@ test("common CLI and MCP direct surfaces preserve one Smart Account operation an
   } finally { await fixture.temporary.cleanup(); }
 });
 
-test("Smart Account ERC-7710 completes the common x402 lifecycle across restart without session funding", async () => {
+for (const method of ["legacy GET", "POST"]) {
+test(`Smart Account ERC-7710 completes ${method} across restart without session funding`, async () => {
+  const requestFields = method === "POST" ? { httpRequest: normalizeX402HttpRequest({
+    schemaVersion: "apn.http-request.v1", url: X402_URL, method, headers: { "content-type": "application/octet-stream" }, bodyBase64: "AAH/",
+  }) } : {};
   const fixture = await makeFixture();
   try {
     assert.equal((await fixture.core.execute(connectCommand())).ok, true);
     const rpc = new SmartAccountX402Rpc();
     const clock = new MutableSmartAccountClock();
     const engine = new RecordingSmartAccountX402Engine();
-    const http = new QueuedHttp([smartAccountX402Challenge(), smartAccountX402PaidSuccess()]);
+    const http = new QueuedHttp([smartAccountX402Challenge(), method === "POST"
+      ? { ...smartAccountX402PaidSuccess(), status: 201 } : smartAccountX402PaidSuccess()]);
     const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
 
-    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-x402-complete-0001"));
+    const prepared = await runtime.core.execute({ ...smartAccountX402Prepare("smart-account-x402-complete-0001"), ...requestFields });
     assert.equal(prepared.ok, true, JSON.stringify(prepared));
     const operationId = publicOperationId(prepared.operation);
     const frozen = await runtime.state.findX402Operation(operationId);
@@ -1374,8 +1380,8 @@ test("Smart Account ERC-7710 completes the common x402 lifecycle across restart 
       hashDelegation(toDelegationStruct(chain[1]!)).toLowerCase(),
     );
     assert.equal(
-      chain[0]?.salt.toLowerCase(),
-      keccak256(toHex(`apn.smart-account.x402\0${operationId}\0${frozen?.fingerprint}`)).toLowerCase(),
+      BigInt(chain[0]!.salt),
+      BigInt(keccak256(toHex(`apn.smart-account.x402\0${operationId}\0${frozen?.fingerprint}`))),
     );
     assert.equal(wire.delegator.toLowerCase(), OWNER.toLowerCase());
     assert.equal(wire.delegationManager.toLowerCase(), permission.delegation_manager.toLowerCase());
@@ -1402,6 +1408,7 @@ test("Smart Account ERC-7710 completes the common x402 lifecycle across restart 
     assert.equal(engine.calls, 1);
     assert.equal(http.calls.length, 2);
     assert.equal(http.calls[1]?.paymentSignature, material.payment_header);
+    assert.deepEqual(http.calls.map((call) => call.httpRequest), [requestFields.httpRequest, requestFields.httpRequest]);
     assert.equal((await restarted.materials.load(operationId))?.phase, "exposed");
     const resultPending = await restarted.state.findX402Operation(operationId);
     assert.ok(resultPending?.resultLink !== undefined);
@@ -1414,7 +1421,8 @@ test("Smart Account ERC-7710 completes the common x402 lifecycle across restart 
     const completed = await completedRuntime.core.execute({ command: "operation.resume", operationId });
     assert.equal(completed.ok, true, JSON.stringify(completed));
     assert.equal((completed.operation as any).state, "completed");
-    assert.deepEqual((completed.data as any).body, { forecast: "sunny" });
+    assert.deepEqual(method === "POST" ? JSON.parse(Buffer.from((completed.data as any).body, "base64").toString("utf8"))
+      : (completed.data as any).body, { forecast: "sunny" });
     assert.equal(engine.calls, 1);
     assert.equal(http.calls.length, 2);
     assert.equal(rpc.x402Calls.some((call) => call.startsWith("logs:") || call.startsWith("state:")), false);
@@ -1434,6 +1442,8 @@ test("Smart Account ERC-7710 completes the common x402 lifecycle across restart 
     assert.equal(safeOutput.includes(material.payment_header), false);
   } finally { await fixture.temporary.cleanup(); }
 });
+
+}
 
 test("Smart Account ERC-7710 freezes the approved facilitator set independent of seller order", async () => {
   const fixture = await makeFixture();

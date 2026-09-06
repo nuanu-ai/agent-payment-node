@@ -156,6 +156,7 @@ export class X402PaidRequest extends X402Lifecycle {
                     throw new Error("x402 caller or authorization deadline elapsed");
                 rawResponse = await this.context.requireHttp().get({
                     url: operation.resource.canonicalUrl,
+                    ...(operation.resource.httpRequest === undefined ? {} : { httpRequest: operation.resource.httpRequest }),
                     paymentSignature: verified.paymentHeader,
                     timeoutMs,
                 });
@@ -174,6 +175,7 @@ export class X402PaidRequest extends X402Lifecycle {
                     canonicalUrl: operation.resource.canonicalUrl,
                     targetHash: operation.resource.urlHash,
                     origin: operation.resource.origin,
+                    opaqueResult: operation.resource.httpRequest !== undefined,
                 });
             }
             catch {

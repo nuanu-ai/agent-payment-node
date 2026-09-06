@@ -21,6 +21,8 @@ import {
 } from "./x402-codec.js";
 import type { HttpGetRequest, HttpObservation, HttpPort, InspectResult } from "./x402-model.js";
 import type { X402HttpObservation } from "./x402-state-integrity.js";
+import { decodeX402RequestBody, optionalX402HttpRequest, type X402HttpRequestV1 } from "./x402-http-request.js";
+import { opaqueHttpResult, parseResultMediaType } from "./x402-opaque-result.js";
 
 const MAX_HEADER_PAIRS = 64;
 const MAX_HEADER_NAME_BYTES = 256;
@@ -43,6 +45,7 @@ export class HttpsX402Http implements HttpPort {
   private readonly request = httpsRequest;
 
   async get(request: HttpGetRequest): Promise<HttpObservation> {
+    const httpRequest = optionalX402HttpRequest(request.url, request.httpRequest);
     const startedMs = this.nowMs();
     const endpoint = parsePublicHttpsUrl(request.url, "APN_HTTP_CONFIG", "Seller URL", 2048);
     const canonicalUrl = endpoint.toString();
@@ -69,6 +72,7 @@ export class HttpsX402Http implements HttpPort {
       endpoint,
       addresses,
       request.paymentSignature,
+      httpRequest,
       deadlineMs,
       this.nowMs,
       this.request,
@@ -78,11 +82,12 @@ export class HttpsX402Http implements HttpPort {
   }
 }
 
-export async function inspectX402(http: HttpPort, value: string): Promise<InspectResult> {
+export async function inspectX402(http: HttpPort, value: string, request?: X402HttpRequestV1): Promise<InspectResult> {
   const endpoint = parsePublicHttpsUrl(value, "APN_HTTP_CONFIG", "Seller URL", 2048);
   const canonicalUrl = endpoint.toString();
   if (canonicalUrl !== value) throw httpError("APN_HTTP_CONFIG", "Seller URL must use its canonical WHATWG serialization.");
-  const observation = await http.get({ url: canonicalUrl });
+  const httpRequest = optionalX402HttpRequest(canonicalUrl, request);
+  const observation = await http.get({ url: canonicalUrl, ...(httpRequest === undefined ? {} : { httpRequest }) });
   validateInspectObservation(observation, endpoint);
   const paymentRequired = decodePaymentRequiredHeader(singleControlHeader(observation.rawHeaderPairs, "payment-required"));
   const candidates = inspectCandidates(paymentRequired, canonicalUrl);
@@ -104,6 +109,8 @@ export interface PaidHttpResult {
   readonly paymentResponseHeader?: string;
   readonly result?: {
     readonly mediaType: string;
+    readonly bodyEncoding?: "base64";
+    readonly responseStatus?: string;
     readonly bodyText: string;
     readonly resultHash: string;
     readonly byteLength: string;
@@ -118,6 +125,7 @@ export function observePaidX402Response(
     readonly canonicalUrl: string;
     readonly targetHash: string;
     readonly origin: string;
+    readonly opaqueResult?: boolean;
   },
 ): PaidHttpResult {
   const endpoint = new URL(input.canonicalUrl);
@@ -158,8 +166,8 @@ export function observePaidX402Response(
   const paymentResponseHeader = optionalPaymentResponseHeader(raw.rawHeaderPairs);
   if (paymentResponseHeader !== undefined) requireAsciiControl(paymentResponseHeader, "PAYMENT-RESPONSE");
 
-  let result: PaidHttpResult["result"];
-  if (raw.status === 200) {
+  let result: PaidHttpResult["result"] = input.opaqueResult === true ? opaqueHttpResult(raw) : undefined;
+  if (raw.status === 200 && input.opaqueResult !== true) {
     const mediaType = parseResultMediaType(singleControlLikeHeader(raw.rawHeaderPairs, "content-type"));
     let bodyText: string;
     try { bodyText = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw.bodyBytes); }
@@ -233,6 +241,7 @@ async function getOnce(
   endpoint: URL,
   addresses: readonly PinnedAddress[],
   paymentSignature: string | undefined,
+  httpRequest: X402HttpRequestV1 | undefined,
   deadlineMs: number,
   nowMs: () => number,
   requestOnce: typeof httpsRequest,
@@ -243,7 +252,9 @@ async function getOnce(
     const selected = addresses[0];
     if (selected === undefined) { reject(httpError("APN_HTTP_CONFIG", "Seller host has no validated address.")); return; }
     const startedAt = new Date().toISOString();
-    const headers = paymentSignature === undefined ? undefined : { "PAYMENT-SIGNATURE": paymentSignature };
+    const body = decodeX402RequestBody(httpRequest?.bodyBase64 ?? null);
+    const headers = { ...httpRequest?.headers, ...(body === undefined ? {} : { "content-length": String(body.byteLength) }),
+      ...(paymentSignature === undefined ? {} : { "PAYMENT-SIGNATURE": paymentSignature }) };
     const hostname = unbracket(endpoint.hostname);
     let request: ClientRequest | undefined;
     let activeResponse: IncomingMessage | undefined;
@@ -273,7 +284,7 @@ async function getOnce(
     );
     try {
       request = requestOnce(endpoint, {
-        method: "GET",
+        method: httpRequest?.method ?? "GET",
         agent: false,
         maxHeaderSize: SELLER_RESPONSE_MAX_HEADER_BYTES,
         family: selected.family,
@@ -346,7 +357,7 @@ async function getOnce(
         response.on("error", () => fail(httpError("APN_HTTP_AMBIGUOUS", "Seller response failed safely.")));
       });
       request.on("error", (error) => finishError(error));
-      request.end();
+      request.end(body);
     } catch (error) {
       finishError(error);
     }
@@ -458,28 +469,6 @@ function singleControlLikeHeader(pairs: readonly (readonly [string, string])[], 
     throw resultError(`Seller response requires one canonical ${name.toUpperCase()} header.`);
   }
   return value;
-}
-
-function parseResultMediaType(value: string): string {
-  if (Buffer.byteLength(value, "utf8") > 128) {
-    throw resultError("Seller result media type is unsupported or non-canonical.");
-  }
-  const parts = value.split(";");
-  const mediaType = parts[0];
-  if (
-    mediaType === undefined ||
-    (mediaType !== "application/json" && !/^text\/[a-z0-9!#$%&'*+.^_`|~-]+$/u.test(mediaType))
-  ) {
-    throw resultError("Seller result media type is unsupported or non-canonical.");
-  }
-  const parameter = parts[1];
-  if (
-    parts.length > 2 ||
-    (parameter !== undefined && !/^[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8")[ \t]*$/iu.test(parameter))
-  ) {
-    throw resultError("Seller result media type parameters are malformed or unsupported.");
-  }
-  return mediaType;
 }
 
 function requireAsciiControl(value: string, name: string): void {

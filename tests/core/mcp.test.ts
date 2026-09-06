@@ -111,8 +111,8 @@ test("official MCP client proves production stdio descriptor, twenty-two tools, 
         required: ["profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"],
         defaults: {},
       },
-      { name: "apn_x402_inspect", properties: ["url"], required: ["url"], defaults: {} },
-      { name: "apn_x402_fetch_prepare", properties: ["profile", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
+      { name: "apn_x402_inspect", properties: ["method", "headers_json", "body_base64", "url"], required: ["url"], defaults: {} },
+      { name: "apn_x402_fetch_prepare", properties: ["profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
       { name: "apn_x402_fetch_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
       { name: "apn_pay_transfer_prepare", properties: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], required: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], defaults: {} },
       { name: "apn_pay_transfer_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
@@ -201,7 +201,7 @@ test("manifest projection is exact, strict and rejects missing, colliding or uns
 
   const unsupported = cloneManifest();
   const status = unsupported.commands.find((command) => command.path.join(" ") === "wallet status")!;
-  status.options[0]!.type = "string";
+  status.options[0] = { ...status.options[0]!, sensitivity: "sensitive_input" };
   assert.throws(() => projectMcpTools(unsupported));
 });
 

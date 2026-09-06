@@ -78,7 +78,8 @@ export function publicX402ResultData(result) {
     return {
         kind: "x402_result",
         media_type: result.mediaType,
-        body: result.mediaType === "application/json"
+        ...(result.bodyEncoding === "base64" ? { body_encoding: "base64" } : {}),
+        body: result.bodyEncoding === "base64" ? result.bodyText : result.mediaType === "application/json"
             ? JSON.parse(result.bodyText)
             : result.bodyText,
         sha256: result.resultHash,
@@ -86,7 +87,7 @@ export function publicX402ResultData(result) {
     };
 }
 export function sealX402Result(value) {
-    return { ...value, integrityHash: domainHash("apn.x402.result.v1", canonicalJson(value)) };
+    return { ...value, integrityHash: domainHash(value.schemaVersion, canonicalJson(value)) };
 }
 export function sealX402Receipt(value) {
     return { ...value, integrityHash: domainHash("apn.x402.receipt.v1", canonicalJson(value)) };

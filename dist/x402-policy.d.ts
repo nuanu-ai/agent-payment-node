@@ -1,6 +1,7 @@
 import type { Address } from "./model.js";
 import type { HttpPort, X402PrepareEvidence } from "./ports.js";
 import { decodePaymentRequiredHeader } from "./x402-codec.js";
+import type { X402HttpRequestV1 } from "./x402-http-request.js";
 import type { InspectCandidate } from "./x402-model.js";
 import type { X402OperationRecord, X402SelectedOffer } from "./x402-state-integrity.js";
 type PaymentRequired = ReturnType<typeof decodePaymentRequiredHeader>;
@@ -23,7 +24,7 @@ export interface PrepareEvidenceContext {
 }
 export declare function canonicalPrepareUrl(value: string): URL;
 export declare function positiveCap(value: unknown): string;
-export declare function freshChallenge(http: HttpPort, canonicalUrl: string): Promise<FreshChallenge>;
+export declare function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest?: X402HttpRequestV1): Promise<FreshChallenge>;
 export declare function candidatesWithinCap(challenge: FreshChallenge, capAtomic: string): readonly InspectCandidate[];
 export declare function selectPrepareOffer(challenge: FreshChallenge, underCap: readonly InspectCandidate[], evidence: X402PrepareEvidence, wallet: Address, context: PrepareEvidenceContext, transferMethod?: "eip3009" | "erc7710"): SelectedPrepareOffer;
 export declare function tokenDomainSeparator(name: string, version: string): `0x${string}`;

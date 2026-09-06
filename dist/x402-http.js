@@ -6,6 +6,8 @@ import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, unbracket, } from "./network-policy.js";
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader, inspectCandidates, } from "./x402-codec.js";
+import { decodeX402RequestBody, optionalX402HttpRequest } from "./x402-http-request.js";
+import { opaqueHttpResult, parseResultMediaType } from "./x402-opaque-result.js";
 const MAX_HEADER_PAIRS = 64;
 const MAX_HEADER_NAME_BYTES = 256;
 const MAX_CONTROL_VALUE_BYTES = 64 * 1024;
@@ -21,6 +23,7 @@ export class HttpsX402Http {
     resolveAddresses = resolvePublicAddresses;
     request = httpsRequest;
     async get(request) {
+        const httpRequest = optionalX402HttpRequest(request.url, request.httpRequest);
         const startedMs = this.nowMs();
         const endpoint = parsePublicHttpsUrl(request.url, "APN_HTTP_CONFIG", "Seller URL", 2048);
         const canonicalUrl = endpoint.toString();
@@ -38,15 +41,16 @@ export class HttpsX402Http {
         }
         const deadlineMs = startedMs + timeoutMs;
         const addresses = await beforeDeadline(() => this.resolveAddresses(endpoint, "APN_HTTP_CONFIG", "Seller URL"), deadlineMs, this.nowMs, this.scheduleDeadline, this.cancelDeadline);
-        return await getOnce(endpoint, addresses, request.paymentSignature, deadlineMs, this.nowMs, this.request, this.scheduleDeadline, this.cancelDeadline);
+        return await getOnce(endpoint, addresses, request.paymentSignature, httpRequest, deadlineMs, this.nowMs, this.request, this.scheduleDeadline, this.cancelDeadline);
     }
 }
-export async function inspectX402(http, value) {
+export async function inspectX402(http, value, request) {
     const endpoint = parsePublicHttpsUrl(value, "APN_HTTP_CONFIG", "Seller URL", 2048);
     const canonicalUrl = endpoint.toString();
     if (canonicalUrl !== value)
         throw httpError("APN_HTTP_CONFIG", "Seller URL must use its canonical WHATWG serialization.");
-    const observation = await http.get({ url: canonicalUrl });
+    const httpRequest = optionalX402HttpRequest(canonicalUrl, request);
+    const observation = await http.get({ url: canonicalUrl, ...(httpRequest === undefined ? {} : { httpRequest }) });
     validateInspectObservation(observation, endpoint);
     const paymentRequired = decodePaymentRequiredHeader(singleControlHeader(observation.rawHeaderPairs, "payment-required"));
     const candidates = inspectCandidates(paymentRequired, canonicalUrl);
@@ -100,8 +104,8 @@ export function observePaidX402Response(raw, input) {
     const paymentResponseHeader = optionalPaymentResponseHeader(raw.rawHeaderPairs);
     if (paymentResponseHeader !== undefined)
         requireAsciiControl(paymentResponseHeader, "PAYMENT-RESPONSE");
-    let result;
-    if (raw.status === 200) {
+    let result = input.opaqueResult === true ? opaqueHttpResult(raw) : undefined;
+    if (raw.status === 200 && input.opaqueResult !== true) {
         const mediaType = parseResultMediaType(singleControlLikeHeader(raw.rawHeaderPairs, "content-type"));
         let bodyText;
         try {
@@ -170,7 +174,7 @@ function validateInspectObservation(observation, endpoint) {
         throw httpError("APN_HTTP_PROTOCOL", "Seller response body exceeds the size limit.");
     validateRawHeaders(observation.rawHeaderPairs);
 }
-async function getOnce(endpoint, addresses, paymentSignature, deadlineMs, nowMs, requestOnce, scheduleDeadline, cancelDeadline) {
+async function getOnce(endpoint, addresses, paymentSignature, httpRequest, deadlineMs, nowMs, requestOnce, scheduleDeadline, cancelDeadline) {
     return await new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
@@ -178,7 +182,9 @@ async function getOnce(endpoint, addresses, paymentSignature, deadlineMs, nowMs,
             return;
         }
         const startedAt = new Date().toISOString();
-        const headers = paymentSignature === undefined ? undefined : { "PAYMENT-SIGNATURE": paymentSignature };
+        const body = decodeX402RequestBody(httpRequest?.bodyBase64 ?? null);
+        const headers = { ...httpRequest?.headers, ...(body === undefined ? {} : { "content-length": String(body.byteLength) }),
+            ...(paymentSignature === undefined ? {} : { "PAYMENT-SIGNATURE": paymentSignature }) };
         const hostname = unbracket(endpoint.hostname);
         let request;
         let activeResponse;
@@ -207,7 +213,7 @@ async function getOnce(endpoint, addresses, paymentSignature, deadlineMs, nowMs,
         const timer = scheduleDeadline(() => finishError(httpError("APN_HTTP_AMBIGUOUS", "Seller request timed out.")), timeoutMs);
         try {
             request = requestOnce(endpoint, {
-                method: "GET",
+                method: httpRequest?.method ?? "GET",
                 agent: false,
                 maxHeaderSize: SELLER_RESPONSE_MAX_HEADER_BYTES,
                 family: selected.family,
@@ -294,7 +300,7 @@ async function getOnce(endpoint, addresses, paymentSignature, deadlineMs, nowMs,
                 response.on("error", () => fail(httpError("APN_HTTP_AMBIGUOUS", "Seller response failed safely.")));
             });
             request.on("error", (error) => finishError(error));
-            request.end();
+            request.end(body);
         }
         catch (error) {
             finishError(error);
@@ -399,23 +405,6 @@ function singleControlLikeHeader(pairs, name) {
         throw resultError(`Seller response requires one canonical ${name.toUpperCase()} header.`);
     }
     return value;
-}
-function parseResultMediaType(value) {
-    if (Buffer.byteLength(value, "utf8") > 128) {
-        throw resultError("Seller result media type is unsupported or non-canonical.");
-    }
-    const parts = value.split(";");
-    const mediaType = parts[0];
-    if (mediaType === undefined ||
-        (mediaType !== "application/json" && !/^text\/[a-z0-9!#$%&'*+.^_`|~-]+$/u.test(mediaType))) {
-        throw resultError("Seller result media type is unsupported or non-canonical.");
-    }
-    const parameter = parts[1];
-    if (parts.length > 2 ||
-        (parameter !== undefined && !/^[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8")[ \t]*$/iu.test(parameter))) {
-        throw resultError("Seller result media type parameters are malformed or unsupported.");
-    }
-    return mediaType;
 }
 function requireAsciiControl(value, name) {
     if (!/^[\x20-\x7e]+$/u.test(value))
