@@ -6,7 +6,7 @@ export function canonicalJson(value) {
 function toCanonical(value) {
     if (value === null || typeof value === "string" || typeof value === "boolean")
         return value;
-    if (typeof value === "number" && Number.isSafeInteger(value))
+    if (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER)
         return value;
     if (Array.isArray(value))
         return value.map(toCanonical);

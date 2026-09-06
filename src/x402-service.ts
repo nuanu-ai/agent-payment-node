@@ -4,8 +4,7 @@ import type { CommandRequest } from "./commands.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { ApnError } from "./errors.js";
 import type { RuntimeContext } from "./runtime.js";
-import { canonicalIdempotencyKey } from "./transfer-policy.js";
-import { canonicalOperationId } from "./transfer-policy.js";
+import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import {
   assertUnattendedX402Balance,
@@ -46,6 +45,7 @@ import { ProviderX402Service } from "./provider-x402-service.js";
 import { isCode } from "./secure-state-store.js";
 import { resolveX402Payer } from "./x402-payer.js";
 import { reconcileX402Method } from "./x402-method-reconciliation.js";
+import { optionalX402HttpRequest } from "./x402-http-request.js";
 
 export class X402Service extends X402PaidRequest {
   private readonly providerX402: ProviderX402Service;
@@ -56,13 +56,14 @@ export class X402Service extends X402PaidRequest {
   }
 
   async prepare(request: X402PrepareRequest): Promise<unknown> {
+    const httpRequest = optionalX402HttpRequest(request.url, request.httpRequest);
+    const requestFields = httpRequest === undefined ? {} : { httpRequest };
     if (await this.providerX402.canHandle(request.profile)) return await this.providerX402.prepare(request);
     const profile = canonicalProfile(request.profile);
     const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
     const callerCap = request.maxAmountAtomic === undefined ? undefined : positiveCap(request.maxAmountAtomic);
     const endpoint = canonicalPrepareUrl(request.url);
-    const canonicalUrl = endpoint.toString();
-    await this.context.ready();
+    const canonicalUrl = endpoint.toString(); await this.context.ready();
     const state = this.context.state;
     const profileHash = state.profileHash(profile);
     const operationId = state.operationId(profile, idempotencyKey);
@@ -77,7 +78,7 @@ export class X402Service extends X402PaidRequest {
       const provisionalCap = callerCap === undefined
         ? existingAtExpectedId?.capAtomic ?? "0"
         : callerCap;
-      const provisionalRequestHash = x402RequestHash({ profile, canonicalUrl, capAtomic: provisionalCap });
+      const provisionalRequestHash = x402RequestHash({ profile, canonicalUrl, capAtomic: provisionalCap, ...requestFields });
       const existing = await this.operations.resolvePrepare({
         kind: "x402_fetch",
         profileHash,
@@ -93,11 +94,11 @@ export class X402Service extends X402PaidRequest {
         await this.context.requirePolicy().load(payer.policy),
       );
       const capAtomic = effectiveX402Cap(profilePolicy, callerCap);
-      const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic });
+      const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic, ...requestFields });
       const wallet = payer.wallet;
       const http = this.context.requireHttp();
       const rpc = this.context.requireRpc();
-      const discovered = await freshChallenge(http, canonicalUrl);
+      const discovered = await freshChallenge(http, canonicalUrl, httpRequest);
       const underCap = candidatesWithinCap(discovered, capAtomic);
       const createdAtDate = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
       const createdAt = createdAtDate.toISOString();
@@ -145,6 +146,7 @@ export class X402Service extends X402PaidRequest {
         createdAt: createdAtUnix,
       };
       const resource = {
+        ...requestFields,
         canonicalUrl,
         origin: endpoint.origin,
         path: endpoint.pathname,

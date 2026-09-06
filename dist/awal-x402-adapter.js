@@ -5,6 +5,8 @@ import { providerX402InvocationIntentHash } from "./provider-x402-model.js";
 import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
 import { isConflictingProviderX402OuterKey, providerX402RejectionShape, PROVIDER_X402_KNOWN_ENVELOPE_KEYS, } from "./provider-x402-rejection-shape.js";
 import { resolveAwalBin } from "./awal-package.js";
+import { assertAwalHttpRequest } from "./provider-x402-http-request.js";
+import { optionalX402HttpRequest } from "./x402-http-request.js";
 export const AWAL_X402_PROCESS_TIMEOUT_MS = 210_000;
 export const AWAL_X402_INTERNAL_TIMEOUT_MS = 180_000;
 export const AWAL_X402_SHUTDOWN_MARGIN_MS = 30_000;
@@ -17,6 +19,7 @@ export class AwalX402Adapter {
     binResolver;
     launch;
     timeoutMs;
+    assertCompatibleRequest = assertAwalHttpRequest;
     mode = "provider_atomic_paid_fetch";
     script;
     constructor(binResolver = resolveAwalBin, launch = defaultLaunch, timeoutMs = AWAL_X402_PROCESS_TIMEOUT_MS) {
@@ -34,6 +37,9 @@ export class AwalX402Adapter {
         this.script ??= await this.binResolver();
     }
     async execute(input) {
+        const httpRequest = optionalX402HttpRequest(input.url, input.httpRequest);
+        if (httpRequest !== undefined)
+            this.assertCompatibleRequest(httpRequest);
         providerAtomic(input.amountAtomic);
         try {
             await this.prime();
@@ -45,8 +51,9 @@ export class AwalX402Adapter {
         if (script === undefined)
             return { disposition: "not_started", reason: "provider_binary_unavailable" };
         const args = [
-            script, "x402", "pay", input.url, "-X", "GET", "--max-amount", input.amountAtomic,
+            script, "x402", "pay", input.url, "-X", httpRequest?.method ?? "GET", "--max-amount", input.amountAtomic,
             "--scheme", "exact", "--correlation-id", input.correlationId, "--json",
+            ...(httpRequest === undefined || Object.keys(httpRequest.headers).length === 0 ? [] : ["-h", JSON.stringify(httpRequest.headers)]),
         ];
         return await this.runChild(args, input, script);
     }

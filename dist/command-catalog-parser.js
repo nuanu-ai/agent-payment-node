@@ -3,6 +3,7 @@ import { COMMAND_GROUPS, COMMAND_MANIFEST, COMMANDS, } from "./command-catalog.j
 import { renderHelp } from "./command-help.js";
 import { containsRawControlCharacters } from "./cli-handoff.js";
 import { ApnError, asApnError } from "./errors.js";
+import { decodeX402RequestBody } from "./x402-http-request.js";
 export function parseCatalogArgv(argv) {
     const definition = longestCommandPrefix(argv);
     if (definition === undefined)
@@ -109,6 +110,9 @@ function validateOptionValue(definition, value) {
     if (containsRawControlCharacters(value))
         invalid();
     switch (definition.type) {
+        case "base64":
+            decodeX402RequestBody(value);
+            return;
         case "string":
             if (value.length === 0)
                 invalid();

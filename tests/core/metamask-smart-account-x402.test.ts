@@ -52,7 +52,7 @@ test("strict inspection accepts only explicit ERC-7710 offers without EIP-3009 t
     { assetTransferMethod: "erc7710", facilitatorAddresses: [] },
     { assetTransferMethod: "erc7710", facilitatorAddresses: [FACILITATOR, FACILITATOR] },
     { assetTransferMethod: "erc7710", facilitatorAddresses: ["0xnot-an-address"] },
-    { assetTransferMethod: "erc7710", facilitatorAddresses: [FACILITATOR], unsafe: true },
+    { assetTransferMethod: "erc7710", facilitatorAddresses: [FACILITATOR], paymentFlow: "unsafe" },
   ]) {
     const rejected = {
       ...paymentRequired,

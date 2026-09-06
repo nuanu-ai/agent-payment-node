@@ -19,14 +19,14 @@ export function canonicalPrepareUrl(value) {
 export function positiveCap(value) {
     return parseAtomic(value, { positive: true }).toString();
 }
-export async function freshChallenge(http, canonicalUrl) {
+export async function freshChallenge(http, canonicalUrl, httpRequest) {
     let captured;
     const inspection = await inspectX402({
         async get(request) {
             captured = await http.get(request);
             return captured;
         },
-    }, canonicalUrl);
+    }, canonicalUrl, httpRequest);
     if (captured === undefined)
         throw new ApnError("APN_HTTP_PROTOCOL", "Seller challenge observation is missing.");
     const values = captured.rawHeaderPairs.filter(([name]) => name.toLowerCase() === "payment-required").map(([, value]) => value);

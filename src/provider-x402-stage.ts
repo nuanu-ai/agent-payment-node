@@ -1,4 +1,4 @@
-import { canonicalJson, domainHash, hashObject, sha256 } from "./canonical.js";
+import { canonicalJson, hashObject, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import type { ProfilePolicyRecord } from "./profile-policy.js";
 import type { ProviderProfileRecord } from "./provider-profile.js";
@@ -9,8 +9,8 @@ import {
 } from "./provider-x402-model.js";
 import { freezeProviderPolicy } from "./provider-x402-policy.js";
 import type { FreshChallenge } from "./x402-policy.js";
-
-const BODY_DIGEST = domainHash("apn.x402.absent-body.v1", canonicalJson({ state: "absent" }));
+import { providerHttpRequest } from "./provider-x402-http-request.js";
+import type { X402HttpRequestV1 } from "./x402-http-request.js";
 
 export function stagedProviderX402Operation(input: {
   readonly operationId: string;
@@ -19,6 +19,7 @@ export function stagedProviderX402Operation(input: {
   readonly profileHash: string;
   readonly requestHash: string;
   readonly endpoint: URL;
+  readonly httpRequest?: X402HttpRequestV1;
   readonly rpcUrl: string;
   readonly callerCapAtomic?: string;
   readonly effectiveCapAtomic: string;
@@ -33,10 +34,8 @@ export function stagedProviderX402Operation(input: {
   readonly createdAt: string;
 }): ProviderX402OperationRecord {
   const canonicalUrl = input.endpoint.toString();
-  const requestMetadata = { method: "GET", bodyState: "absent", headers: "none" } as const;
-  const requestDigest = domainHash("apn.provider-x402.request.v1", canonicalJson({
-    canonicalUrl, ...requestMetadata, bodyDigest: BODY_DIGEST,
-  }));
+  const request = providerHttpRequest(input.endpoint, input.httpRequest);
+  const { method, bodyState, bodyDigest, requestDigest } = request;
   const requirement = {
     x402Version: "2" as const,
     scheme: "exact" as const,
@@ -70,7 +69,7 @@ export function stagedProviderX402Operation(input: {
     profile: input.profile,
     profileHash: input.profileHash,
     provider,
-    request: { canonicalUrl, method: "GET", bodyState: "absent", bodyDigest: BODY_DIGEST, requestDigest },
+    request: { canonicalUrl, method, bodyState, bodyDigest, requestDigest },
     requirement,
     policy,
     rpcBindingHash,
@@ -83,7 +82,7 @@ export function stagedProviderX402Operation(input: {
     proofClass: "x402_frozen_offer",
   };
   return sealProviderX402Operation({
-    schemaVersion: "apn.provider-x402.state.v1",
+    schemaVersion: input.httpRequest === undefined ? "apn.provider-x402.state.v1" : "apn.provider-x402.state.v2",
     kind: "x402_fetch",
     executionMode: "provider_atomic_paid_fetch",
     operationId: input.operationId,
@@ -93,17 +92,7 @@ export function stagedProviderX402Operation(input: {
     requestHash: input.requestHash,
     fingerprint,
     provider,
-    request: {
-      canonicalUrl,
-      origin: input.endpoint.origin,
-      path: input.endpoint.pathname,
-      urlHash: sha256(canonicalUrl),
-      method: "GET",
-      bodyState: "absent",
-      bodyDigest: BODY_DIGEST,
-      metadataDigest: hashObject(requestMetadata),
-      requestDigest,
-    },
+    request,
     requirement,
     policy,
     rpcBindingHash,

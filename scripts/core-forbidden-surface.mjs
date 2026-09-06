@@ -7,9 +7,6 @@ const sourceRoot = join(productRoot, "src");
 const forbidden = [
   "--yes",
   "--mock",
-  "--header",
-  "--method",
-  "--body",
   "--allow-http",
   "--allow-private",
   "--allow-localhost",
@@ -92,7 +89,7 @@ for (const file of files) {
   }
   if (file === join(sourceRoot, "awal-x402-adapter.ts")) {
     for (const required of [
-      "process.execPath", "shell: false", "script, \"x402\", \"pay\"", "\"-X\", \"GET\"",
+      "process.execPath", "shell: false", "script, \"x402\", \"pay\"", "\"-X\", httpRequest?.method ?? \"GET\"", "assertAwalHttpRequest",
       "\"--max-amount\"", "\"--scheme\", \"exact\"", "\"--correlation-id\"", "\"--json\"",
       "AWAL_X402_PROCESS_TIMEOUT_MS = 210_000",
     ]) {

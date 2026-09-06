@@ -8,6 +8,7 @@ import type { Address } from "./model.js";
 import type { HttpPort, X402PrepareEvidence } from "./ports.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js";
 import { inspectX402 } from "./x402-http.js";
+import type { X402HttpRequestV1 } from "./x402-http-request.js";
 import type { InspectCandidate } from "./x402-model.js";
 import type { X402OperationRecord, X402SelectedOffer } from "./x402-state-integrity.js";
 
@@ -48,14 +49,14 @@ export function positiveCap(value: unknown): string {
   return parseAtomic(value, { positive: true }).toString();
 }
 
-export async function freshChallenge(http: HttpPort, canonicalUrl: string): Promise<FreshChallenge> {
+export async function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest?: X402HttpRequestV1): Promise<FreshChallenge> {
   let captured: Awaited<ReturnType<HttpPort["get"]>> | undefined;
   const inspection = await inspectX402({
     async get(request) {
       captured = await http.get(request);
       return captured;
     },
-  }, canonicalUrl);
+  }, canonicalUrl, httpRequest);
   if (captured === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Seller challenge observation is missing.");
   const values = captured.rawHeaderPairs.filter(([name]) => name.toLowerCase() === "payment-required").map(([, value]) => value);
   if (values.length !== 1 || values[0] === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Seller challenge requires one PAYMENT-REQUIRED header.");

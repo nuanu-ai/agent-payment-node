@@ -96,9 +96,18 @@ export function validatePublicX402Result(value) {
         }
         return value;
     }
-    if (!exactKeys(value, ["kind", "media_type", "body", "sha256", "byte_length"]) ||
+    if (!exactKeys(value, ["kind", "media_type", "body", "sha256", "byte_length", ...(value.body_encoding === undefined ? [] : ["body_encoding"])]) ||
         typeof value.media_type !== "string" || value.media_type.length < 1 || value.media_type.length > 128)
         throw new TypeError("Invalid public x402 result.");
+    if (value.body_encoding !== undefined) {
+        if (value.body_encoding !== "base64" || typeof value.body !== "string" || value.body.length > Math.ceil(256 * 1024 / 3) * 4) {
+            throw new TypeError("Invalid opaque public x402 result.");
+        }
+        const bytes = Buffer.from(value.body, "base64");
+        if (bytes.length > 256 * 1024 || bytes.toString("base64") !== value.body || value.byte_length !== String(bytes.length) ||
+            value.sha256 !== domainHash("apn.x402.result-body.v1", bytes))
+            throw new TypeError("Invalid opaque public x402 result binding.");
+    }
     return value;
 }
 function publicSettlement(settlement) {

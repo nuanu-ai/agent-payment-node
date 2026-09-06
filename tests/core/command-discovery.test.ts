@@ -528,6 +528,7 @@ function validArgv(command: CommandDefinition, includeOptional: boolean): string
 
 function validValue(type: ScalarType): string {
   switch (type) {
+    case "base64": return "e30=";
     case "string": return "value";
     case "profile": return "agent_1";
     case "provider_id": return "coinbase-agentic-wallet";

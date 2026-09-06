@@ -133,6 +133,8 @@ function scalarPattern(type: CommandOption["type"]): string | undefined {
     case "transaction_hash": return "^0x[0-9a-fA-F]{64}$";
     case "provider_request_id": return "^[A-Za-z0-9._:-]{1,256}$";
     case "integer_seconds": return "^(?:[1-9]|[1-9][0-9]|[12][0-9]{2}|300)$";
+    case "string":
+    case "base64":
     case "https_url": return undefined;
     default: throw projectionFailure("A selected command uses an unsupported MCP scalar type.");
   }

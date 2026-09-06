@@ -2,6 +2,7 @@ import type { ProfilePolicyRecord } from "./profile-policy.js";
 import type { ProviderProfileRecord } from "./provider-profile.js";
 import { type ProviderX402OperationRecord } from "./provider-x402-model.js";
 import type { FreshChallenge } from "./x402-policy.js";
+import type { X402HttpRequestV1 } from "./x402-http-request.js";
 export declare function stagedProviderX402Operation(input: {
     readonly operationId: string;
     readonly idempotencyHash: string;
@@ -9,6 +10,7 @@ export declare function stagedProviderX402Operation(input: {
     readonly profileHash: string;
     readonly requestHash: string;
     readonly endpoint: URL;
+    readonly httpRequest?: X402HttpRequestV1;
     readonly rpcUrl: string;
     readonly callerCapAtomic?: string;
     readonly effectiveCapAtomic: string;

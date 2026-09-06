@@ -7,14 +7,18 @@ import { providerX402CompleteBindingHash, providerX402FrozenFingerprint, validat
 import { providerX402SettledWithoutResultProof } from "./provider-x402-proof.js";
 import { validateProviderX402TransactionRecoveryBinding, validateProviderX402TransactionRecoveryContinuity, } from "./provider-x402-transaction-recovery-model.js";
 import { validateProviderX402RejectionShape } from "./provider-x402-rejection-shape.js";
+import { validateProviderHttpRequest } from "./provider-x402-http-request.js";
+import { x402HttpRequestBinding } from "./x402-http-request.js";
 export const PROVIDER_X402_STATE_VERSION = "apn.provider-x402.state.v1";
+export const PROVIDER_X402_HTTP_STATE_VERSION = "apn.provider-x402.state.v2";
 export function providerX402RequestHash(input) {
     return hashObject({
         method: "x402.fetch.prepare",
         profile: input.profile,
         canonicalUrl: input.canonicalUrl,
         rpcUrl: input.rpcUrl,
-        methodShape: "GET_absent_body",
+        methodShape: input.httpRequest === undefined ? "GET_absent_body" : "apn.http-request.v1",
+        ...x402HttpRequestBinding(input.httpRequest),
         callerCapAtomic: input.callerCapAtomic ?? null,
     });
 }
@@ -41,14 +45,13 @@ export function validateProviderX402Operation(value) {
     const operation = value;
     const without = { ...operation, integrityHash: undefined };
     delete without.integrityHash;
-    if (operation.schemaVersion !== PROVIDER_X402_STATE_VERSION || operation.kind !== "x402_fetch" ||
+    if (operation.schemaVersion !== (operation.request?.httpRequest === undefined ? PROVIDER_X402_STATE_VERSION : PROVIDER_X402_HTTP_STATE_VERSION) || operation.kind !== "x402_fetch" ||
         operation.executionMode !== "provider_atomic_paid_fetch" || !hash(operation.operationId) ||
         !hash(operation.idempotencyHash) || !hash(operation.profileHash) || !hash(operation.requestHash) ||
         !hash(operation.fingerprint) || operation.fingerprint !== providerX402FrozenFingerprint(operation) ||
         operation.integrityHash !== hashObject(without) ||
         operation.provider?.executionOwner !== "provider" ||
-        operation.provider.retryOwner !== "apn_outer_no_replay_journal" || operation.request?.method !== "GET" ||
-        operation.request.bodyState !== "absent" || operation.requirement?.x402Version !== "2" ||
+        operation.provider.retryOwner !== "apn_outer_no_replay_journal" || operation.requirement?.x402Version !== "2" ||
         operation.requirement.scheme !== "exact" || operation.requirement.network !== CHAIN_CAIP2 ||
         operation.requirement.token !== BASE_USDC.toLowerCase() || operation.requirement.decimals !== 6 ||
         !positive(operation.requirement.amountAtomic) || operation.policy?.verdict !== "authorized_by_existing_profile_policy" ||
@@ -59,6 +62,7 @@ export function validateProviderX402Operation(value) {
         operation.transitions.at(-1)?.proofClass !== operation.proofClass ||
         operation.terminal !== ["completed", "failed_before_effect", "failed_settled_without_result"].includes(operation.state))
         corrupt();
+    validateProviderHttpRequest(operation.request);
     validateTransitions(operation.transitions);
     if (operation.invocation !== undefined)
         validateInvocation(operation.invocation, operation);

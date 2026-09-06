@@ -5,20 +5,24 @@ import { validateStateTuple } from "./x402-operation-validation.js";
 import { address, allowedRecord, exactRecord, hasUnpairedSurrogate, hash, mediaType, positive, stateCorrupt, timestamp, uint, } from "./x402-state-validation-primitives.js";
 export function validateX402ResultUnsafe(value) {
     const result = exactRecord(value, ["schemaVersion", "operationId", "mediaType", "bodyEncoding", "bodyText", "resultHash", "byteLength", "responseStatus", "createdAt", "integrityHash"]);
-    if (result.schemaVersion !== "apn.x402.result.v1" || result.bodyEncoding !== "utf8" || result.responseStatus !== "200")
+    const opaque = result.schemaVersion === "apn.x402.result.v2";
+    if (opaque ? result.bodyEncoding !== "base64" || typeof result.responseStatus !== "string" || !/^2[0-9]{2}$/u.test(result.responseStatus)
+        : result.schemaVersion !== "apn.x402.result.v1" || result.bodyEncoding !== "utf8" || result.responseStatus !== "200")
         stateCorrupt("x402 result discriminant is invalid.");
     hash(result.operationId);
     mediaType(result.mediaType);
     if (typeof result.bodyText !== "string" || hasUnpairedSurrogate(result.bodyText) ||
-        Buffer.byteLength(result.bodyText, "utf8") > 256 * 1024)
+        Buffer.byteLength(result.bodyText, "utf8") > (opaque ? Math.ceil(256 * 1024 / 3) * 4 : 256 * 1024))
         stateCorrupt("x402 result body is invalid.");
     hash(result.resultHash);
     uint(result.byteLength);
     timestamp(result.createdAt);
     hash(result.integrityHash);
-    if (result.byteLength !== Buffer.byteLength(result.bodyText, "utf8").toString() || result.resultHash !== domainHash("apn.x402.result-body.v1", result.bodyText))
+    const bytes = Buffer.from(result.bodyText, opaque ? "base64" : "utf8");
+    if (bytes.length > 256 * 1024 || (opaque && bytes.toString("base64") !== result.bodyText) ||
+        result.byteLength !== bytes.length.toString() || result.resultHash !== domainHash("apn.x402.result-body.v1", bytes))
         stateCorrupt("x402 result body binding is invalid.");
-    if (result.mediaType === "application/json") {
+    if (!opaque && result.mediaType === "application/json") {
         try {
             JSON.parse(result.bodyText);
         }
@@ -27,7 +31,7 @@ export function validateX402ResultUnsafe(value) {
         }
     }
     const { integrityHash: _hash, ...body } = result;
-    if (result.integrityHash !== domainHash("apn.x402.result.v1", canonicalJson(body)))
+    if (result.integrityHash !== domainHash(result.schemaVersion, canonicalJson(body)))
         stateCorrupt("x402 result integrity hash is invalid.");
     return result;
 }

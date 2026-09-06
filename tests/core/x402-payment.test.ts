@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import test, { type TestContext } from "node:test";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -9,6 +11,7 @@ import {
 } from "../../src/x402-codec.js";
 import type { HttpGetRequest, HttpObservation } from "../../src/x402-model.js";
 import { ApnError } from "../../src/errors.js";
+import { normalizeX402HttpRequest, type X402HttpRequestV1 } from "../../src/x402-http-request.js";
 import type { NativePort, NativeRequest } from "../../src/ports.js";
 import { requestX402Authorization, x402NativeRequest } from "../../src/x402-native.js";
 import {
@@ -130,6 +133,7 @@ async function authorizedFixture(t: TestContext): Promise<{
   readonly clock: TestClock;
 }>;
 async function authorizedFixture(t: TestContext, input: {
+  readonly httpRequest?: X402HttpRequestV1;
   readonly paymentRequired?: unknown;
   readonly paidOutcome?: HttpObservation | Error;
   readonly clock?: TestClock;
@@ -146,6 +150,7 @@ async function authorizedFixture(t: TestContext, input: {
 }>;
 async function authorizedFixture(t: TestContext, input: {
   readonly paymentRequired?: unknown;
+  readonly httpRequest?: X402HttpRequestV1;
   readonly paidOutcome?: HttpObservation | Error;
   readonly clock?: TestClock;
   readonly idempotencyKey?: string;
@@ -184,6 +189,7 @@ async function authorizedFixture(t: TestContext, input: {
     url: X402_URL,
     maxAmountAtomic: "2000000",
     idempotencyKey: input.idempotencyKey ?? "x402-payment-001",
+    ...(input.httpRequest === undefined ? {} : { httpRequest: input.httpRequest }),
   });
   const operationId = (prepared.operation as { readonly operationId?: unknown } | null)?.operationId;
   assert.equal(typeof operationId, "string");
@@ -192,6 +198,82 @@ async function authorizedFixture(t: TestContext, input: {
   native.calls.length = 0;
   return { core, operationId: operationId as string, native, http, rpc, root: temporary.root, clock };
 }
+
+for (const [label, method, bodyBase64] of [
+  ["absent", "POST", null], ["empty", "POST", ""],
+  ["JSON", "POST", Buffer.from('{ "planId": "synthetic-plan", "idempotencyKey": "seller-001" }\n').toString("base64")],
+  ["form", "POST", Buffer.from("plan=synthetic&empty=").toString("base64")],
+  ["binary", "PUT", "AAH/"], ["non-JSON", "PATCH", "e2JhZA=="],
+] as const) {
+  test(`frozen ${label} request survives restart and conflicting prepare without replacement authorization`, async (t) => {
+    const httpRequest = normalizeX402HttpRequest({ schemaVersion: "apn.http-request.v1", url: X402_URL,
+      method, headers: { "content-type": "application/octet-stream", "idempotency-key": "seller-001" }, bodyBase64 });
+    const fixture = await authorizedFixture(t, { httpRequest });
+    const before = await fixture.core.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
+    assert.deepEqual(before.resource.httpRequest, httpRequest);
+    const restarted = makeCore({ root: fixture.root, native: fixture.native, rpc: fixture.rpc, http: fixture.http, clock: fixture.clock });
+    const sameRequest = { command: "x402.fetch.prepare" as const, profile: "default", url: X402_URL,
+      maxAmountAtomic: "2000000", idempotencyKey: "x402-payment-001", httpRequest };
+    const duplicate = await restarted.execute(sameRequest);
+    assert.equal(duplicate.ok, true, JSON.stringify(duplicate));
+    for (const change of [{ method: "DELETE" }, { bodyBase64: "AQ==" }, { headers: { "idempotency-key": "different" } }]) {
+      const conflict = await restarted.execute({ ...sameRequest, httpRequest: normalizeX402HttpRequest({ ...httpRequest, ...change }) });
+      assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+    }
+    assert.equal(fixture.http.calls.length, 1, "reprepare and conflicts do not contact the seller");
+    const resumed = await restarted.execute({ command: "operation.resume", operationId: fixture.operationId });
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+    const after = await restarted.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
+    assert.equal(after.state, "settlement_pending");
+    assert.equal(after.fingerprint, before.fingerprint);
+    assert.equal(after.authorization.nonce, before.authorization.nonce);
+    assert.equal(after.paymentHeaderHash, before.paymentHeaderHash);
+    assert.equal(fixture.http.calls.length, 2);
+    assert.deepEqual(fixture.http.calls.map((call) => call.httpRequest), [httpRequest, httpRequest]);
+    assert.equal(fixture.native.calls.filter((call) => call.operation === "x402Exact.approveAndAuthorize").length, 0);
+    const result = await restarted.context.state.loadX402Result(after.profileHash, after.operationId);
+    assert.equal(result?.schemaVersion, "apn.x402.result.v2");
+    assert.equal(Buffer.from(result!.bodyText, "base64").toString("utf8"), '{"forecast":"sunny"}');
+    assert.equal(JSON.stringify(resumed).includes("seller-001"), false);
+  });
+}
+
+test("a fresh Node process resumes the frozen POST with the original authorization and persists a binary 201 result", async (t) => {
+  const httpRequest = normalizeX402HttpRequest({ schemaVersion: "apn.http-request.v1", url: X402_URL, method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": "synthetic-seller-001" }, bodyBase64: "eyAicGxhbiI6ICJzeW50aGV0aWMiIH0=" });
+  const fixture = await authorizedFixture(t, { httpRequest });
+  const before = await fixture.core.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
+  const child = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", `
+    import { makeCore, TestRpc, TestClock } from './dist-test/tests/core/helpers.js';
+    import { ExactX402Native, QueuedHttp, paidObservation } from './dist-test/tests/core/x402-helpers.js';
+    import { canonicalPaymentResponseHeader, X402_TRANSACTION } from './dist-test/tests/core/x402-vectors.js';
+    const input = JSON.parse(process.argv[1]);
+    const native = new ExactX402Native(); native.material = input.material;
+    const rpc = new TestRpc(); rpc.x402Evidence = { ...rpc.x402Evidence, address: input.wallet };
+    const clock = new TestClock(); clock.value = new Date(input.now);
+    const response = { ...paidObservation(), status: 201, bodyBytes: Buffer.from([0, 255, 1]),
+      rawHeaderPairs: [['content-type', 'application/octet-stream'], ['payment-response', canonicalPaymentResponseHeader({
+        success: true, payer: input.wallet.toLowerCase(), transaction: X402_TRANSACTION, network: 'eip155:8453', amount: '1250000'
+      })]] };
+    const http = new QueuedHttp([response]);
+    const core = makeCore({ root: input.root, native, rpc, clock, http });
+    const outcome = await core.execute({ command: 'operation.resume', operationId: input.operationId });
+    console.log(JSON.stringify({ outcome, requests: http.calls.map(call => call.httpRequest),
+      nativeOperations: native.calls.map(call => call.operation) }));
+  `, JSON.stringify({ root: fixture.root, operationId: fixture.operationId, material: fixture.native.material,
+    wallet: ACCOUNT.address, now: fixture.clock.now().toISOString() })], { cwd: process.cwd(), timeout: 15000 });
+  const evidence = JSON.parse(child.stdout);
+  assert.equal(evidence.outcome.ok, true, child.stdout);
+  assert.deepEqual(evidence.requests, [httpRequest]);
+  assert.deepEqual(evidence.nativeOperations, ["x402Exact.authorizationMaterial.get"]);
+  const after = await fixture.core.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
+  assert.equal(after.state, "settlement_pending");
+  assert.equal(after.authorization.nonce, before.authorization.nonce);
+  assert.equal(after.paymentHeaderHash, before.paymentHeaderHash);
+  const result = await fixture.core.context.state.loadX402Result(after.profileHash, after.operationId);
+  assert.equal(result?.responseStatus, "201");
+  assert.deepEqual(Buffer.from(result!.bodyText, "base64"), Buffer.from([0, 255, 1]));
+});
 
 test("authorized resume persists one paid attempt, strict settlement, and protected result", async (t) => {
   const fixture = await authorizedFixture(t);
@@ -324,6 +406,7 @@ test("PAYMENT-RESPONSE codec is exact, normalized, and closed", () => {
     errorMessage: "facilitator metadata",
     extensions: { trace: { provider: "official" } },
     extra: { settlementRoute: "live", attempts: [1] },
+    sellerMetadata: { latency: 0.25, fulfilled: true },
   });
   const success = decodeAndNormalizePaymentResponseHeader(additiveHeader, {
     payer: ACCOUNT.address.toLowerCase(), amountAtomic: "1250000",
@@ -360,7 +443,6 @@ test("PAYMENT-RESPONSE codec is exact, normalized, and closed", () => {
     canonicalPaymentResponseHeader({ ...coreResponse, errorMessage: "x".repeat(513) }),
     canonicalPaymentResponseHeader({ ...coreResponse, extensions: [] }),
     canonicalPaymentResponseHeader({ ...coreResponse, extra: "not-a-record" }),
-    canonicalPaymentResponseHeader({ ...coreResponse, unknown: true }),
     canonicalPaymentResponseHeader({ ...coreResponse, errorReason: "conflicts-with-success" }),
     canonicalPaymentResponseHeader({ ...coreResponse, payer: "0x3333333333333333333333333333333333333333" }),
     canonicalPaymentResponseHeader({ success: true, transaction: `0x${"0".repeat(64)}`, network: "eip155:8453" }),

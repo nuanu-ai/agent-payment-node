@@ -8,6 +8,7 @@ export * from "./command-catalog-parser.js";
 
 export type ScalarType =
   | "string"
+  | "base64"
   | "profile"
   | "provider_id"
   | "provider_auth_method"
@@ -27,6 +28,7 @@ export type EffectClass =
   | "none"
   | "local_read"
   | "network_read"
+  | "network_request"
   | "local_write"
   | "payment_prepare"
   | "payment_submit"
@@ -114,6 +116,12 @@ const rpcRequired = option("--rpc-url", "https_url", true, noDefault, [
   "public_target_required_at_runtime",
 ], "operator_input");
 const operationRequired = option("--operation", "operation_id", true, noDefault, ["64_lowercase_hex_characters"], "public");
+const httpOptions = [
+  option("--method", "string", false, noDefault, ["http_token_except_connect_and_trace", "default_GET"], "operator_input"),
+  option("--headers-json", "string", false, noDefault, ["bounded_safe_header_object", "no_credentials_or_payment_headers"], "operator_input"),
+  option("--body-base64", "base64", false, noDefault, ["maximum_65536_decoded_bytes", "empty_is_present_zero_bytes", "omission_is_absent"], "operator_input"),
+];
+const httpSynopsis = " [--method <method>] [--headers-json <json>] [--body-base64 <base64>]";
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["mcp"], summary: "Serve and discover the local APN MCP transport.", kind: "group" },
@@ -256,15 +264,17 @@ export const COMMANDS: readonly CommandDefinition[] = [
     [],
     ["apn wallet policy set --profile default --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>"],
   ),
-  command(["x402", "inspect"], "apn x402 inspect --url <https-url>", "Inspect supported offers in a standard x402 challenge.", [
+  command(["x402", "inspect"], "apn x402 inspect --url <https-url>" + httpSynopsis, "Inspect supported offers using an unpaid request; a seller may still process its application payload.", [
+    ...httpOptions,
     option("--url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "maximum_2048_utf8_bytes", "canonical_whatwg_serialization", "public_target_required_at_runtime"], "public"),
-  ], "network_read", "Performs one unpaid HTTPS inspection request.", "none", "Never.", completedStates, [], ["apn x402 inspect --url https://seller.example/resource"]),
+  ], "network_request", "Performs one unpaid HTTPS request; application side effects depend on the seller.", "none", "Never signs or pays; caller must authorize the application request.", completedStates, [], ["apn x402 inspect --url https://seller.example/resource"]),
   command(
     ["x402", "fetch", "prepare"],
-    "apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]",
+    "apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]" + httpSynopsis,
     "Freeze a policy-bounded standard x402 purchase.",
     [
       profileRequired,
+      ...httpOptions,
       option("--url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "maximum_2048_utf8_bytes", "canonical_whatwg_serialization", "public_target_required_at_runtime"], "public"),
       option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_200_safe_ascii_characters"], "operator_input"),
       rpcRequired,
