@@ -1,4 +1,5 @@
 import { canonicalJson, domainHash, hashObject, sha256 } from "./canonical.js";
+import { x402HttpRequestBinding } from "./x402-http-request.js";
 const HASH = /^[a-f0-9]{64}$/u;
 const ADDRESS = /^0x[0-9a-f]{40}$/u;
 const BYTES32 = /^0x[0-9a-f]{64}$/u;
@@ -8,6 +9,7 @@ export const X402_STATE_VERSION = "apn.x402.state.v1";
 export const TRANSITION_VERSION = "apn.x402.transition.v1";
 export function x402RequestHash(input) {
     return hashObject({
+        ...x402HttpRequestBinding(input.httpRequest),
         method: "x402.fetch.prepare",
         profile: input.profile,
         canonicalUrl: input.canonicalUrl,
@@ -19,7 +21,8 @@ export function x402Fingerprint(input) {
         kind: input.kind,
         profile: input.profile,
         operationId: input.operationId,
-        method: "GET",
+        method: input.resource.httpRequest?.method ?? "GET",
+        ...x402HttpRequestBinding(input.resource.httpRequest),
         canonicalFullUrl: input.resource.canonicalUrl,
         chainId: input.chainId,
         network: input.network,
@@ -42,7 +45,8 @@ export function x402OperationBindingHash(operation) {
     return domainHash("apn.x402.binding.v1", canonicalJson({
         version: 1,
         x402Version: 2,
-        method: "GET",
+        method: operation.resource.httpRequest?.method ?? "GET",
+        ...x402HttpRequestBinding(operation.resource.httpRequest),
         canonicalFullUrl: operation.resource.canonicalUrl,
         resource: JSON.parse(operation.sellerWire.resourceCanonicalJson),
         acceptedResolvedDefaults: operation.selectedOffer.resolved,

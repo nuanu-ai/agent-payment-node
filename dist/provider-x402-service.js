@@ -13,6 +13,8 @@ import { isCode } from "./secure-state-store.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { canonicalPrepareUrl, freshChallenge, positiveCap } from "./x402-policy.js";
+import { optionalX402HttpRequest } from "./x402-http-request.js";
+import { assertProviderHttpRequest } from "./provider-x402-http-request.js";
 import { assertProviderAtomicAmount, assertProviderPolicyBalance, sameFrozenProviderPolicy, sameFrozenProviderProfile, soleProviderOffer, } from "./provider-x402-policy.js";
 import { waitForProviderSettlement } from "./provider-x402-wait.js";
 import { boundedX402ReadPort } from "./x402-service-rpc.js";
@@ -51,6 +53,8 @@ export class ProviderX402Service {
             stored.capability_snapshot.x402.mode === "provider_atomic_paid_fetch";
     }
     async prepare(request) {
+        const httpRequest = optionalX402HttpRequest(request.url, request.httpRequest);
+        const requestFields = httpRequest === undefined ? {} : { httpRequest };
         const profile = canonicalProfile(request.profile);
         const key = canonicalIdempotencyKey(request.idempotencyKey);
         const callerCap = request.maxAmountAtomic === undefined ? undefined : positiveCap(request.maxAmountAtomic);
@@ -63,7 +67,7 @@ export class ProviderX402Service {
         const operationId = state.operationId(profile, key);
         const idempotencyHash = state.idempotencyHash(key);
         const requestHash = providerX402RequestHash({
-            profile, canonicalUrl, rpcUrl, ...(callerCap === undefined ? {} : { callerCapAtomic: callerCap }),
+            profile, canonicalUrl, rpcUrl, ...requestFields, ...(callerCap === undefined ? {} : { callerCapAtomic: callerCap }),
         });
         return await state.withLocks([
             `profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`,
@@ -79,16 +83,17 @@ export class ProviderX402Service {
             }
             await this.operations.assertProfileAvailable(profileHash);
             const bound = await requireProviderX402Profile(this.context, profileHash);
+            assertProviderHttpRequest(requireProviderX402Adapter(this.context, bound).x402, httpRequest);
             const policy = requireProfilePolicy(await this.context.requirePolicy().load(policyBinding(bound)));
             const capAtomic = effectiveX402Cap(policy, callerCap);
-            const challenge = await freshChallenge(this.context.requireHttp(), canonicalUrl);
+            const challenge = await freshChallenge(this.context.requireHttp(), canonicalUrl, httpRequest);
             const selected = soleProviderOffer(challenge);
             assertProviderAtomicAmount(selected.amountAtomic);
             if (BigInt(selected.amountAtomic) > BigInt(capAtomic)) {
                 throw new ApnError("APN_X402_OFFER_EXCEEDS_LIMIT", "The exact seller offer exceeds the effective x402 limit.");
             }
             const operation = stagedProviderX402Operation({
-                operationId, idempotencyHash, profile, profileHash, requestHash, endpoint, rpcUrl,
+                operationId, idempotencyHash, profile, profileHash, requestHash, endpoint, rpcUrl, ...requestFields,
                 ...(callerCap === undefined ? {} : { callerCapAtomic: callerCap }),
                 effectiveCapAtomic: capAtomic, bound, policy, selected,
                 createdAt: this.context.clock.now().toISOString(),
@@ -154,6 +159,7 @@ export class ProviderX402Service {
                 if (!sameFrozenProviderProfile(bound, operation))
                     await this.failBeforeEffect(operation, "provider_profile_changed");
                 const adapter = requireProviderX402Adapter(this.context, bound);
+                assertProviderHttpRequest(adapter.x402, operation.request.httpRequest);
                 adapter.x402.assertCompatibleIntent?.({ amountAtomic: operation.requirement.amountAtomic });
                 await adapter.x402.prime?.();
                 const balance = await observeProviderX402Balance(this.context, bound, adapter);
@@ -164,7 +170,7 @@ export class ProviderX402Service {
                 const lower = await captureProviderEvidenceLowerBlock(rpc);
                 if (lower.rpcOriginHash !== operation.rpcOriginHash)
                     await this.failBeforeEffect(operation, "rpc_origin_changed");
-                const challenge = await freshChallenge(this.context.requireHttp(), operation.request.canonicalUrl);
+                const challenge = await freshChallenge(this.context.requireHttp(), operation.request.canonicalUrl, operation.request.httpRequest);
                 const selected = soleProviderOffer(challenge);
                 if (selected.digest !== operation.requirement.digest || selected.payee !== operation.requirement.payee ||
                     selected.amountAtomic !== operation.requirement.amountAtomic ||
@@ -180,6 +186,7 @@ export class ProviderX402Service {
                 try {
                     effect = await adapter.x402.execute({
                         url: operation.request.canonicalUrl,
+                        ...(operation.request.httpRequest === undefined ? {} : { httpRequest: operation.request.httpRequest }),
                         amountAtomic: operation.requirement.amountAtomic,
                         correlationId: operation.operationId,
                         requestDigest: operation.request.requestDigest,

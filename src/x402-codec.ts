@@ -114,9 +114,7 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
 ): DecodedPaymentResponse {
   const strict = decodeCanonicalBase64Json(value);
   const response = record(strict, "PAYMENT-RESPONSE");
-  allowedKeys(response, ["success", "transaction", "network"], [
-    "errorReason", "errorMessage", "payer", "amount", "extensions", "extra",
-  ]);
+  requiredKeys(response, ["success", "transaction", "network"]);
   let official: SettleResponse;
   try { official = decodeOfficialPaymentResponseHeader(value); }
   catch { throw settlement("Official x402 v2 representation rejected PAYMENT-RESPONSE."); }
@@ -222,7 +220,7 @@ function inspectCandidate(requirements: PaymentRequirements, index: number): Ins
     Buffer.byteLength(extra.name, "utf8") > 128 ||
     typeof extra.version !== "string" || extra.version.length === 0 ||
     Buffer.byteLength(extra.version, "utf8") > 128 ||
-    Object.keys(extra).some((key) => !["name", "version", "assetTransferMethod", "paymentFlow"].includes(key)) ||
+    (extra.decimals !== undefined && extra.decimals !== 6) ||
     (extra.assetTransferMethod !== undefined && extra.assetTransferMethod !== "eip3009") ||
     (extra.paymentFlow !== undefined && extra.paymentFlow !== "authorization")
   ) return null;
@@ -237,7 +235,7 @@ function inspectCandidate(requirements: PaymentRequirements, index: number): Ins
 
 function validatePaymentRequired(value: unknown): asserts value is PaymentRequired {
   const paymentRequired = record(value, "PAYMENT-REQUIRED");
-  allowedKeys(paymentRequired, ["x402Version", "resource", "accepts"], ["error", "extensions"]);
+  requiredKeys(paymentRequired, ["x402Version", "resource", "accepts"]);
   if (paymentRequired.x402Version !== 2) throw protocol("Only x402Version 2 is supported.");
   if (paymentRequired.error !== undefined && typeof paymentRequired.error !== "string") {
     throw protocol("PAYMENT-REQUIRED error is invalid.");
@@ -284,26 +282,17 @@ function validatePaymentPayload(value: unknown): asserts value is PaymentPayload
 
 function validateResource(value: unknown): void {
   const resource = record(value, "resource");
-  allowedKeys(resource, ["url"], ["description", "mimeType", "serviceName", "tags", "iconUrl"]);
+  requiredKeys(resource, ["url"]);
   boundedString(resource.url, 2048, "resource.url");
-  if (resource.description !== undefined) boundedString(resource.description, 512, "resource.description");
-  if (resource.mimeType !== undefined) asciiString(resource.mimeType, 128, "resource.mimeType");
-  if (resource.serviceName !== undefined) printableAscii(resource.serviceName, 32, "resource.serviceName");
-  if (resource.tags !== undefined) {
-    if (!Array.isArray(resource.tags) || resource.tags.length > 5) throw protocol("resource.tags is invalid.");
-    resource.tags.forEach((tag) => printableAscii(tag, 32, "resource.tags entry"));
-  }
-  if (resource.iconUrl !== undefined) {
-    boundedString(resource.iconUrl, 2048, "resource.iconUrl");
-    let icon: URL;
-    try { icon = new URL(resource.iconUrl); } catch { throw protocol("resource.iconUrl is invalid."); }
-    if (icon.protocol !== "https:" && icon.protocol !== "http:") throw protocol("resource.iconUrl scheme is invalid.");
-  }
+}
+
+function requiredKeys(value: Record<string, unknown>, keys: readonly string[]): void {
+  if (keys.some((key) => !Object.hasOwn(value, key))) throw protocol("x402 required fields are missing.");
 }
 
 function validateRequirements(value: unknown): void {
   const requirements = record(value, "payment requirements");
-  allowedKeys(requirements, ["scheme", "network", "amount", "asset", "payTo", "maxTimeoutSeconds"], ["extra"]);
+  requiredKeys(requirements, ["scheme", "network", "amount", "asset", "payTo", "maxTimeoutSeconds"]);
   boundedString(requirements.scheme, 64, "requirements.scheme");
   boundedString(requirements.network, 128, "requirements.network");
   boundedString(requirements.amount, 128, "requirements.amount");
@@ -424,15 +413,6 @@ function boundedRecord(value: unknown, label: string): Record<string, unknown> {
 
 function boundedString(value: unknown, maxBytes: number, label: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value, "utf8") > maxBytes) throw protocol(`${label} is invalid.`);
-}
-
-function asciiString(value: unknown, maxBytes: number, label: string): asserts value is string {
-  boundedString(value, maxBytes, label);
-  if (!/^[\x20-\x7e]+$/u.test(value)) throw protocol(`${label} must be ASCII.`);
-}
-
-function printableAscii(value: unknown, maxBytes: number, label: string): asserts value is string {
-  asciiString(value, maxBytes, label);
 }
 
 function protocol(message: string): ApnError {

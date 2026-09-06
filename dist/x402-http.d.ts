@@ -1,5 +1,6 @@
 import type { HttpGetRequest, HttpObservation, HttpPort, InspectResult } from "./x402-model.js";
 import type { X402HttpObservation } from "./x402-state-integrity.js";
+import { type X402HttpRequestV1 } from "./x402-http-request.js";
 export declare const SELLER_RESPONSE_MAX_HEADER_BYTES: number;
 export declare class HttpsX402Http implements HttpPort {
     private readonly nowMs;
@@ -9,12 +10,14 @@ export declare class HttpsX402Http implements HttpPort {
     private readonly request;
     get(request: HttpGetRequest): Promise<HttpObservation>;
 }
-export declare function inspectX402(http: HttpPort, value: string): Promise<InspectResult>;
+export declare function inspectX402(http: HttpPort, value: string, request?: X402HttpRequestV1): Promise<InspectResult>;
 export interface PaidHttpResult {
     readonly observation: X402HttpObservation;
     readonly paymentResponseHeader?: string;
     readonly result?: {
         readonly mediaType: string;
+        readonly bodyEncoding?: "base64";
+        readonly responseStatus?: string;
         readonly bodyText: string;
         readonly resultHash: string;
         readonly byteLength: string;
@@ -26,4 +29,5 @@ export declare function observePaidX402Response(raw: HttpObservation, input: {
     readonly canonicalUrl: string;
     readonly targetHash: string;
     readonly origin: string;
+    readonly opaqueResult?: boolean;
 }): PaidHttpResult;

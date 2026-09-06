@@ -14,6 +14,8 @@ import {
   PROVIDER_X402_KNOWN_ENVELOPE_KEYS,
 } from "./provider-x402-rejection-shape.js";
 import { resolveAwalBin } from "./awal-package.js";
+import { assertAwalHttpRequest } from "./provider-x402-http-request.js";
+import { optionalX402HttpRequest, type X402HttpRequestV1 } from "./x402-http-request.js";
 
 export const AWAL_X402_PROCESS_TIMEOUT_MS = 210_000;
 export const AWAL_X402_INTERNAL_TIMEOUT_MS = 180_000;
@@ -51,6 +53,7 @@ export type AwalX402LaunchPort = (
 type ExecutionResult = Awaited<ReturnType<NonNullable<X402ExecutionPort["execute"]>>>;
 
 export class AwalX402Adapter implements X402ExecutionPort {
+  readonly assertCompatibleRequest = assertAwalHttpRequest;
   readonly mode = "provider_atomic_paid_fetch" as const;
   private script: string | undefined;
 
@@ -74,18 +77,22 @@ export class AwalX402Adapter implements X402ExecutionPort {
 
   async execute(input: {
     readonly url: string;
+    readonly httpRequest?: X402HttpRequestV1;
     readonly amountAtomic: string;
     readonly correlationId: string;
     readonly requestDigest: string;
   }): Promise<ExecutionResult> {
+    const httpRequest = optionalX402HttpRequest(input.url, input.httpRequest);
+    if (httpRequest !== undefined) this.assertCompatibleRequest(httpRequest);
     providerAtomic(input.amountAtomic);
     try { await this.prime(); }
     catch { return { disposition: "not_started", reason: "provider_binary_unavailable" }; }
     const script = this.script;
     if (script === undefined) return { disposition: "not_started", reason: "provider_binary_unavailable" };
     const args = [
-      script, "x402", "pay", input.url, "-X", "GET", "--max-amount", input.amountAtomic,
+      script, "x402", "pay", input.url, "-X", httpRequest?.method ?? "GET", "--max-amount", input.amountAtomic,
       "--scheme", "exact", "--correlation-id", input.correlationId, "--json",
+      ...(httpRequest === undefined || Object.keys(httpRequest.headers).length === 0 ? [] : ["-h", JSON.stringify(httpRequest.headers)]),
     ] as const;
     return await this.runChild(args, input, script);
   }

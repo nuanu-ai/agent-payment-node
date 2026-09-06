@@ -54,7 +54,7 @@ export function positive(value: unknown): asserts value is string {
 export function mediaType(value: unknown): asserts value is string {
   if (
     typeof value !== "string" || Buffer.byteLength(value, "utf8") > 128 ||
-    (value !== "application/json" && !/^text\/[!#$%&'*+\-.^_`|~0-9a-z]+$/u.test(value))
+    !/^[!#$%&'*+\-.^_`|~0-9a-z]+\/[!#$%&'*+\-.^_`|~0-9a-z]+$/u.test(value)
   ) stateCorrupt("x402 media type is invalid.");
 }
 export function timestamp(value: unknown): asserts value is string {

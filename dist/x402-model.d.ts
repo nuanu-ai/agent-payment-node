@@ -1,5 +1,7 @@
+import type { X402HttpRequestV1 } from "./x402-http-request.js";
 export interface HttpGetRequest {
     readonly url: string;
+    readonly httpRequest?: X402HttpRequestV1;
     readonly paymentSignature?: string;
     readonly timeoutMs?: number;
 }

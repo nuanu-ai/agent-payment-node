@@ -1,4 +1,6 @@
 import type { X402ExecutionPort } from "./provider-ports.js";
+import { assertAwalHttpRequest } from "./provider-x402-http-request.js";
+import { type X402HttpRequestV1 } from "./x402-http-request.js";
 export declare const AWAL_X402_PROCESS_TIMEOUT_MS = 210000;
 export declare const AWAL_X402_INTERNAL_TIMEOUT_MS = 180000;
 export declare const AWAL_X402_SHUTDOWN_MARGIN_MS = 30000;
@@ -27,6 +29,7 @@ export declare class AwalX402Adapter implements X402ExecutionPort {
     private readonly binResolver;
     private readonly launch;
     private readonly timeoutMs;
+    readonly assertCompatibleRequest: typeof assertAwalHttpRequest;
     readonly mode: "provider_atomic_paid_fetch";
     private script;
     constructor(binResolver?: () => Promise<string>, launch?: AwalX402LaunchPort, timeoutMs?: number);
@@ -36,6 +39,7 @@ export declare class AwalX402Adapter implements X402ExecutionPort {
     prime(): Promise<void>;
     execute(input: {
         readonly url: string;
+        readonly httpRequest?: X402HttpRequestV1;
         readonly amountAtomic: string;
         readonly correlationId: string;
         readonly requestDigest: string;

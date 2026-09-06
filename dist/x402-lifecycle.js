@@ -38,14 +38,14 @@ export class X402Lifecycle {
     }
     async persistAndLinkResult(operation, result, createdAt) {
         const candidate = sealX402Result({
-            schemaVersion: "apn.x402.result.v1",
+            schemaVersion: result.bodyEncoding === "base64" ? "apn.x402.result.v2" : "apn.x402.result.v1",
             operationId: operation.operationId,
             mediaType: result.mediaType,
-            bodyEncoding: "utf8",
+            bodyEncoding: result.bodyEncoding ?? "utf8",
             bodyText: result.bodyText,
             resultHash: result.resultHash,
             byteLength: result.byteLength,
-            responseStatus: "200",
+            responseStatus: result.responseStatus ?? "200",
             createdAt,
         });
         const existing = await this.context.state.loadX402RecoveryResult(operation.profileHash, operation.operationId);
@@ -71,7 +71,7 @@ export class X402Lifecycle {
             ? operation.attempts[attemptIndex]
             : undefined;
         if (response?.classification !== "success" || attempt?.phase !== "observed" ||
-            attempt.observation?.status !== "200" || attempt.observation.bodyHash !== result.resultHash ||
+            attempt.observation?.status !== result.responseStatus || attempt.observation.bodyHash !== result.resultHash ||
             attempt.observation.bodyByteLength !== result.byteLength || attempt.observation.mediaType !== result.mediaType)
             throw new ApnError("APN_STATE_CORRUPT", "Recovered x402 result lacks its designated successful response.");
         return await this.transition(operation, operation.state, {

@@ -85,6 +85,7 @@ interface PublicBlock {
 }
 interface LocalPublicResult {
     readonly kind: "x402_result";
+    readonly body_encoding?: "base64";
     readonly media_type: string;
     readonly body: unknown;
     readonly sha256: string;

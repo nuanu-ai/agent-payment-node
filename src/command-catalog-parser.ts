@@ -10,6 +10,7 @@ import {
 import { renderHelp } from "./command-help.js";
 import { containsRawControlCharacters } from "./cli-handoff.js";
 import { ApnError, asApnError } from "./errors.js";
+import { decodeX402RequestBody } from "./x402-http-request.js";
 
 export interface ParsedCatalogCommand {
   readonly command: CommandDefinition;
@@ -130,6 +131,7 @@ function validateOptionValue(definition: CommandOption, value: string): void {
   const invalid = (): never => { throw new ApnError("APN_INVALID_INPUT", `${definition.name} does not satisfy its declared ${definition.type} contract.`); };
   if (containsRawControlCharacters(value)) invalid();
   switch (definition.type) {
+    case "base64": decodeX402RequestBody(value); return;
     case "string": if (value.length === 0) invalid(); return;
     case "profile": if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value)) invalid(); return;
     case "provider_id": if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value)) invalid(); return;
