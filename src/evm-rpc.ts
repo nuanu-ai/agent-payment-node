@@ -70,7 +70,7 @@ export class EvmRpc implements EvmRpcPort {
     const block = await evmRpcBlock(this.call, "latest");
     const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(MAX_DIRECT_TRANSACTION_BYTES)] });
     const operatorData = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
-    const [l1Fee, operatorFee] = await Promise.all([
+    const [l1Fee, operatorFee] = chainId === 1 ? [0n, 0n] : await Promise.all([
       this.call("eth_call", [{ to: GAS_ORACLE, data }, block.tag]).then(evmRpcWord),
       this.call("eth_call", [{ to: GAS_ORACLE, data: operatorData }, block.tag]).then(evmRpcWord),
     ]);

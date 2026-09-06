@@ -2,6 +2,7 @@ import { COMMANDS } from "./command-catalog.js";
 import { cliHandoffDetails, createCliHandoff, type CliHandoff } from "./cli-handoff.js";
 import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
+import { x402Network } from "./x402-network.js";
 import type { ProfilePolicyApprovalIntent, ProfilePolicyApprovalPort } from "./policy-approval.js";
 
 type PolicySetRequest = Extract<CommandRequest, { readonly command: "wallet.policy.set" }>;
@@ -16,6 +17,8 @@ export class RejectingMcpPolicyApproval implements ProfilePolicyApprovalPort {
   async approve(intent: ProfilePolicyApprovalIntent): Promise<void> {
     if (
       intent.profile !== this.request.profile ||
+      (intent.x402Network?.chainId ?? 8453) !== (this.request.chainId ?? 8453) ||
+      (intent.x402Network !== undefined && intent.x402Network.token !== x402Network(this.request.chainId).token) ||
       intent.maxBalanceUsdcAtomic !== this.request.maxBalanceUsdcAtomic ||
       intent.maxX402AmountAtomic !== this.request.maxX402AmountAtomic ||
       (this.request.maxBalanceEthWei !== undefined && intent.maxBalanceEthWei !== this.request.maxBalanceEthWei)
@@ -31,9 +34,11 @@ export class RejectingMcpPolicyApproval implements ProfilePolicyApprovalPort {
 }
 
 function policyHandoff(request: PolicySetRequest): CliHandoff {
-  const definition = COMMANDS.find((command) => command.path.join(" ") === "wallet policy set");
+  const path = request.chainId === undefined ? "wallet policy set" : "wallet policy set-network";
+  const definition = COMMANDS.find((command) => command.path.join(" ") === path);
   if (definition === undefined) throw new ApnError("APN_INTERNAL", "The policy command is absent from the command manifest.");
   const values: Readonly<Record<string, string | undefined>> = {
+    "--chain": request.chainId === undefined ? undefined : x402Network(request.chainId).network,
     "--profile": request.profile,
     "--max-balance-usdc-atomic": request.maxBalanceUsdcAtomic,
     "--max-x402-amount-atomic": request.maxX402AmountAtomic,

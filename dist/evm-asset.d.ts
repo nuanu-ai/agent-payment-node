@@ -1,10 +1,14 @@
 import type { Address } from "./model.js";
-export type EvmChainId = 8453;
 export declare const EVM_NETWORKS: readonly [{
     readonly chainId: 8453;
     readonly name: "Base";
     readonly caip2: "eip155:8453";
+}, {
+    readonly chainId: 1;
+    readonly name: "Ethereum";
+    readonly caip2: "eip155:1";
 }];
+export type EvmChainId = typeof EVM_NETWORKS[number]["chainId"];
 export declare const NATIVE_ASSET_ADDRESS: "0x0000000000000000000000000000000000000000";
 export declare const MAX_EVM_UINT: bigint;
 export declare const MAX_DIRECT_TRANSACTION_BYTES = 512;

@@ -1,3 +1,4 @@
+import { EVM_NETWORKS } from "./evm-asset.js";
 import type { CommandDefinition, CommandOption } from "./command-catalog.js";
 
 const required = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption => ({
@@ -5,7 +6,7 @@ const required = (name: CommandOption["name"], type: CommandOption["type"], cons
 });
 const selection: readonly CommandOption[] = [
   required("--profile", "profile", ["canonical_profile"]),
-  required("--chain", "string", ["enabled_mainnet_caip2", "eip155:8453"]),
+  required("--chain", "string", ["enabled_mainnet_caip2", ...EVM_NETWORKS.map((network) => network.caip2)]),
   required("--asset", "string", ["native_or_nonzero_erc20_contract"]),
   { ...required("--decimals", "string", ["canonical_integer_0_through_255", "must_match_observed_metadata"]), required: false },
   required("--rpc-url", "https_url", ["credential_free_https_without_fragment", "public_target_required_at_runtime", "selected_chain_verified"]),

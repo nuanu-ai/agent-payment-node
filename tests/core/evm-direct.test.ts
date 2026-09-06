@@ -18,7 +18,7 @@ test("generic CLI and MCP bind the same explicit core request without changing l
   const argv = ["pay", "transfer", "prepare-asset", ...Object.entries(input).flatMap(([name, value]) => [`--${name.replaceAll("_", "-")}`, value])];
   assert.deepEqual(bindArgv(argv), bindMcpInput(tool.command, input));
   assert.equal(bindArgv(argv).request.command, "transfer.prepare");
-  assert.throws(() => bindMcpInput(tool.command, { ...input, chain: "eip155:1" }), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => bindMcpInput(tool.command, { ...input, chain: "eip155:42161" }), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bindMcpInput(tool.command, { ...input, decimals: "256" }), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bindArgv(["pay", "transfer", "prepare", "--profile", "default"]));
   assert.ok(MCP_TOOLS.some((entry) => entry.name === "apn_wallet_balance_asset"));
@@ -36,12 +36,14 @@ test("EVM amount handling preserves 0..255 decimals and uint256 without implicit
   assert.equal(resolveEvmAsset({ chainId: 8453, token: EVM_TOKEN, decimals: 0 }).decimalsSource, "caller");
 });
 
-for (const asset of ["native", EVM_TOKEN] as const) test(`Base ${asset === "native" ? "ETH" : "arbitrary ERC-20"} completes through encrypted custody and durable status/receipt`, async (context) => {
+for (const chainId of [8453, 1] as const) for (const asset of ["native", EVM_TOKEN] as const) test(`Chain ${chainId} ${asset === "native" ? "ETH" : "arbitrary ERC-20"} completes through encrypted custody and durable status/receipt`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
+  setup.rpc.chainId = chainId;
+  if (chainId === 1) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   const wallet = await setup.core.wallet.ensure("default") as { address: Address };
   setup.rpc.sender = wallet.address;
-  const request = { ...EVM_REQUEST, asset: { chainId: 8453 as const, token: asset }, amount: asset === "native" ? "0.000001" : "1.25" };
+  const request = { ...EVM_REQUEST, asset: { chainId, token: asset }, amount: asset === "native" ? "0.000001" : "1.25" };
   const prepared = await setup.core.transfer.prepare(request) as { operation_id: string; state: string };
   assert.equal(prepared.state, "awaiting_approval");
   assert.equal(setup.approval.intents.length, 0);
@@ -55,7 +57,7 @@ for (const asset of ["native", EVM_TOKEN] as const) test(`Base ${asset === "nati
   assert.equal(approved.state, "completed");
   const raw = setup.rpc.submissions[0]!;
   const transaction = parseTransaction(raw);
-  assert.equal(transaction.chainId, 8453);
+  assert.equal(transaction.chainId, chainId);
   assert.equal(transaction.value ?? 0n, asset === "native" ? 1000000000000n : 0n);
   assert.equal(transaction.to?.toLowerCase(), (asset === "native" ? EVM_REQUEST.recipient : asset).toLowerCase());
   assert.equal(setup.approval.intents.length, 1);

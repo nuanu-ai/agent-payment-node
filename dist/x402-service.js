@@ -1,6 +1,8 @@
+import { assertLocalNetworkProfile, x402Network } from "./x402-network.js";
+import { assertX402RpcChain, selectX402Rpc } from "./x402-service-rpc.js";
 import { randomBytes } from "node:crypto";
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { BASE_USDC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
@@ -8,7 +10,7 @@ import { assertUnattendedX402Balance, effectiveX402Cap, requireProfilePolicy, } 
 import { candidatesWithinCap, canonicalPrepareUrl, freshChallenge, paymentIdentifierState, positiveCap, selectPrepareOffer, } from "./x402-policy.js";
 import { appendX402Transition, publicX402Operation, sealX402Operation, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, } from "./x402-state-integrity.js";
 import { X402PaidRequest } from "./x402-paid-request.js";
-import { assertWaitRpcProvenance, boundedX402ReadPort, isPostExposureWaitState, isRecoverableX402RpcObservationFailure, x402ReadPort, } from "./x402-service-rpc.js";
+import { assertWaitRpcProvenance, remainingWaitMs, waitTimeout, boundedX402ReadPort, isPostExposureWaitState, isRecoverableX402RpcObservationFailure, x402ReadPort, } from "./x402-service-rpc.js";
 import { ProviderX402Service } from "./provider-x402-service.js";
 import { isCode } from "./secure-state-store.js";
 import { resolveX402Payer } from "./x402-payer.js";
@@ -21,9 +23,11 @@ export class X402Service extends X402PaidRequest {
         this.providerX402 = new ProviderX402Service(context);
     }
     async prepare(request) {
+        const network = x402Network(request.chainId);
+        await assertLocalNetworkProfile(this.context, request.profile, network.chainId);
         const httpRequest = optionalX402HttpRequest(request.url, request.httpRequest);
         const requestFields = httpRequest === undefined ? {} : { httpRequest };
-        if (await this.providerX402.canHandle(request.profile))
+        if (network.chainId === 8453 && await this.providerX402.canHandle(request.profile))
             return await this.providerX402.prepare(request);
         const profile = canonicalProfile(request.profile);
         const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
@@ -44,7 +48,7 @@ export class X402Service extends X402PaidRequest {
             const provisionalCap = callerCap === undefined
                 ? existingAtExpectedId?.capAtomic ?? "0"
                 : callerCap;
-            const provisionalRequestHash = x402RequestHash({ profile, canonicalUrl, capAtomic: provisionalCap, ...requestFields });
+            const provisionalRequestHash = x402RequestHash({ profile, canonicalUrl, capAtomic: provisionalCap, chainId: network.chainId, ...requestFields });
             const existing = await this.operations.resolvePrepare({
                 kind: "x402_fetch",
                 profileHash,
@@ -55,21 +59,22 @@ export class X402Service extends X402PaidRequest {
             if (existing !== null)
                 return publicX402Operation(existing.record);
             await this.operations.assertProfileAvailable(profileHash);
-            const payer = await resolveX402Payer(this.context, profileHash);
+            const payer = await resolveX402Payer(this.context, profileHash, network.chainId);
             const profilePolicy = requireProfilePolicy(await this.context.requirePolicy().load(payer.policy));
             const capAtomic = effectiveX402Cap(profilePolicy, callerCap);
-            const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic, ...requestFields });
+            const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic, chainId: network.chainId, ...requestFields });
             const wallet = payer.wallet;
             const http = this.context.requireHttp();
-            const rpc = this.context.requireRpc();
-            const discovered = await freshChallenge(http, canonicalUrl, httpRequest);
+            const rpc = selectX402Rpc(this.context.requireRpc(), network.chainId);
+            const discovered = await freshChallenge(http, canonicalUrl, httpRequest, network.chainId);
             const underCap = candidatesWithinCap(discovered, capAtomic);
             const createdAtDate = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
             const createdAt = createdAtDate.toISOString();
             const createdAtUnix = Math.floor(createdAtDate.getTime() / 1000).toString();
             const invocationStartedAtMs = this.context.clock.now().getTime();
-            const chain = await rpc.assertBaseChain();
+            const chain = await assertX402RpcChain(rpc, network.chainId);
             const evidence = await rpc.getX402PrepareEvidence(wallet);
+            await assertX402RpcChain(rpc, network.chainId);
             const invocationCompletedAtMs = this.context.clock.now().getTime();
             const selected = selectPrepareOffer(discovered, underCap, evidence, wallet, {
                 rpcOriginHash: sha256(chain.rpcOrigin),
@@ -121,9 +126,9 @@ export class X402Service extends X402PaidRequest {
                 profile,
                 operationId,
                 resource,
-                chainId: "8453",
-                network: CHAIN_CAIP2,
-                token: BASE_USDC.toLowerCase(),
+                chainId: network.chainText,
+                network: network.network,
+                token: network.token.toLowerCase(),
                 capAtomic,
                 selectedOffer: selected.selectedOffer,
                 wallet,
@@ -152,9 +157,9 @@ export class X402Service extends X402PaidRequest {
                     resourceCanonicalJson,
                     resourceHash: domainHash("apn.x402.resource.v1", resourceCanonicalJson),
                 },
-                chainId: "8453",
-                network: CHAIN_CAIP2,
-                token: BASE_USDC.toLowerCase(),
+                chainId: network.chainText,
+                network: network.network,
+                token: network.token.toLowerCase(),
                 wallet,
                 payee: authorizationBase.to,
                 amountAtomic: selected.amountAtomic,
@@ -223,7 +228,7 @@ export class X402Service extends X402PaidRequest {
             const remaining = remainingWaitMs(deadline, this.context.wait.nowMs());
             if (remaining < 1)
                 return waitTimeout(waitSeconds, 0);
-            const waitRpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining));
+            const waitRpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining), x402Network(found.record.network).chainId);
             if (waitRpc === null) {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
             }
@@ -297,8 +302,8 @@ export class X402Service extends X402PaidRequest {
             if (rpcRemaining !== undefined && rpcRemaining < 1)
                 return publicX402Operation(operation);
             const x402Rpc = rpcRemaining === undefined
-                ? x402ReadPort(rpc)
-                : boundedX402ReadPort(rpc, Math.min(20_000, rpcRemaining));
+                ? x402ReadPort(rpc, x402Network(operation.network).chainId)
+                : boundedX402ReadPort(rpc, Math.min(20_000, rpcRemaining), x402Network(operation.network).chainId);
             if (deadline !== undefined && x402Rpc === null) {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the bounded read-only x402 RPC surface.");
             }
@@ -456,7 +461,7 @@ export class X402Service extends X402PaidRequest {
                 const remaining = remainingWaitMs(deadline, this.context.wait.nowMs());
                 if (remaining < 1)
                     return publicX402Operation(next);
-                const x402Rpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining));
+                const x402Rpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining), x402Network(next.network).chainId);
                 if (x402Rpc === null)
                     throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
                 try {
@@ -477,11 +482,5 @@ export class X402Service extends X402PaidRequest {
                 throw error;
         }
     }
-}
-function remainingWaitMs(deadline, nowMs) {
-    return Math.floor(deadline - nowMs);
-}
-function waitTimeout(seconds, observations) {
-    return { outcome: "timeout", requestedSeconds: seconds.toString(), observationCount: observations.toString() };
 }
 //# sourceMappingURL=x402-service.js.map

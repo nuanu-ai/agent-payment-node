@@ -1,8 +1,8 @@
 # Explicit EVM assets (unreleased source)
 
-The first EVM expansion Slice enables Base (`eip155:8453`) for the default local
-encrypted disposable wallet. Ethereum and Arbitrum remain disabled until their
-sequential Slices. Public APN/Homebrew remains 0.5.8; these source changes do not
+The first two EVM expansion Slices enable Base (`eip155:8453`) and Ethereum
+mainnet (`eip155:1`) for the local encrypted disposable wallet. Arbitrum remains
+disabled until its sequential Slice. Public APN/Homebrew remains 0.5.8; these source changes do not
 alter that published artifact. No new mainnet payment is claimed here.
 
 ## One direct-transfer journey
@@ -24,7 +24,9 @@ token whitelist, NFT, swap, approval or arbitrary calldata is supported.
 
 `--amount` is a canonical exact positive decimal; `--max-fee-wei` is a positive
 integer native-ETH **pre-submission quote budget**, not an onchain-enforced total
-fee cap. The quote includes maximum EIP-1559 execution cost, Base L1 data upper
+fee cap. Ethereum uses execution-only EIP-1559 fees: its L1/operator extra fields
+are explicitly zero and no Base oracle is queried. Base includes maximum
+EIP-1559 execution cost, L1 data upper
 estimate for at most 512 signed bytes, and operator fee estimate. Native value
 must also be funded. The quote is rechecked before signing and every submission.
 Variable L1/operator fees may change at inclusion. Missing oracle evidence fails
@@ -59,11 +61,40 @@ authorize or strand the operation. Status and receipt do not resume effects.
   balances are explicitly unassessed; generic direct permission is the exact
   operation approval, never conversion or reuse of a USDC allowance.
 
+## Ethereum x402 and policy
+
+Use `wallet policy set-network --chain eip155:1` with explicit
+`--max-balance-usdc-atomic` and `--max-x402-amount-atomic`, then
+`x402 inspect-network` / `x402 fetch prepare-network --chain eip155:1` with the
+existing URL, HTTP, RPC and idempotency options. Policy creation/increases require
+foreground TTY approval; MCP returns the exact CLI handoff. Decreases are
+noninteractive. `show-network` reports only the selected policy. Explicit Base
+selection aliases the legacy Base policy; Ethereum never inherits it.
+
+Ethereum x402 supports only exact EIP-3009 canonical Ethereum USDC at
+`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`. Name, version and domain separator
+are independently read at a pinned safe block. Arbitrary ERC-20 direct support
+does not imply other x402 tokens or ERC-7710/Permit2 support. External wallet
+profiles are refused before provider execution on non-Base networks.
+
+Before new authorization and the first paid exposure, APN reloads the encrypted
+network policy, payer, cap, balance and token domain. Lowering limits or changing
+RPC/network/identity blocks new exposure, not read-only reconciliation of an
+already-exposed authorization. RPC reconciliation checks the selected token and
+safe/finalized chain evidence. Resume takes its network from the frozen operation,
+not a new caller override. GET and absent/empty/nonempty POST envelopes remain
+immutable across the same-material retry and result recovery.
+
+These are unreleased local capabilities. A production Ethereum merchant and
+facilitator have not been qualified by a paid run. Fresh native, non-USDC and
+x402 mainnet rows remain required and held; protocol documentation and synthetic
+fixtures do not establish merchant availability or live settlement.
+
 ## Capability boundary
 
-| Profile | Base native / arbitrary ERC-20 direct | Base-USDC direct | Standard x402 |
+| Profile | Base / Ethereum native and arbitrary ERC-20 direct | Base-USDC direct | Standard x402 |
 | --- | --- | --- | --- |
-| Local encrypted wallet | Source/test capability; fresh paid proof held | Existing journey preserved | Existing Base-USDC exact EIP-3009 |
+| Local encrypted wallet | Source/test capability; fresh paid proof held | Existing journey preserved | Existing Base-USDC plus unreleased Ethereum-USDC exact EIP-3009 |
 | Coinbase Agentic Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route; pinned AWAL rejects present bodies, including empty |
 | MetaMask Agent Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route |
 | MetaMask Smart Account | Explicitly unsupported | Existing bounded consent route | Existing advertised ERC-7710 route |

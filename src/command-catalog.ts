@@ -1,5 +1,6 @@
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { EVM_COMMANDS } from "./evm-command-catalog.js";
+import { networkCommandVariants } from "./network-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
 import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
 
@@ -138,7 +139,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ] as const;
 
-export const COMMANDS: readonly CommandDefinition[] = [
+const BASE_COMMANDS: readonly CommandDefinition[] = [
   ...EVM_COMMANDS,
   command(["--version"], "apn --version", "Report installed APN and CLI contract versions.", [], "none", "Reads immutable build metadata only.", "none", "Never.", completedStates, [], ["apn --version"]),
   command(["mcp", "serve"], "apn mcp serve", "Serve the selected APN commands over local MCP stdio.", [], "none", "Starts only a local child-process stdio session.", "none", "Never.", mcpServerStates, [], ["apn mcp serve"], "text"),
@@ -405,6 +406,8 @@ export const COMMANDS: readonly CommandDefinition[] = [
   ),
   command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Read one durable terminal receipt.", [operationRequired], "local_read", "Reads a terminal receipt and never resumes an operation.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ] as const;
+
+export const COMMANDS: readonly CommandDefinition[] = [...BASE_COMMANDS, ...networkCommandVariants(BASE_COMMANDS)];
 
 export const COMMAND_MANIFEST = {
   schema_version: "apn.command-manifest.v1",

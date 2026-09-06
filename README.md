@@ -10,7 +10,8 @@ and canonical Base USDC. It does not require an Apple Developer identity, an
 app bundle, a daemon, a browser extension, or the AI Labs Hub.
 
 This unreleased source tree additionally implements explicit local-wallet Base
-native ETH and arbitrary ERC-20 direct transfers. This is not a new public
+and Ethereum native ETH / arbitrary ERC-20 direct transfers, plus independently
+network-bound Ethereum-USDC EIP-3009 x402. This is not a new public
 0.5.8 artifact or a Homebrew update. See [EVM asset transfers](docs/evm-assets.md)
 for the source-only capability, exact fee budget and evidence boundaries.
 
@@ -453,6 +454,10 @@ apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-se
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
+apn wallet policy show-network --chain <caip2> --profile <profile>
+apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
+apn x402 inspect-network --chain <caip2> --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
+apn x402 fetch prepare-network --chain <caip2> --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 ```
 <!-- END APN COMMAND CATALOG -->
 

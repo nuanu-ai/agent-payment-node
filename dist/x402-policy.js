@@ -1,6 +1,6 @@
+import { x402Network } from "./x402-network.js";
 import { encodeAbiParameters, keccak256, stringToHex } from "viem";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
-import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 import { parsePublicHttpsUrl } from "./network-policy.js";
@@ -19,14 +19,14 @@ export function canonicalPrepareUrl(value) {
 export function positiveCap(value) {
     return parseAtomic(value, { positive: true }).toString();
 }
-export async function freshChallenge(http, canonicalUrl, httpRequest) {
+export async function freshChallenge(http, canonicalUrl, httpRequest, chainId = 8453) {
     let captured;
     const inspection = await inspectX402({
         async get(request) {
             captured = await http.get(request);
             return captured;
         },
-    }, canonicalUrl, httpRequest);
+    }, canonicalUrl, httpRequest, chainId);
     if (captured === undefined)
         throw new ApnError("APN_HTTP_PROTOCOL", "Seller challenge observation is missing.");
     const values = captured.rawHeaderPairs.filter(([name]) => name.toLowerCase() === "payment-required").map(([, value]) => value);
@@ -56,7 +56,7 @@ export function selectPrepareOffer(challenge, underCap, evidence, wallet, contex
             continue;
         hasSufficientBalance = true;
         if (candidate.assetTransferMethod === "eip3009" && (candidate.tokenName !== evidence.tokenName || candidate.tokenVersion !== evidence.tokenVersion ||
-            tokenDomainSeparator(candidate.tokenName, candidate.tokenVersion) !== evidence.domainSeparator))
+            tokenDomainSeparator(candidate.tokenName, candidate.tokenVersion, x402Network(candidate.network).chainId) !== evidence.domainSeparator))
             continue;
         const index = Number(candidate.index);
         const requirements = challenge.paymentRequired.accepts[index];
@@ -96,8 +96,8 @@ export function selectPrepareOffer(challenge, underCap, evidence, wallet, contex
         throw new ApnError("APN_INSUFFICIENT_USDC", "USDC balance is insufficient for every offer within the explicit cap.");
     throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer matches the pinned token domain.");
 }
-export function tokenDomainSeparator(name, version) {
-    return keccak256(encodeAbiParameters([{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }, { type: "uint256" }, { type: "address" }], [DOMAIN_TYPE_HASH, keccak256(stringToHex(name)), keccak256(stringToHex(version)), BigInt(CHAIN_ID), BASE_USDC]));
+export function tokenDomainSeparator(name, version, chainId = 8453) {
+    return keccak256(encodeAbiParameters([{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }, { type: "uint256" }, { type: "address" }], [DOMAIN_TYPE_HASH, keccak256(stringToHex(name)), keccak256(stringToHex(version)), BigInt(chainId), x402Network(chainId).token]));
 }
 export function paymentIdentifierState(paymentRequired, operationId) {
     const extensions = paymentRequired.extensions;
@@ -121,7 +121,7 @@ export function materializePaymentIdentifier(paymentIdentifier) {
         throw new ApnError("APN_STATE_CORRUPT", "Protected payment-identifier declaration is invalid.");
     return { ...declaration, info: { ...declaration.info, id: paymentIdentifier.value } };
 }
-function validatePrepareEvidence(evidence, wallet, context, transferMethod) {
+export function validatePrepareEvidence(evidence, wallet, context, transferMethod) {
     const observedAtMs = Date.parse(evidence.observedAt);
     if (evidence.address.toLowerCase() !== wallet.toLowerCase() || evidence.queriedTag !== "safe" ||
         !HASH.test(evidence.rpcOriginHash) || evidence.rpcOriginHash !== context.rpcOriginHash ||
