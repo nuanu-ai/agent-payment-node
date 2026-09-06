@@ -21,11 +21,11 @@ import { temporaryState } from "./helpers.js";
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
 
-for (const chainId of [8453, 1] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process resumes exactly once without signing`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process resumes exactly once without signing`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); await setup.core.wallet.ensure("default");
   setup.rpc.chainId = chainId;
-  if (chainId === 1) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
+  if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { ...EVM_REQUEST.asset, chainId } }) as { operation_id: string };
   const worker = fileURLToPath(new URL("./evm-crash-worker.js", import.meta.url));
   const crashed = spawnSync(process.execPath, [worker, "sign-crash", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
@@ -39,12 +39,12 @@ for (const chainId of [8453, 1] as const) test(`chain ${chainId}: a real termina
   assert.equal(replay.status, 0, replay.stderr); assert.equal(JSON.parse(replay.stdout).submissions, 0);
 });
 
-for (const chainId of [8453, 1] as const) for (const asset of ["native", EVM_TOKEN] as const) test(`MCP ${chainId}/${asset} prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) for (const asset of ["native", EVM_TOKEN] as const) test(`MCP ${chainId}/${asset} prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
   setup.rpc.sender = (await setup.core.wallet.ensure("default") as { address: `0x${string}` }).address;
   setup.rpc.chainId = chainId;
-  if (chainId === 1) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
+  if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   const server = createMcpServer({ stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair(); await server.connect(serverTransport);
   const client = new Client({ name: "apn-evm-parity-test", version: "1.0.0" }); await client.connect(clientTransport);
@@ -91,10 +91,12 @@ test("generic external profiles fail before RPC, signing or provider calls", asy
     } });
     await assert.rejects(core.transfer.prepare(EVM_REQUEST), { code: "APN_PROVIDER_UNAVAILABLE" });
     assert.equal(setup.rpc.genericBalanceCalls, 0); assert.equal(setup.approval.intents.length, 0);
-    const unsupported = await core.execute({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" } });
+    for (const chainId of [1, 42161] as const) {
+    const unsupported = await core.execute({ ...EVM_REQUEST, asset: { chainId, token: "native" } });
     assert.equal(unsupported.error?.code, "APN_PROVIDER_UNAVAILABLE");
-    const x402 = await core.execute({ command: "x402.fetch.prepare", profile: "default", chainId: 1, url: "https://seller.example/resource", idempotencyKey: "eth-provider-no-effect" });
+    const x402 = await core.execute({ command: "x402.fetch.prepare", profile: "default", chainId, url: "https://seller.example/resource", idempotencyKey: "eth-provider-no-effect" });
     assert.equal(x402.error?.code, "APN_PROVIDER_UNAVAILABLE");
+    }
   }
 });
 

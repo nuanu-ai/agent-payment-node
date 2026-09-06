@@ -27,7 +27,7 @@ export function evmDirectFingerprint(operation) {
 export function validateEvmFeeQuote(value, economics) {
     if (!isPlainRecord(value) || !exactKeys(value, [
         "chainId", "l1DataFeeUpperWei", "operatorFeeUpperWei", "maximumExecutionFeeWei", "totalQuoteWei", "totalFeeEnforcedOnchain",
-        "blockNumberAtomic", "blockHash", "rpcOrigin", "observedAt",
+        "blockNumberAtomic", "blockHash", "rpcOrigin", "observedAt", ...(value.feeModel === undefined ? [] : ["feeModel"]),
     ]))
         throw new ApnError("APN_STATE_CORRUPT", "EVM fee quote schema is invalid.");
     const quote = value;
@@ -35,7 +35,8 @@ export function validateEvmFeeQuote(value, economics) {
     const execution = evmUint(quote.maximumExecutionFeeWei, true);
     const total = execution + evmUint(quote.l1DataFeeUpperWei) + evmUint(quote.operatorFeeUpperWei);
     if (evmUint(quote.totalQuoteWei, true) !== total || quote.totalFeeEnforcedOnchain !== false ||
-        (quote.chainId === 1 && (quote.l1DataFeeUpperWei !== "0" || quote.operatorFeeUpperWei !== "0")) ||
+        (quote.chainId !== 8453 && (quote.l1DataFeeUpperWei !== "0" || quote.operatorFeeUpperWei !== "0")) ||
+        (quote.chainId === 42161 ? quote.feeModel !== "arbitrum-inclusive" : quote.feeModel !== undefined) ||
         (economics !== undefined && economics.maximumGasCostAtomic !== quote.maximumExecutionFeeWei) ||
         typeof quote.blockHash !== "string" || !/^0x[0-9a-f]{64}$/u.test(quote.blockHash) ||
         quote.blockHash === `0x${"0".repeat(64)}` ||

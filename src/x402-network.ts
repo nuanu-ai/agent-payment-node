@@ -13,8 +13,12 @@ export interface X402PolicyNetwork { readonly chainId: EvmChainId; readonly toke
 
 export function x402Network(value: unknown = 8453) {
   const chainId = evmChain(value);
-  const token = chainId === 8453 ? BASE_USDC : "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as const;
-  return { chainId, chainText: `${chainId}` as X402ChainText, network: `eip155:${chainId}` as X402Network, token };
+  const tokens = {
+    8453: BASE_USDC,
+    1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    42161: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  } as const;
+  return { chainId, chainText: `${chainId}` as X402ChainText, network: `eip155:${chainId}` as X402Network, token: tokens[chainId] };
 }
 
 export function validX402Tuple(chain: unknown, network: unknown, token: unknown): boolean {

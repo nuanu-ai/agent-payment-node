@@ -10,7 +10,7 @@ const setup = evmCore(root, undefined, undefined, undefined, (native) => ({ requ
 const frozen = await setup.state.findOperation(operationId);
 if (frozen === null) throw new Error("missing synthetic frozen operation");
 setup.rpc.chainId = frozen.chainId;
-if (frozen.chainId === 1) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
+if (frozen.chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
 if (phase === "sign-crash") {
   await setup.core.transfer.approve(operationId);
   throw new Error("expected process loss was not injected");

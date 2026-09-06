@@ -166,7 +166,7 @@ export function publicOperation(operation) {
 }
 export function publicReceipt(receipt) {
     return {
-        ...(receipt.evm === undefined ? {} : { asset: publicEvmAsset(receipt.evm.asset), amount_atomic: receipt.amountAtomic, fee_budget_wei: receipt.evm.maxFeeWei, chain_evidence: receipt.evmEvidence ?? null, finality: receipt.evmEvidence?.transactionVerified === true ? "inclusion_only" : "not_observed" }),
+        ...(receipt.evm === undefined ? {} : { asset: publicEvmAsset(receipt.evm.asset), amount_atomic: receipt.amountAtomic, fee_budget_wei: receipt.evm.maxFeeWei, ...(receipt.evm.feeQuote.feeModel === undefined ? {} : { fee_model: receipt.evm.feeQuote.feeModel }), chain_evidence: receipt.evmEvidence ?? null, finality: receipt.evmEvidence?.transactionVerified === true ? receipt.evm.asset.chainId === 42161 ? "rpc_safe_inclusion" : "inclusion_only" : "not_observed" }),
         operation_id: receipt.operationId,
         state: receipt.state,
         terminal: receipt.terminal,

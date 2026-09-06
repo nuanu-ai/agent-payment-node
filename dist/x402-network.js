@@ -5,8 +5,12 @@ import { evmChain } from "./evm-asset.js";
 import { canonicalProfile } from "./wallet-policy.js";
 export function x402Network(value = 8453) {
     const chainId = evmChain(value);
-    const token = chainId === 8453 ? BASE_USDC : "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
-    return { chainId, chainText: `${chainId}`, network: `eip155:${chainId}`, token };
+    const tokens = {
+        8453: BASE_USDC,
+        1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        42161: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    };
+    return { chainId, chainText: `${chainId}`, network: `eip155:${chainId}`, token: tokens[chainId] };
 }
 export function validX402Tuple(chain, network, token) {
     try {

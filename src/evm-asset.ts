@@ -7,6 +7,7 @@ import type { Address } from "./model.js";
 export const EVM_NETWORKS = [
   { chainId: 8453, name: "Base", caip2: "eip155:8453" },
   { chainId: 1, name: "Ethereum", caip2: "eip155:1" },
+  { chainId: 42161, name: "Arbitrum One", caip2: "eip155:42161" },
 ] as const;
 export type EvmChainId = typeof EVM_NETWORKS[number]["chainId"];
 export const NATIVE_ASSET_ADDRESS = "0x0000000000000000000000000000000000000000" as const;

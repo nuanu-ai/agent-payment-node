@@ -7,6 +7,7 @@ import { assertProviderTerminalReceiptAuthority } from "./provider-direct-receip
 
 export function validateEvmTransferEvidence(value: unknown): EvmTransferEvidence {
   if (!isPlainRecord(value) || !exactKeys(value, ["blockHash", "transactionVerified", "tokenBalanceDeltasVerified",
+    ...(value.safeBlockNumberAtomic === undefined ? [] : ["safeBlockNumberAtomic"]), ...(value.safeBlockHash === undefined ? [] : ["safeBlockHash"]),
     ...(value.senderDeltaAtomic === undefined ? [] : ["senderDeltaAtomic"]), ...(value.recipientDeltaAtomic === undefined ? [] : ["recipientDeltaAtomic"])])) corrupt();
   const evidence = value as unknown as EvmTransferEvidence;
   if (!/^0x[0-9a-f]{64}$/u.test(evidence.blockHash) || evidence.blockHash === `0x${"0".repeat(64)}` ||
@@ -15,7 +16,18 @@ export function validateEvmTransferEvidence(value: unknown): EvmTransferEvidence
     if (delta !== undefined && (typeof delta !== "string" || delta.length > 79 || !/^(?:0|-?[1-9][0-9]*)$/u.test(delta))) corrupt();
   }
   if (evidence.tokenBalanceDeltasVerified && (evidence.senderDeltaAtomic === undefined || evidence.recipientDeltaAtomic === undefined)) corrupt();
+  if ((evidence.safeBlockNumberAtomic === undefined) !== (evidence.safeBlockHash === undefined)) corrupt();
+  if (evidence.safeBlockNumberAtomic !== undefined) {
+    evmUint(evidence.safeBlockNumberAtomic);
+    if (!/^0x[0-9a-f]{64}$/u.test(evidence.safeBlockHash ?? "") || evidence.safeBlockHash === `0x${"0".repeat(64)}`) corrupt();
+  }
   return evidence;
+}
+
+export function hasSafeEvmInclusion(value: unknown, blockNumberAtomic: string): boolean {
+  const evidence = validateEvmTransferEvidence(value);
+  return evidence.safeBlockNumberAtomic !== undefined && evmUint(evidence.safeBlockNumberAtomic) >= evmUint(blockNumberAtomic) &&
+    (evidence.safeBlockNumberAtomic !== blockNumberAtomic || evidence.safeBlockHash === evidence.blockHash);
 }
 
 export function assertDirectTerminalReceiptAuthority(operation: OperationRecord, receipt: ReceiptRecord | null): void {
@@ -29,6 +41,7 @@ export function assertDirectTerminalReceiptAuthority(operation: OperationRecord,
     const evidence = validateEvmTransferEvidence(receipt.evmEvidence);
     if (!evidence.transactionVerified || receipt.blockNumberAtomic === undefined) corrupt();
     evmUint(receipt.blockNumberAtomic);
+    if (operation.chainId === 42161 ? !hasSafeEvmInclusion(evidence, receipt.blockNumberAtomic) : evidence.safeBlockNumberAtomic !== undefined) corrupt();
     if (operation.state === "failed_confirmed_revert") {
       if (operation.reason !== "confirmed_receipt_revert" || operation.proofClass !== "confirmed_receipt") corrupt();
     } else if (operation.evm.asset.kind === "native") {

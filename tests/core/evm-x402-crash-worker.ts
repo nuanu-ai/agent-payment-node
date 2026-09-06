@@ -1,11 +1,15 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sha256 } from "../../src/canonical.js";
+import { evmChain } from "../../src/evm-asset.js";
+import { StateStore } from "../../src/state.js";
 import { networkFixture, networkPaid, networkSettlement } from "./evm-x402-helpers.js";
 
 const [phase, root, operationId] = process.argv.slice(2);
 if (root === undefined || operationId === undefined) throw new Error("missing synthetic worker arguments");
-const fixture = networkFixture(root, 1, (native) => ({ request: async (request) => {
+const stored = await new StateStore(root).findX402Operation(operationId);
+if (stored === null) throw new Error("missing frozen synthetic operation");
+const fixture = networkFixture(root, evmChain(stored.network), (native) => ({ request: async (request) => {
   if (phase !== "sign-crash" && request.operation === "x402Exact.approveAndAuthorize") throw new Error("replacement authorization forbidden");
   const result = await native.request(request);
   if (phase === "sign-crash" && request.operation === "x402Exact.approveAndAuthorize") process.exit(75);

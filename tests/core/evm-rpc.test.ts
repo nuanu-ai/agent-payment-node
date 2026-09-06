@@ -105,19 +105,20 @@ test("receipt codec rejects log substitution, removed logs, malformed status and
   await assert.rejects(switched.receipt(8453, HASH), { code: "APN_CHAIN_MISMATCH" });
 });
 
-test("on-chain evidence verifies signed fields and exact pinned token deltas; logs or receipt status alone cannot prove delivery", async (context) => {
+for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId} on-chain evidence verifies signed fields and exact pinned token deltas; logs or receipt status alone cannot prove delivery`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = chainId;
+  if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   const wallet = await setup.core.wallet.ensure("default") as { address: Address }; setup.rpc.sender = wallet.address;
-  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 8453, token: EVM_TOKEN }, amount: "1" }) as { operation_id: string };
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: EVM_TOKEN }, amount: "1" }) as { operation_id: string };
   await setup.core.transfer.approve(prepared.operation_id);
   const operation = (await setup.state.findOperation(prepared.operation_id))!;
-  const receipt = (await setup.rpc.evm.receipt(8453, operation.transactionHash!))!;
+  const receipt = (await setup.rpc.evm.receipt(chainId, operation.transactionHash!))!;
   let recipientReceived = 100000000n, transactionValue = "0x0", wrongParent = false, balanceCalls = 0;
   const call: EvmRpcCall = async (method, params) => {
-    if (method === "eth_chainId") return "0x2105";
-    if (method === "eth_getBlockByNumber") return { ...BLOCK, number: params[0], hash: params[0] === "0x303a" ? EVM_BLOCK_HASH : HASH, parentHash: wrongParent ? EVM_BLOCK_HASH : HASH };
-    if (method === "eth_getTransactionByHash") return { hash: operation.transactionHash, blockHash: EVM_BLOCK_HASH, blockNumber: "0x303a", chainId: "0x2105", type: "0x2", from: operation.walletAddress, to: EVM_TOKEN, value: transactionValue, input: operation.transactionData, nonce: "0x7", gas: toHex(BigInt(operation.economics!.gasLimitAtomic)), maxFeePerGas: toHex(BigInt(operation.economics!.maxFeePerGasAtomic)), maxPriorityFeePerGas: toHex(BigInt(operation.economics!.maxPriorityFeePerGasAtomic)), accessList: [] };
+    if (method === "eth_chainId") return toHex(chainId);
+    if (method === "eth_getBlockByNumber") return { ...BLOCK, number: params[0] === "safe" ? "0x303a" : params[0], hash: params[0] === "0x303a" || params[0] === "safe" ? EVM_BLOCK_HASH : HASH, parentHash: wrongParent ? EVM_BLOCK_HASH : HASH };
+    if (method === "eth_getTransactionByHash") return { hash: operation.transactionHash, blockHash: EVM_BLOCK_HASH, blockNumber: "0x303a", chainId: toHex(chainId), type: "0x2", from: operation.walletAddress, to: EVM_TOKEN, value: transactionValue, input: operation.transactionData, nonce: "0x7", gas: toHex(BigInt(operation.economics!.gasLimitAtomic)), maxFeePerGas: toHex(BigInt(operation.economics!.maxFeePerGasAtomic)), maxPriorityFeePerGas: toHex(BigInt(operation.economics!.maxPriorityFeePerGasAtomic)), accessList: [] };
     if (method === "eth_call") {
       balanceCalls += 1;
       const input = params[0] as { data: string };
@@ -152,10 +153,10 @@ test("Ethereum fees are execution-only without Base oracle calls, while chain mi
   await assert.rejects(rpc.feeQuote(1, ECONOMICS), { code: "APN_CHAIN_MISMATCH" });
 });
 
-test("production x402 RPC binds Ethereum token, chain, log filters and bounded copies without weakening Base assertions", async () => {
+for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain ${chainId} token, chain, log filters and bounded copies without weakening Base assertions`, async () => {
   const base = new HttpsBaseRpc("https://rpc.example");
-  const ethereum = base.forX402Network(1); assert.notEqual(base, ethereum);
-  let chain = "0x1";
+  const ethereum = base.forX402Network(chainId); assert.notEqual(base, ethereum);
+  let chain = toHex(chainId);
   const calls: Array<{ method: string; params: readonly unknown[] }> = [];
   const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
     calls.push({ method, params });
@@ -164,11 +165,11 @@ test("production x402 RPC binds Ethereum token, chain, log filters and bounded c
     if (method === "eth_getLogs") return [];
     if (method === "eth_call") {
       const input = params[0] as { to: string; data: string };
-      assert.equal(input.to, x402Network(1).token); assert.equal(params[1], "0x3039");
+      assert.equal(input.to, x402Network(chainId).token); assert.equal(params[1], "0x3039");
       if (input.data.startsWith("0x70a08231")) return toHex(50000000n, { size: 32 });
       if (input.data === "0x06fdde03") return encodeAbiParameters([{ type: "string" }], ["USD Coin"]);
       if (input.data === "0x54fd4d50") return encodeAbiParameters([{ type: "string" }], ["2"]);
-      if (input.data === "0x3644e515") return tokenDomainSeparator("USD Coin", "2", 1);
+      if (input.data === "0x3644e515") return tokenDomainSeparator("USD Coin", "2", chainId);
       if (input.data.startsWith("0xe94a0102")) return toHex(0n, { size: 32 });
     }
     throw new Error(`unexpected synthetic read ${method}`);
@@ -178,18 +179,74 @@ test("production x402 RPC binds Ethereum token, chain, log filters and bounded c
     (rpc as { callX402Logs: (params: readonly unknown[]) => Promise<unknown> }).callX402Logs = async (params) => ({ kind: "complete", value: await call("eth_getLogs", params) });
   };
   wire(ethereum); wire(base);
-  assert.equal((await ethereum.assertX402Chain(1)).chainId, 1);
+  assert.equal((await ethereum.assertX402Chain(chainId)).chainId, chainId);
   await assert.rejects(ethereum.assertBaseChain(), { code: "APN_CHAIN_MISMATCH" });
   await assert.rejects(ethereum.assertX402Chain(8453), { code: "APN_CHAIN_MISMATCH" });
-  assert.equal((await ethereum.getX402PrepareEvidence(WALLET)).domainSeparator, tokenDomainSeparator("USD Coin", "2", 1));
+  assert.equal((await ethereum.getX402PrepareEvidence(WALLET)).domainSeparator, tokenDomainSeparator("USD Coin", "2", chainId));
   await ethereum.getX402AuthorizationState(WALLET, HASH, { tag: "safe" });
   await ethereum.getX402AuthorizationUsedLogs({ authorizer: WALLET, nonce: HASH, fromBlock: "12345", toBlock: "12345" });
   const filter = calls.find(({ method }) => method === "eth_getLogs")!.params[0] as { address: string };
-  assert.equal(filter.address, x402Network(1).token);
+  assert.equal(filter.address, x402Network(chainId).token);
   const bounded = ethereum.withTotalTimeout(20000); wire(bounded);
-  assert.equal((await bounded.assertX402Chain!(1)).chainId, 1);
+  assert.equal((await bounded.assertX402Chain!(chainId)).chainId, chainId);
   chain = "0x2105";
-  await assert.rejects(bounded.assertX402Chain!(1), { code: "APN_CHAIN_MISMATCH" });
+  await assert.rejects(bounded.assertX402Chain!(chainId), { code: "APN_CHAIN_MISMATCH" });
   assert.equal((await base.assertBaseChain()).chainId, 8453);
   assert.equal(calls.some(({ method }) => method.startsWith("eth_send")), false);
+});
+
+test("Arbitrum gas quote includes all estimated gas once, with no Base oracle or priority fee request", async () => {
+  const wire = new Wire(); wire.chain = "0xa4b1";
+  const rpc = new EvmRpc(wire.call, "https://rpc.example");
+  const fees = await rpc.estimate({ chainId: 42161, from: WALLET, to: RECIPIENT, valueAtomic: "123", data: "0x" });
+  assert.equal(fees.gasLimitAtomic, "65000");
+  assert.equal(fees.maxFeePerGasAtomic, "2"); assert.equal(fees.maxPriorityFeePerGasAtomic, "0");
+  const economics = { ...ECONOMICS, ...fees, maximumGasCostAtomic: "130000" };
+  const quote = await rpc.feeQuote(42161, economics);
+  assert.equal(quote.feeModel, "arbitrum-inclusive"); assert.equal(quote.totalQuoteWei, "130000");
+  assert.equal(quote.maximumExecutionFeeWei, "130000"); assert.equal(quote.l1DataFeeUpperWei, "0"); assert.equal(quote.operatorFeeUpperWei, "0");
+  assert.equal(wire.calls.some(({ method }) => method === "eth_call" || method === "eth_maxPriorityFeePerGas"), false);
+  const { validateEvmFeeQuote } = await import("../../src/evm-direct.js");
+  assert.equal(validateEvmFeeQuote(quote, economics), quote);
+  for (const override of [{ feeModel: undefined }, { feeModel: "ethereum" }, { chainId: 1 }, { l1DataFeeUpperWei: "1", totalQuoteWei: "130001" }]) {
+    assert.throws(() => validateEvmFeeQuote({ ...quote, ...override }, economics), { code: "APN_STATE_CORRUPT" });
+  }
+  wire.chain = "0x1";
+  await assert.rejects(rpc.feeQuote(42161, economics), { code: "APN_CHAIN_MISMATCH" });
+});
+
+test("Arbitrum receipt and supersession evidence refuse latest-only or reorged safe heads", async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
+  await setup.core.wallet.ensure("default");
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
+  await setup.core.transfer.approve(prepared.operation_id);
+  const operation = (await setup.state.findOperation(prepared.operation_id))!;
+  const receipt = (await setup.rpc.evm.receipt(42161, operation.transactionHash!))!;
+  let safeNumber = "0x3039", safeReads = 0, reorg = false;
+  const transaction = { hash: operation.transactionHash, blockHash: EVM_BLOCK_HASH, blockNumber: "0x303a", chainId: "0xa4b1", type: "0x2",
+    from: operation.walletAddress, to: operation.evm!.transactionTo, value: toHex(BigInt(operation.evm!.valueAtomic)), input: "0x",
+    nonce: toHex(BigInt(operation.economics!.nonceAtomic)), gas: toHex(BigInt(operation.economics!.gasLimitAtomic)),
+    maxFeePerGas: toHex(BigInt(operation.economics!.maxFeePerGasAtomic)), maxPriorityFeePerGas: toHex(BigInt(operation.economics!.maxPriorityFeePerGasAtomic)), accessList: [] };
+  const tags: string[] = [];
+  const rpc = new EvmRpc(async (method, params) => {
+    if (method === "eth_chainId") return "0xa4b1";
+    if (method === "eth_getTransactionByHash") return transaction;
+    if (method === "eth_getBlockByNumber") {
+      tags.push(String(params[0]));
+      if (params[0] === "safe") safeReads += 1;
+      const number = params[0] === "safe" ? safeNumber : String(params[0]);
+      return { ...BLOCK, number, hash: reorg && safeReads > 1 ? HASH : number === "0x303a" ? EVM_BLOCK_HASH : HASH, transactions: number === "0x303a" ? [transaction] : [] };
+    }
+    throw new Error(`unexpected ${method}`);
+  }, "https://rpc.example");
+  await assert.rejects(rpc.evidence(operation, receipt), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(await rpc.confirmedAtNonce(42161, operation.walletAddress, operation.economics!.nonceAtomic, "12346"), null);
+  safeNumber = "0x303a"; safeReads = 0;
+  const evidence = await rpc.evidence(operation, receipt);
+  assert.equal(evidence.safeBlockNumberAtomic, "12346"); assert.equal(evidence.safeBlockHash, EVM_BLOCK_HASH);
+  assert.equal(await rpc.confirmedAtNonce(42161, operation.walletAddress, operation.economics!.nonceAtomic, "12346"), operation.transactionHash);
+  assert.equal(tags.includes("latest"), false);
+  reorg = true; safeReads = 0;
+  await assert.rejects(rpc.evidence(operation, receipt), { code: "APN_RPC_PROTOCOL" });
 });
