@@ -2266,7 +2266,7 @@ test("protected x402 state rejects unsafe identifiers, non-canonical bytes, impo
   assert.throws(
     () => validateX402Operation(resealOperation({
       ...operation,
-      selectedOffer: { ...operation.selectedOffer, index: "16" },
+      selectedOffer: { ...operation.selectedOffer, index: String(48 * 1024) },
     })),
     { code: "APN_STATE_CORRUPT" },
   );

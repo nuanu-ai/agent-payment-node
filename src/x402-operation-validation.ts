@@ -2,6 +2,7 @@ import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js
 import { validX402Tuple, x402Network } from "./x402-network.js";
 import { parseAtomic } from "./money.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js";
+import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
 import { frozenErc7710FacilitatorsMatch } from "./x402-erc7710-codec.js";
 import { isX402ResultStatus, validateX402Resource } from "./x402-http-request.js";
 import {
@@ -81,7 +82,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
 
   const selectedOffer = exactRecord(operation.selectedOffer, ["index", "declaredCanonicalJson", "resolved", "offerHash"]);
   parseAtomic(selectedOffer.index);
-  if (BigInt(selectedOffer.index as string) >= 16n) stateCorrupt("x402 selected offer index exceeds the supported seller list bound.");
+  if (BigInt(selectedOffer.index as string) >= BigInt(MAX_DECODED_X402_BYTES)) stateCorrupt("x402 selected offer index exceeds the decoded seller wire budget.");
   const requirements = canonicalText(selectedOffer.declaredCanonicalJson);
   const resolvedRecord = record(selectedOffer.resolved);
   const resolved = resolvedRecord.assetTransferMethod === "erc7710"

@@ -4,9 +4,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical
 import { CHAIN_CAIP2 } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { canonicalErc7710Facilitators, isStrictErc7710Payload } from "./x402-erc7710-codec.js";
-import { decodeCanonicalBase64, parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
-const MAX_DECODED_X402_BYTES = 48 * 1024;
-const MAX_ACCEPTS = 16;
+import { MAX_DECODED_X402_BYTES, decodeCanonicalBase64, parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const LOWER_ADDRESS = /^0x[0-9a-f]{40}$/u;
 const BYTES32 = /^0x[0-9a-f]{64}$/u;
@@ -236,8 +234,8 @@ function validatePaymentRequired(value) {
         throw protocol("PAYMENT-REQUIRED error is invalid.");
     }
     validateResource(paymentRequired.resource);
-    if (!Array.isArray(paymentRequired.accepts) || paymentRequired.accepts.length === 0 || paymentRequired.accepts.length > MAX_ACCEPTS) {
-        throw protocol("PAYMENT-REQUIRED accepts must contain 1 through 16 entries.");
+    if (!Array.isArray(paymentRequired.accepts) || paymentRequired.accepts.length === 0) {
+        throw protocol("PAYMENT-REQUIRED accepts must contain at least one entry.");
     }
     paymentRequired.accepts.forEach(validateRequirements);
     if (paymentRequired.extensions !== undefined)
