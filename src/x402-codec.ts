@@ -114,7 +114,7 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
 ): DecodedPaymentResponse {
   const strict = decodeCanonicalBase64Json(value);
   const response = record(strict, "PAYMENT-RESPONSE");
-  requiredKeys(response, ["success", "transaction", "network"]);
+  requiredKeys(response, ["success", "network"]);
   let official: SettleResponse;
   try { official = decodeOfficialPaymentResponseHeader(value); }
   catch { throw settlement("Official x402 v2 representation rejected PAYMENT-RESPONSE."); }
@@ -123,10 +123,19 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
   }
 
   if (response.success !== true && response.success !== false) throw settlement("PAYMENT-RESPONSE success is invalid.");
-  if (
-    typeof response.transaction !== "string" || !TRANSACTION_HASH.test(response.transaction) ||
-    /^0x0{64}$/u.test(response.transaction)
-  ) throw settlement("PAYMENT-RESPONSE transaction is invalid.");
+  // Some merchants return txHash; validate both identities before normalizing.
+  for (const key of ["transaction", "txHash"] as const) {
+    if (!Object.hasOwn(response, key)) continue;
+    const hash = response[key];
+    if (typeof hash !== "string" || !TRANSACTION_HASH.test(hash) || /^0x0{64}$/u.test(hash)) {
+      throw settlement(`PAYMENT-RESPONSE ${key} is invalid.`);
+    }
+  }
+  const transaction = response.transaction ?? response.txHash;
+  if (typeof transaction !== "string") throw settlement("PAYMENT-RESPONSE transaction is missing.");
+  if (response.transaction !== undefined && response.txHash !== undefined && response.transaction !== response.txHash) {
+    throw settlement("PAYMENT-RESPONSE transaction and txHash conflict.");
+  }
   if (response.network !== (expected.network ?? CHAIN_CAIP2)) throw settlement("PAYMENT-RESPONSE network is invalid.");
 
   let payer: string | undefined;
@@ -160,7 +169,7 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
     success: response.success,
     ...(response.errorReason === undefined ? {} : { errorReason: response.errorReason }),
     ...(payer === undefined ? {} : { payer }),
-    transaction: response.transaction,
+    transaction,
     network: expected.network ?? CHAIN_CAIP2,
     ...(response.amount === undefined ? {} : { amount: response.amount }),
   };
@@ -168,7 +177,7 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
   return {
     classification,
     normalizedCanonicalJson,
-    transactionHash: response.transaction as `0x${string}`,
+    transactionHash: transaction as `0x${string}`,
     paymentResponseHeaderHash: domainHash("apn.x402.payment-response-header.v1", Buffer.from(value, "ascii")),
     settlementResponseHash: domainHash("apn.x402.settlement.v1", normalizedCanonicalJson),
   };
