@@ -177,7 +177,7 @@ export class RailOperationService {
         try {
             if (await adapter.assertNetwork() !== operation.prepared.networkIdentity)
                 throw new Error("network mismatch");
-            result = await adapter.inspect(operation.account, operation.prepared, operation.transactionId);
+            result = await adapter.inspect(operation.account, operation.prepared, operation.transactionId, operation.rawPayloadHash ?? undefined);
         }
         catch {
             return operation;

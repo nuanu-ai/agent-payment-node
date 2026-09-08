@@ -2,6 +2,8 @@ import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical
 import { validateChainAccount } from "./chain-account-store.js";
 import { atomic, isoDate, SOLANA_GENESIS, validateChainAsset } from "./chain-policy.js";
 import { ApnError } from "./errors.js";
+import { TRON_GENESIS } from "./tron/constants.js";
+import { validateTronFinalResources, validateTronResources } from "./tron/resource-model.js";
 const TERMINAL = ["completed", "failed_before_effect", "failed_confirmed_revert"];
 const EDGES = {
     awaiting_approval: ["signing_started", "submitting", "failed_before_effect"],
@@ -127,13 +129,13 @@ export function validateRailOperation(value) {
     return operation;
 }
 export function validateRailPrepared(value, account) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["rail", "networkIdentity", "asset", "sender", "recipient", "amountAtomic", "maximumFeeAtomic", "economics", "preparedAt", "expiresAt", "blockReference", "lastValidBlockHeight", "unsignedPayload", "sourceTokenAccount", "destinationTokenAccount", "createsRecipientAccount"]))
+    if (!isPlainRecord(value) || !exactKeys(value, ["rail", "networkIdentity", "asset", "sender", "recipient", "amountAtomic", "maximumFeeAtomic", "economics", "preparedAt", "expiresAt", "blockReference", "lastValidBlockHeight", "unsignedPayload", "sourceTokenAccount", "destinationTokenAccount", "createsRecipientAccount", ...(account.rail === "tron" ? ["resources"] : [])]))
         corrupt();
     const asset = validateChainAsset(value.asset);
     if (asset.rail !== account.rail || value.rail !== account.rail || value.sender !== account.address || value.recipient === value.sender)
         corrupt();
     addressShape(value.recipient, account.rail);
-    if (value.rail === "solana" && value.networkIdentity !== SOLANA_GENESIS)
+    if (value.networkIdentity !== (account.rail === "solana" ? SOLANA_GENESIS : TRON_GENESIS))
         corrupt();
     if (typeof value.networkIdentity !== "string" || typeof value.blockReference !== "string" || !/^[A-Za-z0-9]{32,128}$/u.test(value.blockReference))
         corrupt();
@@ -158,7 +160,7 @@ export function validateRailPrepared(value, account) {
         corrupt();
     if (asset.rail === "solana" && asset.kind === "token" && (value.sourceTokenAccount === null || value.destinationTokenAccount === null))
         corrupt();
-    if (asset.kind === "native" && (value.sourceTokenAccount !== null || value.destinationTokenAccount !== null || value.createsRecipientAccount))
+    if (asset.kind === "native" && (value.sourceTokenAccount !== null || value.destinationTokenAccount !== null || asset.rail === "solana" && value.createsRecipientAccount))
         corrupt();
     const cost = value.economics;
     if (!isPlainRecord(cost) || !exactKeys(cost, ["networkFeeMaximumAtomic", "recipientRentAtomic", "maximumNativeDebitAtomic", "networkFeePayer", "rentPayer", "feeControl"]))
@@ -173,12 +175,17 @@ export function validateRailPrepared(value, account) {
         corrupt();
     if (debit !== (cost.networkFeePayer === account.address ? fee : 0n) + (cost.rentPayer === account.address ? rent : 0n) || debit > atomic(value.maximumFeeAtomic))
         corrupt();
-    if (account.provider === "local" ? cost.feeControl !== "signed_message" || cost.networkFeePayer !== account.address : cost.feeControl !== "provider_guarantee")
+    if (account.provider === "local" ? cost.feeControl !== (account.rail === "solana" ? "signed_message" : "tron_governance_window") || cost.networkFeePayer !== account.address : cost.feeControl !== "provider_guarantee")
         corrupt();
+    if (account.rail === "tron") {
+        if (account.provider !== "local" || rent !== 0n || cost.rentPayer !== null || value.lastValidBlockHeight !== null || value.sourceTokenAccount !== null || value.destinationTokenAccount !== null)
+            corrupt();
+        validateTronResources(value.resources, value);
+    }
     return value;
 }
 export function validateRailEvidence(value, prepared, transactionId, success) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["networkIdentity", "transactionId", "blockNumberAtomic", "blockId", "finality", "sender", "recipient", "assetIdentifier", "amountAtomic", "actualNetworkFeeAtomic", "actualRecipientRentAtomic", "networkFeePayer", "senderEffectVerified", "recipientEffectVerified", "transactionVerified", "observedAt", "rpcOriginHash"]))
+    if (!isPlainRecord(value) || !exactKeys(value, ["networkIdentity", "transactionId", "blockNumberAtomic", "blockId", "finality", "sender", "recipient", "assetIdentifier", "amountAtomic", "actualNetworkFeeAtomic", "actualRecipientRentAtomic", "networkFeePayer", "senderEffectVerified", "recipientEffectVerified", "transactionVerified", "observedAt", "rpcOriginHash", ...(prepared.rail === "tron" ? ["resources"] : [])]))
         corrupt();
     if (value.networkIdentity !== prepared.networkIdentity || value.transactionId !== transactionId || value.sender !== prepared.sender || value.recipient !== prepared.recipient || value.assetIdentifier !== prepared.asset.identifier || value.amountAtomic !== prepared.amountAtomic || value.networkFeePayer !== prepared.economics.networkFeePayer || value.finality !== (prepared.rail === "solana" ? "finalized" : "solidified") || value.transactionVerified !== true)
         corrupt();
@@ -192,6 +199,11 @@ export function validateRailEvidence(value, prepared, transactionId, success) {
     if (typeof value.blockId !== "string" || !/^[A-Za-z0-9]{32,128}$/u.test(value.blockId) || typeof value.rpcOriginHash !== "string" || !HASH.test(value.rpcOriginHash))
         corrupt();
     isoDate(value.observedAt);
+    if (prepared.rail === "tron") {
+        const resources = validateTronFinalResources(value.resources, prepared, atomic(value.blockNumberAtomic), success);
+        if (resources.totalFeeAtomic !== value.actualNetworkFeeAtomic || value.actualRecipientRentAtomic !== "0")
+            corrupt();
+    }
 }
 export function validateRailTransactionId(value, rail) {
     if (typeof value !== "string" || !(rail === "solana" ? /^[1-9A-HJ-NP-Za-km-z]{64,88}$/u : /^[a-f0-9]{64}$/u).test(value))

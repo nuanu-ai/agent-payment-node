@@ -3,6 +3,8 @@ import { validateChainAccount } from "./chain-account-store.js";
 import { atomic, isoDate, SOLANA_GENESIS, validateChainAsset } from "./chain-policy.js";
 import type { ChainAccount, RailFinalEvidence, RailPreparedTransfer } from "./direct-rail-ports.js";
 import { ApnError } from "./errors.js";
+import { TRON_GENESIS } from "./tron/constants.js";
+import { validateTronFinalResources, validateTronResources } from "./tron/resource-model.js";
 
 export type RailState = "awaiting_approval" | "signing_started" | "signed_not_submitted" | "submitting" | "submitted_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert";
 const TERMINAL: readonly RailState[] = ["completed", "failed_before_effect", "failed_confirmed_revert"];
@@ -140,11 +142,11 @@ export function validateRailOperation(value: unknown): RailOperationRecord {
 }
 
 export function validateRailPrepared(value: unknown, account: ChainAccount): RailPreparedTransfer {
-  if (!isPlainRecord(value) || !exactKeys(value, ["rail", "networkIdentity", "asset", "sender", "recipient", "amountAtomic", "maximumFeeAtomic", "economics", "preparedAt", "expiresAt", "blockReference", "lastValidBlockHeight", "unsignedPayload", "sourceTokenAccount", "destinationTokenAccount", "createsRecipientAccount"])) corrupt();
+  if (!isPlainRecord(value) || !exactKeys(value, ["rail", "networkIdentity", "asset", "sender", "recipient", "amountAtomic", "maximumFeeAtomic", "economics", "preparedAt", "expiresAt", "blockReference", "lastValidBlockHeight", "unsignedPayload", "sourceTokenAccount", "destinationTokenAccount", "createsRecipientAccount", ...(account.rail === "tron" ? ["resources"] : [])])) corrupt();
   const asset = validateChainAsset(value.asset);
   if (asset.rail !== account.rail || value.rail !== account.rail || value.sender !== account.address || value.recipient === value.sender) corrupt();
   addressShape(value.recipient, account.rail);
-  if (value.rail === "solana" && value.networkIdentity !== SOLANA_GENESIS) corrupt();
+  if (value.networkIdentity !== (account.rail === "solana" ? SOLANA_GENESIS : TRON_GENESIS)) corrupt();
   if (typeof value.networkIdentity !== "string" || typeof value.blockReference !== "string" || !/^[A-Za-z0-9]{32,128}$/u.test(value.blockReference)) corrupt();
   atomic(value.amountAtomic, true); atomic(value.maximumFeeAtomic, true);
   isoDate(value.preparedAt); isoDate(value.expiresAt);
@@ -156,7 +158,7 @@ export function validateRailPrepared(value: unknown, account: ChainAccount): Rai
   for (const key of ["sourceTokenAccount", "destinationTokenAccount"]) if (value[key] !== null) addressShape(value[key], account.rail);
   if (typeof value.createsRecipientAccount !== "boolean") corrupt();
   if (asset.rail === "solana" && asset.kind === "token" && (value.sourceTokenAccount === null || value.destinationTokenAccount === null)) corrupt();
-  if (asset.kind === "native" && (value.sourceTokenAccount !== null || value.destinationTokenAccount !== null || value.createsRecipientAccount)) corrupt();
+  if (asset.kind === "native" && (value.sourceTokenAccount !== null || value.destinationTokenAccount !== null || asset.rail === "solana" && value.createsRecipientAccount)) corrupt();
   const cost = value.economics;
   if (!isPlainRecord(cost) || !exactKeys(cost, ["networkFeeMaximumAtomic", "recipientRentAtomic", "maximumNativeDebitAtomic", "networkFeePayer", "rentPayer", "feeControl"])) corrupt();
   const fee = atomic(cost.networkFeeMaximumAtomic); const rent = atomic(cost.recipientRentAtomic); const debit = atomic(cost.maximumNativeDebitAtomic);
@@ -164,12 +166,16 @@ export function validateRailPrepared(value: unknown, account: ChainAccount): Rai
   if (cost.rentPayer !== null) addressShape(cost.rentPayer, account.rail);
   if (rent > 0n && cost.rentPayer === null) corrupt();
   if (debit !== (cost.networkFeePayer === account.address ? fee : 0n) + (cost.rentPayer === account.address ? rent : 0n) || debit > atomic(value.maximumFeeAtomic)) corrupt();
-  if (account.provider === "local" ? cost.feeControl !== "signed_message" || cost.networkFeePayer !== account.address : cost.feeControl !== "provider_guarantee") corrupt();
+  if (account.provider === "local" ? cost.feeControl !== (account.rail === "solana" ? "signed_message" : "tron_governance_window") || cost.networkFeePayer !== account.address : cost.feeControl !== "provider_guarantee") corrupt();
+  if (account.rail === "tron") {
+    if (account.provider !== "local" || rent !== 0n || cost.rentPayer !== null || value.lastValidBlockHeight !== null || value.sourceTokenAccount !== null || value.destinationTokenAccount !== null) corrupt();
+    validateTronResources(value.resources, value as unknown as RailPreparedTransfer);
+  }
   return value as unknown as RailPreparedTransfer;
 }
 
 export function validateRailEvidence(value: unknown, prepared: RailPreparedTransfer, transactionId: string, success: boolean): asserts value is RailFinalEvidence {
-  if (!isPlainRecord(value) || !exactKeys(value, ["networkIdentity", "transactionId", "blockNumberAtomic", "blockId", "finality", "sender", "recipient", "assetIdentifier", "amountAtomic", "actualNetworkFeeAtomic", "actualRecipientRentAtomic", "networkFeePayer", "senderEffectVerified", "recipientEffectVerified", "transactionVerified", "observedAt", "rpcOriginHash"])) corrupt();
+  if (!isPlainRecord(value) || !exactKeys(value, ["networkIdentity", "transactionId", "blockNumberAtomic", "blockId", "finality", "sender", "recipient", "assetIdentifier", "amountAtomic", "actualNetworkFeeAtomic", "actualRecipientRentAtomic", "networkFeePayer", "senderEffectVerified", "recipientEffectVerified", "transactionVerified", "observedAt", "rpcOriginHash", ...(prepared.rail === "tron" ? ["resources"] : [])])) corrupt();
   if (value.networkIdentity !== prepared.networkIdentity || value.transactionId !== transactionId || value.sender !== prepared.sender || value.recipient !== prepared.recipient || value.assetIdentifier !== prepared.asset.identifier || value.amountAtomic !== prepared.amountAtomic || value.networkFeePayer !== prepared.economics.networkFeePayer || value.finality !== (prepared.rail === "solana" ? "finalized" : "solidified") || value.transactionVerified !== true) corrupt();
   if (value.senderEffectVerified !== success || value.recipientEffectVerified !== success) corrupt();
   atomic(value.blockNumberAtomic);
@@ -177,6 +183,10 @@ export function validateRailEvidence(value: unknown, prepared: RailPreparedTrans
   if (!success && value.actualRecipientRentAtomic !== "0") corrupt();
   if (typeof value.blockId !== "string" || !/^[A-Za-z0-9]{32,128}$/u.test(value.blockId) || typeof value.rpcOriginHash !== "string" || !HASH.test(value.rpcOriginHash)) corrupt();
   isoDate(value.observedAt);
+  if (prepared.rail === "tron") {
+    const resources = validateTronFinalResources(value.resources, prepared, atomic(value.blockNumberAtomic), success);
+    if (resources.totalFeeAtomic !== value.actualNetworkFeeAtomic || value.actualRecipientRentAtomic !== "0") corrupt();
+  }
 }
 export function validateRailTransactionId(value: unknown, rail: ChainAccount["rail"]): asserts value is string {
   if (typeof value !== "string" || !(rail === "solana" ? /^[1-9A-HJ-NP-Za-km-z]{64,88}$/u : /^[a-f0-9]{64}$/u).test(value)) corrupt();

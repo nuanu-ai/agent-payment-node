@@ -1,3 +1,5 @@
+import type { TronFinalResources, TronResourceSnapshot } from "./tron/model.js";
+
 /** Finite direct-payment rails. This does not expose arbitrary signing. */
 export type DirectRailName = "solana" | "tron";
 export type ChainProvider = "local" | "coinbase-awal";
@@ -44,7 +46,7 @@ export interface RailEconomics {
   readonly maximumNativeDebitAtomic: string;
   readonly networkFeePayer: string;
   readonly rentPayer: string | null;
-  readonly feeControl: "signed_message" | "provider_guarantee";
+  readonly feeControl: "signed_message" | "provider_guarantee" | "tron_governance_window";
 }
 
 export interface RailPreparedTransfer {
@@ -65,6 +67,8 @@ export interface RailPreparedTransfer {
   readonly sourceTokenAccount: string | null;
   readonly destinationTokenAccount: string | null;
   readonly createsRecipientAccount: boolean;
+  /** Required only on TRON. Omitted on existing Solana records. */
+  readonly resources?: TronResourceSnapshot;
 }
 
 /** Reusable bytes belong only in encrypted custody storage, never public state. */
@@ -94,6 +98,8 @@ export interface RailFinalEvidence {
   readonly transactionVerified: true;
   readonly observedAt: string;
   readonly rpcOriginHash: string;
+  /** Required only for solidified TRON evidence. */
+  readonly resources?: TronFinalResources;
 }
 
 export type RailInspection =
@@ -136,11 +142,13 @@ export interface DirectRailPort {
   recoverEffect(binding: RailEffectBinding): Promise<RailSignedEffect | null>;
   /** Called only after durable `submitting`; a thrown error is ambiguous. */
   submit(binding: RailEffectBinding, effect: RailSignedEffect | null): Promise<{ readonly transactionId: string }>;
-  inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<RailInspection>;
+  inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, expectedRawPayloadHash?: string): Promise<RailInspection>;
 }
 
 export interface ChainWalletStoragePort {
   account(profile: string, rail: DirectRailName): Promise<ChainAccount | null>;
+  /** Read public or interrupted encrypted-custody identity without opening secrets. */
+  ownerBinding(profile: string, rail: DirectRailName): Promise<ChainAccount | null>;
   ensureLocal(input: {
     readonly profile: string;
     readonly rail: DirectRailName;

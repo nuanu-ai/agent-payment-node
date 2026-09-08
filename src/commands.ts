@@ -5,6 +5,11 @@ import type { X402HttpRequestV1 } from "./x402-http-request.js";
 import type { ChainProvider } from "./direct-rail-ports.js";
 
 export type CommandRequest =
+  | { readonly command: "wallet.ensure-tron"; readonly profile: string; readonly provider: "local"; readonly acceptRisk: boolean }
+  | { readonly command: "wallet.balance-tron"; readonly profile: string; readonly asset: "trx" | "usdt" }
+  | { readonly command: "wallet.capabilities-tron"; readonly profile?: string }
+  | { readonly command: "policy.admit-tron"; readonly profile: string; readonly asset: "trx" | "usdt"; readonly maximumPerTransfer: string; readonly dailyLimit: string; readonly maximumFee: string }
+  | { readonly command: "transfer.prepare-tron"; readonly profile: string; readonly asset: "trx" | "usdt"; readonly recipient: string; readonly amount: string; readonly maximumFee: string; readonly idempotencyKey: string }
   | { readonly command: "wallet.ensure-solana"; readonly profile: string; readonly provider: ChainProvider; readonly acceptRisk: boolean }
   | { readonly command: "wallet.balance-solana"; readonly profile: string; readonly asset: "sol" | "usdc" }
   | { readonly command: "wallet.capabilities-solana"; readonly profile?: string }

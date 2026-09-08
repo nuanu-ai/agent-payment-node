@@ -151,7 +151,7 @@ export class RailOperationService {
     let result;
     try {
       if (await adapter.assertNetwork() !== operation.prepared.networkIdentity) throw new Error("network mismatch");
-      result = await adapter.inspect(operation.account, operation.prepared, operation.transactionId);
+      result = await adapter.inspect(operation.account, operation.prepared, operation.transactionId, operation.rawPayloadHash ?? undefined);
     } catch { return operation; }
     if (!("evidence" in result)) return operation;
     const next = transitionRail(operation, { state: result.status, at: this.context.clock.now().toISOString(),

@@ -1,6 +1,7 @@
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { validateChainAccount } from "./chain-account-store.js";
 import { ApnError } from "./errors.js";
+import { TRON_GENESIS } from "./tron/constants.js";
 export const SOLANA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const ASSETS = [
@@ -60,7 +61,7 @@ export function validateChainPolicy(value) {
         corrupt();
     const account = validateChainAccount(value.account);
     const asset = validateChainAsset(value.asset);
-    if (account.rail !== asset.rail || (account.rail === "solana" && value.networkIdentity !== SOLANA_GENESIS) || typeof value.networkIdentity !== "string")
+    if (account.rail !== asset.rail || value.networkIdentity !== (account.rail === "solana" ? SOLANA_GENESIS : TRON_GENESIS))
         corrupt();
     if (atomic(value.maximumPerTransferAtomic, true) > atomic(value.dailyLimitAtomic, true))
         corrupt();

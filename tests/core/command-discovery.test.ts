@@ -69,6 +69,11 @@ const EXPECTED_COMMANDS = [
   "wallet capabilities-solana",
   "policy admit-solana",
   "pay transfer prepare-solana",
+  "wallet ensure-tron",
+  "wallet balance-tron",
+  "wallet capabilities-tron",
+  "policy admit-tron",
+  "pay transfer prepare-tron",
 ];
 
 test("one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields", () => {
@@ -143,6 +148,9 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  apn wallet ensure-solana --profile <profile> --provider <local-or-coinbase-awal> [--accept-risk true] — Ensure a separate local ed25519 wallet or link an existing authenticated awal Solana account.",
     "  apn wallet balance-solana --profile <profile> --asset <sol-or-usdc> — Read SOL or canonical USDC and the separate SOL fee balance through APN_SOLANA_RPC_URL.",
     "  apn wallet capabilities-solana [--profile <profile>] — Inspect all four provider capabilities, fee-contract gates and unavailable Solana x402.",
+    "  apn wallet ensure-tron --profile <profile> --provider local --accept-risk true — Ensure a separate encrypted local secp256k1 TRON wallet without funding or activation.",
+    "  apn wallet balance-tron --profile <profile> --asset <trx-or-usdt> — Read solidified TRX or canonical USDT and the separate TRX fee balance through APN_TRON_RPC_URL.",
+    "  apn wallet capabilities-tron [--profile <profile>] — Inspect all four provider capabilities and unavailable TRON x402, sponsorship and bridge execution.",
     "",
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet <child>",

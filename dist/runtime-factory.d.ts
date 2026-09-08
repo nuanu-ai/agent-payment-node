@@ -20,6 +20,7 @@ export interface RuntimeFactoryOptions {
     readonly railApproval?: RailApprovalPort;
     readonly chainPolicyApproval?: ChainPolicyApprovalPort;
     readonly solanaRpcUrl?: string;
+    readonly tronRpcUrl?: string;
     readonly stateRoot?: string;
     readonly native?: NativePort;
     readonly wrappingSecret?: WrappingSecretPort;

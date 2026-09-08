@@ -1,4 +1,5 @@
 import type { CommandDefinition, CommandOption } from "./command-catalog.js";
+import { TRON_COMMANDS } from "./tron/catalog.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[], required = true): CommandOption => ({
   name, type, constraints, required, default: { kind: "none" }, sensitivity: "operator_input",
@@ -38,6 +39,7 @@ export const CHAIN_COMMANDS: readonly CommandDefinition[] = [
     states: { terminal: ["classified_failure"], non_terminal: ["awaiting_approval"] },
     recovery: [{ command_path: ["pay", "transfer", "approve"], when: "After reviewing the frozen transfer." }, { command_path: ["operation", "resume"], when: "To reconcile the same effect after an interruption." }],
     examples: ["apn pay transfer prepare-solana --profile solana-local --asset usdc --to <solana-recipient> --amount 1 --max-fee-sol 0.003 --idempotency-key <key>"] },
+  ...TRON_COMMANDS,
 ];
 
 export function includeRailRecovery(commands: readonly CommandDefinition[]): readonly CommandDefinition[] {
@@ -47,7 +49,7 @@ export function includeRailRecovery(commands: readonly CommandDefinition[]): rea
     const usesRpc = path === "pay transfer approve" || path === "operation resume";
     return { ...command, ...(usesRpc ? {
       synopsis: command.synopsis.replace("--rpc-url <https-url>", "[--rpc-url <https-url>]"),
-      options: command.options.map((entry) => entry.name === "--rpc-url" ? { ...entry, required: false, constraints: [...entry.constraints, "required_for_evm_operations", "solana_uses_explicit_APN_SOLANA_RPC_URL"] } : entry),
+      options: command.options.map((entry) => entry.name === "--rpc-url" ? { ...entry, required: false, constraints: [...entry.constraints, "required_for_evm_operations", "solana_uses_explicit_APN_SOLANA_RPC_URL", "tron_uses_explicit_APN_TRON_RPC_URL"] } : entry),
     } : {}), states: { ...command.states, non_terminal: [...command.states.non_terminal, ...(command.states.non_terminal.includes("signing_started") ? [] : ["signing_started"])] } };
   });
 }

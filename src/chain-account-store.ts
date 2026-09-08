@@ -45,6 +45,19 @@ export class ChainAccountStore extends SecureStateStore implements ChainWalletSt
     return account;
   }
 
+  async ownerBinding(profileInput: string, rail: DirectRailName): Promise<ChainAccount | null> {
+    const profile = canonicalProfile(profileInput); assertRail(rail);
+    const account = await this.account(profile, rail);
+    const stored = await this.readJson(this.walletPath(profile, rail));
+    if (stored === null) return account;
+    // Inspect only the envelope header structure and identity, never decrypt here.
+    // A conflicting or corrupt record must block a different owner before launch.
+    const envelope = parseEnvelope(stored);
+    if (envelope.account.profile !== profile || envelope.account.rail !== rail ||
+      account !== null && canonicalJson(account) !== canonicalJson(envelope.account)) corrupt();
+    return envelope.account;
+  }
+
   async ensureLocal(input: { readonly profile: string; readonly rail: DirectRailName; readonly create: () => Promise<{ readonly address: string; readonly seed: Buffer }> }): Promise<ChainAccount> {
     const profile = canonicalProfile(input.profile);
     assertRail(input.rail);

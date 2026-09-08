@@ -31,6 +31,13 @@ export class ChainPolicyService {
         if (stored === null && provider !== "local" && await this.context.state.loadWallet(hash) !== null) {
             throw new ApnError("APN_PROFILE_DRIFT", "The profile already belongs to a local wallet.");
         }
+        if (this.context.chainAccounts !== undefined)
+            for (const rail of ["solana", "tron"]) {
+                const account = await this.context.chainAccounts.ownerBinding(profile, rail);
+                if (account !== null && account.provider !== provider) {
+                    throw new ApnError("APN_PROFILE_DRIFT", "Another chain account already binds this profile to a different execution owner.");
+                }
+            }
     }
     async account(profileInput, rail) {
         const profile = canonicalProfile(profileInput);

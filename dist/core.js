@@ -16,6 +16,7 @@ import { ProviderX402TransactionRecoveryService } from "./provider-x402-transact
 import { ProviderPermissionService } from "./provider-permission-service.js";
 import { RailOperationService } from "./rail-operation-service.js";
 import { solanaCapabilities } from "./chain-policy-service.js";
+import { tronCapabilities } from "./tron/catalog.js";
 export class ApnCore {
     context;
     wallet;
@@ -57,6 +58,13 @@ export class ApnCore {
                 }, "local_build_metadata");
             case "doctor.keychain": return dataOutcome(await this.wallet.doctorKeychain(), "encrypted_apn_home_status");
             case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
+            case "wallet.ensure-tron": return dataOutcome(await this.rails.policies.ensure(request.profile, "tron", request.provider, request.acceptRisk), "chain_account_binding");
+            case "wallet.balance-tron": return dataOutcome(await this.rails.policies.balance(request.profile, "tron", request.asset), "chain_verified_public_read");
+            case "wallet.capabilities-tron": return dataOutcome({ ...tronCapabilities(), ...(request.profile === undefined ? {} : {
+                    profile: request.profile, account: await this.context.chainAccounts?.account(request.profile, "tron") ?? null,
+                }) }, "inspected_provider_capabilities");
+            case "policy.admit-tron": return dataOutcome(await this.rails.policies.admit({ ...request, rail: "tron" }), "human_admitted_chain_policy");
+            case "transfer.prepare-tron": return operationOutcome(await this.rails.prepare({ ...request, rail: "tron" }));
             case "wallet.ensure-solana": return dataOutcome(await this.rails.policies.ensure(request.profile, "solana", request.provider, request.acceptRisk), "chain_account_binding");
             case "wallet.balance-solana": return dataOutcome(await this.rails.policies.balance(request.profile, "solana", request.asset), "chain_verified_public_read");
             case "wallet.capabilities-solana": return dataOutcome({ ...solanaCapabilities(), ...(request.profile === undefined ? {} : {
