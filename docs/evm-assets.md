@@ -1,9 +1,8 @@
-# Explicit EVM assets (unreleased source)
+# Explicit EVM assets
 
-The local EVM expansion enables exactly Base (`eip155:8453`), Ethereum mainnet
-(`eip155:1`) and Arbitrum One (`eip155:42161`) for the local encrypted disposable
-wallet. Public APN/Homebrew remains 0.5.8; these source changes do not
-alter that published artifact. No new mainnet payment is claimed here.
+APN 0.5.9 enables exactly Base (`eip155:8453`), Ethereum mainnet (`eip155:1`)
+and Arbitrum One (`eip155:42161`) for the local encrypted disposable wallet.
+Release availability and a fresh mainnet payment remain separate proof layers.
 
 ## One direct-transfer journey
 
@@ -30,8 +29,10 @@ EIP-1559 execution cost, L1 data upper
 estimate for at most 512 signed bytes, and operator fee estimate. Native value
 must also be funded. The quote is rechecked before signing and every submission.
 Variable L1/operator fees may change at inclusion. Missing oracle evidence fails
-closed. Changing nonce or transaction fee fields requires a new operation before
-signing; a signed operation is never replaced or repriced automatically.
+closed. Base and Ethereum require exact nonce and transaction-fee fields before
+signing. Arbitrum requires an exact nonce, gas limit and priority fee, while a
+fresh maximum fee at or below the frozen approved ceiling remains compatible.
+A signed operation is never replaced or repriced automatically.
 
 Arbitrum uses its full inclusive `eth_estimateGas` result: L2 execution and L1
 posting are paid within one gas envelope. Its `feeModel: arbitrum-inclusive`
@@ -40,6 +41,9 @@ surcharges do not mean posting is free. APN never calls the Base oracle or
 adds posting costs twice. Priority fee is zero. Before submission, a higher
 inclusive gas or fee estimate blocks the existing signed operation rather than
 replacing it; resume only that operation when its frozen envelope suffices.
+Before signing, any nonce, gas-limit or priority-fee drift, or a maximum fee
+above the frozen ceiling, requires a new operation. A lower recommendation is
+not substituted into the transaction: APN signs the original approved ceiling.
 
 Exact foreground TTY approval precedes private-key access. MCP
 `apn_wallet_balance_asset` and `apn_pay_transfer_prepare_asset` use the same
@@ -101,8 +105,8 @@ safe/finalized chain evidence. Resume takes its network from the frozen operatio
 not a new caller override. GET and absent/empty/nonempty POST envelopes remain
 immutable across the same-material retry and result recovery.
 
-These are unreleased local capabilities. Production Ethereum and Arbitrum
-merchant/facilitator paths have not been qualified by a paid run. Fresh native, non-USDC and
+Production Ethereum and Arbitrum merchant/facilitator paths have not been
+qualified by a paid run. Fresh native, non-USDC and
 x402 mainnet rows remain required and held; protocol documentation and synthetic
 fixtures do not establish merchant availability or live settlement.
 
@@ -110,7 +114,7 @@ fixtures do not establish merchant availability or live settlement.
 
 | Profile | Base / Ethereum / Arbitrum native and arbitrary ERC-20 direct | Base-USDC direct | Standard x402 |
 | --- | --- | --- | --- |
-| Local encrypted wallet | Source/test capability; fresh paid proof held | Existing journey preserved | Existing Base-USDC plus unreleased Ethereum/Arbitrum-USDC exact EIP-3009 |
+| Local encrypted wallet | APN 0.5.9 capability; fresh paid proof held | Existing journey preserved | Base plus APN 0.5.9 Ethereum/Arbitrum-USDC exact EIP-3009; fresh merchant proof held |
 | Coinbase Agentic Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route; pinned AWAL rejects present bodies, including empty |
 | MetaMask Agent Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route |
 | MetaMask Smart Account | Explicitly unsupported | Existing bounded consent route | Existing advertised ERC-7710 route |

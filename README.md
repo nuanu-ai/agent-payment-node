@@ -5,15 +5,12 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.8 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
-and canonical Base USDC. It does not require an Apple Developer identity, an
-app bundle, a daemon, a browser extension, or the AI Labs Hub.
-
-This unreleased source tree additionally implements explicit local-wallet Base,
+APN 0.5.9 targets Apple Silicon macOS and supports explicit local-wallet Base,
 Ethereum and Arbitrum One native ETH / arbitrary ERC-20 direct transfers, plus
-independently network-bound Ethereum/Arbitrum canonical-USDC EIP-3009 x402. This is not a new public
-0.5.8 artifact or a Homebrew update. See [EVM asset transfers](docs/evm-assets.md)
-for the source-only capability, exact fee budget and evidence boundaries.
+independently network-bound canonical-USDC EIP-3009 x402. It does not require an
+Apple Developer identity, an app bundle, a daemon, a browser extension, or the
+AI Labs Hub. See [EVM asset transfers](docs/evm-assets.md) for the exact fee
+budget and evidence boundaries.
 
 ## Install
 
