@@ -12,9 +12,14 @@ const GAS_ORACLE_ABI = [
 export class EvmRpc {
     call;
     rpcOrigin;
-    constructor(call, rpcOrigin) {
+    maximumSignedBytes;
+    constructor(call, rpcOrigin, maximumSignedBytes = MAX_DIRECT_TRANSACTION_BYTES) {
         this.call = call;
         this.rpcOrigin = rpcOrigin;
+        this.maximumSignedBytes = maximumSignedBytes;
+        if (!Number.isSafeInteger(maximumSignedBytes) || maximumSignedBytes < MAX_DIRECT_TRANSACTION_BYTES || maximumSignedBytes > 16 * 1024) {
+            throw new ApnError("APN_RPC_CONFIG", "Signed transaction size bound is invalid.");
+        }
     }
     async assertChain(chainId) {
         evmChain(chainId);
@@ -70,7 +75,7 @@ export class EvmRpc {
     async feeQuote(chainId, economics) {
         await this.assertChain(chainId);
         const block = await evmRpcBlock(this.call, "latest");
-        const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(MAX_DIRECT_TRANSACTION_BYTES)] });
+        const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(this.maximumSignedBytes)] });
         const operatorData = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
         const [l1Fee, operatorFee] = chainId !== 8453 ? [0n, 0n] : await Promise.all([
             this.call("eth_call", [{ to: GAS_ORACLE, data }, block.tag]).then(evmRpcWord),

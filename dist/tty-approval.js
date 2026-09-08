@@ -243,7 +243,7 @@ export class TtyChainPolicyApproval {
         ], `ADMIT APN ASSET ${policy.policyHash.slice(-16)}`, new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString(), this.options);
     }
 }
-async function exactChainConsent(lines, phrase, expiresAt, options) {
+export async function exactChainConsent(lines, phrase, expiresAt, options) {
     if (Date.now() >= Date.parse(expiresAt))
         throw approvalFailure("APN_APPROVAL_EXPIRED", "The chain approval expired.");
     let terminal;

@@ -6,6 +6,7 @@ import { bindX402HttpRequest } from "./x402-http-request.js";
 import { chainDecimal } from "./chain-policy.js";
 import { solanaAddress } from "./solana/rpc.js";
 import { tronAddress } from "./tron/codec.js";
+import { bindBridgeCommand } from "./lifi/command-catalog.js";
 export function bindArgv(argv) {
     return bindParsedCatalog(parseCatalogArgv(argv));
 }
@@ -38,6 +39,8 @@ export function mcpFieldName(optionName) {
 }
 function bindParsedCatalog(parsed) {
     const options = parsed.values;
+    if (parsed.command.path[0] === "bridge")
+        return { request: bindBridgeCommand(parsed.command.path.join(" "), options) };
     switch (parsed.command.path.join(" ")) {
         case "--version": return { request: { command: "version" } };
         case "doctor keychain": return { request: { command: "doctor.keychain" } };

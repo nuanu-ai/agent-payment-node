@@ -63,8 +63,14 @@ import { SolanaLocalAdapter } from "./solana/local-adapter.js";
 import { SolanaAwalAdapter } from "./solana/awal-adapter.js";
 import { TronLocalAdapter } from "./tron/local-adapter.js";
 import { TronRpc } from "./tron/rpc.js";
+import type { BridgeDependencies } from "./lifi/service.js";
+import { LocalBridgeCustody } from "./lifi/custody.js";
+import { LifiProvider } from "./lifi/provider.js";
+import { bridgeRpcFactory } from "./lifi/rpc.js";
+import { TtyBridgeApproval } from "./lifi/tty.js";
 
 export interface RuntimeFactoryOptions {
+  readonly bridge?: BridgeDependencies;
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly directRails?: readonly DirectRailPort[];
   readonly railApproval?: RailApprovalPort;
@@ -183,6 +189,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   );
   return new ApnCore({
     state,
+    bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
+      custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
+      ...(bound.request.command === "bridge.approve" ? { approval: new TtyBridgeApproval() } : {}) },
     chainAccounts, directRails,
     ...(bound.request.command === "transfer.approve" || options.railApproval !== undefined ? { railApproval: options.railApproval ?? new TtyRailApproval() } : {}),
     ...(bound.request.command === "policy.admit-solana" || bound.request.command === "policy.admit-tron" || options.chainPolicyApproval !== undefined ? { chainPolicyApproval: options.chainPolicyApproval ?? new TtyChainPolicyApproval() } : {}),

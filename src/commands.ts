@@ -3,8 +3,14 @@ import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import type { ErrorDetails } from "./errors.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
 import type { ChainProvider } from "./direct-rail-ports.js";
+import type { BridgeRouteRequest } from "./lifi/model.js";
 
 export type CommandRequest =
+  | { readonly command: "bridge.capabilities"; readonly profile?: string }
+  | { readonly command: "bridge.inventory" }
+  | { readonly command: "bridge.routes"; readonly profile: string; readonly request: BridgeRouteRequest }
+  | { readonly command: "bridge.prepare"; readonly profile: string; readonly quote: string; readonly route: string; readonly idempotencyKey: string }
+  | { readonly command: "bridge.approve"; readonly operationId: string }
   | { readonly command: "wallet.ensure-tron"; readonly profile: string; readonly provider: "local"; readonly acceptRisk: boolean }
   | { readonly command: "wallet.balance-tron"; readonly profile: string; readonly asset: "trx" | "usdt" }
   | { readonly command: "wallet.capabilities-tron"; readonly profile?: string }

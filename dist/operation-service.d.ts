@@ -6,7 +6,12 @@ import { type ProviderX402OperationRecord } from "./provider-x402-model.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { type RailOperationRecord } from "./rail-operation-model.js";
+import { BridgeOperationRepository } from "./lifi/operation-repository.js";
+import type { BridgeOperationRecord } from "./lifi/operation-model.js";
 export type StoredMoneyOperation = {
+    readonly kind: "bridge_route";
+    readonly record: BridgeOperationRecord;
+} | {
     readonly kind: "rail_transfer";
     readonly record: RailOperationRecord;
 } | {
@@ -25,7 +30,8 @@ export declare class OperationService {
     private readonly state;
     private readonly providerX402;
     private readonly rails;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository);
+    private readonly bridges;
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository);
     resolvePrepare(input: {
         readonly kind: StoredMoneyOperation["kind"];
         readonly profileHash: string;

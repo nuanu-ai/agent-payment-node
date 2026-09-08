@@ -56,6 +56,7 @@ const TOOL_NAMES = [
   "apn_wallet_policy_set_network",
   "apn_x402_inspect_network",
   "apn_x402_fetch_prepare_network",
+  "apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare", "apn_bridge_approve",
 ] as const;
 const MASTER = Buffer.from("55".repeat(32), "hex");
 
@@ -163,6 +164,11 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_wallet_policy_set_network", properties: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei"], required: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"], defaults: {} },
       { name: "apn_x402_inspect_network", properties: ["chain", "method", "headers_json", "body_base64", "url"], required: ["chain", "url"], defaults: {} },
       { name: "apn_x402_fetch_prepare_network", properties: ["chain", "profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["chain", "profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
+      { name: "apn_bridge_capabilities", properties: ["profile"], required: [], defaults: {} },
+      { name: "apn_bridge_inventory", properties: [], required: [], defaults: {} },
+      { name: "apn_bridge_routes", properties: ["profile", "from_chain", "to_chain", "from_token", "to_token", "amount", "to", "min_output", "max_native_debit_wei", "max_route_fee", "slippage_bps"], required: ["profile", "from_chain", "to_chain", "from_token", "to_token", "amount", "to", "min_output", "max_native_debit_wei", "max_route_fee", "slippage_bps"], defaults: {} },
+      { name: "apn_bridge_prepare", properties: ["profile", "quote", "route", "idempotency_key"], required: ["profile", "quote", "route", "idempotency_key"], defaults: {} },
+      { name: "apn_bridge_approve", properties: ["operation"], required: ["operation"], defaults: {} },
     ]);
     const listedBytes = JSON.stringify(listed);
     assert.equal(listedBytes.includes(MASTER.toString("hex")), false);

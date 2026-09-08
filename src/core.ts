@@ -18,6 +18,8 @@ import { ProviderPermissionService } from "./provider-permission-service.js";
 import { RailOperationService } from "./rail-operation-service.js";
 import { solanaCapabilities } from "./chain-policy-service.js";
 import { tronCapabilities } from "./tron/catalog.js";
+import { bridgeCapabilities } from "./lifi/catalog.js";
+import { BridgeService } from "./lifi/service.js";
 
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
@@ -32,6 +34,7 @@ export class ApnCore {
   readonly providerPermissions: ProviderPermissionService;
   readonly providerTransactionRecovery: ProviderX402TransactionRecoveryService;
   readonly rails: RailOperationService;
+  readonly bridges: BridgeService;
 
   constructor(dependencies: CoreDependencies) {
     this.context = new RuntimeContext(dependencies);
@@ -43,6 +46,7 @@ export class ApnCore {
     this.providerPermissions = new ProviderPermissionService(this.context);
     this.providerTransactionRecovery = new ProviderX402TransactionRecoveryService(this.context);
     this.rails = new RailOperationService(this.context);
+    this.bridges = new BridgeService(this.context);
   }
 
   async execute(request: CommandRequest): Promise<OutputEnvelope> {
@@ -56,6 +60,11 @@ export class ApnCore {
 
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
+      case "bridge.capabilities": return dataOutcome(bridgeCapabilities(request.profile), "static_bridge_capabilities");
+      case "bridge.inventory": return dataOutcome(await this.bridges.inventory(), "provider_inventory_only");
+      case "bridge.routes": return dataOutcome(await this.bridges.routes(request.profile, request.request), "profile_bound_bridge_quote");
+      case "bridge.prepare": return operationOutcome(await this.bridges.prepare(request));
+      case "bridge.approve": return operationOutcome(await this.bridges.approve(request.operationId));
       case "version":
         return dataOutcome({
           product: "agent-payment-node",
@@ -123,6 +132,10 @@ export class ApnCore {
       case "operation.resume": {
         await this.context.ready();
         const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "bridge_route") {
+          if (request.waitSeconds !== undefined) throw new ApnError("APN_INVALID_INPUT", "Bridge recovery performs one bounded observation; omit --wait-seconds.");
+          return operationOutcome(await this.bridges.resume(request.operationId));
+        }
         if (operation.kind === "rail_transfer") {
           if (request.waitSeconds !== undefined) throw new ApnError("APN_INVALID_INPUT", "Solana resume performs one bounded observation; omit --wait-seconds.");
           return operationOutcome(await this.rails.resume(request.operationId));
@@ -155,6 +168,7 @@ export class ApnCore {
         await this.context.ready();
         await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "bridge_route") return operationOutcome(await this.bridges.status(request.operationId));
         return operation.kind === "x402_fetch"
           ? await this.operations.x402Outcome(request.operationId, {
               exposeSellerResult: false,
@@ -167,6 +181,7 @@ export class ApnCore {
         await this.context.ready();
         await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "bridge_route") return receiptOutcome(await this.bridges.receipt(request.operationId));
         if (operation.kind === "rail_transfer") return receiptOutcome(await this.rails.receipt(request.operationId));
         return operation.kind === "x402_fetch"
           ? await this.operations.x402ReceiptOutcome(request.operationId)

@@ -5,7 +5,8 @@ import type { EvmBalanceSnapshot, EvmFeeQuote, EvmRpcCall, EvmRpcPort, EvmTransa
 export declare class EvmRpc implements EvmRpcPort {
     private readonly call;
     private readonly rpcOrigin;
-    constructor(call: EvmRpcCall, rpcOrigin: string);
+    private readonly maximumSignedBytes;
+    constructor(call: EvmRpcCall, rpcOrigin: string, maximumSignedBytes?: number);
     assertChain(chainId: EvmChainId): Promise<void>;
     balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
     nonce(chainId: EvmChainId, address: Address, tag: "pending" | "latest"): Promise<string>;

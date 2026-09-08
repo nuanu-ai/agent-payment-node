@@ -4,6 +4,7 @@ import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
+    bridge;
     directRails;
     chainAccounts;
     railApproval;
@@ -27,6 +28,8 @@ export class RuntimeContext {
     providerAuthorizationStore;
     initialized;
     constructor(dependencies) {
+        if (dependencies.bridge !== undefined)
+            this.bridge = dependencies.bridge;
         this.directRails = dependencies.directRails ?? [];
         if (dependencies.chainAccounts !== undefined)
             this.chainAccounts = dependencies.chainAccounts;
