@@ -7,7 +7,13 @@ import type { TransferApprovalPort } from "./tty-approval.js";
 import type { ProviderX402Repository } from "./provider-x402-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
+import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
+import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 export interface CoreDependencies {
+    readonly directRails?: readonly DirectRailPort[];
+    readonly chainAccounts?: ChainWalletStoragePort;
+    readonly railApproval?: RailApprovalPort;
+    readonly chainPolicyApproval?: ChainPolicyApprovalPort;
     readonly state: StateStore;
     readonly native?: NativePort;
     readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
@@ -27,6 +33,10 @@ export interface CoreDependencies {
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
 }
 export declare class RuntimeContext {
+    readonly directRails: readonly DirectRailPort[];
+    readonly chainAccounts?: ChainWalletStoragePort;
+    readonly railApproval?: RailApprovalPort;
+    readonly chainPolicyApproval?: ChainPolicyApprovalPort;
     readonly state: StateStore;
     readonly native?: NativePort;
     readonly keychainProbe?: Pick<WrappingSecretPort, "load">;

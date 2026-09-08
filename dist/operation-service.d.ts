@@ -4,7 +4,12 @@ import type { StateStore } from "./state.js";
 import { type X402SettlementWaitProjection, type X402OperationRecord } from "./x402-state-integrity.js";
 import { type ProviderX402OperationRecord } from "./provider-x402-model.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
+import { RailOperationRepository } from "./rail-operation-repository.js";
+import { type RailOperationRecord } from "./rail-operation-model.js";
 export type StoredMoneyOperation = {
+    readonly kind: "rail_transfer";
+    readonly record: RailOperationRecord;
+} | {
     readonly kind: "direct_transfer";
     readonly record: OperationRecord;
 } | {
@@ -19,7 +24,8 @@ export type StoredMoneyOperation = {
 export declare class OperationService {
     private readonly state;
     private readonly providerX402;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository);
+    private readonly rails;
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository);
     resolvePrepare(input: {
         readonly kind: StoredMoneyOperation["kind"];
         readonly profileHash: string;

@@ -4,6 +4,10 @@ import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
+    directRails;
+    chainAccounts;
+    railApproval;
+    chainPolicyApproval;
     state;
     native;
     keychainProbe;
@@ -23,6 +27,13 @@ export class RuntimeContext {
     providerAuthorizationStore;
     initialized;
     constructor(dependencies) {
+        this.directRails = dependencies.directRails ?? [];
+        if (dependencies.chainAccounts !== undefined)
+            this.chainAccounts = dependencies.chainAccounts;
+        if (dependencies.railApproval !== undefined)
+            this.railApproval = dependencies.railApproval;
+        if (dependencies.chainPolicyApproval !== undefined)
+            this.chainPolicyApproval = dependencies.chainPolicyApproval;
         this.state = dependencies.state;
         if (dependencies.native !== undefined)
             this.native = dependencies.native;

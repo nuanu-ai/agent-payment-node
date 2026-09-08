@@ -12,7 +12,14 @@ import { type ProviderAuthorizationStorePort } from "./encrypted-provider-author
 import { type SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
 import { type SessionKeyFactoryPort } from "./metamask-smart-account-adapter.js";
 import { type SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
+import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
+import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 export interface RuntimeFactoryOptions {
+    readonly chainAccounts?: ChainWalletStoragePort;
+    readonly directRails?: readonly DirectRailPort[];
+    readonly railApproval?: RailApprovalPort;
+    readonly chainPolicyApproval?: ChainPolicyApprovalPort;
+    readonly solanaRpcUrl?: string;
     readonly stateRoot?: string;
     readonly native?: NativePort;
     readonly wrappingSecret?: WrappingSecretPort;

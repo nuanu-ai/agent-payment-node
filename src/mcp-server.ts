@@ -5,9 +5,9 @@ import { bindMcpInput } from "./command-binder.js";
 import { cliHandoffDetails, createCliHandoff, type CliHandoff } from "./cli-handoff.js";
 import type { OutputEnvelope } from "./commands.js";
 import { PRODUCT_VERSION } from "./constants.js";
-import { RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
+import { chainPolicyHandoff, RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
 import { MCP_TOOLS, type ProjectedMcpTool } from "./mcp-projection.js";
-import { genericTransferHandoff, RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
+import { genericTransferHandoff, RejectingMcpRailApproval, RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
 import { failureEnvelope } from "./output.js";
 import { createApnCore, executeBoundCommand, type RuntimeFactoryOptions } from "./runtime-factory.js";
 import { ApnError } from "./errors.js";
@@ -77,11 +77,11 @@ async function callTool(
     const policyApproval = bound.request.command === "wallet.policy.set"
       ? new RejectingMcpPolicyApproval(bound.request)
       : undefined;
+    if (bound.request.command === "policy.admit-solana") chainPolicyHandoff(bound.request);
     if (bound.request.command === "transfer.approve") {
-      if (bound.rpcUrl === undefined) throw new Error("The bound transfer approval is missing its required RPC URL.");
-      const { native: _injectedNative, approval: _injectedApproval, ...sharedOptions } = options;
+      const { native: _injectedNative, approval: _injectedApproval, railApproval: _injectedRailApproval, ...sharedOptions } = options;
       const approval = new RejectingMcpTransferApproval(bound.request, bound.rpcUrl);
-      const core = createApnCore(bound, { ...sharedOptions, approval });
+      const core = createApnCore(bound, { ...sharedOptions, approval, railApproval: new RejectingMcpRailApproval() });
       try { await genericTransferHandoff(core, bound.request, approval); }
       catch (error) { return failureEnvelope(bound.request.command, randomUUID(), error); }
       return await core.execute(bound.request);

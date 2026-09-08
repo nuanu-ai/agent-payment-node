@@ -41,4 +41,11 @@ function policyHandoff(request) {
     }
     return createCliHandoff(tokens);
 }
+export function chainPolicyHandoff(request) {
+    const handoff = createCliHandoff(["apn", "policy", "admit-solana", "--profile", request.profile, "--asset", request.asset,
+        "--max-per-transfer", request.maximumPerTransfer, "--daily-limit", request.dailyLimit, "--max-fee-sol", request.maximumFee]);
+    throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Run the exact mainnet asset admission command in a foreground terminal with APN_SOLANA_RPC_URL configured.", {
+        approval_boundary: "foreground_tty", ...cliHandoffDetails(handoff),
+    });
+}
 //# sourceMappingURL=mcp-policy-approval.js.map

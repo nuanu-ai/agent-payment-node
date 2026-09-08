@@ -2,7 +2,35 @@ import type { Address } from "./model.js";
 import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import type { ErrorDetails } from "./errors.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
+import type { ChainProvider } from "./direct-rail-ports.js";
 export type CommandRequest = {
+    readonly command: "wallet.ensure-solana";
+    readonly profile: string;
+    readonly provider: ChainProvider;
+    readonly acceptRisk: boolean;
+} | {
+    readonly command: "wallet.balance-solana";
+    readonly profile: string;
+    readonly asset: "sol" | "usdc";
+} | {
+    readonly command: "wallet.capabilities-solana";
+    readonly profile?: string;
+} | {
+    readonly command: "policy.admit-solana";
+    readonly profile: string;
+    readonly asset: "sol" | "usdc";
+    readonly maximumPerTransfer: string;
+    readonly dailyLimit: string;
+    readonly maximumFee: string;
+} | {
+    readonly command: "transfer.prepare-solana";
+    readonly profile: string;
+    readonly asset: "sol" | "usdc";
+    readonly recipient: string;
+    readonly amount: string;
+    readonly maximumFee: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "version";
 } | {
     readonly command: "doctor.keychain";
