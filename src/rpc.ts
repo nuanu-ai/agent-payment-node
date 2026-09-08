@@ -1,9 +1,12 @@
 import { request as httpsRequest } from "node:https";
 import { performance } from "node:perf_hooks";
-import { decodeAbiParameters } from "viem";
+import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, rpcString, nonzeroBytes32, x402RpcLog } from "./base-rpc-codec.js";
+import { x402Network } from "./x402-network.js";
+import type { EvmChainId } from "./evm-asset.js";
 import { sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { EvmRpc } from "./evm-rpc.js";
 import { parseAtomic } from "./money.js";
 import type { Address, Hex } from "./model.js";
 import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses, type PinnedAddress } from "./network-policy.js";
@@ -30,21 +33,23 @@ type JsonRpcResult = { readonly jsonrpc: "2.0"; readonly id: string; readonly re
 const AUTHORIZATION_STATE_SELECTOR = "0xe94a0102";
 const AUTHORIZATION_USED_TOPIC = "0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5";
 const MAX_X402_LOGS = 256;
-const MAX_X402_TOPICS = 4;
-const MAX_X402_LOG_DATA_BYTES = 4096;
 
 export class HttpsBaseRpc implements RpcPort, X402RpcPort {
+  readonly evm: EvmRpc;
   readonly endpoint: URL;
   readonly rpcOrigin: string;
   private sequence = 0n;
+  private readonly x402ChainId: EvmChainId;
   private pinnedAddresses: Promise<readonly PinnedAddress[]> | undefined;
   private readonly totalDeadlineMs: number | undefined;
 
-  constructor(endpoint: string, options: { readonly totalDeadlineMs?: number } = {}) {
+  constructor(endpoint: string, options: { readonly totalDeadlineMs?: number; readonly x402ChainId?: EvmChainId } = {}) {
     const parsed = parsePublicHttpsUrl(endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     this.endpoint = parsed;
     this.rpcOrigin = parsed.origin;
+    this.evm = new EvmRpc((method, params) => this.call(method, params), this.rpcOrigin);
     this.totalDeadlineMs = options.totalDeadlineMs;
+    this.x402ChainId = x402Network(options.x402ChainId).chainId;
   }
 
   withTotalTimeout(milliseconds: number): X402RpcPort {
@@ -53,9 +58,24 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     }
     const bounded = new HttpsBaseRpc(this.endpoint.toString(), {
       totalDeadlineMs: performance.now() + milliseconds,
+      x402ChainId: this.x402ChainId,
     });
     bounded.pinnedAddresses = this.pinnedAddresses;
     return bounded;
+  }
+
+  forX402Network(chainId: EvmChainId): HttpsBaseRpc {
+    const selected = new HttpsBaseRpc(this.endpoint.toString(), {
+      x402ChainId: chainId, ...(this.totalDeadlineMs === undefined ? {} : { totalDeadlineMs: this.totalDeadlineMs }),
+    });
+    selected.pinnedAddresses = this.pinnedAddresses;
+    return selected;
+  }
+
+  async assertX402Chain(chainId: EvmChainId): Promise<{ readonly chainId: EvmChainId; readonly rpcOrigin: string }> {
+    if (chainId !== this.x402ChainId) throw new ApnError("APN_CHAIN_MISMATCH", "x402 RPC binding belongs to another network.");
+    await this.evm.assertChain(chainId);
+    return { chainId, rpcOrigin: this.rpcOrigin };
   }
 
   async assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }> {
@@ -84,10 +104,10 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const timestamp = rpcQuantity(block.timestamp).toString();
     const balanceData = `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}`;
     const [balance, name, version, domainSeparator] = await Promise.all([
-      this.call("eth_call", [{ to: BASE_USDC, data: balanceData }, tag]),
-      this.call("eth_call", [{ to: BASE_USDC, data: "0x06fdde03" }, tag]),
-      this.call("eth_call", [{ to: BASE_USDC, data: "0x54fd4d50" }, tag]),
-      this.call("eth_call", [{ to: BASE_USDC, data: "0x3644e515" }, tag]),
+      this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data: balanceData }, tag]),
+      this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data: "0x06fdde03" }, tag]),
+      this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data: "0x54fd4d50" }, tag]),
+      this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data: "0x3644e515" }, tag]),
     ]);
     const recheckedBlock = record(await this.call("eth_getBlockByNumber", [tag, false]), "rechecked pinned block");
     const recheckedNumber = rpcQuantity(recheckedBlock.number).toString();
@@ -180,7 +200,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const identity = "tag" in block ? await this.getX402Head(block.tag) : await this.getX402Block(block.number);
     const tag = `0x${BigInt(identity.number).toString(16)}`;
     const data = `${AUTHORIZATION_STATE_SELECTOR}${authorizer.slice(2).toLowerCase().padStart(64, "0")}${rpcHex(nonce, 32).slice(2)}`;
-    const encoded = rpcHex(await this.call("eth_call", [{ to: BASE_USDC, data }, tag]), 32);
+    const encoded = rpcHex(await this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data }, tag]), 32);
     const value = BigInt(encoded);
     if (value !== 0n && value !== 1n) throw new ApnError("APN_RPC_PROTOCOL", "RPC authorization state is not a canonical boolean.");
     return {
@@ -203,7 +223,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const to = parseAtomic(input.toBlock);
     if (from > to || to - from + 1n > 2048n) throw new ApnError("APN_RPC_PROTOCOL", "RPC AuthorizationUsed range exceeds the fixed bound.");
     const result = await this.callX402Logs([{
-      address: BASE_USDC,
+      address: x402Network(this.x402ChainId).token,
       fromBlock: `0x${from.toString(16)}`,
       toBlock: `0x${to.toString(16)}`,
       topics: [
@@ -219,7 +239,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const logs = result.value.map((entry: unknown) => x402RpcLog(entry));
     for (const log of logs) {
       if (
-        log.address.toLowerCase() !== BASE_USDC.toLowerCase() || log.topics.length !== 3 ||
+        log.address.toLowerCase() !== x402Network(this.x402ChainId).token.toLowerCase() || log.topics.length !== 3 ||
         log.topics[0] !== AUTHORIZATION_USED_TOPIC ||
         log.topics[1] !== `0x${input.authorizer.slice(2).toLowerCase().padStart(64, "0")}` ||
         log.topics[2] !== input.nonce.toLowerCase() || log.data !== "0x" ||
@@ -239,7 +259,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     if (from > to || to - from + 1n > 2048n) throw new ApnError("APN_RPC_PROTOCOL", "RPC Transfer range exceeds the fixed bound.");
     const fromTopic = `0x${input.from.slice(2).toLowerCase().padStart(64, "0")}`;
     const result = await this.callX402Logs([{
-      address: BASE_USDC,
+      address: x402Network(this.x402ChainId).token,
       fromBlock: `0x${from.toString(16)}`,
       toBlock: `0x${to.toString(16)}`,
       topics: [TRANSFER_TOPIC, fromTopic],
@@ -251,7 +271,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const logs = result.value.map((entry: unknown) => x402RpcLog(entry));
     for (const log of logs) {
       if (
-        log.address.toLowerCase() !== BASE_USDC.toLowerCase() || log.topics.length !== 3 ||
+        log.address.toLowerCase() !== x402Network(this.x402ChainId).token.toLowerCase() || log.topics.length !== 3 ||
         log.topics[0] !== TRANSFER_TOPIC || log.topics[1] !== fromTopic || log.data.length !== 66 ||
         BigInt(log.blockNumber) < from || BigInt(log.blockNumber) > to
       ) throw new ApnError("APN_RPC_PROTOCOL", "RPC Transfer log violates the exact filter.");
@@ -431,61 +451,4 @@ async function postJson(
 export { isPublicIp } from "./network-policy.js";
 export function acceptRpcHttpBody(status: number | undefined, allowJsonRpcClientError: boolean): boolean {
   return status === 200 || (allowJsonRpcClientError && status === 400);
-}
-function record(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new ApnError("APN_RPC_PROTOCOL", `RPC ${label} is invalid.`);
-  return value as Record<string, unknown>;
-}
-function rpcQuantity(value: unknown): bigint {
-  if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)) throw new ApnError("APN_RPC_PROTOCOL", "RPC quantity is not canonical hexadecimal.");
-  return BigInt(value);
-}
-function rpcHex(value: unknown, byteLength?: number): Hex {
-  if (typeof value !== "string" || !/^0x(?:[0-9a-fA-F]{2})*$/.test(value)) throw new ApnError("APN_RPC_PROTOCOL", "RPC hex data is invalid.");
-  if (byteLength !== undefined && value.length !== 2 + byteLength * 2) throw new ApnError("APN_RPC_PROTOCOL", "RPC hex data has the wrong length.");
-  return value.toLowerCase() as Hex;
-}
-function rpcAddress(value: unknown): Address {
-  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value)) throw new ApnError("APN_RPC_PROTOCOL", "RPC address is invalid.");
-  return value as Address;
-}
-
-function nonzeroBytes32(value: unknown, label: string): Hex {
-  const parsed = rpcHex(value, 32);
-  if (/^0x0{64}$/u.test(parsed)) throw new ApnError("APN_RPC_PROTOCOL", `RPC ${label} is zero.`);
-  return parsed;
-}
-
-function x402RpcLog(value: unknown): X402RpcLog {
-  const log = record(value, "x402 log");
-  if (!Array.isArray(log.topics) || log.topics.length > MAX_X402_TOPICS) {
-    throw new ApnError("APN_RPC_PROTOCOL", "RPC log topics exceed the fixed bound.");
-  }
-  const data = rpcHex(log.data);
-  if ((data.length - 2) / 2 > MAX_X402_LOG_DATA_BYTES) {
-    throw new ApnError("APN_RPC_PROTOCOL", "RPC log data exceeds the fixed bound.");
-  }
-  return {
-    address: rpcAddress(log.address).toLowerCase() as Address,
-    topics: log.topics.map((topic: unknown) => rpcHex(topic, 32)),
-    data,
-    blockNumber: rpcQuantity(log.blockNumber).toString(),
-    blockHash: nonzeroBytes32(log.blockHash, "log block hash"),
-    transactionHash: nonzeroBytes32(log.transactionHash, "log transaction hash"),
-    logIndex: rpcQuantity(log.logIndex).toString(),
-  };
-}
-function rpcString(value: unknown, label: string): string {
-  const encoded = rpcHex(value);
-  try {
-    const [decoded] = decodeAbiParameters([{ type: "string" }], encoded);
-    if (decoded.length === 0 || Buffer.byteLength(decoded, "utf8") > 128) throw new Error("bounded string");
-    return decoded;
-  } catch {
-    throw new ApnError("APN_RPC_PROTOCOL", `RPC ${label} is invalid.`);
-  }
-}
-function rpcUint256Data(value: unknown, label: string): string {
-  try { return BigInt(rpcHex(value, 32)).toString(); }
-  catch { throw new ApnError("APN_RPC_PROTOCOL", `RPC ${label} is invalid.`); }
 }

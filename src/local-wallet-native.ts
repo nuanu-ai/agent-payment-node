@@ -1,3 +1,4 @@
+import { validX402Tuple, type X402ChainText } from "./x402-network.js";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
@@ -10,6 +11,8 @@ import {
   type X402EffectMaterial,
 } from "./encrypted-wallet-store.js";
 import { ApnError } from "./errors.js";
+import { MAX_DIRECT_TRANSACTION_BYTES } from "./evm-asset.js";
+import { parseEvmNativeIntent } from "./evm-native-intent.js";
 import { formatAtomic } from "./money.js";
 import type { Address, Hex } from "./model.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
@@ -73,7 +76,7 @@ export class LocalWalletNative implements NativePort {
   }
 
   private async approveAndSign(payload: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const intent = parseDirectIntent(payload);
+    const intent = payload.evm === undefined ? parseDirectIntent(payload) : parseEvmNativeIntent(payload);
     // Human approval must complete before the Keychain-backed wallet envelope
     // is loaded. This keeps the raw signing key out of memory while approval is
     // pending, refused, interrupted, or expired.
@@ -90,9 +93,9 @@ export class LocalWalletNative implements NativePort {
       const account = privateKeyToAccount(secret.privateKey);
       const rawTransaction = await account.signTransaction({
         type: "eip1559",
-        chainId: CHAIN_ID,
-        to: BASE_USDC,
-        value: 0n,
+        chainId: intent.evm?.asset.chainId ?? CHAIN_ID,
+        to: intent.evm?.transactionTo ?? BASE_USDC,
+        value: BigInt(intent.evm?.valueAtomic ?? "0"),
         data: intent.transactionData,
         nonce: Number(BigInt(intent.nonceAtomic)),
         gas: BigInt(intent.gasLimitAtomic),
@@ -100,6 +103,7 @@ export class LocalWalletNative implements NativePort {
         maxPriorityFeePerGas: BigInt(intent.maxPriorityFeePerGasAtomic),
         accessList: [],
       });
+      if (intent.evm !== undefined && (rawTransaction.length - 2) / 2 > MAX_DIRECT_TRANSACTION_BYTES) throw protocol("Signed transaction exceeds its data-fee quote size bound.");
       const transactionHash = keccak256(rawTransaction);
       const effect: DirectEffectMaterial = {
         payloadHash,
@@ -118,7 +122,14 @@ export class LocalWalletNative implements NativePort {
     return await this.withWallet(recovery.profile, async (_identity, secret) => {
       const slot = effectSlot("apn-effect-v1", recovery.profile, recovery.operationId, recovery.fingerprint);
       const effect = secret.directEffects[slot];
-      if (effect === undefined) throw rejected("APN_EFFECT_NOT_FOUND", "Direct-transfer effect material was not found.");
+      if (effect === undefined) {
+        if ("expectedPayloadHash" in recovery) return { found: false };
+        throw rejected("APN_EFFECT_NOT_FOUND", "Direct-transfer effect material was not found.");
+      }
+      if ("expectedPayloadHash" in recovery) {
+        if (effect.payloadHash !== recovery.expectedPayloadHash) throw rejected("APN_EFFECT_MISMATCH", "Stored signature does not match the frozen started operation.");
+        return publicDirectEffect(effect);
+      }
       if (
         effect.transactionHash.toLowerCase() !== recovery.expectedTransactionHash.toLowerCase() ||
         effect.rawTransactionHash.toLowerCase() !== recovery.expectedRawTransactionHash.toLowerCase()
@@ -147,7 +158,7 @@ export class LocalWalletNative implements NativePort {
         domain: {
           name: intent.tokenDomain.name,
           version: intent.tokenDomain.version,
-          chainId: CHAIN_ID,
+          chainId: Number(intent.chainId),
           verifyingContract: intent.token,
         },
         types: {
@@ -266,7 +277,11 @@ function parseDirectIntent(payload: Readonly<Record<string, unknown>>): DirectIn
 function parseDirectRecovery(payload: Readonly<Record<string, unknown>>): {
   readonly profile: string; readonly operationId: string; readonly fingerprint: string;
   readonly expectedTransactionHash: Hex; readonly expectedRawTransactionHash: Hex;
-} {
+} | { readonly profile: string; readonly operationId: string; readonly fingerprint: string; readonly expectedPayloadHash: string } {
+  if (payload.expectedPayloadHash !== undefined) {
+    exactRecord(payload, ["profile", "operationId", "fingerprint", "expectedPayloadHash"]);
+    return { profile: canonicalProfile(payload.profile), operationId: hash(payload.operationId, "operation ID"), fingerprint: hash(payload.fingerprint, "fingerprint"), expectedPayloadHash: hash(payload.expectedPayloadHash, "payload hash") };
+  }
   exactRecord(payload, ["profile", "operationId", "fingerprint", "expectedTransactionHash", "expectedRawTransactionHash"]);
   return {
     profile: canonicalProfile(payload.profile),
@@ -279,7 +294,7 @@ function parseDirectRecovery(payload: Readonly<Record<string, unknown>>): {
 
 interface X402Binding {
   readonly profile: string; readonly operationId: string; readonly fingerprint: string;
-  readonly wallet: Address; readonly chainId: "8453"; readonly token: Address;
+  readonly wallet: Address; readonly chainId: X402ChainText; readonly token: Address;
   readonly tokenDomain: { readonly name: string; readonly version: string };
   readonly authorization: { readonly from: Address; readonly to: Address; readonly value: string; readonly validAfter: "0"; readonly validBefore: string; readonly nonce: Hex };
   readonly intentHash: string;
@@ -329,9 +344,8 @@ function parseX402Common(payload: Readonly<Record<string, unknown>>, create: boo
   const operationId = hash(payload.operationId, "operation ID");
   const fingerprint = hash(payload.fingerprint, "fingerprint");
   const wallet = x402Address(payload.wallet, "wallet");
-  if (payload.chainId !== "8453") throw protocol("x402 chain is unsupported.");
   const token = x402Address(payload.token, "token");
-  if (!addressEqual(token, BASE_USDC)) throw protocol("x402 token is unsupported.");
+  if (!validX402Tuple(payload.chainId, `eip155:${String(payload.chainId)}`, token)) throw protocol("x402 network or token is unsupported.");
   const tokenDomain = exactRecord(payload.tokenDomain, ["name", "version"]);
   if (typeof tokenDomain.name !== "string" || tokenDomain.name.length === 0 || typeof tokenDomain.version !== "string" || tokenDomain.version.length === 0) throw protocol("x402 token domain is invalid.");
   const authKeys = create ? ["from", "to", "value", "validAfter", "validBefore", "nonce", "createdAt"] : ["from", "to", "value", "validAfter", "validBefore", "nonce"];
@@ -344,7 +358,7 @@ function parseX402Common(payload: Readonly<Record<string, unknown>>, create: boo
   if (!addressEqual(wallet, from) || authorization.validAfter !== "0") throw protocol("x402 authorization binding is invalid.");
   const intentHash = hash(payload.intentHash, "x402 intent hash");
   return {
-    profile, operationId, fingerprint, wallet, chainId: "8453", token,
+    profile, operationId, fingerprint, wallet, chainId: payload.chainId as X402ChainText, token,
     tokenDomain: { name: tokenDomain.name, version: tokenDomain.version },
     authorization: { from, to, value, validAfter: "0", validBefore, nonce },
     intentHash,

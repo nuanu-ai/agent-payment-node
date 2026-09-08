@@ -1,3 +1,4 @@
+import { assertCurrentNetworkPolicy } from "./x402-network-policy.js";
 import { sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { assertUnattendedX402Balance, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
@@ -46,6 +47,8 @@ export class X402PaidRequest extends X402Lifecycle {
         return BigInt(Math.floor(this.context.clock.now().getTime() / 1000)) >= BigInt(operation.authorization.validBefore);
     }
     async assertLegacySafeRead(operation) {
+        if (operation.chainId !== "8453")
+            throw new ApnError("APN_RPC_CONFIG", "Non-Base x402 requires network-bound settlement reads.");
         const rpc = this.context.requireRpc();
         const chain = await rpc.assertBaseChain();
         const evidence = await rpc.getX402PrepareEvidence(operation.wallet);
@@ -72,6 +75,7 @@ export class X402PaidRequest extends X402Lifecycle {
             }
             throw new ApnError("APN_OPERATION_BLOCKED", "Frozen x402 authorization validity has expired.");
         }
+        await assertCurrentNetworkPolicy(this.context, operation);
         if (operation.delegatedMaterial !== undefined) {
             await this.assertDelegatedPolicy(operation);
             const port = this.delegatedMaterialPort(operation);
@@ -127,6 +131,8 @@ export class X402PaidRequest extends X402Lifecycle {
     async sendPaidRequest(operation, purpose, verified, terminalizeFromExistingEvidence = false, callerDeadlineMs) {
         if (operation.attempts.length >= 64)
             return publicX402Operation(operation);
+        if (purpose === "payment" && !operation.attempts.some((attempt) => attempt.purpose === "payment"))
+            await assertCurrentNetworkPolicy(this.context, operation, callerDeadlineMs);
         try {
             const requestTimeoutMs = () => {
                 const nowMs = this.context.clock.now().getTime();
@@ -191,6 +197,7 @@ export class X402PaidRequest extends X402Lifecycle {
                 }
                 decoded = decodeAndNormalizePaymentResponseHeader(paid.paymentResponseHeader, {
                     payer: operation.wallet,
+                    network: operation.network,
                     amountAtomic: operation.amountAtomic,
                 });
                 if (decoded.paymentResponseHeaderHash !== paid.observation.paymentResponseHeaderHash) {

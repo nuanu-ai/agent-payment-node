@@ -1,6 +1,7 @@
+import { x402Network } from "./x402-network.js";
+import type { EvmChainId } from "./evm-asset.js";
 import { encodeAbiParameters, keccak256, stringToHex } from "viem";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
-import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 import { parsePublicHttpsUrl } from "./network-policy.js";
@@ -49,14 +50,14 @@ export function positiveCap(value: unknown): string {
   return parseAtomic(value, { positive: true }).toString();
 }
 
-export async function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest?: X402HttpRequestV1): Promise<FreshChallenge> {
+export async function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest?: X402HttpRequestV1, chainId: EvmChainId = 8453): Promise<FreshChallenge> {
   let captured: Awaited<ReturnType<HttpPort["get"]>> | undefined;
   const inspection = await inspectX402({
     async get(request) {
       captured = await http.get(request);
       return captured;
     },
-  }, canonicalUrl, httpRequest);
+  }, canonicalUrl, httpRequest, chainId);
   if (captured === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Seller challenge observation is missing.");
   const values = captured.rawHeaderPairs.filter(([name]) => name.toLowerCase() === "payment-required").map(([, value]) => value);
   if (values.length !== 1 || values[0] === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Seller challenge requires one PAYMENT-REQUIRED header.");
@@ -92,7 +93,7 @@ export function selectPrepareOffer(
     hasSufficientBalance = true;
     if (candidate.assetTransferMethod === "eip3009" && (
       candidate.tokenName !== evidence.tokenName || candidate.tokenVersion !== evidence.tokenVersion ||
-      tokenDomainSeparator(candidate.tokenName, candidate.tokenVersion) !== evidence.domainSeparator
+      tokenDomainSeparator(candidate.tokenName, candidate.tokenVersion, x402Network(candidate.network).chainId) !== evidence.domainSeparator
     )) continue;
     const index = Number(candidate.index);
     const requirements = challenge.paymentRequired.accepts[index];
@@ -130,10 +131,10 @@ export function selectPrepareOffer(
   throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer matches the pinned token domain.");
 }
 
-export function tokenDomainSeparator(name: string, version: string): `0x${string}` {
+export function tokenDomainSeparator(name: string, version: string, chainId: EvmChainId = 8453): `0x${string}` {
   return keccak256(encodeAbiParameters(
     [{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }, { type: "uint256" }, { type: "address" }],
-    [DOMAIN_TYPE_HASH, keccak256(stringToHex(name)), keccak256(stringToHex(version)), BigInt(CHAIN_ID), BASE_USDC],
+    [DOMAIN_TYPE_HASH, keccak256(stringToHex(name)), keccak256(stringToHex(version)), BigInt(chainId), x402Network(chainId).token],
   ));
 }
 
@@ -162,7 +163,7 @@ export function materializePaymentIdentifier(
   return { ...declaration, info: { ...declaration.info, id: paymentIdentifier.value } };
 }
 
-function validatePrepareEvidence(
+export function validatePrepareEvidence(
   evidence: X402PrepareEvidence,
   wallet: Address,
   context: PrepareEvidenceContext,

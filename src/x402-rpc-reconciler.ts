@@ -1,5 +1,6 @@
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { x402Network } from "./x402-network.js";
+import { assertX402RpcChain } from "./x402-service-rpc.js";
 import type { ClockPort, X402RpcHead, X402RpcPort } from "./ports.js";
 import {
   appendX402Transition,
@@ -47,7 +48,7 @@ export class X402RpcReconciler {
         settlementResponseTransaction(input.settlementResponseObservation.normalizedCanonicalJson) === input.settlementEvidence.transactionHash
       ))
     ) return outcome(input, false);
-    const chain = await this.rpc.assertBaseChain();
+    const chain = await assertX402RpcChain(this.rpc, x402Network(input.network).chainId);
     const rpcOriginHash = sha256(chain.rpcOrigin);
     const safe = await this.rpc.getX402Head("safe");
     if (!validX402Head(safe) || !sameRpcOrigin(safe.rpcOrigin, chain.rpcOrigin)) return outcome(input, false);
@@ -117,11 +118,12 @@ export class X402RpcReconciler {
       !sameHead(finalized, finalizedRecheck) || !sameRpcOrigin(authorizationState.rpcOrigin, chain.rpcOrigin)
     ) return outcome(operation, completeZeroScanRead);
 
+    if (operation.chainId !== "8453") await assertX402RpcChain(this.rpc, x402Network(operation.network).chainId);
     const body = {
       schemaVersion: "apn.x402.unused-expiry-evidence.v1" as const,
-      network: CHAIN_CAIP2,
-      chainId: "8453" as const,
-      token: BASE_USDC.toLowerCase() as `0x${string}`,
+      network: operation.network,
+      chainId: operation.chainId,
+      token: operation.token,
       validBefore: operation.authorization.validBefore,
       finalizedHead: {
         number: finalized.number,
@@ -193,11 +195,19 @@ export class X402RpcReconciler {
       !sameRpcOrigin(authorizationState.rpcOrigin, rpcOrigin)
     ) return operation;
 
+    if (operation.chainId !== "8453") {
+      const transactionRecheck = await this.rpc.getX402Block(transactionBlock.number);
+      const safeRecheck = await this.rpc.getX402Block(safe.number);
+      if (transactionRecheck.hash !== transactionBlock.hash || transactionRecheck.timestamp !== transactionBlock.timestamp ||
+          safeRecheck.hash !== safe.hash || safeRecheck.timestamp !== safe.timestamp ||
+          !sameRpcOrigin(transactionRecheck.rpcOrigin, rpcOrigin) || !sameRpcOrigin(safeRecheck.rpcOrigin, rpcOrigin)) return operation;
+      await assertX402RpcChain(this.rpc, x402Network(operation.network).chainId);
+    }
     const body = {
       schemaVersion: "apn.x402.settlement-evidence.v1" as const,
-      network: CHAIN_CAIP2,
-      chainId: "8453" as const,
-      token: BASE_USDC.toLowerCase() as `0x${string}`,
+      network: operation.network,
+      chainId: operation.chainId,
+      token: operation.token,
       transactionHash: hint.transactionHash,
       safeHead: { number: safe.number, hash: safe.hash, observedAt: safe.observedAt },
       transactionBlock: { number: transactionBlock.number, hash: transactionBlock.hash, timestamp: transactionBlock.timestamp },

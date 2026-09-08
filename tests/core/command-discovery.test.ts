@@ -34,6 +34,8 @@ import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-ve
 
 const EXPECTED_GROUPS = ["mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
+  "wallet balance-asset",
+  "pay transfer prepare-asset",
   "--version",
   "mcp serve",
   "mcp config",
@@ -58,6 +60,10 @@ const EXPECTED_COMMANDS = [
   "operation recover-provider-request",
   "operation recover-transaction-settlement",
   "receipt get",
+  "wallet policy show-network",
+  "wallet policy set-network",
+  "x402 inspect-network",
+  "x402 fetch prepare-network",
 ];
 
 test("one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields", () => {
@@ -124,6 +130,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  apn wallet policy <command> [options] — Inspect or change owner-approved wallet policy.",
     "",
     "Commands:",
+    "  apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] — Read one explicitly selected local-wallet EVM asset and native gas balance.",
     "  apn wallet ensure [--profile <profile>] — Create or reuse one encrypted disposable wallet.",
     "  apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>] — Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.",
     "  apn wallet status [--profile <profile>] — Read wallet presence and public identity.",
@@ -162,6 +169,8 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "Commands:",
     "  apn wallet policy show --profile <profile> — Read the encrypted owner-approved profile policy.",
     "  apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] — Create, lower or raise owner-approved balance and x402 limits.",
+    "  apn wallet policy show-network --chain <caip2> --profile <profile> — Read the encrypted owner-approved profile policy. Explicit local-wallet network selection; no cross-network authority inheritance.",
+    "  apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] — Create, lower or raise owner-approved balance and x402 limits. Explicit local-wallet network selection; no cross-network authority inheritance.",
     "",
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet policy <child>",

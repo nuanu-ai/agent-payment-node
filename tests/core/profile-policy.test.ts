@@ -1,3 +1,5 @@
+import { networkPolicyBinding, policyStorageIdentity, x402Network } from "../../src/x402-network.js";
+import { policyBinding } from "../../src/profile-policy.js";
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -398,4 +400,40 @@ test("policy CLI is explicit and production approval refuses a non-TTY before pe
   assert.equal(result.error?.code, "APN_NATIVE_REJECTED");
   assert.equal(result.error?.details?.nativeCode, "APN_TTY_UNAVAILABLE");
   await assert.rejects(access(join(temporary.root, "policies", "default.json")));
+});
+
+for (const chainId of [1, 42161] as const) test(`network ${chainId} policies use disjoint AEAD/storage/TTY identities and explicit Base aliases legacy`, async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const state = new StateStore(temporary.root), approval = new RecordingPolicyApproval(), clock = new TestClock();
+  const policy = new EncryptedProfilePolicy(state, new TestWrappingSecret(), approval, clock);
+  const core = new ApnCore({ state, native: new TestNative(), policy, clock });
+  await ensureWallet(core);
+  const base = policyBinding((await state.loadWallet(state.profileHash("default")))!);
+  const selected = networkPolicyBinding(base, chainId);
+  const limits = { maxBalanceUsdcAtomic: "60000000", maxX402AmountAtomic: "2000000" };
+  await policy.set(base, limits);
+  assert.deepEqual(networkPolicyBinding(base, 8453), base);
+  assert.equal(await policy.load(selected), null);
+  const baseEnvelope = await state.loadEncryptedPolicyEnvelope(policyStorageIdentity(base));
+  await state.writeEncryptedPolicyEnvelope(policyStorageIdentity(selected), baseEnvelope);
+  await assert.rejects(policy.load(selected), { code: "APN_STATE_CORRUPT" });
+  const { rm } = await import("node:fs/promises");
+  await rm(join(temporary.root, "policies", policyStorageIdentity(selected) + ".json"));
+  const approved = await policy.set(selected, limits);
+  assert.equal(approval.intents.length, 2); assert.equal(approval.intents[1]?.x402Network?.chainId, chainId);
+  assert.notEqual(approval.intents[0]?.fingerprint, approval.intents[1]?.fingerprint);
+  const stored = await state.loadEncryptedPolicyEnvelope(policyStorageIdentity(selected)) as { binding: ProfilePolicyBinding };
+  assert.equal(JSON.stringify(stored).includes(limits.maxBalanceUsdcAtomic), false);
+  await policy.set(selected, { ...limits, maxX402AmountAtomic: "1" }); assert.equal(approval.intents.length, 2);
+  assert.equal((await policy.load(base))!.maxX402AmountAtomic, limits.maxX402AmountAtomic);
+  const restarted = new EncryptedProfilePolicy(new StateStore(temporary.root), new TestWrappingSecret(), approval, clock);
+  assert.equal((await restarted.load(selected))!.maxX402AmountAtomic, "1");
+  await state.writeEncryptedPolicyEnvelope(policyStorageIdentity(selected), { ...stored, binding: { ...stored.binding, x402Network: { chainId, token: x402Network(8453).token } } });
+  await assert.rejects(restarted.load(selected), { code: "APN_STATE_CORRUPT" });
+  assert.equal(approved.x402Network?.token, x402Network(chainId).token);
+  const other = networkPolicyBinding(base, chainId === 1 ? 42161 : 1);
+  assert.notEqual(policyStorageIdentity(selected), policyStorageIdentity(other));
+  await state.writeEncryptedPolicyEnvelope(policyStorageIdentity(other), stored);
+  await assert.rejects(restarted.load(other), { code: "APN_STATE_CORRUPT" });
+  assert.notEqual(policyStorageIdentity(selected), policyStorageIdentity({ ...base, profile: "default.1.usdc" }));
 });
