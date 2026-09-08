@@ -15,6 +15,12 @@ independently network-bound Ethereum/Arbitrum canonical-USDC EIP-3009 x402. This
 0.5.8 artifact or a Homebrew update. See [EVM asset transfers](docs/evm-assets.md)
 for the source-only capability, exact fee budget and evidence boundaries.
 
+It also adds local Solana mainnet SOL/USDC account, policy, transfer and recovery
+commands with a separate encrypted ed25519 wallet. Coinbase Solana account and
+balance inspection is implemented, while sending is blocked by the pinned
+provider's missing fee/rent guarantee. See [Solana direct transfers](docs/solana.md)
+for exact commands and the four open mainnet acceptance rows.
+
 ## Install
 
 ```sh
@@ -448,9 +454,9 @@ apn x402 inspect --url <https-url> [--method <method>] [--headers-json <json>] [
 apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
 apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
-apn pay transfer approve --operation <operation-id> --rpc-url <https-url>
+apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
 apn operation status --operation <operation-id>
-apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]
+apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>]
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
@@ -458,6 +464,11 @@ apn wallet policy show-network --chain <caip2> --profile <profile>
 apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
 apn x402 inspect-network --chain <caip2> --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch prepare-network --chain <caip2> --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
+apn wallet ensure-solana --profile <profile> --provider <local-or-coinbase-awal> [--accept-risk true]
+apn wallet balance-solana --profile <profile> --asset <sol-or-usdc>
+apn wallet capabilities-solana [--profile <profile>]
+apn policy admit-solana --profile <profile> --asset <sol-or-usdc> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-sol <decimal>
+apn pay transfer prepare-solana --profile <profile> --asset <sol-or-usdc> --to <solana-address> --amount <decimal> --max-fee-sol <decimal> --idempotency-key <key>
 ```
 <!-- END APN COMMAND CATALOG -->
 
@@ -539,12 +550,14 @@ live provider acceptance, payment proof or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
 are separately recorded release gates. The local stdio MCP surface projects
-the same seventeen catalog-selected wallet, policy, payment, operation and
+the same thirty-three catalog-selected wallet, policy, payment, operation and
 receipt commands through the shared binder/runtime/core path. Direct approval
 remains foreground CLI only. Coinbase x402 source and deterministic product
 proof are included; live Coinbase/provider and paid acceptance are recorded as
-separate release gates. Hub, contracts, remote MCP, other providers, Stellar,
-Solana and TRON are outside this release.
+separate release gates. Local Solana source integration has synthetic custody,
+policy, exact signed-effect and restart tests; its four required mainnet rows
+and provider economics gate remain open. Hub, contracts, remote MCP, Stellar
+and TRON are outside this source change. The published 0.5.8 release is unchanged.
 
 The published npm archive includes `npm-shrinkwrap.json`, so Formula installation resolves the exact
 integrity-pinned production closure. It preserves direct MetaMask pins and overrides only the

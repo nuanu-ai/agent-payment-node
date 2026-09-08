@@ -1,5 +1,7 @@
 import type { Address } from "./model.js";
 import type { EvmDirectBinding } from "./evm-direct.js";
+import type { RailApprovalPort } from "./direct-rail-ports.js";
+import { type ChainPolicy, type ChainPolicyApprovalPort } from "./chain-policy.js";
 export declare const TTY_APPROVAL_DEADLINE_MS = 60000;
 export interface TransferApprovalIntent {
     readonly evm?: EvmDirectBinding;
@@ -43,4 +45,14 @@ export declare class TtyTransferApproval implements TransferApprovalPort {
 }
 export declare function transferApprovalPhrase(fingerprint: string): string;
 export declare function isExactTransferApproval(expected: string, supplied: string): boolean;
+export declare class TtyRailApproval implements RailApprovalPort {
+    private readonly options;
+    constructor(options?: TtyTransferApprovalOptions);
+    approve(input: Parameters<RailApprovalPort["approve"]>[0]): Promise<void>;
+}
+export declare class TtyChainPolicyApproval implements ChainPolicyApprovalPort {
+    private readonly options;
+    constructor(options?: TtyTransferApprovalOptions);
+    approve(policy: ChainPolicy): Promise<void>;
+}
 export {};

@@ -16,8 +16,14 @@ import type { TransferApprovalPort } from "./tty-approval.js";
 import type { ProviderX402Repository } from "./provider-x402-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
+import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
+import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 
 export interface CoreDependencies {
+  readonly directRails?: readonly DirectRailPort[];
+  readonly chainAccounts?: ChainWalletStoragePort;
+  readonly railApproval?: RailApprovalPort;
+  readonly chainPolicyApproval?: ChainPolicyApprovalPort;
   readonly state: StateStore;
   readonly native?: NativePort;
   readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
@@ -38,6 +44,10 @@ export interface CoreDependencies {
 }
 
 export class RuntimeContext {
+  readonly directRails: readonly DirectRailPort[];
+  readonly chainAccounts?: ChainWalletStoragePort;
+  readonly railApproval?: RailApprovalPort;
+  readonly chainPolicyApproval?: ChainPolicyApprovalPort;
   readonly state: StateStore;
   readonly native?: NativePort;
   readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
@@ -58,6 +68,10 @@ export class RuntimeContext {
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
+    this.directRails = dependencies.directRails ?? [];
+    if (dependencies.chainAccounts !== undefined) this.chainAccounts = dependencies.chainAccounts;
+    if (dependencies.railApproval !== undefined) this.railApproval = dependencies.railApproval;
+    if (dependencies.chainPolicyApproval !== undefined) this.chainPolicyApproval = dependencies.chainPolicyApproval;
     this.state = dependencies.state;
     if (dependencies.native !== undefined) this.native = dependencies.native;
     if (dependencies.keychainProbe !== undefined) this.keychainProbe = dependencies.keychainProbe;

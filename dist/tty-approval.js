@@ -1,6 +1,7 @@
 import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { chainDisplay } from "./chain-policy.js";
 export const TTY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
 export class TtyTransferApproval {
@@ -197,5 +198,66 @@ async function readApprovalInput(tty, expiresAt, deadlineMs, externalSignal) {
 }
 function approvalFailure(nativeCode, message) {
     return new ApnError("APN_NATIVE_REJECTED", message, { nativeCode });
+}
+export class TtyRailApproval {
+    options;
+    constructor(options = {}) {
+        this.options = options;
+    }
+    async approve(input) {
+        const { account, prepared } = input;
+        await exactChainConsent([
+            "Agent Payment Node direct-rail approval", `Profile: ${account.profile}`, `Provider: ${account.provider}`,
+            `Custody: ${account.custody}`, `Operation: ${input.operationId}`, `Mainnet: ${account.rail}`,
+            `Genesis: ${prepared.networkIdentity}`, `Asset: ${prepared.asset.identifier}`, `Decimals: ${prepared.asset.decimals}`,
+            `Sender: ${prepared.sender}`, `Recipient: ${prepared.recipient}`,
+            `Amount: ${chainDisplay(prepared.amountAtomic, prepared.asset.decimals)} ${prepared.asset.symbol} (${prepared.amountAtomic} atomic)`,
+            `Network fee payer: ${prepared.economics.networkFeePayer}`, `Maximum network fee: ${prepared.economics.networkFeeMaximumAtomic} native atomic`,
+            `Recipient rent payer: ${prepared.economics.rentPayer ?? "none"}`, `Recipient rent: ${prepared.economics.recipientRentAtomic} native atomic`,
+            `Maximum sender fee and rent debit: ${prepared.economics.maximumNativeDebitAtomic} native atomic`,
+            `Selected fee/rent cap: ${prepared.maximumFeeAtomic} native atomic`, `Policy: ${input.policyHash}`,
+            `Fingerprint: ${input.fingerprint}`, `Expires: ${prepared.expiresAt}`,
+        ], transferApprovalPhrase(input.fingerprint), prepared.expiresAt, this.options);
+    }
+}
+export class TtyChainPolicyApproval {
+    options;
+    constructor(options = {}) {
+        this.options = options;
+    }
+    async approve(policy) {
+        await exactChainConsent([
+            "Agent Payment Node mainnet asset admission", `Profile: ${policy.account.profile}`, `Provider: ${policy.account.provider}`,
+            `Custody: ${policy.account.custody}`, `Account: ${policy.account.address}`, `Mainnet: ${policy.account.rail}`,
+            `Genesis: ${policy.networkIdentity}`, `Asset: ${policy.asset.identifier}`, `Decimals: ${policy.asset.decimals}`,
+            `Maximum per transfer: ${policy.maximumPerTransferAtomic} asset atomic`, `Daily principal limit (UTC): ${policy.dailyLimitAtomic} asset atomic`,
+            `Maximum fee and rent per operation: ${policy.maximumNativeFeeAtomic} native atomic`, `Policy: ${policy.policyHash}`,
+            "Unresolved transfers continue to reserve limits across UTC days.",
+        ], `ADMIT APN ASSET ${policy.policyHash.slice(-16)}`, new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString(), this.options);
+    }
+}
+async function exactChainConsent(lines, phrase, expiresAt, options) {
+    if (Date.now() >= Date.parse(expiresAt))
+        throw approvalFailure("APN_APPROVAL_EXPIRED", "The chain approval expired.");
+    let terminal;
+    try {
+        terminal = await (options.openTerminal ?? openApprovalTerminal)();
+    }
+    catch {
+        throw approvalFailure("APN_TTY_UNAVAILABLE", "A foreground terminal is required for chain approval.");
+    }
+    try {
+        if (!(options.isTerminal ?? isatty)(terminal.fd))
+            throw approvalFailure("APN_TTY_UNAVAILABLE", "The chain approval is not attached to a terminal.");
+        await terminal.write(`\n${lines.join("\n")}\nType exactly: ${phrase}\n> `);
+        const supplied = await readApprovalInput(terminal, expiresAt, options.deadlineMs ?? TTY_APPROVAL_DEADLINE_MS, options.signal);
+        if (supplied !== phrase)
+            throw approvalFailure("APN_APPROVAL_REFUSED", "The chain approval was refused.");
+        if (Date.now() >= Date.parse(expiresAt))
+            throw approvalFailure("APN_APPROVAL_EXPIRED", "The chain approval expired.");
+    }
+    finally {
+        await terminal.close();
+    }
 }
 //# sourceMappingURL=tty-approval.js.map

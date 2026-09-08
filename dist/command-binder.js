@@ -3,6 +3,8 @@ import { parseCatalogArgv, parseCatalogInput, } from "./command-catalog.js";
 import { ApnError } from "./errors.js";
 import { evmChain, evmDecimals, evmToken } from "./evm-asset.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
+import { chainDecimal } from "./chain-policy.js";
+import { solanaAddress } from "./solana/rpc.js";
 export function bindArgv(argv) {
     return bindParsedCatalog(parseCatalogArgv(argv));
 }
@@ -38,6 +40,32 @@ function bindParsedCatalog(parsed) {
     switch (parsed.command.path.join(" ")) {
         case "--version": return { request: { command: "version" } };
         case "doctor keychain": return { request: { command: "doctor.keychain" } };
+        case "wallet ensure-solana": {
+            const provider = value(options, "--provider");
+            if (provider !== "local" && provider !== "coinbase-awal")
+                throw new ApnError("APN_INVALID_INPUT", "Solana supports only the explicit local or coinbase-awal execution owner.");
+            if (options["--accept-risk"] !== undefined && options["--accept-risk"] !== "true")
+                throw new ApnError("APN_INVALID_INPUT", "Local risk acknowledgement must be the literal true.");
+            return { request: { command: "wallet.ensure-solana", profile: value(options, "--profile"), provider, acceptRisk: options["--accept-risk"] === "true" } };
+        }
+        case "wallet balance-solana": return { request: { command: "wallet.balance-solana", profile: value(options, "--profile"), asset: solanaAsset(options) } };
+        case "wallet capabilities-solana": return { request: { command: "wallet.capabilities-solana", ...(options["--profile"] === undefined ? {} : { profile: options["--profile"] }) } };
+        case "policy admit-solana": {
+            const asset = solanaAsset(options);
+            const decimals = asset === "sol" ? 9 : 6;
+            chainDecimal(value(options, "--max-per-transfer"), decimals);
+            chainDecimal(value(options, "--daily-limit"), decimals);
+            chainDecimal(value(options, "--max-fee-sol"), 9);
+            return { request: { command: "policy.admit-solana", profile: value(options, "--profile"), asset,
+                    maximumPerTransfer: value(options, "--max-per-transfer"), dailyLimit: value(options, "--daily-limit"), maximumFee: value(options, "--max-fee-sol") } };
+        }
+        case "pay transfer prepare-solana": {
+            const asset = solanaAsset(options);
+            chainDecimal(value(options, "--amount"), asset === "sol" ? 9 : 6);
+            chainDecimal(value(options, "--max-fee-sol"), 9);
+            return { request: { command: "transfer.prepare-solana", profile: value(options, "--profile"), asset,
+                    recipient: solanaAddress(value(options, "--to")), amount: value(options, "--amount"), maximumFee: value(options, "--max-fee-sol"), idempotencyKey: value(options, "--idempotency-key") } };
+        }
         case "wallet ensure": return { request: { command: "wallet.ensure", profile: value(options, "--profile") } };
         case "wallet connect": return {
             request: {
@@ -146,7 +174,7 @@ function bindParsedCatalog(parsed) {
         };
         case "pay transfer approve": return {
             request: { command: "transfer.approve", operationId: value(options, "--operation") },
-            rpcUrl: value(options, "--rpc-url"),
+            ...(options["--rpc-url"] === undefined ? {} : { rpcUrl: options["--rpc-url"] }),
         };
         case "operation status": return { request: { command: "operation.status", operationId: value(options, "--operation") } };
         case "operation resume": return {
@@ -155,7 +183,7 @@ function bindParsedCatalog(parsed) {
                 operationId: value(options, "--operation"),
                 ...(options["--wait-seconds"] === undefined ? {} : { waitSeconds: Number(options["--wait-seconds"]) }),
             },
-            rpcUrl: value(options, "--rpc-url"),
+            ...(options["--rpc-url"] === undefined ? {} : { rpcUrl: options["--rpc-url"] }),
         };
         case "operation recover-provider-request": return {
             request: {
@@ -176,6 +204,12 @@ function bindParsedCatalog(parsed) {
         case "receipt get": return { request: { command: "receipt.get", operationId: value(options, "--operation") } };
         default: throw new ApnError("APN_INTERNAL", "The command catalog has no request binding.");
     }
+}
+function solanaAsset(options) {
+    const asset = value(options, "--asset");
+    if (asset !== "sol" && asset !== "usdc")
+        throw new ApnError("APN_INVALID_INPUT", "Select the explicit sol or usdc asset alias.");
+    return asset;
 }
 function bindNetwork(options) {
     return options["--chain"] === undefined ? {} : { chainId: evmChain(options["--chain"]) };

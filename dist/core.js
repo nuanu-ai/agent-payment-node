@@ -14,6 +14,8 @@ import { evmWalletBalance } from "./evm-wallet-balance.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
 import { ProviderPermissionService } from "./provider-permission-service.js";
+import { RailOperationService } from "./rail-operation-service.js";
+import { solanaCapabilities } from "./chain-policy-service.js";
 export class ApnCore {
     context;
     wallet;
@@ -23,6 +25,7 @@ export class ApnCore {
     providerWallet;
     providerPermissions;
     providerTransactionRecovery;
+    rails;
     constructor(dependencies) {
         this.context = new RuntimeContext(dependencies);
         this.wallet = new WalletService(this.context);
@@ -32,6 +35,7 @@ export class ApnCore {
         this.providerWallet = new ProviderWalletService(this.context);
         this.providerPermissions = new ProviderPermissionService(this.context);
         this.providerTransactionRecovery = new ProviderX402TransactionRecoveryService(this.context);
+        this.rails = new RailOperationService(this.context);
     }
     async execute(request) {
         const requestId = this.context.ids.next();
@@ -53,6 +57,13 @@ export class ApnCore {
                 }, "local_build_metadata");
             case "doctor.keychain": return dataOutcome(await this.wallet.doctorKeychain(), "encrypted_apn_home_status");
             case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
+            case "wallet.ensure-solana": return dataOutcome(await this.rails.policies.ensure(request.profile, "solana", request.provider, request.acceptRisk), "chain_account_binding");
+            case "wallet.balance-solana": return dataOutcome(await this.rails.policies.balance(request.profile, "solana", request.asset), "chain_verified_public_read");
+            case "wallet.capabilities-solana": return dataOutcome({ ...solanaCapabilities(), ...(request.profile === undefined ? {} : {
+                    profile: request.profile, account: await this.context.chainAccounts?.account(request.profile, "solana") ?? null,
+                }) }, "inspected_provider_capabilities");
+            case "policy.admit-solana": return dataOutcome(await this.rails.policies.admit({ ...request, rail: "solana" }), "human_admitted_chain_policy");
+            case "transfer.prepare-solana": return operationOutcome(await this.rails.prepare({ ...request, rail: "solana" }));
             case "wallet.connect": return dataOutcome(await this.providerWallet.connect(request), "provider_profile_binding");
             case "wallet.permission.list":
             case "wallet.permission.sync":
@@ -89,10 +100,18 @@ export class ApnCore {
                     await this.providerWallet.assertPaymentAvailable(request.profile, "direct");
                 return operationOutcome(await this.transfer.prepare(request));
             }
-            case "transfer.approve": return operationOutcome(await this.transfer.approve(request.operationId));
+            case "transfer.approve": {
+                const operation = await this.operations.required(request.operationId);
+                return operationOutcome(operation.kind === "rail_transfer" ? await this.rails.approve(request.operationId) : await this.transfer.approve(request.operationId));
+            }
             case "operation.resume": {
                 await this.context.ready();
                 const operation = await this.operations.required(request.operationId);
+                if (operation.kind === "rail_transfer") {
+                    if (request.waitSeconds !== undefined)
+                        throw new ApnError("APN_INVALID_INPUT", "Solana resume performs one bounded observation; omit --wait-seconds.");
+                    return operationOutcome(await this.rails.resume(request.operationId));
+                }
                 if (operation.kind === "x402_fetch") {
                     const settlementWait = await this.x402.resume(request.operationId, request.waitSeconds);
                     return await this.operations.x402Outcome(request.operationId, {
@@ -131,6 +150,8 @@ export class ApnCore {
                 await this.context.ready();
                 await this.x402.recoverRead(request.operationId);
                 const operation = await this.operations.required(request.operationId);
+                if (operation.kind === "rail_transfer")
+                    return receiptOutcome(await this.rails.receipt(request.operationId));
                 return operation.kind === "x402_fetch"
                     ? await this.operations.x402ReceiptOutcome(request.operationId)
                     : receiptOutcome(await this.transfer.receipt(request.operationId));

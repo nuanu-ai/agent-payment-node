@@ -22,9 +22,18 @@ import { EncryptedSmartAccountDirectEffectStore } from "./encrypted-smart-accoun
 import { MetaMaskSmartAccountDirectAdapter, OfficialSmartAccountAllowance, } from "./metamask-smart-account-direct.js";
 import { EncryptedSmartAccountX402MaterialStore } from "./encrypted-smart-account-x402-material-store.js";
 import { MetaMaskSmartAccountX402Adapter } from "./metamask-smart-account-x402.js";
+import { ChainAccountStore } from "./chain-account-store.js";
+import { TtyChainPolicyApproval, TtyRailApproval } from "./tty-approval.js";
+import { SolanaRpc } from "./solana/rpc.js";
+import { SolanaLocalAdapter } from "./solana/local-adapter.js";
+import { SolanaAwalAdapter } from "./solana/awal-adapter.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
+    const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
+    const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL);
+    const directRails = options.directRails ?? [new SolanaLocalAdapter(chainAccounts, solanaRpc, () => options.clock?.now() ?? new Date()),
+        new SolanaAwalAdapter(chainAccounts, solanaRpc, undefined, undefined, () => options.clock?.now() ?? new Date())];
     const native = needsNative(bound.request.command)
         ? options.native ?? new LocalWalletNative(state, wrappingSecret, options.approval)
         : undefined;
@@ -69,6 +78,9 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     return new ApnCore({
         state,
+        chainAccounts, directRails,
+        ...(bound.request.command === "transfer.approve" || options.railApproval !== undefined ? { railApproval: options.railApproval ?? new TtyRailApproval() } : {}),
+        ...(bound.request.command === "policy.admit-solana" || options.chainPolicyApproval !== undefined ? { chainPolicyApproval: options.chainPolicyApproval ?? new TtyChainPolicyApproval() } : {}),
         profileRepository,
         providerRegistry,
         ...(foregroundAuthentication === undefined ? {} : { foregroundAuthentication }),
