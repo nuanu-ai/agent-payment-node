@@ -22,7 +22,14 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
       rpc.nonce(operation.chainId, operation.walletAddress, "pending"),
       rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic)),
     ]);
-    if (canonicalJson(validateEconomics(nonce, fees)) !== canonicalJson(operation.economics)) {
+    const current = validateEconomics(nonce, fees);
+    const incompatible = operation.chainId === 42161
+      ? current.nonceAtomic !== operation.economics.nonceAtomic ||
+        current.gasLimitAtomic !== operation.economics.gasLimitAtomic ||
+        current.maxPriorityFeePerGasAtomic !== operation.economics.maxPriorityFeePerGasAtomic ||
+        BigInt(current.maxFeePerGasAtomic) > BigInt(operation.economics.maxFeePerGasAtomic)
+      : canonicalJson(current) !== canonicalJson(operation.economics);
+    if (incompatible) {
       throw new ApnError("APN_REPREPARE_REQUIRED", "Nonce or execution fee economics changed before approval.");
     }
   }
