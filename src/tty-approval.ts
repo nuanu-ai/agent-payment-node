@@ -274,7 +274,7 @@ export class TtyChainPolicyApproval implements ChainPolicyApprovalPort {
     ], `ADMIT APN ASSET ${policy.policyHash.slice(-16)}`, new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString(), this.options);
   }
 }
-async function exactChainConsent(lines: readonly string[], phrase: string, expiresAt: string, options: TtyTransferApprovalOptions): Promise<void> {
+export async function exactChainConsent(lines: readonly string[], phrase: string, expiresAt: string, options: TtyTransferApprovalOptions): Promise<void> {
   if (Date.now() >= Date.parse(expiresAt)) throw approvalFailure("APN_APPROVAL_EXPIRED", "The chain approval expired.");
   let terminal: ApprovalTerminal;
   try { terminal = await (options.openTerminal ?? openApprovalTerminal)(); }

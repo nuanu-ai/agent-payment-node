@@ -8,6 +8,7 @@ import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
 import { ProviderPermissionService } from "./provider-permission-service.js";
 import { RailOperationService } from "./rail-operation-service.js";
+import { BridgeService } from "./lifi/service.js";
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
 export declare class ApnCore {
@@ -20,6 +21,7 @@ export declare class ApnCore {
     readonly providerPermissions: ProviderPermissionService;
     readonly providerTransactionRecovery: ProviderX402TransactionRecoveryService;
     readonly rails: RailOperationService;
+    readonly bridges: BridgeService;
     constructor(dependencies: CoreDependencies);
     execute(request: CommandRequest): Promise<OutputEnvelope>;
     private dispatch;

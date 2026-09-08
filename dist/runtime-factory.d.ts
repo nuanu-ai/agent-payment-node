@@ -14,7 +14,9 @@ import { type SessionKeyFactoryPort } from "./metamask-smart-account-adapter.js"
 import { type SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
 import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
 import type { ChainPolicyApprovalPort } from "./chain-policy.js";
+import type { BridgeDependencies } from "./lifi/service.js";
 export interface RuntimeFactoryOptions {
+    readonly bridge?: BridgeDependencies;
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly directRails?: readonly DirectRailPort[];
     readonly railApproval?: RailApprovalPort;

@@ -9,7 +9,9 @@ import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transa
 import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
 import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
 import type { ChainPolicyApprovalPort } from "./chain-policy.js";
+import type { BridgeDependencies } from "./lifi/service.js";
 export interface CoreDependencies {
+    readonly bridge?: BridgeDependencies;
     readonly directRails?: readonly DirectRailPort[];
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;
@@ -33,6 +35,7 @@ export interface CoreDependencies {
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
 }
 export declare class RuntimeContext {
+    readonly bridge?: BridgeDependencies;
     readonly directRails: readonly DirectRailPort[];
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;

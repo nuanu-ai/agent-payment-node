@@ -46,6 +46,7 @@ const SELECTED_PATHS = [
   "wallet policy set-network",
   "x402 inspect-network",
   "x402 fetch prepare-network",
+  "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
 ] as const;
 
 export interface ProjectedMcpTool {

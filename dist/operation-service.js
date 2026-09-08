@@ -6,17 +6,22 @@ import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { projectPublicX402Receipt, projectPublicX402Result } from "./x402-public-artifacts.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { publicRailOperation } from "./rail-operation-model.js";
+import { BridgeOperationRepository } from "./lifi/operation-repository.js";
+import { publicBridgeOperation } from "./lifi/receipt.js";
 export class OperationService {
     state;
     providerX402;
     rails;
-    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root)) {
+    bridges;
+    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root)) {
         this.state = state;
         this.providerX402 = providerX402;
         this.rails = rails;
+        this.bridges = bridges;
     }
     async resolvePrepare(input) {
         const matches = [
+            ...(await this.bridges.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "bridge_route", record })),
             ...(await this.rails.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "rail_transfer", record })),
             ...(await this.state.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "direct_transfer", record })),
             ...(await this.state.listAllX402Operations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "x402_fetch", strategy: "local", record })),
@@ -34,6 +39,7 @@ export class OperationService {
     }
     async assertProfileAvailable(profileHash) {
         const active = [
+            ...(await this.bridges.listOperations(profileHash)).map((record) => ({ kind: "bridge_route", record })),
             ...(await this.rails.listOperations(profileHash)).map((record) => ({ kind: "rail_transfer", record })),
             ...(await this.state.listOperations(profileHash)).map((record) => ({ kind: "direct_transfer", record })),
             ...(await this.state.listX402Operations(profileHash)).map((record) => ({ kind: "x402_fetch", strategy: "local", record })),
@@ -53,7 +59,8 @@ export class OperationService {
         const x402 = await this.state.findX402Operation(canonicalId);
         const providerX402 = await this.providerX402.findOperation(canonicalId);
         const rail = await this.rails.findOperation(canonicalId);
-        if ([direct, x402, providerX402, rail].filter((value) => value !== null).length > 1) {
+        const bridge = await this.bridges.findOperation(canonicalId);
+        if ([direct, x402, providerX402, rail, bridge].filter((value) => value !== null).length > 1) {
             throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
         }
         if (direct !== null)
@@ -64,6 +71,8 @@ export class OperationService {
             return { kind: "x402_fetch", strategy: "provider_atomic", record: providerX402 };
         if (rail !== null)
             return { kind: "rail_transfer", record: rail };
+        if (bridge !== null)
+            return { kind: "bridge_route", record: bridge };
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
     }
     async status(operationId) {
@@ -72,6 +81,8 @@ export class OperationService {
             return publicOperation(operation.record);
         if (operation.kind === "rail_transfer")
             return publicRailOperation(operation.record);
+        if (operation.kind === "bridge_route")
+            return publicBridgeOperation(operation.record);
         return operation.strategy === "local"
             ? publicX402Operation(operation.record)
             : publicProviderX402Operation(operation.record);

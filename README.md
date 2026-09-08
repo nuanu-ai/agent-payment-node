@@ -27,6 +27,12 @@ resource-price window and solidified transaction evidence. All three external
 wallet profiles remain unavailable for TRON. See [TRON direct transfers](docs/tron.md)
 for commands, total TRX caps and the two open mainnet acceptance rows.
 
+LI.FI route selection and local-wallet execution now cover canonical USDC
+between Ethereum, Base and Arbitrum through Across V4 and Stargate V2 Taxi.
+The bridge flow freezes both source effects, requires foreground approval and
+correlates safe delivery across both chains. See [LI.FI bridges](docs/lifi.md)
+for fee controls, recovery and the three open mainnet acceptance rows.
+
 ## Install
 
 ```sh
@@ -61,12 +67,13 @@ apn mcp config
 apn mcp serve
 ```
 
-This source tree exposes twenty-four catalog-derived tools: version, Keychain
+This source tree exposes catalog-derived tools for version, Keychain
 doctor, wallet, provider-permission and wallet-policy operations plus x402 inspect/prepare/approve,
 direct-transfer prepare/foreground handoff, operation status/resume and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
-The two added tools select an explicit asset for balance and direct preparation;
-direct approval still hands off to a foreground CLI terminal without payment.
+The manifest also covers explicit EVM assets, Solana, TRON and LI.FI route
+selection. Transfer and bridge approval through MCP hand off to the foreground
+CLI terminal without payment.
 
 ## Supply-chain verification
 
@@ -480,6 +487,11 @@ apn wallet balance-tron --profile <profile> --asset <trx-or-usdt>
 apn wallet capabilities-tron [--profile <profile>]
 apn policy admit-tron --profile <profile> --asset <trx-or-usdt> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-trx <decimal>
 apn pay transfer prepare-tron --profile <profile> --asset <trx-or-usdt> --to <tron-address> --amount <decimal> --max-fee-trx <decimal> --idempotency-key <key>
+apn bridge capabilities [--profile <profile>]
+apn bridge inventory
+apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --from-token <address> --to-token <address> --amount <decimal> --to <address> --min-output <decimal> --max-native-debit-wei <uint> --max-route-fee <decimal> --slippage-bps <uint>
+apn bridge prepare --profile <profile> --quote <snapshot-hash> --route <route-id> --idempotency-key <key>
+apn bridge approve --operation <operation-id>
 ```
 <!-- END APN COMMAND CATALOG -->
 

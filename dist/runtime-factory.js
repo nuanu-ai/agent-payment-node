@@ -29,6 +29,10 @@ import { SolanaLocalAdapter } from "./solana/local-adapter.js";
 import { SolanaAwalAdapter } from "./solana/awal-adapter.js";
 import { TronLocalAdapter } from "./tron/local-adapter.js";
 import { TronRpc } from "./tron/rpc.js";
+import { LocalBridgeCustody } from "./lifi/custody.js";
+import { LifiProvider } from "./lifi/provider.js";
+import { bridgeRpcFactory } from "./lifi/rpc.js";
+import { TtyBridgeApproval } from "./lifi/tty.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -82,6 +86,9 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     return new ApnCore({
         state,
+        bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
+            custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
+            ...(bound.request.command === "bridge.approve" ? { approval: new TtyBridgeApproval() } : {}) },
         chainAccounts, directRails,
         ...(bound.request.command === "transfer.approve" || options.railApproval !== undefined ? { railApproval: options.railApproval ?? new TtyRailApproval() } : {}),
         ...(bound.request.command === "policy.admit-solana" || bound.request.command === "policy.admit-tron" || options.chainPolicyApproval !== undefined ? { chainPolicyApproval: options.chainPolicyApproval ?? new TtyChainPolicyApproval() } : {}),

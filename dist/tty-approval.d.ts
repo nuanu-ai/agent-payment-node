@@ -55,4 +55,5 @@ export declare class TtyChainPolicyApproval implements ChainPolicyApprovalPort {
     constructor(options?: TtyTransferApprovalOptions);
     approve(policy: ChainPolicy): Promise<void>;
 }
+export declare function exactChainConsent(lines: readonly string[], phrase: string, expiresAt: string, options: TtyTransferApprovalOptions): Promise<void>;
 export {};

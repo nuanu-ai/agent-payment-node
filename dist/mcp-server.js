@@ -36,6 +36,10 @@ export async function serveMcpStdio() {
 async function callTool(tool, input, options) {
     try {
         const bound = bindMcpInput(tool.command, input);
+        if (bound.request.command === "bridge.approve") {
+            const handoff = createCliHandoff(["apn", "bridge", "approve", "--operation", bound.request.operationId]);
+            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review and approve this bridge intent in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
+        }
         if (bound.request.command === "wallet.connect") {
             const handoff = walletConnectHandoff(bound.request);
             return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "Wallet provider authentication must continue in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
