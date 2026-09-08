@@ -1,4 +1,5 @@
 import type { Address } from "./model.js";
+import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import type { ErrorDetails } from "./errors.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
 
@@ -21,18 +22,20 @@ export type CommandRequest =
   | { readonly command: "wallet.permission.disable"; readonly profile: string; readonly expectedRevision: number }
   | { readonly command: "wallet.permission.forget"; readonly profile: string; readonly expectedRevision: number }
   | { readonly command: "wallet.status"; readonly profile: string }
-  | { readonly command: "wallet.balance"; readonly profile: string }
-  | { readonly command: "wallet.policy.show"; readonly profile: string }
+  | { readonly command: "wallet.balance"; readonly profile: string; readonly asset?: EvmAssetSelection }
+  | { readonly command: "wallet.policy.show"; readonly profile: string; readonly chainId?: EvmChainId }
   | {
     readonly command: "wallet.policy.set";
+    readonly chainId?: EvmChainId;
     readonly profile: string;
     readonly maxBalanceUsdcAtomic: string;
     readonly maxX402AmountAtomic: string;
     readonly maxBalanceEthWei?: string;
   }
-  | { readonly command: "x402.inspect"; readonly url: string; readonly httpRequest?: X402HttpRequestV1 }
+  | { readonly command: "x402.inspect"; readonly url: string; readonly httpRequest?: X402HttpRequestV1; readonly chainId?: EvmChainId }
   | {
     readonly command: "x402.fetch.prepare";
+    readonly chainId?: EvmChainId;
     readonly httpRequest?: X402HttpRequestV1;
     readonly profile: string;
     readonly url: string;
@@ -46,6 +49,8 @@ export type CommandRequest =
     readonly idempotencyKey: string;
     readonly recipient: Address | string;
     readonly amount: string;
+    readonly asset?: EvmAssetSelection;
+    readonly maxFeeWei?: string;
   }
   | { readonly command: "transfer.approve"; readonly operationId: string }
   | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number }

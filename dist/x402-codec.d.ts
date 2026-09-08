@@ -1,3 +1,5 @@
+import { type X402Network } from "./x402-network.js";
+import type { EvmChainId } from "./evm-asset.js";
 import type { PaymentPayload, PaymentRequired, PaymentRequirements } from "@x402/core/types";
 import type { InspectCandidate } from "./x402-model.js";
 export type X402PaymentPayload = PaymentPayload;
@@ -18,5 +20,6 @@ export interface DecodedPaymentResponse {
 export declare function decodeAndNormalizePaymentResponseHeader(value: string, expected: {
     readonly payer: string;
     readonly amountAtomic: string;
+    readonly network?: X402Network;
 }): DecodedPaymentResponse;
-export declare function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string): readonly InspectCandidate[];
+export declare function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, chainId?: EvmChainId): readonly InspectCandidate[];

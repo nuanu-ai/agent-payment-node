@@ -28,18 +28,24 @@ const TOOL_NAMES = [
   "apn_wallet_permission_forget",
   "apn_wallet_status",
   "apn_wallet_balance",
+  "apn_wallet_balance_asset",
   "apn_wallet_policy_show",
   "apn_wallet_policy_set",
   "apn_x402_inspect",
   "apn_x402_fetch_prepare",
   "apn_x402_fetch_approve",
   "apn_pay_transfer_prepare",
+  "apn_pay_transfer_prepare_asset",
   "apn_pay_transfer_approve",
   "apn_operation_status",
   "apn_operation_resume",
   "apn_operation_recover_provider_request",
   "apn_operation_recover_transaction_settlement",
   "apn_receipt_get",
+  "apn_wallet_policy_show_network",
+  "apn_wallet_policy_set_network",
+  "apn_x402_inspect_network",
+  "apn_x402_fetch_prepare_network",
 ] as const;
 const MASTER = Buffer.from("55".repeat(32), "hex");
 
@@ -53,7 +59,7 @@ class RecordingPolicyApproval implements ProfilePolicyApprovalPort {
   async approve(intent: ProfilePolicyApprovalIntent): Promise<void> { this.intents.push(intent); }
 }
 
-test("official MCP client proves production stdio descriptor, twenty-two tools, application failures and clean close", async () => {
+test("official MCP client proves production stdio descriptor, the exact tool set, application failures and clean close", async () => {
   const executable = process.env.APN_INSTALLED_BIN ?? resolve("bin/apn.js");
   const config = spawnSync(executable, ["mcp", "config"], { cwd: resolve("."), encoding: "utf8" });
   assert.equal(config.status, 0, config.stderr);
@@ -104,6 +110,7 @@ test("official MCP client proves production stdio descriptor, twenty-two tools, 
       { name: "apn_wallet_permission_forget", properties: ["profile", "expected_revision"], required: ["profile", "expected_revision"], defaults: {} },
       { name: "apn_wallet_status", properties: ["profile"], required: [], defaults: { profile: "default" } },
       { name: "apn_wallet_balance", properties: ["profile", "rpc_url"], required: ["rpc_url"], defaults: { profile: "default" } },
+      { name: "apn_wallet_balance_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url"], required: ["profile", "chain", "asset", "rpc_url"], defaults: {} },
       { name: "apn_wallet_policy_show", properties: ["profile"], required: ["profile"], defaults: {} },
       {
         name: "apn_wallet_policy_set",
@@ -115,6 +122,7 @@ test("official MCP client proves production stdio descriptor, twenty-two tools, 
       { name: "apn_x402_fetch_prepare", properties: ["profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
       { name: "apn_x402_fetch_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
       { name: "apn_pay_transfer_prepare", properties: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], required: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], defaults: {} },
+      { name: "apn_pay_transfer_prepare_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], required: ["profile", "chain", "asset", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], defaults: {} },
       { name: "apn_pay_transfer_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
       { name: "apn_operation_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_operation_resume", properties: ["operation", "rpc_url", "wait_seconds"], required: ["operation", "rpc_url"], defaults: {} },
@@ -131,6 +139,10 @@ test("official MCP client proves production stdio descriptor, twenty-two tools, 
         defaults: {},
       },
       { name: "apn_receipt_get", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_wallet_policy_show_network", properties: ["chain", "profile"], required: ["chain", "profile"], defaults: {} },
+      { name: "apn_wallet_policy_set_network", properties: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei"], required: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"], defaults: {} },
+      { name: "apn_x402_inspect_network", properties: ["chain", "method", "headers_json", "body_base64", "url"], required: ["chain", "url"], defaults: {} },
+      { name: "apn_x402_fetch_prepare_network", properties: ["chain", "profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["chain", "profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
     ]);
     const listedBytes = JSON.stringify(listed);
     assert.equal(listedBytes.includes(MASTER.toString("hex")), false);

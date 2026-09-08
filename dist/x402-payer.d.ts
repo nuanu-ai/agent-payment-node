@@ -1,3 +1,4 @@
+import type { EvmChainId } from "./evm-asset.js";
 import { type ProfilePolicyBinding } from "./profile-policy.js";
 import type { RuntimeContext } from "./runtime.js";
 import type { X402OperationRecord } from "./x402-state-integrity.js";
@@ -14,4 +15,4 @@ export interface X402PayerBinding {
         readonly port: X402PaymentMaterialPort;
     };
 }
-export declare function resolveX402Payer(context: RuntimeContext, profileHash: string): Promise<X402PayerBinding>;
+export declare function resolveX402Payer(context: RuntimeContext, profileHash: string, chainId?: EvmChainId): Promise<X402PayerBinding>;

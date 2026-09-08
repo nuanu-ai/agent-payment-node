@@ -1,5 +1,5 @@
 import { ApnError } from "./errors.js";
-const MAX_DECODED_X402_BYTES = 48 * 1024;
+export const MAX_DECODED_X402_BYTES = 48 * 1024;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 export function decodeCanonicalBase64(value) {
     if (value.length === 0 || value.length % 4 !== 0 || !BASE64.test(value) ||

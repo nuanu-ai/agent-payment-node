@@ -1,0 +1,430 @@
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "https://x402.quicknode.com/base-mainnet",
+    "description": "Payment for Quicknode RPC access. Options: per-request ($0.001/request), nanopayment ($0.0001/request via Circle Gateway), or credit drawdown with SIWX authentication.",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:84532",
+      "amount": "1000000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      "extra": {
+        "name": "USDC",
+        "version": "2"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:84532",
+      "amount": "1000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      "extra": {
+        "name": "USDC",
+        "version": "2"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:84532",
+      "amount": "100",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 604900,
+      "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      "extra": {
+        "name": "GatewayWalletBatched",
+        "version": "1",
+        "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "10000000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "1000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "100",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 604900,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "GatewayWalletBatched",
+        "version": "1",
+        "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:80002",
+      "amount": "1000000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+      "extra": {
+        "name": "USDC",
+        "version": "2"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:80002",
+      "amount": "1000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+      "extra": {
+        "name": "USDC",
+        "version": "2"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:80002",
+      "amount": "100",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 604900,
+      "asset": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+      "extra": {
+        "name": "GatewayWalletBatched",
+        "version": "1",
+        "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:137",
+      "amount": "10000000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:137",
+      "amount": "1000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:137",
+      "amount": "100",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 604900,
+      "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+      "extra": {
+        "name": "GatewayWalletBatched",
+        "version": "1",
+        "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:196",
+      "amount": "10000000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x4ae46a509F6b1D9056937BA4500cb143933D2dc8",
+      "extra": {
+        "name": "Global Dollar",
+        "version": "1"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:196",
+      "amount": "1000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0x4ae46a509F6b1D9056937BA4500cb143933D2dc8",
+      "extra": {
+        "name": "Global Dollar",
+        "version": "1"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:1952",
+      "amount": "1000000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0xF0863D7A29a55d0c4263c11bFac754312ff078DF",
+      "extra": {
+        "name": "Global Dollar",
+        "version": "1"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:1952",
+      "amount": "1000",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 60,
+      "asset": "0xF0863D7A29a55d0c4263c11bFac754312ff078DF",
+      "extra": {
+        "name": "Global Dollar",
+        "version": "1"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:5042002",
+      "amount": "100",
+      "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+      "maxTimeoutSeconds": 604900,
+      "asset": "0x3600000000000000000000000000000000000000",
+      "extra": {
+        "name": "GatewayWalletBatched",
+        "version": "1",
+        "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "amount": "1000000",
+      "payTo": "2LWbc9Mi6dRUrdEHBttoNS4udDtH1A4xwBdm1EKqcT57",
+      "maxTimeoutSeconds": 60,
+      "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "extra": {
+        "feePayer": "CPZSjRmyfTS95UjQD8ZdeTEWbQvW9QvEXnn6aGP7yyMN"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "amount": "1000",
+      "payTo": "2LWbc9Mi6dRUrdEHBttoNS4udDtH1A4xwBdm1EKqcT57",
+      "maxTimeoutSeconds": 60,
+      "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "extra": {
+        "feePayer": "CPZSjRmyfTS95UjQD8ZdeTEWbQvW9QvEXnn6aGP7yyMN"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+      "amount": "10000000",
+      "payTo": "2LWbc9Mi6dRUrdEHBttoNS4udDtH1A4xwBdm1EKqcT57",
+      "maxTimeoutSeconds": 60,
+      "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "extra": {
+        "feePayer": "CPZSjRmyfTS95UjQD8ZdeTEWbQvW9QvEXnn6aGP7yyMN"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+      "amount": "1000",
+      "payTo": "2LWbc9Mi6dRUrdEHBttoNS4udDtH1A4xwBdm1EKqcT57",
+      "maxTimeoutSeconds": 60,
+      "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "extra": {
+        "feePayer": "CPZSjRmyfTS95UjQD8ZdeTEWbQvW9QvEXnn6aGP7yyMN"
+      }
+    }
+  ],
+  "extensions": {
+    "sign-in-with-x": {
+      "info": {
+        "domain": "x402.quicknode.com",
+        "uri": "https://x402.quicknode.com/base-mainnet",
+        "version": "1",
+        "nonce": "8c64f54b75e74894bf077c61ba4d49e4",
+        "issuedAt": "2026-09-07T05:07:25.363Z",
+        "expirationTime": "2026-09-07T05:12:25.363Z",
+        "resources": [
+          "https://x402.quicknode.com/base-mainnet"
+        ]
+      },
+      "supportedChains": [
+        {
+          "chainId": "eip155:84532",
+          "type": "eip191"
+        },
+        {
+          "chainId": "eip155:8453",
+          "type": "eip191"
+        },
+        {
+          "chainId": "eip155:80002",
+          "type": "eip191"
+        },
+        {
+          "chainId": "eip155:137",
+          "type": "eip191"
+        },
+        {
+          "chainId": "eip155:196",
+          "type": "eip191"
+        },
+        {
+          "chainId": "eip155:1952",
+          "type": "eip191"
+        },
+        {
+          "chainId": "eip155:5042002",
+          "type": "eip191"
+        },
+        {
+          "chainId": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+          "type": "ed25519"
+        },
+        {
+          "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "type": "ed25519"
+        }
+      ]
+    },
+    "bazaar": {
+      "info": {
+        "input": {
+          "type": "http",
+          "bodyType": "json",
+          "body": {
+            "jsonrpc": "2.0",
+            "method": "eth_blockNumber",
+            "params": [],
+            "id": 1
+          },
+          "method": "POST"
+        },
+        "output": {
+          "type": "json",
+          "example": {
+            "jsonrpc": "2.0",
+            "result": "0x1234567",
+            "id": 1
+          }
+        }
+      },
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "http"
+              },
+              "method": {
+                "type": "string",
+                "enum": [
+                  "POST",
+                  "PUT",
+                  "PATCH"
+                ]
+              },
+              "bodyType": {
+                "type": "string",
+                "enum": [
+                  "json",
+                  "form-data",
+                  "text"
+                ]
+              },
+              "body": {
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "const": "2.0"
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "JSON-RPC method name (e.g., eth_blockNumber, eth_call)"
+                  },
+                  "params": {
+                    "type": "array",
+                    "description": "Method parameters"
+                  },
+                  "id": {
+                    "type": [
+                      "number",
+                      "string"
+                    ],
+                    "description": "Request identifier"
+                  }
+                },
+                "required": [
+                  "jsonrpc",
+                  "method"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "method",
+              "bodyType",
+              "body"
+            ],
+            "additionalProperties": false
+          },
+          "output": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "example": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        },
+        "required": [
+          "input"
+        ]
+      }
+    },
+    "quicknode-session": {
+      "info": {
+        "description": "JWT session token issued in settlement response extensions after successful payment",
+        "tokenLocation": "extensions.quicknode-session.info.token",
+        "expirySeconds": 3600,
+        "authEndpoint": "/auth",
+        "usage": "Set as Authorization: Bearer <token> on subsequent requests"
+      }
+    }
+  }
+}

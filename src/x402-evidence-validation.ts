@@ -1,3 +1,4 @@
+import { validX402Tuple } from "./x402-network.js";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import type {
@@ -113,7 +114,7 @@ export function validateNormalizedSettlement(
   operation: Record<string, unknown>,
 ): void {
   const settlement = allowedRecord(value, ["success", "transaction", "network"], ["errorReason", "payer", "amount", "extensions"]);
-  if (settlement.network !== CHAIN_CAIP2) stateCorrupt("x402 settlement response network is invalid.");
+  if (settlement.network !== operation.network) stateCorrupt("x402 settlement response network is invalid.");
   transactionHash(settlement.transaction);
   if (settlement.payer !== undefined) {
     address(settlement.payer);
@@ -232,7 +233,7 @@ function validateEip3009SettlementEvidence(value: unknown, operation?: Record<st
     "schemaVersion", "network", "chainId", "token", "transactionHash", "safeHead", "transactionBlock", "receiptStatus",
     "blockHashRechecked", "authorizationUsed", "transfer", "authorizationState", "rpcOriginHash", "evidenceHash",
   ]);
-  if (evidence.schemaVersion !== "apn.x402.settlement-evidence.v1" || evidence.network !== CHAIN_CAIP2 || evidence.chainId !== "8453" || evidence.token !== BASE_USDC.toLowerCase()) stateCorrupt("x402 settlement evidence discriminant is invalid.");
+  if (evidence.schemaVersion !== "apn.x402.settlement-evidence.v1" || !matchingEvidenceNetwork(evidence, operation)) stateCorrupt("x402 settlement evidence discriminant is invalid.");
   transactionHash(evidence.transactionHash);
   const safeHead = exactRecord(evidence.safeHead, ["number", "hash", "observedAt"]);
   positive(safeHead.number); bytes32(safeHead.hash); timestamp(safeHead.observedAt);
@@ -336,7 +337,7 @@ export function validateUnusedExpiryEvidence(value: unknown, operation?: Record<
     return validateErc7710UnusedExpiryEvidence(value, operation);
   }
   const evidence = exactRecord(value, ["schemaVersion", "network", "chainId", "token", "validBefore", "finalizedHead", "authorizationState", "absence", "rpcOriginHash", "evidenceHash"]);
-  if (evidence.schemaVersion !== "apn.x402.unused-expiry-evidence.v1" || evidence.network !== CHAIN_CAIP2 || evidence.chainId !== "8453" || evidence.token !== BASE_USDC.toLowerCase()) stateCorrupt("x402 unused-expiry evidence discriminant is invalid.");
+  if (evidence.schemaVersion !== "apn.x402.unused-expiry-evidence.v1" || !matchingEvidenceNetwork(evidence, operation)) stateCorrupt("x402 unused-expiry evidence discriminant is invalid.");
   uint(evidence.validBefore);
   const finalizedHead = exactRecord(evidence.finalizedHead, ["number", "hash", "timestamp", "observedAt"]);
   positive(finalizedHead.number); bytes32(finalizedHead.hash); uint(finalizedHead.timestamp); timestamp(finalizedHead.observedAt);
@@ -415,4 +416,9 @@ function validateErc7710UnusedExpiryEvidence(
     evidence.evidenceHash !== domainHash("apn.x402.erc7710-unused-expiry-evidence.v1", canonicalJson(body))
   ) stateCorrupt("x402 ERC-7710 unused-expiry evidence hash is invalid.");
   return evidence as unknown as UnusedExpiryEvidence;
+}
+
+function matchingEvidenceNetwork(evidence: Record<string, unknown>, operation?: Record<string, unknown>): boolean {
+  return validX402Tuple(evidence.chainId, evidence.network, evidence.token) &&
+    (operation === undefined || (operation.chainId === evidence.chainId && operation.network === evidence.network && operation.token === evidence.token));
 }

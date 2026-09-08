@@ -2,6 +2,7 @@ import { encodeFunctionData, getAddress, keccak256, parseTransaction, recoverTra
 import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2, CHAIN_ID, TRANSFER_TOPIC, USDC_DECIMALS } from "./constants.js";
 import { ApnError, assertInput } from "./errors.js";
+import { MAX_DIRECT_TRANSACTION_BYTES, publicEvmAsset } from "./evm-asset.js";
 import { multiplyAtomic, parseAtomic } from "./money.js";
 import { canonicalAddress, validateBalance } from "./wallet-policy.js";
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/;
@@ -74,6 +75,8 @@ export async function verifyEffect(effect, operation) {
         throw new ApnError("APN_NATIVE_PROTOCOL", "Native signing requires a local direct operation.");
     }
     const computed = keccak256(effect.rawTransaction);
+    if (operation.evm !== undefined && (effect.rawTransaction.length - 2) / 2 > MAX_DIRECT_TRANSACTION_BYTES)
+        throw new ApnError("APN_NATIVE_PROTOCOL", "Signed bytes exceed the frozen data-fee size bound.");
     if (computed.toLowerCase() !== effect.transactionHash.toLowerCase() ||
         computed.toLowerCase() !== effect.rawTransactionHash.toLowerCase())
         throw new ApnError("APN_NATIVE_PROTOCOL", "Native effect hashes do not match the exact signed bytes.");
@@ -90,9 +93,10 @@ export async function verifyEffect(effect, operation) {
     const accessList = transaction.accessList ?? [];
     const s = transaction.s === undefined ? 0n : BigInt(transaction.s);
     const halfCurveOrder = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n;
-    if (transaction.type !== "eip1559" || transaction.chainId !== CHAIN_ID ||
-        transaction.to?.toLowerCase() !== BASE_USDC.toLowerCase() || (transaction.value ?? 0n) !== 0n ||
-        transaction.data?.toLowerCase() !== operation.transactionData.toLowerCase() ||
+    if (transaction.type !== "eip1559" || transaction.chainId !== operation.chainId ||
+        transaction.to?.toLowerCase() !== (operation.evm?.transactionTo ?? BASE_USDC).toLowerCase() ||
+        (transaction.value ?? 0n) !== BigInt(operation.evm?.valueAtomic ?? "0") ||
+        (transaction.data ?? "0x").toLowerCase() !== operation.transactionData.toLowerCase() ||
         transaction.nonce?.toString() !== operation.economics.nonceAtomic ||
         transaction.gas?.toString() !== operation.economics.gasLimitAtomic ||
         transaction.maxFeePerGas?.toString() !== operation.economics.maxFeePerGasAtomic ||
@@ -106,7 +110,7 @@ export function hasExactTransfer(receipt, operation) {
     const senderTopic = addressTopic(operation.walletAddress);
     const recipientTopic = addressTopic(operation.recipient);
     const value = `0x${parseAtomic(operation.amountAtomic).toString(16).padStart(64, "0")}`;
-    return receipt.logs.some((log) => log.address.toLowerCase() === BASE_USDC.toLowerCase() && log.topics.length === 3 &&
+    return receipt.logs.some((log) => log.address.toLowerCase() === operation.token.toLowerCase() && log.topics.length === 3 &&
         log.topics[0]?.toLowerCase() === TRANSFER_TOPIC && log.topics[1]?.toLowerCase() === senderTopic &&
         log.topics[2]?.toLowerCase() === recipientTopic && log.data.toLowerCase() === value);
 }
@@ -119,11 +123,14 @@ export function publicOperation(operation) {
         terminal: operation.terminal,
         reason: operation.reason,
         proof_class: operation.proofClass,
-        chain: CHAIN_CAIP2,
-        token: BASE_USDC,
+        chain: operation.evm === undefined ? CHAIN_CAIP2 : `eip155:${operation.chainId}`,
+        token: operation.evm?.asset.kind === "native" ? null : operation.token,
+        ...(operation.evm === undefined ? {} : { asset: publicEvmAsset(operation.evm.asset), fee_budget: {
+                max_fee_wei: operation.evm.maxFeeWei, enforcement: "pre_submission_quote", quote: operation.evm.feeQuote,
+            }, policy: { identity: "apn.direct.foreground-approval.v1", chain: `eip155:${operation.chainId}`, asset: publicEvmAsset(operation.evm.asset), amount_atomic: operation.amountAtomic, foreground_approval_required: true } }),
         wallet_address: operation.walletAddress,
         recipient: operation.recipient,
-        amount: { atomic: operation.amountAtomic, decimal: operation.amountDecimal, decimals: USDC_DECIMALS },
+        amount: { atomic: operation.amountAtomic, decimal: operation.amountDecimal, decimals: operation.evm?.asset.decimals ?? USDC_DECIMALS },
         ...(operation.economics === undefined ? {} : { economics: operation.economics }),
         prepared_at: operation.preparedAt,
         ...(operation.preparedBlockNumberAtomic === undefined ? {} : {
@@ -159,6 +166,7 @@ export function publicOperation(operation) {
 }
 export function publicReceipt(receipt) {
     return {
+        ...(receipt.evm === undefined ? {} : { asset: publicEvmAsset(receipt.evm.asset), amount_atomic: receipt.amountAtomic, fee_budget_wei: receipt.evm.maxFeeWei, ...(receipt.evm.feeQuote.feeModel === undefined ? {} : { fee_model: receipt.evm.feeQuote.feeModel }), chain_evidence: receipt.evmEvidence ?? null, finality: receipt.evmEvidence?.transactionVerified === true ? receipt.evm.asset.chainId === 42161 ? "rpc_safe_inclusion" : "inclusion_only" : "not_observed" }),
         operation_id: receipt.operationId,
         state: receipt.state,
         terminal: receipt.terminal,
@@ -177,6 +185,8 @@ function addressTopic(address) {
     return `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
 }
 function operationNextActions(operation) {
+    if (operation.evm !== undefined && operation.state === "failed_before_effect")
+        return ["apn pay transfer prepare-asset --help"];
     if (operation.state === "failed_before_effect" && operation.reason === "provider_sender_changed" &&
         operation.providerDirect !== undefined)
         return [

@@ -1,4 +1,6 @@
-import type { CHAIN_ID } from "./constants.js";
+import type { EvmChainId } from "./evm-asset.js";
+import type { EvmDirectBinding } from "./evm-direct.js";
+import type { EvmTransferEvidence } from "./evm-ports.js";
 
 export type Address = `0x${string}`;
 export type Hex = `0x${string}`;
@@ -91,8 +93,9 @@ export interface OperationRecord {
   readonly recipient: Address;
   readonly amountAtomic: string;
   readonly amountDecimal: string;
-  readonly chainId: typeof CHAIN_ID;
+  readonly chainId: EvmChainId;
   readonly token: Address;
+  readonly evm?: EvmDirectBinding;
   readonly transactionData?: Hex;
   readonly economics?: Economics;
   readonly providerDirect?: ProviderDirectBinding;
@@ -122,6 +125,9 @@ export interface WalletRecord {
 }
 
 export interface ReceiptRecord {
+  readonly evm?: EvmDirectBinding;
+  readonly amountAtomic?: string;
+  readonly evmEvidence?: EvmTransferEvidence;
   readonly schemaVersion: "apn.state.v1";
   readonly operationId: string;
   readonly state: OperationState;

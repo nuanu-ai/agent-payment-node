@@ -163,7 +163,7 @@ test("strict wire rejects malformed base64, duplicate JSON keys, unsafe numbers,
     Buffer.from([0xff]).toString("base64"),
     canonicalPaymentRequiredHeader().slice(0, -4),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, resource: { ...X402_PAYMENT_REQUIRED.resource, description: "x".repeat(49 * 1024) } }),
-    canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: Array.from({ length: 17 }, () => X402_REQUIREMENTS) }),
+    canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: Array.from({ length: 1000 }, () => X402_REQUIREMENTS) }),
     canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, amount: 1 }] }),
   ]) assert.throws(() => decodePaymentRequiredHeader(header), ApnError, header.slice(0, 32));
 });

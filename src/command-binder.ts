@@ -7,6 +7,7 @@ import {
 } from "./command-catalog.js";
 import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
+import { evmChain, evmDecimals, evmToken, type EvmAssetSelection } from "./evm-asset.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
 
 export interface BoundCommand {
@@ -102,20 +103,30 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
       request: { command: "wallet.balance", profile: value(options, "--profile") },
       rpcUrl: value(options, "--rpc-url"),
     };
-    case "wallet policy show": return { request: { command: "wallet.policy.show", profile: value(options, "--profile") } };
+    case "wallet balance-asset": return {
+      request: { command: "wallet.balance", profile: value(options, "--profile"), asset: bindAsset(options) },
+      rpcUrl: value(options, "--rpc-url"),
+    };
+    case "wallet policy show-network":
+    case "wallet policy show": return { request: { command: "wallet.policy.show", profile: value(options, "--profile"), ...bindNetwork(options) } };
+    case "wallet policy set-network":
     case "wallet policy set": return {
       request: {
         command: "wallet.policy.set",
+        ...bindNetwork(options),
         profile: value(options, "--profile"),
         maxBalanceUsdcAtomic: value(options, "--max-balance-usdc-atomic"),
         maxX402AmountAtomic: value(options, "--max-x402-amount-atomic"),
         ...(options["--max-balance-eth-wei"] === undefined ? {} : { maxBalanceEthWei: options["--max-balance-eth-wei"] }),
       },
     };
-    case "x402 inspect": return { request: { command: "x402.inspect", url: value(options, "--url"), ...bindX402HttpRequest(options) } };
+    case "x402 inspect-network":
+    case "x402 inspect": return { request: { command: "x402.inspect", url: value(options, "--url"), ...bindX402HttpRequest(options), ...bindNetwork(options) } };
+    case "x402 fetch prepare-network":
     case "x402 fetch prepare": return {
       request: {
         command: "x402.fetch.prepare",
+        ...bindNetwork(options),
         ...bindX402HttpRequest(options),
         profile: value(options, "--profile"),
         url: value(options, "--url"),
@@ -135,6 +146,14 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
         idempotencyKey: value(options, "--idempotency-key"),
         recipient: value(options, "--to"),
         amount: value(options, "--amount-usdc"),
+      },
+      rpcUrl: value(options, "--rpc-url"),
+    };
+    case "pay transfer prepare-asset": return {
+      request: {
+        command: "transfer.prepare", profile: value(options, "--profile"), asset: bindAsset(options),
+        recipient: value(options, "--to"), amount: value(options, "--amount"), maxFeeWei: value(options, "--max-fee-wei"),
+        idempotencyKey: value(options, "--idempotency-key"),
       },
       rpcUrl: value(options, "--rpc-url"),
     };
@@ -170,6 +189,19 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     case "receipt get": return { request: { command: "receipt.get", operationId: value(options, "--operation") } };
     default: throw new ApnError("APN_INTERNAL", "The command catalog has no request binding.");
   }
+}
+
+function bindNetwork(options: Readonly<Record<string, string>>) {
+  return options["--chain"] === undefined ? {} : { chainId: evmChain(options["--chain"]) };
+}
+
+function bindAsset(options: Readonly<Record<string, string>>): EvmAssetSelection {
+  const decimals = options["--decimals"];
+  if (decimals !== undefined && !/^(?:0|[1-9][0-9]{0,2})$/u.test(decimals)) throw new ApnError("APN_INVALID_INPUT", "Asset decimals must be a canonical integer from 0 through 255.");
+  return {
+    chainId: evmChain(value(options, "--chain")), token: evmToken(value(options, "--asset")),
+    ...(decimals === undefined ? {} : { decimals: evmDecimals(Number(decimals)) }),
+  };
 }
 
 function value(options: Readonly<Record<string, string>>, name: string): string {

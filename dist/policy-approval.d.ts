@@ -1,5 +1,7 @@
 import type { Address } from "./model.js";
+import { type X402PolicyNetwork } from "./x402-network.js";
 export interface ProfilePolicyApprovalIntent {
+    readonly x402Network?: X402PolicyNetwork;
     readonly profile: string;
     readonly walletAddress: Address;
     readonly fingerprint: string;

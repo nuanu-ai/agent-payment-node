@@ -3,6 +3,7 @@ import { TextDecoder } from "node:util";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { canonicalPolicyInput, policyIncrease, sealProfilePolicy, validateProfilePolicy, } from "./profile-policy.js";
+import { policyStorageIdentity, validPolicyNetwork } from "./x402-network.js";
 const ENVELOPE_VERSION = "apn.profile-policy-envelope.v1";
 const KDF_NAME = "HKDF-SHA-256";
 const CIPHER_NAME = "AES-256-GCM";
@@ -18,7 +19,7 @@ export class EncryptedProfilePolicy {
         this.clock = clock;
     }
     async load(binding) {
-        const value = await this.state.loadEncryptedPolicyEnvelope(binding.profile);
+        const value = await this.state.loadEncryptedPolicyEnvelope(policyStorageIdentity(binding));
         if (value === null)
             return null;
         const envelope = parseEnvelope(value, binding);
@@ -54,6 +55,7 @@ export class EncryptedProfilePolicy {
             await this.approval.approve({
                 profile: binding.profile,
                 walletAddress: binding.walletAddress,
+                ...(binding.x402Network === undefined ? {} : { x402Network: binding.x402Network }),
                 fingerprint,
                 change: current === null ? "create" : "increase",
                 ...effective,
@@ -76,13 +78,14 @@ export class EncryptedProfilePolicy {
         }
     }
     async loadForSet(binding) {
-        const value = await this.state.loadEncryptedPolicyEnvelope(binding.profile);
+        const value = await this.state.loadEncryptedPolicyEnvelope(policyStorageIdentity(binding));
         if (value === null)
             return null;
         const envelope = parseEnvelope(value);
         if (canonicalJson(envelope.binding) === canonicalJson(binding))
             return await this.load(binding);
-        if (envelope.binding.profile !== binding.profile || envelope.binding.profileHash !== binding.profileHash)
+        if (envelope.binding.profile !== binding.profile || envelope.binding.profileHash !== binding.profileHash ||
+            canonicalJson(envelope.binding.x402Network ?? null) !== canonicalJson(binding.x402Network ?? null))
             corrupt("Profile policy envelope profile binding is invalid.");
         const wrapping = await this.wrappingSecret.load();
         if (wrapping === null)
@@ -98,7 +101,7 @@ export class EncryptedProfilePolicy {
     async save(binding, policy, wrapping) {
         const salt = randomBytes(32);
         const nonce = randomBytes(12);
-        const key = deriveKey(wrapping, salt, binding.profile);
+        const key = deriveKey(wrapping, salt, policyStorageIdentity(binding));
         const header = {
             schemaVersion: ENVELOPE_VERSION,
             binding,
@@ -118,7 +121,7 @@ export class EncryptedProfilePolicy {
                     tag: cipher.getAuthTag().toString("base64"),
                 },
             };
-            await this.state.writeEncryptedPolicyEnvelope(binding.profile, envelope);
+            await this.state.writeEncryptedPolicyEnvelope(policyStorageIdentity(binding), envelope);
             ciphertext.fill(0);
         }
         finally {
@@ -134,7 +137,7 @@ function decryptEnvelope(envelope, wrapping, binding) {
     const nonce = decodeBase64(envelope.cipher.nonce, 12, "nonce");
     const ciphertext = decodeBase64(envelope.cipher.ciphertext, undefined, "ciphertext");
     const tag = decodeBase64(envelope.cipher.tag, 16, "tag");
-    const key = deriveKey(wrapping, salt, binding.profile);
+    const key = deriveKey(wrapping, salt, policyStorageIdentity(binding));
     const header = {
         schemaVersion: envelope.schemaVersion,
         binding: envelope.binding,
@@ -173,7 +176,7 @@ function parseEnvelope(value, binding) {
     }
     if (value.schemaVersion !== ENVELOPE_VERSION)
         corrupt("Profile policy envelope version is unsupported.");
-    if (!isPlainRecord(value.binding) || !exactKeys(value.binding, ["profile", "profileHash", "walletAddress", "walletBindingHash"])) {
+    if (!isPlainRecord(value.binding) || !exactKeys(value.binding, ["profile", "profileHash", "walletAddress", "walletBindingHash", ...(value.binding.x402Network === undefined ? [] : ["x402Network"])]) || !validPolicyNetwork(value.binding.x402Network)) {
         corrupt("Profile policy binding schema is invalid.");
     }
     const storedBinding = value.binding;

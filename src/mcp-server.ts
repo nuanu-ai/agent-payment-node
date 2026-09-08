@@ -7,9 +7,9 @@ import type { OutputEnvelope } from "./commands.js";
 import { PRODUCT_VERSION } from "./constants.js";
 import { RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
 import { MCP_TOOLS, type ProjectedMcpTool } from "./mcp-projection.js";
-import { RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
+import { genericTransferHandoff, RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
 import { failureEnvelope } from "./output.js";
-import { executeBoundCommand, type RuntimeFactoryOptions } from "./runtime-factory.js";
+import { createApnCore, executeBoundCommand, type RuntimeFactoryOptions } from "./runtime-factory.js";
 import { ApnError } from "./errors.js";
 
 export type McpRuntimeOptions = Omit<RuntimeFactoryOptions, "policy" | "policyApproval">;
@@ -80,10 +80,11 @@ async function callTool(
     if (bound.request.command === "transfer.approve") {
       if (bound.rpcUrl === undefined) throw new Error("The bound transfer approval is missing its required RPC URL.");
       const { native: _injectedNative, approval: _injectedApproval, ...sharedOptions } = options;
-      return await executeBoundCommand(bound, {
-        ...sharedOptions,
-        approval: new RejectingMcpTransferApproval(bound.request, bound.rpcUrl),
-      });
+      const approval = new RejectingMcpTransferApproval(bound.request, bound.rpcUrl);
+      const core = createApnCore(bound, { ...sharedOptions, approval });
+      try { await genericTransferHandoff(core, bound.request, approval); }
+      catch (error) { return failureEnvelope(bound.request.command, randomUUID(), error); }
+      return await core.execute(bound.request);
     }
     return await executeBoundCommand(bound, {
       ...options,

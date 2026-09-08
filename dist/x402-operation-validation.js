@@ -1,7 +1,8 @@
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
+import { validX402Tuple, x402Network } from "./x402-network.js";
 import { parseAtomic } from "./money.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js";
+import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
 import { frozenErc7710FacilitatorsMatch } from "./x402-erc7710-codec.js";
 import { isX402ResultStatus, validateX402Resource } from "./x402-http-request.js";
 import { X402_STATE_VERSION, TRANSITION_VERSION, ZERO_HASH, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-model.js";
@@ -34,7 +35,7 @@ export function validateX402OperationUnsafe(value) {
     hash(sellerWire.resourceHash);
     if (sellerWire.resourceHash !== domainHash("apn.x402.resource.v1", sellerWire.resourceCanonicalJson))
         stateCorrupt("x402 seller resource hash is invalid.");
-    if (operation.chainId !== "8453" || operation.network !== CHAIN_CAIP2 || operation.token !== BASE_USDC.toLowerCase())
+    if (!validX402Tuple(operation.chainId, operation.network, operation.token) || (operation.chainId !== "8453" && (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined)))
         stateCorrupt("x402 chain or token binding is invalid.");
     address(operation.wallet);
     address(operation.payee);
@@ -44,8 +45,8 @@ export function validateX402OperationUnsafe(value) {
         stateCorrupt("x402 amount exceeds the frozen cap.");
     const selectedOffer = exactRecord(operation.selectedOffer, ["index", "declaredCanonicalJson", "resolved", "offerHash"]);
     parseAtomic(selectedOffer.index);
-    if (BigInt(selectedOffer.index) >= 16n)
-        stateCorrupt("x402 selected offer index exceeds the supported seller list bound.");
+    if (BigInt(selectedOffer.index) >= BigInt(MAX_DECODED_X402_BYTES))
+        stateCorrupt("x402 selected offer index exceeds the decoded seller wire budget.");
     const requirements = canonicalText(selectedOffer.declaredCanonicalJson);
     const resolvedRecord = record(selectedOffer.resolved);
     const resolved = resolvedRecord.assetTransferMethod === "erc7710"
@@ -83,7 +84,7 @@ export function validateX402OperationUnsafe(value) {
     };
     const header = Buffer.from(canonicalJson(paymentRequired), "utf8").toString("base64");
     const decoded = decodePaymentRequiredHeader(header);
-    const candidates = inspectCandidates(decoded, resource.canonicalUrl);
+    const candidates = inspectCandidates(decoded, resource.canonicalUrl, x402Network(operation.network).chainId);
     if (candidates.length !== 1)
         stateCorrupt("x402 frozen offer is no longer statically compatible.");
     const candidate = candidates[0];
@@ -212,7 +213,7 @@ export function validateX402OperationUnsafe(value) {
         stateCorrupt("x402 transition timestamps do not bind the operation summary.");
     }
     const typed = operation;
-    if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic,
+    if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic, chainId: x402Network(typed.network).chainId,
         ...(resource.httpRequest === undefined ? {} : { httpRequest: resource.httpRequest }) }))
         stateCorrupt("x402 request hash is invalid.");
     if (typed.fingerprint !== x402Fingerprint(typed))

@@ -5,9 +5,12 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.8 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
-and canonical Base USDC. It does not require an Apple Developer identity, an
-app bundle, a daemon, a browser extension, or the AI Labs Hub.
+APN 0.5.9 targets Apple Silicon macOS and supports explicit local-wallet Base,
+Ethereum and Arbitrum One native ETH / arbitrary ERC-20 direct transfers, plus
+independently network-bound canonical-USDC EIP-3009 x402. It does not require an
+Apple Developer identity, an app bundle, a daemon, a browser extension, or the
+AI Labs Hub. See [EVM asset transfers](docs/evm-assets.md) for the exact fee
+budget and evidence boundaries.
 
 ## Install
 
@@ -43,10 +46,12 @@ apn mcp config
 apn mcp serve
 ```
 
-The server exposes exactly twenty-two catalog-derived tools: version, Keychain
+This source tree exposes twenty-four catalog-derived tools: version, Keychain
 doctor, wallet, provider-permission and wallet-policy operations plus x402 inspect/prepare/approve,
 direct-transfer prepare/foreground handoff, operation status/resume and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
+The two added tools select an explicit asset for balance and direct preparation;
+direct approval still hands off to a foreground CLI terminal without payment.
 
 ## Supply-chain verification
 
@@ -420,6 +425,8 @@ all-asset or all-x402-version support. No live payment acceptance is implied.
 
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
+apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>]
+apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] --to <address> --amount <decimal> --max-fee-wei <wei> --idempotency-key <key>
 apn --version
 apn mcp serve
 apn mcp config
@@ -444,6 +451,10 @@ apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-se
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
+apn wallet policy show-network --chain <caip2> --profile <profile>
+apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
+apn x402 inspect-network --chain <caip2> --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
+apn x402 fetch prepare-network --chain <caip2> --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 ```
 <!-- END APN COMMAND CATALOG -->
 

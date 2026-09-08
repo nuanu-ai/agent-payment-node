@@ -1,9 +1,16 @@
 import type { CommandRequest } from "./commands.js";
+import type { ApnCore } from "./core.js";
 import { cliHandoffDetails, createCliHandoff } from "./cli-handoff.js";
 import { ApnError } from "./errors.js";
 import type { TransferApprovalIntent, TransferApprovalPort } from "./tty-approval.js";
 
 type TransferApproveRequest = Extract<CommandRequest, { readonly command: "transfer.approve" }>;
+
+export async function genericTransferHandoff(core: ApnCore, request: TransferApproveRequest, approval: RejectingMcpTransferApproval): Promise<void> {
+  await core.context.ready();
+  const operation = await core.context.state.findOperation(request.operationId);
+  if (operation?.evm !== undefined && operation.state === "awaiting_approval") await approval.approve(operation);
+}
 
 export class RejectingMcpTransferApproval implements TransferApprovalPort {
   constructor(
