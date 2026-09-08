@@ -21,6 +21,12 @@ balance inspection is implemented, while sending is blocked by the pinned
 provider's missing fee/rent guarantee. See [Solana direct transfers](docs/solana.md)
 for exact commands and the four open mainnet acceptance rows.
 
+Local TRON mainnet TRX and canonical USDT now use a separate encrypted
+secp256k1 wallet, explicit RPC, human policy and transfer approval, a bounded
+resource-price window and solidified transaction evidence. All three external
+wallet profiles remain unavailable for TRON. See [TRON direct transfers](docs/tron.md)
+for commands, total TRX caps and the two open mainnet acceptance rows.
+
 ## Install
 
 ```sh
@@ -469,6 +475,11 @@ apn wallet balance-solana --profile <profile> --asset <sol-or-usdc>
 apn wallet capabilities-solana [--profile <profile>]
 apn policy admit-solana --profile <profile> --asset <sol-or-usdc> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-sol <decimal>
 apn pay transfer prepare-solana --profile <profile> --asset <sol-or-usdc> --to <solana-address> --amount <decimal> --max-fee-sol <decimal> --idempotency-key <key>
+apn wallet ensure-tron --profile <profile> --provider local --accept-risk true
+apn wallet balance-tron --profile <profile> --asset <trx-or-usdt>
+apn wallet capabilities-tron [--profile <profile>]
+apn policy admit-tron --profile <profile> --asset <trx-or-usdt> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-trx <decimal>
+apn pay transfer prepare-tron --profile <profile> --asset <trx-or-usdt> --to <tron-address> --amount <decimal> --max-fee-trx <decimal> --idempotency-key <key>
 ```
 <!-- END APN COMMAND CATALOG -->
 
@@ -550,14 +561,16 @@ live provider acceptance, payment proof or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
 are separately recorded release gates. The local stdio MCP surface projects
-the same thirty-three catalog-selected wallet, policy, payment, operation and
+the same thirty-eight catalog-selected wallet, policy, payment, operation and
 receipt commands through the shared binder/runtime/core path. Direct approval
 remains foreground CLI only. Coinbase x402 source and deterministic product
 proof are included; live Coinbase/provider and paid acceptance are recorded as
 separate release gates. Local Solana source integration has synthetic custody,
 policy, exact signed-effect and restart tests; its four required mainnet rows
-and provider economics gate remain open. Hub, contracts, remote MCP, Stellar
-and TRON are outside this source change. The published 0.5.8 release is unchanged.
+and provider economics gate remain open. Local TRON adds synthetic TRX/USDT,
+resource-fee, solidified receipt and interrupted-execution checks; its two
+required mainnet rows remain open. Hub, contracts, remote MCP and Stellar are
+outside this source change. The published 0.5.8 release is unchanged.
 
 The published npm archive includes `npm-shrinkwrap.json`, so Formula installation resolves the exact
 integrity-pinned production closure. It preserves direct MetaMask pins and overrides only the

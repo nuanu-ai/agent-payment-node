@@ -61,6 +61,8 @@ import { TtyChainPolicyApproval, TtyRailApproval } from "./tty-approval.js";
 import { SolanaRpc } from "./solana/rpc.js";
 import { SolanaLocalAdapter } from "./solana/local-adapter.js";
 import { SolanaAwalAdapter } from "./solana/awal-adapter.js";
+import { TronLocalAdapter } from "./tron/local-adapter.js";
+import { TronRpc } from "./tron/rpc.js";
 
 export interface RuntimeFactoryOptions {
   readonly chainAccounts?: ChainWalletStoragePort;
@@ -68,6 +70,7 @@ export interface RuntimeFactoryOptions {
   readonly railApproval?: RailApprovalPort;
   readonly chainPolicyApproval?: ChainPolicyApprovalPort;
   readonly solanaRpcUrl?: string;
+  readonly tronRpcUrl?: string;
   readonly stateRoot?: string;
   readonly native?: NativePort;
   readonly wrappingSecret?: WrappingSecretPort;
@@ -95,8 +98,10 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
   const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
   const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL);
+  const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL);
   const directRails = options.directRails ?? [new SolanaLocalAdapter(chainAccounts, solanaRpc, () => options.clock?.now() ?? new Date()),
-    new SolanaAwalAdapter(chainAccounts, solanaRpc, undefined, undefined, () => options.clock?.now() ?? new Date())];
+    new SolanaAwalAdapter(chainAccounts, solanaRpc, undefined, undefined, () => options.clock?.now() ?? new Date()),
+    new TronLocalAdapter(chainAccounts, tronRpc, () => options.clock?.now() ?? new Date())];
   const native = needsNative(bound.request.command)
     ? options.native ?? new LocalWalletNative(state, wrappingSecret, options.approval)
     : undefined;
@@ -180,7 +185,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     state,
     chainAccounts, directRails,
     ...(bound.request.command === "transfer.approve" || options.railApproval !== undefined ? { railApproval: options.railApproval ?? new TtyRailApproval() } : {}),
-    ...(bound.request.command === "policy.admit-solana" || options.chainPolicyApproval !== undefined ? { chainPolicyApproval: options.chainPolicyApproval ?? new TtyChainPolicyApproval() } : {}),
+    ...(bound.request.command === "policy.admit-solana" || bound.request.command === "policy.admit-tron" || options.chainPolicyApproval !== undefined ? { chainPolicyApproval: options.chainPolicyApproval ?? new TtyChainPolicyApproval() } : {}),
     profileRepository,
     providerRegistry,
     ...(foregroundAuthentication === undefined ? {} : { foregroundAuthentication }),

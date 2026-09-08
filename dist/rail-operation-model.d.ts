@@ -79,6 +79,7 @@ export declare function publicRailOperation(operation: RailOperationRecord): {
         sourceTokenAccount: string | null;
         destinationTokenAccount: string | null;
         createsRecipientAccount: boolean;
+        resources?: import("./tron/model.js").TronResourceSnapshot;
     };
     state: RailState;
     terminal: boolean;
@@ -119,6 +120,7 @@ export declare function railReceipt(operation: RailOperationRecord): {
         sourceTokenAccount: string | null;
         destinationTokenAccount: string | null;
         createsRecipientAccount: boolean;
+        resources?: import("./tron/model.js").TronResourceSnapshot;
     };
     state: RailState;
     terminal: boolean;

@@ -177,9 +177,9 @@ test("production SPDX SBOM is deterministic and bound to the lockfiles", async (
   for (const [name, version] of Object.entries(packageJson.dependencies)) {
     assert.equal(packages.has(`${name}@${version}`), true, `missing production dependency ${name}@${version}`);
   }
-  for (const name of ["@modelcontextprotocol/client", "@types/node"]) {
-    assert.equal(sbom.packages.some((entry) => entry.name === name), false, `dev-only package leaked: ${name}`);
-  }
+  assert.equal(sbom.packages.some((entry) => entry.name === "@modelcontextprotocol/client"), false, "dev-only MCP client leaked");
+  assert.equal(packages.has("@types/node@24.5.2"), false, "root dev-only Node types leaked");
+  assert.equal(packages.has("@types/node@22.7.5"), true, "ethers production dependency omitted Node types");
   assert.equal(packages.has("typescript@5.9.2"), true, "installed production peer closure omitted TypeScript");
 });
 

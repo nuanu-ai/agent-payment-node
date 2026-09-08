@@ -77,7 +77,7 @@ async function callTool(
     const policyApproval = bound.request.command === "wallet.policy.set"
       ? new RejectingMcpPolicyApproval(bound.request)
       : undefined;
-    if (bound.request.command === "policy.admit-solana") chainPolicyHandoff(bound.request);
+    if (bound.request.command === "policy.admit-solana" || bound.request.command === "policy.admit-tron") chainPolicyHandoff(bound.request);
     if (bound.request.command === "transfer.approve") {
       const { native: _injectedNative, approval: _injectedApproval, railApproval: _injectedRailApproval, ...sharedOptions } = options;
       const approval = new RejectingMcpTransferApproval(bound.request, bound.rpcUrl);

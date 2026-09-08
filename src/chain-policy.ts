@@ -3,6 +3,7 @@ import { validateChainAccount } from "./chain-account-store.js";
 import type { ChainAccount, ChainAsset, ChainAssetAlias, DirectRailName } from "./direct-rail-ports.js";
 import { ApnError } from "./errors.js";
 import type { RailOperationRecord } from "./rail-operation-model.js";
+import { TRON_GENESIS } from "./tron/constants.js";
 
 export const SOLANA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -66,7 +67,7 @@ export function validateChainPolicy(value: unknown): ChainPolicy {
   if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "account", "asset", "networkIdentity", "maximumPerTransferAtomic", "dailyLimitAtomic", "maximumNativeFeeAtomic", "admittedAt", "policyHash"])) corrupt();
   if (value.schemaVersion !== "apn.chain-policy.v1") corrupt();
   const account = validateChainAccount(value.account); const asset = validateChainAsset(value.asset);
-  if (account.rail !== asset.rail || (account.rail === "solana" && value.networkIdentity !== SOLANA_GENESIS) || typeof value.networkIdentity !== "string") corrupt();
+  if (account.rail !== asset.rail || value.networkIdentity !== (account.rail === "solana" ? SOLANA_GENESIS : TRON_GENESIS)) corrupt();
   if (atomic(value.maximumPerTransferAtomic, true) > atomic(value.dailyLimitAtomic, true)) corrupt();
   atomic(value.maximumNativeFeeAtomic, true); isoDate(value.admittedAt);
   const { policyHash, ...body } = value;

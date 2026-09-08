@@ -247,9 +247,16 @@ export class TtyRailApproval implements RailApprovalPort {
       `Sender: ${prepared.sender}`, `Recipient: ${prepared.recipient}`,
       `Amount: ${chainDisplay(prepared.amountAtomic, prepared.asset.decimals)} ${prepared.asset.symbol} (${prepared.amountAtomic} atomic)`,
       `Network fee payer: ${prepared.economics.networkFeePayer}`, `Maximum network fee: ${prepared.economics.networkFeeMaximumAtomic} native atomic`,
-      `Recipient rent payer: ${prepared.economics.rentPayer ?? "none"}`, `Recipient rent: ${prepared.economics.recipientRentAtomic} native atomic`,
-      `Maximum sender fee and rent debit: ${prepared.economics.maximumNativeDebitAtomic} native atomic`,
-      `Selected fee/rent cap: ${prepared.maximumFeeAtomic} native atomic`, `Policy: ${input.policyHash}`,
+      ...(prepared.rail === "solana" ? [`Recipient rent payer: ${prepared.economics.rentPayer ?? "none"}`, `Recipient rent: ${prepared.economics.recipientRentAtomic} native atomic`] : [
+        `Bandwidth bound: ${prepared.resources?.bandwidthBytesAtomic} bytes / ${prepared.resources?.bandwidthMaximumAtomic} TRX atomic`,
+        `Caller Energy fee_limit: ${prepared.resources?.energyFeeLimitAtomic} TRX atomic (Bandwidth is additional)`,
+        `Maximum activation component: ${prepared.resources?.accountActivationMaximumAtomic} TRX atomic`,
+        `Recipient active at solidified snapshot: ${prepared.resources?.recipientActivatedAtSolidHead === true ? "yes" : "no"}`,
+        `Resource cost rule: ${prepared.resources?.costRule}`, `Fee control: ${prepared.economics.feeControl}`,
+        `Next maintenance: ${prepared.resources?.nextMaintenanceMsAtomic} UTC epoch milliseconds`,
+      ]),
+      `Maximum sender fee${prepared.rail === "solana" ? " and rent" : " and resource"} debit: ${prepared.economics.maximumNativeDebitAtomic} native atomic`,
+      `Selected fee/${prepared.rail === "solana" ? "rent" : "resource"} cap: ${prepared.maximumFeeAtomic} native atomic`, `Policy: ${input.policyHash}`,
       `Fingerprint: ${input.fingerprint}`, `Expires: ${prepared.expiresAt}`,
     ], transferApprovalPhrase(input.fingerprint), prepared.expiresAt, this.options);
   }
@@ -262,7 +269,7 @@ export class TtyChainPolicyApproval implements ChainPolicyApprovalPort {
       `Custody: ${policy.account.custody}`, `Account: ${policy.account.address}`, `Mainnet: ${policy.account.rail}`,
       `Genesis: ${policy.networkIdentity}`, `Asset: ${policy.asset.identifier}`, `Decimals: ${policy.asset.decimals}`,
       `Maximum per transfer: ${policy.maximumPerTransferAtomic} asset atomic`, `Daily principal limit (UTC): ${policy.dailyLimitAtomic} asset atomic`,
-      `Maximum fee and rent per operation: ${policy.maximumNativeFeeAtomic} native atomic`, `Policy: ${policy.policyHash}`,
+      `Maximum fee and ${policy.account.rail === "solana" ? "rent" : "resources"} per operation: ${policy.maximumNativeFeeAtomic} native atomic`, `Policy: ${policy.policyHash}`,
       "Unresolved transfers continue to reserve limits across UTC days.",
     ], `ADMIT APN ASSET ${policy.policyHash.slice(-16)}`, new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString(), this.options);
   }

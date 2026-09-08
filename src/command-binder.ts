@@ -11,6 +11,7 @@ import { evmChain, evmDecimals, evmToken, type EvmAssetSelection } from "./evm-a
 import { bindX402HttpRequest } from "./x402-http-request.js";
 import { chainDecimal } from "./chain-policy.js";
 import { solanaAddress } from "./solana/rpc.js";
+import { tronAddress } from "./tron/codec.js";
 
 export interface BoundCommand {
   readonly request: CommandRequest;
@@ -53,6 +54,21 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   switch (parsed.command.path.join(" ")) {
     case "--version": return { request: { command: "version" } };
     case "doctor keychain": return { request: { command: "doctor.keychain" } };
+    case "wallet ensure-tron": {
+      if (value(options, "--provider") !== "local" || value(options, "--accept-risk") !== "true") throw new ApnError("APN_INVALID_INPUT", "TRON requires the explicit local provider and literal true risk acknowledgement.");
+      return { request: { command: "wallet.ensure-tron", profile: value(options, "--profile"), provider: "local", acceptRisk: true } };
+    }
+    case "wallet balance-tron": return { request: { command: "wallet.balance-tron", profile: value(options, "--profile"), asset: tronAsset(options) } };
+    case "wallet capabilities-tron": return { request: { command: "wallet.capabilities-tron", ...(options["--profile"] === undefined ? {} : { profile: options["--profile"] }) } };
+    case "policy admit-tron": {
+      const asset = tronAsset(options);
+      for (const key of ["--max-per-transfer", "--daily-limit", "--max-fee-trx"]) chainDecimal(value(options, key), 6);
+      return { request: { command: "policy.admit-tron", profile: value(options, "--profile"), asset, maximumPerTransfer: value(options, "--max-per-transfer"), dailyLimit: value(options, "--daily-limit"), maximumFee: value(options, "--max-fee-trx") } };
+    }
+    case "pay transfer prepare-tron": {
+      const asset = tronAsset(options); chainDecimal(value(options, "--amount"), 6); chainDecimal(value(options, "--max-fee-trx"), 6);
+      return { request: { command: "transfer.prepare-tron", profile: value(options, "--profile"), asset, recipient: tronAddress(value(options, "--to")), amount: value(options, "--amount"), maximumFee: value(options, "--max-fee-trx"), idempotencyKey: value(options, "--idempotency-key") } };
+    }
     case "wallet ensure-solana": {
       const provider = value(options, "--provider");
       if (provider !== "local" && provider !== "coinbase-awal") throw new ApnError("APN_INVALID_INPUT", "Solana supports only the explicit local or coinbase-awal execution owner.");
@@ -216,6 +232,11 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
 function solanaAsset(options: Readonly<Record<string, string>>): "sol" | "usdc" {
   const asset = value(options, "--asset");
   if (asset !== "sol" && asset !== "usdc") throw new ApnError("APN_INVALID_INPUT", "Select the explicit sol or usdc asset alias.");
+  return asset;
+}
+function tronAsset(options: Readonly<Record<string, string>>): "trx" | "usdt" {
+  const asset = value(options, "--asset");
+  if (asset !== "trx" && asset !== "usdt") throw new ApnError("APN_INVALID_INPUT", "Select the explicit trx or usdt asset alias.");
   return asset;
 }
 
