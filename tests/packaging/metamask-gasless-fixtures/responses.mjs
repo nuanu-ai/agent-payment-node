@@ -153,12 +153,20 @@ function rpcResult(f, method, params) {
     throw new Error("unexpected call target or payload");
   }
   if (method === "eth_getTransactionByHash") return proved && params[0] === effect.transaction.hash ? effect.transaction : null;
-  if (method === "eth_getTransactionReceipt") return proved && params[0] === effect.transaction.hash ?
-    (f.phase === "reverted" ? { ...effect.receipt, status: "0x0", logs: [] } : effect.receipt) : null;
+  if (method === "eth_getTransactionReceipt") {
+    if (!proved || params[0] !== effect.transaction.hash) return null;
+    if (f.phase === "reverted") return { ...effect.receipt, status: "0x0", logs: [] };
+    const logs = [...effect.receipt.logs];
+    for (let index = logs.length; index < (f.receiptLogCount ?? logs.length); index += 1) {
+      logs.push({ ...logs[0], logIndex: quantity(index), address: "0x4444444444444444444444444444444444444444",
+        topics: [`0x${sha("UnrelatedEvent()")}`], data: "0x" });
+    }
+    return { ...effect.receipt, logs };
+  }
   if (method === "eth_getLogs") {
     const filter = params[0]; assert.equal(filter.address.toLowerCase(), row.protocol.limitedCalls.address);
     assert.ok(BigInt(filter.toBlock) - BigInt(filter.fromBlock) <= 1999n);
-    if (!proved || f.phase !== "success") return [];
+    if (!proved || f.phase !== "success" || f.emptyScanPage) return [];
     if (transactionNumber < Number(BigInt(filter.fromBlock)) || transactionNumber > Number(BigInt(filter.toBlock))) return [];
     assert.equal(filter.topics[3], effect.delegationHash); return [effect.receipt.logs[0]];
   }

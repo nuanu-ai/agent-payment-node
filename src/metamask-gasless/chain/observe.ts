@@ -47,7 +47,9 @@ export async function observeMetaMaskGasless(context: MetaMaskObservationContext
   }
   if (providerResult?.kind === "reverted") return result(scan.cursor, providerHash, providerResult, context.clock);
   const adverse = chooseAdverse(scan.inspection, providerResult);
-  if (adverse !== null) return result(scan.cursor, null, adverse, context.clock);
+  // An invalid provider-hinted receipt also forbids advancing past the page.
+  // Keep the original cursor until all relevant evidence can be validated.
+  if (adverse !== null) return result(cursor, null, adverse, context.clock);
   const usableCandidate = scan.inspection?.kind === "pending" && scan.inspection.usableCandidate ? scan.candidate :
     providerResult?.kind === "pending" && providerResult.usableCandidate ? providerHash : null;
   return makeObservation(scan.cursor, "pending", "mm_gasless_pending", usableCandidate, null, null,

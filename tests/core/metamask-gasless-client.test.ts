@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rename, symlink } from "node:fs/promises";
+import { readFile, rename, symlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { executeHelperRequest, MetaMaskGaslessProviderClient, MM_HELPER_VERSION,
@@ -65,6 +65,42 @@ test("client inspect rejects id fallback, duplicate selected matches, unsafe fil
   assert.deepEqual(ancestorResult, { version: MM_HELPER_VERSION, ok: false,
     failure: { code: "APN_STATE_SECURITY", reason: "mm_gasless_state_security" } });
   assert.equal(JSON.stringify([idResult, staleResult, linkedResult, ancestorResult]).includes(SECRET), false);
+});
+
+test("public helper enforces JWT NumericDate millisecond boundaries before provider invocation", async (t) => {
+  const nowSeconds = Math.floor(NOW.getTime() / 1000), expirationSeconds = nowSeconds + 60;
+  const cases = [
+    { name: "exp one millisecond before", claims: { sub: PROJECT, exp: expirationSeconds, iat: nowSeconds - 60 },
+      now: new Date(expirationSeconds * 1000 - 1), accepted: true },
+    { name: "exp at equality", claims: { sub: PROJECT, exp: expirationSeconds, iat: nowSeconds - 60 },
+      now: new Date(expirationSeconds * 1000), accepted: false },
+    { name: "exp one millisecond after", claims: { sub: PROJECT, exp: expirationSeconds, iat: nowSeconds - 60 },
+      now: new Date(expirationSeconds * 1000 + 1), accepted: false },
+    { name: "nbf one second in the future", claims: { sub: PROJECT, exp: nowSeconds + 600, nbf: nowSeconds + 1,
+      iat: nowSeconds - 60 }, now: NOW, accepted: false },
+    { name: "nbf at equality", claims: { sub: PROJECT, exp: nowSeconds + 600, nbf: nowSeconds,
+      iat: nowSeconds - 60 }, now: NOW, accepted: true },
+    { name: "iat one second in the future", claims: { sub: PROJECT, exp: nowSeconds + 600,
+      iat: nowSeconds + 1 }, now: NOW, accepted: false },
+    { name: "iat at equality", claims: { sub: PROJECT, exp: nowSeconds + 600,
+      iat: nowSeconds }, now: NOW, accepted: true },
+  ] as const;
+  for (const row of cases) await t.test(row.name, async () => {
+    const home = await syntheticClaimHome(row.claims); t.after(home.cleanup);
+    if (row.accepted) {
+      const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect",
+        expected: identity(home.binding) }, { homeDirectory: home.home, now: () => row.now });
+      assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: true, result: home.binding });
+      return;
+    }
+    const exchange = new SdkExchange(8453);
+    const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote",
+      input: quoteInput(home.binding, 8453) }, { homeDirectory: home.home, now: () => row.now, exchange });
+    assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
+      failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" } });
+    assert.deepEqual(exchange.requests, [], "invalid claims must not reach refresh, authenticated SDK, RPC, or payment calls");
+    assert.equal(exchange.beforeSends, 0);
+  });
 });
 
 test("client buildUnsigned runs public prepareDelegation defaults and root verifier on all eight chains with no network", async () => {
@@ -226,3 +262,12 @@ test("helper refuses a DOM-bearing process before public SDK construction", asyn
       failure: { code: "APN_STATE_SECURITY", reason: "mm_gasless_state_security" } });
   } finally { Reflect.deleteProperty(globalThis, "document"); }
 });
+
+async function syntheticClaimHome(claims: Readonly<Record<string, unknown>>) {
+  const home = await syntheticHome(), path = join(home.directory, "session.json");
+  const session = JSON.parse(await readFile(path, "utf8")) as { data: { cliToken: string } };
+  const payload = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+  session.data.cliToken = `e30.${payload}.synthetic-signature`;
+  await writeFile(path, JSON.stringify(session), { mode: 0o600 });
+  return home;
+}
