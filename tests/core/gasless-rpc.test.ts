@@ -7,7 +7,7 @@ import { hashObject, sha256 } from "../../src/canonical.js";
 import type { Address, Hex } from "../../src/model.js";
 import { GASLESS_ENTRYPOINT_ABI, GASLESS_PAYMASTER_ABI, GASLESS_TOKEN_ABI } from "../../src/gasless/abi.js";
 import { gaslessFee, gaslessGas } from "../../src/gasless/economics.js";
-import type { GaslessTransport } from "../../src/gasless/https.js";
+import { GaslessHttps, type GaslessTransport } from "../../src/gasless/https.js";
 import type { GaslessBlock, GaslessCursor, GaslessDeployment, GaslessIntent, GaslessLog,
   GaslessSnapshot } from "../../src/gasless/model.js";
 import type { GaslessBootstrapMaterial, GaslessUserOperationMaterial } from "../../src/gasless/ports.js";
@@ -67,6 +67,50 @@ test("gasless RPC factory is lazy and requires only the selected chain RPC confi
   const first = configured(8453), repeated = configured(8453);
   assert.equal(first, repeated); assert.equal(first.rpcEndpointHash, sha256(RPC_URL));
   assert.equal(first.bundlerEndpointHash, sha256(gaslessDeployment(8453).publicBundlerUrl));
+});
+
+test("gasless JSON-RPC parser rejects malformed envelopes, bounds responses, and redacts provider errors", async () => {
+  const deployment = gaslessDeployment(8453), canary = "canary_provider_path_secret";
+  const cases: Array<{ name: string; response: (id: string) => { status: number; body: string }; code: string }> = [
+    { name: "mismatched id", response: () => ({ status: 200,
+      body: JSON.stringify({ jsonrpc: "2.0", id: "wrong", result: "0x2105" }) }), code: "APN_RPC_PROTOCOL" },
+    { name: "result and error", response: (id) => ({ status: 200,
+      body: JSON.stringify({ jsonrpc: "2.0", id, result: "0x2105", error: { message: canary } }) }), code: "APN_RPC_PROTOCOL" },
+    { name: "missing result", response: (id) => ({ status: 200,
+      body: JSON.stringify({ jsonrpc: "2.0", id }) }), code: "APN_RPC_PROTOCOL" },
+    { name: "invalid JSON", response: () => ({ status: 200, body: "{" }), code: "APN_RPC_PROTOCOL" },
+    { name: "wrong HTTP status", response: () => ({ status: 503, body: canary }), code: "APN_RPC_PROTOCOL" },
+    { name: "oversize response", response: () => ({ status: 200, body: "x".repeat(2 * 1024 * 1024 + 1) }),
+      code: "APN_RPC_PROTOCOL" },
+    { name: "provider error", response: (id) => ({ status: 200,
+      body: JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32_000, message: canary } }) }),
+      code: "APN_PROVIDER_EFFECT_UNAVAILABLE" },
+  ];
+  for (const row of cases) {
+    const transport: GaslessTransport = { request: async (_endpoint, _method, body) => {
+      const id = body === null ? "missing" : (JSON.parse(body) as Json).id as string;
+      return row.response(id);
+    } };
+    const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+    await assert.rejects(rpc.assertChain(), (error: any) => {
+      assert.equal(error.code, row.code, row.name); assert.equal(String(error.message).includes(canary), false, row.name); return true;
+    });
+  }
+  const valid = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, new TestTransport((_endpoint, method) =>
+    method === "eth_supportedEntryPoints" ? [deployment.entryPoint] : "0x2105"));
+  await valid.assertChain();
+});
+
+test("gasless HTTPS rejects unsafe targets and invalid local bounds before any network access", async () => {
+  const transport = new GaslessHttps();
+  await assert.rejects(transport.request("https://127.0.0.1/rpc", "POST", null, 1024, "APN_RPC_CONFIG"),
+    { code: "APN_RPC_CONFIG" });
+  await assert.rejects(transport.request("https://user:password@example.com/rpc", "POST", null, 1024, "APN_RPC_CONFIG"),
+    { code: "APN_RPC_CONFIG" });
+  await assert.rejects(transport.request("https://example.com/rpc", "POST", null, 0, "APN_RPC_CONFIG"),
+    { code: "APN_RPC_AMBIGUOUS" });
+  await assert.rejects(transport.request("https://example.com/rpc", "POST", "x".repeat(256 * 1024 + 1), 1024,
+    "APN_RPC_CONFIG"), { code: "APN_RPC_AMBIGUOUS" });
 });
 
 test("gasless estimate sends only the exact v0.8 wire and send accepts only its locally authenticated hash", async () => {
@@ -204,7 +248,7 @@ test("gasless safe observation fixes effect proof while later safe account state
       }
       if (method === "eth_getBalance" || method === "eth_getTransactionCount") return "0x0";
       if (method === "eth_getCode") return `0xef0100${intent.delegate.slice(2).toLowerCase()}`;
-      if (method === "eth_call") return accountRead(params, safeNumber);
+      if (method === "eth_call") return accountRead(params);
       throw new Error(`unexpected ${method}`);
     },
   } as GaslessObservationContext;
@@ -215,9 +259,9 @@ test("gasless safe observation fixes effect proof while later safe account state
   safeNumber = 103n; const second = await observeGasless(context, intent, identity, first.cursor);
   assert.equal(second.status, "safe"); assert.equal(second.settlement?.safeBlock.numberAtomic, "103");
   assert.equal(second.settlement?.safeAccount.balanceAtomic, "6000001");
-  assert.equal(second.settlement?.receiptHash, first.settlement?.receiptHash);
-  assert.equal(second.settlement?.transactionProofHash, first.settlement?.transactionProofHash);
-  assert.deepEqual(second.settlement?.accounting, first.settlement?.accounting);
+  const { safeBlock: _firstSafeBlock, safeAccount: _firstSafeAccount, ...firstEffect } = first.settlement!;
+  const { safeBlock: _secondSafeBlock, safeAccount: _secondSafeAccount, ...secondEffect } = second.settlement!;
+  assert.deepEqual(secondEffect, firstEffect);
 });
 
 function makeIntent(): GaslessIntent {
@@ -315,9 +359,10 @@ function rawLog(log: GaslessLog, transactionHash: Hex, at: GaslessBlock): Json {
     transactionHash, blockHash: at.hash, blockNumber: quantity(BigInt(at.numberAtomic)), transactionIndex: "0x0", removed: false };
 }
 
-function accountRead(params: readonly unknown[], safeNumber: bigint): Hex {
+function accountRead(params: readonly unknown[]): Hex {
   const data = ((params[0] as Json).data as string).slice(0, 10);
-  if (data === "0x70a08231") return word(safeNumber === 103n ? 6_000_001n : 6_000_000n);
+  const pinned = params.at(-1) as { blockHash?: Hex };
+  if (data === "0x70a08231") return word(pinned.blockHash === blockHash(103n) ? 6_000_001n : 6_000_000n);
   if (data === "0xdd62ed3e") return word(0n);
   if (data === "0x7ecebe00") return word(8n);
   if (data === "0x35567e1a") return word(10n);
