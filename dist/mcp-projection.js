@@ -41,6 +41,7 @@ const SELECTED_PATHS = [
     "x402 inspect-network",
     "x402 fetch prepare-network",
     "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
+    "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
 ];
 export function projectMcpTools(manifest = COMMAND_MANIFEST) {
     validateCommandManifest(manifest);

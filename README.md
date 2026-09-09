@@ -33,6 +33,14 @@ The bridge flow freezes both source effects, requires foreground approval and
 correlates safe delivery across both chains. See [LI.FI bridges](docs/lifi.md)
 for fee controls, recovery and the three open mainnet acceptance rows.
 
+The local wallet also has a USDC fee-transfer path on Ethereum, Base, Arbitrum,
+Optimism, Polygon PoS, Unichain and Avalanche C-Chain. Its gas fee comes from
+the total USDC budget, so the sender can have zero native gas balance. The
+recipient amount and maximum USDC fee are frozen before foreground approval;
+unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
+for commands, persistent account permissions and recovery. This remains
+unreleased source with separate mainnet acceptance still open.
+
 ## Install
 
 ```sh
@@ -71,8 +79,8 @@ This source tree exposes catalog-derived tools for version, Keychain
 doctor, wallet, provider-permission and wallet-policy operations plus x402 inspect/prepare/approve,
 direct-transfer prepare/foreground handoff, operation status/resume and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
-The manifest also covers explicit EVM assets, Solana, TRON and LI.FI route
-selection. Transfer and bridge approval through MCP hand off to the foreground
+The manifest also covers explicit EVM assets, Solana, TRON, USDC gas fees and
+LI.FI route selection. Transfer, gasless and bridge approval through MCP hand off to the foreground
 CLI terminal without payment.
 
 ## Supply-chain verification
@@ -492,6 +500,10 @@ apn bridge inventory
 apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --from-token <address> --to-token <address> --amount <decimal> --to <address> --min-output <decimal> --max-native-debit-wei <uint> --max-route-fee <decimal> --slippage-bps <uint>
 apn bridge prepare --profile <profile> --quote <snapshot-hash> --route <route-id> --idempotency-key <key>
 apn bridge approve --operation <operation-id>
+apn gasless capabilities [--profile <profile>]
+apn gasless balance --profile <profile> --chain <chain-id>
+apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --idempotency-key <key>
+apn gasless transfer approve --operation <operation-id>
 ```
 <!-- END APN COMMAND CATALOG -->
 

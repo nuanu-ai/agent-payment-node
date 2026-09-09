@@ -63,7 +63,7 @@ for (const file of files) {
     if (["--chain-id", "--token"].includes(needle) && file === join(sourceRoot, "metamask-direct-adapter.ts")) continue;
     if (needle === "--chain-id" && file === join(sourceRoot, "metamask-x402-adapter.ts")) continue;
     if (needle === "--scheme" && file === join(sourceRoot, "awal-x402-adapter.ts")) continue;
-    if (needle === "signTypedData" && file === join(sourceRoot, "local-wallet-native.ts")) continue;
+    if (needle === "signTypedData" && ["local-wallet-native.ts", "gasless/custody.ts"].some((name) => file === join(sourceRoot, name))) continue;
     if (text.includes(needle)) violations.push(`${file.slice(productRoot.length + 1)}: ${needle}`);
   }
   if (file !== join(sourceRoot, "x402-codec.ts") && text.includes("@x402/core")) {

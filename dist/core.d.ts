@@ -9,6 +9,7 @@ import { ProviderX402TransactionRecoveryService } from "./provider-x402-transact
 import { ProviderPermissionService } from "./provider-permission-service.js";
 import { RailOperationService } from "./rail-operation-service.js";
 import { BridgeService } from "./lifi/service.js";
+import { GaslessService } from "./gasless/service.js";
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
 export declare class ApnCore {
@@ -22,6 +23,7 @@ export declare class ApnCore {
     readonly providerTransactionRecovery: ProviderX402TransactionRecoveryService;
     readonly rails: RailOperationService;
     readonly bridges: BridgeService;
+    readonly gasless: GaslessService;
     constructor(dependencies: CoreDependencies);
     execute(request: CommandRequest): Promise<OutputEnvelope>;
     private dispatch;

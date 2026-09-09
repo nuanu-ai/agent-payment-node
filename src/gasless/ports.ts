@@ -19,6 +19,7 @@ export interface GaslessBootstrapMaterial extends GaslessMaterialBinding {
 export interface GaslessUserOperationMaterial extends GaslessMaterialBinding {
   readonly role: "user_operation";
   readonly bootstrapMaterialHash: string;
+  readonly estimateHash: string;
   readonly userOperation: GaslessUserOperation;
   readonly userOperationHash: Hex;
 }

@@ -19,8 +19,12 @@ import { publicRailOperation, type RailOperationRecord } from "./rail-operation-
 import { BridgeOperationRepository } from "./lifi/operation-repository.js";
 import type { BridgeOperationRecord } from "./lifi/operation-model.js";
 import { publicBridgeOperation } from "./lifi/receipt.js";
+import { GaslessOperationRepository } from "./gasless/operation-repository.js";
+import type { GaslessOperationRecord } from "./gasless/operation-model.js";
+import { publicGaslessOperation } from "./gasless/receipt.js";
 
 export type StoredMoneyOperation =
+  | { readonly kind: "gasless_transfer"; readonly record: GaslessOperationRecord }
   | { readonly kind: "bridge_route"; readonly record: BridgeOperationRecord }
   | { readonly kind: "rail_transfer"; readonly record: RailOperationRecord }
   | { readonly kind: "direct_transfer"; readonly record: OperationRecord }
@@ -33,6 +37,7 @@ export class OperationService {
     private readonly providerX402 = new ProviderX402Repository(state.root),
     private readonly rails = new RailOperationRepository(state.root),
     private readonly bridges = new BridgeOperationRepository(state.root),
+    private readonly gasless = new GaslessOperationRepository(state.root),
   ) {}
 
   async resolvePrepare(input: {
@@ -43,6 +48,7 @@ export class OperationService {
     readonly requestHash: string;
   }): Promise<StoredMoneyOperation | null> {
     const matches = [
+      ...(await this.gasless.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "gasless_transfer" as const, record })),
       ...(await this.bridges.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "bridge_route" as const, record })),
       ...(await this.rails.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "rail_transfer" as const, record })),
       ...(await this.state.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "direct_transfer" as const, record })),
@@ -61,6 +67,7 @@ export class OperationService {
 
   async assertProfileAvailable(profileHash: string): Promise<void> {
     const active: StoredMoneyOperation[] = [
+      ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer" as const, record })),
       ...(await this.bridges.listOperations(profileHash)).map((record) => ({ kind: "bridge_route" as const, record })),
       ...(await this.rails.listOperations(profileHash)).map((record) => ({ kind: "rail_transfer" as const, record })),
       ...(await this.state.listOperations(profileHash)).map((record) => ({ kind: "direct_transfer" as const, record })),
@@ -83,7 +90,8 @@ export class OperationService {
     const providerX402 = await this.providerX402.findOperation(canonicalId);
     const rail = await this.rails.findOperation(canonicalId);
     const bridge = await this.bridges.findOperation(canonicalId);
-    if ([direct, x402, providerX402, rail, bridge].filter((value) => value !== null).length > 1) {
+    const gasless = await this.gasless.findOperation(canonicalId);
+    if ([direct, x402, providerX402, rail, bridge, gasless].filter((value) => value !== null).length > 1) {
       throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
     }
     if (direct !== null) return { kind: "direct_transfer", record: direct };
@@ -91,6 +99,7 @@ export class OperationService {
     if (providerX402 !== null) return { kind: "x402_fetch", strategy: "provider_atomic", record: providerX402 };
     if (rail !== null) return { kind: "rail_transfer", record: rail };
     if (bridge !== null) return { kind: "bridge_route", record: bridge };
+    if (gasless !== null) return { kind: "gasless_transfer", record: gasless };
     throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
   }
 
@@ -99,6 +108,7 @@ export class OperationService {
     if (operation.kind === "direct_transfer") return publicOperation(operation.record);
     if (operation.kind === "rail_transfer") return publicRailOperation(operation.record);
     if (operation.kind === "bridge_route") return publicBridgeOperation(operation.record);
+    if (operation.kind === "gasless_transfer") return publicGaslessOperation(operation.record);
     return operation.strategy === "local"
       ? publicX402Operation(operation.record)
       : publicProviderX402Operation(operation.record);

@@ -8,7 +8,12 @@ import { RailOperationRepository } from "./rail-operation-repository.js";
 import { type RailOperationRecord } from "./rail-operation-model.js";
 import { BridgeOperationRepository } from "./lifi/operation-repository.js";
 import type { BridgeOperationRecord } from "./lifi/operation-model.js";
+import { GaslessOperationRepository } from "./gasless/operation-repository.js";
+import type { GaslessOperationRecord } from "./gasless/operation-model.js";
 export type StoredMoneyOperation = {
+    readonly kind: "gasless_transfer";
+    readonly record: GaslessOperationRecord;
+} | {
     readonly kind: "bridge_route";
     readonly record: BridgeOperationRecord;
 } | {
@@ -31,7 +36,8 @@ export declare class OperationService {
     private readonly providerX402;
     private readonly rails;
     private readonly bridges;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository);
+    private readonly gasless;
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository);
     resolvePrepare(input: {
         readonly kind: StoredMoneyOperation["kind"];
         readonly profileHash: string;

@@ -170,6 +170,7 @@ test("gasless terminal approval renders exact USDC authority and rejects any ine
   assert.match(shown, /The sender pays no native gas\./u);
   assert.match(shown, /Persistent account delegation: .*; current state: empty/u);
   assert.match(shown, /Paymaster permission: .* up to .* USDC/u);
+  assert.match(shown, /Current paymaster allowance: 0 USDC/u);
   assert.match(shown, /The signed permit and operation have no on-chain expiry\. Delegation persists after this payment\./u);
   assert.match(shown, new RegExp(`Type exactly: ${phrase}`, "u"));
   assert.equal(acceptedTerminal.closes(), 1);

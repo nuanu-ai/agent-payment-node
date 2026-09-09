@@ -8,19 +8,24 @@ import { RailOperationRepository } from "./rail-operation-repository.js";
 import { publicRailOperation } from "./rail-operation-model.js";
 import { BridgeOperationRepository } from "./lifi/operation-repository.js";
 import { publicBridgeOperation } from "./lifi/receipt.js";
+import { GaslessOperationRepository } from "./gasless/operation-repository.js";
+import { publicGaslessOperation } from "./gasless/receipt.js";
 export class OperationService {
     state;
     providerX402;
     rails;
     bridges;
-    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root)) {
+    gasless;
+    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root), gasless = new GaslessOperationRepository(state.root)) {
         this.state = state;
         this.providerX402 = providerX402;
         this.rails = rails;
         this.bridges = bridges;
+        this.gasless = gasless;
     }
     async resolvePrepare(input) {
         const matches = [
+            ...(await this.gasless.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "gasless_transfer", record })),
             ...(await this.bridges.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "bridge_route", record })),
             ...(await this.rails.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "rail_transfer", record })),
             ...(await this.state.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "direct_transfer", record })),
@@ -39,6 +44,7 @@ export class OperationService {
     }
     async assertProfileAvailable(profileHash) {
         const active = [
+            ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer", record })),
             ...(await this.bridges.listOperations(profileHash)).map((record) => ({ kind: "bridge_route", record })),
             ...(await this.rails.listOperations(profileHash)).map((record) => ({ kind: "rail_transfer", record })),
             ...(await this.state.listOperations(profileHash)).map((record) => ({ kind: "direct_transfer", record })),
@@ -60,7 +66,8 @@ export class OperationService {
         const providerX402 = await this.providerX402.findOperation(canonicalId);
         const rail = await this.rails.findOperation(canonicalId);
         const bridge = await this.bridges.findOperation(canonicalId);
-        if ([direct, x402, providerX402, rail, bridge].filter((value) => value !== null).length > 1) {
+        const gasless = await this.gasless.findOperation(canonicalId);
+        if ([direct, x402, providerX402, rail, bridge, gasless].filter((value) => value !== null).length > 1) {
             throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
         }
         if (direct !== null)
@@ -73,6 +80,8 @@ export class OperationService {
             return { kind: "rail_transfer", record: rail };
         if (bridge !== null)
             return { kind: "bridge_route", record: bridge };
+        if (gasless !== null)
+            return { kind: "gasless_transfer", record: gasless };
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
     }
     async status(operationId) {
@@ -83,6 +92,8 @@ export class OperationService {
             return publicRailOperation(operation.record);
         if (operation.kind === "bridge_route")
             return publicBridgeOperation(operation.record);
+        if (operation.kind === "gasless_transfer")
+            return publicGaslessOperation(operation.record);
         return operation.strategy === "local"
             ? publicX402Operation(operation.record)
             : publicProviderX402Operation(operation.record);

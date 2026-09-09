@@ -15,7 +15,9 @@ import { type SmartAccountConsentPort } from "./metamask-smart-account-consent.j
 import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
 import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
+import type { GaslessDependencies } from "./gasless/service.js";
 export interface RuntimeFactoryOptions {
+    readonly gasless?: GaslessDependencies;
     readonly bridge?: BridgeDependencies;
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly directRails?: readonly DirectRailPort[];

@@ -57,6 +57,7 @@ const TOOL_NAMES = [
   "apn_x402_inspect_network",
   "apn_x402_fetch_prepare_network",
   "apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare", "apn_bridge_approve",
+  "apn_gasless_capabilities", "apn_gasless_balance", "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve",
 ] as const;
 const MASTER = Buffer.from("55".repeat(32), "hex");
 
@@ -169,6 +170,10 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_bridge_routes", properties: ["profile", "from_chain", "to_chain", "from_token", "to_token", "amount", "to", "min_output", "max_native_debit_wei", "max_route_fee", "slippage_bps"], required: ["profile", "from_chain", "to_chain", "from_token", "to_token", "amount", "to", "min_output", "max_native_debit_wei", "max_route_fee", "slippage_bps"], defaults: {} },
       { name: "apn_bridge_prepare", properties: ["profile", "quote", "route", "idempotency_key"], required: ["profile", "quote", "route", "idempotency_key"], defaults: {} },
       { name: "apn_bridge_approve", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_gasless_capabilities", properties: ["profile"], required: [], defaults: {} },
+      { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], defaults: {} },
+      { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], required: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], defaults: {} },
+      { name: "apn_gasless_transfer_approve", properties: ["operation"], required: ["operation"], defaults: {} },
     ]);
     const listedBytes = JSON.stringify(listed);
     assert.equal(listedBytes.includes(MASTER.toString("hex")), false);
