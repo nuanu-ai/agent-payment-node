@@ -28,7 +28,7 @@ type Inspection =
   | { readonly kind: "success"; readonly settlement: MetaMaskGaslessSettlement }
   | { readonly kind: "reverted"; readonly transactionBlock: MetaMaskGaslessSettlement["transactionBlock"];
       readonly finalityBlock: MetaMaskGaslessSettlement["finalityBlock"]; readonly evidenceHash: string }
-  | { readonly kind: "pending"; readonly evidenceHash: string | null }
+  | { readonly kind: "pending"; readonly evidenceHash: string | null; readonly usableCandidate: boolean }
   | { readonly kind: "invalid" | "unavailable" | "reorg"; readonly evidenceHash: string | null };
 
 /** Observe provider hints and the canonical enforcer log stream without any write/sign/send method. */
@@ -47,11 +47,10 @@ export async function observeMetaMaskGasless(context: MetaMaskObservationContext
   }
   if (providerResult?.kind === "reverted") return result(scan.cursor, providerHash, providerResult, context.clock);
   const adverse = chooseAdverse(scan.inspection, providerResult);
-  if (adverse !== null) return result(scan.cursor, providerHash ?? scan.candidate, adverse, context.clock);
-  const providerReason: MetaMaskGaslessReason = provider?.status === "failed" ? "mm_gasless_provider_failed" :
-    provider?.status === "unavailable" ? "mm_gasless_provider_unavailable" : "mm_gasless_pending";
-  const phase = providerReason === "mm_gasless_pending" ? "pending" : "unavailable";
-  return makeObservation(scan.cursor, phase, providerReason, providerHash, null, null,
+  if (adverse !== null) return result(scan.cursor, null, adverse, context.clock);
+  const usableCandidate = scan.inspection?.kind === "pending" && scan.inspection.usableCandidate ? scan.candidate :
+    providerResult?.kind === "pending" && providerResult.usableCandidate ? providerHash : null;
+  return makeObservation(scan.cursor, "pending", "mm_gasless_pending", usableCandidate, null, null,
     scan.evidenceHash ?? providerResult?.evidenceHash ?? null, null, context.clock);
 }
 
@@ -68,7 +67,7 @@ async function inspectCandidate(context: MetaMaskObservationContext, intent: Met
     context.call("eth_getTransactionReceipt", [transactionHash]),
   ]);
   if (rawTransaction === null || rawReceipt === null) {
-    return { kind: "pending", evidenceHash: hashObject({ transactionHash, pending: true }) };
+    return { kind: "pending", evidenceHash: hashObject({ transactionHash, pending: true }), usableCandidate: false };
   }
   const transaction = rpcRecord(rawTransaction), receipt = rpcRecord(rawReceipt);
   const blockNumber = rpcQuantity(receipt.blockNumber), blockHash = rpcHex(receipt.blockHash, 32, 32);
@@ -91,10 +90,12 @@ async function inspectCandidate(context: MetaMaskObservationContext, intent: Met
   const logs = parseReceiptLogs(receipt.logs, transactionHash, included, transactionIndex);
   const status = rpcQuantity(receipt.status);
   if (status !== 0n && status !== 1n) mmFail("mm_gasless_evidence_invalid");
+  const accounting = status === 1n ? verifyMetaMaskReceiptAccounting(intent, outer.from, logs) : null;
   const finality = (await rpcBlock(context.call, context.deployment.row.finalityTag)).block;
   if (BigInt(finality.numberAtomic) < blockNumber) {
     await recheckBlock(context.call, included); await recheckBlock(context.call, finality);
-    return { kind: "pending", evidenceHash: hashObject({ transactionHash, included, finality }) };
+    return { kind: "pending", evidenceHash: hashObject({ transactionHash, included, finality }),
+      usableCandidate: accounting !== null };
   }
   const [receiptState, finalityState] = await Promise.all([
     readMetaMaskChainState(context.call, context.deployment.row, intent.binding.address, included, intent.delegationHash),
@@ -107,13 +108,14 @@ async function inspectCandidate(context: MetaMaskObservationContext, intent: Met
     finalityBlock: finality, transactionIndexAtomic: transactionIndex.toString(), outer };
   if (status === 0n) {
     if (receiptState.counterAtomic !== "0" || finalityState.counterAtomic !== "0") {
-      return { kind: "pending", evidenceHash: hashObject({ ...baseProof, counterAdvancedAfterRevert: true }) };
+      return { kind: "pending", evidenceHash: hashObject({ ...baseProof, counterAdvancedAfterRevert: true }),
+        usableCandidate: false };
     }
     return { kind: "reverted", transactionBlock: included, finalityBlock: finality,
       evidenceHash: hashObject({ ...baseProof, status: "reverted" }) };
   }
   if (receiptState.counterAtomic !== "1" || finalityState.counterAtomic !== "1") mmFail("mm_gasless_evidence_invalid");
-  const accounting = verifyMetaMaskReceiptAccounting(intent, outer.from, logs);
+  if (accounting === null) mmFail("mm_gasless_internal");
   const observedAt = context.clock.now().toISOString();
   const transactionProofHash = hashObject(baseProof);
   const protocolHash = hashObject({ deploymentEvidenceHash: context.deployment.deploymentEvidenceHash,
@@ -220,9 +222,11 @@ function chooseAdverse(...values: readonly (Inspection | null)[]): Inspection | 
 
 function result(cursor: MetaMaskGaslessCursor, candidate: Hex | null,
   inspected: Inspection, clock: ClockPort): MetaMaskGaslessRpcObservation {
-  if (inspected.kind === "success") return makeObservation(cursor, "success", "mm_gasless_success",
-    inspected.settlement.txHash, inspected.settlement.transactionBlock, inspected.settlement.finalityBlock,
-    hashObject(inspected.settlement), inspected.settlement, clock);
+  if (inspected.kind === "success") return { cursor, observation: {
+    observedAt: inspected.settlement.observedAt, phase: "success", reason: "mm_gasless_success",
+    candidateTxHash: inspected.settlement.txHash, transactionBlock: inspected.settlement.transactionBlock,
+    finalityBlock: inspected.settlement.finalityBlock, evidenceHash: hashObject(inspected.settlement),
+  }, settlement: inspected.settlement };
   if (inspected.kind === "reverted") return makeObservation(cursor, "reverted", "mm_gasless_transaction_reverted",
     candidate, inspected.transactionBlock, inspected.finalityBlock, inspected.evidenceHash, null, clock);
   const map: Record<"invalid" | "unavailable" | "reorg" | "pending", readonly [MetaMaskGaslessObservation["phase"], MetaMaskGaslessReason]> = {

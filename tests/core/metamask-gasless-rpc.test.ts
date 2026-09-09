@@ -8,6 +8,7 @@ import type { Address, Hex } from "../../src/model.js";
 import { addressWord, MM_INCREASED_COUNT_TOPIC, MM_TRANSFER_TOPIC } from
   "../../src/metamask-gasless/chain/abi.js";
 import { MetaMaskGaslessRpc, metaMaskGaslessRpcFactory } from "../../src/metamask-gasless/chain/rpc.js";
+import { validateMetaMaskGaslessSnapshot } from "../../src/metamask-gasless/chain/snapshot.js";
 import { mmQuoteHash } from "../../src/metamask-gasless/economics.js";
 import { mmWalletIdentityHash } from "../../src/metamask-gasless/identity.js";
 import { MM_CHAINS, type MetaMaskGaslessChainId, type MetaMaskGaslessChainState,
@@ -123,6 +124,18 @@ test("lazy factory binds exact endpoints and protocol drift fails closed", async
     grossAtomic: "1000000" }), protocolError);
 });
 
+test("same-height snapshot blocks must have identical hash and timestamp", () => {
+  const snapshot = intent(block(8453, 100n)).initialSnapshot;
+  assert.equal(validateMetaMaskGaslessSnapshot(snapshot, { chainId: 8453, endpointHash: sha256(RPC_URL),
+    endpointOrigin: "https://rpc.example", grossAtomic: "1000000" }).headBlock.hash, snapshot.safeBlock.hash);
+  assert.throws(() => validateMetaMaskGaslessSnapshot({ ...snapshot,
+    headBlock: { ...snapshot.headBlock, hash: `0x${"e".repeat(64)}` } }, { chainId: 8453,
+    endpointHash: sha256(RPC_URL), endpointOrigin: "https://rpc.example", grossAtomic: "1000000" }), protocolError);
+  assert.throws(() => validateMetaMaskGaslessSnapshot({ ...snapshot,
+    headBlock: { ...snapshot.headBlock, timestampAtomic: "1788912101" } }, { chainId: 8453,
+    endpointHash: sha256(RPC_URL), endpointOrigin: "https://rpc.example", grossAtomic: "1000000" }), protocolError);
+});
+
 test("scan advances one complete 2000-block window and preserves cursor on a later reorg", async () => {
   const firstTransport = new FakeRpcTransport(8453, { finality: 2500n, head: 2501n });
   const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport: firstTransport });
@@ -148,13 +161,27 @@ test("full chain proof wins when provider reports failed", async () => {
     logs: rawSettlementLogs(value, txBlock) };
   const transport = new FakeRpcTransport(8453, { finality: 102n, head: 102n, transaction, receipt,
     counter: number => number >= 101n ? 1n : 0n });
-  const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport });
+  let tick = 0;
+  const advancingClock = { now: () => new Date(Date.parse("2026-09-09T00:01:00.000Z") + tick++ * 1000) };
+  const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: advancingClock, transport });
   const observed = await rpc.observe(value, { startBlock: value.initialSnapshot.safeBlock,
     nextBlockAtomic: "100", previousEndBlock: null }, { observedAt: "2026-09-09T00:00:30.000Z",
     requestIdHash: hashObject({ request: "synthetic" }), status: "failed", txHash: vector.type2.hash });
   assert.equal(observed.observation.phase, "success"); assert.equal(observed.settlement?.debitAtomic, "1000000");
+  assert.equal(observed.observation.observedAt, observed.settlement?.observedAt);
   assert.equal(observed.settlement?.outerSender, vector.relayer); assert.deepEqual(observed.settlement?.finalityBlock, finality);
   assert.ok(transport.calls.every(call => readMethods.has(call.method)));
+});
+
+test("confirmed provider hash stays private when RPC has no transaction or receipt", async () => {
+  const value = intent(block(8453, 100n));
+  const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now,
+    transport: new FakeRpcTransport(8453, { finality: 100n, head: 101n }) });
+  const observed = await rpc.observe(value, { startBlock: value.initialSnapshot.safeBlock,
+    nextBlockAtomic: "100", previousEndBlock: null }, { observedAt: "2026-09-09T00:00:30.000Z",
+    requestIdHash: hashObject({ request: "synthetic" }), status: "confirmed", txHash: vector.type2.hash });
+  assert.equal(observed.observation.phase, "pending"); assert.equal(observed.observation.reason, "mm_gasless_pending");
+  assert.equal(observed.observation.candidateTxHash, null); assert.equal(observed.settlement, null);
 });
 
 function intent(start: ReturnType<typeof block>): MetaMaskGaslessIntent {
