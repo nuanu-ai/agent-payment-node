@@ -18,6 +18,7 @@ export const RECIPIENT = "0x2222222222222222222222222222222222222222" as Address
 export const FEE_RECIPIENT = "0x3333333333333333333333333333333333333333" as Address;
 export const OUTER = "0x4444444444444444444444444444444444444444" as Address;
 export const TX_HASH = `0x${"99".repeat(32)}` as Hex;
+export const TX_HASH_B = `0x${"88".repeat(32)}` as Hex;
 export const PREPARED = "2026-09-09T00:00:00.000Z";
 export const APPROVED = "2026-09-09T00:00:30.000Z";
 export const DISPATCHED = "2026-09-09T00:01:00.000Z";
@@ -106,19 +107,27 @@ export function unknown(operation: MetaMaskGaslessOperationRecord, at = "2026-09
     failure: mmFailure("mm_gasless_submit_unknown") }, at);
 }
 
-export function complete(operation: MetaMaskGaslessOperationRecord, at = "2026-09-09T00:10:00.000Z") {
+export function complete(operation: MetaMaskGaslessOperationRecord, at = "2026-09-09T00:10:00.000Z",
+  txHash: Hex = TX_HASH) {
   const transactionBlock = block("120", "c"), finalityBlock = block("150", "d"), row = mmRegistry(8453).row;
-  const settlement = { observedAt: at, txHash: TX_HASH, transactionBlock, finalityBlock, outerSender: OUTER,
+  const protocolCodeHashes = Object.fromEntries(Object.entries(row.protocol).map(([name, pin]) => [name, pin.codeHash]));
+  const tokenState = { address: row.tokenImplementationAddress, codeHash: row.tokenImplementationCodeHash,
+    proxyCodeHash: row.tokenProxyCodeHash };
+  const settlement = { observedAt: at, txHash, transactionBlock, finalityBlock, outerSender: OUTER,
     transactionProofHash: hashObject({ fixture: "transaction" }), receiptHash: hashObject({ fixture: "receipt" }),
-    protocolHash: hashObject({ fixture: "protocol" }), tokenImplementationHash: row.tokenImplementationCodeHash,
+    protocolHash: hashObject({ deploymentEvidenceHash: mmRegistry(8453).deploymentEvidenceHash,
+      receipt: { block: transactionBlock, code: protocolCodeHashes },
+      finality: { block: finalityBlock, code: protocolCodeHashes } }),
+    tokenImplementationHash: hashObject({ token: row.token, receipt: { block: transactionBlock, ...tokenState },
+      finality: { block: finalityBlock, ...tokenState } }),
     deliveredAtomic: "9950000", feeAtomic: "50000", debitAtomic: "10000000", refundAtomic: "0" as const,
     unusedGrossAtomic: "0" as const, designation: "pinned" as const, permission: "consumed" as const,
     receiptCounterAtomic: "1" as const, finalityCounterAtomic: "1" as const };
   const patch: Partial<MetaMaskGaslessMutable> = { state: "completed", providerObservation: { observedAt: at,
     requestIdHash: hashObject({ purpose: "apn.metamask-gasless.request-id.v1", value: operation.intent.requestId }),
-    status: "confirmed", txHash: TX_HASH }, cursor: { startBlock: operation.cursor.startBlock,
+    status: "confirmed", txHash }, cursor: { startBlock: operation.cursor.startBlock,
     nextBlockAtomic: "151", previousEndBlock: finalityBlock }, observation: { observedAt: at, phase: "success",
-    reason: "mm_gasless_success", candidateTxHash: TX_HASH, transactionBlock, finalityBlock,
+    reason: "mm_gasless_success", candidateTxHash: txHash, transactionBlock, finalityBlock,
     evidenceHash: hashObject({ fixture: "evidence" }) }, settlement, failure: null };
   return advanceMetaMaskGaslessOperation(operation, patch, at);
 }

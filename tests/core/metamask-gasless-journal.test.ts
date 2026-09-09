@@ -15,7 +15,7 @@ import { advanceMetaMaskGaslessOperation, assertMetaMaskGaslessDispatchCapacity,
 import { validateMetaMaskGaslessContinuity,
   validateMetaMaskGaslessOperation } from "../../src/metamask-gasless/journal/validation.js";
 import { validateDirectory } from "../../src/secure-state-store.js";
-import { APPROVED, DISPATCHED, EXPIRES, TX_HASH, approve, complete, makeOperation, mark, unknown } from
+import { APPROVED, DISPATCHED, EXPIRES, TX_HASH, TX_HASH_B, approve, complete, makeOperation, mark, unknown } from
   "./metamask-gasless-journal-fixtures/factory.js";
 
 const OPS = "metamask-gasless-operations";
@@ -84,24 +84,44 @@ test("failed-effects precedence remains guarded until a later full success", () 
       phase: "pending", reason: "mm_gasless_pending", candidateTxHash: TX_HASH, transactionBlock: null,
       finalityBlock: null, evidenceHash: null }, failure: mmFailure("mm_gasless_pending") },
   "2026-09-09T00:03:00.000Z"), { code: "APN_STATE_CORRUPT" });
-  const providerConfirmed = advanceMetaMaskGaslessOperation(failed, { providerObservation: {
-    observedAt: "2026-09-09T00:03:00.000Z", requestIdHash: requestIdHash(failed), status: "confirmed", txHash: TX_HASH },
+  const unavailable = advanceMetaMaskGaslessOperation(failed, { providerObservation: {
+    observedAt: "2026-09-09T00:03:00.000Z", requestIdHash: requestIdHash(failed), status: "unavailable", txHash: TX_HASH },
     observation: { observedAt: "2026-09-09T00:03:00.000Z", phase: "unavailable",
-      reason: "mm_gasless_rpc_unavailable", candidateTxHash: TX_HASH, transactionBlock: null,
+      reason: "mm_gasless_rpc_unavailable", candidateTxHash: null, transactionBlock: null,
       finalityBlock: null, evidenceHash: null } }, "2026-09-09T00:03:00.000Z");
+  assert.equal(unavailable.state, "failed_effects_pending");
+  const providerConfirmed = advanceMetaMaskGaslessOperation(unavailable, { providerObservation: {
+    observedAt: "2026-09-09T00:04:00.000Z", requestIdHash: requestIdHash(failed), status: "confirmed", txHash: TX_HASH_B },
+    observation: { observedAt: "2026-09-09T00:04:00.000Z", phase: "pending",
+      reason: "mm_gasless_pending", candidateTxHash: null, transactionBlock: null,
+      finalityBlock: null, evidenceHash: null } }, "2026-09-09T00:04:00.000Z");
   assert.equal(providerConfirmed.state, "failed_effects_pending");
   const retainedUnavailable = advanceMetaMaskGaslessOperation(providerConfirmed, { providerObservation: {
-    observedAt: "2026-09-09T00:04:00.000Z", requestIdHash: requestIdHash(failed), status: "unavailable", txHash: TX_HASH },
-    observation: { observedAt: "2026-09-09T00:04:00.000Z", phase: "reorg",
-      reason: "mm_gasless_scan_reorg", candidateTxHash: TX_HASH, transactionBlock: null,
-      finalityBlock: null, evidenceHash: null } }, "2026-09-09T00:04:00.000Z");
+    observedAt: "2026-09-09T00:05:00.000Z", requestIdHash: requestIdHash(failed), status: "unavailable", txHash: TX_HASH_B },
+    observation: { observedAt: "2026-09-09T00:05:00.000Z", phase: "reorg",
+      reason: "mm_gasless_scan_reorg", candidateTxHash: null, transactionBlock: null,
+      finalityBlock: null, evidenceHash: null } }, "2026-09-09T00:05:00.000Z");
   assert.equal(retainedUnavailable.state, "failed_effects_pending");
   assert.throws(() => advanceMetaMaskGaslessOperation(mark(approve(makeOperation("new"))), {
     state: "unknown_finality", providerObservation: { observedAt: "2026-09-09T00:02:00.000Z",
       requestIdHash: requestIdHash(makeOperation("new")), status: "unavailable", txHash: TX_HASH },
     failure: mmFailure("mm_gasless_provider_unavailable") }, "2026-09-09T00:02:00.000Z"),
   { code: "APN_STATE_CORRUPT" });
-  assert.equal(complete(retainedUnavailable).state, "completed");
+  assert.equal(complete(retainedUnavailable, "2026-09-09T00:10:00.000Z", TX_HASH_B).settlement?.txHash, TX_HASH_B);
+});
+
+test("nonterminal observation revisions may drop an unconfirmed candidate without losing history", () => {
+  const marked = mark(approve(makeOperation("candidate-revision"))), at = "2026-09-09T00:02:00.000Z";
+  const pending = advanceMetaMaskGaslessOperation(marked, { state: "submitted_pending", providerObservation: {
+    observedAt: at, requestIdHash: requestIdHash(marked), status: "confirmed", txHash: TX_HASH },
+    observation: { observedAt: at, phase: "pending", reason: "mm_gasless_pending", candidateTxHash: TX_HASH,
+      transactionBlock: null, finalityBlock: null, evidenceHash: null }, failure: mmFailure("mm_gasless_pending") }, at);
+  const revisedAt = "2026-09-09T00:03:00.000Z";
+  const revised = advanceMetaMaskGaslessOperation(pending, { observation: { observedAt: revisedAt, phase: "pending",
+    reason: "mm_gasless_pending", candidateTxHash: null, transactionBlock: null, finalityBlock: null,
+    evidenceHash: null } }, revisedAt);
+  assert.equal(revised.observation?.candidateTxHash, null);
+  assert.equal(revised.transitions.at(-2)?.observation?.candidateTxHash, TX_HASH);
 });
 
 test("exact nested schemas, registry identity, hashes, and transition reconstruction fail closed", () => {
@@ -124,6 +144,16 @@ test("exact nested schemas, registry identity, hashes, and transition reconstruc
   const extra = structuredClone(initial) as unknown as Record<string, unknown>;
   extra.unknown = null;
   assert.throws(() => validateMetaMaskGaslessOperation(reseal(extra)), { code: "APN_STATE_CORRUPT" });
+  for (const proofKey of ["protocolHash", "tokenImplementationHash"] as const) {
+    const proofDrift = structuredClone(complete(later)) as unknown as Record<string, unknown>;
+    (proofDrift.settlement as Record<string, unknown>)[proofKey] = "f".repeat(64);
+    const transitions = proofDrift.transitions as Record<string, unknown>[];
+    const last = transitions.at(-1)!;
+    (last.settlement as Record<string, unknown>)[proofKey] = "f".repeat(64);
+    const { transitionHash: _transitionHash, ...transitionBody } = last;
+    last.transitionHash = hashObject(transitionBody);
+    assert.throws(() => validateMetaMaskGaslessOperation(reseal(proofDrift)), { code: "APN_STATE_CORRUPT" });
+  }
   assert.throws(() => validateMetaMaskGaslessContinuity(initial, makeOperation("fixture", "key-2")),
     { code: "APN_STATE_CORRUPT" });
 });
