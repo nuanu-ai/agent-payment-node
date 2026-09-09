@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
+import { ApnCore } from "../../src/core.js";
 import { EncryptedWalletStore, type WalletIdentity, type WalletSecretState } from "../../src/encrypted-wallet-store.js";
 import { EncryptedProviderAuthorizationStore } from "../../src/encrypted-provider-authorization-store.js";
 import { ApnError } from "../../src/errors.js";
@@ -18,11 +19,20 @@ import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/regist
 import { newGaslessOperation, transitionGasless } from "../../src/gasless/transitions.js";
 import { gaslessBatch, gaslessEnvelopeBinding, gaslessUserOperation } from "../../src/gasless/wire.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
-import type { Address } from "../../src/model.js";
+import type { Address, Hex } from "../../src/model.js";
+import type { ProviderAdapterBundle } from "../../src/provider-ports.js";
+import { ProviderRegistry } from "../../src/provider-registry.js";
+import { accountBindingHash, capabilityHash, coinbaseDirectCapabilitySnapshot, type ProviderProfileRecord } from "../../src/provider-profile.js";
+import { ProviderX402Repository } from "../../src/provider-x402-repository.js";
+import { StateProfileRepository } from "../../src/profile-repository.js";
 import { sealWallet, StateStore } from "../../src/state.js";
 import { EVM_REQUEST, evmCore } from "./evm-helpers.js";
-import { gaslessFixture as gaslessCoreFixture } from "./gasless-helpers.js";
-import { temporaryState } from "./helpers.js";
+import { GaslessApproval, GaslessTestRpc, gaslessFixture as gaslessCoreFixture } from "./gasless-helpers.js";
+import { TestNative, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
+import { LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
+import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
+import { TestHttp } from "./x402-helpers.js";
+import { X402_URL } from "./x402-vectors.js";
 
 const MASTER = Buffer.from("6d".repeat(32), "hex");
 const PREPARED = "2026-09-09T00:00:00.000Z";
@@ -419,4 +429,317 @@ async function rejectsCode(promise: Promise<unknown>, code: string): Promise<voi
     assert.equal((error as ApnError).code, code);
     return true;
   });
+}
+
+test("concurrent legacy direct and gasless preparation preserves the same-profile guard in both orders", { timeout: 15_000 }, async (t) => {
+  for (const first of ["gasless", "direct"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const gasless = await gaslessCoreFixture(temporary.root), direct = evmCore(temporary.root, undefined, gasless.wrapping);
+    const profileHash = gasless.state.profileHash(gasless.profile), gate = new BoundaryGate();
+    const loserState = new LockObservedState(temporary.root, `profile:${profileHash}`);
+    const gaslessCore = new ApnCore({ state: first === "gasless" ? gasless.state : loserState,
+      gasless: gasless.dependencies, clock: { now: () => new Date(gasless.now) } });
+    const directCore = first === "direct" ? direct.core : new ApnCore({ state: loserState,
+      rpc: direct.rpc, native: direct.local, clock: direct.clock });
+    const originalSnapshot = gasless.rpc.snapshot.bind(gasless.rpc);
+    const originalBalance = direct.rpc.evm.balance.bind(direct.rpc.evm);
+    if (first === "gasless") gasless.rpc.snapshot = async (owner) => { await gate.hold(); return await originalSnapshot(owner); };
+    else direct.rpc.evm.balance = async (address, selection) => { await gate.hold(); return await originalBalance(address, selection); };
+    const wrappingBefore = gasless.wrapping.loads;
+    const gaslessInput = { command: "gasless.transfer.prepare" as const, profile: gasless.profile,
+      request: gasless.request, idempotencyKey: `direct-${first}-gasless` };
+    const directInput = { ...EVM_REQUEST, profile: gasless.profile, idempotencyKey: `direct-${first}-legacy` };
+    const winner = first === "gasless" ? gaslessCore.execute(gaslessInput) : directCore.execute(directInput);
+    await gate.started;
+    const loser = first === "gasless" ? directCore.execute(directInput) : gaslessCore.execute(gaslessInput);
+    await loserState.attempted; gate.release();
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+    assert.equal(winnerResult.ok, true, winnerResult.error?.message);
+    assert.equal(loserResult.error?.code, "APN_OPERATION_BLOCKED");
+    const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
+    const directOperations = await direct.state.listOperations(profileHash);
+    assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
+    assert.equal(directOperations.length, first === "direct" ? 1 : 0);
+    const operations = [...gaslessOperations, ...directOperations];
+    assert.equal(operations.length, 1); assert.equal(operations[0]?.terminal, false);
+    assert.equal(operations[0]?.operationId, gasless.state.operationId(gasless.profile,
+      first === "gasless" ? gaslessInput.idempotencyKey : directInput.idempotencyKey));
+    if (first === "gasless") assert.equal(direct.rpc.genericBalanceCalls, 0);
+    else assert.equal(gasless.rpc.calls.length, 0);
+    assert.equal(gasless.wrapping.loads, wrappingBefore); assert.equal(direct.approval.intents.length, 0);
+    assert.equal(direct.rpc.broadcastCount, 0); assert.equal(direct.rpc.submissions.length, 0);
+    assert.equal(gasless.rpc.sends.length, 0); assert.equal(gasless.approval.calls.length, 0);
+  }
+});
+
+test("concurrent local x402 and gasless preparation preserves the same-profile guard in both orders", { timeout: 15_000 }, async (t) => {
+  for (const first of ["gasless", "x402"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const fixture = await gaslessCoreFixture(temporary.root);
+    const gate = new BoundaryGate(), profileLock = `profile:${fixture.state.profileHash(fixture.profile)}`;
+    const loserState = new LockObservedState(temporary.root, profileLock);
+    const x402Rpc = new TestRpc();
+    x402Rpc.x402Evidence = { ...x402Rpc.x402Evidence, address: fixture.account.address,
+      observedAt: fixture.now.toISOString(), block: { ...x402Rpc.x402Evidence.block,
+        timestamp: Math.floor(fixture.now.getTime() / 1_000).toString() } };
+    const http = new TestHttp(), policy = new TestProfilePolicy(), native = new TestNative();
+    const gaslessCore = new ApnCore({ state: first === "gasless" ? fixture.state : loserState,
+      gasless: fixture.dependencies, clock: { now: () => new Date(fixture.now) } });
+    const x402Core = new ApnCore({ state: first === "x402" ? new StateStore(temporary.root) : loserState,
+      rpc: x402Rpc, http, policy, native, clock: { now: () => new Date(fixture.now) } });
+    const originalSnapshot = fixture.rpc.snapshot.bind(fixture.rpc);
+    if (first === "gasless") fixture.rpc.snapshot = async (owner) => { await gate.hold(); return await originalSnapshot(owner); };
+    else {
+      const originalGet = http.get.bind(http);
+      http.get = async (request) => { await gate.hold(); return await originalGet(request); };
+    }
+    const wrappingBefore = fixture.wrapping.loads;
+    const gaslessInput = { command: "gasless.transfer.prepare" as const, profile: fixture.profile,
+      request: fixture.request, idempotencyKey: `local-x402-${first}-gasless` };
+    const x402Input = { command: "x402.fetch.prepare" as const, profile: fixture.profile, url: X402_URL,
+      maxAmountAtomic: "10000000", idempotencyKey: `local-x402-${first}-x402` };
+    const winner = first === "gasless" ? gaslessCore.execute(gaslessInput) : x402Core.execute(x402Input);
+    await gate.started;
+    const loser = first === "gasless" ? x402Core.execute(x402Input) : gaslessCore.execute(gaslessInput);
+    await loserState.attempted; gate.release();
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+    assert.equal(winnerResult.ok, true, winnerResult.error?.message);
+    assert.equal(loserResult.error?.code, "APN_OPERATION_BLOCKED");
+    const gaslessOperations = await fixture.core.gasless.records.listAllOperations();
+    const x402Operations = await fixture.state.listAllX402Operations();
+    assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
+    assert.equal(x402Operations.length, first === "x402" ? 1 : 0);
+    const operations = [...gaslessOperations, ...x402Operations];
+    assert.equal(operations.length, 1); assert.equal(operations[0]?.terminal, false);
+    assert.equal(operations[0]?.operationId, fixture.state.operationId(fixture.profile,
+      first === "gasless" ? gaslessInput.idempotencyKey : x402Input.idempotencyKey));
+    if (first === "gasless") {
+      assert.equal(http.calls.length, 0); assert.equal(x402Rpc.x402PrepareCalls, 0);
+    } else {
+      assert.equal(fixture.rpc.calls.length, 0); assert.equal(fixture.wrapping.loads, wrappingBefore);
+    }
+    assert.equal(fixture.wrapping.loads, wrappingBefore); assert.equal(fixture.approval.calls.length, 0);
+    assert.equal(fixture.rpc.sends.length, 0); assert.equal(native.calls.length, 0); assert.equal(x402Rpc.submissions.length, 0);
+  }
+});
+
+test("concurrent provider-atomic x402 and gasless preparation serialize one global idempotency identity in both orders", { timeout: 15_000 }, async (t) => {
+  for (const first of ["gasless", "provider"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const gasless = await gaslessCoreFixture(temporary.root);
+    const provider = await providerAtomicFixture(temporary.root, gasless.now);
+    const idempotencyKey = `provider-atomic-global-${first}`;
+    const idempotencyLock = `operation:idempotency:${gasless.state.idempotencyHash(idempotencyKey)}`;
+    const gate = new BoundaryGate(), loserState = new LockObservedState(temporary.root, idempotencyLock);
+    const gaslessCore = new ApnCore({ state: first === "gasless" ? gasless.state : loserState,
+      gasless: gasless.dependencies, clock: { now: () => new Date(gasless.now) } });
+    const providerState = first === "provider" ? provider.state : loserState;
+    const providerCore = new ApnCore({ state: providerState, profileRepository: new StateProfileRepository(providerState),
+      providerRegistry: provider.registry, providerX402Repository: provider.repository, policy: provider.policy,
+      rpc: provider.rpc, http: provider.http, native: provider.native, rpcUrl: provider.rpcUrl,
+      clock: { now: () => new Date(provider.now) } });
+    const originalSnapshot = gasless.rpc.snapshot.bind(gasless.rpc);
+    const originalGet = provider.http.get.bind(provider.http);
+    if (first === "gasless") gasless.rpc.snapshot = async (owner) => { await gate.hold(); return await originalSnapshot(owner); };
+    else provider.http.get = async (request) => { await gate.hold(); return await originalGet(request); };
+    const wrappingBefore = gasless.wrapping.loads;
+    const gaslessInput = { command: "gasless.transfer.prepare" as const, profile: gasless.profile,
+      request: gasless.request, idempotencyKey };
+    const providerInput = { command: "x402.fetch.prepare" as const, profile: provider.profile.profile,
+      url: X402_URL, maxAmountAtomic: "2000000", idempotencyKey };
+    const winner = first === "gasless" ? gaslessCore.execute(gaslessInput) : providerCore.execute(providerInput);
+    await gate.started;
+    const loser = first === "gasless" ? providerCore.execute(providerInput) : gaslessCore.execute(gaslessInput);
+    await loserState.attempted; gate.release();
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+    assert.equal(winnerResult.ok, true, winnerResult.error?.message);
+    assert.equal(loserResult.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+    const gaslessOperations = await gasless.core.gasless.records.listAllOperations();
+    const providerOperations = await provider.repository.listAllOperations();
+    assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
+    assert.equal(providerOperations.length, first === "provider" ? 1 : 0);
+    const operations = [...gaslessOperations, ...providerOperations];
+    assert.equal(operations.length, 1); assert.equal(operations[0]?.terminal, false);
+    assert.equal(operations[0]?.idempotencyHash, gasless.state.idempotencyHash(idempotencyKey));
+    assert.equal(operations[0]?.operationId, gasless.state.operationId(
+      first === "gasless" ? gasless.profile : provider.profile.profile, idempotencyKey));
+    if (first === "gasless") {
+      assert.equal(provider.http.calls.length, 0); assert.equal(provider.calls.probe, 0);
+      assert.equal(provider.calls.balance, 0); assert.equal(provider.calls.crossCheck, 0); assert.equal(provider.calls.rpcChain, 0);
+    } else assert.equal(gasless.rpc.calls.length, 0);
+    assert.equal(gasless.wrapping.loads, wrappingBefore); assert.equal(gasless.approval.calls.length, 0);
+    assert.equal(gasless.rpc.sends.length, 0); assert.equal(provider.calls.prime, 0); assert.equal(provider.calls.execute, 0);
+    assert.equal(provider.rpc.submissions.length, 0); assert.equal(provider.native.calls.length, 0);
+  }
+});
+
+test("concurrent Solana rail and gasless preparation preserves the same-profile guard in both orders", { timeout: 15_000 }, async (t) => {
+  for (const first of ["gasless", "rail"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const rail = await solanaFixture(temporary.root);
+    const gasless = await gaslessProfileFixture(temporary.root, rail.account.profile, rail.now, rail.wrapping);
+    const gate = new BoundaryGate(), profileHash = gasless.state.profileHash(gasless.profile);
+    const loserState = new LockObservedState(temporary.root, `profile:${profileHash}`);
+    const gaslessCore = new ApnCore({ state: first === "gasless" ? gasless.state : loserState,
+      gasless: gasless.dependencies, clock: { now: () => new Date(gasless.now) } });
+    const railCore = first === "rail" ? rail.core : new ApnCore({ state: loserState, chainAccounts: rail.storage,
+      directRails: [rail.adapter], railApproval: rail.approval, chainPolicyApproval: { approve: async () => {} },
+      clock: { now: () => new Date(rail.now) } });
+    const originalSnapshot = gasless.rpc.snapshot.bind(gasless.rpc);
+    const originalPrepare = rail.adapter.prepare.bind(rail.adapter);
+    if (first === "gasless") gasless.rpc.snapshot = async (owner) => { await gate.hold(); return await originalSnapshot(owner); };
+    else rail.adapter.prepare = async (input) => { await gate.hold(); return await originalPrepare(input); };
+    const railCallsBefore = rail.rpc.calls.length, wrappingBefore = rail.wrapping.loads;
+    const gaslessInput = { command: "gasless.transfer.prepare" as const, profile: gasless.profile,
+      request: gasless.request, idempotencyKey: `rail-${first}-gasless` };
+    const railInput = { command: "transfer.prepare-solana" as const, profile: rail.account.profile, asset: "usdc" as const,
+      recipient: SOL_RECIPIENT, amount: "1", maximumFee: "0.003", idempotencyKey: `rail-${first}-solana` };
+    const winner = first === "gasless" ? gaslessCore.execute(gaslessInput) : railCore.execute(railInput);
+    await gate.started;
+    const loser = first === "gasless" ? railCore.execute(railInput) : gaslessCore.execute(gaslessInput);
+    await loserState.attempted; gate.release();
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+    assert.equal(winnerResult.ok, true, winnerResult.error?.message);
+    assert.equal(loserResult.error?.code, "APN_OPERATION_BLOCKED");
+    const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
+    const railOperations = await rail.core.rails.records.listOperations(profileHash);
+    assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
+    assert.equal(railOperations.length, first === "rail" ? 1 : 0);
+    const operations = [...gaslessOperations, ...railOperations];
+    assert.equal(operations.length, 1); assert.equal(operations[0]?.terminal, false);
+    assert.equal(operations[0]?.operationId, gasless.state.operationId(gasless.profile,
+      first === "gasless" ? gaslessInput.idempotencyKey : railInput.idempotencyKey));
+    if (first === "gasless") assert.equal(rail.rpc.calls.length, railCallsBefore);
+    else assert.equal(gasless.rpc.calls.length, 0);
+    assert.equal(rail.wrapping.loads, wrappingBefore); assert.equal(rail.approval.calls.length, 0);
+    assert.equal(rail.rpc.submissions.length, 0); assert.equal(gasless.rpc.sends.length, 0); assert.equal(gasless.approval.calls.length, 0);
+  }
+});
+
+test("concurrent LI.FI bridge and gasless preparation preserves the same-profile guard in both orders", { timeout: 15_000 }, async (t) => {
+  for (const first of ["gasless", "bridge"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const bridge = await lifiFixture(temporary.root);
+    const quotes = await bridge.core.execute({ command: "bridge.routes", profile: bridge.profile, request: bridge.request });
+    assert.equal(quotes.ok, true, quotes.error?.message);
+    const quote = (quotes.data as { quote_hash: string }).quote_hash;
+    const gasless = await gaslessProfileFixture(temporary.root, bridge.profile, bridge.now, bridge.wrapping,
+      { key: LIFI_SYNTHETIC_KEY, initializeWallet: false });
+    const gate = new BoundaryGate(), profileHash = gasless.state.profileHash(gasless.profile);
+    const loserState = new LockObservedState(temporary.root, `profile:${profileHash}`);
+    const gaslessCore = new ApnCore({ state: first === "gasless" ? gasless.state : loserState,
+      gasless: gasless.dependencies, clock: { now: () => new Date(gasless.now) } });
+    const bridgeCore = first === "bridge" ? bridge.core : new ApnCore({ state: loserState,
+      bridge: bridge.dependencies, clock: { now: () => new Date(bridge.now) } });
+    const originalSnapshot = gasless.rpc.snapshot.bind(gasless.rpc);
+    const originalMaterialize = bridge.provider.materialize.bind(bridge.provider);
+    if (first === "gasless") gasless.rpc.snapshot = async (owner) => { await gate.hold(); return await originalSnapshot(owner); };
+    else bridge.provider.materialize = async (selected) => { await gate.hold(); return await originalMaterialize(selected); };
+    const wrappingBefore = bridge.wrapping.loads, sourceCallsBefore = bridge.source.calls.length;
+    const gaslessInput = { command: "gasless.transfer.prepare" as const, profile: gasless.profile,
+      request: gasless.request, idempotencyKey: `bridge-${first}-gasless` };
+    const bridgeInput = { command: "bridge.prepare" as const, profile: bridge.profile, quote,
+      route: "route-across", idempotencyKey: `bridge-${first}-lifi` };
+    const winner = first === "gasless" ? gaslessCore.execute(gaslessInput) : bridgeCore.execute(bridgeInput);
+    await gate.started;
+    const loser = first === "gasless" ? bridgeCore.execute(bridgeInput) : gaslessCore.execute(gaslessInput);
+    await loserState.attempted; gate.release();
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+    assert.equal(winnerResult.ok, true, winnerResult.error?.message);
+    assert.equal(loserResult.error?.code, "APN_OPERATION_BLOCKED");
+    const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
+    const bridgeOperations = await bridge.core.bridges.records.listOperations(profileHash);
+    assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
+    assert.equal(bridgeOperations.length, first === "bridge" ? 1 : 0);
+    const operations = [...gaslessOperations, ...bridgeOperations];
+    assert.equal(operations.length, 1); assert.equal(operations[0]?.terminal, false);
+    assert.equal(operations[0]?.operationId, gasless.state.operationId(gasless.profile,
+      first === "gasless" ? gaslessInput.idempotencyKey : bridgeInput.idempotencyKey));
+    if (first === "gasless") {
+      assert.equal(bridge.provider.materializeCalls, 0); assert.equal(bridge.source.calls.length, sourceCallsBefore);
+    } else assert.equal(gasless.rpc.calls.length, 0);
+    assert.equal(bridge.wrapping.loads, wrappingBefore); assert.equal(bridge.approval.calls.length, 0);
+    assert.equal(bridge.source.submissions.length, 0); assert.equal(bridge.destination.submissions.length, 0);
+    assert.equal(gasless.rpc.sends.length, 0); assert.equal(gasless.approval.calls.length, 0);
+  }
+});
+
+class BoundaryGate {
+  private signalStarted!: () => void;
+  private signalRelease!: () => void;
+  readonly started = new Promise<void>((resolve) => { this.signalStarted = resolve; });
+  private readonly released = new Promise<void>((resolve) => { this.signalRelease = resolve; });
+  async hold(): Promise<void> { this.signalStarted(); await this.released; }
+  release(): void { this.signalRelease(); }
+}
+
+class LockObservedState extends StateStore {
+  private signalAttempted!: () => void;
+  readonly attempted = new Promise<void>((resolve) => { this.signalAttempted = resolve; });
+  constructor(root: string, private readonly target: string) { super(root); }
+  protected override async beforeLockAcquire(key: string): Promise<void> {
+    if (key === this.target) this.signalAttempted();
+  }
+}
+
+async function gaslessProfileFixture(root: string, profile: string, now: Date, wrapping: WrappingSecretPort, options: {
+  readonly key?: Hex; readonly initializeWallet?: boolean;
+} = {}) {
+  const state = new StateStore(root); await state.initialize();
+  const key = options.key ?? generatePrivateKey(), account = privateKeyToAccount(key);
+  if (options.initializeWallet !== false) {
+    const identity = { profile, address: account.address, chainId: 8453 as const, createdAt: now.toISOString(),
+      bindingHash: hashObject({ profile, address: account.address, createdAt: now.toISOString() }) };
+    await new EncryptedWalletStore(state, wrapping).save(identity,
+      { version: "apn.wallet-secret.v1", privateKey: key, directEffects: {}, x402Effects: {} }, Buffer.alloc(32, 73));
+    await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile, profileHash: state.profileHash(profile),
+      address: identity.address, createdAt: identity.createdAt, bindingHash: identity.bindingHash }));
+  }
+  const rpc = new GaslessTestRpc(8453, account.address, "empty", now), approval = new GaslessApproval();
+  const custody = new LocalGaslessCustody(state, wrapping, () => now.getTime());
+  const dependencies = { rpcFor: () => rpc, custody, approval };
+  const core = new ApnCore({ state, gasless: dependencies, clock: { now: () => new Date(now) } });
+  const request = { chainId: 8453 as const, recipient: RECIPIENT, grossAtomic: "10000000",
+    maxFeeAtomic: "200000", minReceivedAtomic: "9800000" };
+  return { state, profile, now, rpc, approval, custody, dependencies, core, request };
+}
+
+async function providerAtomicFixture(root: string, now: Date) {
+  const state = new StateStore(root); await state.initialize();
+  const capabilities = coinbaseDirectCapabilitySnapshot(), providerId = "coinbase-awal";
+  const profile: ProviderProfileRecord = {
+    schema_version: "apn.provider-profile.v1", profile: "provider-atomic", profile_hash: state.profileHash("provider-atomic"),
+    provider_id: providerId, public_address: "0x1111111111111111111111111111111111111111",
+    account_binding_hash: accountBindingHash(providerId, "0x1111111111111111111111111111111111111111"),
+    trust_class: "provider_managed_non_custodial_tee", revision: 1, capability_snapshot: capabilities,
+    capability_hash: capabilityHash(capabilities), observed_at: now.toISOString(), drift: { state: "bound", reason: "none" },
+  };
+  await new StateProfileRepository(state).save(profile);
+  const calls = { probe: 0, balance: 0, crossCheck: 0, rpcChain: 0, prime: 0, execute: 0 };
+  const adapter: ProviderAdapterBundle = {
+    provider_id: providerId, trust_class: profile.trust_class, capabilities,
+    lifecycle: {
+      async connect() { throw new Error("provider connect is forbidden in preparation concurrency tests"); },
+      async probeStatus() { calls.probe += 1; },
+      async logout() { throw new Error("provider logout is forbidden in preparation concurrency tests"); },
+    },
+    reads: {
+      async observeBalance() { calls.balance += 1; return { address: profile.public_address,
+        account_binding_hash: profile.account_binding_hash, chain: "base" as const, asset: "USDC" as const,
+        raw: "50000000", formatted: "50 USDC", decimals: 6 as const, observed_at: now.toISOString() }; },
+      async crossCheckAddress(expected) { calls.crossCheck += 1; assert.equal(expected, profile.public_address); },
+    },
+    x402: {
+      mode: "provider_atomic_paid_fetch", assertCompatibleIntent() {},
+      async prime() { calls.prime += 1; throw new Error("provider prime is forbidden during prepare"); },
+      async execute() { calls.execute += 1; throw new Error("provider paid fetch is forbidden during prepare"); },
+    },
+    evidence: { owner: "apn" },
+  };
+  const registry = new ProviderRegistry([{ provider_id: providerId, create: () => adapter }]);
+  const repository = new ProviderX402Repository(root), policy = new TestProfilePolicy(), rpc = new TestRpc();
+  const originalChain = rpc.assertBaseChain.bind(rpc);
+  rpc.assertBaseChain = async () => { calls.rpcChain += 1; return await originalChain(); };
+  const http = new TestHttp(), native = new TestNative(), rpcUrl = "https://rpc.example";
+  return { state, profile, now, calls, registry, repository, policy, rpc, http, native, rpcUrl };
 }
