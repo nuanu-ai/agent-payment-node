@@ -1,4 +1,5 @@
 import { keccak256 } from "viem";
+import { hashObject } from "../../canonical.js";
 import type {
   MetaMaskGaslessApproval,
   MetaMaskGaslessBlock,
@@ -154,8 +155,18 @@ function settlement(value: unknown, intent: MetaMaskGaslessIntent, at: string): 
   if (BigInt(transaction.numberAtomic) < BigInt(intent.initialSnapshot.safeBlock.numberAtomic)) corrupt();
   const outer = mmCanonicalAddress(s.outerSender);
   if (outer === MM_ZERO_ADDRESS || outer === intent.binding.address) corrupt();
-  mmHash(s.transactionProofHash); mmHash(s.receiptHash); mmHash(s.protocolHash);
-  if (mmHex(s.tokenImplementationHash, 32) !== mmRegistry(intent.request.chainId).row.tokenImplementationCodeHash ||
+  mmHash(s.transactionProofHash); mmHash(s.receiptHash); mmHash(s.protocolHash); mmHash(s.tokenImplementationHash);
+  const deployment = mmRegistry(intent.request.chainId), row = deployment.row;
+  const protocolHash = hashObject({ deploymentEvidenceHash: deployment.deploymentEvidenceHash,
+    receipt: { block: transaction, code: Object.fromEntries(Object.entries(row.protocol).map(([name, pin]) =>
+      [name, pin.codeHash])) },
+    finality: { block: finality, code: Object.fromEntries(Object.entries(row.protocol).map(([name, pin]) =>
+      [name, pin.codeHash])) } });
+  const tokenState = { address: row.tokenImplementationAddress, codeHash: row.tokenImplementationCodeHash,
+    proxyCodeHash: row.tokenProxyCodeHash };
+  const tokenImplementationHash = hashObject({ token: row.token,
+    receipt: { block: transaction, ...tokenState }, finality: { block: finality, ...tokenState } });
+  if (s.protocolHash !== protocolHash || s.tokenImplementationHash !== tokenImplementationHash ||
     s.deliveredAtomic !== intent.quote.netAtomic || s.feeAtomic !== intent.quote.feeAtomic ||
     s.debitAtomic !== intent.request.grossAtomic || s.refundAtomic !== "0" || s.unusedGrossAtomic !== "0" ||
     s.designation !== "pinned" || s.permission !== "consumed" || s.receiptCounterAtomic !== "1" || s.finalityCounterAtomic !== "1") corrupt();

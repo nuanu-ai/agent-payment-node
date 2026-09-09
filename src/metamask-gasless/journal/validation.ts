@@ -34,9 +34,6 @@ function transition(value: unknown, intent: MetaMaskGaslessOperationRecord["inte
   const normalized = mmJournalMutable(mutable(t), intent, fingerprint, at);
   return { ...normalized, at, previousHash, transitionHash };
 }
-function candidate(value: MetaMaskGaslessMutable): string | null {
-  return value.settlement?.txHash ?? value.observation?.candidateTxHash ?? null;
-}
 function step(previous: MetaMaskGaslessTransition, next: MetaMaskGaslessTransition): void {
   if (!EDGES[previous.state].includes(next.state) || time(next.at) < time(previous.at)) corrupt();
   if (previous.approval !== null && !mmSame(previous.approval, next.approval)) corrupt();
@@ -46,15 +43,12 @@ function step(previous: MetaMaskGaslessTransition, next: MetaMaskGaslessTransiti
   if (previous.submissionAttempts === 1 &&
     (next.submissionAttempts !== 1 || previous.dispatchStartedAt !== next.dispatchStartedAt)) corrupt();
   if (previous.settlement !== null && !mmSame(previous.settlement, next.settlement)) corrupt();
-  const oldCandidate = candidate(previous), newCandidate = candidate(next);
-  if (oldCandidate !== null && oldCandidate !== newCandidate) corrupt();
   if (previous.providerObservation !== null && next.providerObservation !== null) {
     if (time(next.providerObservation.observedAt) < time(previous.providerObservation.observedAt) ||
-      previous.providerObservation.requestIdHash !== next.providerObservation.requestIdHash ||
-      (previous.providerObservation.txHash !== null && previous.providerObservation.txHash !== next.providerObservation.txHash)) corrupt();
+      previous.providerObservation.requestIdHash !== next.providerObservation.requestIdHash) corrupt();
   }
-  if (next.providerObservation?.status === "unavailable" && next.providerObservation.txHash !== null &&
-    previous.providerObservation?.txHash !== next.providerObservation.txHash) corrupt();
+  if (next.providerObservation?.status === "unavailable" &&
+    next.providerObservation.txHash !== (previous.providerObservation?.txHash ?? null)) corrupt();
   if (previous.observation !== null && next.observation !== null &&
     time(next.observation.observedAt) < time(previous.observation.observedAt)) corrupt();
   const before = BigInt(previous.cursor.nextBlockAtomic), after = BigInt(next.cursor.nextBlockAtomic);
