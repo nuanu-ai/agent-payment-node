@@ -5,9 +5,11 @@ import test from "node:test";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { EncryptedWalletStore, type WalletIdentity, type WalletSecretState } from "../../src/encrypted-wallet-store.js";
+import { EncryptedProviderAuthorizationStore } from "../../src/encrypted-provider-authorization-store.js";
 import { ApnError } from "../../src/errors.js";
 import { LocalGaslessCustody } from "../../src/gasless/custody.js";
 import { gaslessFee, gaslessGas } from "../../src/gasless/economics.js";
+import { GaslessOperationRepository } from "../../src/gasless/operation-repository.js";
 import type { GaslessBootstrapMaterial, GaslessUserOperationMaterial } from "../../src/gasless/ports.js";
 import type { GaslessEstimate, GaslessIntent, GaslessSnapshot } from "../../src/gasless/model.js";
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
@@ -18,6 +20,8 @@ import { gaslessBatch, gaslessEnvelopeBinding, gaslessUserOperation } from "../.
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { Address } from "../../src/model.js";
 import { sealWallet, StateStore } from "../../src/state.js";
+import { EVM_REQUEST, evmCore } from "./evm-helpers.js";
+import { gaslessFixture as gaslessCoreFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 const MASTER = Buffer.from("6d".repeat(32), "hex");
@@ -129,6 +133,120 @@ test("signing gates and changed encrypted keys fail before a new gasless effect"
   );
   await assert.rejects(stat(effectFile(fixture, "bootstrap")), { code: "ENOENT" });
   assert.equal(fixture.wrapping.creates, 0);
+});
+
+test("gasless repository initialization preserves local-wallet, provider-authorization, and unresolved direct identities", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const gasless = await gaslessCoreFixture(temporary.root);
+  const direct = evmCore(temporary.root, undefined, gasless.wrapping);
+  const directResult = await direct.core.execute({
+    ...EVM_REQUEST,
+    profile: gasless.profile,
+    idempotencyKey: "older-direct-preserved-0001",
+  });
+  assert.equal(directResult.ok, true, directResult.error?.message);
+  const directId = (directResult.operation as { operation_id: string }).operation_id;
+  const directBefore = await direct.state.findOperation(directId);
+  assert.ok(directBefore);
+  assert.equal(directBefore.terminal, false);
+
+  const providerId = gasless.state.operationId(gasless.profile, "synthetic-provider-envelope-0001");
+  const providerBinding = {
+    profile: gasless.profile,
+    profileHash: gasless.state.profileHash(gasless.profile),
+    operationId: providerId,
+    fingerprint: hashObject("synthetic-provider-fingerprint"),
+    wallet: gasless.account.address.toLowerCase() as Address,
+    providerId: "synthetic-provider",
+    profileRevision: 1,
+    capabilityHash: hashObject("synthetic-provider-capability"),
+    accountBindingHash: hashObject("synthetic-provider-account"),
+  };
+  await new EncryptedProviderAuthorizationStore(gasless.state, gasless.wrapping).save(providerBinding, {
+    schemaVersion: "apn.provider-authorization.v1",
+    phase: "invocation_started",
+    requestHash: hashObject("synthetic-provider-request"),
+    updatedAt: gasless.now.toISOString(),
+  });
+
+  const profileHash = gasless.state.profileHash(gasless.profile);
+  const paths = [
+    join(temporary.root, "wallets", `${gasless.profile}.json`),
+    join(temporary.root, "wallets", profileHash, "wallet.json"),
+    join(temporary.root, "provider-authorizations", profileHash, `${providerId}.json`),
+    join(temporary.root, "operations", profileHash, `${directId}.json`),
+  ];
+  const bytesBefore = await Promise.all(paths.map(async (path) => await readFile(path)));
+  for (let index = 0; index < 3; index += 1) {
+    await new StateStore(temporary.root).initialize();
+    assert.deepEqual(await new GaslessOperationRepository(temporary.root).listAllOperations(), []);
+  }
+  const bytesAfter = await Promise.all(paths.map(async (path) => await readFile(path)));
+  assert.deepEqual(bytesAfter, bytesBefore);
+
+  const directAfter = await new StateStore(temporary.root).findOperation(directId);
+  assert.ok(directAfter);
+  for (const field of ["operationId", "idempotencyHash", "requestHash", "profileHash", "fingerprint"] as const) {
+    assert.equal(directAfter[field], directBefore[field]);
+  }
+  const blocked = await gasless.core.execute({
+    command: "gasless.transfer.prepare",
+    profile: gasless.profile,
+    request: gasless.request,
+    idempotencyKey: "gasless-behind-older-direct-0001",
+  });
+  assert.equal(blocked.error?.code, "APN_OPERATION_BLOCKED");
+  assert.deepEqual(await gasless.core.gasless.records.listOperations(profileHash), []);
+  assert.equal(gasless.rpc.calls.length, 0, "the active direct operation must block before gasless RPC access");
+  assert.deepEqual(await Promise.all(paths.map(async (path) => await readFile(path))), bytesBefore);
+});
+
+test("an active gasless operation blocks a new direct prepare for the same profile", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const gasless = await gaslessCoreFixture(temporary.root);
+  const active = await gasless.prepare("active-gasless-before-direct-0001");
+  const direct = evmCore(temporary.root, undefined, gasless.wrapping);
+  const blocked = await direct.core.execute({
+    ...EVM_REQUEST,
+    profile: gasless.profile,
+    idempotencyKey: "direct-behind-gasless-0001",
+  });
+  assert.equal(blocked.error?.code, "APN_OPERATION_BLOCKED");
+  assert.deepEqual(await direct.state.listOperations(active.operation.profileHash), []);
+  assert.equal(direct.rpc.genericBalanceCalls, 0, "the active gasless operation must block before direct RPC access");
+  assert.deepEqual(await gasless.record(active.id), active.operation);
+});
+
+test("concurrent direct and gasless prepares serialize one shared idempotency identity", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const gasless = await gaslessCoreFixture(temporary.root);
+  const direct = evmCore(temporary.root, undefined, gasless.wrapping);
+  const idempotencyKey = "cross-family-concurrent-0001";
+  const [gaslessResult, directResult] = await Promise.all([
+    gasless.core.execute({
+      command: "gasless.transfer.prepare",
+      profile: gasless.profile,
+      request: gasless.request,
+      idempotencyKey,
+    }),
+    direct.core.execute({ ...EVM_REQUEST, profile: gasless.profile, idempotencyKey }),
+  ]);
+  const results = [gaslessResult, directResult];
+  assert.equal(results.filter((result) => result.ok).length, 1);
+  assert.deepEqual(results.filter((result) => !result.ok).map((result) => result.error?.code), ["APN_IDEMPOTENCY_CONFLICT"]);
+
+  const profileHash = gasless.state.profileHash(gasless.profile);
+  const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
+  const directOperations = await direct.state.listOperations(profileHash);
+  assert.equal(gaslessOperations.length + directOperations.length, 1);
+  const winner = [...gaslessOperations, ...directOperations][0]!;
+  assert.equal(winner.operationId, gasless.state.operationId(gasless.profile, idempotencyKey));
+  assert.equal(winner.idempotencyHash, gasless.state.idempotencyHash(idempotencyKey));
+  assert.equal(gasless.rpc.calls.length > 0, gaslessOperations.length === 1);
+  assert.equal(direct.rpc.genericBalanceCalls > 0, directOperations.length === 1);
 });
 
 async function gaslessFixture(profile: string, delegation: "empty" | "expected") {
