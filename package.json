@@ -25,7 +25,8 @@
     "docs/solana.md",
     "LICENSE",
     "docs/tron.md",
-    "docs/lifi.md"
+    "docs/lifi.md",
+    "docs/gasless.md"
   ],
   "scripts": {
     "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",

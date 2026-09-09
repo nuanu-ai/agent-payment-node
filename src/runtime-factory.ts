@@ -68,8 +68,13 @@ import { LocalBridgeCustody } from "./lifi/custody.js";
 import { LifiProvider } from "./lifi/provider.js";
 import { bridgeRpcFactory } from "./lifi/rpc.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
+import type { GaslessDependencies } from "./gasless/service.js";
+import { LocalGaslessCustody } from "./gasless/custody.js";
+import { gaslessRpcFactory } from "./gasless/rpc.js";
+import { TtyGaslessApproval } from "./gasless/tty.js";
 
 export interface RuntimeFactoryOptions {
+  readonly gasless?: GaslessDependencies;
   readonly bridge?: BridgeDependencies;
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly directRails?: readonly DirectRailPort[];
@@ -189,6 +194,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   );
   return new ApnCore({
     state,
+    gasless: options.gasless ?? { rpcFor: gaslessRpcFactory(process.env),
+      custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
+      ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyGaslessApproval() } : {}) },
     bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
       custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
       ...(bound.request.command === "bridge.approve" ? { approval: new TtyBridgeApproval() } : {}) },

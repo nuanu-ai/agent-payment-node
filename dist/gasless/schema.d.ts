@@ -1,0 +1,1309 @@
+import { z } from "zod";
+export declare const hashSchema: z.ZodString;
+export declare const wordSchema: z.ZodString;
+export declare const hexSchema: z.ZodString;
+export declare const uintSchema: z.ZodString;
+export declare const addressSchema: z.ZodString;
+export declare const isoSchema: z.ZodString;
+export declare const chainSchema: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+export declare const reasonSchema: z.ZodString;
+export declare const originSchema: z.ZodString;
+export declare const blockSchema: z.ZodObject<{
+    numberAtomic: z.ZodString;
+    hash: z.ZodString;
+    timestampAtomic: z.ZodString;
+}, z.core.$strict>;
+export declare const ownerSchema: z.ZodObject<{
+    profile: z.ZodString;
+    profileHash: z.ZodString;
+    address: z.ZodString;
+    walletBindingHash: z.ZodString;
+    walletCreatedAt: z.ZodString;
+}, z.core.$strict>;
+export declare const providerBindingSchema: z.ZodObject<{
+    providerId: z.ZodLiteral<"local">;
+    accountBindingHash: z.ZodString;
+    capabilityHash: z.ZodString;
+    revision: z.ZodNumber;
+}, z.core.$strict>;
+export declare const requestSchema: z.ZodObject<{
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+    recipient: z.ZodString;
+    grossAtomic: z.ZodString;
+    maxFeeAtomic: z.ZodString;
+    minReceivedAtomic: z.ZodString;
+}, z.core.$strict>;
+export declare const tokenDomainSchema: z.ZodObject<{
+    name: z.ZodEnum<{
+        USDC: "USDC";
+        "USD Coin": "USD Coin";
+    }>;
+    version: z.ZodLiteral<"2">;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+    verifyingContract: z.ZodString;
+    domainSeparator: z.ZodString;
+}, z.core.$strict>;
+export declare const gasSchema: z.ZodObject<{
+    verificationGasLimit: z.ZodString;
+    callGasLimit: z.ZodString;
+    paymasterVerificationGasLimit: z.ZodString;
+    paymasterPostOpGasLimit: z.ZodString;
+    preVerificationGas: z.ZodString;
+    maxFeePerGas: z.ZodString;
+    maxPriorityFeePerGas: z.ZodString;
+}, z.core.$strict>;
+export declare const feeConfigurationSchema: z.ZodObject<{
+    additionalGasCharge: z.ZodString;
+    feeSpread: z.ZodString;
+    nativeTokenPrice: z.ZodString;
+}, z.core.$strict>;
+export declare const accountSchema: z.ZodObject<{
+    owner: z.ZodString;
+    balanceAtomic: z.ZodString;
+    nativeBalanceWei: z.ZodString;
+    allowanceAtomic: z.ZodString;
+    permitNonceAtomic: z.ZodString;
+    entryPointNonceAtomic: z.ZodString;
+    eoaNonceAtomic: z.ZodString;
+    pendingEoaNonceAtomic: z.ZodString;
+    delegation: z.ZodEnum<{
+        empty: "empty";
+        expected: "expected";
+    }>;
+}, z.core.$strict>;
+export declare const snapshotSchema: z.ZodObject<{
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+    rpcOrigin: z.ZodString;
+    rpcEndpointHash: z.ZodString;
+    bundlerOrigin: z.ZodString;
+    bundlerEndpointHash: z.ZodString;
+    block: z.ZodObject<{
+        numberAtomic: z.ZodString;
+        hash: z.ZodString;
+        timestampAtomic: z.ZodString;
+    }, z.core.$strict>;
+    protocolHash: z.ZodString;
+    token: z.ZodString;
+    feeConfiguration: z.ZodObject<{
+        additionalGasCharge: z.ZodString;
+        feeSpread: z.ZodString;
+        nativeTokenPrice: z.ZodString;
+    }, z.core.$strict>;
+    baseFeePerGas: z.ZodString;
+    maxFeePerGas: z.ZodString;
+    maxPriorityFeePerGas: z.ZodString;
+    owner: z.ZodString;
+    balanceAtomic: z.ZodString;
+    nativeBalanceWei: z.ZodString;
+    allowanceAtomic: z.ZodString;
+    permitNonceAtomic: z.ZodString;
+    entryPointNonceAtomic: z.ZodString;
+    eoaNonceAtomic: z.ZodString;
+    pendingEoaNonceAtomic: z.ZodString;
+    delegation: z.ZodEnum<{
+        empty: "empty";
+        expected: "expected";
+    }>;
+}, z.core.$strict>;
+export declare const intentSchema: z.ZodObject<{
+    profile: z.ZodString;
+    request: z.ZodObject<{
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+        recipient: z.ZodString;
+        grossAtomic: z.ZodString;
+        maxFeeAtomic: z.ZodString;
+        minReceivedAtomic: z.ZodString;
+    }, z.core.$strict>;
+    owner: z.ZodObject<{
+        profile: z.ZodString;
+        profileHash: z.ZodString;
+        address: z.ZodString;
+        walletBindingHash: z.ZodString;
+        walletCreatedAt: z.ZodString;
+    }, z.core.$strict>;
+    providerBinding: z.ZodObject<{
+        providerId: z.ZodLiteral<"local">;
+        accountBindingHash: z.ZodString;
+        capabilityHash: z.ZodString;
+        revision: z.ZodNumber;
+    }, z.core.$strict>;
+    initialSnapshot: z.ZodObject<{
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+        rpcOrigin: z.ZodString;
+        rpcEndpointHash: z.ZodString;
+        bundlerOrigin: z.ZodString;
+        bundlerEndpointHash: z.ZodString;
+        block: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        protocolHash: z.ZodString;
+        token: z.ZodString;
+        feeConfiguration: z.ZodObject<{
+            additionalGasCharge: z.ZodString;
+            feeSpread: z.ZodString;
+            nativeTokenPrice: z.ZodString;
+        }, z.core.$strict>;
+        baseFeePerGas: z.ZodString;
+        maxFeePerGas: z.ZodString;
+        maxPriorityFeePerGas: z.ZodString;
+        owner: z.ZodString;
+        balanceAtomic: z.ZodString;
+        nativeBalanceWei: z.ZodString;
+        allowanceAtomic: z.ZodString;
+        permitNonceAtomic: z.ZodString;
+        entryPointNonceAtomic: z.ZodString;
+        eoaNonceAtomic: z.ZodString;
+        pendingEoaNonceAtomic: z.ZodString;
+        delegation: z.ZodEnum<{
+            empty: "empty";
+            expected: "expected";
+        }>;
+    }, z.core.$strict>;
+    gas: z.ZodObject<{
+        verificationGasLimit: z.ZodString;
+        callGasLimit: z.ZodString;
+        paymasterVerificationGasLimit: z.ZodString;
+        paymasterPostOpGasLimit: z.ZodString;
+        preVerificationGas: z.ZodString;
+        maxFeePerGas: z.ZodString;
+        maxPriorityFeePerGas: z.ZodString;
+    }, z.core.$strict>;
+    token: z.ZodString;
+    tokenDomain: z.ZodObject<{
+        name: z.ZodEnum<{
+            USDC: "USDC";
+            "USD Coin": "USD Coin";
+        }>;
+        version: z.ZodLiteral<"2">;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+        verifyingContract: z.ZodString;
+        domainSeparator: z.ZodString;
+    }, z.core.$strict>;
+    paymaster: z.ZodString;
+    entryPoint: z.ZodString;
+    delegate: z.ZodString;
+    feeCapAtomic: z.ZodString;
+    recipientAtomic: z.ZodString;
+    callData: z.ZodString;
+    unsignedEnvelopeHash: z.ZodString;
+    preparedAt: z.ZodString;
+    expiresAt: z.ZodString;
+    policyHash: z.ZodString;
+}, z.core.$strict>;
+export declare const estimateSchema: z.ZodObject<{
+    verificationGasLimit: z.ZodString;
+    callGasLimit: z.ZodString;
+    paymasterVerificationGasLimit: z.ZodString;
+    paymasterPostOpGasLimit: z.ZodString;
+    preVerificationGas: z.ZodString;
+    responseHash: z.ZodString;
+}, z.core.$strict>;
+export declare const cursorSchema: z.ZodObject<{
+    startBlock: z.ZodObject<{
+        numberAtomic: z.ZodString;
+        hash: z.ZodString;
+        timestampAtomic: z.ZodString;
+    }, z.core.$strict>;
+    nextBlockAtomic: z.ZodString;
+    previousEndBlock: z.ZodNullable<z.ZodObject<{
+        numberAtomic: z.ZodString;
+        hash: z.ZodString;
+        timestampAtomic: z.ZodString;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+export declare const accountingSchema: z.ZodObject<{
+    success: z.ZodBoolean;
+    branch: z.ZodEnum<{
+        sponsored: "sponsored";
+        post_op_reverted: "post_op_reverted";
+        prefund_too_low: "prefund_too_low";
+    }>;
+    prefundAtomic: z.ZodString;
+    refundAtomic: z.ZodString;
+    feeAtomic: z.ZodString;
+    deliveredAtomic: z.ZodString;
+    logsHash: z.ZodString;
+}, z.core.$strict>;
+export declare const settlementSchema: z.ZodObject<{
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+    userOperationHash: z.ZodString;
+    transactionHash: z.ZodString;
+    block: z.ZodObject<{
+        numberAtomic: z.ZodString;
+        hash: z.ZodString;
+        timestampAtomic: z.ZodString;
+    }, z.core.$strict>;
+    safeBlock: z.ZodObject<{
+        numberAtomic: z.ZodString;
+        hash: z.ZodString;
+        timestampAtomic: z.ZodString;
+    }, z.core.$strict>;
+    outerSender: z.ZodString;
+    transactionProofHash: z.ZodString;
+    receiptHash: z.ZodString;
+    protocolHash: z.ZodString;
+    effectAccount: z.ZodObject<{
+        owner: z.ZodString;
+        balanceAtomic: z.ZodString;
+        nativeBalanceWei: z.ZodString;
+        allowanceAtomic: z.ZodString;
+        permitNonceAtomic: z.ZodString;
+        entryPointNonceAtomic: z.ZodString;
+        eoaNonceAtomic: z.ZodString;
+        pendingEoaNonceAtomic: z.ZodString;
+        delegation: z.ZodEnum<{
+            empty: "empty";
+            expected: "expected";
+        }>;
+    }, z.core.$strict>;
+    safeAccount: z.ZodObject<{
+        owner: z.ZodString;
+        balanceAtomic: z.ZodString;
+        nativeBalanceWei: z.ZodString;
+        allowanceAtomic: z.ZodString;
+        permitNonceAtomic: z.ZodString;
+        entryPointNonceAtomic: z.ZodString;
+        eoaNonceAtomic: z.ZodString;
+        pendingEoaNonceAtomic: z.ZodString;
+        delegation: z.ZodEnum<{
+            empty: "empty";
+            expected: "expected";
+        }>;
+    }, z.core.$strict>;
+    accounting: z.ZodObject<{
+        success: z.ZodBoolean;
+        branch: z.ZodEnum<{
+            sponsored: "sponsored";
+            post_op_reverted: "post_op_reverted";
+            prefund_too_low: "prefund_too_low";
+        }>;
+        prefundAtomic: z.ZodString;
+        refundAtomic: z.ZodString;
+        feeAtomic: z.ZodString;
+        deliveredAtomic: z.ZodString;
+        logsHash: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export declare const observationSchema: z.ZodObject<{
+    status: z.ZodEnum<{
+        pending: "pending";
+        safe: "safe";
+        not_found: "not_found";
+        unresolved: "unresolved";
+    }>;
+    transactionHash: z.ZodNullable<z.ZodString>;
+    settlement: z.ZodNullable<z.ZodObject<{
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+        userOperationHash: z.ZodString;
+        transactionHash: z.ZodString;
+        block: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        safeBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        outerSender: z.ZodString;
+        transactionProofHash: z.ZodString;
+        receiptHash: z.ZodString;
+        protocolHash: z.ZodString;
+        effectAccount: z.ZodObject<{
+            owner: z.ZodString;
+            balanceAtomic: z.ZodString;
+            nativeBalanceWei: z.ZodString;
+            allowanceAtomic: z.ZodString;
+            permitNonceAtomic: z.ZodString;
+            entryPointNonceAtomic: z.ZodString;
+            eoaNonceAtomic: z.ZodString;
+            pendingEoaNonceAtomic: z.ZodString;
+            delegation: z.ZodEnum<{
+                empty: "empty";
+                expected: "expected";
+            }>;
+        }, z.core.$strict>;
+        safeAccount: z.ZodObject<{
+            owner: z.ZodString;
+            balanceAtomic: z.ZodString;
+            nativeBalanceWei: z.ZodString;
+            allowanceAtomic: z.ZodString;
+            permitNonceAtomic: z.ZodString;
+            entryPointNonceAtomic: z.ZodString;
+            eoaNonceAtomic: z.ZodString;
+            pendingEoaNonceAtomic: z.ZodString;
+            delegation: z.ZodEnum<{
+                empty: "empty";
+                expected: "expected";
+            }>;
+        }, z.core.$strict>;
+        accounting: z.ZodObject<{
+            success: z.ZodBoolean;
+            branch: z.ZodEnum<{
+                sponsored: "sponsored";
+                post_op_reverted: "post_op_reverted";
+                prefund_too_low: "prefund_too_low";
+            }>;
+            prefundAtomic: z.ZodString;
+            refundAtomic: z.ZodString;
+            feeAtomic: z.ZodString;
+            deliveredAtomic: z.ZodString;
+            logsHash: z.ZodString;
+        }, z.core.$strict>;
+    }, z.core.$strict>>;
+    cursor: z.ZodObject<{
+        startBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        nextBlockAtomic: z.ZodString;
+        previousEndBlock: z.ZodNullable<z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    evidenceHash: z.ZodNullable<z.ZodString>;
+    reason: z.ZodNullable<z.ZodString>;
+}, z.core.$strict>;
+export declare const consentSchema: z.ZodObject<{
+    policy: z.ZodLiteral<"apn.gasless.foreground-approval.v1">;
+    fingerprint: z.ZodString;
+    approvedAt: z.ZodString;
+    expiresAt: z.ZodString;
+}, z.core.$strict>;
+export declare const stateSchema: z.ZodEnum<{
+    awaiting_approval: "awaiting_approval";
+    submitted_pending: "submitted_pending";
+    unknown_finality: "unknown_finality";
+    completed: "completed";
+    failed_before_effect: "failed_before_effect";
+    failed_confirmed_revert: "failed_confirmed_revert";
+    execution_pending: "execution_pending";
+    included_success: "included_success";
+    included_revert: "included_revert";
+    bootstrap_pending: "bootstrap_pending";
+    user_operation_pending: "user_operation_pending";
+    failed_effects_pending: "failed_effects_pending";
+}>;
+export declare const phaseSchema: z.ZodEnum<{
+    submitted_pending: "submitted_pending";
+    unknown_finality: "unknown_finality";
+    signing_started: "signing_started";
+    submitting: "submitting";
+    unsealed: "unsealed";
+    sealed: "sealed";
+    included_success: "included_success";
+    included_revert: "included_revert";
+    safe_success: "safe_success";
+    safe_revert: "safe_revert";
+    disclosure_started: "disclosure_started";
+    checked: "checked";
+}>;
+export declare const effectSchema: z.ZodObject<{
+    role: z.ZodEnum<{
+        bootstrap: "bootstrap";
+        user_operation: "user_operation";
+    }>;
+    phase: z.ZodEnum<{
+        submitted_pending: "submitted_pending";
+        unknown_finality: "unknown_finality";
+        signing_started: "signing_started";
+        submitting: "submitting";
+        unsealed: "unsealed";
+        sealed: "sealed";
+        included_success: "included_success";
+        included_revert: "included_revert";
+        safe_success: "safe_success";
+        safe_revert: "safe_revert";
+        disclosure_started: "disclosure_started";
+        checked: "checked";
+    }>;
+    signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+    materialHash: z.ZodNullable<z.ZodString>;
+    disclosureAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+    submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+    userOperationHash: z.ZodNullable<z.ZodString>;
+    estimate: z.ZodNullable<z.ZodObject<{
+        verificationGasLimit: z.ZodString;
+        callGasLimit: z.ZodString;
+        paymasterVerificationGasLimit: z.ZodString;
+        paymasterPostOpGasLimit: z.ZodString;
+        preVerificationGas: z.ZodString;
+        responseHash: z.ZodString;
+    }, z.core.$strict>>;
+    signingStartedAt: z.ZodNullable<z.ZodString>;
+    sealedAt: z.ZodNullable<z.ZodString>;
+    disclosedAt: z.ZodNullable<z.ZodString>;
+    submittedAt: z.ZodNullable<z.ZodString>;
+}, z.core.$strict>;
+export declare const transitionSchema: z.ZodObject<{
+    at: z.ZodString;
+    previousHash: z.ZodString;
+    transitionHash: z.ZodString;
+    state: z.ZodEnum<{
+        awaiting_approval: "awaiting_approval";
+        submitted_pending: "submitted_pending";
+        unknown_finality: "unknown_finality";
+        completed: "completed";
+        failed_before_effect: "failed_before_effect";
+        failed_confirmed_revert: "failed_confirmed_revert";
+        execution_pending: "execution_pending";
+        included_success: "included_success";
+        included_revert: "included_revert";
+        bootstrap_pending: "bootstrap_pending";
+        user_operation_pending: "user_operation_pending";
+        failed_effects_pending: "failed_effects_pending";
+    }>;
+    approval: z.ZodNullable<z.ZodObject<{
+        policy: z.ZodLiteral<"apn.gasless.foreground-approval.v1">;
+        fingerprint: z.ZodString;
+        approvedAt: z.ZodString;
+        expiresAt: z.ZodString;
+    }, z.core.$strict>>;
+    bootstrap: z.ZodObject<{
+        role: z.ZodEnum<{
+            bootstrap: "bootstrap";
+            user_operation: "user_operation";
+        }>;
+        phase: z.ZodEnum<{
+            submitted_pending: "submitted_pending";
+            unknown_finality: "unknown_finality";
+            signing_started: "signing_started";
+            submitting: "submitting";
+            unsealed: "unsealed";
+            sealed: "sealed";
+            included_success: "included_success";
+            included_revert: "included_revert";
+            safe_success: "safe_success";
+            safe_revert: "safe_revert";
+            disclosure_started: "disclosure_started";
+            checked: "checked";
+        }>;
+        signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        materialHash: z.ZodNullable<z.ZodString>;
+        disclosureAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        userOperationHash: z.ZodNullable<z.ZodString>;
+        estimate: z.ZodNullable<z.ZodObject<{
+            verificationGasLimit: z.ZodString;
+            callGasLimit: z.ZodString;
+            paymasterVerificationGasLimit: z.ZodString;
+            paymasterPostOpGasLimit: z.ZodString;
+            preVerificationGas: z.ZodString;
+            responseHash: z.ZodString;
+        }, z.core.$strict>>;
+        signingStartedAt: z.ZodNullable<z.ZodString>;
+        sealedAt: z.ZodNullable<z.ZodString>;
+        disclosedAt: z.ZodNullable<z.ZodString>;
+        submittedAt: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>;
+    userOperation: z.ZodObject<{
+        role: z.ZodEnum<{
+            bootstrap: "bootstrap";
+            user_operation: "user_operation";
+        }>;
+        phase: z.ZodEnum<{
+            submitted_pending: "submitted_pending";
+            unknown_finality: "unknown_finality";
+            signing_started: "signing_started";
+            submitting: "submitting";
+            unsealed: "unsealed";
+            sealed: "sealed";
+            included_success: "included_success";
+            included_revert: "included_revert";
+            safe_success: "safe_success";
+            safe_revert: "safe_revert";
+            disclosure_started: "disclosure_started";
+            checked: "checked";
+        }>;
+        signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        materialHash: z.ZodNullable<z.ZodString>;
+        disclosureAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        userOperationHash: z.ZodNullable<z.ZodString>;
+        estimate: z.ZodNullable<z.ZodObject<{
+            verificationGasLimit: z.ZodString;
+            callGasLimit: z.ZodString;
+            paymasterVerificationGasLimit: z.ZodString;
+            paymasterPostOpGasLimit: z.ZodString;
+            preVerificationGas: z.ZodString;
+            responseHash: z.ZodString;
+        }, z.core.$strict>>;
+        signingStartedAt: z.ZodNullable<z.ZodString>;
+        sealedAt: z.ZodNullable<z.ZodString>;
+        disclosedAt: z.ZodNullable<z.ZodString>;
+        submittedAt: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>;
+    cursor: z.ZodObject<{
+        startBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        nextBlockAtomic: z.ZodString;
+        previousEndBlock: z.ZodNullable<z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    observation: z.ZodNullable<z.ZodObject<{
+        status: z.ZodEnum<{
+            pending: "pending";
+            safe: "safe";
+            not_found: "not_found";
+            unresolved: "unresolved";
+        }>;
+        transactionHash: z.ZodNullable<z.ZodString>;
+        settlement: z.ZodNullable<z.ZodObject<{
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+            userOperationHash: z.ZodString;
+            transactionHash: z.ZodString;
+            block: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            safeBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            outerSender: z.ZodString;
+            transactionProofHash: z.ZodString;
+            receiptHash: z.ZodString;
+            protocolHash: z.ZodString;
+            effectAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+            safeAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+            accounting: z.ZodObject<{
+                success: z.ZodBoolean;
+                branch: z.ZodEnum<{
+                    sponsored: "sponsored";
+                    post_op_reverted: "post_op_reverted";
+                    prefund_too_low: "prefund_too_low";
+                }>;
+                prefundAtomic: z.ZodString;
+                refundAtomic: z.ZodString;
+                feeAtomic: z.ZodString;
+                deliveredAtomic: z.ZodString;
+                logsHash: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>>;
+        cursor: z.ZodObject<{
+            startBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            nextBlockAtomic: z.ZodString;
+            previousEndBlock: z.ZodNullable<z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+        evidenceHash: z.ZodNullable<z.ZodString>;
+        reason: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>>;
+    settlement: z.ZodNullable<z.ZodObject<{
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+        userOperationHash: z.ZodString;
+        transactionHash: z.ZodString;
+        block: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        safeBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        outerSender: z.ZodString;
+        transactionProofHash: z.ZodString;
+        receiptHash: z.ZodString;
+        protocolHash: z.ZodString;
+        effectAccount: z.ZodObject<{
+            owner: z.ZodString;
+            balanceAtomic: z.ZodString;
+            nativeBalanceWei: z.ZodString;
+            allowanceAtomic: z.ZodString;
+            permitNonceAtomic: z.ZodString;
+            entryPointNonceAtomic: z.ZodString;
+            eoaNonceAtomic: z.ZodString;
+            pendingEoaNonceAtomic: z.ZodString;
+            delegation: z.ZodEnum<{
+                empty: "empty";
+                expected: "expected";
+            }>;
+        }, z.core.$strict>;
+        safeAccount: z.ZodObject<{
+            owner: z.ZodString;
+            balanceAtomic: z.ZodString;
+            nativeBalanceWei: z.ZodString;
+            allowanceAtomic: z.ZodString;
+            permitNonceAtomic: z.ZodString;
+            entryPointNonceAtomic: z.ZodString;
+            eoaNonceAtomic: z.ZodString;
+            pendingEoaNonceAtomic: z.ZodString;
+            delegation: z.ZodEnum<{
+                empty: "empty";
+                expected: "expected";
+            }>;
+        }, z.core.$strict>;
+        accounting: z.ZodObject<{
+            success: z.ZodBoolean;
+            branch: z.ZodEnum<{
+                sponsored: "sponsored";
+                post_op_reverted: "post_op_reverted";
+                prefund_too_low: "prefund_too_low";
+            }>;
+            prefundAtomic: z.ZodString;
+            refundAtomic: z.ZodString;
+            feeAtomic: z.ZodString;
+            deliveredAtomic: z.ZodString;
+            logsHash: z.ZodString;
+        }, z.core.$strict>;
+    }, z.core.$strict>>;
+    failure: z.ZodNullable<z.ZodString>;
+}, z.core.$strict>;
+export declare const operationSchema: z.ZodObject<{
+    schemaVersion: z.ZodLiteral<"apn.gasless-operation.v1">;
+    kind: z.ZodLiteral<"gasless_transfer">;
+    profileHash: z.ZodString;
+    operationId: z.ZodString;
+    idempotencyHash: z.ZodString;
+    requestHash: z.ZodString;
+    fingerprint: z.ZodString;
+    createdAt: z.ZodString;
+    updatedAt: z.ZodString;
+    terminal: z.ZodBoolean;
+    intent: z.ZodObject<{
+        profile: z.ZodString;
+        request: z.ZodObject<{
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+            recipient: z.ZodString;
+            grossAtomic: z.ZodString;
+            maxFeeAtomic: z.ZodString;
+            minReceivedAtomic: z.ZodString;
+        }, z.core.$strict>;
+        owner: z.ZodObject<{
+            profile: z.ZodString;
+            profileHash: z.ZodString;
+            address: z.ZodString;
+            walletBindingHash: z.ZodString;
+            walletCreatedAt: z.ZodString;
+        }, z.core.$strict>;
+        providerBinding: z.ZodObject<{
+            providerId: z.ZodLiteral<"local">;
+            accountBindingHash: z.ZodString;
+            capabilityHash: z.ZodString;
+            revision: z.ZodNumber;
+        }, z.core.$strict>;
+        initialSnapshot: z.ZodObject<{
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+            rpcOrigin: z.ZodString;
+            rpcEndpointHash: z.ZodString;
+            bundlerOrigin: z.ZodString;
+            bundlerEndpointHash: z.ZodString;
+            block: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            protocolHash: z.ZodString;
+            token: z.ZodString;
+            feeConfiguration: z.ZodObject<{
+                additionalGasCharge: z.ZodString;
+                feeSpread: z.ZodString;
+                nativeTokenPrice: z.ZodString;
+            }, z.core.$strict>;
+            baseFeePerGas: z.ZodString;
+            maxFeePerGas: z.ZodString;
+            maxPriorityFeePerGas: z.ZodString;
+            owner: z.ZodString;
+            balanceAtomic: z.ZodString;
+            nativeBalanceWei: z.ZodString;
+            allowanceAtomic: z.ZodString;
+            permitNonceAtomic: z.ZodString;
+            entryPointNonceAtomic: z.ZodString;
+            eoaNonceAtomic: z.ZodString;
+            pendingEoaNonceAtomic: z.ZodString;
+            delegation: z.ZodEnum<{
+                empty: "empty";
+                expected: "expected";
+            }>;
+        }, z.core.$strict>;
+        gas: z.ZodObject<{
+            verificationGasLimit: z.ZodString;
+            callGasLimit: z.ZodString;
+            paymasterVerificationGasLimit: z.ZodString;
+            paymasterPostOpGasLimit: z.ZodString;
+            preVerificationGas: z.ZodString;
+            maxFeePerGas: z.ZodString;
+            maxPriorityFeePerGas: z.ZodString;
+        }, z.core.$strict>;
+        token: z.ZodString;
+        tokenDomain: z.ZodObject<{
+            name: z.ZodEnum<{
+                USDC: "USDC";
+                "USD Coin": "USD Coin";
+            }>;
+            version: z.ZodLiteral<"2">;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+            verifyingContract: z.ZodString;
+            domainSeparator: z.ZodString;
+        }, z.core.$strict>;
+        paymaster: z.ZodString;
+        entryPoint: z.ZodString;
+        delegate: z.ZodString;
+        feeCapAtomic: z.ZodString;
+        recipientAtomic: z.ZodString;
+        callData: z.ZodString;
+        unsignedEnvelopeHash: z.ZodString;
+        preparedAt: z.ZodString;
+        expiresAt: z.ZodString;
+        policyHash: z.ZodString;
+    }, z.core.$strict>;
+    transitions: z.ZodArray<z.ZodObject<{
+        at: z.ZodString;
+        previousHash: z.ZodString;
+        transitionHash: z.ZodString;
+        state: z.ZodEnum<{
+            awaiting_approval: "awaiting_approval";
+            submitted_pending: "submitted_pending";
+            unknown_finality: "unknown_finality";
+            completed: "completed";
+            failed_before_effect: "failed_before_effect";
+            failed_confirmed_revert: "failed_confirmed_revert";
+            execution_pending: "execution_pending";
+            included_success: "included_success";
+            included_revert: "included_revert";
+            bootstrap_pending: "bootstrap_pending";
+            user_operation_pending: "user_operation_pending";
+            failed_effects_pending: "failed_effects_pending";
+        }>;
+        approval: z.ZodNullable<z.ZodObject<{
+            policy: z.ZodLiteral<"apn.gasless.foreground-approval.v1">;
+            fingerprint: z.ZodString;
+            approvedAt: z.ZodString;
+            expiresAt: z.ZodString;
+        }, z.core.$strict>>;
+        bootstrap: z.ZodObject<{
+            role: z.ZodEnum<{
+                bootstrap: "bootstrap";
+                user_operation: "user_operation";
+            }>;
+            phase: z.ZodEnum<{
+                submitted_pending: "submitted_pending";
+                unknown_finality: "unknown_finality";
+                signing_started: "signing_started";
+                submitting: "submitting";
+                unsealed: "unsealed";
+                sealed: "sealed";
+                included_success: "included_success";
+                included_revert: "included_revert";
+                safe_success: "safe_success";
+                safe_revert: "safe_revert";
+                disclosure_started: "disclosure_started";
+                checked: "checked";
+            }>;
+            signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+            materialHash: z.ZodNullable<z.ZodString>;
+            disclosureAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+            submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+            userOperationHash: z.ZodNullable<z.ZodString>;
+            estimate: z.ZodNullable<z.ZodObject<{
+                verificationGasLimit: z.ZodString;
+                callGasLimit: z.ZodString;
+                paymasterVerificationGasLimit: z.ZodString;
+                paymasterPostOpGasLimit: z.ZodString;
+                preVerificationGas: z.ZodString;
+                responseHash: z.ZodString;
+            }, z.core.$strict>>;
+            signingStartedAt: z.ZodNullable<z.ZodString>;
+            sealedAt: z.ZodNullable<z.ZodString>;
+            disclosedAt: z.ZodNullable<z.ZodString>;
+            submittedAt: z.ZodNullable<z.ZodString>;
+        }, z.core.$strict>;
+        userOperation: z.ZodObject<{
+            role: z.ZodEnum<{
+                bootstrap: "bootstrap";
+                user_operation: "user_operation";
+            }>;
+            phase: z.ZodEnum<{
+                submitted_pending: "submitted_pending";
+                unknown_finality: "unknown_finality";
+                signing_started: "signing_started";
+                submitting: "submitting";
+                unsealed: "unsealed";
+                sealed: "sealed";
+                included_success: "included_success";
+                included_revert: "included_revert";
+                safe_success: "safe_success";
+                safe_revert: "safe_revert";
+                disclosure_started: "disclosure_started";
+                checked: "checked";
+            }>;
+            signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+            materialHash: z.ZodNullable<z.ZodString>;
+            disclosureAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+            submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+            userOperationHash: z.ZodNullable<z.ZodString>;
+            estimate: z.ZodNullable<z.ZodObject<{
+                verificationGasLimit: z.ZodString;
+                callGasLimit: z.ZodString;
+                paymasterVerificationGasLimit: z.ZodString;
+                paymasterPostOpGasLimit: z.ZodString;
+                preVerificationGas: z.ZodString;
+                responseHash: z.ZodString;
+            }, z.core.$strict>>;
+            signingStartedAt: z.ZodNullable<z.ZodString>;
+            sealedAt: z.ZodNullable<z.ZodString>;
+            disclosedAt: z.ZodNullable<z.ZodString>;
+            submittedAt: z.ZodNullable<z.ZodString>;
+        }, z.core.$strict>;
+        cursor: z.ZodObject<{
+            startBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            nextBlockAtomic: z.ZodString;
+            previousEndBlock: z.ZodNullable<z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+        observation: z.ZodNullable<z.ZodObject<{
+            status: z.ZodEnum<{
+                pending: "pending";
+                safe: "safe";
+                not_found: "not_found";
+                unresolved: "unresolved";
+            }>;
+            transactionHash: z.ZodNullable<z.ZodString>;
+            settlement: z.ZodNullable<z.ZodObject<{
+                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+                userOperationHash: z.ZodString;
+                transactionHash: z.ZodString;
+                block: z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>;
+                safeBlock: z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>;
+                outerSender: z.ZodString;
+                transactionProofHash: z.ZodString;
+                receiptHash: z.ZodString;
+                protocolHash: z.ZodString;
+                effectAccount: z.ZodObject<{
+                    owner: z.ZodString;
+                    balanceAtomic: z.ZodString;
+                    nativeBalanceWei: z.ZodString;
+                    allowanceAtomic: z.ZodString;
+                    permitNonceAtomic: z.ZodString;
+                    entryPointNonceAtomic: z.ZodString;
+                    eoaNonceAtomic: z.ZodString;
+                    pendingEoaNonceAtomic: z.ZodString;
+                    delegation: z.ZodEnum<{
+                        empty: "empty";
+                        expected: "expected";
+                    }>;
+                }, z.core.$strict>;
+                safeAccount: z.ZodObject<{
+                    owner: z.ZodString;
+                    balanceAtomic: z.ZodString;
+                    nativeBalanceWei: z.ZodString;
+                    allowanceAtomic: z.ZodString;
+                    permitNonceAtomic: z.ZodString;
+                    entryPointNonceAtomic: z.ZodString;
+                    eoaNonceAtomic: z.ZodString;
+                    pendingEoaNonceAtomic: z.ZodString;
+                    delegation: z.ZodEnum<{
+                        empty: "empty";
+                        expected: "expected";
+                    }>;
+                }, z.core.$strict>;
+                accounting: z.ZodObject<{
+                    success: z.ZodBoolean;
+                    branch: z.ZodEnum<{
+                        sponsored: "sponsored";
+                        post_op_reverted: "post_op_reverted";
+                        prefund_too_low: "prefund_too_low";
+                    }>;
+                    prefundAtomic: z.ZodString;
+                    refundAtomic: z.ZodString;
+                    feeAtomic: z.ZodString;
+                    deliveredAtomic: z.ZodString;
+                    logsHash: z.ZodString;
+                }, z.core.$strict>;
+            }, z.core.$strict>>;
+            cursor: z.ZodObject<{
+                startBlock: z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>;
+                nextBlockAtomic: z.ZodString;
+                previousEndBlock: z.ZodNullable<z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>>;
+            }, z.core.$strict>;
+            evidenceHash: z.ZodNullable<z.ZodString>;
+            reason: z.ZodNullable<z.ZodString>;
+        }, z.core.$strict>>;
+        settlement: z.ZodNullable<z.ZodObject<{
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+            userOperationHash: z.ZodString;
+            transactionHash: z.ZodString;
+            block: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            safeBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            outerSender: z.ZodString;
+            transactionProofHash: z.ZodString;
+            receiptHash: z.ZodString;
+            protocolHash: z.ZodString;
+            effectAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+            safeAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+            accounting: z.ZodObject<{
+                success: z.ZodBoolean;
+                branch: z.ZodEnum<{
+                    sponsored: "sponsored";
+                    post_op_reverted: "post_op_reverted";
+                    prefund_too_low: "prefund_too_low";
+                }>;
+                prefundAtomic: z.ZodString;
+                refundAtomic: z.ZodString;
+                feeAtomic: z.ZodString;
+                deliveredAtomic: z.ZodString;
+                logsHash: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>>;
+        failure: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>>;
+    integrityHash: z.ZodString;
+    state: z.ZodEnum<{
+        awaiting_approval: "awaiting_approval";
+        submitted_pending: "submitted_pending";
+        unknown_finality: "unknown_finality";
+        completed: "completed";
+        failed_before_effect: "failed_before_effect";
+        failed_confirmed_revert: "failed_confirmed_revert";
+        execution_pending: "execution_pending";
+        included_success: "included_success";
+        included_revert: "included_revert";
+        bootstrap_pending: "bootstrap_pending";
+        user_operation_pending: "user_operation_pending";
+        failed_effects_pending: "failed_effects_pending";
+    }>;
+    approval: z.ZodNullable<z.ZodObject<{
+        policy: z.ZodLiteral<"apn.gasless.foreground-approval.v1">;
+        fingerprint: z.ZodString;
+        approvedAt: z.ZodString;
+        expiresAt: z.ZodString;
+    }, z.core.$strict>>;
+    bootstrap: z.ZodObject<{
+        role: z.ZodEnum<{
+            bootstrap: "bootstrap";
+            user_operation: "user_operation";
+        }>;
+        phase: z.ZodEnum<{
+            submitted_pending: "submitted_pending";
+            unknown_finality: "unknown_finality";
+            signing_started: "signing_started";
+            submitting: "submitting";
+            unsealed: "unsealed";
+            sealed: "sealed";
+            included_success: "included_success";
+            included_revert: "included_revert";
+            safe_success: "safe_success";
+            safe_revert: "safe_revert";
+            disclosure_started: "disclosure_started";
+            checked: "checked";
+        }>;
+        signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        materialHash: z.ZodNullable<z.ZodString>;
+        disclosureAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        userOperationHash: z.ZodNullable<z.ZodString>;
+        estimate: z.ZodNullable<z.ZodObject<{
+            verificationGasLimit: z.ZodString;
+            callGasLimit: z.ZodString;
+            paymasterVerificationGasLimit: z.ZodString;
+            paymasterPostOpGasLimit: z.ZodString;
+            preVerificationGas: z.ZodString;
+            responseHash: z.ZodString;
+        }, z.core.$strict>>;
+        signingStartedAt: z.ZodNullable<z.ZodString>;
+        sealedAt: z.ZodNullable<z.ZodString>;
+        disclosedAt: z.ZodNullable<z.ZodString>;
+        submittedAt: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>;
+    userOperation: z.ZodObject<{
+        role: z.ZodEnum<{
+            bootstrap: "bootstrap";
+            user_operation: "user_operation";
+        }>;
+        phase: z.ZodEnum<{
+            submitted_pending: "submitted_pending";
+            unknown_finality: "unknown_finality";
+            signing_started: "signing_started";
+            submitting: "submitting";
+            unsealed: "unsealed";
+            sealed: "sealed";
+            included_success: "included_success";
+            included_revert: "included_revert";
+            safe_success: "safe_success";
+            safe_revert: "safe_revert";
+            disclosure_started: "disclosure_started";
+            checked: "checked";
+        }>;
+        signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        materialHash: z.ZodNullable<z.ZodString>;
+        disclosureAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+        userOperationHash: z.ZodNullable<z.ZodString>;
+        estimate: z.ZodNullable<z.ZodObject<{
+            verificationGasLimit: z.ZodString;
+            callGasLimit: z.ZodString;
+            paymasterVerificationGasLimit: z.ZodString;
+            paymasterPostOpGasLimit: z.ZodString;
+            preVerificationGas: z.ZodString;
+            responseHash: z.ZodString;
+        }, z.core.$strict>>;
+        signingStartedAt: z.ZodNullable<z.ZodString>;
+        sealedAt: z.ZodNullable<z.ZodString>;
+        disclosedAt: z.ZodNullable<z.ZodString>;
+        submittedAt: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>;
+    cursor: z.ZodObject<{
+        startBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        nextBlockAtomic: z.ZodString;
+        previousEndBlock: z.ZodNullable<z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    observation: z.ZodNullable<z.ZodObject<{
+        status: z.ZodEnum<{
+            pending: "pending";
+            safe: "safe";
+            not_found: "not_found";
+            unresolved: "unresolved";
+        }>;
+        transactionHash: z.ZodNullable<z.ZodString>;
+        settlement: z.ZodNullable<z.ZodObject<{
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+            userOperationHash: z.ZodString;
+            transactionHash: z.ZodString;
+            block: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            safeBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            outerSender: z.ZodString;
+            transactionProofHash: z.ZodString;
+            receiptHash: z.ZodString;
+            protocolHash: z.ZodString;
+            effectAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+            safeAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+            accounting: z.ZodObject<{
+                success: z.ZodBoolean;
+                branch: z.ZodEnum<{
+                    sponsored: "sponsored";
+                    post_op_reverted: "post_op_reverted";
+                    prefund_too_low: "prefund_too_low";
+                }>;
+                prefundAtomic: z.ZodString;
+                refundAtomic: z.ZodString;
+                feeAtomic: z.ZodString;
+                deliveredAtomic: z.ZodString;
+                logsHash: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>>;
+        cursor: z.ZodObject<{
+            startBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            nextBlockAtomic: z.ZodString;
+            previousEndBlock: z.ZodNullable<z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
+        evidenceHash: z.ZodNullable<z.ZodString>;
+        reason: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>>;
+    settlement: z.ZodNullable<z.ZodObject<{
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+        userOperationHash: z.ZodString;
+        transactionHash: z.ZodString;
+        block: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        safeBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        outerSender: z.ZodString;
+        transactionProofHash: z.ZodString;
+        receiptHash: z.ZodString;
+        protocolHash: z.ZodString;
+        effectAccount: z.ZodObject<{
+            owner: z.ZodString;
+            balanceAtomic: z.ZodString;
+            nativeBalanceWei: z.ZodString;
+            allowanceAtomic: z.ZodString;
+            permitNonceAtomic: z.ZodString;
+            entryPointNonceAtomic: z.ZodString;
+            eoaNonceAtomic: z.ZodString;
+            pendingEoaNonceAtomic: z.ZodString;
+            delegation: z.ZodEnum<{
+                empty: "empty";
+                expected: "expected";
+            }>;
+        }, z.core.$strict>;
+        safeAccount: z.ZodObject<{
+            owner: z.ZodString;
+            balanceAtomic: z.ZodString;
+            nativeBalanceWei: z.ZodString;
+            allowanceAtomic: z.ZodString;
+            permitNonceAtomic: z.ZodString;
+            entryPointNonceAtomic: z.ZodString;
+            eoaNonceAtomic: z.ZodString;
+            pendingEoaNonceAtomic: z.ZodString;
+            delegation: z.ZodEnum<{
+                empty: "empty";
+                expected: "expected";
+            }>;
+        }, z.core.$strict>;
+        accounting: z.ZodObject<{
+            success: z.ZodBoolean;
+            branch: z.ZodEnum<{
+                sponsored: "sponsored";
+                post_op_reverted: "post_op_reverted";
+                prefund_too_low: "prefund_too_low";
+            }>;
+            prefundAtomic: z.ZodString;
+            refundAtomic: z.ZodString;
+            feeAtomic: z.ZodString;
+            deliveredAtomic: z.ZodString;
+            logsHash: z.ZodString;
+        }, z.core.$strict>;
+    }, z.core.$strict>>;
+    failure: z.ZodNullable<z.ZodString>;
+}, z.core.$strict>;

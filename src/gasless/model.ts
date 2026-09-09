@@ -27,7 +27,7 @@ export interface GaslessBlock {
   readonly timestampAtomic: string;
 }
 export interface GaslessTokenDomain {
-  readonly name: "USD Coin";
+  readonly name: "USD Coin" | "USDC";
   readonly version: "2";
   readonly chainId: GaslessChainId;
   readonly verifyingContract: Address;

@@ -7,6 +7,7 @@ import { chainDecimal } from "./chain-policy.js";
 import { solanaAddress } from "./solana/rpc.js";
 import { tronAddress } from "./tron/codec.js";
 import { bindBridgeCommand } from "./lifi/command-catalog.js";
+import { bindGaslessCommand } from "./gasless/command-catalog.js";
 export function bindArgv(argv) {
     return bindParsedCatalog(parseCatalogArgv(argv));
 }
@@ -39,6 +40,8 @@ export function mcpFieldName(optionName) {
 }
 function bindParsedCatalog(parsed) {
     const options = parsed.values;
+    if (parsed.command.path[0] === "gasless")
+        return { request: bindGaslessCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "bridge")
         return { request: bindBridgeCommand(parsed.command.path.join(" "), options) };
     switch (parsed.command.path.join(" ")) {

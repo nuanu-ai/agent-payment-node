@@ -4,6 +4,7 @@ import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
+    gasless;
     bridge;
     directRails;
     chainAccounts;
@@ -28,6 +29,8 @@ export class RuntimeContext {
     providerAuthorizationStore;
     initialized;
     constructor(dependencies) {
+        if (dependencies.gasless !== undefined)
+            this.gasless = dependencies.gasless;
         if (dependencies.bridge !== undefined)
             this.bridge = dependencies.bridge;
         this.directRails = dependencies.directRails ?? [];
