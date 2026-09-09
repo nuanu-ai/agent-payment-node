@@ -1,4 +1,3 @@
-import { readdir } from "node:fs/promises";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
@@ -17,7 +16,6 @@ export class BridgeOperationRepository extends SecureStateStore {
     await this.initialized;
   }
   async loadOperation(profileHash: string, operationId: string): Promise<BridgeOperationRecord | null> {
-    await this.ready();
     const value = await this.readJson(this.path("bridge-operations", profileHash, operationId));
     if (value === null) return null;
     const op = validateBridgeOperation(value);
@@ -31,11 +29,10 @@ export class BridgeOperationRepository extends SecureStateStore {
     return matches[0] ?? null;
   }
   async listOperations(profileHash: string): Promise<readonly BridgeOperationRecord[]> {
-    await this.ready(); stateIdentifier(profileHash, "bridge profile hash");
+    stateIdentifier(profileHash, "bridge profile hash");
     const directory = `bridge-operations/${profileHash}`;
-    await this.ensureDirectory(directory);
     const result: BridgeOperationRecord[] = [];
-    for (const entry of await readdir(this.resolveRelative(directory), { withFileTypes: true })) {
+    for (const entry of await this.readDirectory(directory)) {
       if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) bridgeCorrupt();
       const op = await this.loadOperation(profileHash, entry.name.slice(0, -5));
       if (op === null) bridgeCorrupt();
@@ -44,8 +41,8 @@ export class BridgeOperationRepository extends SecureStateStore {
     return result;
   }
   async listAllOperations(): Promise<readonly BridgeOperationRecord[]> {
-    await this.ready(); const result: BridgeOperationRecord[] = [];
-    for (const entry of await readdir(this.resolveRelative("bridge-operations"), { withFileTypes: true })) {
+    const result: BridgeOperationRecord[] = [];
+    for (const entry of await this.readDirectory("bridge-operations")) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name)) bridgeCorrupt();
       result.push(...await this.listOperations(entry.name));
     }
@@ -68,6 +65,7 @@ export class BridgeOperationRepository extends SecureStateStore {
     await this.repairReceipt(op);
   }
   async repairReceipt(op: BridgeOperationRecord): Promise<void> {
+    await this.ready();
     const stored = await this.loadOperation(op.profileHash, op.operationId);
     if (stored === null || !bridgeSame(stored, op)) bridgeCorrupt();
     const path = this.path("bridge-receipts", op.profileHash, op.operationId), previous = await this.readJson(path);

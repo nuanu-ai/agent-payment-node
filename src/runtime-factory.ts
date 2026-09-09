@@ -72,8 +72,13 @@ import type { GaslessDependencies } from "./gasless/service.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
 import { TtyGaslessApproval } from "./gasless/tty.js";
+import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
+import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
+import { metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
+import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
 
 export interface RuntimeFactoryOptions {
+  readonly metaMaskGasless?: MetaMaskGaslessDependencies;
   readonly gasless?: GaslessDependencies;
   readonly bridge?: BridgeDependencies;
   readonly chainAccounts?: ChainWalletStoragePort;
@@ -194,6 +199,11 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   );
   return new ApnCore({
     state,
+    metaMaskGasless: options.metaMaskGasless ?? {
+      rpcFor: metaMaskGaslessRpcFactory(process.env, options.clock ?? { now: () => new Date() }),
+      provider: new MetaMaskGaslessProviderClient({ environment: process.env, clock: options.clock ?? { now: () => new Date() } }),
+      ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyMetaMaskGaslessApproval() } : {}),
+    },
     gasless: options.gasless ?? { rpcFor: gaslessRpcFactory(process.env),
       custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
       ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyGaslessApproval() } : {}) },

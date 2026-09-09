@@ -6,6 +6,7 @@ import { assertWalletMatches, canonicalProfile, parseWalletDescribe, parseWallet
 import { fundingPosture, policyBinding, publicProfilePolicy } from "./profile-policy.js";
 import { projectLegacyLocalProfile } from "./provider-profile.js";
 import { assertLocalNetworkProfile, networkPolicyBinding } from "./x402-network.js";
+import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
 export class WalletService {
     context;
     constructor(context) {
@@ -27,6 +28,7 @@ export class WalletService {
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+            await assertWalletLifecycleAvailable(this.context, profileHash);
             const providerProfile = await this.context.profileRepository?.load(profileHash) ?? null;
             if (providerProfile !== null && providerProfile.provider_id !== "local") {
                 throw new ApnError("APN_PROFILE_DRIFT", "The APN profile is already bound to a different wallet provider.");

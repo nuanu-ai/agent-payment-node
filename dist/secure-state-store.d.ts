@@ -1,4 +1,4 @@
-import { type Stats } from "node:fs";
+import { type Dirent, type Stats } from "node:fs";
 import { type AdvisoryLockPort } from "./macos-advisory-lock.js";
 export declare function stateSecurity(message: string): never;
 export declare function stateCorrupt(message: string): never;
@@ -22,8 +22,11 @@ export declare class SecureStateStore {
     }): Promise<T>;
     protected beforeLockAcquire(_key: string): Promise<void>;
     protected ensureDirectory(relativePath: string): Promise<void>;
+    protected readDirectory(relativePath: string): Promise<readonly Dirent[]>;
     protected resolveRelative(relativePath: string): string;
     protected assertNoSymlinkAncestors(target: string): Promise<void>;
+    private directorySnapshot;
+    private assertSameDirectorySnapshot;
     protected readJson(relativePath: string): Promise<unknown | null>;
     protected writeJson(relativePath: string, value: unknown): Promise<void>;
     protected removeFile(relativePath: string): Promise<boolean>;

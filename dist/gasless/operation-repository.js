@@ -1,4 +1,3 @@
-import { readdir } from "node:fs/promises";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
@@ -17,7 +16,6 @@ export class GaslessOperationRepository extends SecureStateStore {
         await this.initialized;
     }
     async loadOperation(profileHash, operationId) {
-        await this.ready();
         const value = await this.readJson(this.path("gasless-operations", profileHash, operationId));
         if (value === null)
             return null;
@@ -34,12 +32,10 @@ export class GaslessOperationRepository extends SecureStateStore {
         return matches[0] ?? null;
     }
     async listOperations(profileHash) {
-        await this.ready();
         stateIdentifier(profileHash, "gasless profile hash");
         const directory = `gasless-operations/${profileHash}`;
-        await this.ensureDirectory(directory);
         const result = [];
-        for (const entry of await readdir(this.resolveRelative(directory), { withFileTypes: true })) {
+        for (const entry of await this.readDirectory(directory)) {
             if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name))
                 gaslessCorrupt();
             const op = await this.loadOperation(profileHash, entry.name.slice(0, -5));
@@ -50,9 +46,8 @@ export class GaslessOperationRepository extends SecureStateStore {
         return result;
     }
     async listAllOperations() {
-        await this.ready();
         const result = [];
-        for (const entry of await readdir(this.resolveRelative("gasless-operations"), { withFileTypes: true })) {
+        for (const entry of await this.readDirectory("gasless-operations")) {
             if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name))
                 gaslessCorrupt();
             result.push(...await this.listOperations(entry.name));
@@ -82,6 +77,7 @@ export class GaslessOperationRepository extends SecureStateStore {
         await this.repairReceipt(op);
     }
     async repairReceipt(op) {
+        await this.ready();
         const stored = await this.loadOperation(op.profileHash, op.operationId);
         if (stored === null || !gaslessSame(stored, op))
             gaslessCorrupt();

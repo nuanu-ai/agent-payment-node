@@ -1,4 +1,3 @@
-import { readdir } from "node:fs/promises";
 import { canonicalJson } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
@@ -28,7 +27,6 @@ export class MetaMaskGaslessOperationRepository extends SecureStateStore impleme
   }
 
   async loadOperation(profileHash: string, operationId: string): Promise<MetaMaskGaslessOperationRecord | null> {
-    await this.ready();
     const value = await this.readJson(this.path(OPERATIONS, profileHash, operationId));
     if (value === null) return null;
     const operation = validateMetaMaskGaslessOperation(value);
@@ -44,12 +42,10 @@ export class MetaMaskGaslessOperationRepository extends SecureStateStore impleme
   }
 
   async listOperations(profileHash: string): Promise<readonly MetaMaskGaslessOperationRecord[]> {
-    await this.ready();
     stateIdentifier(profileHash, "MetaMask gasless profile hash");
     const directory = `${OPERATIONS}/${profileHash}`;
-    await this.ensureDirectory(directory);
     const result: MetaMaskGaslessOperationRecord[] = [];
-    for (const entry of await readdir(this.resolveRelative(directory), { withFileTypes: true })) {
+    for (const entry of await this.readDirectory(directory)) {
       if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) corrupt();
       const operation = await this.loadOperation(profileHash, entry.name.slice(0, -5));
       if (operation === null) corrupt();
@@ -59,9 +55,8 @@ export class MetaMaskGaslessOperationRepository extends SecureStateStore impleme
   }
 
   async listAllOperations(): Promise<readonly MetaMaskGaslessOperationRecord[]> {
-    await this.ready();
     const result: MetaMaskGaslessOperationRecord[] = [];
-    for (const entry of await readdir(this.resolveRelative(OPERATIONS), { withFileTypes: true })) {
+    for (const entry of await this.readDirectory(OPERATIONS)) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name)) corrupt();
       result.push(...await this.listOperations(entry.name));
     }
@@ -95,6 +90,7 @@ export class MetaMaskGaslessOperationRepository extends SecureStateStore impleme
   }
 
   async repairReceipt(operationInput: MetaMaskGaslessOperationRecord): Promise<void> {
+    await this.ready();
     const operation = validateMetaMaskGaslessOperation(operationInput);
     const stored = await this.loadOperation(operation.profileHash, operation.operationId);
     if (stored === null || !mmSame(stored, operation)) corrupt();

@@ -41,6 +41,14 @@ unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
 for commands, persistent account permissions and recovery. This remains
 unreleased source with separate mainnet acceptance still open.
 
+The same gasless commands also support an existing MetaMask Agent server wallet
+on Ethereum, Optimism, Polygon PoS, Monad, Sei, Base, Arbitrum and Linea. The
+successful sender debit equals the frozen recipient amount plus the exact USDC
+fee. APN requires the full operation ID and fingerprint in foreground approval,
+dispatches once and independently verifies settlement. Recovery only observes
+after dispatch, including after the APN deadline. All eight live acceptance rows
+remain open; see [MetaMask gasless transfers](docs/gasless.md#metamask-agent-server-wallet).
+
 ## Install
 
 ```sh

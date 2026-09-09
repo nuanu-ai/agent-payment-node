@@ -11,7 +11,9 @@ import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from ".
 import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
+import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 export interface CoreDependencies {
+    readonly metaMaskGasless?: MetaMaskGaslessDependencies;
     readonly gasless?: GaslessDependencies;
     readonly bridge?: BridgeDependencies;
     readonly directRails?: readonly DirectRailPort[];
@@ -37,6 +39,7 @@ export interface CoreDependencies {
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
 }
 export declare class RuntimeContext {
+    readonly metaMaskGasless?: MetaMaskGaslessDependencies;
     readonly gasless?: GaslessDependencies;
     readonly bridge?: BridgeDependencies;
     readonly directRails: readonly DirectRailPort[];

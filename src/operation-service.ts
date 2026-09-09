@@ -22,8 +22,13 @@ import { publicBridgeOperation } from "./lifi/receipt.js";
 import { GaslessOperationRepository } from "./gasless/operation-repository.js";
 import type { GaslessOperationRecord } from "./gasless/operation-model.js";
 import { publicGaslessOperation } from "./gasless/receipt.js";
+import { MetaMaskGaslessOperationRepository } from "./metamask-gasless/journal/repository.js";
+import { publicMetaMaskGaslessOperation } from "./metamask-gasless/journal/receipt.js";
+import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operation-model.js";
+import type { MetaMaskGaslessRepositoryPort } from "./metamask-gasless/ports.js";
 
 export type StoredMoneyOperation =
+  | { readonly kind: "metamask_gasless_transfer"; readonly record: MetaMaskGaslessOperationRecord }
   | { readonly kind: "gasless_transfer"; readonly record: GaslessOperationRecord }
   | { readonly kind: "bridge_route"; readonly record: BridgeOperationRecord }
   | { readonly kind: "rail_transfer"; readonly record: RailOperationRecord }
@@ -38,6 +43,7 @@ export class OperationService {
     private readonly rails = new RailOperationRepository(state.root),
     private readonly bridges = new BridgeOperationRepository(state.root),
     private readonly gasless = new GaslessOperationRepository(state.root),
+    private readonly metaMaskGasless: MetaMaskGaslessRepositoryPort = new MetaMaskGaslessOperationRepository(state.root),
   ) {}
 
   async resolvePrepare(input: {
@@ -47,17 +53,8 @@ export class OperationService {
     readonly idempotencyHash: string;
     readonly requestHash: string;
   }): Promise<StoredMoneyOperation | null> {
-    const matches = [
-      ...(await this.gasless.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "gasless_transfer" as const, record })),
-      ...(await this.bridges.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "bridge_route" as const, record })),
-      ...(await this.rails.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "rail_transfer" as const, record })),
-      ...(await this.state.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "direct_transfer" as const, record })),
-      ...(await this.state.listAllX402Operations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "x402_fetch" as const, strategy: "local" as const, record })),
-      ...(await this.providerX402.listAllOperations()).filter((operation) => operation.idempotencyHash === input.idempotencyHash).map((record) => ({ kind: "x402_fetch" as const, strategy: "provider_atomic" as const, record })),
-    ];
-    if (matches.length > 1) throw new ApnError("APN_STATE_CORRUPT", "Idempotency identity is duplicated across operation stores.");
-    const existing = matches[0];
-    if (existing === undefined) return null;
+    const existing = await this.findIdempotency(input.idempotencyHash);
+    if (existing === null) return null;
     if (
       existing.kind !== input.kind || existing.record.profileHash !== input.profileHash ||
       existing.record.operationId !== input.operationId || existing.record.requestHash !== input.requestHash
@@ -65,8 +62,24 @@ export class OperationService {
     return existing;
   }
 
+  /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
+  async findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null> {
+    const matches = [
+      ...(await this.metaMaskGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "metamask_gasless_transfer" as const, record })),
+      ...(await this.gasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "gasless_transfer" as const, record })),
+      ...(await this.bridges.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "bridge_route" as const, record })),
+      ...(await this.rails.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "rail_transfer" as const, record })),
+      ...(await this.state.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "direct_transfer" as const, record })),
+      ...(await this.state.listAllX402Operations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "x402_fetch" as const, strategy: "local" as const, record })),
+      ...(await this.providerX402.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "x402_fetch" as const, strategy: "provider_atomic" as const, record })),
+    ];
+    if (matches.length > 1) throw new ApnError("APN_STATE_CORRUPT", "Idempotency identity is duplicated across operation stores.");
+    return matches[0] ?? null;
+  }
+
   async assertProfileAvailable(profileHash: string): Promise<void> {
     const active: StoredMoneyOperation[] = [
+      ...(await this.metaMaskGasless.listOperations(profileHash)).map((record) => ({ kind: "metamask_gasless_transfer" as const, record })),
       ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer" as const, record })),
       ...(await this.bridges.listOperations(profileHash)).map((record) => ({ kind: "bridge_route" as const, record })),
       ...(await this.rails.listOperations(profileHash)).map((record) => ({ kind: "rail_transfer" as const, record })),
@@ -91,7 +104,8 @@ export class OperationService {
     const rail = await this.rails.findOperation(canonicalId);
     const bridge = await this.bridges.findOperation(canonicalId);
     const gasless = await this.gasless.findOperation(canonicalId);
-    if ([direct, x402, providerX402, rail, bridge, gasless].filter((value) => value !== null).length > 1) {
+    const metaMaskGasless = await this.metaMaskGasless.findOperation(canonicalId);
+    if ([direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless].filter((value) => value !== null).length > 1) {
       throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
     }
     if (direct !== null) return { kind: "direct_transfer", record: direct };
@@ -100,6 +114,7 @@ export class OperationService {
     if (rail !== null) return { kind: "rail_transfer", record: rail };
     if (bridge !== null) return { kind: "bridge_route", record: bridge };
     if (gasless !== null) return { kind: "gasless_transfer", record: gasless };
+    if (metaMaskGasless !== null) return { kind: "metamask_gasless_transfer", record: metaMaskGasless };
     throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
   }
 
@@ -109,6 +124,7 @@ export class OperationService {
     if (operation.kind === "rail_transfer") return publicRailOperation(operation.record);
     if (operation.kind === "bridge_route") return publicBridgeOperation(operation.record);
     if (operation.kind === "gasless_transfer") return publicGaslessOperation(operation.record);
+    if (operation.kind === "metamask_gasless_transfer") return publicMetaMaskGaslessOperation(operation.record);
     return operation.strategy === "local"
       ? publicX402Operation(operation.record)
       : publicProviderX402Operation(operation.record);

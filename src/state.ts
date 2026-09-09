@@ -5,7 +5,6 @@ import {
   lstat,
   mkdir,
   open,
-  readdir,
   realpath,
   rename,
   stat,
@@ -126,8 +125,7 @@ export class StateStore extends SecureStateStore {
     return operation;
   }
   async findOperation(operationId: string): Promise<OperationRecord | null> {
-    const operationsRoot = this.resolveRelative("operations");
-    const entries = await readdir(operationsRoot, { withFileTypes: true });
+    const entries = await this.readDirectory("operations");
     let found: OperationRecord | null = null;
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/.test(entry.name)) {
@@ -148,8 +146,7 @@ export class StateStore extends SecureStateStore {
   }
   async listOperations(profileHash: string): Promise<readonly OperationRecord[]> {
     const directory = join("operations", profileHash);
-    await this.ensureDirectory(directory);
-    const entries = await readdir(this.resolveRelative(directory), { withFileTypes: true });
+    const entries = await this.readDirectory(directory);
     const operations: OperationRecord[] = [];
     for (const entry of entries) {
       if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) {
@@ -222,8 +219,7 @@ export class StateStore extends SecureStateStore {
   async listX402Operations(profileHash: string): Promise<readonly X402OperationRecord[]> {
     stateIdentifier(profileHash, "x402 profile hash");
     const directory = join("x402-operations", profileHash);
-    await this.ensureDirectory(directory);
-    const entries = await readdir(this.resolveRelative(directory), { withFileTypes: true });
+    const entries = await this.readDirectory(directory);
     const operations: X402OperationRecord[] = [];
     for (const entry of entries) {
       if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) {
@@ -306,8 +302,7 @@ export class StateStore extends SecureStateStore {
   async listX402Results(profileHash: string): Promise<readonly X402ResultRecord[]> {
     stateIdentifier(profileHash, "x402 profile hash");
     const directory = join("x402-results", profileHash);
-    await this.ensureDirectory(directory);
-    const entries = await readdir(this.resolveRelative(directory), { withFileTypes: true });
+    const entries = await this.readDirectory(directory);
     const results: X402ResultRecord[] = [];
     for (const entry of entries) {
       if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) stateSecurity("x402 results directory contains an unsafe entry.");
@@ -390,8 +385,7 @@ export class StateStore extends SecureStateStore {
   async listX402Receipts(profileHash: string): Promise<readonly X402ReceiptRecord[]> {
     stateIdentifier(profileHash, "x402 profile hash");
     const directory = join("x402-receipts", profileHash);
-    await this.ensureDirectory(directory);
-    const entries = await readdir(this.resolveRelative(directory), { withFileTypes: true });
+    const entries = await this.readDirectory(directory);
     const receipts: X402ReceiptRecord[] = [];
     for (const entry of entries) {
       if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) stateSecurity("x402 receipts directory contains an unsafe entry.");
@@ -485,7 +479,7 @@ export class StateStore extends SecureStateStore {
   }
 
   private async operationProfiles(rootName: "operations" | "x402-operations" | "x402-results" | "x402-receipts"): Promise<readonly string[]> {
-    const entries = await readdir(this.resolveRelative(rootName), { withFileTypes: true });
+    const entries = await this.readDirectory(rootName);
     const profiles: string[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/.test(entry.name)) {
