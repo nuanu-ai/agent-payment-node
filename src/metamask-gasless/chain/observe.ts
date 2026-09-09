@@ -91,18 +91,20 @@ async function inspectCandidate(context: MetaMaskObservationContext, intent: Met
   const status = rpcQuantity(receipt.status);
   if (status !== 0n && status !== 1n) mmFail("mm_gasless_evidence_invalid");
   const accounting = status === 1n ? verifyMetaMaskReceiptAccounting(intent, outer.from, logs) : null;
+  const receiptState = await readMetaMaskChainState(context.call, context.deployment.row,
+    intent.binding.address, included, intent.delegationHash);
+  if (!("counterAtomic" in receiptState) || receiptState.designation !== "pinned") {
+    mmFail("mm_gasless_evidence_invalid");
+  }
   const finality = (await rpcBlock(context.call, context.deployment.row.finalityTag)).block;
   if (BigInt(finality.numberAtomic) < blockNumber) {
     await recheckBlock(context.call, included); await recheckBlock(context.call, finality);
     return { kind: "pending", evidenceHash: hashObject({ transactionHash, included, finality }),
-      usableCandidate: accounting !== null };
+      usableCandidate: accounting !== null && receiptState.counterAtomic === "1" };
   }
-  const [receiptState, finalityState] = await Promise.all([
-    readMetaMaskChainState(context.call, context.deployment.row, intent.binding.address, included, intent.delegationHash),
-    readMetaMaskChainState(context.call, context.deployment.row, intent.binding.address, finality, intent.delegationHash),
-  ]);
-  if (!("counterAtomic" in receiptState) || !("counterAtomic" in finalityState) ||
-    receiptState.designation !== "pinned" || finalityState.designation !== "pinned") mmFail("mm_gasless_evidence_invalid");
+  const finalityState = await readMetaMaskChainState(context.call, context.deployment.row,
+    intent.binding.address, finality, intent.delegationHash);
+  if (!("counterAtomic" in finalityState) || finalityState.designation !== "pinned") mmFail("mm_gasless_evidence_invalid");
   await recheckBlock(context.call, included); await recheckBlock(context.call, finality);
   const baseProof = { chainId: intent.request.chainId, transactionHash, transactionBlock: included,
     finalityBlock: finality, transactionIndexAtomic: transactionIndex.toString(), outer };

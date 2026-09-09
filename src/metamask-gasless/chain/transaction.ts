@@ -81,9 +81,6 @@ export async function verifyMetaMaskOuterTransaction(raw: Record<string, unknown
       serializable = { ...feeFields, type: "eip7702", authorizationList: [parsed.authorization] };
     }
   }
-  if (authorizationOwner === null && intent.initialSnapshot.headState.designation !== "pinned") {
-    mmFail("mm_gasless_evidence_invalid");
-  }
   let serialized: Hex;
   try {
     const signature = type === 0n ? { r, s, v: rpcQuantity(raw.v) } : { r, s, yParity: y };
