@@ -5,7 +5,7 @@ import { encodeFunctionData, parseAbi } from "viem";
 import { createExactExecutionBatchTerms, createLimitedCallsTerms, hashDelegation } from "@metamask/delegation-core";
 import { TypedDataEncoder } from "ethers";
 import { hashObject, sha256 } from "../../src/canonical.js";
-import { mmBinding, mmPrivateHash } from "../../src/metamask-gasless/identity.js";
+import { mmBinding, mmPrivateHash, mmWalletIdentityHash } from "../../src/metamask-gasless/identity.js";
 import { mmEconomics, mmQuote, mmQuoteHash } from "../../src/metamask-gasless/economics.js";
 import { MM_CHAINS, MM_DEPLOYMENT_INPUT_SHA, mmRegistry } from "../../src/metamask-gasless/registry.js";
 import { MM_REASON_CODES, mmError } from "../../src/metamask-gasless/reasons.js";
@@ -20,7 +20,7 @@ const feeRecipient = "0x3333333333333333333333333333333333333333" as const;
 const hash = "a".repeat(64);
 const binding: MetaMaskGaslessBinding = { providerId: "metamask-agent-wallet", address: sender,
   accountBindingHash: hash, capabilityHash: hash, revision: 1, projectHash: hash,
-  walletReferenceHash: hash, walletIdHash: hash, namespace: "eip155", mode: "server", environment: "prod" };
+  walletReferenceHash: hash, walletIdHash: mmWalletIdentityHash(sender), namespace: "eip155", mode: "server", environment: "prod" };
 const request = { chainId: 8453, recipient, grossAtomic: "10000000", maxFeeAtomic: "50000", minReceivedAtomic: "9950000" };
 const transfer = parseAbi(["function transfer(address,uint256) returns (bool)"]);
 function executions(net: string, fee: string): readonly [MetaMaskGaslessExecution, MetaMaskGaslessExecution] {
@@ -55,6 +55,8 @@ test("MM safe binding hashes preserve selected reference kind and original strin
   assert.notEqual(mmPrivateHash("wallet-reference", "Alice", "name"), mmPrivateHash("wallet-reference", "Alice", "id"));
   assert.notEqual(mmPrivateHash("wallet-reference", "Alice", "name"), mmPrivateHash("wallet-reference", "alice", "name"));
   assert.equal(mmPrivateHash("project", "fixture"), hashObject({ purpose: "apn.metamask-gasless.project.v1", value: "fixture" }));
+  assert.equal(mmWalletIdentityHash(sender), hashObject({ purpose: "apn.metamask-gasless.wallet-id.v1", value: sender }));
+  assert.throws(() => mmBinding({ ...binding, walletIdHash: hash }));
   for (const change of [{ projectHash: "X".repeat(64) }, { mode: "byok" }, { revision: 0 }, { rawToken: "private" }])
     assert.throws(() => mmBinding({ ...binding, ...change }));
 });

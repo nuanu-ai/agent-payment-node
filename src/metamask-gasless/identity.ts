@@ -22,12 +22,17 @@ export function mmProfileIdentity(value: unknown): MetaMaskGaslessProfileIdentit
   return { profile: p.profile, profileHash: p.profile_hash, address, accountBindingHash: p.account_binding_hash,
     capabilityHash: p.capability_hash, revision: p.revision };
 }
+/** The supported server service has no opaque wallet id. The legacy field binds its resolved address. */
+export function mmWalletIdentityHash(address: unknown): string {
+  return mmPrivateHash("wallet-id", mmAddress(address, "mm_gasless_identity"));
+}
 export function mmBinding(value: unknown, reason: MetaMaskGaslessFailureReason = "mm_gasless_identity"): MetaMaskGaslessBinding {
   const b = mmExact(value, ["providerId", "address", "accountBindingHash", "capabilityHash", "revision", "projectHash",
     "walletReferenceHash", "walletIdHash", "namespace", "mode", "environment"], reason);
   if (b.providerId !== "metamask-agent-wallet" || b.namespace !== "eip155" || b.mode !== "server" || b.environment !== "prod" ||
     !Number.isSafeInteger(b.revision) || Number(b.revision) < 1 || mmCanonicalAddress(b.address, reason) === MM_ZERO_ADDRESS) mmFail(reason);
   for (const key of ["accountBindingHash", "capabilityHash", "projectHash", "walletReferenceHash", "walletIdHash"]) mmHash(b[key], reason);
+  if (b.walletIdHash !== mmWalletIdentityHash(b.address)) mmFail(reason);
   return b as unknown as MetaMaskGaslessBinding;
 }
 export function mmAssertProfileBinding(binding: MetaMaskGaslessBinding, expected: MetaMaskGaslessProfileIdentity): void {
