@@ -70,7 +70,11 @@ export function validateMetaMaskGaslessSnapshot(value: unknown, expected: {
     snapshot.endpointOrigin !== expected.endpointOrigin) mmFail("mm_gasless_rpc_binding");
   mmIso(snapshot.observedAt, "mm_gasless_evidence_invalid");
   const safeBlock = validateBlock(snapshot.safeBlock), headBlock = validateBlock(snapshot.headBlock);
-  if (BigInt(safeBlock.numberAtomic) > BigInt(headBlock.numberAtomic)) mmFail("mm_gasless_evidence_invalid");
+  if (BigInt(safeBlock.numberAtomic) > BigInt(headBlock.numberAtomic) ||
+    (safeBlock.numberAtomic === headBlock.numberAtomic &&
+      (safeBlock.hash !== headBlock.hash || safeBlock.timestampAtomic !== headBlock.timestampAtomic))) {
+    mmFail("mm_gasless_evidence_invalid");
+  }
   const gross = mmUint(expected.grossAtomic, true, "mm_gasless_evidence_invalid"), row = mmRegistry(expected.chainId).row;
   const safeState = validateState(snapshot.safeState, row, gross);
   const headState = validateState(snapshot.headState, row, gross);
