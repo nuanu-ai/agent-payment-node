@@ -21,6 +21,7 @@ const PAYMASTER = getAddress("0x2222222222222222222222222222222222222222");
 const ENTRYPOINT = getAddress("0x4337084d9e255ff0702461cf8895ce9e3b5ff108");
 const DELEGATE = getAddress("0x3333333333333333333333333333333333333333");
 const RECIPIENT = getAddress("0x4444444444444444444444444444444444444444");
+const OTHER = getAddress("0x5555555555555555555555555555555555555555");
 const HASH = `0x${"ab".repeat(32)}` as Hex;
 const TX_HASH = `0x${"cd".repeat(32)}` as Hex;
 
@@ -48,6 +49,11 @@ test("conservative gas and Circle fee arithmetic bind first and repeated delegat
     { code: "APN_FEE_BUDGET_EXCEEDED" });
   assert.throws(() => assertGaslessSnapshot(intent, { ...firstSnapshot,
     feeConfiguration: { ...firstSnapshot.feeConfiguration, nativeTokenPrice: "5000000000" } }),
+  { code: "APN_FEE_BUDGET_EXCEEDED" });
+  assert.doesNotThrow(() => assertGaslessSnapshot(intent, { ...firstSnapshot,
+    feeConfiguration: { ...firstSnapshot.feeConfiguration, nativeTokenPrice: "1" } }));
+  assert.throws(() => assertGaslessSnapshot(intent, { ...firstSnapshot,
+    feeConfiguration: { additionalGasCharge: "35001", feeSpread: "0", nativeTokenPrice: "1" } }),
   { code: "APN_FEE_BUDGET_EXCEEDED" });
 });
 
@@ -118,23 +124,7 @@ test("settlement decoder accounts sponsored success from exact published events"
   const intent = makeIntent(getAddress("0x1111111111111111111111111111111111111111"), "expected");
   const operationHash = `0x${"12".repeat(32)}` as Hex;
   const prefund = 3_000_000n, refund = 500_000n, charge = 2_500_000n;
-  const logs = [
-    eventLog(GASLESS_TOKEN_ABI, "Approval", intent.token,
-      { owner: intent.owner.address, spender: intent.paymaster, value: BigInt(intent.feeCapAtomic) }, 0),
-    eventLog(GASLESS_TOKEN_ABI, "Transfer", intent.token,
-      { from: intent.owner.address, to: intent.paymaster, value: prefund }, 1),
-    eventLog(GASLESS_TOKEN_ABI, "Transfer", intent.token,
-      { from: intent.owner.address, to: intent.request.recipient, value: BigInt(intent.recipientAtomic) }, 2),
-    eventLog(GASLESS_TOKEN_ABI, "Approval", intent.token,
-      { owner: intent.owner.address, spender: intent.paymaster, value: 0n }, 3),
-    eventLog(GASLESS_TOKEN_ABI, "Transfer", intent.token,
-      { from: intent.paymaster, to: intent.owner.address, value: refund }, 4),
-    eventLog(GASLESS_PAYMASTER_ABI, "UserOperationSponsored", intent.paymaster, {
-      token: intent.token, sender: intent.owner.address, userOpHash: operationHash,
-      nativeTokenPrice: 2_500_000_000n, actualTokenNeeded: charge, feeTokenAmount: 25_000n,
-    }, 5),
-    userOperationEvent(intent, operationHash, true, 6),
-  ];
+  const logs = sponsoredSuccessLogs(intent, operationHash);
   assert.deepEqual(gaslessAccounting(intent, operationHash, receipt(logs)), {
     success: true, branch: "sponsored", prefundAtomic: prefund.toString(), refundAtomic: refund.toString(),
     feeAtomic: charge.toString(), deliveredAtomic: intent.recipientAtomic,
@@ -168,6 +158,90 @@ test("failed postOp proof charges the exact prefund and leaves the fee residue f
     userOperationEvent(intent, `0x${"56".repeat(32)}` as Hex, false, 4)])), { code: "APN_RPC_PROTOCOL" });
 });
 
+test("receipt correlation rejects reordered, duplicated, missing, and mismatched owner effects", () => {
+  const intent = makeIntent(getAddress("0x1111111111111111111111111111111111111111"), "expected");
+  const operationHash = `0x${"12".repeat(32)}` as Hex, otherHash = `0x${"56".repeat(32)}` as Hex;
+  const good = sponsoredSuccessLogs(intent, operationHash);
+  const rejected = (logs: readonly GaslessLog[]) => assert.throws(
+    () => gaslessAccounting(intent, operationHash, receipt(logs)), { code: "APN_RPC_PROTOCOL" });
+  rejected(reindex([good[0]!, good[1]!, good[3]!, good[2]!, ...good.slice(4)]));
+  rejected(good.map((log, index) => index === 1 ? { ...log, logIndexAtomic: "0" } : log));
+  rejected([...good, userOperationEvent(intent, operationHash, true, 7)]);
+  rejected(replace(good, 6, userOperationEventAs(intent, operationHash, true, 6, { sender: OTHER })));
+  rejected(replace(good, 5, sponsorEvent(intent, operationHash, 5, { token: OTHER })));
+  rejected(replace(good, 6, { ...good[6]!, address: OTHER }));
+  rejected(replace(good, 6, userOperationEvent(intent, otherHash, true, 6)));
+  rejected(replace(good, 6, userOperationEventAs(intent, operationHash, true, 6, { nonce: 10n })));
+  rejected(good.filter((_, index) => index !== 2));
+  rejected(good.filter((_, index) => index !== 3));
+  rejected(good.filter((_, index) => index !== 5));
+  rejected(replace(good, 1, tokenTransfer(intent.owner.address, intent.paymaster,
+    BigInt(intent.feeCapAtomic) + 1n, 1)));
+  rejected(replace(good, 4, tokenTransfer(intent.paymaster, intent.owner.address, 3_000_001n, 4)));
+
+  const unrelated = reindex([
+    good[0]!,
+    eventLog(GASLESS_TOKEN_ABI, "Approval", intent.token,
+      { owner: OTHER, spender: intent.paymaster, value: 1n }, 0),
+    tokenTransfer(OTHER, intent.paymaster, 1n, 0),
+    tokenTransfer(OTHER, intent.owner.address, 1n, 0),
+    ...good.slice(1),
+    userOperationEventAs(intent, otherHash, false, 0, { sender: OTHER, nonce: 1n }),
+  ]);
+  assert.equal(gaslessAccounting(intent, operationHash, receipt(unrelated)).feeAtomic, "2500000");
+});
+
+test("failed sponsored and prefund-low branches enforce their exact effect order", () => {
+  const intent = makeIntent(getAddress("0x1111111111111111111111111111111111111111"), "expected");
+  const operationHash = `0x${"78".repeat(32)}` as Hex;
+  const failedSponsored = [
+    permitApproval(intent, 0), tokenTransfer(intent.owner.address, intent.paymaster, 3_000_000n, 1),
+    tokenTransfer(intent.paymaster, intent.owner.address, 500_000n, 2),
+    sponsorEvent(intent, operationHash, 3), userOperationEvent(intent, operationHash, false, 4),
+  ];
+  const sponsored = gaslessAccounting(intent, operationHash, receipt(failedSponsored));
+  assert.deepEqual([sponsored.success, sponsored.branch, sponsored.feeAtomic, sponsored.deliveredAtomic],
+    [false, "sponsored", "2500000", "0"]);
+  assert.throws(() => gaslessAccounting(intent, operationHash,
+    receipt(reindex([failedSponsored[0]!, failedSponsored[1]!, failedSponsored[3]!, failedSponsored[2]!, failedSponsored[4]!]))),
+  { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => gaslessAccounting(intent, operationHash, receipt(failedSponsored.filter((_, index) => index !== 3))),
+    { code: "APN_RPC_PROTOCOL" });
+
+  const prefundLow = [
+    permitApproval(intent, 0), tokenTransfer(intent.owner.address, intent.paymaster, 2_000_000n, 1),
+    eventLog(GASLESS_ENTRYPOINT_ABI, "UserOperationPrefundTooLow", intent.entryPoint,
+      { userOpHash: operationHash, sender: intent.owner.address,
+        nonce: BigInt(intent.initialSnapshot.entryPointNonceAtomic) }, 2),
+    userOperationEvent(intent, operationHash, false, 3),
+  ];
+  assert.equal(gaslessAccounting(intent, operationHash, receipt(prefundLow)).branch, "prefund_too_low");
+  assert.throws(() => gaslessAccounting(intent, operationHash,
+    receipt(reindex([prefundLow[0]!, prefundLow[1]!, prefundLow[3]!, prefundLow[2]!]))),
+  { code: "APN_RPC_PROTOCOL" });
+
+  const combined = [
+    permitApproval(intent, 0), tokenTransfer(intent.owner.address, intent.paymaster, 2_000_000n, 1),
+    postOpFailureFrame(intent, operationHash, 2), prefundFailureFrame(intent, operationHash, 3),
+    userOperationEvent(intent, operationHash, false, 4),
+  ];
+  const combinedAccounting = gaslessAccounting(intent, operationHash, receipt(combined));
+  assert.deepEqual([combinedAccounting.branch, combinedAccounting.feeAtomic, combinedAccounting.logsHash],
+    ["prefund_too_low", "2000000", hashObjectForLogs(combined)]);
+
+  const rejected = (logs: readonly GaslessLog[]) => assert.throws(
+    () => gaslessAccounting(intent, operationHash, receipt(logs)), { code: "APN_RPC_PROTOCOL" });
+  rejected(reindex([...combined.slice(0, 2), combined[3]!, combined[2]!, combined[4]!]));
+  rejected(reindex([...combined.slice(0, 4), combined[3]!, combined[4]!]));
+  rejected(replace(combined, 3, prefundFailureFrame(intent, operationHash, 3, { nonce: 10n })));
+  rejected(replace(combined, 3, prefundFailureFrame(intent, operationHash, 3, { sender: OTHER })));
+  rejected(replace(combined, 3, prefundFailureFrame(intent, otherHash(), 3)));
+  rejected(reindex([...combined.slice(0, 4), sponsorEvent(intent, operationHash, 0), combined[4]!]));
+  rejected(reindex([...combined.slice(0, 4), tokenTransfer(intent.paymaster, intent.owner.address, 1n, 0), combined[4]!]));
+  rejected(reindex([...combined.slice(0, 2), tokenTransfer(intent.owner.address, intent.request.recipient, 1n, 0),
+    ...combined.slice(2)]));
+});
+
 function makeIntent(ownerAddress: Address, delegation: "empty" | "expected"): GaslessIntent {
   const initialSnapshot = snapshot(ownerAddress, delegation), gas = gaslessGas(initialSnapshot);
   const feeCapAtomic = gaslessFee(gas, initialSnapshot.feeConfiguration);
@@ -199,16 +273,73 @@ function snapshot(owner: Address, delegation: "empty" | "expected"): GaslessSnap
   };
 }
 
+function sponsoredSuccessLogs(intent: GaslessIntent, operationHash: Hex): readonly GaslessLog[] {
+  return [
+    permitApproval(intent, 0),
+    tokenTransfer(intent.owner.address, intent.paymaster, 3_000_000n, 1),
+    tokenTransfer(intent.owner.address, intent.request.recipient, BigInt(intent.recipientAtomic), 2),
+    eventLog(GASLESS_TOKEN_ABI, "Approval", intent.token,
+      { owner: intent.owner.address, spender: intent.paymaster, value: 0n }, 3),
+    tokenTransfer(intent.paymaster, intent.owner.address, 500_000n, 4),
+    sponsorEvent(intent, operationHash, 5),
+    userOperationEvent(intent, operationHash, true, 6),
+  ];
+}
+
+function permitApproval(intent: GaslessIntent, index: number): GaslessLog {
+  return eventLog(GASLESS_TOKEN_ABI, "Approval", intent.token,
+    { owner: intent.owner.address, spender: intent.paymaster, value: BigInt(intent.feeCapAtomic) }, index);
+}
+
+function tokenTransfer(from: Address, to: Address, value: bigint, index: number): GaslessLog {
+  return eventLog(GASLESS_TOKEN_ABI, "Transfer", TOKEN, { from, to, value }, index);
+}
+
+function sponsorEvent(intent: GaslessIntent, hash: Hex, index: number, changes: Json = {}): GaslessLog {
+  return eventLog(GASLESS_PAYMASTER_ABI, "UserOperationSponsored", intent.paymaster, {
+    token: intent.token, sender: intent.owner.address, userOpHash: hash, nativeTokenPrice: 2_500_000_000n,
+    actualTokenNeeded: 2_500_000n, feeTokenAmount: 25_000n, ...changes,
+  }, index);
+}
+
+function postOpFailureFrame(intent: GaslessIntent, hash: Hex, index: number, changes: Json = {}): GaslessLog {
+  return eventLog(GASLESS_ENTRYPOINT_ABI, "PostOpRevertReason", intent.entryPoint, {
+    userOpHash: hash, sender: intent.owner.address, nonce: BigInt(intent.initialSnapshot.entryPointNonceAtomic),
+    revertReason: "0xdeadbeef", ...changes,
+  }, index);
+}
+
+function prefundFailureFrame(intent: GaslessIntent, hash: Hex, index: number, changes: Json = {}): GaslessLog {
+  return eventLog(GASLESS_ENTRYPOINT_ABI, "UserOperationPrefundTooLow", intent.entryPoint, {
+    userOpHash: hash, sender: intent.owner.address, nonce: BigInt(intent.initialSnapshot.entryPointNonceAtomic), ...changes,
+  }, index);
+}
+
+function otherHash(): Hex { return `0x${"56".repeat(32)}`; }
+
 function receipt(logs: readonly GaslessLog[]): GaslessProtocolReceipt {
   return { chainId: 8453, transactionHash: TX_HASH,
     block: { numberAtomic: "101", hash: `0x${"ef".repeat(32)}`, timestampAtomic: "1788912012" }, logs };
 }
 
 function userOperationEvent(intent: GaslessIntent, hash: Hex, success: boolean, index: number): GaslessLog {
+  return userOperationEventAs(intent, hash, success, index);
+}
+
+function userOperationEventAs(intent: GaslessIntent, hash: Hex, success: boolean, index: number,
+  changes: Json = {}): GaslessLog {
   return eventLog(GASLESS_ENTRYPOINT_ABI, "UserOperationEvent", intent.entryPoint, {
     userOpHash: hash, sender: intent.owner.address, paymaster: intent.paymaster,
-    nonce: BigInt(intent.initialSnapshot.entryPointNonceAtomic), success, actualGasCost: 100n, actualGasUsed: 50n,
+    nonce: BigInt(intent.initialSnapshot.entryPointNonceAtomic), success, actualGasCost: 100n, actualGasUsed: 50n, ...changes,
   }, index);
+}
+
+function replace(logs: readonly GaslessLog[], index: number, value: GaslessLog): readonly GaslessLog[] {
+  return logs.map((log, candidate) => candidate === index ? value : log);
+}
+
+function reindex(logs: readonly GaslessLog[]): readonly GaslessLog[] {
+  return logs.map((log, index) => ({ ...log, logIndexAtomic: String(index) }));
 }
 
 function eventLog(abi: Abi, eventName: string, address: Address, args: Json, index: number): GaslessLog {

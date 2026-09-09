@@ -111,7 +111,8 @@ export function assertGaslessSnapshot(intent: GaslessIntent, current: GaslessSna
   }
   if (observed.allowanceAtomic !== "0") gaslessFailure("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "gasless_allowance_drift");
   if (BigInt(observed.balanceAtomic) < gross) gaslessFailure("APN_INSUFFICIENT_USDC", "gasless_fee_budget");
-  if (BigInt(observed.baseFeePerGas) > BigInt(gas.maxFeePerGas) ||
+  if (BigInt(observed.feeConfiguration.additionalGasCharge) > BigInt(gas.paymasterPostOpGasLimit) ||
+    BigInt(observed.baseFeePerGas) > BigInt(gas.maxFeePerGas) ||
     BigInt(gaslessFee(gas, observed.feeConfiguration)) > cap) feeFailure();
 }
 
