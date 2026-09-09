@@ -1,0 +1,325 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { encodeAbiParameters, encodeEventTopics, getAbiItem, getAddress, keccak256, parseTransaction,
+  type Abi, type AbiParameter, type TransactionSerializable } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { hashObject, sha256 } from "../../src/canonical.js";
+import type { Address, Hex } from "../../src/model.js";
+import { GASLESS_ENTRYPOINT_ABI, GASLESS_PAYMASTER_ABI, GASLESS_TOKEN_ABI } from "../../src/gasless/abi.js";
+import { gaslessFee, gaslessGas } from "../../src/gasless/economics.js";
+import type { GaslessTransport } from "../../src/gasless/https.js";
+import type { GaslessBlock, GaslessCursor, GaslessDeployment, GaslessIntent, GaslessLog,
+  GaslessSnapshot } from "../../src/gasless/model.js";
+import type { GaslessBootstrapMaterial, GaslessUserOperationMaterial } from "../../src/gasless/ports.js";
+import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
+import { GaslessRpc, gaslessRpcFactory } from "../../src/gasless/rpc.js";
+import { observeGasless, type GaslessObservationContext } from "../../src/gasless/rpc-observe.js";
+import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "../../src/gasless/rpc-state.js";
+import { verifyGaslessOuterTransaction } from "../../src/gasless/rpc-transaction.js";
+import { GASLESS_ESTIMATE_SIGNATURE } from "../../src/gasless/signature.js";
+import { gaslessBatch, gaslessEnvelopeBinding, gaslessPermitTypedData, gaslessUserOperation,
+  gaslessUserOperationHash, gaslessUserOperationTypedData } from "../../src/gasless/wire.js";
+
+type Json = Record<string, any>;
+const RPC_URL = "https://rpc.example/private-path";
+const BUNDLER_URL = "https://bundler.example/api/v1";
+const KEY = `0x${"1".repeat(64)}` as Hex;
+const OUTER_KEY = `0x${"2".repeat(64)}` as Hex;
+const OWNER = privateKeyToAccount(KEY);
+const OUTER = privateKeyToAccount(OUTER_KEY);
+const RECIPIENT = getAddress("0x4444444444444444444444444444444444444444");
+const word = (value: bigint): Hex => `0x${value.toString(16).padStart(64, "0")}`;
+const quantity = (value: bigint | number): Hex => `0x${BigInt(value).toString(16)}`;
+const blockHash = (number: bigint | number): Hex => `0x${sha256(`gasless-block-${number}`)}`;
+const block = (number: bigint | number): GaslessBlock => ({ numberAtomic: String(number),
+  hash: blockHash(number), timestampAtomic: String(1_788_912_000n + BigInt(number)) });
+
+class TestTransport implements GaslessTransport {
+  readonly calls: Array<{ endpoint: string; method: string; params: readonly unknown[] }> = [];
+  constructor(readonly result: (endpoint: string, method: string, params: readonly unknown[]) => unknown) {}
+  async request(endpoint: string, method: "POST" | "GET", body: string | null) {
+    assert.equal(method, "POST"); assert.notEqual(body, null);
+    const request = JSON.parse(body!) as Json;
+    this.calls.push({ endpoint, method: request.method, params: request.params });
+    const result = this.result(endpoint, request.method, request.params);
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
+  }
+}
+
+test("gasless RPC binds full endpoint identities and verifies both chains plus EntryPoint support", async () => {
+  const deployment = gaslessDeployment(8453);
+  const transport = new TestTransport((_endpoint, method) => method === "eth_supportedEntryPoints"
+    ? [deployment.entryPoint] : "0x2105");
+  const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+  assert.equal(rpc.rpcOrigin, "https://rpc.example"); assert.equal(rpc.bundlerOrigin, "https://bundler.example");
+  assert.equal(rpc.rpcEndpointHash, sha256(RPC_URL)); assert.equal(rpc.bundlerEndpointHash, sha256(BUNDLER_URL));
+  await rpc.assertChain(); assert.equal(transport.calls.length, 3);
+  assert.throws(() => new GaslessRpc(8453, `${RPC_URL}?key=secret`, BUNDLER_URL, transport), { code: "APN_RPC_CONFIG" });
+  const mismatch = new GaslessRpc(8453, RPC_URL, BUNDLER_URL,
+    new TestTransport((_endpoint, method) => method === "eth_supportedEntryPoints" ? [deployment.entryPoint] : "0x1"));
+  await assert.rejects(mismatch.assertChain(), { code: "APN_CHAIN_MISMATCH" });
+});
+
+test("gasless RPC factory is lazy and requires only the selected chain RPC configuration", () => {
+  const factory = gaslessRpcFactory({});
+  assert.throws(() => factory(8453), { code: "APN_RPC_CONFIG" });
+  const configured = gaslessRpcFactory({ APN_BASE_RPC_URL: RPC_URL });
+  const first = configured(8453), repeated = configured(8453);
+  assert.equal(first, repeated); assert.equal(first.rpcEndpointHash, sha256(RPC_URL));
+  assert.equal(first.bundlerEndpointHash, sha256(gaslessDeployment(8453).publicBundlerUrl));
+});
+
+test("gasless estimate sends only the exact v0.8 wire and send accepts only its locally authenticated hash", async () => {
+  const intent = makeIntent();
+  const permitSignature = await OWNER.signTypedData(gaslessPermitTypedData(intent));
+  const bootstrap = material("bootstrap", { permitSignature, authorization: null }) as GaslessBootstrapMaterial;
+  let sentHash: Hex | null = null;
+  const transport = new TestTransport((_endpoint, method, params) => {
+    if (method === "eth_chainId") return "0x2105";
+    if (method === "eth_supportedEntryPoints") return [intent.entryPoint];
+    if (method === "eth_estimateUserOperationGas") return { verificationGasLimit: "0x15f90", callGasLimit: "0x30d40",
+      paymasterVerificationGasLimit: "0x2bf20", paymasterPostOpGasLimit: "0x88b8", preVerificationGas: "0x1d4c0" };
+    if (method === "eth_sendUserOperation") return sentHash;
+    throw new Error("unexpected method");
+  });
+  const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+  const estimate = await rpc.estimate(intent, bootstrap);
+  assert.deepEqual({ ...estimate, responseHash: undefined }, { verificationGasLimit: "90000", callGasLimit: "200000",
+    paymasterVerificationGasLimit: "180000", paymasterPostOpGasLimit: "35000",
+    preVerificationGas: "120000", responseHash: undefined });
+  assert.match(estimate.responseHash, /^[a-f0-9]{64}$/u);
+  const estimateCall = transport.calls.find((call) => call.method === "eth_estimateUserOperationGas")!;
+  assert.deepEqual(Object.keys(estimateCall.params[0] as Json).sort(), ["callData", "callGasLimit", "factory", "factoryData",
+    "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "paymaster", "paymasterData", "paymasterPostOpGasLimit",
+    "paymasterVerificationGasLimit", "preVerificationGas", "sender", "signature", "verificationGasLimit"].sort());
+  assert.equal((estimateCall.params[0] as Json).signature, GASLESS_ESTIMATE_SIGNATURE);
+  const estimateWire = gaslessUserOperation(intent, bootstrap, GASLESS_ESTIMATE_SIGNATURE);
+  const signature = await OWNER.signTypedData(gaslessUserOperationTypedData(intent, estimateWire));
+  const wire = gaslessUserOperation(intent, bootstrap, signature), localHash = gaslessUserOperationHash(intent, wire);
+  const sealed = material("user_operation", { bootstrapMaterialHash: bootstrap.materialHash,
+    estimateHash: estimate.responseHash, userOperation: wire, userOperationHash: localHash }) as GaslessUserOperationMaterial;
+  sentHash = localHash; assert.equal(await rpc.send(intent, sealed), localHash);
+  const sends = transport.calls.filter((call) => call.method === "eth_sendUserOperation");
+  assert.equal(sends.length, 1); assert.deepEqual(sends[0]!.params, [wire, intent.entryPoint]);
+  sentHash = word(999n); await assert.rejects(rpc.send(intent, sealed), { code: "APN_RPC_AMBIGUOUS" });
+});
+
+test("gasless canonical state reads pin every effect value to one block hash", async () => {
+  const intent = makeIntent(), deployment = gaslessDeployment(8453), at = block(100);
+  const pinned = { blockHash: at.hash, requireCanonical: true }, seen: Array<readonly unknown[]> = [];
+  const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+    seen.push(params);
+    if (method === "eth_getBalance" || method === "eth_getTransactionCount") return "0x0";
+    if (method === "eth_getCode") return `0xef0100${deployment.delegate.slice(2).toLowerCase()}`;
+    const data = (params[0] as Json).data as string;
+    if (data.startsWith("0x70a08231")) return word(10_000_000n);
+    if (data.startsWith("0xdd62ed3e")) return word(0n);
+    if (data.startsWith("0x7ecebe00")) return word(7n);
+    if (data.startsWith("0x35567e1a")) return word(9n);
+    if (data.startsWith("0x5c975abb") || data.startsWith("0xe877a526")) return word(0n);
+    if (data.startsWith("0x1c704f2e")) return word(35_000n);
+    if (data.startsWith("0x37876f0d")) return word(100n);
+    if (data.startsWith("0x0fdb11cf")) return word(2_500_000_000n);
+    throw new Error(`unexpected call ${data}`);
+  };
+  const account = await readAccountAt(call as never, deployment, intent.owner.address, at, true);
+  assert.equal(account.delegation, "expected"); assert.equal(account.nativeBalanceWei, "0");
+  const config = await readFeeConfigurationAt(call as never, deployment, intent.owner.address, at);
+  assert.deepEqual(config, { additionalGasCharge: "35000", feeSpread: "100", nativeTokenPrice: "2500000000" });
+  assert.ok(seen.filter((params) => params.at(-1) !== "pending").every((params) => hashObject(params.at(-1)) === hashObject(pinned)));
+  const tiny = { ...deployment, code: [{ address: deployment.token, codeHash: keccak256("0x6000") }],
+    reads: [{ kind: "call" as const, address: deployment.token, data: "0x12345678" as Hex, expected: word(7n) }] };
+  const protocolRead = async (method: string, params: readonly unknown[]) => method === "eth_call" &&
+    (params[0] as Json).data === "0x12345678" ? word(7n) : call(method, params);
+  await verifyProtocolAt(async (method, params) => method === "eth_getCode" ? "0x6000" : protocolRead(method, params), tiny, at);
+  await assert.rejects(verifyProtocolAt(async (method, params) => method === "eth_getCode" ? "0x6001" : protocolRead(method, params),
+    tiny, at), { code: "APN_RPC_PROTOCOL" });
+});
+
+for (let type = 0; type <= 4; type += 1) test(`gasless outer type ${type} is reconstructed from signed bytes`, async () => {
+  const signed = await signedOuter(type);
+  const verified = await verifyGaslessOuterTransaction(signed.rpc, 8453, signed.hash);
+  assert.equal(verified.from, OUTER.address); assert.equal(verified.to, gaslessDeployment(8453).entryPoint);
+  await assert.rejects(verifyGaslessOuterTransaction({ ...signed.rpc, input: "0x12345679" }, 8453, signed.hash),
+    { code: "APN_RPC_PROTOCOL" });
+});
+
+test("gasless observation reports bootstrap-only permission without inventing a payment hash", async () => {
+  const intent = makeIntent(), cursor = initialCursor(intent), calls: string[] = [];
+  const context = { chainId: 8453 as const, rpcOrigin: "https://rpc.example", deployment: gaslessDeployment(8453),
+    rpc: async (method: string) => { calls.push(method); throw new Error("no RPC expected"); },
+    bundler: async (method: string) => { calls.push(method); throw new Error("no bundler expected"); },
+    snapshot: async () => intent.initialSnapshot } as GaslessObservationContext;
+  const observation = await observeGasless(context, intent,
+    { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: null, userOperationHash: null }, cursor);
+  assert.equal(observation.status, "unresolved"); assert.equal(observation.transactionHash, null);
+  assert.equal(observation.reason, "gasless_bootstrap_unresolved"); assert.match(observation.evidenceHash!, /^[a-f0-9]{64}$/u);
+  assert.deepEqual(calls, []);
+});
+
+test("gasless finite safe-block scan advances one 256-block window and resets on cursor reorg", async () => {
+  const intent = makeIntent(), userOperationHash = word(71n), cursor = initialCursor(intent);
+  let reorg = false; const tags: unknown[] = [];
+  const context = { chainId: 8453 as const, rpcOrigin: "https://rpc.example", deployment: gaslessDeployment(8453),
+    bundler: async () => null,
+    snapshot: async () => intent.initialSnapshot,
+    rpc: async (method: string, params: readonly unknown[]) => {
+      if (method === "eth_getBlockByNumber") {
+        const tag = params[0]; tags.push(tag); const number = tag === "safe" ? 400n : BigInt(tag as string);
+        return rawBlock(number, reorg && number === 355n ? word(123_456n) : blockHash(number));
+      }
+      if (method === "eth_getLogs") { const filter = params[0] as Json;
+        assert.equal(filter.fromBlock, "0x64"); assert.equal(filter.toBlock, "0x163"); return []; }
+      throw new Error(`unexpected ${method}`);
+    },
+  } as GaslessObservationContext;
+  const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
+  const first = await observeGasless(context, intent, identity, cursor);
+  assert.equal(first.status, "not_found"); assert.equal(first.cursor.nextBlockAtomic, "356");
+  assert.equal(first.cursor.previousEndBlock?.numberAtomic, "355"); assert.ok(tags.includes("safe"));
+  reorg = true; const second = await observeGasless(context, intent, identity, first.cursor);
+  assert.equal(second.status, "unresolved"); assert.deepEqual(second.cursor, cursor);
+});
+
+test("gasless safe observation fixes effect proof while later safe account state may advance", async () => {
+  const intent = makeIntent(), userOperationHash = word(72n), signed = await signedOuter(2);
+  const effectBlock = block(101), transaction = { ...signed.rpc, blockNumber: "0x65", blockHash: effectBlock.hash,
+    transactionIndex: "0x0" };
+  const logs = settlementLogs(intent, userOperationHash), receipt = { transactionHash: signed.hash, blockNumber: "0x65",
+    blockHash: effectBlock.hash, transactionIndex: "0x0", type: "0x2", from: OUTER.address, to: intent.entryPoint,
+    status: "0x1", logs: logs.map((log) => rawLog(log, signed.hash, effectBlock)) };
+  let safeNumber = 102n;
+  const context = { chainId: 8453 as const, rpcOrigin: "https://rpc.example",
+    deployment: { ...gaslessDeployment(8453), code: [], reads: [] } as GaslessDeployment,
+    snapshot: async () => intent.initialSnapshot,
+    bundler: async (method: string) => method === "eth_getUserOperationReceipt"
+      ? { userOpHash: userOperationHash, receipt: { transactionHash: signed.hash } }
+      : { userOpHash: userOperationHash, entryPoint: intent.entryPoint, transactionHash: signed.hash },
+    rpc: async (method: string, params: readonly unknown[]) => {
+      if (method === "eth_getTransactionByHash") return transaction;
+      if (method === "eth_getTransactionReceipt") return receipt;
+      if (method === "eth_getBlockByNumber") {
+        const tag = params[0], number = tag === "safe" ? safeNumber : BigInt(tag as string);
+        return rawBlock(number, blockHash(number), number === 101n ? [signed.hash] : []);
+      }
+      if (method === "eth_getBalance" || method === "eth_getTransactionCount") return "0x0";
+      if (method === "eth_getCode") return `0xef0100${intent.delegate.slice(2).toLowerCase()}`;
+      if (method === "eth_call") return accountRead(params, safeNumber);
+      throw new Error(`unexpected ${method}`);
+    },
+  } as GaslessObservationContext;
+  const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
+  const first = await observeGasless(context, intent, identity, initialCursor(intent));
+  assert.equal(first.status, "safe"); assert.equal(first.settlement?.safeBlock.numberAtomic, "102");
+  assert.equal(first.settlement?.effectAccount.balanceAtomic, "6000000");
+  safeNumber = 103n; const second = await observeGasless(context, intent, identity, first.cursor);
+  assert.equal(second.status, "safe"); assert.equal(second.settlement?.safeBlock.numberAtomic, "103");
+  assert.equal(second.settlement?.safeAccount.balanceAtomic, "6000001");
+  assert.equal(second.settlement?.receiptHash, first.settlement?.receiptHash);
+  assert.equal(second.settlement?.transactionProofHash, first.settlement?.transactionProofHash);
+  assert.deepEqual(second.settlement?.accounting, first.settlement?.accounting);
+});
+
+function makeIntent(): GaslessIntent {
+  const deployment = gaslessDeployment(8453);
+  const snapshot: GaslessSnapshot = { chainId: 8453, rpcOrigin: new URL(RPC_URL).origin,
+    rpcEndpointHash: sha256(RPC_URL), bundlerOrigin: new URL(BUNDLER_URL).origin,
+    bundlerEndpointHash: sha256(BUNDLER_URL), block: block(100), protocolHash: gaslessProtocolHash(deployment),
+    owner: OWNER.address, token: deployment.token, balanceAtomic: "10000000", nativeBalanceWei: "0", allowanceAtomic: "0",
+    permitNonceAtomic: "7", entryPointNonceAtomic: "9", eoaNonceAtomic: "0", pendingEoaNonceAtomic: "0",
+    delegation: "expected", feeConfiguration: { additionalGasCharge: "35000", feeSpread: "100",
+      nativeTokenPrice: "2500000000" }, baseFeePerGas: "1000000000", maxFeePerGas: "2100000000",
+    maxPriorityFeePerGas: "100000000" };
+  const gas = gaslessGas(snapshot), feeCapAtomic = gaslessFee(gas, snapshot.feeConfiguration), grossAtomic = "10000000";
+  const withoutHash = { profile: "synthetic", request: { chainId: 8453 as const, recipient: RECIPIENT, grossAtomic,
+    maxFeeAtomic: "5000000", minReceivedAtomic: "5000000" }, owner: { profile: "synthetic", profileHash: "1".repeat(64),
+    address: OWNER.address, walletBindingHash: "2".repeat(64), walletCreatedAt: "2026-09-09T00:00:00.000Z" },
+    providerBinding: { providerId: "local" as const, accountBindingHash: "3".repeat(64), capabilityHash: "4".repeat(64),
+      revision: 1 }, initialSnapshot: snapshot, gas, token: deployment.token, tokenDomain: deployment.tokenDomain,
+    paymaster: deployment.paymaster, entryPoint: deployment.entryPoint, delegate: deployment.delegate, feeCapAtomic,
+    recipientAtomic: (BigInt(grossAtomic) - BigInt(feeCapAtomic)).toString(), callData: "0x" as Hex,
+    preparedAt: "2026-09-09T00:00:00.000Z", expiresAt: "2026-09-09T00:05:00.000Z", policyHash: "5".repeat(64) };
+  const bound = { ...withoutHash, callData: gaslessBatch(deployment.token, RECIPIENT,
+    withoutHash.recipientAtomic, deployment.paymaster) };
+  return { ...bound, unsignedEnvelopeHash: hashObject(gaslessEnvelopeBinding(bound)) };
+}
+
+function material(role: "bootstrap" | "user_operation", fields: Json): Json {
+  return { schemaVersion: "apn.gasless-effect.v1", profileHash: "1".repeat(64), operationId: "gasless-rpc-test",
+    fingerprint: "6".repeat(64), envelopeHash: "7".repeat(64), materialHash: "8".repeat(64), role, ...fields };
+}
+
+async function signedOuter(type: number) {
+  const deployment = gaslessDeployment(8453), common = { chainId: 8453, to: deployment.entryPoint, nonce: 7,
+    gas: 400_000n, value: 0n, data: "0x12345678" as Hex }, fees = { maxFeePerGas: 2_000_000_000n,
+    maxPriorityFeePerGas: 0n };
+  let transaction: TransactionSerializable;
+  if (type === 0) transaction = { ...common, type: "legacy", gasPrice: fees.maxFeePerGas };
+  else if (type === 1) transaction = { ...common, type: "eip2930", gasPrice: fees.maxFeePerGas, accessList: [] };
+  else if (type === 2) transaction = { ...common, ...fees, type: "eip1559", accessList: [] };
+  else if (type === 3) transaction = { ...common, ...fees, type: "eip4844", accessList: [], maxFeePerBlobGas: 100n,
+    blobVersionedHashes: [`0x01${"67".repeat(31)}`] };
+  else transaction = { ...common, ...fees, type: "eip7702", accessList: [], authorizationList: [
+    await OUTER.signAuthorization({ chainId: 8453, contractAddress: deployment.delegate, nonce: 0 })] };
+  const raw = await OUTER.signTransaction(transaction), parsed = parseTransaction(raw) as Json, hash = keccak256(raw);
+  const rpc = { hash, chainId: "0x2105", type: quantity(type), nonce: "0x7", from: OUTER.address, to: common.to,
+    gas: quantity(common.gas), value: "0x0", input: common.data, r: parsed.r, s: parsed.s,
+    v: quantity(parsed.v ?? BigInt(parsed.yParity)), ...(type === 0 ? {} : { yParity: quantity(parsed.yParity),
+      accessList: parsed.accessList ?? [] }), ...(type < 2 ? { gasPrice: quantity(fees.maxFeePerGas) } : {
+      maxFeePerGas: quantity(fees.maxFeePerGas), maxPriorityFeePerGas: "0x0" }), ...(type === 3 ? {
+      maxFeePerBlobGas: "0x64", blobVersionedHashes: parsed.blobVersionedHashes } : {}), ...(type === 4 ? {
+      authorizationList: parsed.authorizationList.map((authorization: Json) => ({ ...authorization,
+        chainId: quantity(authorization.chainId), nonce: quantity(authorization.nonce ?? 0),
+        yParity: quantity(authorization.yParity) })) } : {}) };
+  return { hash, rpc };
+}
+
+function initialCursor(intent: GaslessIntent): GaslessCursor {
+  return { startBlock: intent.initialSnapshot.block, nextBlockAtomic: intent.initialSnapshot.block.numberAtomic,
+    previousEndBlock: null };
+}
+
+function rawBlock(number: bigint, hash: Hex, transactions: readonly Hex[] = []): Json {
+  return { number: quantity(number), hash, timestamp: quantity(1_788_912_000n + number), baseFeePerGas: "0x1",
+    transactions };
+}
+
+function settlementLogs(intent: GaslessIntent, userOperationHash: Hex): readonly GaslessLog[] {
+  const prefund = BigInt(intent.feeCapAtomic) - 100n, refund = prefund / 4n, fee = prefund - refund;
+  return [eventLog(GASLESS_TOKEN_ABI, "Approval", intent.token,
+    { owner: intent.owner.address, spender: intent.paymaster, value: BigInt(intent.feeCapAtomic) }, 0),
+  eventLog(GASLESS_TOKEN_ABI, "Transfer", intent.token, { from: intent.owner.address, to: intent.paymaster, value: prefund }, 1),
+  eventLog(GASLESS_TOKEN_ABI, "Transfer", intent.token,
+    { from: intent.owner.address, to: intent.request.recipient, value: BigInt(intent.recipientAtomic) }, 2),
+  eventLog(GASLESS_TOKEN_ABI, "Approval", intent.token, { owner: intent.owner.address, spender: intent.paymaster, value: 0n }, 3),
+  eventLog(GASLESS_TOKEN_ABI, "Transfer", intent.token, { from: intent.paymaster, to: intent.owner.address, value: refund }, 4),
+  eventLog(GASLESS_PAYMASTER_ABI, "UserOperationSponsored", intent.paymaster, { token: intent.token,
+    sender: intent.owner.address, userOpHash: userOperationHash, nativeTokenPrice: 2_500_000_000n,
+    actualTokenNeeded: fee, feeTokenAmount: 1n }, 5),
+  eventLog(GASLESS_ENTRYPOINT_ABI, "UserOperationEvent", intent.entryPoint, { userOpHash: userOperationHash,
+    sender: intent.owner.address, paymaster: intent.paymaster, nonce: BigInt(intent.initialSnapshot.entryPointNonceAtomic),
+    success: true, actualGasCost: 100n, actualGasUsed: 50n }, 6)];
+}
+
+function eventLog(abi: Abi, eventName: string, address: Address, args: Json, index: number): GaslessLog {
+  const item = getAbiItem({ abi, name: eventName as never }) as any;
+  const inputs = item.inputs as readonly (AbiParameter & { indexed?: boolean })[];
+  const topics = encodeEventTopics({ abi: [item], eventName: eventName as never, args: args as never }) as readonly Hex[];
+  const plain = inputs.filter((input) => !input.indexed) as readonly AbiParameter[];
+  const values = plain.map((input) => args[input.name!]);
+  return { address, topics, data: encodeAbiParameters(plain, values as never), logIndexAtomic: String(index) };
+}
+
+function rawLog(log: GaslessLog, transactionHash: Hex, at: GaslessBlock): Json {
+  return { address: log.address, topics: log.topics, data: log.data, logIndex: quantity(BigInt(log.logIndexAtomic)),
+    transactionHash, blockHash: at.hash, blockNumber: quantity(BigInt(at.numberAtomic)), transactionIndex: "0x0", removed: false };
+}
+
+function accountRead(params: readonly unknown[], safeNumber: bigint): Hex {
+  const data = ((params[0] as Json).data as string).slice(0, 10);
+  if (data === "0x70a08231") return word(safeNumber === 103n ? 6_000_001n : 6_000_000n);
+  if (data === "0xdd62ed3e") return word(0n);
+  if (data === "0x7ecebe00") return word(8n);
+  if (data === "0x35567e1a") return word(10n);
+  throw new Error(`unexpected account read ${data}`);
+}
