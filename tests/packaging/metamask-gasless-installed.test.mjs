@@ -144,6 +144,32 @@ test("installed POST response loss and helper termination retain the marker acro
   });
 });
 
+test("installed invalid hinted receipt retains its cursor and resumes without a second POST", { timeout: 90000 }, async () => {
+  const s = await scenario(installed, 8453, { receiptLogCount: 513, emptyScanPage: true });
+  const { id, record: prepared } = await s.prepare();
+  await s.approve(id);
+  const invalid = await s.record(id);
+  assert.equal(invalid.observation.phase, "invalid");
+  assert.equal(invalid.observation.reason, "mm_gasless_evidence_invalid");
+  assert.equal(invalid.terminal, false); assert.equal(invalid.submissionAttempts, 1);
+  assert.deepEqual(invalid.cursor, prepared.cursor);
+  assert.equal(s.fixture().postCount, 1);
+  s.update({ receiptLogCount: null, emptyScanPage: false });
+  const resumed = await s.cli(["operation", "resume", "--operation", id]);
+  assert.equal(resumed.ok, true, JSON.stringify(resumed));
+  const complete = await s.record(id);
+  assert.equal(complete.state, "completed");
+  assert.equal(complete.intent.delegationHash, prepared.intent.delegationHash);
+  assert.equal(complete.submissionAttempts, 1); assert.equal(s.fixture().postCount, 1);
+  await assertSafeTrace(s, 1);
+  await writeFile(join(installed.root, "receipt-cursor-installed-proof.json"), JSON.stringify({
+    proofClass: "installed_archive_synthetic_transport", archiveSha256: installed.identity.archiveSha256,
+    realProviderOrMainnetPayment: false, operationId: id, invalidReceiptLogs: 513,
+    originalCursor: prepared.cursor, invalidCursor: invalid.cursor,
+    invalidState: invalid.state, finalState: complete.state, providerPosts: 1,
+  }, null, 2) + "\n");
+});
+
 test("installed reverted transaction keeps effects pending and later same-permission delivery closes after reinstall", { timeout: 120000 }, async () => {
   const s = await scenario(installed, 8453, { afterPostPhase: "reverted" });
   const { id } = await s.prepare(); await s.approve(id);

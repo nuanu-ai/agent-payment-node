@@ -33,6 +33,7 @@ interface FakeOptions {
   readonly corruptProtocol?: boolean;
   readonly transaction?: Json;
   readonly receipt?: Json;
+  readonly scanLogs?: readonly Json[];
   readonly reorgBlock?: bigint;
   readonly ownerCode?: "pinned" | "empty" | "foreign";
 }
@@ -74,7 +75,7 @@ class FakeRpcTransport implements GaslessTransport {
     }
     if (method === "eth_getTransactionByHash") return this.options.transaction ?? null;
     if (method === "eth_getTransactionReceipt") return this.options.receipt ?? null;
-    if (method === "eth_getLogs") return [];
+    if (method === "eth_getLogs") return this.options.scanLogs ?? [];
     throw new Error(`unexpected write or unknown RPC method ${method}`);
   }
   private rawBlock(tag: string): Json {
@@ -155,6 +156,67 @@ test("scan advances one complete 2000-block window and preserves cursor on a lat
     transport: new FakeRpcTransport(8453, { finality: 2500n, reorgBlock: 2099n }) });
   const second = await reorgRpc.observe(value, first.cursor, null);
   assert.equal(second.observation.phase, "reorg"); assert.deepEqual(second.cursor, first.cursor);
+});
+
+test("scan rejects a provider result from the 2001st block without truncation or cursor advance", async () => {
+  const value = intent(block(8453, 100n));
+  const cursor = { startBlock: value.initialSnapshot.safeBlock, nextBlockAtomic: "100", previousEndBlock: null };
+  const outside = { ...rawSettlementLogs(value, block(8453, 2100n))[0]!, blockNumber: quantity(2100n) };
+  const transport = new FakeRpcTransport(8453, { finality: 2500n, scanLogs: [outside] });
+  const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport });
+  const denied = await rpc.observe(value, cursor, null);
+  assert.equal(denied.observation.phase, "invalid");
+  assert.equal(denied.observation.reason, "mm_gasless_evidence_invalid");
+  assert.deepEqual(denied.cursor, cursor); assert.equal(denied.settlement, null);
+  const filter = transport.calls.find(call => call.method === "eth_getLogs")!.params[0] as Json;
+  assert.equal(BigInt(filter.toBlock) - BigInt(filter.fromBlock) + 1n, 2000n);
+  assert.equal(transport.calls.some(call => call.method === "eth_getTransactionByHash"), false);
+});
+
+test("scan inspects at most eight hashes and denies a ninth before candidate reads", async () => {
+  const value = intent(block(8453, 100n));
+  const cursor = { startBlock: value.initialSnapshot.safeBlock, nextBlockAtomic: "100", previousEndBlock: null };
+  const countLog = rawSettlementLogs(value, block(8453, 101n))[0]!;
+  for (const count of [8, 9]) {
+    const scanLogs = Array.from({ length: count }, (_, index) => ({ ...countLog,
+      logIndex: quantity(index), transactionHash: `0x${sha256(`candidate-${index}`)}` }));
+    const transport = new FakeRpcTransport(8453, { finality: 102n, scanLogs });
+    const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport });
+    const denied = await rpc.observe(value, cursor, null);
+    assert.equal(denied.observation.phase, "invalid");
+    assert.equal(denied.observation.reason, "mm_gasless_evidence_invalid");
+    assert.deepEqual(denied.cursor, cursor); assert.equal(denied.settlement, null);
+    for (const method of ["eth_getTransactionByHash", "eth_getTransactionReceipt"]) {
+      assert.equal(transport.calls.filter(call => call.method === method).length, count === 8 ? 8 : 0);
+    }
+    assert.ok(transport.calls.every(call => readMethods.has(call.method)));
+  }
+});
+
+test("complete 512-log receipt validates and its 513th log denies the same scan without advancing", async () => {
+  const value = intent(block(8453, 100n)), txBlock = block(8453, 101n);
+  const cursor = { startBlock: value.initialSnapshot.safeBlock, nextBlockAtomic: "100", previousEndBlock: null };
+  const transaction = { ...vector.type2.raw, blockNumber: "0x65", blockHash: txBlock.hash, transactionIndex: "0x0" };
+  for (const hint of [false, true]) for (const count of [512, 513]) {
+    const logs = rawSettlementLogs(value, txBlock);
+    for (let index = logs.length; index < count; index += 1) logs.push({ ...logs[0], logIndex: quantity(index),
+      address: "0x4444444444444444444444444444444444444444", topics: [`0x${sha256("UnrelatedEvent()")}`], data: "0x" });
+    const receipt = { transactionHash: vector.type2.hash, blockNumber: "0x65", blockHash: txBlock.hash,
+      transactionIndex: "0x0", type: "0x2", from: vector.relayer, to: value.relayTo, status: "0x1", logs };
+    const transport = new FakeRpcTransport(8453, { finality: 102n, head: 102n, transaction, receipt,
+      scanLogs: hint ? [] : [logs[0]!], counter: number => number >= 101n ? 1n : 0n });
+    const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport });
+    const observed = await rpc.observe(value, cursor, hint ? { observedAt: "2026-09-09T00:00:30.000Z",
+      requestIdHash: hashObject({ request: "receipt-boundary" }), status: "confirmed", txHash: vector.type2.hash } : null);
+    assert.equal(observed.observation.phase, count === 512 ? "success" : "invalid");
+    assert.deepEqual(observed.cursor, cursor, `receipt_logs=${count} provider_hint=${hint}`);
+    assert.equal(observed.settlement?.debitAtomic ?? null, count === 512 ? "1000000" : null);
+    assert.equal(observed.observation.reason, count === 512 ? "mm_gasless_success" : "mm_gasless_evidence_invalid");
+    for (const method of ["eth_getTransactionByHash", "eth_getTransactionReceipt"]) {
+      assert.equal(transport.calls.filter(call => call.method === method).length, 1);
+    }
+    assert.ok(transport.calls.every(call => readMethods.has(call.method)));
+  }
 });
 
 test("full chain proof wins when provider reports failed", async () => {
