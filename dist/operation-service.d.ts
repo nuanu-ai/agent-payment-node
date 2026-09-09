@@ -10,7 +10,12 @@ import { BridgeOperationRepository } from "./lifi/operation-repository.js";
 import type { BridgeOperationRecord } from "./lifi/operation-model.js";
 import { GaslessOperationRepository } from "./gasless/operation-repository.js";
 import type { GaslessOperationRecord } from "./gasless/operation-model.js";
+import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operation-model.js";
+import type { MetaMaskGaslessRepositoryPort } from "./metamask-gasless/ports.js";
 export type StoredMoneyOperation = {
+    readonly kind: "metamask_gasless_transfer";
+    readonly record: MetaMaskGaslessOperationRecord;
+} | {
     readonly kind: "gasless_transfer";
     readonly record: GaslessOperationRecord;
 } | {
@@ -37,7 +42,8 @@ export declare class OperationService {
     private readonly rails;
     private readonly bridges;
     private readonly gasless;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository);
+    private readonly metaMaskGasless;
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort);
     resolvePrepare(input: {
         readonly kind: StoredMoneyOperation["kind"];
         readonly profileHash: string;
@@ -45,6 +51,8 @@ export declare class OperationService {
         readonly idempotencyHash: string;
         readonly requestHash: string;
     }): Promise<StoredMoneyOperation | null>;
+    /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
+    findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null>;
     assertProfileAvailable(profileHash: string): Promise<void>;
     required(operationId: string): Promise<StoredMoneyOperation>;
     status(operationId: string): Promise<unknown>;

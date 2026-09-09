@@ -36,6 +36,9 @@ import { TtyBridgeApproval } from "./lifi/tty.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
 import { TtyGaslessApproval } from "./gasless/tty.js";
+import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
+import { metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
+import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -89,6 +92,11 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     return new ApnCore({
         state,
+        metaMaskGasless: options.metaMaskGasless ?? {
+            rpcFor: metaMaskGaslessRpcFactory(process.env, options.clock ?? { now: () => new Date() }),
+            provider: new MetaMaskGaslessProviderClient({ environment: process.env, clock: options.clock ?? { now: () => new Date() } }),
+            ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyMetaMaskGaslessApproval() } : {}),
+        },
         gasless: options.gasless ?? { rpcFor: gaslessRpcFactory(process.env),
             custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
             ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyGaslessApproval() } : {}) },

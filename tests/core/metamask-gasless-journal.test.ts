@@ -117,7 +117,11 @@ test("nonterminal observation revisions may drop an unconfirmed candidate withou
     observation: { observedAt: at, phase: "pending", reason: "mm_gasless_pending", candidateTxHash: TX_HASH,
       transactionBlock: null, finalityBlock: null, evidenceHash: null }, failure: mmFailure("mm_gasless_pending") }, at);
   const revisedAt = "2026-09-09T00:03:00.000Z";
-  const revised = advanceMetaMaskGaslessOperation(pending, { observation: { observedAt: revisedAt, phase: "pending",
+  const missingCandidate = { observedAt: revisedAt, phase: "pending" as const, reason: "mm_gasless_pending" as const,
+    candidateTxHash: null, transactionBlock: null, finalityBlock: null, evidenceHash: null };
+  assert.throws(() => advanceMetaMaskGaslessOperation(pending, { observation: missingCandidate }, revisedAt),
+    { code: "APN_STATE_CORRUPT" });
+  const revised = advanceMetaMaskGaslessOperation(pending, { state: "unknown_finality", observation: { observedAt: revisedAt, phase: "pending",
     reason: "mm_gasless_pending", candidateTxHash: null, transactionBlock: null, finalityBlock: null,
     evidenceHash: null } }, revisedAt);
   assert.equal(revised.observation?.candidateTxHash, null);

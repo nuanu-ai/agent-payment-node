@@ -95,7 +95,7 @@ test("same-key replay is stable; cross-kind idempotency and EVM/new-rail profile
   await assert.rejects(new OperationService(s.core.context.state).resolvePrepare({ kind: "direct_transfer", profileHash: operation.profileHash,
     operationId: id, idempotencyHash: operation.idempotencyHash, requestHash: operation.requestHash }), { code: "APN_IDEMPOTENCY_CONFLICT" });
   const evm = makeCore({ root: temporary.root, native: new TestNative(), rpc: new TestRpc() });
-  await evm.wallet.ensure(s.account.profile);
+  await assert.rejects(evm.wallet.ensure(s.account.profile), { code: "APN_OPERATION_BLOCKED" });
   const result = await evm.execute({ command: "transfer.prepare", profile: s.account.profile, recipient: "0x2222222222222222222222222222222222222222", amount: "1", idempotencyKey: "evm-cross-rail-0001" });
   assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
   assert.equal(s.rpc.submissions.length, 0);

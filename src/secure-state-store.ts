@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { constants, type Dirent, type Stats } from "node:fs";
 import {
   type FileHandle,
   lstat,
   mkdir,
   open,
+  readdir,
   realpath,
   rename,
   stat,
@@ -58,6 +59,10 @@ function validateFile(stats: Stats): void {
 
 interface HeldLock {
   readonly handle: FileHandle;
+}
+interface DirectoryIdentity {
+  readonly path: string;
+  readonly stats: Stats;
 }
 export function isCode(error: unknown, code: string): boolean {
   return error !== null && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === code;
@@ -157,6 +162,16 @@ export class SecureStateStore {
     validateDirectory(await lstat(target), target === this.root);
   }
 
+  protected async readDirectory(relativePath: string): Promise<readonly Dirent[]> {
+    const target = this.resolveRelative(relativePath);
+    await this.assertNoSymlinkAncestors(target);
+    const before = await this.directorySnapshot(target);
+    if (before === null) return [];
+    const entries = await readdir(target, { withFileTypes: true });
+    this.assertSameDirectorySnapshot(before, await this.directorySnapshot(target));
+    return entries;
+  }
+
   protected resolveRelative(relativePath: string): string {
     if (relativePath === "" || isAbsolute(relativePath)) stateSecurity("State path must be relative.");
     const target = resolve(this.root, relativePath);
@@ -180,35 +195,66 @@ export class SecureStateStore {
     }
   }
 
+  private async directorySnapshot(target: string): Promise<readonly DirectoryIdentity[] | null> {
+    const paths = [this.root];
+    let current = this.root;
+    const targetRelative = relative(this.root, target);
+    for (const component of targetRelative === "" ? [] : targetRelative.split(sep)) {
+      current = join(current, component);
+      paths.push(current);
+    }
+    const result: DirectoryIdentity[] = [];
+    for (const path of paths) {
+      let info: Stats;
+      try { info = await lstat(path); }
+      catch (error) {
+        if (isCode(error, "ENOENT")) return null;
+        throw error;
+      }
+      validateDirectory(info, path === this.root);
+      if (path === this.root && await realpath(path) !== path) {
+        stateSecurity("State root resolves through an alias or symbolic link.");
+      }
+      result.push({ path, stats: info });
+    }
+    return result;
+  }
+
+  private assertSameDirectorySnapshot(
+    before: readonly DirectoryIdentity[],
+    after: readonly DirectoryIdentity[] | null,
+  ): void {
+    if (after === null || before.length !== after.length || before.some((item, index) => {
+      const current = after[index];
+      return current === undefined || item.path !== current.path ||
+        item.stats.dev !== current.stats.dev || item.stats.ino !== current.stats.ino;
+    })) stateSecurity("State directory changed during a protected read.");
+  }
+
   protected async readJson(relativePath: string): Promise<unknown | null> {
     const target = this.resolveRelative(relativePath);
     const parent = dirname(target);
     await this.assertNoSymlinkAncestors(target);
-    let parentBefore: Stats;
-    try {
-      parentBefore = await stat(parent);
-    } catch (error) {
-      if (isCode(error, "ENOENT")) return null;
-      throw error;
-    }
-    validateDirectory(parentBefore, parent === this.root);
+    const directoriesBefore = await this.directorySnapshot(parent);
+    if (directoriesBefore === null) return null;
     let handle;
     try {
       handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
     } catch (error) {
-      if (isCode(error, "ENOENT")) return null;
+      if (isCode(error, "ENOENT")) {
+        this.assertSameDirectorySnapshot(directoriesBefore, await this.directorySnapshot(parent));
+        return null;
+      }
       if (isCode(error, "ELOOP")) stateSecurity("State file is a symbolic link.");
       throw error;
     }
     try {
       const info = await handle.stat();
       validateFile(info);
-      const parentAfter = await stat(parent);
-      if (parentAfter.dev !== parentBefore.dev || parentAfter.ino !== parentBefore.ino) {
-        stateSecurity("State parent changed during a protected read.");
-      }
+      this.assertSameDirectorySnapshot(directoriesBefore, await this.directorySnapshot(parent));
       if (info.size > MAX_STATE_BYTES) stateCorrupt("State file exceeds the size limit.");
       const bytes = await handle.readFile();
+      this.assertSameDirectorySnapshot(directoriesBefore, await this.directorySnapshot(parent));
       let text: string;
       try {
         text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);

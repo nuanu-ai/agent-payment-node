@@ -4,18 +4,18 @@ import type { ErrorDetails } from "./errors.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
 import type { ChainProvider } from "./direct-rail-ports.js";
 import type { BridgeRouteRequest } from "./lifi/model.js";
-import type { GaslessChainId, GaslessRequest } from "./gasless/model.js";
+import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
     readonly command: "gasless.capabilities";
     readonly profile?: string;
 } | {
     readonly command: "gasless.balance";
     readonly profile: string;
-    readonly chainId: GaslessChainId;
+    readonly chainId: GaslessCommandChainId;
 } | {
     readonly command: "gasless.transfer.prepare";
     readonly profile: string;
-    readonly request: GaslessRequest;
+    readonly request: GaslessCommandRequest;
     readonly idempotencyKey: string;
 } | {
     readonly command: "gasless.transfer.approve";

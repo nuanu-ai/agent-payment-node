@@ -202,9 +202,7 @@ export function mmJournalMutable(value: Record<string, unknown>, intent: MetaMas
   if (state === "failed_before_effect" && (!before || provider !== null || o !== null || settled !== null || failed === null)) corrupt();
   if (state === "submitted_pending" && (before || a === null || settled !== null || failed?.reason !== "mm_gasless_pending" ||
     provider === null || !["broadcasted", "confirmed"].includes(provider.status) ||
-    (provider.txHash ?? o?.candidateTxHash ?? null) === null || o?.phase === "invalid" || o?.phase === "reorg" ||
-    o?.phase === "unavailable" || (provider.txHash !== null && o?.candidateTxHash != null &&
-      provider.txHash !== o.candidateTxHash))) corrupt();
+    provider.txHash === null || o === null || o.phase !== "pending" || o.candidateTxHash !== provider.txHash)) corrupt();
   if (state === "unknown_finality" && (before || a === null || settled !== null || failed === null || o?.phase === "reverted" || o?.phase === "success")) corrupt();
   if (state === "failed_effects_pending" && (before || a === null || settled !== null ||
     failed?.reason !== "mm_gasless_transaction_reverted" || o === null || o.phase === "success")) corrupt();

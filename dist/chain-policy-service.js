@@ -5,6 +5,7 @@ import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
 export class ChainPolicyService {
     context;
     policies;
@@ -58,6 +59,7 @@ export class ChainPolicyService {
             throw new ApnError("APN_INVALID_INPUT", "Local chain custody requires explicit --accept-risk acknowledgement.");
         await this.context.ready();
         return await this.context.state.withLocks([`profile:${this.context.state.profileHash(profile)}`], async () => {
+            await assertWalletLifecycleAvailable(this.context, this.context.state.profileHash(profile));
             await this.assertProfileOwner(profile, provider);
             return await this.adapter(rail, provider).ensureAccount(profile);
         });

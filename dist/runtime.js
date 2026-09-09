@@ -4,6 +4,7 @@ import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
+    metaMaskGasless;
     gasless;
     bridge;
     directRails;
@@ -29,6 +30,8 @@ export class RuntimeContext {
     providerAuthorizationStore;
     initialized;
     constructor(dependencies) {
+        if (dependencies.metaMaskGasless !== undefined)
+            this.metaMaskGasless = dependencies.metaMaskGasless;
         if (dependencies.gasless !== undefined)
             this.gasless = dependencies.gasless;
         if (dependencies.bridge !== undefined)

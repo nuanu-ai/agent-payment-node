@@ -181,7 +181,11 @@ async function readApprovalInput(
   expiresAt: string,
   deadlineMs: number,
   externalSignal?: AbortSignal,
+  maximumInputBytes = MAX_APPROVAL_INPUT_BYTES,
 ): Promise<string> {
+  if (!Number.isSafeInteger(maximumInputBytes) || maximumInputBytes < 1 || maximumInputBytes > 256) {
+    throw new ApnError("APN_INTERNAL", "The approval input bound is invalid.");
+  }
   const controller = new AbortController();
   const expiryMs = Date.parse(expiresAt);
   const remainingMs = Math.max(1, Math.min(deadlineMs, expiryMs - Date.now()));
@@ -199,7 +203,7 @@ async function readApprovalInput(
   process.once("SIGINT", onSigint);
   if (externalSignal?.aborted === true) abort("external");
 
-  const input = Buffer.alloc(MAX_APPROVAL_INPUT_BYTES);
+  const input = Buffer.alloc(maximumInputBytes);
   let length = 0;
   try {
     for await (const chunk of tty.read(controller.signal)) {
@@ -274,7 +278,8 @@ export class TtyChainPolicyApproval implements ChainPolicyApprovalPort {
     ], `ADMIT APN ASSET ${policy.policyHash.slice(-16)}`, new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString(), this.options);
   }
 }
-export async function exactChainConsent(lines: readonly string[], phrase: string, expiresAt: string, options: TtyTransferApprovalOptions): Promise<void> {
+export async function exactChainConsent(lines: readonly string[], phrase: string, expiresAt: string,
+  options: TtyTransferApprovalOptions, maximumInputBytes = MAX_APPROVAL_INPUT_BYTES): Promise<void> {
   if (Date.now() >= Date.parse(expiresAt)) throw approvalFailure("APN_APPROVAL_EXPIRED", "The chain approval expired.");
   let terminal: ApprovalTerminal;
   try { terminal = await (options.openTerminal ?? openApprovalTerminal)(); }
@@ -282,7 +287,7 @@ export async function exactChainConsent(lines: readonly string[], phrase: string
   try {
     if (!(options.isTerminal ?? isatty)(terminal.fd)) throw approvalFailure("APN_TTY_UNAVAILABLE", "The chain approval is not attached to a terminal.");
     await terminal.write(`\n${lines.join("\n")}\nType exactly: ${phrase}\n> `);
-    const supplied = await readApprovalInput(terminal, expiresAt, options.deadlineMs ?? TTY_APPROVAL_DEADLINE_MS, options.signal);
+    const supplied = await readApprovalInput(terminal, expiresAt, options.deadlineMs ?? TTY_APPROVAL_DEADLINE_MS, options.signal, maximumInputBytes);
     if (supplied !== phrase) throw approvalFailure("APN_APPROVAL_REFUSED", "The chain approval was refused.");
     if (Date.now() >= Date.parse(expiresAt)) throw approvalFailure("APN_APPROVAL_EXPIRED", "The chain approval expired.");
   } finally { await terminal.close(); }

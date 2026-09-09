@@ -1,4 +1,3 @@
-import { readdir } from "node:fs/promises";
 import { canonicalJson, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { railHistoricalReceipt, railReceipt, validateRailContinuity, validateRailOperation, type RailOperationRecord, type RailReceipt } from "./rail-operation-model.js";
@@ -13,7 +12,6 @@ export class RailOperationRepository extends SecureStateStore {
     await this.initialized;
   }
   async loadOperation(profileHash: string, operationId: string): Promise<RailOperationRecord | null> {
-    await this.ready();
     const value = await this.readJson(this.path("rail-operations", profileHash, operationId));
     if (value === null) return null;
     const operation = validateRailOperation(value);
@@ -26,11 +24,10 @@ export class RailOperationRepository extends SecureStateStore {
     return matches[0] ?? null;
   }
   async listOperations(profileHash: string): Promise<readonly RailOperationRecord[]> {
-    await this.ready(); stateIdentifier(profileHash, "rail profile hash");
+    stateIdentifier(profileHash, "rail profile hash");
     const directory = `rail-operations/${profileHash}`;
-    await this.ensureDirectory(directory);
     const result: RailOperationRecord[] = [];
-    for (const entry of await readdir(this.resolveRelative(directory), { withFileTypes: true })) {
+    for (const entry of await this.readDirectory(directory)) {
       if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) corrupt();
       const value = await this.loadOperation(profileHash, entry.name.slice(0, -5));
       if (value === null) corrupt();
@@ -39,8 +36,8 @@ export class RailOperationRepository extends SecureStateStore {
     return result;
   }
   async listAllOperations(): Promise<readonly RailOperationRecord[]> {
-    await this.ready(); const result: RailOperationRecord[] = [];
-    for (const entry of await readdir(this.resolveRelative("rail-operations"), { withFileTypes: true })) {
+    const result: RailOperationRecord[] = [];
+    for (const entry of await this.readDirectory("rail-operations")) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name)) corrupt();
       result.push(...await this.listOperations(entry.name));
     }
@@ -61,6 +58,7 @@ export class RailOperationRepository extends SecureStateStore {
     await this.repairReceipt(operation);
   }
   async repairReceipt(operation: RailOperationRecord): Promise<void> {
+    await this.ready();
     const stored = await this.loadOperation(operation.profileHash, operation.operationId);
     if (stored === null || canonicalJson(stored) !== canonicalJson(operation)) corrupt();
     const path = this.path("rail-receipts", operation.profileHash, operation.operationId);

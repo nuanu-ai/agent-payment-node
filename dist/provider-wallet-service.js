@@ -4,9 +4,12 @@ import { formatAtomic, parseAtomic } from "./money.js";
 import { accountBindingHash, capabilityHash, markProviderProfileDrift, } from "./provider-profile.js";
 import { findPendingProviderPermission } from "./provider-permission-discovery.js";
 import { publicPendingPermissionProfile, publicPermissionProfile } from "./provider-permission-output.js";
+import { permissionBalance, publicProfile } from "./provider-wallet-output.js";
 import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
 import { canonicalIdempotencyKey } from "./transfer-policy.js";
 import { canonicalProfile, publicProvenance, validateBalance } from "./wallet-policy.js";
+import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
+import { OperationService } from "./operation-service.js";
 export class ProviderWalletService {
     context;
     constructor(context) {
@@ -17,6 +20,7 @@ export class ProviderWalletService {
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+            await assertWalletLifecycleAvailable(this.context, profileHash);
             const repository = this.context.requireProfileRepository();
             let existing = await repository.load(profileHash);
             if (existing !== null) {
@@ -111,9 +115,12 @@ export class ProviderWalletService {
         const profileHash = this.context.state.profileHash(profile);
         const repository = this.context.requireProfileRepository();
         const initial = await repository.load(profileHash);
-        if (initial === null || initial.provider_id === "local") {
-            if (this.context.providerRegistry === undefined)
+        if (initial?.provider_id === "local")
+            return null;
+        if (initial === null) {
+            if (this.context.providerRegistry === undefined || await this.context.state.loadWallet(profileHash) !== null)
                 return null;
+            await assertWalletLifecycleAvailable(this.context, profileHash);
             const pending = await findPendingProviderPermission(this.context.requireProviderRegistry(), profileHash);
             if (pending === null)
                 return null;
@@ -121,7 +128,14 @@ export class ProviderWalletService {
         await this.context.ready();
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
             let current = await repository.load(profileHash);
-            if (current === null || current.provider_id === "local") {
+            if (current?.provider_id === "local")
+                return null;
+            if (current === null && await this.context.state.loadWallet(profileHash) !== null)
+                return null;
+            if (current === null && this.context.providerRegistry === undefined)
+                return null;
+            await assertWalletLifecycleAvailable(this.context, profileHash);
+            if (current === null) {
                 if (this.context.providerRegistry === undefined)
                     return null;
                 const pending = await findPendingProviderPermission(this.context.requireProviderRegistry(), profileHash);
@@ -173,6 +187,7 @@ export class ProviderWalletService {
             return null;
         await this.context.ready();
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+            await assertWalletLifecycleAvailable(this.context, profileHash);
             let bound = await this.context.requireProfileRepository().load(profileHash);
             if (bound === null || bound.provider_id === "local") {
                 throw new ApnError("APN_STATE_CORRUPT", "Provider profile changed during balance read.");
@@ -237,13 +252,19 @@ export class ProviderWalletService {
             };
         });
     }
-    async assertPaymentAvailable(profileInput, kind) {
+    async assertPaymentAvailable(profileInput, kind, idempotencyKey) {
         if (this.context.profileRepository === undefined)
             return;
         const profile = canonicalProfile(profileInput);
         const profileHash = this.context.state.profileHash(profile);
         await this.context.ready();
         await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+            const key = canonicalIdempotencyKey(idempotencyKey);
+            const operations = new OperationService(this.context.state, this.context.providerX402Repository, undefined, undefined, undefined, this.context.metaMaskGasless?.records);
+            // Repeated/conflicting keys reach the family's resolver without a profile migration.
+            if (await operations.findIdempotency(this.context.state.idempotencyHash(key)) !== null)
+                return;
+            await operations.assertProfileAvailable(profileHash);
             const repository = this.context.requireProfileRepository();
             let bound = await repository.load(profileHash);
             if (bound === null || bound.provider_id === "local")
@@ -351,54 +372,6 @@ function alignPermissionRevision(profile, permission) {
         return profile;
     return { ...profile, revision: Math.max(profile.revision + 1, permission.revision), observed_at: permission.observed_at };
 }
-function permissionBalance(profile, bound, permission, owner, session) {
-    const balances = (snapshot) => ({
-        ETH: { atomic: snapshot.ethAtomic, decimal: formatAtomic(snapshot.ethAtomic, ETH_DECIMALS), decimals: ETH_DECIMALS },
-        USDC: {
-            atomic: snapshot.usdcAtomic,
-            decimal: formatAtomic(snapshot.usdcAtomic, USDC_DECIMALS),
-            decimals: USDC_DECIMALS,
-            contract: BASE_USDC,
-        },
-    });
-    return {
-        profile,
-        provider: bound.provider_id,
-        revision: bound.revision,
-        capability_hash: bound.capability_hash,
-        status: permission.state,
-        funding_address: permission.owner_address,
-        explorer_url: `https://basescan.org/address/${permission.owner_address}`,
-        chain: CHAIN_CAIP2,
-        proof_class: "chain_verified_public_read",
-        balances: balances(owner),
-        provenance: publicProvenance(owner),
-        accounts: {
-            owner_smart_account: {
-                address: permission.owner_address,
-                role: "funding_and_usdc_owner",
-                balances: balances(owner),
-                provenance: publicProvenance(owner),
-            },
-            session_execution_account: {
-                address: permission.session_address,
-                role: "delegated_execution_and_gas",
-                balances: balances(session),
-                provenance: publicProvenance(session),
-                gas_readiness: parseAtomic(session.ethAtomic) === 0n
-                    ? "not_ready_zero_balance"
-                    : "unverified_sufficiency_nonzero",
-            },
-        },
-        funding_guidance: {
-            action: `Manually send only Base USDC to owner Smart Account ${permission.owner_address}; future delegated execution also requires Base ETH at session ${permission.session_address}.`,
-            warning: "This read performs no funding action and does not prove future effect availability or gas sufficiency.",
-        },
-        next_actions: permission.state === "active"
-            ? ["Fund manually only if intended", "Re-run apn wallet balance"]
-            : ["Review the permission lifecycle state before any future effect."],
-    };
-}
 function boundProfile(input) {
     return {
         schema_version: "apn.provider-profile.v1",
@@ -420,33 +393,6 @@ function sameBinding(profile, observed) {
         profile.account_binding_hash === observed.accountBindingHash &&
         profile.capability_hash === observed.capabilityHash &&
         profile.trust_class === observed.trustClass;
-}
-function publicProfile(profile, reused) {
-    const rebindCommand = `apn wallet connect --profile ${profile.profile} --provider ${profile.provider_id} --expected-revision ${profile.revision}`;
-    return {
-        profile: profile.profile,
-        provider: profile.provider_id,
-        status: profile.drift.state,
-        address: profile.public_address,
-        account_binding_hash: profile.account_binding_hash,
-        trust_class: profile.trust_class,
-        revision: profile.revision,
-        capability_hash: profile.capability_hash,
-        observed_at: profile.observed_at,
-        reused,
-        proof_class: "provider_profile_binding",
-        ...(profile.drift.state === "bound" ? {
-            funding_guidance: {
-                network: "Base",
-                asset: "USDC",
-                address: profile.public_address,
-                action: "Fund manually only; APN performs no funding action.",
-            },
-            next_actions: ["Use apn wallet balance with an explicit Base RPC URL"],
-        } : {
-            next_actions: [rebindCommand],
-        }),
-    };
 }
 function revisionConflict(message) {
     return new ApnError("APN_PROFILE_REVISION_CONFLICT", message);

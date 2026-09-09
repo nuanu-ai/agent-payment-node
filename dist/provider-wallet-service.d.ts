@@ -8,6 +8,6 @@ export declare class ProviderWalletService {
     }>): Promise<unknown>;
     status(profileInput: string): Promise<unknown | null>;
     balance(profileInput: string): Promise<unknown | null>;
-    assertPaymentAvailable(profileInput: string, kind: "direct" | "x402"): Promise<void>;
+    assertPaymentAvailable(profileInput: string, kind: "direct" | "x402", idempotencyKey: string): Promise<void>;
     private connectPermissionProfile;
 }

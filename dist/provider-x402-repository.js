@@ -1,4 +1,3 @@
-import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -22,7 +21,6 @@ export class ProviderX402Repository extends SecureStateStore {
         await this.ensureDirectory(RECOVERY_RESERVATIONS);
     }
     async loadOperation(profileHash, operationId) {
-        await this.ready();
         stateIdentifier(profileHash, "provider x402 profile hash");
         stateIdentifier(operationId, "provider x402 operation ID");
         const value = await this.readJson(join(OPERATIONS, profileHash, `${operationId}.json`));
@@ -36,7 +34,6 @@ export class ProviderX402Repository extends SecureStateStore {
         return operation;
     }
     async findOperation(operationId) {
-        await this.ready();
         stateIdentifier(operationId, "provider x402 operation ID");
         let found = null;
         for (const profileHash of await this.profileDirectories(OPERATIONS)) {
@@ -50,12 +47,10 @@ export class ProviderX402Repository extends SecureStateStore {
         return found;
     }
     async listOperations(profileHash) {
-        await this.ready();
         stateIdentifier(profileHash, "provider x402 profile hash");
         const directory = join(OPERATIONS, profileHash);
-        await this.ensureDirectory(directory);
         const output = [];
-        for (const entry of await readdir(this.resolveRelative(directory), { withFileTypes: true })) {
+        for (const entry of await this.readDirectory(directory)) {
             if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) {
                 stateSecurity("Provider x402 operations directory contains an unsafe entry.");
             }
@@ -73,7 +68,6 @@ export class ProviderX402Repository extends SecureStateStore {
         return output;
     }
     async listAllOperations() {
-        await this.ready();
         const output = [];
         for (const profileHash of await this.profileDirectories(OPERATIONS))
             output.push(...await this.listOperations(profileHash));
@@ -94,7 +88,6 @@ export class ProviderX402Repository extends SecureStateStore {
         await this.writeJson(path, operation);
     }
     async loadReceipt(profileHash, operationId) {
-        await this.ready();
         stateIdentifier(profileHash, "provider x402 profile hash");
         stateIdentifier(operationId, "provider x402 operation ID");
         const operation = await this.loadOperation(profileHash, operationId);
@@ -164,7 +157,7 @@ export class ProviderX402Repository extends SecureStateStore {
     }
     async profileDirectories(rootName) {
         const profiles = [];
-        for (const entry of await readdir(this.resolveRelative(rootName), { withFileTypes: true })) {
+        for (const entry of await this.readDirectory(rootName)) {
             if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name)) {
                 stateSecurity(`${rootName} root contains an unsafe profile entry.`);
             }
