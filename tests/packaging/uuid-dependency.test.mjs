@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { createSandbox as createEsmSandbox } from "@metamask/utils/node";
 
@@ -42,12 +43,17 @@ test("MetaMask utils UUID override and production lock closure are exact", async
   });
   assert.deepEqual(lockBytes, shrinkwrapBytes);
 
-  const uuidNodes = Object.entries(lock.packages).filter(([path]) =>
-    /(?:^|\/)node_modules\/uuid$/u.test(path),
-  );
-  assert.equal(uuidNodes.length, 1);
-  assert.equal(uuidNodes[0][0], "node_modules/uuid");
-  assert.equal(uuidNodes[0][1].version, "11.1.1");
+  assert.equal(lock.packages["node_modules/uuid"].version, "11.1.1");
+  // The gasless SDK adds its own UUID generations. The scoped F-004 override
+  // must still resolve to 11.1.1 for every installed MetaMask utils generation.
+  const utilsNodes = Object.entries(lock.packages).filter(([path]) =>
+    /(?:^|\/)node_modules\/@metamask\/utils$/u.test(path));
+  assert.ok(utilsNodes.length > 0);
+  for (const [path] of utilsNodes) {
+    const dependency = createRequire(join(fileURLToPath(packageRoot), path, "package.json"));
+    assert.equal(dependency("uuid/package.json").version, "11.1.1", path);
+    assert.match(dependency("uuid").v4(), uuidV4Pattern);
+  }
   assert.equal(lock.packages["node_modules/@metamask/utils"].dependencies.uuid, "^9.0.1");
 });
 
