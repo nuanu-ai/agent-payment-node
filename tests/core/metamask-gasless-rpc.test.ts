@@ -34,6 +34,7 @@ interface FakeOptions {
   readonly transaction?: Json;
   readonly receipt?: Json;
   readonly reorgBlock?: bigint;
+  readonly ownerCode?: "pinned" | "empty" | "foreign";
 }
 
 class FakeRpcTransport implements GaslessTransport {
@@ -92,7 +93,11 @@ class FakeRpcTransport implements GaslessTransport {
     }
     if (address === row.token) return this.codes.tokenProxyCode as Hex;
     if (address === row.tokenImplementationAddress) return this.codes.tokenImplementationCode as Hex;
-    if (address === vector.owner) return `0xef0100${row.protocol.delegate.address.slice(2)}` as Hex;
+    if (address === vector.owner) {
+      if (this.options.ownerCode === "empty") return "0x";
+      if (this.options.ownerCode === "foreign") return "0x6000";
+      return `0xef0100${row.protocol.delegate.address.slice(2)}` as Hex;
+    }
     return "0x";
   }
 }
@@ -184,12 +189,39 @@ test("confirmed provider hash stays private when RPC has no transaction or recei
   assert.equal(observed.observation.candidateTxHash, null); assert.equal(observed.settlement, null);
 });
 
-function intent(start: ReturnType<typeof block>): MetaMaskGaslessIntent {
+test("late type2 redemption uses receipt-block designation instead of frozen prepare designation", async () => {
+  const value = intent(block(8453, 100n), "empty"), txBlock = block(8453, 101n);
+  const transaction = { ...vector.type2.raw, blockNumber: "0x65", blockHash: txBlock.hash, transactionIndex: "0x0" };
+  const receipt = { transactionHash: vector.type2.hash, blockNumber: "0x65", blockHash: txBlock.hash,
+    transactionIndex: "0x0", type: "0x2", from: vector.relayer, to: value.relayTo, status: "0x1",
+    logs: rawSettlementLogs(value, txBlock) };
+  const provider = { observedAt: "2026-09-09T00:00:30.000Z", requestIdHash: hashObject({ request: "late" }),
+    status: "confirmed" as const, txHash: vector.type2.hash as Hex };
+  const cursor = { startBlock: value.initialSnapshot.safeBlock, nextBlockAtomic: "100", previousEndBlock: null };
+  const options = { finality: 102n, head: 102n, transaction, receipt,
+    counter: (number: bigint) => number >= 101n ? 1n : 0n };
+  const pinned = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now,
+    transport: new FakeRpcTransport(8453, options) });
+  assert.equal((await pinned.observe(value, cursor, provider)).observation.phase, "success");
+  for (const ownerCode of ["empty", "foreign"] as const) {
+    const rejected = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now,
+      transport: new FakeRpcTransport(8453, { ...options, ownerCode }) });
+    const observation = await rejected.observe(value, cursor, provider);
+    assert.notEqual(observation.observation.phase, "success"); assert.equal(observation.observation.candidateTxHash, null);
+  }
+  const pending = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now,
+    transport: new FakeRpcTransport(8453, { ...options, finality: 100n, head: 101n }) });
+  const beforeFinality = await pending.observe(value, cursor, provider);
+  assert.equal(beforeFinality.observation.phase, "pending");
+  assert.equal(beforeFinality.observation.candidateTxHash, vector.type2.hash);
+});
+
+function intent(start: ReturnType<typeof block>, designation: "empty" | "pinned" = "pinned"): MetaMaskGaslessIntent {
   const deployment = mmRegistry(8453), row = deployment.row;
   const executions = vector.executions as MetaMaskGaslessIntent["quote"]["executions"];
   const quote = { netAtomic: "900000", feeAtomic: "100000", feeRecipient: vector.feeRecipient as Address,
     executions, hash: "" }; quote.hash = mmQuoteHash(quote);
-  const state = chainState("0");
+  const state = chainState("0", designation);
   return { profile: "synthetic", request: { chainId: 8453, recipient: vector.recipient,
     grossAtomic: "1000000", maxFeeAtomic: "100000", minReceivedAtomic: "900000" },
     binding: { providerId: "metamask-agent-wallet", address: vector.owner,
@@ -205,12 +237,13 @@ function intent(start: ReturnType<typeof block>): MetaMaskGaslessIntent {
     signingDigest: vector.signingDigest, relayTo: row.protocol.manager.address, mode: vector.mode } as MetaMaskGaslessIntent;
 }
 
-function chainState(counterAtomic: string): MetaMaskGaslessChainState {
-  const row = mmRegistry(8453).row, code = `0xef0100${row.protocol.delegate.address.slice(2)}` as Hex;
+function chainState(counterAtomic: string, designation: "empty" | "pinned" = "pinned"): MetaMaskGaslessChainState {
+  const row = mmRegistry(8453).row, code = designation === "empty" ? "0x" as Hex :
+    `0xef0100${row.protocol.delegate.address.slice(2)}` as Hex;
   return { protocolCodeHashes: Object.fromEntries(Object.entries(row.protocol).map(([name, pin]) =>
     [name, pin.codeHash])) as MetaMaskGaslessChainState["protocolCodeHashes"], tokenProxyCodeHash: row.tokenProxyCodeHash,
     tokenImplementationAddress: row.tokenImplementationAddress, tokenImplementationCodeHash: row.tokenImplementationCodeHash,
-    tokenDecimals: 6, ownerCodeHash: keccak256(code), designation: "pinned", usdcBalanceAtomic: "1000000", counterAtomic };
+    tokenDecimals: 6, ownerCodeHash: keccak256(code), designation, usdcBalanceAtomic: "1000000", counterAtomic };
 }
 
 function block(chainId: number, number: bigint) {
