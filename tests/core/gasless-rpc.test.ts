@@ -167,8 +167,11 @@ test("gasless HTTPS rejects unsafe targets and invalid local bounds before any n
     "APN_RPC_CONFIG"), { code: "APN_RPC_AMBIGUOUS" });
 });
 
-test("gasless estimate sends only the exact v0.8 wire and send accepts only its locally authenticated hash", async () => {
-  const intent = makeIntent();
+for (const wireVersion of [undefined, "apn.gasless-wire.v2"] as const) {
+test(`gasless estimate and authenticated send preserve the ${wireVersion ?? "legacy"} wire`, async () => {
+  const original = makeIntent();
+  const body = wireVersion === undefined ? original : { ...original, wireVersion };
+  const intent = { ...body, unsignedEnvelopeHash: hashObject(gaslessEnvelopeBinding(body)) };
   const permitSignature = await OWNER.signTypedData(gaslessPermitTypedData(intent));
   const bootstrap = material("bootstrap", { permitSignature, authorization: null }) as GaslessBootstrapMaterial;
   let sentHash: Hex | null = null;
@@ -187,7 +190,8 @@ test("gasless estimate sends only the exact v0.8 wire and send accepts only its 
     preVerificationGas: "120000", responseHash: undefined });
   assert.match(estimate.responseHash, /^[a-f0-9]{64}$/u);
   const estimateCall = transport.calls.find((call) => call.method === "eth_estimateUserOperationGas")!;
-  assert.deepEqual(Object.keys(estimateCall.params[0] as Json).sort(), ["callData", "callGasLimit", "factory", "factoryData",
+  assert.deepEqual(Object.keys(estimateCall.params[0] as Json).sort(), ["callData", "callGasLimit",
+    ...(wireVersion === undefined ? ["factory", "factoryData"] : []),
     "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "paymaster", "paymasterData", "paymasterPostOpGasLimit",
     "paymasterVerificationGasLimit", "preVerificationGas", "sender", "signature", "verificationGasLimit"].sort());
   assert.equal((estimateCall.params[0] as Json).signature, GASLESS_ESTIMATE_SIGNATURE);
@@ -201,6 +205,7 @@ test("gasless estimate sends only the exact v0.8 wire and send accepts only its 
   assert.equal(sends.length, 1); assert.deepEqual(sends[0]!.params, [wire, intent.entryPoint]);
   sentHash = word(999n); await assert.rejects(rpc.send(intent, sealed), { code: "APN_RPC_AMBIGUOUS" });
 });
+}
 
 test("gasless canonical state reads pin every effect value to one block hash", async () => {
   const intent = makeIntent(), deployment = gaslessDeployment(8453), at = block(100);

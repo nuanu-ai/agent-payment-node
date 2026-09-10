@@ -39,7 +39,7 @@ export class GaslessPreparation {
                 gaslessFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_fee_budget");
             }
             const preparedAt = new Date(this.o.now()).toISOString(), recipientAtomic = net.toString();
-            const unsigned = { profile, request, ...binding,
+            const unsigned = { wireVersion: "apn.gasless-wire.v2", profile, request, ...binding,
                 initialSnapshot, gas, token: row.token, tokenDomain: row.tokenDomain, paymaster: row.paymaster,
                 entryPoint: row.entryPoint, delegate: row.delegate, feeCapAtomic, recipientAtomic,
                 callData: gaslessBatch(row.token, request.recipient, recipientAtomic, row.paymaster), preparedAt,

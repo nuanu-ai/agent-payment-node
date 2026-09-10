@@ -89,6 +89,8 @@ export interface GaslessSnapshot extends GaslessAccountState {
   readonly maxPriorityFeePerGas: string;
 }
 export interface GaslessIntent {
+  /** Absent on legacy journals; never reinterpret their signed wire or hash. */
+  readonly wireVersion?: "apn.gasless-wire.v2";
   readonly profile: string;
   readonly request: GaslessRequest;
   readonly owner: GaslessOwner;
@@ -120,8 +122,8 @@ export interface GaslessAuthorization {
 export interface GaslessUserOperation {
   readonly sender: Address;
   readonly nonce: Hex;
-  readonly factory: Address;
-  readonly factoryData: "0x";
+  readonly factory?: Address;
+  readonly factoryData?: "0x";
   readonly callData: Hex;
   readonly callGasLimit: Hex;
   readonly verificationGasLimit: Hex;

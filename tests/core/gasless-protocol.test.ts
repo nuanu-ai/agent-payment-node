@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { intentSchema } from "../../src/gasless/schema.js";
 import { encodeAbiParameters, encodeEventTopics, getAbiItem, getAddress, numberToHex } from "viem";
 import type { Abi, AbiParameter } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
@@ -126,7 +128,7 @@ test("published batch and paymaster codec reject hostile field and byte mutation
     { code: "APN_PROVIDER_PROTOCOL" });
 });
 
-test("synthetic first-use and repeated signatures recover while both hashes use the actual delegate", async () => {
+test("legacy first-use and repeated signatures preserve their original delegate hash", async () => {
   const account = privateKeyToAccount(generatePrivateKey());
   const first = makeIntent(account.address, "empty");
   const permit = await account.signTypedData(gaslessPermitTypedData(first));
@@ -143,6 +145,11 @@ test("synthetic first-use and repeated signatures recover while both hashes use 
   const accountSignature = await account.signTypedData(gaslessUserOperationTypedData(first, estimateWire));
   const firstWire = gaslessUserOperation(first, { permitSignature: permit, authorization }, accountSignature);
   assert.equal(await verifyGaslessUserOperation(first, firstWire), gaslessUserOperationHash(first, firstWire));
+  const firstV2 = { ...first, wireVersion: "apn.gasless-wire.v2" as const };
+  assert.deepEqual(gaslessUserOperation(firstV2, { permitSignature: permit, authorization }, accountSignature), firstWire);
+  assert.equal(await verifyGaslessUserOperation(firstV2, firstWire), gaslessUserOperationHash(first, firstWire));
+  const { factory: _factory, factoryData: _factoryData, ...missingMarker } = firstWire;
+  assert.throws(() => validateGaslessWire(firstV2, missingMarker), { code: "APN_PROVIDER_PROTOCOL" });
   const repeatedEquivalent = { ...first, initialSnapshot: { ...first.initialSnapshot, delegation: "expected" as const } };
   const repeatedEquivalentWire = gaslessUserOperation(repeatedEquivalent,
     { permitSignature: permit, authorization: null }, GASLESS_ESTIMATE_SIGNATURE);
@@ -165,6 +172,34 @@ test("synthetic first-use and repeated signatures recover while both hashes use 
   const hostile = { ...repeatedWire,
     signature: `${repeatedWire.signature.slice(0, 66)}${"f".repeat(64)}${repeatedWire.signature.slice(-2)}` as Hex };
   await assert.rejects(() => verifyGaslessUserOperation(repeated, hostile), { code: "APN_PROVIDER_PROTOCOL" });
+});
+
+test("v2 reuses a designation with empty initCode and rejects a legacy-hash signature", async () => {
+  const account = privateKeyToAccount(generatePrivateKey());
+  const legacy = makeIntent(account.address, "expected"), legacyBinding = hashObject(gaslessEnvelopeBinding(legacy));
+  const body = { ...legacy, wireVersion: "apn.gasless-wire.v2" as const };
+  const intent = { ...body, unsignedEnvelopeHash: hashObject(gaslessEnvelopeBinding(body)) };
+  const bootstrap = { permitSignature: await account.signTypedData(gaslessPermitTypedData(intent)), authorization: null };
+  const wire = gaslessUserOperation(intent, bootstrap, GASLESS_ESTIMATE_SIGNATURE);
+  const oldWire = gaslessUserOperation(legacy, bootstrap, GASLESS_ESTIMATE_SIGNATURE);
+  assert.equal("factory" in wire, false); assert.equal("factoryData" in wire, false);
+  assert.equal("eip7702Auth" in wire, false);
+  assert.equal(gaslessUserOperationTypedData(intent, wire).message.initCode, "0x");
+  assert.notEqual(gaslessUserOperationHash(intent, wire), gaslessUserOperationHash(legacy, oldWire));
+  assert.notEqual(intent.unsignedEnvelopeHash, legacyBinding);
+  assert.equal(hashObject(gaslessEnvelopeBinding(legacy)), legacyBinding);
+  const signature = await account.signTypedData(gaslessUserOperationTypedData(intent, wire));
+  assert.equal(await verifyGaslessUserOperation(intent, { ...wire, signature }), gaslessUserOperationHash(intent, wire));
+  const wrongSignature = await account.signTypedData(gaslessUserOperationTypedData(legacy, oldWire));
+  await assert.rejects(verifyGaslessUserOperation(intent, { ...wire, signature: wrongSignature }), { code: "APN_PROVIDER_PROTOCOL" });
+  assert.throws(() => validateGaslessWire(legacy, wire), { code: "APN_PROVIDER_PROTOCOL" });
+  for (const extra of [{ factory: oldWire.factory }, { factoryData: "0x" },
+    { factory: oldWire.factory, factoryData: "0x" }, { factory: null, factoryData: null },
+    { eip7702Auth: null }, { eip7702Auth: {} }]) {
+    assert.throws(() => validateGaslessWire(intent, { ...wire, ...extra }), { code: "APN_PROVIDER_PROTOCOL" });
+  }
+  assert.throws(() => gaslessUserOperation({ ...intent, wireVersion: "unknown" } as never,
+    bootstrap, GASLESS_ESTIMATE_SIGNATURE), { code: "APN_PROVIDER_PROTOCOL" });
 });
 
 test("settlement decoder accounts sponsored success from exact published events", () => {
@@ -402,3 +437,37 @@ function hashObjectForLogs(logs: readonly GaslessLog[]): string {
   // Production uses the same canonical SHA-256 convention as hashObject.
   return hashObject(logs);
 }
+
+test("v2 empty initCode hash matches deployed Base EntryPoint and differs from its 7702 override", async () => {
+  const vector = JSON.parse(await readFile("tests/core/gasless-fixtures/entrypoint-wire-v2-vector.json", "utf8"));
+  const wire = vector.wire as GaslessUserOperation;
+  // Public burn-sender fixture: the expected value is eth_call on pinned deployed code,
+  // independent of this codec; no real signature, wallet state or payment is used.
+  const intent = { wireVersion: "apn.gasless-wire.v2", owner: { address: wire.sender },
+    request: { chainId: 8453, recipient: vector.recipient }, initialSnapshot: { delegation: "expected",
+      entryPointNonceAtomic: BigInt(wire.nonce).toString() },
+    entryPoint: vector.entryPoint, delegate: vector.delegate, token: vector.token, paymaster: wire.paymaster,
+    feeCapAtomic: vector.feeCapAtomic, recipientAtomic: vector.recipientAtomic, callData: wire.callData,
+    gas: Object.fromEntries(["callGasLimit", "verificationGasLimit", "preVerificationGas", "maxFeePerGas",
+      "maxPriorityFeePerGas", "paymasterVerificationGasLimit", "paymasterPostOpGasLimit"]
+      .map(key => [key, BigInt(vector.wire[key]).toString()])) } as unknown as GaslessIntent;
+  assert.equal(vector.calls[3].request.method, "eth_call");
+  assert.equal(vector.calls[3].request.params.length, 2);
+  assert.equal(vector.calls[3].response.result, vector.expectedHash);
+  assert.equal(gaslessUserOperationTypedData(intent, wire).message.initCode, "0x");
+  assert.equal(gaslessUserOperationHash(intent, wire), vector.expectedHash);
+  const { wireVersion: _version, ...legacy } = intent;
+  const legacyWire = { ...wire, factory: "0x7702000000000000000000000000000000000000" as const, factoryData: "0x" as const };
+  assert.equal(gaslessUserOperationHash(legacy, legacyWire), vector.markerHash);
+  assert.notEqual(vector.expectedHash, vector.markerHash);
+  assert.throws(() => validateGaslessWire(intent, legacyWire), { code: "APN_PROVIDER_PROTOCOL" });
+});
+
+test("the frozen wire version admits only legacy absence or v2", () => {
+  const version = intentSchema.shape.wireVersion;
+  assert.equal(version.safeParse(undefined).success, true);
+  assert.equal(version.safeParse("apn.gasless-wire.v2").success, true);
+  for (const invalid of [null, 2, "", "apn.gasless-wire.v1", "apn.gasless-wire.v3"]) {
+    assert.equal(version.safeParse(invalid).success, false);
+  }
+});
