@@ -10,7 +10,7 @@ const EDGES = {
     execution_pending: ["bootstrap_pending", "failed_before_effect", "unknown_finality"],
     bootstrap_pending: ["user_operation_pending", "unknown_finality", "failed_permissions_invalidated"],
     user_operation_pending: ["submitted_pending", "unknown_finality", "included_success", "included_revert", "failed_effects_pending", "completed", "failed_confirmed_revert", "failed_permissions_invalidated"],
-    submitted_pending: ["unknown_finality", "included_success", "included_revert", "failed_effects_pending", "completed", "failed_confirmed_revert"],
+    submitted_pending: ["unknown_finality", "included_success", "included_revert", "failed_effects_pending", "completed", "failed_confirmed_revert", "failed_permissions_invalidated"],
     included_success: ["unknown_finality", "completed"],
     included_revert: ["unknown_finality", "failed_effects_pending", "failed_confirmed_revert"],
     unknown_finality: ["bootstrap_pending", "user_operation_pending", "submitted_pending", "included_success", "included_revert", "failed_effects_pending", "completed", "failed_confirmed_revert", "failed_permissions_invalidated"],
