@@ -31,6 +31,22 @@ export declare class GaslessService {
         proof_class: string;
     }>;
     prepare(input: Parameters<GaslessPreparation["prepare"]>[0]): Promise<{
+        rpc_origin: string;
+        bundler_origin: string;
+        policy: {
+            identity: string;
+            policy_hash: string;
+            approved_at: string | null;
+            action_deadline: string;
+            onchain_user_operation_expiry: boolean;
+            onchain_permit_expiry: boolean;
+        };
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        permission_invalidation?: import("./model.js").GaslessPermissionInvalidation;
+        payment_submitted?: boolean;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -109,22 +125,24 @@ export declare class GaslessService {
         transaction_hash: `0x${string}` | null;
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
-        rpc_origin: string;
-        bundler_origin: string;
-        policy: {
-            identity: string;
-            policy_hash: string;
-            approved_at: string | null;
-            action_deadline: string;
-            onchain_user_operation_expiry: boolean;
-            onchain_permit_expiry: boolean;
-        };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
     }>;
     approve(operationId: string): Promise<{
+        rpc_origin: string;
+        bundler_origin: string;
+        policy: {
+            identity: string;
+            policy_hash: string;
+            approved_at: string | null;
+            action_deadline: string;
+            onchain_user_operation_expiry: boolean;
+            onchain_permit_expiry: boolean;
+        };
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        permission_invalidation?: import("./model.js").GaslessPermissionInvalidation;
+        payment_submitted?: boolean;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -203,22 +221,24 @@ export declare class GaslessService {
         transaction_hash: `0x${string}` | null;
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
-        rpc_origin: string;
-        bundler_origin: string;
-        policy: {
-            identity: string;
-            policy_hash: string;
-            approved_at: string | null;
-            action_deadline: string;
-            onchain_user_operation_expiry: boolean;
-            onchain_permit_expiry: boolean;
-        };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
     }>;
     resume(operationId: string): Promise<{
+        rpc_origin: string;
+        bundler_origin: string;
+        policy: {
+            identity: string;
+            policy_hash: string;
+            approved_at: string | null;
+            action_deadline: string;
+            onchain_user_operation_expiry: boolean;
+            onchain_permit_expiry: boolean;
+        };
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        permission_invalidation?: import("./model.js").GaslessPermissionInvalidation;
+        payment_submitted?: boolean;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -297,22 +317,24 @@ export declare class GaslessService {
         transaction_hash: `0x${string}` | null;
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
-        rpc_origin: string;
-        bundler_origin: string;
-        policy: {
-            identity: string;
-            policy_hash: string;
-            approved_at: string | null;
-            action_deadline: string;
-            onchain_user_operation_expiry: boolean;
-            onchain_permit_expiry: boolean;
-        };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
     }>;
     status(operationId: string): Promise<{
+        rpc_origin: string;
+        bundler_origin: string;
+        policy: {
+            identity: string;
+            policy_hash: string;
+            approved_at: string | null;
+            action_deadline: string;
+            onchain_user_operation_expiry: boolean;
+            onchain_permit_expiry: boolean;
+        };
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        permission_invalidation?: import("./model.js").GaslessPermissionInvalidation;
+        payment_submitted?: boolean;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -391,25 +413,27 @@ export declare class GaslessService {
         transaction_hash: `0x${string}` | null;
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
-        rpc_origin: string;
-        bundler_origin: string;
-        policy: {
-            identity: string;
-            policy_hash: string;
-            approved_at: string | null;
-            action_deadline: string;
-            onchain_user_operation_expiry: boolean;
-            onchain_permit_expiry: boolean;
-        };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
     }>;
     receipt(operationId: string): Promise<{
         receipt_hash: string;
         schema_version: "apn.gasless-receipt.v1";
         operation_binding_hash: string;
+        rpc_origin: string;
+        bundler_origin: string;
+        policy: {
+            identity: string;
+            policy_hash: string;
+            approved_at: string | null;
+            action_deadline: string;
+            onchain_user_operation_expiry: boolean;
+            onchain_permit_expiry: boolean;
+        };
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        permission_invalidation?: import("./model.js").GaslessPermissionInvalidation;
+        payment_submitted?: boolean;
         kind: "gasless_transfer";
         operation_id: string;
         profile: string;
@@ -487,20 +511,6 @@ export declare class GaslessService {
         transaction_hash: `0x${string}` | null;
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
-        rpc_origin: string;
-        bundler_origin: string;
-        policy: {
-            identity: string;
-            policy_hash: string;
-            approved_at: string | null;
-            action_deadline: string;
-            onchain_user_operation_expiry: boolean;
-            onchain_permit_expiry: boolean;
-        };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
     }>;
     private dependencies;
     private execution;

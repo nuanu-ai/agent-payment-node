@@ -2,6 +2,22 @@ import type { GaslessOperationRecord } from "./operation-model.js";
 export declare function gaslessNextActions(op: GaslessOperationRecord): readonly string[];
 export declare function gaslessProofClass(op: GaslessOperationRecord): string;
 export declare function publicGaslessOperation(op: GaslessOperationRecord): {
+    rpc_origin: string;
+    bundler_origin: string;
+    policy: {
+        identity: string;
+        policy_hash: string;
+        approved_at: string | null;
+        action_deadline: string;
+        onchain_user_operation_expiry: boolean;
+        onchain_permit_expiry: boolean;
+    };
+    created_at: string;
+    updated_at: string;
+    expires_at: string;
+    next_actions: readonly string[];
+    permission_invalidation?: import("./model.js").GaslessPermissionInvalidation;
+    payment_submitted?: boolean;
     kind: "gasless_transfer";
     schema_version: "apn.gasless-operation.v1";
     operation_id: string;
@@ -80,6 +96,11 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     transaction_hash: `0x${string}` | null;
     settlement: import("./model.js").GaslessSettlement | null;
     scan_cursor: import("./model.js").GaslessCursor;
+};
+export declare function gaslessReceipt(op: GaslessOperationRecord): {
+    receipt_hash: string;
+    schema_version: "apn.gasless-receipt.v1";
+    operation_binding_hash: string;
     rpc_origin: string;
     bundler_origin: string;
     policy: {
@@ -94,11 +115,8 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     updated_at: string;
     expires_at: string;
     next_actions: readonly string[];
-};
-export declare function gaslessReceipt(op: GaslessOperationRecord): {
-    receipt_hash: string;
-    schema_version: "apn.gasless-receipt.v1";
-    operation_binding_hash: string;
+    permission_invalidation?: import("./model.js").GaslessPermissionInvalidation;
+    payment_submitted?: boolean;
     kind: "gasless_transfer";
     operation_id: string;
     profile: string;
@@ -176,19 +194,5 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     transaction_hash: `0x${string}` | null;
     settlement: import("./model.js").GaslessSettlement | null;
     scan_cursor: import("./model.js").GaslessCursor;
-    rpc_origin: string;
-    bundler_origin: string;
-    policy: {
-        identity: string;
-        policy_hash: string;
-        approved_at: string | null;
-        action_deadline: string;
-        onchain_user_operation_expiry: boolean;
-        onchain_permit_expiry: boolean;
-    };
-    created_at: string;
-    updated_at: string;
-    expires_at: string;
-    next_actions: readonly string[];
 };
 export type GaslessReceipt = ReturnType<typeof gaslessReceipt>;

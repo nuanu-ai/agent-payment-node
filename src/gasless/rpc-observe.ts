@@ -3,6 +3,7 @@ import type { Address, Hex } from "../model.js";
 import type { GaslessBlock, GaslessChainId, GaslessCursor, GaslessDeployment, GaslessEffectIdentity,
   GaslessIntent, GaslessObservation, GaslessProtocolReceipt, GaslessSnapshot } from "./model.js";
 import { gaslessAccounting } from "./protocol.js";
+import { observeGaslessBootstrap } from "./rpc-bootstrap-observe.js";
 import { addressWord, parseReceiptLogs, quantity, receiptHash, recheckBlock, rpcAddress, rpcBlock, rpcHex,
   rpcQuantity, rpcRecord, sameBlock, type GaslessRpcCall } from "./rpc-codec.js";
 import { readAccountAt, verifyProtocolAt } from "./rpc-state.js";
@@ -29,12 +30,7 @@ export async function observeGasless(context: GaslessObservationContext, intent:
   const cursor = validateCursor(intent, cursorInput);
   validateIdentity(identity);
   if (identity.userOperationHash === null) {
-    try {
-      const current = await context.snapshot(intent.owner.address);
-      return unresolved(cursor, null, "gasless_bootstrap_unresolved", hashObject({ reason: "gasless_bootstrap_unresolved", current }));
-    } catch {
-      return unresolved(cursor, null, "gasless_bootstrap_unresolved", null);
-    }
+    return await observeGaslessBootstrap(context, intent, identity, cursor);
   }
   const userOperationHash = identity.userOperationHash;
   let candidate: Hex | null = null;

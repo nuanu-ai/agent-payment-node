@@ -9,6 +9,7 @@ export function gaslessNextActions(op: GaslessOperationRecord): readonly string[
 }
 export function gaslessProofClass(op: GaslessOperationRecord): string {
   if (op.state === "completed") return "rpc_safe_correlated";
+  if (op.state === "failed_permissions_invalidated") return "rpc_safe_permissions_invalidated";
   if (op.settlement !== null || op.observation?.settlement) return "rpc_safe_effects";
   if (op.bootstrap.signingAttempts === 1) return "effect_observation_pending";
   return "durable_pre_effect";
@@ -16,6 +17,7 @@ export function gaslessProofClass(op: GaslessOperationRecord): string {
 export function publicGaslessOperation(op: GaslessOperationRecord) {
   validateGaslessOperation(op);
   const i = op.intent, proof = op.settlement ?? op.observation?.settlement ?? null, a = proof?.accounting ?? null;
+  const invalidation = op.observation?.permissionInvalidation;
   const fee = a === null ? null : BigInt(a.feeAtomic), delivered = a === null ? null : BigInt(a.deliveredAtomic);
   const effects = [op.bootstrap, op.userOperation].map((e) => ({ role: e.role, phase: e.phase,
     signing_attempts: e.signingAttempts, disclosure_attempts: e.disclosureAttempts, submission_attempts: e.submissionAttempts,
@@ -42,14 +44,17 @@ export function publicGaslessOperation(op: GaslessOperationRecord) {
       native_gas_payer: proof?.outerSender ?? null, native_paymaster: i.paymaster,
       native_paymaster_bill_capped_by_this_quote: false },
     permission: { entry_point: i.entryPoint, paymaster: i.paymaster, delegate: i.delegate,
-      initial_designation: i.initialSnapshot.delegation, observed_designation: proof?.safeAccount.delegation ?? null,
-      delegation_persists: true, permit_deadline: "MAX_UINT256", permit_amount_atomic: i.feeCapAtomic,
+      initial_designation: i.initialSnapshot.delegation,
+      observed_designation: proof?.safeAccount.delegation ?? invalidation?.headAccount.delegation ?? null,
+      delegation_persists: invalidation === undefined || invalidation.headAccount.delegation === "expected",
+      permit_deadline: "MAX_UINT256", permit_amount_atomic: i.feeCapAtomic,
       initial_allowance_atomic: i.initialSnapshot.allowanceAtomic,
-      residual_allowance_atomic: proof?.safeAccount.allowanceAtomic ?? null,
+      residual_allowance_atomic: proof?.safeAccount.allowanceAtomic ?? invalidation?.headAccount.allowanceAtomic ?? null,
       guard_held: !op.terminal, automatic_revocation: false },
     gas: i.gas, effects, unsigned_envelope_hash: i.unsignedEnvelopeHash,
     user_operation_hash: op.userOperation.userOperationHash, transaction_hash: proof?.transactionHash ?? op.observation?.transactionHash ?? null,
     settlement: proof, scan_cursor: op.cursor,
+    ...(invalidation === undefined ? {} : { permission_invalidation: invalidation, payment_submitted: false }),
     rpc_origin: i.initialSnapshot.rpcOrigin, bundler_origin: i.initialSnapshot.bundlerOrigin,
     policy: { identity: "apn.gasless.foreground-approval.v1", policy_hash: i.policyHash,
       approved_at: op.approval?.approvedAt ?? null, action_deadline: i.expiresAt,

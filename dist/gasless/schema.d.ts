@@ -286,12 +286,57 @@ export declare const settlementSchema: z.ZodObject<{
         logsHash: z.ZodString;
     }, z.core.$strict>;
 }, z.core.$strict>;
+export declare const permissionInvalidationSchema: z.ZodObject<{
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+    intentHash: z.ZodString;
+    bootstrapMaterialHash: z.ZodString;
+    protocolHash: z.ZodString;
+    safeBlock: z.ZodObject<{
+        numberAtomic: z.ZodString;
+        hash: z.ZodString;
+        timestampAtomic: z.ZodString;
+    }, z.core.$strict>;
+    headBlock: z.ZodObject<{
+        numberAtomic: z.ZodString;
+        hash: z.ZodString;
+        timestampAtomic: z.ZodString;
+    }, z.core.$strict>;
+    safeAccount: z.ZodObject<{
+        owner: z.ZodString;
+        balanceAtomic: z.ZodString;
+        nativeBalanceWei: z.ZodString;
+        allowanceAtomic: z.ZodString;
+        permitNonceAtomic: z.ZodString;
+        entryPointNonceAtomic: z.ZodString;
+        eoaNonceAtomic: z.ZodString;
+        pendingEoaNonceAtomic: z.ZodString;
+        delegation: z.ZodEnum<{
+            empty: "empty";
+            expected: "expected";
+        }>;
+    }, z.core.$strict>;
+    headAccount: z.ZodObject<{
+        owner: z.ZodString;
+        balanceAtomic: z.ZodString;
+        nativeBalanceWei: z.ZodString;
+        allowanceAtomic: z.ZodString;
+        permitNonceAtomic: z.ZodString;
+        entryPointNonceAtomic: z.ZodString;
+        eoaNonceAtomic: z.ZodString;
+        pendingEoaNonceAtomic: z.ZodString;
+        delegation: z.ZodEnum<{
+            empty: "empty";
+            expected: "expected";
+        }>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const observationSchema: z.ZodObject<{
     status: z.ZodEnum<{
         pending: "pending";
         safe: "safe";
         not_found: "not_found";
         unresolved: "unresolved";
+        permissions_invalidated: "permissions_invalidated";
     }>;
     transactionHash: z.ZodNullable<z.ZodString>;
     settlement: z.ZodNullable<z.ZodObject<{
@@ -369,6 +414,50 @@ export declare const observationSchema: z.ZodObject<{
     }, z.core.$strict>;
     evidenceHash: z.ZodNullable<z.ZodString>;
     reason: z.ZodNullable<z.ZodString>;
+    permissionInvalidation: z.ZodOptional<z.ZodObject<{
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+        intentHash: z.ZodString;
+        bootstrapMaterialHash: z.ZodString;
+        protocolHash: z.ZodString;
+        safeBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        headBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        safeAccount: z.ZodObject<{
+            owner: z.ZodString;
+            balanceAtomic: z.ZodString;
+            nativeBalanceWei: z.ZodString;
+            allowanceAtomic: z.ZodString;
+            permitNonceAtomic: z.ZodString;
+            entryPointNonceAtomic: z.ZodString;
+            eoaNonceAtomic: z.ZodString;
+            pendingEoaNonceAtomic: z.ZodString;
+            delegation: z.ZodEnum<{
+                empty: "empty";
+                expected: "expected";
+            }>;
+        }, z.core.$strict>;
+        headAccount: z.ZodObject<{
+            owner: z.ZodString;
+            balanceAtomic: z.ZodString;
+            nativeBalanceWei: z.ZodString;
+            allowanceAtomic: z.ZodString;
+            permitNonceAtomic: z.ZodString;
+            entryPointNonceAtomic: z.ZodString;
+            eoaNonceAtomic: z.ZodString;
+            pendingEoaNonceAtomic: z.ZodString;
+            delegation: z.ZodEnum<{
+                empty: "empty";
+                expected: "expected";
+            }>;
+        }, z.core.$strict>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const consentSchema: z.ZodObject<{
     policy: z.ZodLiteral<"apn.gasless.foreground-approval.v1">;
@@ -389,6 +478,7 @@ export declare const stateSchema: z.ZodEnum<{
     bootstrap_pending: "bootstrap_pending";
     user_operation_pending: "user_operation_pending";
     failed_effects_pending: "failed_effects_pending";
+    failed_permissions_invalidated: "failed_permissions_invalidated";
 }>;
 export declare const phaseSchema: z.ZodEnum<{
     submitted_pending: "submitted_pending";
@@ -458,6 +548,7 @@ export declare const transitionSchema: z.ZodObject<{
         bootstrap_pending: "bootstrap_pending";
         user_operation_pending: "user_operation_pending";
         failed_effects_pending: "failed_effects_pending";
+        failed_permissions_invalidated: "failed_permissions_invalidated";
     }>;
     approval: z.ZodNullable<z.ZodObject<{
         policy: z.ZodLiteral<"apn.gasless.foreground-approval.v1">;
@@ -558,6 +649,7 @@ export declare const transitionSchema: z.ZodObject<{
             safe: "safe";
             not_found: "not_found";
             unresolved: "unresolved";
+            permissions_invalidated: "permissions_invalidated";
         }>;
         transactionHash: z.ZodNullable<z.ZodString>;
         settlement: z.ZodNullable<z.ZodObject<{
@@ -635,6 +727,50 @@ export declare const transitionSchema: z.ZodObject<{
         }, z.core.$strict>;
         evidenceHash: z.ZodNullable<z.ZodString>;
         reason: z.ZodNullable<z.ZodString>;
+        permissionInvalidation: z.ZodOptional<z.ZodObject<{
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+            intentHash: z.ZodString;
+            bootstrapMaterialHash: z.ZodString;
+            protocolHash: z.ZodString;
+            safeBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            headBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            safeAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+            headAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+        }, z.core.$strict>>;
     }, z.core.$strict>>;
     settlement: z.ZodNullable<z.ZodObject<{
         chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
@@ -813,6 +949,7 @@ export declare const operationSchema: z.ZodObject<{
             bootstrap_pending: "bootstrap_pending";
             user_operation_pending: "user_operation_pending";
             failed_effects_pending: "failed_effects_pending";
+            failed_permissions_invalidated: "failed_permissions_invalidated";
         }>;
         approval: z.ZodNullable<z.ZodObject<{
             policy: z.ZodLiteral<"apn.gasless.foreground-approval.v1">;
@@ -913,6 +1050,7 @@ export declare const operationSchema: z.ZodObject<{
                 safe: "safe";
                 not_found: "not_found";
                 unresolved: "unresolved";
+                permissions_invalidated: "permissions_invalidated";
             }>;
             transactionHash: z.ZodNullable<z.ZodString>;
             settlement: z.ZodNullable<z.ZodObject<{
@@ -990,6 +1128,50 @@ export declare const operationSchema: z.ZodObject<{
             }, z.core.$strict>;
             evidenceHash: z.ZodNullable<z.ZodString>;
             reason: z.ZodNullable<z.ZodString>;
+            permissionInvalidation: z.ZodOptional<z.ZodObject<{
+                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+                intentHash: z.ZodString;
+                bootstrapMaterialHash: z.ZodString;
+                protocolHash: z.ZodString;
+                safeBlock: z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>;
+                headBlock: z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>;
+                safeAccount: z.ZodObject<{
+                    owner: z.ZodString;
+                    balanceAtomic: z.ZodString;
+                    nativeBalanceWei: z.ZodString;
+                    allowanceAtomic: z.ZodString;
+                    permitNonceAtomic: z.ZodString;
+                    entryPointNonceAtomic: z.ZodString;
+                    eoaNonceAtomic: z.ZodString;
+                    pendingEoaNonceAtomic: z.ZodString;
+                    delegation: z.ZodEnum<{
+                        empty: "empty";
+                        expected: "expected";
+                    }>;
+                }, z.core.$strict>;
+                headAccount: z.ZodObject<{
+                    owner: z.ZodString;
+                    balanceAtomic: z.ZodString;
+                    nativeBalanceWei: z.ZodString;
+                    allowanceAtomic: z.ZodString;
+                    permitNonceAtomic: z.ZodString;
+                    entryPointNonceAtomic: z.ZodString;
+                    eoaNonceAtomic: z.ZodString;
+                    pendingEoaNonceAtomic: z.ZodString;
+                    delegation: z.ZodEnum<{
+                        empty: "empty";
+                        expected: "expected";
+                    }>;
+                }, z.core.$strict>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         settlement: z.ZodNullable<z.ZodObject<{
             chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
@@ -1067,6 +1249,7 @@ export declare const operationSchema: z.ZodObject<{
         bootstrap_pending: "bootstrap_pending";
         user_operation_pending: "user_operation_pending";
         failed_effects_pending: "failed_effects_pending";
+        failed_permissions_invalidated: "failed_permissions_invalidated";
     }>;
     approval: z.ZodNullable<z.ZodObject<{
         policy: z.ZodLiteral<"apn.gasless.foreground-approval.v1">;
@@ -1167,6 +1350,7 @@ export declare const operationSchema: z.ZodObject<{
             safe: "safe";
             not_found: "not_found";
             unresolved: "unresolved";
+            permissions_invalidated: "permissions_invalidated";
         }>;
         transactionHash: z.ZodNullable<z.ZodString>;
         settlement: z.ZodNullable<z.ZodObject<{
@@ -1244,6 +1428,50 @@ export declare const operationSchema: z.ZodObject<{
         }, z.core.$strict>;
         evidenceHash: z.ZodNullable<z.ZodString>;
         reason: z.ZodNullable<z.ZodString>;
+        permissionInvalidation: z.ZodOptional<z.ZodObject<{
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
+            intentHash: z.ZodString;
+            bootstrapMaterialHash: z.ZodString;
+            protocolHash: z.ZodString;
+            safeBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            headBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            safeAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+            headAccount: z.ZodObject<{
+                owner: z.ZodString;
+                balanceAtomic: z.ZodString;
+                nativeBalanceWei: z.ZodString;
+                allowanceAtomic: z.ZodString;
+                permitNonceAtomic: z.ZodString;
+                entryPointNonceAtomic: z.ZodString;
+                eoaNonceAtomic: z.ZodString;
+                pendingEoaNonceAtomic: z.ZodString;
+                delegation: z.ZodEnum<{
+                    empty: "empty";
+                    expected: "expected";
+                }>;
+            }, z.core.$strict>;
+        }, z.core.$strict>>;
     }, z.core.$strict>>;
     settlement: z.ZodNullable<z.ZodObject<{
         chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;

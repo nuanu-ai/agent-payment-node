@@ -72,14 +72,18 @@ export const settlementSchema = z.strictObject({ chainId: chainSchema, userOpera
     transactionHash: wordSchema, block: blockSchema, safeBlock: blockSchema, outerSender: addressSchema,
     transactionProofHash: hashSchema, receiptHash: hashSchema, protocolHash: hashSchema,
     effectAccount: accountSchema, safeAccount: accountSchema, accounting: accountingSchema });
-export const observationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "safe", "unresolved"]),
+export const permissionInvalidationSchema = z.strictObject({ chainId: chainSchema, intentHash: hashSchema,
+    bootstrapMaterialHash: hashSchema, protocolHash: hashSchema, safeBlock: blockSchema, headBlock: blockSchema,
+    safeAccount: accountSchema, headAccount: accountSchema });
+export const observationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "safe", "unresolved", "permissions_invalidated"]),
     transactionHash: wordSchema.nullable(), settlement: settlementSchema.nullable(), cursor: cursorSchema,
-    evidenceHash: hashSchema.nullable(), reason: reasonSchema.nullable() });
+    evidenceHash: hashSchema.nullable(), reason: reasonSchema.nullable(),
+    permissionInvalidation: permissionInvalidationSchema.optional() });
 export const consentSchema = z.strictObject({ policy: z.literal("apn.gasless.foreground-approval.v1"),
     fingerprint: hashSchema, approvedAt: isoSchema, expiresAt: isoSchema });
 export const stateSchema = z.enum(["awaiting_approval", "execution_pending", "bootstrap_pending", "user_operation_pending",
     "submitted_pending", "unknown_finality", "included_success", "included_revert", "failed_effects_pending",
-    "completed", "failed_before_effect", "failed_confirmed_revert"]);
+    "completed", "failed_before_effect", "failed_confirmed_revert", "failed_permissions_invalidated"]);
 export const phaseSchema = z.enum(["unsealed", "signing_started", "sealed", "disclosure_started", "checked",
     "submitting", "submitted_pending", "unknown_finality", "included_success", "included_revert", "safe_success", "safe_revert"]);
 const attemptSchema = z.union([z.literal(0), z.literal(1)]);

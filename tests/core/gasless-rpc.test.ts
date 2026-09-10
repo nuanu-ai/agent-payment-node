@@ -197,9 +197,84 @@ test("gasless observation reports bootstrap-only permission without inventing a 
   const observation = await observeGasless(context, intent,
     { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: null, userOperationHash: null }, cursor);
   assert.equal(observation.status, "unresolved"); assert.equal(observation.transactionHash, null);
-  assert.equal(observation.reason, "gasless_bootstrap_unresolved"); assert.match(observation.evidenceHash!, /^[a-f0-9]{64}$/u);
-  assert.deepEqual(calls, []);
+  assert.equal(observation.reason, "gasless_bootstrap_unresolved"); assert.equal(observation.evidenceHash, null);
+  assert.deepEqual(calls, ["eth_getBlockByNumber"]);
 });
+
+for (const designation of ["empty", "expected"] as const) {
+  test(`gasless ${designation} bootstrap RPC proves permission invalidation without bundler or effect calls`, async () => {
+    const { context, intent, calls, setFault } = bootstrapRpcFixture(designation);
+    const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: null, userOperationHash: null };
+    const good = await observeGasless(context, intent, identity, initialCursor(intent));
+    assert.equal(good.status, "permissions_invalidated"); assert.equal(good.transactionHash, null);
+    assert.equal(good.settlement, null); assert.equal(good.permissionInvalidation?.safeBlock.numberAtomic, "102");
+    assert.equal(good.permissionInvalidation?.headBlock.numberAtomic, "103");
+    assert.equal(good.permissionInvalidation?.headAccount.permitNonceAtomic, "8");
+    if (designation === "expected") {
+      assert.equal(good.permissionInvalidation?.safeAccount.eoaNonceAtomic, intent.initialSnapshot.eoaNonceAtomic);
+      assert.equal(good.permissionInvalidation?.headAccount.eoaNonceAtomic, intent.initialSnapshot.eoaNonceAtomic);
+    }
+    assert.equal(good.evidenceHash, hashObject(good.permissionInvalidation));
+    assert.ok(calls.includes("eth_getCode")); assert.ok(calls.includes("eth_getStorageAt"));
+    assert.ok(calls.includes("eth_call")); assert.ok(calls.includes("eth_getTransactionCount"));
+    assert.equal(calls.some((m) => /UserOperation|send|estimate|bundler|snapshot/u.test(m)), false);
+    for (const fault of ["permit", "allowance", "pending", "entrypoint", "owner_code", "protocol_code", "storage",
+      "domain", "prepare_reorg", "safe_reorg", "head_reorg", "chain", "safe_ahead", "hash_zero",
+      ...(designation === "empty" ? ["authorization"] : [])]) {
+      setFault(fault);
+      const held = await observeGasless(context, intent, identity, initialCursor(intent));
+      assert.equal(held.status, "unresolved", fault); assert.equal(held.permissionInvalidation, undefined, fault);
+      assert.equal(held.settlement, null); assert.deepEqual(held.cursor, initialCursor(intent));
+    }
+  });
+}
+
+function bootstrapRpcFixture(designation: "empty" | "expected") {
+  const original = makeIntent(), base = gaslessDeployment(8453);
+  const deployment: GaslessDeployment = { ...base,
+    code: [{ address: base.token, codeHash: keccak256("0x6000") }],
+    reads: [{ kind: "storage", address: base.paymaster, data: word(1n), expected: word(2n) },
+      { kind: "call", address: base.token, data: "0x3644e515", expected: base.tokenDomain.domainSeparator }] };
+  const intent = { ...original, initialSnapshot: { ...original.initialSnapshot, delegation: designation,
+    protocolHash: gaslessProtocolHash(deployment) } };
+  const eoaNonce = `0x${(BigInt(intent.initialSnapshot.eoaNonceAtomic) + (designation === "empty" ? 1n : 0n)).toString(16)}`;
+  const calls: string[] = []; let fault = "";
+  const context: GaslessObservationContext = { chainId: 8453, rpcOrigin: "https://rpc.example", deployment,
+    snapshot: async () => { calls.push("snapshot"); throw new Error("no snapshot"); },
+    bundler: async () => { calls.push("bundler"); throw new Error("no bundler"); },
+    rpc: async (method, params) => {
+      calls.push(method);
+      if (method === "eth_getBlockByNumber") {
+        const tag = params[0], n = tag === "safe" ? 102n : tag === "latest" ? (fault === "safe_ahead" ? 101n : 103n) : BigInt(tag as string);
+        const reorg = (fault === "prepare_reorg" && n === 100n) ||
+          (fault === "safe_reorg" && tag === "0x66") || (fault === "head_reorg" && tag === "0x67");
+        return rawBlock(n, fault === "hash_zero" ? word(0n) : reorg ? word(123n) : blockHash(n));
+      }
+      if (method === "eth_getTransactionCount" && params[1] === "pending") return fault === "pending" ? "0x2" : eoaNonce;
+      const pinned = params.at(-1) as Json;
+      assert.equal(pinned.requireCanonical, true); assert.ok([blockHash(102), blockHash(103)].includes(pinned.blockHash));
+      if (method === "eth_getBalance") return "0x100";
+      if (method === "eth_getTransactionCount") return fault === "authorization" ? "0x0" : eoaNonce;
+      if (method === "eth_getCode") {
+        if (params[0] === intent.owner.address) return fault === "owner_code" ? "0x6001" :
+          designation === "empty" ? "0x" : `0xef0100${intent.delegate.slice(2).toLowerCase()}`;
+        assert.equal(params[0], deployment.token); return fault === "protocol_code" ? "0x6001" : "0x6000";
+      }
+      if (method === "eth_getStorageAt") return fault === "storage" ? word(3n) : word(2n);
+      if (method === "eth_call") {
+        const request = params[0] as Json, data = request.data as string;
+        if (data === "0x3644e515") return fault === "domain" ? word(0n) : base.tokenDomain.domainSeparator;
+        if (data.startsWith("0x70a08231")) return word(9_990_000n);
+        if (data.startsWith("0xdd62ed3e")) return word(fault === "allowance" ? 1n : 0n);
+        if (data.startsWith("0x7ecebe00")) return word(fault === "permit" ? 7n : 8n);
+        if (data.startsWith("0x35567e1a")) return word(fault === "entrypoint" ? 10n : 9n);
+      }
+      throw new Error(`unexpected read ${method}`);
+    } };
+  return { context, intent, calls, setFault: (value: string) => {
+    fault = value; (context as { chainId: number }).chainId = value === "chain" ? 1 : 8453;
+  } };
+}
 
 test("gasless finite safe-block scan advances one 256-block window and resets on cursor reorg", async () => {
   const intent = makeIntent(), userOperationHash = word(71n), cursor = initialCursor(intent);
@@ -276,7 +351,7 @@ function makeIntent(): GaslessIntent {
     maxPriorityFeePerGas: "100000000" };
   const gas = gaslessGas(snapshot), feeCapAtomic = gaslessFee(gas, snapshot.feeConfiguration), grossAtomic = "10000000";
   const withoutHash = { profile: "synthetic", request: { chainId: 8453 as const, recipient: RECIPIENT, grossAtomic,
-    maxFeeAtomic: "5000000", minReceivedAtomic: "5000000" }, owner: { profile: "synthetic", profileHash: "1".repeat(64),
+    maxFeeAtomic: "6000000", minReceivedAtomic: "4000000" }, owner: { profile: "synthetic", profileHash: "1".repeat(64),
     address: OWNER.address, walletBindingHash: "2".repeat(64), walletCreatedAt: "2026-09-09T00:00:00.000Z" },
     providerBinding: { providerId: "local" as const, accountBindingHash: "3".repeat(64), capabilityHash: "4".repeat(64),
       revision: 1 }, initialSnapshot: snapshot, gas, token: deployment.token, tokenDomain: deployment.tokenDomain,

@@ -6,7 +6,8 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../../src/canonical.js";
 import type { Address, Hex } from "../../src/model.js";
 import { GASLESS_ENTRYPOINT_ABI, GASLESS_PAYMASTER_ABI, GASLESS_TOKEN_ABI } from "../../src/gasless/abi.js";
-import { assertGaslessEstimate, assertGaslessSnapshot, gaslessFee, gaslessGas } from "../../src/gasless/economics.js";
+import { assertGaslessEstimate, assertGaslessSnapshot, gaslessFee, gaslessGas, validateGaslessGas,
+  validateGaslessStoredOffer } from "../../src/gasless/economics.js";
 import type { GaslessAuthorization, GaslessIntent, GaslessLog, GaslessProtocolReceipt, GaslessSnapshot,
   GaslessUserOperation } from "../../src/gasless/model.js";
 import { gaslessAccounting } from "../../src/gasless/protocol.js";
@@ -31,10 +32,13 @@ test("conservative gas and Circle fee arithmetic bind first and repeated delegat
   const first = gaslessGas(firstSnapshot), repeated = gaslessGas(repeatedSnapshot);
   assert.equal(first.preVerificationGas, "150000");
   assert.equal(repeated.preVerificationGas, "125000");
-  assert.equal(gaslessFee(first, firstSnapshot.feeConfiguration), "4082926");
-  assert.equal(gaslessFee(repeated, repeatedSnapshot.feeConfiguration), "3950363");
+  assert.equal(gaslessFee(first, firstSnapshot.feeConfiguration), "5408551");
+  assert.equal(gaslessFee(repeated, repeatedSnapshot.feeConfiguration), "5275988");
   const intent = makeIntent(owner, "empty");
   assert.doesNotThrow(() => assertGaslessSnapshot(intent, firstSnapshot));
+  assert.throws(() => assertGaslessSnapshot({ ...intent,
+    request: { ...intent.request, maxFeeAtomic: "5000000", minReceivedAtomic: "5000000" } }, firstSnapshot),
+  { code: "APN_FEE_BUDGET_EXCEEDED" });
   assert.doesNotThrow(() => assertGaslessEstimate(intent, {
     verificationGasLimit: "90000", callGasLimit: "200000", paymasterVerificationGasLimit: "180000",
     paymasterPostOpGasLimit: "35000", preVerificationGas: "140000", responseHash: "9".repeat(64),
@@ -55,6 +59,49 @@ test("conservative gas and Circle fee arithmetic bind first and repeated delegat
   assert.throws(() => assertGaslessSnapshot(intent, { ...firstSnapshot,
     feeConfiguration: { additionalGasCharge: "35001", feeSpread: "0", nativeTokenPrice: "1" } }),
   { code: "APN_FEE_BUDGET_EXCEEDED" });
+});
+
+test("the captured public Circle estimate fits a new offer but never enlarges a legacy intent", () => {
+  const intent = makeIntent(getAddress("0x1111111111111111111111111111111111111111"), "empty");
+  // Base public Pimlico response, 2026-09-09 16:02 UTC. The diagnostic used a
+  // burn sender and simulation-only signature/balance overrides, not a payment.
+  const estimate = { verificationGasLimit: "61585", callGasLimit: "35910",
+    paymasterVerificationGasLimit: "400530", paymasterPostOpGasLimit: "11360",
+    preVerificationGas: "83700", responseHash: hashObject({ preVerificationGas: "0x146f4",
+      verificationGasLimit: "0xf091", callGasLimit: "0x8c46",
+      paymasterVerificationGasLimit: "0x61c92", paymasterPostOpGasLimit: "0x2c60" }) };
+  assert.doesNotThrow(() => assertGaslessEstimate(intent, estimate));
+  const legacyGas = { ...intent.gas, callGasLimit: "250000", paymasterVerificationGasLimit: "200000" };
+  assert.doesNotThrow(() => validateGaslessGas(legacyGas));
+  const frozen = JSON.stringify(legacyGas);
+  assert.throws(() => assertGaslessEstimate({ ...intent, gas: legacyGas }, estimate),
+    { code: "APN_FEE_BUDGET_EXCEEDED" });
+  assert.equal(JSON.stringify(legacyGas), frozen);
+  assert.throws(() => assertGaslessEstimate(intent, { ...estimate, paymasterVerificationGasLimit: "500001" }),
+    { code: "APN_FEE_BUDGET_EXCEEDED" });
+  assert.throws(() => validateGaslessGas({ ...intent.gas, callGasLimit: "250000" }),
+    { code: "APN_FEE_BUDGET_EXCEEDED" });
+});
+
+test("stored offers retain only exact legacy or current gas, including legacy-only aggregate headroom", () => {
+  const owner = getAddress("0x1111111111111111111111111111111111111111");
+  for (const designation of ["empty", "expected"] as const) {
+    const state = snapshot(owner, designation), current = gaslessGas(state);
+    const legacy = { ...current, callGasLimit: "250000", paymasterVerificationGasLimit: "200000" };
+    const before = JSON.stringify(legacy);
+    assert.doesNotThrow(() => validateGaslessStoredOffer(current, state));
+    assert.doesNotThrow(() => validateGaslessStoredOffer(legacy, state));
+    assert.equal(JSON.stringify(legacy), before);
+    for (const change of [
+      { callGasLimit: "199999" }, { callGasLimit: "200000" }, { paymasterVerificationGasLimit: "199999" },
+      { paymasterVerificationGasLimit: "500000" }, { verificationGasLimit: "99999" },
+      { preVerificationGas: "124999" }, { paymasterPostOpGasLimit: "35001" },
+      { maxFeePerGas: "2100000001" }, { maxPriorityFeePerGas: "100000001" },
+    ]) assert.throws(() => validateGaslessStoredOffer({ ...legacy, ...change }, state), { code: "APN_FEE_BUDGET_EXCEEDED" });
+    const heavy = { ...state, feeConfiguration: { ...state.feeConfiguration, additionalGasCharge: "200000" } };
+    assert.throws(() => gaslessGas(heavy), { code: "APN_FEE_BUDGET_EXCEEDED" });
+    assert.doesNotThrow(() => validateGaslessStoredOffer({ ...legacy, paymasterPostOpGasLimit: "200000" }, heavy));
+  }
 });
 
 test("published batch and paymaster codec reject hostile field and byte mutations", () => {
@@ -150,7 +197,7 @@ test("failed postOp proof charges the exact prefund and leaves the fee residue f
   assert.equal(accounting.feeAtomic, prefund.toString());
   assert.equal(accounting.refundAtomic, "0");
   assert.equal(accounting.deliveredAtomic, "0");
-  assert.equal(BigInt(intent.feeCapAtomic) - BigInt(accounting.feeAtomic), 1_950_363n);
+  assert.equal(BigInt(intent.feeCapAtomic) - BigInt(accounting.feeAtomic), 3_275_988n);
   assert.throws(() => gaslessAccounting(intent, operationHash, receipt([...logs,
     eventLog(GASLESS_TOKEN_ABI, "Transfer", intent.token,
       { from: intent.owner.address, to: RECIPIENT, value: 1n }, 4)])), { code: "APN_RPC_PROTOCOL" });
@@ -248,7 +295,7 @@ function makeIntent(ownerAddress: Address, delegation: "empty" | "expected"): Ga
   const grossAtomic = "10000000", recipientAtomic = (BigInt(grossAtomic) - BigInt(feeCapAtomic)).toString();
   const withoutHash = {
     profile: "synthetic", request: { chainId: 8453 as const, recipient: RECIPIENT, grossAtomic,
-      maxFeeAtomic: "5000000", minReceivedAtomic: "5000000" },
+      maxFeeAtomic: "6000000", minReceivedAtomic: "4000000" },
     owner: { profile: "synthetic", profileHash: "1".repeat(64), address: ownerAddress,
       walletBindingHash: "2".repeat(64), walletCreatedAt: "2026-09-09T00:00:00.000Z" },
     providerBinding: { providerId: "local" as const, accountBindingHash: "3".repeat(64),

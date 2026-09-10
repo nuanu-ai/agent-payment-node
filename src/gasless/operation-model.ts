@@ -5,7 +5,7 @@ import type { GaslessCursor, GaslessEstimate, GaslessIntent, GaslessObservation,
 export type GaslessState = "awaiting_approval" | "execution_pending" | "bootstrap_pending" |
   "user_operation_pending" | "submitted_pending" | "included_success" | "included_revert" |
   "unknown_finality" | "failed_effects_pending" |
-  "completed" | "failed_before_effect" | "failed_confirmed_revert";
+  "completed" | "failed_before_effect" | "failed_confirmed_revert" | "failed_permissions_invalidated";
 export type GaslessRole = "bootstrap" | "user_operation";
 export type GaslessEffectPhase = "unsealed" | "signing_started" | "sealed" |
   "disclosure_started" | "checked" | "submitting" | "submitted_pending" | "unknown_finality" |
@@ -60,7 +60,7 @@ export interface GaslessOperationRecord extends GaslessMutable {
   readonly transitions: readonly GaslessTransition[];
   readonly integrityHash: string;
 }
-export const GASLESS_TERMINAL: readonly GaslessState[] = ["completed", "failed_before_effect", "failed_confirmed_revert"];
+export const GASLESS_TERMINAL: readonly GaslessState[] = ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_permissions_invalidated"];
 export function gaslessIntentBinding(op: Pick<GaslessOperationRecord,
   "schemaVersion" | "kind" | "profileHash" | "operationId" | "idempotencyHash" | "requestHash" | "intent">) {
   return { schemaVersion: op.schemaVersion, kind: op.kind, profileHash: op.profileHash,

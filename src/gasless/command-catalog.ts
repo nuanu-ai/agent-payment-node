@@ -2,6 +2,7 @@ import type { CommandDefinition, CommandOption } from "../command-catalog.js";
 import type { CommandRequest } from "../commands.js";
 import { gaslessAddress, gaslessDecimal, gaslessFailure } from "./validation.js";
 import { gaslessCommandChain, gaslessCommandRequest } from "./command-input.js";
+import { GASLESS_TERMINAL } from "./operation-model.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[], required = true): CommandOption => ({
   name, type, constraints, required, default: { kind: "none" }, sensitivity: "operator_input",
@@ -12,7 +13,7 @@ const operation = option("--operation", "operation_id", ["64_lowercase_hex_chara
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
   success: "USDC gross, fee budget, recipient amount, permission state and independently verified settlement.",
   failures: ["Classified APN error with no automatic fallback or replacement signature."] } as const;
-const states = { terminal: ["completed", "failed_before_effect", "failed_confirmed_revert"],
+const states = { terminal: GASLESS_TERMINAL,
   non_terminal: ["awaiting_approval", "execution_pending", "bootstrap_pending", "user_operation_pending", "submitted_pending",
     "included_success", "included_revert", "unknown_finality", "failed_effects_pending", "dispatch_pending"] } as const;
 const readApproval = { class: "none", when: "Never signs or submits." } as const;

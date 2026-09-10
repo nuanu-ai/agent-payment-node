@@ -1,5 +1,5 @@
 import { hashObject, sha256 } from "../canonical.js";
-import { assertGaslessSnapshot, gaslessFee, gaslessGas, validateGaslessGas } from "./economics.js";
+import { assertGaslessSnapshot, gaslessFee, validateGaslessStoredOffer } from "./economics.js";
 import { gaslessDeployment, gaslessProtocolHash } from "./registry.js";
 import { intentSchema } from "./schema.js";
 import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, gaslessFailure, gaslessSame, gaslessUint, validateGaslessRequest } from "./validation.js";
@@ -21,8 +21,8 @@ export function validateGaslessIntent(value) {
     if ([GASLESS_ZERO_ADDRESS, i.owner.address, i.token, i.paymaster, i.entryPoint, i.delegate].includes(r.recipient)) {
         gaslessFailure("APN_STATE_CORRUPT", "gasless_recipient_alias");
     }
-    validateGaslessGas(i.gas);
-    if (!gaslessSame(i.gas, gaslessGas(s)) || i.feeCapAtomic !== gaslessFee(i.gas, s.feeConfiguration) ||
+    validateGaslessStoredOffer(i.gas, s);
+    if (i.feeCapAtomic !== gaslessFee(i.gas, s.feeConfiguration) ||
         gaslessUint(i.feeCapAtomic, true) + gaslessUint(i.recipientAtomic, true) !== gaslessUint(r.grossAtomic) ||
         gaslessUint(i.feeCapAtomic) > gaslessUint(r.maxFeeAtomic) || gaslessUint(i.recipientAtomic) < gaslessUint(r.minReceivedAtomic)) {
         gaslessFailure("APN_STATE_CORRUPT", "gasless_intent_economics");

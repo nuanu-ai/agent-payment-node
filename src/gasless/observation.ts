@@ -1,5 +1,6 @@
 import type { GaslessMutable, GaslessOperationRecord } from "./operation-model.js";
 import type { GaslessRpcPort } from "./ports.js";
+import { assertGaslessPermissionClosure, GASLESS_PERMISSIONS_INVALIDATED } from "./permission-invalidation.js";
 import { observationSchema } from "./schema.js";
 import { assertGaslessSettlementContinuation, validateGaslessSettlement } from "./settlement-validation.js";
 import { gaslessSame } from "./validation.js";
@@ -21,6 +22,8 @@ export class GaslessObservationService {
       if (!observationSchema.safeParse(result).success || !gaslessSame(result.cursor.startBlock, op.cursor.startBlock)) throw new Error("shape");
       if (op.userOperation.submissionAttempts !== 1 && (result.transactionHash !== null || result.settlement !== null)) throw new Error("unsubmitted");
       if ((result.status === "safe") !== (result.settlement !== null)) throw new Error("proof");
+      if ((result.status === "permissions_invalidated") !== (result.permissionInvalidation !== undefined)) throw new Error("permission proof");
+      if (result.status === "permissions_invalidated") assertGaslessPermissionClosure(op, { ...op, observation: result });
       const proof = result.settlement;
       if (proof !== null) {
         if (op.userOperation.userOperationHash === null || result.transactionHash !== proof.transactionHash || result.evidenceHash === null) throw new Error("binding");
@@ -35,6 +38,10 @@ export class GaslessObservationService {
       // Preserve an already proven effect when a later safe-state observation is unavailable.
       if (op.state === "failed_effects_pending") return op;
       return await this.save(op, { state: "unknown_finality", failure: "gasless_receipt_unresolved" });
+    }
+    if (result.status === "permissions_invalidated") {
+      return await this.save(op, { state: "failed_permissions_invalidated", observation: result,
+        cursor: result.cursor, failure: GASLESS_PERMISSIONS_INVALIDATED });
     }
     const proof = result.settlement;
     if (proof !== null) {

@@ -1,5 +1,5 @@
 import { hashObject } from "../canonical.js";
-export const GASLESS_TERMINAL = ["completed", "failed_before_effect", "failed_confirmed_revert"];
+export const GASLESS_TERMINAL = ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_permissions_invalidated"];
 export function gaslessIntentBinding(op) {
     return { schemaVersion: op.schemaVersion, kind: op.kind, profileHash: op.profileHash,
         operationId: op.operationId, idempotencyHash: op.idempotencyHash, requestHash: op.requestHash, intent: op.intent };

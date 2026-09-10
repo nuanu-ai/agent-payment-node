@@ -1,15 +1,18 @@
 import { exactKeys, isPlainRecord } from "../canonical.js";
-import { GASLESS_MAX_UINT, GASLESS_MAX_UINT120, gaslessAddress, gaslessChain, gaslessExact, gaslessFailure, gaslessHash, gaslessHex, gaslessUint } from "./validation.js";
+import { GASLESS_MAX_UINT, GASLESS_MAX_UINT120, gaslessAddress, gaslessChain, gaslessExact, gaslessFailure, gaslessHash, gaslessHex, gaslessSame, gaslessUint } from "./validation.js";
 const GAS_CEILINGS = {
     verificationGasLimit: 100000n,
     callGasLimit: 250000n,
-    paymasterVerificationGasLimit: 200000n,
+    paymasterVerificationGasLimit: 500000n,
     paymasterPostOpGasLimit: 200000n,
     preVerificationGas: 150000n,
 };
 const REPEATED_PRE_VERIFICATION_GAS = 125000n;
 const AUTHORIZATION_GAS = 25000n;
 const MIN_POST_OP_GAS = 35000n;
+// Preserve the legacy 250k call ceiling when reading existing intents. New offers
+// reserve more gas for Circle validation within the same 1m aggregate ceiling.
+const OFFER_CALL_GAS = 200000n;
 const MAX_TOTAL_GAS = 1000000n;
 const PRICE_SCALE = 1000000000000000000n;
 const BPS_SCALE = 10000n;
@@ -18,6 +21,17 @@ const GAS_FIELDS = [
     "preVerificationGas", "maxFeePerGas", "maxPriorityFeePerGas",
 ];
 export function gaslessGas(snapshot) {
+    return validateGaslessGas(gaslessGasFields(snapshot));
+}
+/** Recognize the two admitted immutable offers without changing saved gas. */
+export function validateGaslessStoredOffer(gas, snapshot) {
+    validateGaslessGas(gas);
+    const current = gaslessGasFields(snapshot);
+    const legacy = { ...current, callGasLimit: "250000", paymasterVerificationGasLimit: "200000" };
+    if (!gaslessSame(gas, current) && !gaslessSame(gas, legacy))
+        feeFailure();
+}
+function gaslessGasFields(snapshot) {
     const configuration = feeConfiguration(snapshot.feeConfiguration);
     const additional = BigInt(configuration.additionalGasCharge);
     if (additional > GAS_CEILINGS.paymasterPostOpGasLimit)
@@ -29,16 +43,16 @@ export function gaslessGas(snapshot) {
         feeFailure();
     if (snapshot.delegation !== "empty" && snapshot.delegation !== "expected")
         identityFailure();
-    return validateGaslessGas({
+    return {
         verificationGasLimit: GAS_CEILINGS.verificationGasLimit.toString(),
-        callGasLimit: GAS_CEILINGS.callGasLimit.toString(),
+        callGasLimit: OFFER_CALL_GAS.toString(),
         paymasterVerificationGasLimit: GAS_CEILINGS.paymasterVerificationGasLimit.toString(),
         paymasterPostOpGasLimit: (additional > MIN_POST_OP_GAS ? additional : MIN_POST_OP_GAS).toString(),
         preVerificationGas: (REPEATED_PRE_VERIFICATION_GAS +
             (snapshot.delegation === "empty" ? AUTHORIZATION_GAS : 0n)).toString(),
         maxFeePerGas: maximum.toString(),
         maxPriorityFeePerGas: priority.toString(),
-    });
+    };
 }
 export function gaslessFee(gas, config) {
     const validated = validateGaslessGas(gas), configuration = feeConfiguration(config);
