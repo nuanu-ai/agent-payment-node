@@ -276,9 +276,9 @@ function bootstrapRpcFixture(designation: "empty" | "expected") {
   } };
 }
 
-test("gasless finite safe-block scan advances one 256-block window and resets on cursor reorg", async () => {
+test("gasless finite safe-block scan uses ten-block RPC ranges and resets on cursor reorg", async () => {
   const intent = makeIntent(), userOperationHash = word(71n), cursor = initialCursor(intent);
-  let reorg = false; const tags: unknown[] = [];
+  let reorg = false; const tags: unknown[] = [], ranges: Array<[bigint, bigint]> = [];
   const context = { chainId: 8453 as const, rpcOrigin: "https://rpc.example", deployment: gaslessDeployment(8453),
     bundler: async () => null,
     snapshot: async () => intent.initialSnapshot,
@@ -288,7 +288,10 @@ test("gasless finite safe-block scan advances one 256-block window and resets on
         return rawBlock(number, reorg && number === 355n ? word(123_456n) : blockHash(number));
       }
       if (method === "eth_getLogs") { const filter = params[0] as Json;
-        assert.equal(filter.fromBlock, "0x64"); assert.equal(filter.toBlock, "0x163"); return []; }
+        const from = BigInt(filter.fromBlock), to = BigInt(filter.toBlock);
+        ranges.push([from, to]);
+        if (to - from + 1n > 10n) throw new Error("provider maximum block range is 10");
+        return []; }
       throw new Error(`unexpected ${method}`);
     },
   } as GaslessObservationContext;
@@ -296,8 +299,68 @@ test("gasless finite safe-block scan advances one 256-block window and resets on
   const first = await observeGasless(context, intent, identity, cursor);
   assert.equal(first.status, "not_found"); assert.equal(first.cursor.nextBlockAtomic, "356");
   assert.equal(first.cursor.previousEndBlock?.numberAtomic, "355"); assert.ok(tags.includes("safe"));
+  assert.equal(ranges.length, 26); assert.deepEqual(ranges[0], [100n, 109n]);
+  assert.deepEqual(ranges.at(-1), [350n, 355n]);
+  for (let index = 1; index < ranges.length; index += 1) assert.equal(ranges[index]![0], ranges[index - 1]![1] + 1n);
   reorg = true; const second = await observeGasless(context, intent, identity, first.cursor);
   assert.equal(second.status, "unresolved"); assert.deepEqual(second.cursor, cursor);
+  assert.equal(ranges.length, 26);
+});
+
+for (const fault of ["transport", "range", "count", "reorg"] as const) {
+  test(`gasless scan retains the original cursor after a later RPC range ${fault} failure`, async () => {
+    const intent = makeIntent(), userOperationHash = word(73n), cursor = initialCursor(intent);
+    const userLog = settlementLogs(intent, userOperationHash).at(-1)!;
+    let requests = 0, endReads = 0;
+    const context: GaslessObservationContext = { chainId: 8453, rpcOrigin: "https://rpc.example",
+      deployment: gaslessDeployment(8453), bundler: async () => null, snapshot: async () => intent.initialSnapshot,
+      rpc: async (method, params) => {
+        if (method === "eth_getBlockByNumber") {
+          const number = params[0] === "safe" ? 400n : BigInt(params[0] as string);
+          if (number === 355n) endReads += 1;
+          return rawBlock(number, fault === "reorg" && number === 355n && endReads === 2 ? word(999n) : blockHash(number));
+        }
+        assert.equal(method, "eth_getLogs"); requests += 1;
+        const filter = params[0] as Json, from = BigInt(filter.fromBlock), to = BigInt(filter.toBlock);
+        assert.ok(to - from + 1n <= 10n);
+        if (fault === "transport" && requests === 3) throw new Error("provider unavailable");
+        if (fault === "range" && requests === 3) return [rawLog(userLog, word(74n), block(to + 1n))];
+        if (fault === "count") return Array.from({ length: 65 }, (_, index) => ({
+          ...rawLog(userLog, word(74n), block(from)), logIndex: quantity(index) }));
+        return [];
+      } };
+    const observation = await observeGasless(context, intent,
+      { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash }, cursor);
+    assert.equal(observation.status, "unresolved"); assert.equal(observation.settlement, null);
+    assert.deepEqual(observation.cursor, cursor); assert.equal(observation.evidenceHash, null);
+    assert.equal(requests, fault === "count" ? 2 : fault === "reorg" ? 26 : 3);
+  });
+}
+
+test("gasless scan locates a matching operation in a later range without an effect call", async () => {
+  const intent = makeIntent(), userOperationHash = word(75n), transactionHash = word(76n), calls: string[] = [];
+  const userLog = rawLog(settlementLogs(intent, userOperationHash).at(-1)!, transactionHash, block(125n));
+  const ranges: Array<[bigint, bigint]> = [];
+  const context: GaslessObservationContext = { chainId: 8453, rpcOrigin: "https://rpc.example",
+    deployment: gaslessDeployment(8453), bundler: async () => null, snapshot: async () => intent.initialSnapshot,
+    rpc: async (method, params) => {
+      calls.push(method);
+      if (method === "eth_getBlockByNumber") return rawBlock(params[0] === "safe" ? 150n : BigInt(params[0] as string),
+        blockHash(params[0] === "safe" ? 150n : BigInt(params[0] as string)));
+      if (method === "eth_getTransactionByHash" || method === "eth_getTransactionReceipt") {
+        assert.equal(params[0], transactionHash); return null;
+      }
+      assert.equal(method, "eth_getLogs");
+      const filter = params[0] as Json, from = BigInt(filter.fromBlock), to = BigInt(filter.toBlock);
+      assert.ok(to - from + 1n <= 10n); ranges.push([from, to]);
+      return from <= 125n && to >= 125n ? [userLog] : [];
+    } };
+  const cursor = initialCursor(intent), observation = await observeGasless(context, intent,
+    { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash }, cursor);
+  assert.equal(observation.status, "pending"); assert.equal(observation.transactionHash, transactionHash);
+  assert.equal(observation.settlement, null); assert.deepEqual(observation.cursor, cursor);
+  assert.equal(ranges.length, 6); assert.deepEqual(ranges.at(-1), [150n, 150n]);
+  assert.ok(calls.includes("eth_getTransactionReceipt")); assert.equal(calls.some((method) => /send|estimate/iu.test(method)), false);
 });
 
 test("gasless safe observation fixes effect proof while later safe account state may advance", async () => {

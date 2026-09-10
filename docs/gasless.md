@@ -129,6 +129,11 @@ any externally paid cleanup is separate. It preserves the original operation
 history and permits a new transfer only through a new prepare and approval.
 APN does not perform the external revocation or start another payment.
 
+Canonical recovery scans at most 256 safe blocks per resume, using log requests
+of at most ten blocks each. Failed requests and invalid logs never advance the
+cursor; a reorganization can rewind it. The next observation cannot skip an
+unread range.
+
 `operation status` and `receipt get` read saved evidence locally. Receipts
 contain hashes and public accounting, without permits, signatures, raw
 UserOperations, encrypted keys or provider response text.
