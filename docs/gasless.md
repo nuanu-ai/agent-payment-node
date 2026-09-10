@@ -48,6 +48,12 @@ support once within each fresh snapshot; balance, preparation and execution
 guards do not repeat that snapshot's network checks. Each signing and disclosure
 boundary still reads current account and protocol state. This reduces request
 volume without changing the approved operation or allowing submission retries.
+Each snapshot groups bundler chain identity, EntryPoint support and the current
+Pimlico gas-price quote into one read-only HTTP batch. New offers cover the fast
+tier. Before each effect, both frozen fee fields must still cover a fresh slow
+tier; a higher current fee stops the action without changing its approved budget.
+Configured bundlers must support this batch and gas-price API. Batch members and
+HTTP requests are separate counts; a batch does not guarantee provider admission.
 
 There is no default chain, arbitrary token option or native-payment fallback.
 The USDC address comes from the verified chain registry. USDC has six decimals;
@@ -136,6 +142,17 @@ submitted. Transfer delivery, token fee/debit and native cost stay unknown;
 any externally paid cleanup is separate. It preserves the original operation
 history and permits a new transfer only through a new prepare and approval.
 APN does not perform the external revocation or start another payment.
+
+If a final UserOperation was already sealed, recovery additionally requires its
+exact original hash and a canonical scan with no matching event through the
+safe block used by the proof. Both safe and current EntryPoint nonces must be
+greater than the frozen nonce, as well as satisfying permit, authorization,
+allowance and pending-transaction checks. This prevents the old signed operation
+from becoming usable again after future delegation or approval. The resulting
+`rpc_safe_final_permissions_invalidated` receipt releases the guard while
+preserving the original submission-attempt marker and unknown past financial
+results. It never reports an unacknowledged attempt as a confirmed submission,
+successful payment or zero-cost failure. External recovery fees remain separate.
 
 Canonical recovery scans at most 256 safe blocks per resume, using log requests
 of at most ten blocks each. Failed requests and invalid logs never advance the

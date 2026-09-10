@@ -9,7 +9,8 @@ export function gaslessNextActions(op: GaslessOperationRecord): readonly string[
 }
 export function gaslessProofClass(op: GaslessOperationRecord): string {
   if (op.state === "completed") return "rpc_safe_correlated";
-  if (op.state === "failed_permissions_invalidated") return "rpc_safe_permissions_invalidated";
+  if (op.state === "failed_permissions_invalidated") return op.observation?.permissionInvalidation?.userOperationHash === undefined
+    ? "rpc_safe_permissions_invalidated" : "rpc_safe_final_permissions_invalidated";
   if (op.settlement !== null || op.observation?.settlement) return "rpc_safe_effects";
   if (op.bootstrap.signingAttempts === 1) return "effect_observation_pending";
   return "durable_pre_effect";
@@ -54,7 +55,10 @@ export function publicGaslessOperation(op: GaslessOperationRecord) {
     gas: i.gas, effects, unsigned_envelope_hash: i.unsignedEnvelopeHash,
     user_operation_hash: op.userOperation.userOperationHash, transaction_hash: proof?.transactionHash ?? op.observation?.transactionHash ?? null,
     settlement: proof, scan_cursor: op.cursor,
-    ...(invalidation === undefined ? {} : { permission_invalidation: invalidation, payment_submitted: false }),
+    ...(invalidation === undefined ? {} : { permission_invalidation: invalidation,
+      ...(invalidation.userOperationHash === undefined ? { payment_submitted: false } : {
+        payment_submitted: null, payment_submission_attempted: op.userOperation.submissionAttempts === 1,
+        prior_payment_effects: "unknown" as const, final_permissions_invalidated: true }) }),
     rpc_origin: i.initialSnapshot.rpcOrigin, bundler_origin: i.initialSnapshot.bundlerOrigin,
     policy: { identity: "apn.gasless.foreground-approval.v1", policy_hash: i.policyHash,
       approved_at: op.approval?.approvedAt ?? null, action_deadline: i.expiresAt,

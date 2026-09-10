@@ -59,7 +59,10 @@ test("gasless production prepare and approval fit one public bundler request win
     finalPhase: record.userOperation.phase, failure: record.failure }));
   assert.equal(bundler.filter(c => c.method === "eth_sendUserOperation").length, 1);
   assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas").length, 1);
-  assert.ok(bundler.length <= 20);
+  assert.equal(bundler.length, 14);
+  assert.equal(bundler.filter(c => c.afterApproval).length, 12);
+  assert.equal(record.intent.gas.maxPriorityFeePerGas, "300000");
+  assert.equal(record.intent.gas.maxFeePerGas, "2300000");
   assert.equal(record.bootstrap.signingAttempts, 1);
   assert.equal(record.userOperation.signingAttempts, 1);
   assert.equal(record.userOperation.submissionAttempts, 1);
@@ -69,7 +72,7 @@ test("gasless production prepare and approval fit one public bundler request win
 });
 
 for (const boundary of ["before_bootstrap", "before_send"] as const) {
-  for (const fault of ["chain", "entrypoint", "balance", "allowance", "nonce"] as const) {
+  for (const fault of ["chain", "entrypoint", "balance", "allowance", "nonce", "fees"] as const) {
     test(`gasless production ${fault} drift ${boundary} blocks the next effect`, async (t) => {
       const temporary = await temporaryState(); t.after(temporary.cleanup);
       const s = await bundledGaslessFixture(temporary.root); s.setLimit(100);
@@ -280,7 +283,25 @@ for (const designation of ["empty", "expected"] as const) {
   });
 }
 
-function bootstrapRpcFixture(designation: "empty" | "expected") {
+for (const designation of ["empty", "expected"] as const) test(`gasless production ${designation} final invalidation requires canonical scan and all revoked permissions`, async () => {
+  const { context, intent, calls, setFault } = bootstrapRpcFixture(designation, true);
+  const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash: word(71n) };
+  const result = await observeGasless(context, intent, identity, initialCursor(intent));
+  assert.equal(result.status, "permissions_invalidated"); assert.equal(result.reason, "gasless_final_permissions_invalidated");
+  assert.equal(result.permissionInvalidation?.userOperationHash, identity.userOperationHash);
+  assert.equal(result.permissionInvalidation?.userOperationMaterialHash, identity.userOperationMaterialHash);
+  assert.equal(result.cursor.nextBlockAtomic, "103"); assert.deepEqual(result.cursor.previousEndBlock, result.permissionInvalidation?.safeBlock);
+  assert.ok(calls.includes("eth_getLogs")); assert.equal(calls.some(c => /send|estimate|snapshot/iu.test(c)), false);
+  for (const fault of ["permit", "allowance", "pending", "entrypoint", "owner_code", "protocol_code", "storage",
+    "domain", "prepare_reorg", "safe_reorg", "head_reorg", "chain", "safe_ahead", "hash_zero", "scan_error",
+    ...(designation === "empty" ? ["authorization"] : [])]) {
+    setFault(fault);
+    const held = await observeGasless(context, intent, identity, initialCursor(intent));
+    assert.notEqual(held.status, "permissions_invalidated", fault); assert.equal(held.permissionInvalidation, undefined, fault);
+  }
+});
+
+function bootstrapRpcFixture(designation: "empty" | "expected", final = false) {
   const original = makeIntent(), base = gaslessDeployment(8453);
   const deployment: GaslessDeployment = { ...base,
     code: [{ address: base.token, codeHash: keccak256("0x6000") }],
@@ -292,9 +313,10 @@ function bootstrapRpcFixture(designation: "empty" | "expected") {
   const calls: string[] = []; let fault = "";
   const context: GaslessObservationContext = { chainId: 8453, rpcOrigin: "https://rpc.example", deployment,
     snapshot: async () => { calls.push("snapshot"); throw new Error("no snapshot"); },
-    bundler: async () => { calls.push("bundler"); throw new Error("no bundler"); },
+    bundler: async () => { calls.push("bundler"); if (final) return null; throw new Error("no bundler"); },
     rpc: async (method, params) => {
       calls.push(method);
+      if (method === "eth_getLogs" && final) { if (fault === "scan_error") throw new Error("scan failed"); return []; }
       if (method === "eth_getBlockByNumber") {
         const tag = params[0], n = tag === "safe" ? 102n : tag === "latest" ? (fault === "safe_ahead" ? 101n : 103n) : BigInt(tag as string);
         const reorg = (fault === "prepare_reorg" && n === 100n) ||
@@ -318,7 +340,7 @@ function bootstrapRpcFixture(designation: "empty" | "expected") {
         if (data.startsWith("0x70a08231")) return word(9_990_000n);
         if (data.startsWith("0xdd62ed3e")) return word(fault === "allowance" ? 1n : 0n);
         if (data.startsWith("0x7ecebe00")) return word(fault === "permit" ? 7n : 8n);
-        if (data.startsWith("0x35567e1a")) return word(fault === "entrypoint" ? 10n : 9n);
+        if (data.startsWith("0x35567e1a")) return word((fault === "entrypoint") !== final ? 10n : 9n);
       }
       throw new Error(`unexpected read ${method}`);
     } };

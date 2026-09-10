@@ -1,5 +1,5 @@
 import { assertGaslessEstimate } from "./economics.js";
-import { assertGaslessPermissionClosure, GASLESS_PERMISSIONS_INVALIDATED } from "./permission-invalidation.js";
+import { assertGaslessPermissionClosure } from "./permission-invalidation.js";
 import { validateGaslessSettlement } from "./settlement-validation.js";
 import { gaslessFailure, gaslessSame } from "./validation.js";
 const corrupt = () => gaslessFailure("APN_STATE_CORRUPT", "gasless_effect_binding");
@@ -45,7 +45,7 @@ export function validateGaslessMutable(op, s, at) {
     }
     if (s.state === "failed_permissions_invalidated") {
         assertGaslessPermissionClosure(op, s);
-        if (s.failure !== GASLESS_PERMISSIONS_INVALIDATED)
+        if (s.failure !== s.observation.reason)
             corrupt();
     }
     for (const p of [observed, s.settlement]) {
