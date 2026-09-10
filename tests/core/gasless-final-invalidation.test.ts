@@ -28,12 +28,15 @@ function invalidation(op: GaslessOperationRecord): GaslessObservation {
     evidenceHash: hashObject(proof), reason: "gasless_final_permissions_invalidated", permissionInvalidation: proof };
 }
 
-for (const delegation of ["empty", "expected"] as const) test(`gasless ${delegation} final invalidation releases only future authority and preserves ambiguous financial results`, async t => {
+for (const [delegation, pending] of [["empty", false], ["expected", false], ["empty", true]] as const) test(`gasless ${delegation} ${pending ? "acknowledged" : "ambiguous"} final invalidation releases only future authority and preserves ambiguous financial results`, async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root, 8453, { delegation }), { id } = await s.prepare();
-  s.rpc.timeout = true; s.rpc.result = "missing";
+  s.rpc.timeout = !pending; s.rpc.result = "missing";
+  if (pending) s.rpc.observe = async (_intent, _identity, cursor) => ({ status: "pending", transactionHash: null,
+    settlement: null, cursor, evidenceHash: hashObject("pending"), reason: null });
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
   const before = await s.record(id), loads = s.wrapping.loads;
+  assert.equal(before.state, pending ? "submitted_pending" : "unknown_finality");
   assert.equal(before.userOperation.submissionAttempts, 1); assert.equal(before.terminal, false);
   const receiptPath = resolve(temporary.root, "gasless-receipts", before.profileHash, `${id}.json`);
   const oldReceipt = await readFile(receiptPath, "utf8");
