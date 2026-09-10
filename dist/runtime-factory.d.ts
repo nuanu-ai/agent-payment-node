@@ -18,7 +18,9 @@ import type { BridgeDependencies } from "./lifi/service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 import { type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
+import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 export interface RuntimeFactoryOptions {
+    readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
     readonly gasless?: GaslessDependencies;
     readonly bridge?: BridgeDependencies;

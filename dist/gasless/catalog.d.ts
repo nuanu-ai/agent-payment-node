@@ -40,7 +40,19 @@ export declare function gaslessCapabilities(profile?: string): {
             action_time_verification_required: boolean;
             mainnet_acceptance: string;
         }[];
-        "metamask-smart-account": never[];
+        "metamask-smart-account": {
+            chain_id: number;
+            token: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+            symbol: string;
+            decimals: number;
+            executable_adapter: boolean;
+            rpc_environment: string;
+            action_time_verification_required: boolean;
+            required_checks: string[];
+            sender_native_balance_required: boolean;
+            mainnet_acceptance: string;
+            deployment_evidence_hash: string;
+        }[];
         "coinbase-agentic-wallet": never[];
     };
     provider_semantics: {
@@ -56,6 +68,22 @@ export declare function gaslessCapabilities(profile?: string): {
             onchain_permission_expiry: boolean;
             persistent_designation: boolean;
             provider_status_is_settlement_proof: boolean;
+        };
+        "metamask-smart-account": {
+            amount: string;
+            fee_atomic: string;
+            native_gas_payer: string;
+            approved_owner_native_debit_wei: string;
+            approved_session_native_debit_wei: string;
+            terminal_states: string[];
+            one_signature: boolean;
+            one_disclosure: boolean;
+            one_settlement_dispatch: boolean;
+            onchain_permission_expiry: boolean;
+            recovery_after_exposure: string;
+            provider_status_is_settlement_proof: boolean;
+            accounting_before_independent_proof: string;
+            persistent_owner_designation: boolean;
         };
     };
     semantics: {

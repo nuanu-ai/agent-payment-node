@@ -12,6 +12,7 @@ import { BridgeService } from "./lifi/service.js";
 import { GaslessService } from "./gasless/service.js";
 import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { OperationAbandonService } from "./operation-abandon-service.js";
+import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
 export declare class ApnCore {
@@ -27,9 +28,11 @@ export declare class ApnCore {
     readonly bridges: BridgeService;
     readonly gasless: GaslessService;
     readonly metaMaskGasless: MetaMaskGaslessService;
+    readonly smartAccountGasless: SmartAccountGaslessService;
     readonly operationAbandon: OperationAbandonService;
     constructor(dependencies: CoreDependencies);
     execute(request: CommandRequest): Promise<OutputEnvelope>;
     private dispatch;
+    private prepareGasless;
     private gaslessProvider;
 }

@@ -34,7 +34,8 @@ correlates safe delivery across both chains. See [LI.FI bridges](docs/lifi.md)
 for fee controls, recovery and the three open mainnet acceptance rows.
 
 The local wallet also has a USDC fee-transfer path on Ethereum, Base, Arbitrum,
-Optimism, Polygon PoS, Unichain and Avalanche C-Chain. Its gas fee comes from
+Optimism, Polygon PoS and Unichain. Avalanche C-Chain remains required but its
+admitted bundler lacks the needed EIP-7702 support. The gas fee comes from
 the total USDC budget, so the sender can have zero native gas balance. The
 recipient amount and maximum USDC fee are frozen before foreground approval;
 unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
@@ -48,6 +49,14 @@ fee. APN requires the full operation ID and fingerprint in foreground approval,
 dispatches once and independently verifies settlement. Recovery only observes
 after dispatch, including after the APN deadline. All eight live acceptance rows
 remain open; see [MetaMask gasless transfers](docs/gasless.md#metamask-agent-server-wallet).
+
+An existing MetaMask Smart Account profile can use these commands on Base with
+its current owner, session and periodic USDC permission. The public facilitator
+pays native gas; the recipient receives the full approved USDC amount and the
+fee is zero. APN signs one expiring child permission, records disclosure before
+verification, and only observes on recovery after disclosure. Fresh Base
+acceptance remains open. See [Smart Account gasless transfers](docs/gasless.md#metamask-smart-account)
+and the [verified archive recovery preflight](docs/gasless.md#existing-state-and-upgrades).
 
 ## Install
 

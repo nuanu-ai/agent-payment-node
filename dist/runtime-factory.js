@@ -40,6 +40,7 @@ import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.j
 import { metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
 import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
 import { TtyOperationAbandonApproval } from "./operation-abandon-approval.js";
+import { smartAccountGaslessRuntime } from "./smart-account-gasless/runtime.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -93,6 +94,9 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     return new ApnCore({
         state,
+        smartAccountGasless: options.smartAccountGasless ?? smartAccountGaslessRuntime({ state,
+            permissions: smartAccountPermissionStore, wrapping: wrappingSecret, environment: process.env,
+            clock: options.clock ?? { now: () => new Date() }, foregroundApproval: bound.request.command === "gasless.transfer.approve" }),
         metaMaskGasless: options.metaMaskGasless ?? {
             rpcFor: metaMaskGaslessRpcFactory(process.env, options.clock ?? { now: () => new Date() }),
             provider: new MetaMaskGaslessProviderClient({ environment: process.env, clock: options.clock ?? { now: () => new Date() } }),

@@ -1,6 +1,6 @@
 # USDC transfers with gas paid from the amount
 
-Use an existing local wallet or MetaMask Agent server-wallet profile to send
+Use an existing local wallet, MetaMask Agent server wallet or MetaMask Smart Account profile to send
 canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
@@ -8,8 +8,8 @@ calculation and recovery rules described below.
 This is an unreleased source capability. Mainnet transfer evidence and receiving
 human acceptance are tracked separately for each profile and network. `apn gasless capabilities`
 reports the exact adapter and acceptance state without reading a wallet,
-Keychain, RPC or provider. MetaMask Smart Account and Coinbase Agentic Wallet
-remain required work with no executable adapter in this gasless command family.
+Keychain, RPC or provider. MetaMask Smart Account is admitted on Base only.
+Coinbase Agentic Wallet remains required work with no executable adapter in this gasless command family.
 This same-chain transfer does not establish gasless x402 or bridge support.
 
 ## Local wallet networks and configuration
@@ -257,6 +257,58 @@ contains hashed provider identities and accounting, without the private
 request UUID, session token, unsigned wire or provider response. Unresolved
 operations block competing payments and wallet lifecycle changes for the profile.
 
+## MetaMask Smart Account
+
+Use an existing `metamask-smart-account` profile with its original Base owner,
+session key and active periodic USDC permission. Set `APN_BASE_RPC_URL` to an
+explicit public HTTPS Base RPC. The RPC must support numeric block reads,
+`safe` and `finalized` blocks, complete transaction receipts and bounded logs.
+APN checks the current permission nonce, available allowance, owner USDC balance,
+session state and pinned contract deployments before signing and disclosure.
+No new grant, account deployment or native funding is part of this command.
+
+The public MetaMask facilitator pays native gas. For this provider the exact
+fee is zero: the successful owner debit and recipient credit both equal
+`--amount` (`G = N`, `F = 0`). The owner and session need no native balance.
+Other networks are not executable through this adapter.
+
+```sh
+apn gasless balance --profile smart-account --chain 8453
+apn gasless transfer prepare --profile smart-account --chain 8453 \
+  --to <recipient-address> --amount 1 --max-fee 0 --min-received 1 \
+  --idempotency-key <unique-key>
+apn gasless transfer approve --operation <operation-id>
+```
+
+Preparation saves the exact transfer and its five-minute deadline without
+signing. Foreground approval displays the owner, session, recipient, USDC
+amount, zero fee, existing root permission and expiry, and requires
+`APPROVE GASLESS <operation-id> <full-fingerprint>`. MCP supplies the same
+foreground CLI handoff.
+
+APN signs one child permission for the exact transfer. The child has an
+onchain expiry and does not replace the existing root permission. Verification
+discloses this signed child to the facilitator; a failed verification, lost
+response or timeout does not prove that it cannot be used. APN durably records
+each signing, disclosure and settlement attempt before that boundary.
+
+After disclosure, `apn operation resume --operation <operation-id>` only reads
+independent RPC evidence. Omit `--wait-seconds`. Resume does not sign again or
+repeat verification or settlement, even if the previous response was lost.
+It can recover without an active session or grant. The operation retains its
+profile guard until independently proved completion or unused expiry.
+
+Completion requires the authenticated signed outer transaction, exact child
+and root redemption, canonical safe receipt, USDC delivery and spent amount,
+and an external native gas payer. Provider responses and transaction hashes
+are only hints. Unused expiry requires a complete canonical scan, finalized
+expiry and zero child spending; elapsed wall time alone cannot release the
+guard. Interrupted scans continue from the saved cursor.
+
+Status and receipt commands read local evidence and omit signed permissions,
+session secrets and provider response bodies. Unknown amounts remain unknown.
+Source and installed tests do not establish fresh Base transfer acceptance.
+
 ## Existing state and upgrades
 
 The gasless journal, receipts and encrypted effects use separate files under
@@ -266,6 +318,34 @@ and its existing wrapping secret. Recover an unresolved operation with the
 same verified archive or a compatible newer archive. An older binary does not
 provide gasless recovery; do not delete unresolved state or create a replacement
 payment to work around it.
+
+Once the state directory contains any Smart Account gasless operation, select
+a recovery archive through the current archive's read-only preflight. Supply
+canonical absolute paths and the manifest hash obtained from independent
+archive, source and installed-byte verification:
+
+```sh
+node <verified-current-package>/dist/smart-account-gasless/recovery-gate.js \
+  --state-root <existing-state-root> \
+  --archive <target-archive.tgz> \
+  --manifest <verified-target-manifest.json> \
+  --manifest-sha256 <independently-verified-manifest-sha256> \
+  --package-root <target-installed-package>
+```
+
+Only select the target executable after a successful preflight. The gate
+validates saved journals and the target's exact runtime bytes without running
+the target or editing state. An unknown manifest, changed artifact, malformed
+state or incompatible runtime returns
+`APN_OPERATION_BLOCKED / sa_gasless_archive_incompatible`. Recheck after a
+state or installation change.
+
+The retained I745 archive with SHA-256
+`1883f117a84552e720319d2770ea9439fad30d8eb6f1bd3212f344854b0ce267`
+is incompatible with Smart Account gasless state: its original operation
+lookup cannot discover this family or its guards. Preserve it as historical
+evidence; use the verified current archive for this state. The preflight does
+not change older binaries or migrate existing profiles and operations.
 
 New local operations freeze wire format v2. First use includes the delegation
 authorization; repeated use sends an ordinary operation for the already
