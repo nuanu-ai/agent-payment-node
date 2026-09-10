@@ -15,6 +15,7 @@ const USER_OPERATION_EVENT =
   "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f" as Hex;
 const ZERO_HASH = `0x${"0".repeat(64)}` as Hex;
 const SCAN_WINDOW = 256n;
+const LOG_REQUEST_WINDOW = 10n;
 
 export interface GaslessObservationContext {
   readonly chainId: GaslessChainId;
@@ -62,20 +63,25 @@ async function scan(context: GaslessObservationContext, intent: GaslessIntent, u
     const endBlock = (await rpcBlock(context.rpc, quantity(end))).block;
     const filter = { address: intent.entryPoint, fromBlock: quantity(start), toBlock: quantity(end),
       topics: [USER_OPERATION_EVENT, userOperationHash, addressWord(intent.owner.address), addressWord(intent.paymaster)] };
-    const value = await context.rpc("eth_getLogs", [filter]);
-    if (!Array.isArray(value) || value.length > 128) gaslessFailure("APN_RPC_PROTOCOL", "gasless_scan_log_count");
-    const candidates = new Set<Hex>();
-    for (const item of value) {
-      const log = rpcRecord(item), topics = log.topics;
-      const number = rpcQuantity(log.blockNumber);
-      if (rpcAddress(log.address) !== intent.entryPoint || log.removed !== false || number < start || number > end ||
-        !Array.isArray(topics) || topics.length !== 4 || rpcHex(topics[0], 32, 32) !== USER_OPERATION_EVENT ||
-        rpcHex(topics[1], 32, 32) !== userOperationHash || rpcHex(topics[2], 32, 32) !== addressWord(intent.owner.address) ||
-        rpcHex(topics[3], 32, 32) !== addressWord(intent.paymaster)) {
-        gaslessFailure("APN_RPC_PROTOCOL", "gasless_scan_log_identity");
+    const candidates = new Set<Hex>(); let logCount = 0;
+    // Keep one bounded cursor step while supporting public RPC range limits.
+    for (let from = start; from <= end; from += LOG_REQUEST_WINDOW) {
+      const to = minimum(end, from + LOG_REQUEST_WINDOW - 1n);
+      const value = await context.rpc("eth_getLogs", [{ ...filter, fromBlock: quantity(from), toBlock: quantity(to) }]);
+      if (!Array.isArray(value) || value.length > 128 - logCount) gaslessFailure("APN_RPC_PROTOCOL", "gasless_scan_log_count");
+      logCount += value.length;
+      for (const item of value) {
+        const log = rpcRecord(item), topics = log.topics;
+        const number = rpcQuantity(log.blockNumber);
+        if (rpcAddress(log.address) !== intent.entryPoint || log.removed !== false || number < from || number > to ||
+          !Array.isArray(topics) || topics.length !== 4 || rpcHex(topics[0], 32, 32) !== USER_OPERATION_EVENT ||
+          rpcHex(topics[1], 32, 32) !== userOperationHash || rpcHex(topics[2], 32, 32) !== addressWord(intent.owner.address) ||
+          rpcHex(topics[3], 32, 32) !== addressWord(intent.paymaster)) {
+          gaslessFailure("APN_RPC_PROTOCOL", "gasless_scan_log_identity");
+        }
+        rpcHex(log.blockHash, 32, 32); rpcQuantity(log.logIndex); rpcHex(log.data, 256);
+        candidates.add(rpcHex(log.transactionHash, 32, 32));
       }
-      rpcHex(log.blockHash, 32, 32); rpcQuantity(log.logIndex); rpcHex(log.data, 256);
-      candidates.add(rpcHex(log.transactionHash, 32, 32));
     }
     await recheckBlock(context.rpc, endBlock); await recheckBlock(context.rpc, safe);
     if (candidates.size > 1) return unresolved(cursor, null, "gasless_receipt_unresolved", hashObject({ filter, count: candidates.size }));
