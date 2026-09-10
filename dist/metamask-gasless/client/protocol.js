@@ -170,7 +170,7 @@ function observation(value, intentValue) {
     const o = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"], "mm_gasless_provider_unavailable");
     mmIso(o.observedAt, "mm_gasless_provider_unavailable");
     mmHash(o.requestIdHash, "mm_gasless_provider_unavailable");
-    if (!["pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(String(o.status)) ||
+    if (!["awaiting_approval", "pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(String(o.status)) ||
         (o.txHash !== null && mmHex(o.txHash, 32, "mm_gasless_provider_unavailable") !== o.txHash))
         mmFail("mm_gasless_provider_unavailable");
     mmUuid(intentValue.requestId, "mm_gasless_state_corrupt");

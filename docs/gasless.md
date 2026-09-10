@@ -5,9 +5,8 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-This is an unreleased source capability. Real mainnet transfers and receiving
-human acceptance remain open for all seven local-wallet and eight MetaMask
-networks. `apn gasless capabilities`
+This is an unreleased source capability. Mainnet transfer evidence and receiving
+human acceptance are tracked separately for each profile and network. `apn gasless capabilities`
 reports the exact adapter and acceptance state without reading a wallet,
 Keychain, RPC or provider. MetaMask Smart Account and Coinbase Agentic Wallet
 remain required work with no executable adapter in this gasless command family.
@@ -183,7 +182,7 @@ UserOperations, encrypted keys or provider response text.
 Use a profile already bound to the intended MetaMask Agent server-wallet address
 and its existing production session. The current selected wallet must resolve
 to that same address. This path does not create a wallet, change selection,
-refresh a login or request MFA automatically. If the session is unavailable,
+refresh a login or complete provider MFA. If the session is unavailable,
 complete the normal provider login separately and continue the saved operation.
 
 | Network | Chain ID | Required RPC environment | Finality |
@@ -238,6 +237,13 @@ original request and delegation. Lost responses, provider failures and pending
 MFA remain unresolved. A canonical revert is `failed_effects_pending` and
 retains the profile guard because the permission may still be redeemed later.
 Only independently proved completion or failure before any effect is terminal.
+
+If MetaMask requires MFA, the operation reports `mm_gasless_provider_approval`.
+Confirm the existing transaction in MetaMask Mobile or the email registered to
+your MetaMask dashboard, then resume the same operation. APN does not approve
+provider policy changes. The saved operation stays guarded while confirmation
+is pending; neither another CLI approval nor resume sends a second request.
+Provider metadata, approval links and signatures are discarded from public output.
 
 Continue with `apn operation resume --operation <operation-id>`, without
 `--wait-seconds`, including after the APN deadline. A provider status or hash

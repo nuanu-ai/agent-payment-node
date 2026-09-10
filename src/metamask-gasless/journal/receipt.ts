@@ -20,6 +20,10 @@ export function metaMaskGaslessNextActions(operation: MetaMaskGaslessOperationRe
   const op = validateMetaMaskGaslessOperation(operation);
   if (op.state === "awaiting_approval") return [`apn gasless transfer approve --operation ${op.operationId}`];
   if (op.terminal) return [`apn receipt get --operation ${op.operationId}`];
+  if (op.failure?.reason === "mm_gasless_provider_approval") return [
+    "Confirm this existing transaction in MetaMask Mobile or the email registered to your MetaMask dashboard.",
+    `apn operation resume --operation ${op.operationId}`,
+  ];
   return [`apn operation resume --operation ${op.operationId}`];
 }
 
