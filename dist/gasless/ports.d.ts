@@ -33,6 +33,7 @@ export interface GaslessRpcPort {
     readonly bundlerOrigin: string;
     readonly bundlerEndpointHash: string;
     assertChain(): Promise<void>;
+    /** Verifies both endpoint chains and EntryPoint support before fresh canonical state reads. */
     snapshot(owner: Address): Promise<GaslessSnapshot>;
     estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial): Promise<GaslessEstimate>;
     send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex>;

@@ -32,7 +32,6 @@ export class GaslessPreparation {
                 gaslessFailure("APN_INVALID_INPUT", "gasless_recipient_alias");
             }
             const rpc = this.o.rpcFor(request.chainId);
-            await rpc.assertChain();
             const initialSnapshot = await rpc.snapshot(binding.owner.address), gas = gaslessGas(initialSnapshot);
             const feeCapAtomic = gaslessFee(gas, initialSnapshot.feeConfiguration);
             const net = BigInt(request.grossAtomic) - BigInt(feeCapAtomic);

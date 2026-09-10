@@ -41,6 +41,14 @@ fragments are rejected. Endpoint identities are frozen into each intent;
 changing an endpoint during an operation does not create permission to submit
 through the new endpoint.
 
+The [public Pimlico endpoint](https://docs.pimlico.io/references/bundler/public-endpoint)
+requires no API key and permits 20 requests per minute per IP. Other calls from
+the same IP share that limit. APN verifies both endpoint chains and EntryPoint
+support once within each fresh snapshot; balance, preparation and execution
+guards do not repeat that snapshot's network checks. Each signing and disclosure
+boundary still reads current account and protocol state. This reduces request
+volume without changing the approved operation or allowing submission retries.
+
 There is no default chain, arbitrary token option or native-payment fallback.
 The USDC address comes from the verified chain registry. USDC has six decimals;
 amount inputs use ordinary decimal notation with at most six fractional digits.
