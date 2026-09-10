@@ -1,7 +1,7 @@
 import { hashObject } from "../canonical.js";
 import { gaslessAccounting } from "./protocol.js";
 import { observeGaslessBootstrap } from "./rpc-bootstrap-observe.js";
-import { addressWord, parseReceiptLogs, quantity, receiptHash, recheckBlock, rpcAddress, rpcBlock, rpcHex, rpcQuantity, rpcRecord, sameBlock } from "./rpc-codec.js";
+import { addressWord, parseReceiptLogs, quantity, receiptHash, recheckBlock, rpcAddress, rpcBlock, rpcFinalityBlock, rpcHex, rpcQuantity, rpcRecord, sameBlock } from "./rpc-codec.js";
 import { readAccountAt, verifyProtocolAt } from "./rpc-state.js";
 import { verifyGaslessOuterTransaction } from "./rpc-transaction.js";
 import { gaslessProtocolHash } from "./registry.js";
@@ -41,7 +41,7 @@ async function scan(context, intent, userOperationHash, cursor) {
                 return unresolved(reset, null, "gasless_receipt_unresolved", hashObject({ reason: "gasless_scan_cursor_reorg", previous: cursor.previousEndBlock, current }));
             }
         }
-        const safe = (await rpcBlock(context.rpc, "safe")).block;
+        const safe = (await rpcFinalityBlock(context.rpc, context.chainId)).block;
         const start = BigInt(cursor.nextBlockAtomic), safeNumber = BigInt(safe.numberAtomic);
         if (safeNumber < start) {
             await recheckBlock(context.rpc, safe);
@@ -136,7 +136,7 @@ async function inspect(context, intent, userOperationHash, transactionHash, curs
     await recheckBlock(context.rpc, included);
     if (status === 0n)
         return unresolved(anchored, transactionHash, "gasless_receipt_unresolved", hashObject({ transactionHash, included, outer, status: "outer_reverted" }));
-    const safe = (await rpcBlock(context.rpc, "safe")).block;
+    const safe = (await rpcFinalityBlock(context.rpc, context.chainId)).block;
     await recheckBlock(context.rpc, safe);
     if (BigInt(safe.numberAtomic) < blockNumber) {
         return { status: "pending", transactionHash, settlement: null, cursor: anchored,

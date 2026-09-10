@@ -1,7 +1,7 @@
 import { getAddress } from "viem";
 import { hashObject, isPlainRecord } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
-import type { GaslessBlock, GaslessLog } from "./model.js";
+import type { GaslessBlock, GaslessChainId, GaslessLog } from "./model.js";
 import { gaslessFailure } from "./validation.js";
 
 export type GaslessRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getCode" |
@@ -63,7 +63,7 @@ export function quantity(value: bigint): Hex {
 
 export function addressWord(value: Address): Hex { return `0x${value.slice(2).toLowerCase().padStart(64, "0")}`; }
 
-export async function rpcBlock(call: GaslessRpcCall, tag: "latest" | "safe" | Hex): Promise<GaslessRawBlock> {
+export async function rpcBlock(call: GaslessRpcCall, tag: "latest" | "safe" | "finalized" | Hex): Promise<GaslessRawBlock> {
   const raw = rpcRecord(await call("eth_getBlockByNumber", [tag, false]));
   const number = rpcQuantity(raw.number), hash = rpcHex(raw.hash, 32, 32);
   if (hash === `0x${"0".repeat(64)}` || (tag.startsWith("0x") && number !== rpcQuantity(tag))) {
@@ -71,6 +71,11 @@ export async function rpcBlock(call: GaslessRpcCall, tag: "latest" | "safe" | He
   }
   const block = { numberAtomic: number.toString(), hash, timestampAtomic: rpcQuantity(raw.timestamp).toString() };
   return { block, tag: quantity(number), raw };
+}
+
+/** Polygon exposes milestone finality through finalized; unavailable finality never falls back to latest. */
+export async function rpcFinalityBlock(call: GaslessRpcCall, chainId: GaslessChainId): Promise<GaslessRawBlock> {
+  return await rpcBlock(call, chainId === 137 ? "finalized" : "safe");
 }
 
 export async function recheckBlock(call: GaslessRpcCall, block: GaslessBlock): Promise<void> {
