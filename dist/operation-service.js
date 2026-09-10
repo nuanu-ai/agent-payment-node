@@ -12,6 +12,8 @@ import { GaslessOperationRepository } from "./gasless/operation-repository.js";
 import { publicGaslessOperation } from "./gasless/receipt.js";
 import { MetaMaskGaslessOperationRepository } from "./metamask-gasless/journal/repository.js";
 import { publicMetaMaskGaslessOperation } from "./metamask-gasless/journal/receipt.js";
+import { SmartAccountGaslessOperationRepository } from "./smart-account-gasless/operation-repository.js";
+import { publicSmartAccountGaslessOperation } from "./smart-account-gasless/receipt.js";
 export class OperationService {
     state;
     providerX402;
@@ -19,13 +21,15 @@ export class OperationService {
     bridges;
     gasless;
     metaMaskGasless;
-    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root), gasless = new GaslessOperationRepository(state.root), metaMaskGasless = new MetaMaskGaslessOperationRepository(state.root)) {
+    smartAccountGasless;
+    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root), gasless = new GaslessOperationRepository(state.root), metaMaskGasless = new MetaMaskGaslessOperationRepository(state.root), smartAccountGasless = new SmartAccountGaslessOperationRepository(state.root)) {
         this.state = state;
         this.providerX402 = providerX402;
         this.rails = rails;
         this.bridges = bridges;
         this.gasless = gasless;
         this.metaMaskGasless = metaMaskGasless;
+        this.smartAccountGasless = smartAccountGasless;
     }
     async resolvePrepare(input) {
         const existing = await this.findIdempotency(input.idempotencyHash);
@@ -39,6 +43,7 @@ export class OperationService {
     /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
     async findIdempotency(idempotencyHash) {
         const matches = [
+            ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
             ...(await this.metaMaskGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "metamask_gasless_transfer", record })),
             ...(await this.gasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "gasless_transfer", record })),
             ...(await this.bridges.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "bridge_route", record })),
@@ -53,6 +58,7 @@ export class OperationService {
     }
     async assertProfileAvailable(profileHash) {
         const active = [
+            ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
             ...(await this.metaMaskGasless.listOperations(profileHash)).map((record) => ({ kind: "metamask_gasless_transfer", record })),
             ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer", record })),
             ...(await this.bridges.listOperations(profileHash)).map((record) => ({ kind: "bridge_route", record })),
@@ -78,7 +84,8 @@ export class OperationService {
         const bridge = await this.bridges.findOperation(canonicalId);
         const gasless = await this.gasless.findOperation(canonicalId);
         const metaMaskGasless = await this.metaMaskGasless.findOperation(canonicalId);
-        if ([direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless].filter((value) => value !== null).length > 1) {
+        const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
+        if ([direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless].filter((value) => value !== null).length > 1) {
             throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
         }
         if (direct !== null)
@@ -95,6 +102,8 @@ export class OperationService {
             return { kind: "gasless_transfer", record: gasless };
         if (metaMaskGasless !== null)
             return { kind: "metamask_gasless_transfer", record: metaMaskGasless };
+        if (smartAccountGasless !== null)
+            return { kind: "smart_account_gasless_transfer", record: smartAccountGasless };
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
     }
     async status(operationId) {
@@ -109,6 +118,8 @@ export class OperationService {
             return publicGaslessOperation(operation.record);
         if (operation.kind === "metamask_gasless_transfer")
             return publicMetaMaskGaslessOperation(operation.record);
+        if (operation.kind === "smart_account_gasless_transfer")
+            return publicSmartAccountGaslessOperation(operation.record);
         return operation.strategy === "local"
             ? publicX402Operation(operation.record)
             : publicProviderX402Operation(operation.record);

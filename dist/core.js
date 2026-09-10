@@ -6,7 +6,7 @@ import { TransferService } from "./transfer-service.js";
 import { WalletService } from "./wallet-service.js";
 import { OperationService } from "./operation-service.js";
 import { inspectX402 } from "./x402-http.js";
-import { canonicalOperationId } from "./transfer-policy.js";
+import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
@@ -27,6 +27,9 @@ import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
 import { mmFail } from "./metamask-gasless/reasons.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { OperationAbandonService } from "./operation-abandon-service.js";
+import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
+import { saRequest } from "./smart-account-gasless/schema.js";
+import { saFail } from "./smart-account-gasless/reasons.js";
 export class ApnCore {
     context;
     wallet;
@@ -40,12 +43,13 @@ export class ApnCore {
     bridges;
     gasless;
     metaMaskGasless;
+    smartAccountGasless;
     operationAbandon;
     constructor(dependencies) {
         this.context = new RuntimeContext(dependencies);
         this.wallet = new WalletService(this.context);
         this.transfer = new TransferService(this.context);
-        this.operations = new OperationService(this.context.state, this.context.providerX402Repository, undefined, undefined, undefined, this.context.metaMaskGasless?.records);
+        this.operations = new OperationService(this.context.state, this.context.providerX402Repository, undefined, undefined, undefined, this.context.metaMaskGasless?.records, this.context.smartAccountGasless?.records);
         this.x402 = new X402Service(this.context);
         this.providerWallet = new ProviderWalletService(this.context);
         this.providerPermissions = new ProviderPermissionService(this.context);
@@ -54,6 +58,7 @@ export class ApnCore {
         this.bridges = new BridgeService(this.context);
         this.gasless = new GaslessService(this.context);
         this.metaMaskGasless = new MetaMaskGaslessService(this.context);
+        this.smartAccountGasless = new SmartAccountGaslessService(this.context);
         this.operationAbandon = new OperationAbandonService(this.context);
     }
     async execute(request) {
@@ -68,16 +73,19 @@ export class ApnCore {
     async dispatch(request) {
         switch (request.command) {
             case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
-            case "gasless.balance": return dataOutcome(await this.gaslessProvider(request.profile) === "metamask-agent-wallet"
-                ? await this.metaMaskGasless.balance(request.profile, mmChain(request.chainId))
-                : await this.gasless.balance(request.profile, gaslessChain(request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")), "chain_verified_public_read");
-            case "gasless.transfer.prepare": return operationOutcome(await this.gaslessProvider(request.profile) === "metamask-agent-wallet"
-                ? await this.metaMaskGasless.prepare({ ...request, request: { ...request.request,
-                        chainId: mmChain(request.request.chainId), recipient: mmAddress(request.request.recipient) } })
-                : await this.gasless.prepare({ ...request, request: { ...request.request,
-                        chainId: gaslessChain(request.request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE") } }));
-            case "gasless.transfer.approve": return operationOutcome((await this.operations.required(request.operationId)).kind === "metamask_gasless_transfer"
-                ? await this.metaMaskGasless.approve(request.operationId) : await this.gasless.approve(request.operationId));
+            case "gasless.balance": {
+                const provider = await this.gaslessProvider(request.profile);
+                return dataOutcome(provider === "metamask-smart-account"
+                    ? await this.smartAccountGasless.balance(request.profile, request.chainId)
+                    : provider === "metamask-agent-wallet" ? await this.metaMaskGasless.balance(request.profile, mmChain(request.chainId))
+                        : await this.gasless.balance(request.profile, gaslessChain(request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")), "chain_verified_public_read");
+            }
+            case "gasless.transfer.prepare": return operationOutcome(await this.prepareGasless(request));
+            case "gasless.transfer.approve": {
+                const { kind } = await this.operations.required(request.operationId);
+                return operationOutcome(kind === "smart_account_gasless_transfer" ? await this.smartAccountGasless.approve(request.operationId)
+                    : kind === "metamask_gasless_transfer" ? await this.metaMaskGasless.approve(request.operationId) : await this.gasless.approve(request.operationId));
+            }
             case "bridge.capabilities": return dataOutcome(bridgeCapabilities(request.profile), "static_bridge_capabilities");
             case "bridge.inventory": return dataOutcome(await this.bridges.inventory(), "provider_inventory_only");
             case "bridge.routes": return dataOutcome(await this.bridges.routes(request.profile, request.request), "profile_bound_bridge_quote");
@@ -144,9 +152,10 @@ export class ApnCore {
             }
             case "transfer.approve": {
                 const operation = await this.operations.required(request.operationId);
-                if (operation.kind === "gasless_transfer" || operation.kind === "metamask_gasless_transfer")
-                    throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Use the gasless approval command for this USDC fee transfer.", {
+                if (operation.kind === "gasless_transfer" || operation.kind === "metamask_gasless_transfer" || operation.kind === "smart_account_gasless_transfer")
+                    throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Use the gasless approval command for this USDC transfer.", {
                         ...(operation.kind === "metamask_gasless_transfer" ? { reason: "mm_gasless_approval" } : {}),
+                        ...(operation.kind === "smart_account_gasless_transfer" ? { reason: "sa_gasless_approval" } : {}),
                         nextActions: [`apn gasless transfer approve --operation ${request.operationId}`],
                     });
                 return operationOutcome(operation.kind === "rail_transfer" ? await this.rails.approve(request.operationId) : await this.transfer.approve(request.operationId));
@@ -154,6 +163,11 @@ export class ApnCore {
             case "operation.resume": {
                 await this.context.ready();
                 const operation = await this.operations.required(request.operationId);
+                if (operation.kind === "smart_account_gasless_transfer") {
+                    if (request.waitSeconds !== undefined)
+                        saFail("sa_gasless_input");
+                    return operationOutcome(await this.smartAccountGasless.resume(request.operationId));
+                }
                 if (operation.kind === "metamask_gasless_transfer") {
                     if (request.waitSeconds !== undefined)
                         throw new ApnError("APN_INVALID_INPUT", "MetaMask gasless recovery performs one bounded observation; omit --wait-seconds.", { reason: "mm_gasless_input" });
@@ -201,6 +215,8 @@ export class ApnCore {
                 await this.context.ready();
                 await this.x402.recoverRead(request.operationId);
                 const operation = await this.operations.required(request.operationId);
+                if (operation.kind === "smart_account_gasless_transfer")
+                    return operationOutcome(await this.smartAccountGasless.status(request.operationId));
                 if (operation.kind === "bridge_route")
                     return operationOutcome(await this.bridges.status(request.operationId));
                 if (operation.kind === "gasless_transfer")
@@ -221,6 +237,8 @@ export class ApnCore {
                 await this.context.ready();
                 await this.x402.recoverRead(request.operationId);
                 const operation = await this.operations.required(request.operationId);
+                if (operation.kind === "smart_account_gasless_transfer")
+                    return receiptOutcome(await this.smartAccountGasless.receipt(request.operationId));
                 if (operation.kind === "bridge_route")
                     return receiptOutcome(await this.bridges.receipt(request.operationId));
                 if (operation.kind === "gasless_transfer")
@@ -235,6 +253,20 @@ export class ApnCore {
             }
         }
     }
+    async prepareGasless(request) {
+        const key = canonicalIdempotencyKey(request.idempotencyKey);
+        const existing = await this.operations.findIdempotency(this.context.state.idempotencyHash(key));
+        if (existing?.kind === "smart_account_gasless_transfer")
+            return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
+        const provider = await this.gaslessProvider(request.profile);
+        if (provider === "metamask-smart-account")
+            return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
+        if (provider === "metamask-agent-wallet")
+            return await this.metaMaskGasless.prepare({ ...request, request: { ...request.request,
+                    chainId: mmChain(request.request.chainId), recipient: mmAddress(request.request.recipient) } });
+        return await this.gasless.prepare({ ...request, request: { ...request.request,
+                chainId: gaslessChain(request.request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE") } });
+    }
     async gaslessProvider(input) {
         const profile = canonicalProfile(input);
         const stored = await this.context.state.loadProviderProfile(this.context.state.profileHash(profile));
@@ -242,6 +274,8 @@ export class ApnCore {
             return "local";
         if (stored.provider_id === "metamask-agent-wallet")
             return "metamask-agent-wallet";
+        if (stored.provider_id === "metamask-smart-account")
+            return "metamask-smart-account";
         return mmFail("mm_gasless_capability_unavailable");
     }
 }

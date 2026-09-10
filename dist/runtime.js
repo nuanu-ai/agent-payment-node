@@ -4,6 +4,7 @@ import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
+    smartAccountGasless;
     metaMaskGasless;
     gasless;
     bridge;
@@ -31,6 +32,8 @@ export class RuntimeContext {
     operationAbandonApproval;
     initialized;
     constructor(dependencies) {
+        if (dependencies.smartAccountGasless !== undefined)
+            this.smartAccountGasless = dependencies.smartAccountGasless;
         if (dependencies.metaMaskGasless !== undefined)
             this.metaMaskGasless = dependencies.metaMaskGasless;
         if (dependencies.gasless !== undefined)

@@ -60,7 +60,7 @@ test("the combined gasless surface preserves seven local rows, adds eight MetaMa
   assert.deepEqual(capabilities.profiles.map(row => [row.provider, row.custody, row.adapter, row.mainnet_acceptance]), [
     ["local", "local_software", "implemented", "open"],
     ["metamask-agent-wallet", "provider_managed_server_wallet", "implemented", "open"],
-    ["metamask-smart-account", "provider_owned_session_grant", "unavailable", "open"],
+    ["metamask-smart-account", "provider_owned_session_grant", "implemented", "open"],
     ["coinbase-agentic-wallet", "provider_owned", "unavailable", "open"],
   ]);
 

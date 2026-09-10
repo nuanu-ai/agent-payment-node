@@ -12,4 +12,6 @@ export declare class GaslessHttps implements GaslessTransport {
         readonly status: number;
         readonly body: string;
     }>;
+    private acquire;
+    private releaser;
 }

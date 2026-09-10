@@ -26,8 +26,13 @@ import { MetaMaskGaslessOperationRepository } from "./metamask-gasless/journal/r
 import { publicMetaMaskGaslessOperation } from "./metamask-gasless/journal/receipt.js";
 import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operation-model.js";
 import type { MetaMaskGaslessRepositoryPort } from "./metamask-gasless/ports.js";
+import { SmartAccountGaslessOperationRepository } from "./smart-account-gasless/operation-repository.js";
+import { publicSmartAccountGaslessOperation } from "./smart-account-gasless/receipt.js";
+import type { SmartAccountGaslessOperationRecord } from "./smart-account-gasless/operation-model.js";
+import type { SmartAccountGaslessRepositoryPort } from "./smart-account-gasless/ports.js";
 
 export type StoredMoneyOperation =
+  | { readonly kind: "smart_account_gasless_transfer"; readonly record: SmartAccountGaslessOperationRecord }
   | { readonly kind: "metamask_gasless_transfer"; readonly record: MetaMaskGaslessOperationRecord }
   | { readonly kind: "gasless_transfer"; readonly record: GaslessOperationRecord }
   | { readonly kind: "bridge_route"; readonly record: BridgeOperationRecord }
@@ -44,6 +49,7 @@ export class OperationService {
     private readonly bridges = new BridgeOperationRepository(state.root),
     private readonly gasless = new GaslessOperationRepository(state.root),
     private readonly metaMaskGasless: MetaMaskGaslessRepositoryPort = new MetaMaskGaslessOperationRepository(state.root),
+    private readonly smartAccountGasless: SmartAccountGaslessRepositoryPort = new SmartAccountGaslessOperationRepository(state.root),
   ) {}
 
   async resolvePrepare(input: {
@@ -65,6 +71,7 @@ export class OperationService {
   /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
   async findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null> {
     const matches = [
+      ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
       ...(await this.metaMaskGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "metamask_gasless_transfer" as const, record })),
       ...(await this.gasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "gasless_transfer" as const, record })),
       ...(await this.bridges.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "bridge_route" as const, record })),
@@ -79,6 +86,7 @@ export class OperationService {
 
   async assertProfileAvailable(profileHash: string): Promise<void> {
     const active: StoredMoneyOperation[] = [
+      ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
       ...(await this.metaMaskGasless.listOperations(profileHash)).map((record) => ({ kind: "metamask_gasless_transfer" as const, record })),
       ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer" as const, record })),
       ...(await this.bridges.listOperations(profileHash)).map((record) => ({ kind: "bridge_route" as const, record })),
@@ -105,7 +113,8 @@ export class OperationService {
     const bridge = await this.bridges.findOperation(canonicalId);
     const gasless = await this.gasless.findOperation(canonicalId);
     const metaMaskGasless = await this.metaMaskGasless.findOperation(canonicalId);
-    if ([direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless].filter((value) => value !== null).length > 1) {
+    const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
+    if ([direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless].filter((value) => value !== null).length > 1) {
       throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
     }
     if (direct !== null) return { kind: "direct_transfer", record: direct };
@@ -115,6 +124,7 @@ export class OperationService {
     if (bridge !== null) return { kind: "bridge_route", record: bridge };
     if (gasless !== null) return { kind: "gasless_transfer", record: gasless };
     if (metaMaskGasless !== null) return { kind: "metamask_gasless_transfer", record: metaMaskGasless };
+    if (smartAccountGasless !== null) return { kind: "smart_account_gasless_transfer", record: smartAccountGasless };
     throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
   }
 
@@ -125,6 +135,7 @@ export class OperationService {
     if (operation.kind === "bridge_route") return publicBridgeOperation(operation.record);
     if (operation.kind === "gasless_transfer") return publicGaslessOperation(operation.record);
     if (operation.kind === "metamask_gasless_transfer") return publicMetaMaskGaslessOperation(operation.record);
+    if (operation.kind === "smart_account_gasless_transfer") return publicSmartAccountGaslessOperation(operation.record);
     return operation.strategy === "local"
       ? publicX402Operation(operation.record)
       : publicProviderX402Operation(operation.record);

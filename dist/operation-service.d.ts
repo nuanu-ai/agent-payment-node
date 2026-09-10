@@ -12,7 +12,12 @@ import { GaslessOperationRepository } from "./gasless/operation-repository.js";
 import type { GaslessOperationRecord } from "./gasless/operation-model.js";
 import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operation-model.js";
 import type { MetaMaskGaslessRepositoryPort } from "./metamask-gasless/ports.js";
+import type { SmartAccountGaslessOperationRecord } from "./smart-account-gasless/operation-model.js";
+import type { SmartAccountGaslessRepositoryPort } from "./smart-account-gasless/ports.js";
 export type StoredMoneyOperation = {
+    readonly kind: "smart_account_gasless_transfer";
+    readonly record: SmartAccountGaslessOperationRecord;
+} | {
     readonly kind: "metamask_gasless_transfer";
     readonly record: MetaMaskGaslessOperationRecord;
 } | {
@@ -43,7 +48,8 @@ export declare class OperationService {
     private readonly bridges;
     private readonly gasless;
     private readonly metaMaskGasless;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort);
+    private readonly smartAccountGasless;
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort);
     resolvePrepare(input: {
         readonly kind: StoredMoneyOperation["kind"];
         readonly profileHash: string;

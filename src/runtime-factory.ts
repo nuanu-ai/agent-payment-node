@@ -77,8 +77,11 @@ import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.j
 import { metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
 import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
 import { TtyOperationAbandonApproval, type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
+import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
+import { smartAccountGaslessRuntime } from "./smart-account-gasless/runtime.js";
 
 export interface RuntimeFactoryOptions {
+  readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
   readonly gasless?: GaslessDependencies;
   readonly bridge?: BridgeDependencies;
@@ -201,6 +204,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   );
   return new ApnCore({
     state,
+    smartAccountGasless: options.smartAccountGasless ?? smartAccountGaslessRuntime({ state,
+      permissions: smartAccountPermissionStore, wrapping: wrappingSecret, environment: process.env,
+      clock: options.clock ?? { now: () => new Date() }, foregroundApproval: bound.request.command === "gasless.transfer.approve" }),
     metaMaskGasless: options.metaMaskGasless ?? {
       rpcFor: metaMaskGaslessRpcFactory(process.env, options.clock ?? { now: () => new Date() }),
       provider: new MetaMaskGaslessProviderClient({ environment: process.env, clock: options.clock ?? { now: () => new Date() } }),
