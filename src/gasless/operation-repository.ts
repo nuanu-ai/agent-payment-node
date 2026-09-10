@@ -87,10 +87,12 @@ export class GaslessOperationRepository extends SecureStateStore {
   }
 }
 function validateReceipt(value: unknown, op: GaslessOperationRecord): void {
-  if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint ||
-    !gaslessSame(Object.keys(value).sort(), Object.keys(gaslessReceipt(op)).sort())) gaslessCorrupt();
+  if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint) gaslessCorrupt();
   const { receipt_hash, ...body } = value;
   if (hashObject(body) !== receipt_hash) gaslessCorrupt();
   const index = op.transitions.findIndex((_, i) => gaslessAtTransition(op, i).integrityHash === value.operation_binding_hash);
+  // A stale authentic receipt has its historical shape, including the absence
+  // of optional proof fields added by a later transition. Exact comparison to
+  // that transition rejects extra fields without requiring the latest shape.
   if (index < 0 || !gaslessSame(value, gaslessReceipt(gaslessAtTransition(op, index)))) gaslessCorrupt();
 }

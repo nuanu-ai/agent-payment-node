@@ -1,3 +1,4 @@
+import { assertGaslessPermissionClosure, GASLESS_PERMISSIONS_INVALIDATED } from "./permission-invalidation.js";
 import { observationSchema } from "./schema.js";
 import { assertGaslessSettlementContinuation, validateGaslessSettlement } from "./settlement-validation.js";
 import { gaslessSame } from "./validation.js";
@@ -27,6 +28,10 @@ export class GaslessObservationService {
                 throw new Error("unsubmitted");
             if ((result.status === "safe") !== (result.settlement !== null))
                 throw new Error("proof");
+            if ((result.status === "permissions_invalidated") !== (result.permissionInvalidation !== undefined))
+                throw new Error("permission proof");
+            if (result.status === "permissions_invalidated")
+                assertGaslessPermissionClosure(op, { ...op, observation: result });
             const proof = result.settlement;
             if (proof !== null) {
                 if (op.userOperation.userOperationHash === null || result.transactionHash !== proof.transactionHash || result.evidenceHash === null)
@@ -45,6 +50,10 @@ export class GaslessObservationService {
             if (op.state === "failed_effects_pending")
                 return op;
             return await this.save(op, { state: "unknown_finality", failure: "gasless_receipt_unresolved" });
+        }
+        if (result.status === "permissions_invalidated") {
+            return await this.save(op, { state: "failed_permissions_invalidated", observation: result,
+                cursor: result.cursor, failure: GASLESS_PERMISSIONS_INVALIDATED });
         }
         const proof = result.settlement;
         if (proof !== null) {

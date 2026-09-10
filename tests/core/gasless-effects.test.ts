@@ -365,7 +365,7 @@ function gaslessIntent(
   const recipientAtomic = (BigInt(grossAtomic) - BigInt(feeCapAtomic)).toString();
   const withoutHash = {
     profile: owner.profile,
-    request: { chainId: 8453 as const, recipient: RECIPIENT, grossAtomic, maxFeeAtomic: "5000000", minReceivedAtomic: "5000000" },
+    request: { chainId: 8453 as const, recipient: RECIPIENT, grossAtomic, maxFeeAtomic: "6000000", minReceivedAtomic: "4000000" },
     owner,
     providerBinding,
     initialSnapshot: snapshot,
@@ -381,7 +381,7 @@ function gaslessIntent(
     preparedAt: PREPARED,
     expiresAt: EXPIRES,
     policyHash: hashObject({ identity: "apn.gasless.foreground-approval.v1", request: {
-      chainId: 8453, recipient: RECIPIENT, grossAtomic, maxFeeAtomic: "5000000", minReceivedAtomic: "5000000",
+      chainId: 8453, recipient: RECIPIENT, grossAtomic, maxFeeAtomic: "6000000", minReceivedAtomic: "4000000",
     } }),
   };
   return { ...withoutHash, unsignedEnvelopeHash: hashObject(gaslessEnvelopeBinding(withoutHash)) };

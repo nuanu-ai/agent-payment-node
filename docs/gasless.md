@@ -115,6 +115,20 @@ batched operation is allowed; multiple operations for this owner in the same
 transaction are ambiguous and cannot close this payment. A reverted outer
 transaction does not prove that signed permissions can no longer be used.
 
+If only the permit and optional delegation authorization were disclosed, the
+owner can invalidate them separately and then resume the same operation. APN
+closes it as `failed_permissions_invalidated` only after canonical safe and
+current state prove the old permit nonce consumed, authorization nonce invalid,
+zero paymaster allowance, unchanged EntryPoint nonce and no pending transaction.
+The original bootstrap seal must be known, and no final UserOperation signing
+attempt may exist. Missing or conflicting proof keeps the guard.
+
+This outcome records cleared permissions and that no final payment was
+submitted. Transfer delivery, token fee/debit and native cost stay unknown;
+any externally paid cleanup is separate. It preserves the original operation
+history and permits a new transfer only through a new prepare and approval.
+APN does not perform the external revocation or start another payment.
+
 `operation status` and `receipt get` read saved evidence locally. Receipts
 contain hashes and public accounting, without permits, signatures, raw
 UserOperations, encrypted keys or provider response text.

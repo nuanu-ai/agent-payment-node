@@ -185,11 +185,22 @@ export interface GaslessEffectIdentity {
   readonly userOperationMaterialHash: string | null;
   readonly userOperationHash: Hex | null;
 }
+export interface GaslessPermissionInvalidation {
+  readonly chainId: GaslessChainId;
+  readonly intentHash: string;
+  readonly bootstrapMaterialHash: string;
+  readonly protocolHash: string;
+  readonly safeBlock: GaslessBlock;
+  readonly headBlock: GaslessBlock;
+  readonly safeAccount: GaslessAccountState;
+  readonly headAccount: GaslessAccountState;
+}
 export interface GaslessObservation {
-  readonly status: "not_found" | "pending" | "safe" | "unresolved";
+  readonly status: "not_found" | "pending" | "safe" | "unresolved" | "permissions_invalidated";
   readonly transactionHash: Hex | null;
   readonly settlement: GaslessSettlement | null;
   readonly cursor: GaslessCursor;
   readonly evidenceHash: string | null;
   readonly reason: string | null;
+  readonly permissionInvalidation?: GaslessPermissionInvalidation;
 }

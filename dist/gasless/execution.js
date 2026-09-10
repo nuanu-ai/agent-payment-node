@@ -50,6 +50,10 @@ export class GaslessExecution {
         if (op.bootstrap.disclosureAttempts === 1 && op.bootstrap.estimate === null) {
             return await this.observation.run(await this.unknown(op, "gasless_bootstrap_unresolved"));
         }
+        if (op.bootstrap.materialHash !== null && op.userOperation.signingAttempts === 0 &&
+            this.now() >= Date.parse(op.intent.expiresAt)) {
+            return await this.observation.run(await this.unknown(op, "gasless_bootstrap_unresolved"));
+        }
         const bootstrapResult = await this.material(op, "bootstrap");
         op = bootstrapResult.op;
         if (bootstrapResult.material === null)

@@ -4,6 +4,7 @@ import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { formatUnits } from "viem";
 import { bindMcpInput } from "../../src/command-binder.js";
+import { dispatchDiscovery, type CommandDefinition } from "../../src/command-catalog.js";
 import { parseArgv, runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { ApnError } from "../../src/errors.js";
@@ -24,6 +25,21 @@ const GASLESS_TOOL_NAMES = [
   "apn_gasless_transfer_approve",
 ] as const;
 const OPERATION_ID = "a".repeat(64);
+
+test("CLI and MCP discovery expose the terminal permission-invalidation recovery outcome", () => {
+  const discovery = dispatchDiscovery(["help", "--json"]);
+  assert.ok(discovery?.ok);
+  const manifest = JSON.parse(discovery.output) as { commands: CommandDefinition[] };
+  const tools = projectMcpTools();
+  for (const path of ["gasless transfer prepare", "gasless transfer approve", "operation resume", "operation status", "receipt get"]) {
+    const cli = manifest.commands.find((command) => command.path.join(" ") === path);
+    const mcp = tools.find((tool) => tool.command.path.join(" ") === path);
+    assert.ok(cli && mcp, path);
+    assert.equal(cli.states.terminal.includes("failed_permissions_invalidated"), true, path);
+    assert.equal(cli.states.non_terminal.includes("failed_permissions_invalidated"), false, path);
+    assert.deepEqual(mcp.command.states, cli.states, path);
+  }
+});
 
 test("gasless CLI and MCP project the same four strict tools and canonical inputs", () => {
   const tools = projectMcpTools().filter((item) => item.name.startsWith("apn_gasless_"));

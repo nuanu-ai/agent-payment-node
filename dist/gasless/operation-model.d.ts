@@ -1,6 +1,6 @@
 import type { Hex } from "../model.js";
 import type { GaslessCursor, GaslessEstimate, GaslessIntent, GaslessObservation, GaslessSettlement } from "./model.js";
-export type GaslessState = "awaiting_approval" | "execution_pending" | "bootstrap_pending" | "user_operation_pending" | "submitted_pending" | "included_success" | "included_revert" | "unknown_finality" | "failed_effects_pending" | "completed" | "failed_before_effect" | "failed_confirmed_revert";
+export type GaslessState = "awaiting_approval" | "execution_pending" | "bootstrap_pending" | "user_operation_pending" | "submitted_pending" | "included_success" | "included_revert" | "unknown_finality" | "failed_effects_pending" | "completed" | "failed_before_effect" | "failed_confirmed_revert" | "failed_permissions_invalidated";
 export type GaslessRole = "bootstrap" | "user_operation";
 export type GaslessEffectPhase = "unsealed" | "signing_started" | "sealed" | "disclosure_started" | "checked" | "submitting" | "submitted_pending" | "unknown_finality" | "included_success" | "included_revert" | "safe_success" | "safe_revert";
 export interface GaslessConsent {

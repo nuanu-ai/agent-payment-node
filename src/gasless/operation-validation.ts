@@ -11,14 +11,14 @@ import { gaslessFailure, gaslessSame } from "./validation.js";
 const EDGES: Readonly<Record<GaslessState, readonly GaslessState[]>> = {
   awaiting_approval: ["execution_pending", "failed_before_effect"],
   execution_pending: ["bootstrap_pending", "failed_before_effect", "unknown_finality"],
-  bootstrap_pending: ["user_operation_pending", "unknown_finality"],
-  user_operation_pending: ["submitted_pending", "unknown_finality", "included_success", "included_revert", "failed_effects_pending", "completed", "failed_confirmed_revert"],
+  bootstrap_pending: ["user_operation_pending", "unknown_finality", "failed_permissions_invalidated"],
+  user_operation_pending: ["submitted_pending", "unknown_finality", "included_success", "included_revert", "failed_effects_pending", "completed", "failed_confirmed_revert", "failed_permissions_invalidated"],
   submitted_pending: ["unknown_finality", "included_success", "included_revert", "failed_effects_pending", "completed", "failed_confirmed_revert"],
   included_success: ["unknown_finality", "completed"],
   included_revert: ["unknown_finality", "failed_effects_pending", "failed_confirmed_revert"],
-  unknown_finality: ["bootstrap_pending", "user_operation_pending", "submitted_pending", "included_success", "included_revert", "failed_effects_pending", "completed", "failed_confirmed_revert"],
+  unknown_finality: ["bootstrap_pending", "user_operation_pending", "submitted_pending", "included_success", "included_revert", "failed_effects_pending", "completed", "failed_confirmed_revert", "failed_permissions_invalidated"],
   failed_effects_pending: ["failed_confirmed_revert"],
-  completed: [], failed_before_effect: [], failed_confirmed_revert: [],
+  completed: [], failed_before_effect: [], failed_confirmed_revert: [], failed_permissions_invalidated: [],
 };
 const PHASE_EDGES: Readonly<Record<GaslessEffectPhase, readonly GaslessEffectPhase[]>> = {
   unsealed: ["signing_started"], signing_started: ["sealed", "unknown_finality"],
