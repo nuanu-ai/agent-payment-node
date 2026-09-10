@@ -19,6 +19,8 @@ import { verifyGaslessOuterTransaction } from "../../src/gasless/rpc-transaction
 import { GASLESS_ESTIMATE_SIGNATURE } from "../../src/gasless/signature.js";
 import { gaslessBatch, gaslessEnvelopeBinding, gaslessPermitTypedData, gaslessUserOperation,
   gaslessUserOperationHash, gaslessUserOperationTypedData } from "../../src/gasless/wire.js";
+import { bundledGaslessFixture } from "./gasless-fixtures/bundler-transport.js";
+import { temporaryState } from "./helpers.js";
 
 type Json = Record<string, any>;
 const RPC_URL = "https://rpc.example/private-path";
@@ -43,6 +45,55 @@ class TestTransport implements GaslessTransport {
     this.calls.push({ endpoint, method: request.method, params: request.params });
     const result = this.result(endpoint, request.method, request.params);
     return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
+  }
+}
+
+test("gasless production prepare and approval fit one public bundler request window", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id), bundler = s.calls.filter(c => c.bundler);
+  t.diagnostic(JSON.stringify({ bundlerRequests: bundler.length,
+    afterApproval: bundler.filter(c => c.afterApproval).length,
+    finalPhase: record.userOperation.phase, failure: record.failure }));
+  assert.equal(bundler.filter(c => c.method === "eth_sendUserOperation").length, 1);
+  assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas").length, 1);
+  assert.ok(bundler.length <= 20);
+  assert.equal(record.bootstrap.signingAttempts, 1);
+  assert.equal(record.userOperation.signingAttempts, 1);
+  assert.equal(record.userOperation.submissionAttempts, 1);
+  assert.equal(record.userOperation.phase, "submitted_pending");
+  // Locator absence is still ambiguous; passing the rate budget is not settlement.
+  assert.equal(record.terminal, false);
+});
+
+for (const boundary of ["before_bootstrap", "before_send"] as const) {
+  for (const fault of ["chain", "entrypoint", "balance", "allowance", "nonce"] as const) {
+    test(`gasless production ${fault} drift ${boundary} blocks the next effect`, async (t) => {
+      const temporary = await temporaryState(); t.after(temporary.cleanup);
+      const s = await bundledGaslessFixture(temporary.root); s.setLimit(100);
+      const { id } = await s.prepare();
+      if (boundary === "before_bootstrap") {
+        const confirm = s.approval.confirm.bind(s.approval);
+        s.approval.confirm = async input => { const accepted = await confirm(input); s.setFault(fault); return accepted; };
+      } else {
+        const seal = s.custody.seal.bind(s.custody);
+        s.custody.seal = async (...args) => {
+          const material = await seal(...args);
+          if (args[1] === "user_operation") s.setFault(fault);
+          return material;
+        };
+      }
+      const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+      assert.equal(result.ok, true, result.error?.message);
+      const record = await s.record(id), signed = boundary === "before_bootstrap" ? 0 : 1;
+      assert.equal(record.bootstrap.signingAttempts, signed);
+      assert.equal(record.userOperation.signingAttempts, signed);
+      assert.equal(record.userOperation.submissionAttempts, 0);
+      assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+      assert.equal(record.state, signed === 0 ? "failed_before_effect" : "unknown_finality");
+    });
   }
 }
 

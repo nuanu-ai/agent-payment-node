@@ -30,7 +30,6 @@ export class GaslessService {
   async balance(profile: string, chainId: GaslessChainId) {
     const row = gaslessDeployment(chainId), { owner } = await gaslessOwner(this.context.state, profile);
     const rpc = this.dependencies().rpcFor(chainId);
-    await rpc.assertChain();
     const snapshot = await rpc.snapshot(owner.address);
     if (!snapshotSchema.safeParse(snapshot).success || snapshot.chainId !== chainId || snapshot.owner !== owner.address ||
       snapshot.token !== row.token) gaslessFailure("APN_RPC_PROTOCOL", "gasless_balance_binding");

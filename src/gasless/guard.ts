@@ -20,7 +20,6 @@ export async function guardGaslessOperation(state: StateStore, rpc: GaslessRpcPo
   if (rpc.chainId !== op.intent.request.chainId || rpc.rpcOrigin !== s.rpcOrigin ||
     rpc.rpcEndpointHash !== s.rpcEndpointHash || rpc.bundlerOrigin !== s.bundlerOrigin ||
     rpc.bundlerEndpointHash !== s.bundlerEndpointHash) gaslessFailure("APN_RPC_CONFIG", "gasless_endpoint_identity");
-  await rpc.assertChain();
   assertGaslessSnapshot(op.intent, await rpc.snapshot(op.intent.owner.address));
   await assertGaslessOwner(state, op.intent);
   assertGaslessRemaining(op, now());
