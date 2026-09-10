@@ -59,6 +59,10 @@ export async function rpcBlock(call, tag) {
     const block = { numberAtomic: number.toString(), hash, timestampAtomic: rpcQuantity(raw.timestamp).toString() };
     return { block, tag: quantity(number), raw };
 }
+/** Polygon exposes milestone finality through finalized; unavailable finality never falls back to latest. */
+export async function rpcFinalityBlock(call, chainId) {
+    return await rpcBlock(call, chainId === 137 ? "finalized" : "safe");
+}
 export async function recheckBlock(call, block) {
     const again = await rpcBlock(call, quantity(BigInt(block.numberAtomic)));
     if (!sameBlock(again.block, block))

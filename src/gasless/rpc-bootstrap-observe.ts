@@ -2,7 +2,7 @@ import { hashObject } from "../canonical.js";
 import type { GaslessCursor, GaslessEffectIdentity, GaslessIntent, GaslessObservation } from "./model.js";
 import { GASLESS_FINAL_PERMISSIONS_INVALIDATED, GASLESS_PERMISSIONS_INVALIDATED,
   validateGaslessPermissionInvalidation } from "./permission-invalidation.js";
-import { recheckBlock, rpcBlock, sameBlock } from "./rpc-codec.js";
+import { recheckBlock, rpcBlock, rpcFinalityBlock, sameBlock } from "./rpc-codec.js";
 import type { GaslessObservationContext } from "./rpc-observe.js";
 import { readAccountAt, verifyProtocolAt } from "./rpc-state.js";
 import { gaslessProtocolHash } from "./registry.js";
@@ -15,7 +15,7 @@ export async function observeGaslessBootstrap(context: GaslessObservationContext
       context.chainId !== intent.request.chainId ||
       gaslessProtocolHash(context.deployment) !== intent.initialSnapshot.protocolHash) throw new Error("identity");
     await recheckBlock(context.rpc, intent.initialSnapshot.block);
-    const currentSafe = (await rpcBlock(context.rpc, "safe")).block;
+    const currentSafe = (await rpcFinalityBlock(context.rpc, context.chainId)).block;
     // A final seal additionally requires the canonical no-event scan through this block.
     const safeBlock = final ? cursor.previousEndBlock : currentSafe;
     if (safeBlock === null || BigInt(safeBlock.numberAtomic) > BigInt(currentSafe.numberAtomic) ||

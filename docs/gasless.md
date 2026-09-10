@@ -129,6 +129,11 @@ batched operation is allowed; multiple operations for this owner in the same
 transaction are ambiguous and cannot close this payment. A reverted outer
 transaction does not prove that signed permissions can no longer be used.
 
+For Local transfers, Polygon PoS uses the RPC `finalized` block, which reflects
+milestone finality. Other admitted Local networks use `safe`. The saved
+`safeBlock` field records this selected finality boundary for settlement and
+permission recovery. Unavailable finality never falls back to `latest`.
+
 If only the permit and optional delegation authorization were disclosed, the
 owner can invalidate them separately and then resume the same operation. APN
 closes it as `failed_permissions_invalidated` only after canonical safe and

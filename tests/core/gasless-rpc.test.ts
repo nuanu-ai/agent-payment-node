@@ -8,7 +8,7 @@ import type { Address, Hex } from "../../src/model.js";
 import { GASLESS_ENTRYPOINT_ABI, GASLESS_PAYMASTER_ABI, GASLESS_TOKEN_ABI } from "../../src/gasless/abi.js";
 import { gaslessFee, gaslessGas } from "../../src/gasless/economics.js";
 import { GaslessHttps, type GaslessTransport } from "../../src/gasless/https.js";
-import type { GaslessBlock, GaslessCursor, GaslessDeployment, GaslessIntent, GaslessLog,
+import type { GaslessBlock, GaslessChainId, GaslessCursor, GaslessDeployment, GaslessIntent, GaslessLog,
   GaslessSnapshot } from "../../src/gasless/model.js";
 import type { GaslessBootstrapMaterial, GaslessUserOperationMaterial } from "../../src/gasless/ports.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
@@ -283,9 +283,9 @@ test("gasless observation reports bootstrap-only permission without inventing a 
   assert.deepEqual(calls, ["eth_getBlockByNumber"]);
 });
 
-for (const designation of ["empty", "expected"] as const) {
-  test(`gasless ${designation} bootstrap RPC proves permission invalidation without bundler or effect calls`, async () => {
-    const { context, intent, calls, setFault } = bootstrapRpcFixture(designation);
+for (const chainId of [8453, 137] as const) for (const designation of ["empty", "expected"] as const) {
+  test(`gasless ${chainId} ${designation} bootstrap RPC proves permission invalidation without bundler or effect calls`, async () => {
+    const { context, intent, calls, blockTags, setFault } = bootstrapRpcFixture(designation, false, chainId);
     const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: null, userOperationHash: null };
     const good = await observeGasless(context, intent, identity, initialCursor(intent));
     assert.equal(good.status, "permissions_invalidated"); assert.equal(good.transactionHash, null);
@@ -297,6 +297,7 @@ for (const designation of ["empty", "expected"] as const) {
       assert.equal(good.permissionInvalidation?.headAccount.eoaNonceAtomic, intent.initialSnapshot.eoaNonceAtomic);
     }
     assert.equal(good.evidenceHash, hashObject(good.permissionInvalidation));
+    assert.ok(blockTags.includes(chainId === 137 ? "finalized" : "safe"));
     assert.ok(calls.includes("eth_getCode")); assert.ok(calls.includes("eth_getStorageAt"));
     assert.ok(calls.includes("eth_call")); assert.ok(calls.includes("eth_getTransactionCount"));
     assert.equal(calls.some((m) => /UserOperation|send|estimate|bundler|snapshot/u.test(m)), false);
@@ -311,14 +312,15 @@ for (const designation of ["empty", "expected"] as const) {
   });
 }
 
-for (const designation of ["empty", "expected"] as const) test(`gasless production ${designation} final invalidation requires canonical scan and all revoked permissions`, async () => {
-  const { context, intent, calls, setFault } = bootstrapRpcFixture(designation, true);
+for (const chainId of [8453, 137] as const) for (const designation of ["empty", "expected"] as const) test(`gasless production ${chainId} ${designation} final invalidation requires canonical scan and all revoked permissions`, async () => {
+  const { context, intent, calls, blockTags, setFault } = bootstrapRpcFixture(designation, true, chainId);
   const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash: word(71n) };
   const result = await observeGasless(context, intent, identity, initialCursor(intent));
   assert.equal(result.status, "permissions_invalidated"); assert.equal(result.reason, "gasless_final_permissions_invalidated");
   assert.equal(result.permissionInvalidation?.userOperationHash, identity.userOperationHash);
   assert.equal(result.permissionInvalidation?.userOperationMaterialHash, identity.userOperationMaterialHash);
   assert.equal(result.cursor.nextBlockAtomic, "103"); assert.deepEqual(result.cursor.previousEndBlock, result.permissionInvalidation?.safeBlock);
+  assert.ok(blockTags.includes(chainId === 137 ? "finalized" : "safe"));
   assert.ok(calls.includes("eth_getLogs")); assert.equal(calls.some(c => /send|estimate|snapshot/iu.test(c)), false);
   for (const fault of ["permit", "allowance", "pending", "entrypoint", "owner_code", "protocol_code", "storage",
     "domain", "prepare_reorg", "safe_reorg", "head_reorg", "chain", "safe_ahead", "hash_zero", "scan_error",
@@ -329,8 +331,20 @@ for (const designation of ["empty", "expected"] as const) test(`gasless producti
   }
 });
 
-function bootstrapRpcFixture(designation: "empty" | "expected", final = false) {
-  const original = makeIntent(), base = gaslessDeployment(8453);
+for (const final of [false, true]) test(`gasless Polygon ${final ? "final" : "bootstrap"} recovery retains uncertainty when finalized is unavailable`, async () => {
+  const { context, intent, blockTags, setFault } = bootstrapRpcFixture("empty", final, 137);
+  setFault("finality_unavailable");
+  const identity = { bootstrapMaterialHash: "a".repeat(64),
+    userOperationMaterialHash: final ? "b".repeat(64) : null, userOperationHash: final ? word(71n) : null };
+  const cursor = initialCursor(intent), result = await observeGasless(context, intent, identity, cursor);
+  assert.equal(result.status, "unresolved"); assert.equal(result.settlement, null);
+  assert.equal(result.permissionInvalidation, undefined); assert.deepEqual(result.cursor, cursor);
+  assert.ok(blockTags.includes("finalized")); assert.equal(blockTags.includes("safe"), false);
+  assert.equal(blockTags.includes("latest"), false);
+});
+
+function bootstrapRpcFixture(designation: "empty" | "expected", final = false, chainId: GaslessChainId = 8453) {
+  const original = makeIntent(chainId), base = gaslessDeployment(chainId);
   const deployment: GaslessDeployment = { ...base,
     code: [{ address: base.token, codeHash: keccak256("0x6000") }],
     reads: [{ kind: "storage", address: base.paymaster, data: word(1n), expected: word(2n) },
@@ -338,15 +352,18 @@ function bootstrapRpcFixture(designation: "empty" | "expected", final = false) {
   const intent = { ...original, initialSnapshot: { ...original.initialSnapshot, delegation: designation,
     protocolHash: gaslessProtocolHash(deployment) } };
   const eoaNonce = `0x${(BigInt(intent.initialSnapshot.eoaNonceAtomic) + (designation === "empty" ? 1n : 0n)).toString(16)}`;
-  const calls: string[] = []; let fault = "";
-  const context: GaslessObservationContext = { chainId: 8453, rpcOrigin: "https://rpc.example", deployment,
+  const calls: string[] = [], blockTags: unknown[] = []; let fault = "";
+  const context: GaslessObservationContext = { chainId, rpcOrigin: "https://rpc.example", deployment,
     snapshot: async () => { calls.push("snapshot"); throw new Error("no snapshot"); },
     bundler: async () => { calls.push("bundler"); if (final) return null; throw new Error("no bundler"); },
     rpc: async (method, params) => {
       calls.push(method);
       if (method === "eth_getLogs" && final) { if (fault === "scan_error") throw new Error("scan failed"); return []; }
       if (method === "eth_getBlockByNumber") {
-        const tag = params[0], n = tag === "safe" ? 102n : tag === "latest" ? (fault === "safe_ahead" ? 101n : 103n) : BigInt(tag as string);
+        const tag = params[0], finalityTag = chainId === 137 ? "finalized" : "safe";
+        blockTags.push(tag);
+        if (tag === finalityTag && fault === "finality_unavailable") throw new Error("finality block unavailable");
+        const n = tag === finalityTag ? 102n : tag === "latest" ? (fault === "safe_ahead" ? 101n : 103n) : BigInt(tag as string);
         const reorg = (fault === "prepare_reorg" && n === 100n) ||
           (fault === "safe_reorg" && tag === "0x66") || (fault === "head_reorg" && tag === "0x67");
         return rawBlock(n, fault === "hash_zero" ? word(0n) : reorg ? word(123n) : blockHash(n));
@@ -372,20 +389,21 @@ function bootstrapRpcFixture(designation: "empty" | "expected", final = false) {
       }
       throw new Error(`unexpected read ${method}`);
     } };
-  return { context, intent, calls, setFault: (value: string) => {
-    fault = value; (context as { chainId: number }).chainId = value === "chain" ? 1 : 8453;
+  return { context, intent, calls, blockTags, setFault: (value: string) => {
+    fault = value; (context as { chainId: number }).chainId = value === "chain" ? 1 : chainId;
   } };
 }
 
-test("gasless finite safe-block scan uses ten-block RPC ranges and resets on cursor reorg", async () => {
-  const intent = makeIntent(), userOperationHash = word(71n), cursor = initialCursor(intent);
+for (const chainId of [8453, 137] as const) test(`gasless ${chainId} finite finality-block scan uses ten-block RPC ranges and resets on cursor reorg`, async () => {
+  const intent = makeIntent(chainId), userOperationHash = word(71n), cursor = initialCursor(intent);
+  const finalityTag = chainId === 137 ? "finalized" : "safe";
   let reorg = false; const tags: unknown[] = [], ranges: Array<[bigint, bigint]> = [];
-  const context = { chainId: 8453 as const, rpcOrigin: "https://rpc.example", deployment: gaslessDeployment(8453),
+  const context = { chainId, rpcOrigin: "https://rpc.example", deployment: gaslessDeployment(chainId),
     bundler: async () => null,
     snapshot: async () => intent.initialSnapshot,
     rpc: async (method: string, params: readonly unknown[]) => {
       if (method === "eth_getBlockByNumber") {
-        const tag = params[0]; tags.push(tag); const number = tag === "safe" ? 400n : BigInt(tag as string);
+        const tag = params[0]; tags.push(tag); const number = tag === finalityTag ? 400n : BigInt(tag as string);
         return rawBlock(number, reorg && number === 355n ? word(123_456n) : blockHash(number));
       }
       if (method === "eth_getLogs") { const filter = params[0] as Json;
@@ -399,7 +417,7 @@ test("gasless finite safe-block scan uses ten-block RPC ranges and resets on cur
   const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
   const first = await observeGasless(context, intent, identity, cursor);
   assert.equal(first.status, "not_found"); assert.equal(first.cursor.nextBlockAtomic, "356");
-  assert.equal(first.cursor.previousEndBlock?.numberAtomic, "355"); assert.ok(tags.includes("safe"));
+  assert.equal(first.cursor.previousEndBlock?.numberAtomic, "355"); assert.ok(tags.includes(finalityTag));
   assert.equal(ranges.length, 26); assert.deepEqual(ranges[0], [100n, 109n]);
   assert.deepEqual(ranges.at(-1), [350n, 355n]);
   for (let index = 1; index < ranges.length; index += 1) assert.equal(ranges[index]![0], ranges[index - 1]![1] + 1n);
@@ -464,16 +482,17 @@ test("gasless scan locates a matching operation in a later range without an effe
   assert.ok(calls.includes("eth_getTransactionReceipt")); assert.equal(calls.some((method) => /send|estimate/iu.test(method)), false);
 });
 
-test("gasless safe observation fixes effect proof while later safe account state may advance", async () => {
-  const intent = makeIntent(), userOperationHash = word(72n), signed = await signedOuter(2);
+for (const chainId of [8453, 137] as const) test(`gasless ${chainId} finality observation fixes effect proof while later account state may advance`, async () => {
+  const intent = makeIntent(chainId), userOperationHash = word(72n), signed = await signedOuter(2, chainId);
   const effectBlock = block(101), transaction = { ...signed.rpc, blockNumber: "0x65", blockHash: effectBlock.hash,
     transactionIndex: "0x0" };
   const logs = settlementLogs(intent, userOperationHash), receipt = { transactionHash: signed.hash, blockNumber: "0x65",
     blockHash: effectBlock.hash, transactionIndex: "0x0", type: "0x2", from: OUTER.address, to: intent.entryPoint,
     status: "0x1", logs: logs.map((log) => rawLog(log, signed.hash, effectBlock)) };
-  let safeNumber = 102n;
-  const context = { chainId: 8453 as const, rpcOrigin: "https://rpc.example",
-    deployment: { ...gaslessDeployment(8453), code: [], reads: [] } as GaslessDeployment,
+  let safeNumber = 102n, finalityUnavailable = false;
+  const tags: unknown[] = [], finalityTag = chainId === 137 ? "finalized" : "safe";
+  const context = { chainId, rpcOrigin: "https://rpc.example",
+    deployment: { ...gaslessDeployment(chainId), code: [], reads: [] } as GaslessDeployment,
     snapshot: async () => intent.initialSnapshot,
     bundler: async (method: string) => method === "eth_getUserOperationReceipt"
       ? { userOpHash: userOperationHash, receipt: { transactionHash: signed.hash } }
@@ -482,7 +501,9 @@ test("gasless safe observation fixes effect proof while later safe account state
       if (method === "eth_getTransactionByHash") return transaction;
       if (method === "eth_getTransactionReceipt") return receipt;
       if (method === "eth_getBlockByNumber") {
-        const tag = params[0], number = tag === "safe" ? safeNumber : BigInt(tag as string);
+        const tag = params[0]; tags.push(tag);
+        if (tag === finalityTag && finalityUnavailable) throw new Error("finality block unavailable");
+        const number = tag === finalityTag ? safeNumber : BigInt(tag as string);
         return rawBlock(number, blockHash(number), number === 101n ? [signed.hash] : []);
       }
       if (method === "eth_getBalance" || method === "eth_getTransactionCount") return "0x0";
@@ -494,6 +515,7 @@ test("gasless safe observation fixes effect proof while later safe account state
   const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
   const first = await observeGasless(context, intent, identity, initialCursor(intent));
   assert.equal(first.status, "safe"); assert.equal(first.settlement?.safeBlock.numberAtomic, "102");
+  assert.ok(tags.includes(finalityTag)); assert.equal(tags.includes("latest"), false);
   assert.equal(first.settlement?.effectAccount.balanceAtomic, "6000000");
   safeNumber = 103n; const second = await observeGasless(context, intent, identity, first.cursor);
   assert.equal(second.status, "safe"); assert.equal(second.settlement?.safeBlock.numberAtomic, "103");
@@ -501,11 +523,16 @@ test("gasless safe observation fixes effect proof while later safe account state
   const { safeBlock: _firstSafeBlock, safeAccount: _firstSafeAccount, ...firstEffect } = first.settlement!;
   const { safeBlock: _secondSafeBlock, safeAccount: _secondSafeAccount, ...secondEffect } = second.settlement!;
   assert.deepEqual(secondEffect, firstEffect);
+  finalityUnavailable = true; tags.length = 0;
+  const held = await observeGasless(context, intent, identity, first.cursor);
+  assert.equal(held.status, "unresolved"); assert.equal(held.settlement, null); assert.deepEqual(held.cursor, first.cursor);
+  assert.ok(tags.includes(finalityTag)); assert.equal(tags.includes("latest"), false);
+  assert.equal(tags.includes(chainId === 137 ? "safe" : "finalized"), false);
 });
 
-function makeIntent(): GaslessIntent {
-  const deployment = gaslessDeployment(8453);
-  const snapshot: GaslessSnapshot = { chainId: 8453, rpcOrigin: new URL(RPC_URL).origin,
+function makeIntent(chainId: GaslessChainId = 8453): GaslessIntent {
+  const deployment = gaslessDeployment(chainId);
+  const snapshot: GaslessSnapshot = { chainId, rpcOrigin: new URL(RPC_URL).origin,
     rpcEndpointHash: sha256(RPC_URL), bundlerOrigin: new URL(BUNDLER_URL).origin,
     bundlerEndpointHash: sha256(BUNDLER_URL), block: block(100), protocolHash: gaslessProtocolHash(deployment),
     owner: OWNER.address, token: deployment.token, balanceAtomic: "10000000", nativeBalanceWei: "0", allowanceAtomic: "0",
@@ -514,7 +541,7 @@ function makeIntent(): GaslessIntent {
       nativeTokenPrice: "2500000000" }, baseFeePerGas: "1000000000", maxFeePerGas: "2100000000",
     maxPriorityFeePerGas: "100000000" };
   const gas = gaslessGas(snapshot), feeCapAtomic = gaslessFee(gas, snapshot.feeConfiguration), grossAtomic = "10000000";
-  const withoutHash = { profile: "synthetic", request: { chainId: 8453 as const, recipient: RECIPIENT, grossAtomic,
+  const withoutHash = { profile: "synthetic", request: { chainId, recipient: RECIPIENT, grossAtomic,
     maxFeeAtomic: "6000000", minReceivedAtomic: "4000000" }, owner: { profile: "synthetic", profileHash: "1".repeat(64),
     address: OWNER.address, walletBindingHash: "2".repeat(64), walletCreatedAt: "2026-09-09T00:00:00.000Z" },
     providerBinding: { providerId: "local" as const, accountBindingHash: "3".repeat(64), capabilityHash: "4".repeat(64),
@@ -532,8 +559,8 @@ function material(role: "bootstrap" | "user_operation", fields: Json): Json {
     fingerprint: "6".repeat(64), envelopeHash: "7".repeat(64), materialHash: "8".repeat(64), role, ...fields };
 }
 
-async function signedOuter(type: number) {
-  const deployment = gaslessDeployment(8453), common = { chainId: 8453, to: deployment.entryPoint, nonce: 7,
+async function signedOuter(type: number, chainId: GaslessChainId = 8453) {
+  const deployment = gaslessDeployment(chainId), common = { chainId, to: deployment.entryPoint, nonce: 7,
     gas: 400_000n, value: 0n, data: "0x12345678" as Hex }, fees = { maxFeePerGas: 2_000_000_000n,
     maxPriorityFeePerGas: 0n };
   let transaction: TransactionSerializable;
@@ -543,9 +570,9 @@ async function signedOuter(type: number) {
   else if (type === 3) transaction = { ...common, ...fees, type: "eip4844", accessList: [], maxFeePerBlobGas: 100n,
     blobVersionedHashes: [`0x01${"67".repeat(31)}`] };
   else transaction = { ...common, ...fees, type: "eip7702", accessList: [], authorizationList: [
-    await OUTER.signAuthorization({ chainId: 8453, contractAddress: deployment.delegate, nonce: 33 })] };
+    await OUTER.signAuthorization({ chainId, contractAddress: deployment.delegate, nonce: 33 })] };
   const raw = await OUTER.signTransaction(transaction), parsed = parseTransaction(raw) as Json, hash = keccak256(raw);
-  const rpc = { hash, chainId: "0x2105", type: quantity(type), nonce: "0x7", from: OUTER.address, to: common.to,
+  const rpc = { hash, chainId: quantity(chainId), type: quantity(type), nonce: "0x7", from: OUTER.address, to: common.to,
     gas: quantity(common.gas), value: "0x0", input: common.data, r: quantity(BigInt(parsed.r)), s: quantity(BigInt(parsed.s)),
     v: quantity(parsed.v ?? BigInt(parsed.yParity)), ...(type === 0 ? {} : { yParity: quantity(parsed.yParity),
       accessList: parsed.accessList ?? [] }), ...(type < 2 ? { gasPrice: quantity(fees.maxFeePerGas) } : {
