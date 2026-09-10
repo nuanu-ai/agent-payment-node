@@ -58,8 +58,15 @@ export class SdkExchange implements FetchExchange {
     let body: unknown;
     if (request.url.endsWith("/v1/supportedNetworks")) body = { networks: MM_CHAINS.map((chainId) => ({ chainId,
       name: `chain-${chainId}`, networkType: "mainnet", shieldSupported: true })) };
-    else if (request.url.endsWith("/v2/supportedNetworks")) body = { fullSupport: MM_CHAINS.map((id) => `eip155:${id}`), partialSupport: [] };
-    else if (request.url.endsWith("/networks")) body = Object.fromEntries(MM_CHAINS.map((id) => [id, { relayTransactions: true }]));
+    else if (request.url.endsWith("/v2/supportedNetworks")) body = { fullSupport: MM_CHAINS.map((id) => `eip155:${id}`), partialSupport: {} };
+    // Synthetic values preserve the richer public inventory shape observed on 2026-09-10.
+    else if (request.url.endsWith("/networks")) body = Object.fromEntries(MM_CHAINS.map((id) => [id, {
+      name: `chain-${id}`, group: "synthetic", chainID: id,
+      nativeCurrency: { name: "Native", symbol: "NATIVE", decimals: 18, address: "0x0000000000000000000000000000000000000000" },
+      network: "mainnet", explorer: "https://explorer.example.test", confirmations: false,
+      smartTransactions: true, relayTransactions: true, hidden: false, sendBundle: false, simulationIncludeFees: true,
+      cubistSigners: [], sponsorship: { enabled: false, rules: [] },
+    }]));
     else if (request.url.includes("rpc.example.test")) {
       const rpc = JSON.parse(request.body!) as { id: unknown; params: [{ data: string }] };
       body = { jsonrpc: "2.0", id: rpc.id, result: rpc.params[0].data === "0x313ce567" ? word(6n) : word(10_000_000_000n) };

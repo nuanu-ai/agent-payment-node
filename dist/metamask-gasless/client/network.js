@@ -280,14 +280,19 @@ function validateResponse(key, body, requestBody, context) {
             mmFail("mm_gasless_provider_unavailable");
     }
     else if (key === "accounts-networks") {
-        if (!exactKeys(value, ["fullSupport", "partialSupport"]) || !Array.isArray(value.fullSupport) || !Array.isArray(value.partialSupport) ||
-            value.fullSupport.length > 512 || value.partialSupport.length > 512 || [...value.fullSupport, ...value.partialSupport].some((v) => typeof v !== "string")) {
+        // NetworkRegistry accepts a list or an object-keyed map; map values are unused metadata.
+        const partial = value.partialSupport;
+        const validPartial = Array.isArray(partial) ? partial.length <= 512 && partial.every((v) => typeof v === "string") :
+            isPlainRecord(partial) && Object.keys(partial).length <= 512;
+        if (!exactKeys(value, ["fullSupport", "partialSupport"]) || !Array.isArray(value.fullSupport) ||
+            value.fullSupport.length > 512 || value.fullSupport.some((v) => typeof v !== "string") || !validPartial) {
             mmFail("mm_gasless_provider_unavailable");
         }
     }
     else if (key === "sentinel-networks") {
+        // Only the chain key and relay flag control SDK capability; other row fields are provider metadata.
         if (Object.keys(value).length > 512 || Object.entries(value).some(([chain, row]) => !/^[1-9][0-9]*$/u.test(chain) ||
-            !isPlainRecord(row) || !exactKeys(row, ["relayTransactions"]) || typeof row.relayTransactions !== "boolean"))
+            !Number.isSafeInteger(Number(chain)) || !isPlainRecord(row) || typeof row.relayTransactions !== "boolean"))
             mmFail("mm_gasless_provider_unavailable");
     }
     else if (key.startsWith("rpc-")) {
