@@ -17,6 +17,7 @@ import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
+import { type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 export interface RuntimeFactoryOptions {
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
     readonly gasless?: GaslessDependencies;
@@ -47,6 +48,7 @@ export interface RuntimeFactoryOptions {
     readonly smartAccountConsent?: SmartAccountConsentPort;
     readonly smartAccountSessionKeys?: SessionKeyFactoryPort;
     readonly smartAccountX402Material?: X402PaymentMaterialPort;
+    readonly operationAbandonApproval?: OperationAbandonApprovalPort;
 }
 export declare function createApnCore(bound: BoundCommand, options?: RuntimeFactoryOptions): ApnCore;
 export declare function executeBoundCommand(bound: BoundCommand, options?: RuntimeFactoryOptions): Promise<OutputEnvelope>;

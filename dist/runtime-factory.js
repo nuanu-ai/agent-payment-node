@@ -39,6 +39,7 @@ import { TtyGaslessApproval } from "./gasless/tty.js";
 import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
 import { metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
 import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
+import { TtyOperationAbandonApproval } from "./operation-abandon-approval.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -121,6 +122,9 @@ export function createApnCore(bound, options = {}) {
         ...(options.wait === undefined ? {} : { wait: options.wait }),
         ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
         ...(providerAuthorizationStore === undefined ? {} : { providerAuthorizationStore }),
+        ...(bound.request.command === "operation.abandon" || options.operationAbandonApproval !== undefined
+            ? { operationAbandonApproval: options.operationAbandonApproval ?? new TtyOperationAbandonApproval() }
+            : {}),
     });
 }
 export async function executeBoundCommand(bound, options = {}) {

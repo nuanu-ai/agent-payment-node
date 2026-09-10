@@ -26,6 +26,7 @@ import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
 import { mmFail } from "./metamask-gasless/reasons.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { OperationAbandonService } from "./operation-abandon-service.js";
 export class ApnCore {
     context;
     wallet;
@@ -39,6 +40,7 @@ export class ApnCore {
     bridges;
     gasless;
     metaMaskGasless;
+    operationAbandon;
     constructor(dependencies) {
         this.context = new RuntimeContext(dependencies);
         this.wallet = new WalletService(this.context);
@@ -52,6 +54,7 @@ export class ApnCore {
         this.bridges = new BridgeService(this.context);
         this.gasless = new GaslessService(this.context);
         this.metaMaskGasless = new MetaMaskGaslessService(this.context);
+        this.operationAbandon = new OperationAbandonService(this.context);
     }
     async execute(request) {
         const requestId = this.context.ids.next();
@@ -181,6 +184,7 @@ export class ApnCore {
                 }
                 return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds));
             }
+            case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));
             case "operation.recover-provider-request": return operationOutcome(await this.transfer.recoverProviderRequest(request.operationId, request.providerRequestId));
             case "operation.recover-transaction-settlement": {
                 const recovered = await this.providerTransactionRecovery.recover(request);
@@ -203,12 +207,14 @@ export class ApnCore {
                     return operationOutcome(await this.gasless.status(request.operationId));
                 if (operation.kind === "metamask_gasless_transfer")
                     return operationOutcome(await this.metaMaskGasless.status(request.operationId));
+                if (operation.kind === "rail_transfer")
+                    return operationOutcome(await this.operations.status(request.operationId));
                 return operation.kind === "x402_fetch"
                     ? await this.operations.x402Outcome(request.operationId, {
                         exposeSellerResult: false,
                         exposeTerminalReceipt: false,
                     })
-                    : operationOutcome(await this.operations.status(request.operationId));
+                    : operationOutcome(await this.transfer.status(request.operationId));
             }
             case "receipt.get": {
                 canonicalOperationId(request.operationId);

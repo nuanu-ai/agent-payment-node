@@ -48,6 +48,7 @@ const TOOL_NAMES = [
   "apn_pay_transfer_prepare_asset",
   "apn_pay_transfer_approve",
   "apn_operation_status",
+  "apn_operation_abandon",
   "apn_operation_resume",
   "apn_operation_recover_provider_request",
   "apn_operation_recover_transaction_settlement",
@@ -147,6 +148,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_pay_transfer_prepare_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], required: ["profile", "chain", "asset", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], defaults: {} },
       { name: "apn_pay_transfer_approve", properties: ["operation", "rpc_url"], required: ["operation"], defaults: {} },
       { name: "apn_operation_status", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_operation_abandon", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_operation_resume", properties: ["operation", "rpc_url", "wait_seconds"], required: ["operation"], defaults: {} },
       {
         name: "apn_operation_recover_provider_request",

@@ -204,6 +204,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
       ...(options["--rpc-url"] === undefined ? {} : { rpcUrl: options["--rpc-url"] }),
     };
     case "operation status": return { request: { command: "operation.status", operationId: value(options, "--operation") } };
+    case "operation abandon": return { request: { command: "operation.abandon", operationId: value(options, "--operation") } };
     case "operation resume": return {
       request: {
         command: "operation.resume",

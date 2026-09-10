@@ -21,6 +21,7 @@ import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
+import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 
 export interface CoreDependencies {
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -47,6 +48,7 @@ export interface CoreDependencies {
   readonly providerX402Repository?: ProviderX402Repository;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+  readonly operationAbandonApproval?: OperationAbandonApprovalPort;
 }
 
 export class RuntimeContext {
@@ -74,6 +76,7 @@ export class RuntimeContext {
   readonly providerX402Repository?: ProviderX402Repository;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+  readonly operationAbandonApproval?: OperationAbandonApprovalPort;
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
@@ -101,6 +104,7 @@ export class RuntimeContext {
     if (dependencies.providerX402Repository !== undefined) this.providerX402Repository = dependencies.providerX402Repository;
     if (dependencies.providerTransactionEvidence !== undefined) this.providerTransactionEvidence = dependencies.providerTransactionEvidence;
     if (dependencies.providerAuthorizationStore !== undefined) this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
+    if (dependencies.operationAbandonApproval !== undefined) this.operationAbandonApproval = dependencies.operationAbandonApproval;
   }
 
   async ready(): Promise<void> {
@@ -158,6 +162,13 @@ export class RuntimeContext {
       throw new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "A foreground terminal is required for wallet provider authentication.");
     }
     return this.foregroundAuthentication;
+  }
+
+  requireOperationAbandonApproval(): OperationAbandonApprovalPort {
+    if (this.operationAbandonApproval === undefined) {
+      throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Unknown-effect abandonment requires exact foreground terminal confirmation.");
+    }
+    return this.operationAbandonApproval;
   }
 
   requireTransferApproval(): TransferApprovalPort {

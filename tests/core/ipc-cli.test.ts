@@ -111,6 +111,9 @@ test("CLI argv preserves Slice 1, adds bounded x402 commands, and contains no ap
   assert.deepEqual(parseArgv(["operation", "status", "--operation", OPERATION_ID]), {
     request: { command: "operation.status", operationId: OPERATION_ID },
   });
+  assert.deepEqual(parseArgv(["operation", "abandon", "--operation", OPERATION_ID]), {
+    request: { command: "operation.abandon", operationId: OPERATION_ID },
+  });
   assert.deepEqual(parseArgv(["operation", "resume", "--operation", OPERATION_ID, "--rpc-url", "https://rpc.example"]), {
     request: { command: "operation.resume", operationId: OPERATION_ID },
     rpcUrl: "https://rpc.example",
@@ -154,6 +157,7 @@ test("CLI argv preserves Slice 1, adds bounded x402 commands, and contains no ap
 
   assert.throws(() => parseArgv(["transfer", "prepare"]));
   assert.throws(() => parseArgv(["pay", "transfer", "prepare", "--yes", "true"]));
+  assert.throws(() => parseArgv(["operation", "abandon", "--operation", OPERATION_ID, "--yes", "true"]));
   assert.throws(() => parseArgv(["x402", "fetch", "approve", "--operation", OPERATION_ID, "--yes", "true"]));
   assert.throws(() => parseArgv(["wallet", "export"]));
 });
