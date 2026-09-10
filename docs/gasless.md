@@ -32,7 +32,17 @@ state. A changed or unavailable deployment fails closed.
 | Polygon PoS | 137 | `APN_POLYGON_RPC_URL` | `APN_POLYGON_BUNDLER_RPC_URL` |
 | Base | 8453 | `APN_BASE_RPC_URL` | `APN_BASE_BUNDLER_RPC_URL` |
 | Arbitrum One | 42161 | `APN_ARBITRUM_RPC_URL` | `APN_ARBITRUM_BUNDLER_RPC_URL` |
-| Avalanche C-Chain | 43114 | `APN_AVALANCHE_RPC_URL` | `APN_AVALANCHE_BUNDLER_RPC_URL` |
+| Avalanche C-Chain (execution unavailable) | 43114 | `APN_AVALANCHE_RPC_URL` | `APN_AVALANCHE_BUNDLER_RPC_URL` |
+
+The admitted Avalanche bundler path does not support EIP-7702. Its deployed
+EntryPoint and token paymaster alone cannot enable this Local adapter. New
+Avalanche offers and further signing or disclosure fail with
+`gasless_eip7702_unavailable`. The capability matrix retains its required row
+with `executable_adapter: false`; the executable Local list contains six chains.
+Existing Avalanche records, identical prepare lookups, status, receipts and
+permission-invalidation observation remain available. This admission correction
+does not establish Avalanche acceptance or invalidate previously disclosed material.
+See [Pimlico chain support](https://docs.pimlico.io/guides/supported-chains#avalanche).
 
 The default bundler is the selected chain's public Pimlico endpoint. The
 registry exposes its exact URL. The RPC must support canonical block-hash

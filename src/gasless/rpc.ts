@@ -14,7 +14,7 @@ import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "./rpc-s
 import { bundlerGasPrices } from "./rpc-gas-prices.js";
 import { gaslessDeployment, gaslessProtocolHash } from "./registry.js";
 import { GASLESS_ESTIMATE_SIGNATURE, verifyGaslessBootstrap, verifyGaslessUserOperation } from "./signature.js";
-import { gaslessChain, gaslessFailure, gaslessSame } from "./validation.js";
+import { assertGaslessExecutionChain, gaslessChain, gaslessFailure, gaslessSame } from "./validation.js";
 import { gaslessUserOperation, gaslessUserOperationHash, validateGaslessWire } from "./wire.js";
 
 const RPC_METHODS = new Set<GaslessRpcMethod>(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode",
@@ -133,6 +133,7 @@ export class GaslessRpc implements GaslessRpcPort {
   }
 
   async estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial): Promise<GaslessEstimate> {
+    assertGaslessExecutionChain(this.chainId);
     this.assertIntent(intent);
     await verifyGaslessBootstrap(intent, { permitSignature: bootstrap.permitSignature, authorization: bootstrap.authorization });
     await this.assertChain();
@@ -150,6 +151,7 @@ export class GaslessRpc implements GaslessRpcPort {
   }
 
   async send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex> {
+    assertGaslessExecutionChain(this.chainId);
     this.assertIntent(intent);
     const wire = validateGaslessWire(intent, sealed.userOperation);
     const localHash = gaslessUserOperationHash(intent, wire);

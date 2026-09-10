@@ -1,6 +1,7 @@
 import { canonicalProfile } from "../wallet-policy.js";
 import { GASLESS_DEPLOYMENTS } from "./registry.js";
 import { metaMaskGaslessNetworks } from "../metamask-gasless/catalog.js";
+import { GASLESS_EIP7702_CHAINS } from "./validation.js";
 
 export function gaslessCapabilities(profile?: string) {
   return { family: "gasless_transfer", purpose: "same_chain_USDC_transfer_with_fee_from_gross",
@@ -8,7 +9,9 @@ export function gaslessCapabilities(profile?: string) {
     networks: GASLESS_DEPLOYMENTS.map((r) => ({ chain_id: r.chainId, name: r.network, token: r.token,
       symbol: "USDC", decimals: 6, rpc_environment: r.rpcEnv, bundler_environment: r.bundlerEnv,
       public_bundler_default: r.publicBundlerUrl, deployment_evidence_hash: r.evidenceHash,
-      executable_adapter: true, action_time_verification_required: true, mainnet_acceptance: "open" })),
+      executable_adapter: GASLESS_EIP7702_CHAINS.includes(r.chainId),
+      execution_unavailable_reason: GASLESS_EIP7702_CHAINS.includes(r.chainId) ? null : "gasless_eip7702_unavailable",
+      action_time_verification_required: true, mainnet_acceptance: "open" })),
     profiles: [
       { provider: "local", custody: "local_software", adapter: "implemented", mainnet_acceptance: "open",
         reason: "existing_local_wallet_with_Circle_USDC_paymaster_and_EIP7702" },
@@ -19,7 +22,7 @@ export function gaslessCapabilities(profile?: string) {
       { provider: "coinbase-agentic-wallet", custody: "provider_owned", adapter: "unavailable", mainnet_acceptance: "open",
         reason: "public_quote_cap_and_recoverable_send_contract_required" },
     ],
-    provider_networks: { local: GASLESS_DEPLOYMENTS.map(r => r.chainId), "metamask-agent-wallet": metaMaskGaslessNetworks(),
+    provider_networks: { local: [...GASLESS_EIP7702_CHAINS], "metamask-agent-wallet": metaMaskGaslessNetworks(),
       "metamask-smart-account": [], "coinbase-agentic-wallet": [] },
     provider_semantics: { "metamask-agent-wallet": { amount: "exact_gross_USDC_equals_net_plus_fee",
       fee: "frozen_quote_in_canonical_USDC", unused_gross_atomic: "0", refund_atomic: "0",

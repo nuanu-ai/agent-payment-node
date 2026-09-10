@@ -2,6 +2,8 @@ import { getAddress } from "viem";
 import { canonicalJson, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 export const GASLESS_CHAINS = [1, 10, 130, 137, 8453, 42161, 43114];
+// Keep historical Avalanche records parseable; the admitted bundler path lacks EIP-7702 there.
+export const GASLESS_EIP7702_CHAINS = Object.freeze([1, 10, 130, 137, 8453, 42161]);
 export const GASLESS_TTL_MS = 300_000;
 export const GASLESS_MIN_REMAINING_MS = 15_000;
 export const GASLESS_MAX_UINT = (1n << 256n) - 1n;
@@ -64,6 +66,11 @@ export function gaslessChain(value, code = "APN_INVALID_INPUT") {
     if (!GASLESS_CHAINS.includes(value))
         gaslessFailure(code, "gasless_chain_identity");
     return value;
+}
+export function assertGaslessExecutionChain(chainId) {
+    if (!GASLESS_EIP7702_CHAINS.includes(gaslessChain(chainId))) {
+        gaslessFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "gasless_eip7702_unavailable");
+    }
 }
 export function gaslessIso(value) {
     if (typeof value !== "string" || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString() !== value)

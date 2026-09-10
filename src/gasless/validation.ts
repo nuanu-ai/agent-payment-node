@@ -5,6 +5,8 @@ import type { Address, Hex } from "../model.js";
 import type { GaslessChainId, GaslessRequest } from "./model.js";
 
 export const GASLESS_CHAINS = [1, 10, 130, 137, 8453, 42161, 43114] as const;
+// Keep historical Avalanche records parseable; the admitted bundler path lacks EIP-7702 there.
+export const GASLESS_EIP7702_CHAINS: readonly GaslessChainId[] = Object.freeze([1, 10, 130, 137, 8453, 42161]);
 export const GASLESS_TTL_MS = 300_000;
 export const GASLESS_MIN_REMAINING_MS = 15_000;
 export const GASLESS_MAX_UINT = (1n << 256n) - 1n;
@@ -53,6 +55,11 @@ export function gaslessHash(value: unknown, code: ErrorCode = "APN_STATE_CORRUPT
 export function gaslessChain(value: unknown, code: ErrorCode = "APN_INVALID_INPUT"): GaslessChainId {
   if (!GASLESS_CHAINS.includes(value as GaslessChainId)) gaslessFailure(code, "gasless_chain_identity");
   return value as GaslessChainId;
+}
+export function assertGaslessExecutionChain(chainId: GaslessChainId): void {
+  if (!GASLESS_EIP7702_CHAINS.includes(gaslessChain(chainId))) {
+    gaslessFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "gasless_eip7702_unavailable");
+  }
 }
 export function gaslessIso(value: unknown): string {
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString() !== value) gaslessFailure("APN_STATE_CORRUPT", "gasless_timestamp");

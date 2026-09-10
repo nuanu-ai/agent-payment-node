@@ -207,6 +207,27 @@ test(`gasless estimate and authenticated send preserve the ${wireVersion ?? "leg
 });
 }
 
+test("gasless Avalanche RPC rejects estimate and send before disclosing valid material", async () => {
+  const intent = makeIntent(43114);
+  const bootstrap = material("bootstrap", {
+    permitSignature: await OWNER.signTypedData(gaslessPermitTypedData(intent)), authorization: null,
+  }) as GaslessBootstrapMaterial;
+  const estimateWire = gaslessUserOperation(intent, bootstrap, GASLESS_ESTIMATE_SIGNATURE);
+  const signature = await OWNER.signTypedData(gaslessUserOperationTypedData(intent, estimateWire));
+  const wire = gaslessUserOperation(intent, bootstrap, signature);
+  const sealed = material("user_operation", { bootstrapMaterialHash: bootstrap.materialHash,
+    estimateHash: hashObject("estimate"), userOperation: wire, userOperationHash: gaslessUserOperationHash(intent, wire),
+  }) as GaslessUserOperationMaterial;
+  const transport = new TestTransport((_endpoint, method) => method === "eth_supportedEntryPoints"
+    ? [intent.entryPoint] : "0xa86a");
+  const rpc = new GaslessRpc(43114, RPC_URL, BUNDLER_URL, transport);
+  for (const call of [() => rpc.estimate(intent, bootstrap), () => rpc.send(intent, sealed)]) {
+    await assert.rejects(call(), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+      message: "Gasless validation failed: gasless_eip7702_unavailable." });
+  }
+  assert.deepEqual(transport.calls, []);
+});
+
 test("gasless canonical state reads pin every effect value to one block hash", async () => {
   const intent = makeIntent(), deployment = gaslessDeployment(8453), at = block(100);
   const pinned = { blockHash: at.hash, requireCanonical: true }, seen: Array<readonly unknown[]> = [];

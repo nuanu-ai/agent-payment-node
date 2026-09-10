@@ -5,7 +5,7 @@ import { gaslessFee, gaslessGas } from "./economics.js";
 import { gaslessOwner } from "./owner.js";
 import { gaslessDeployment } from "./registry.js";
 import { newGaslessOperation } from "./transitions.js";
-import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, gaslessFailure, validateGaslessRequest } from "./validation.js";
+import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, assertGaslessExecutionChain, gaslessFailure, validateGaslessRequest } from "./validation.js";
 import { gaslessBatch, gaslessEnvelopeBinding } from "./wire.js";
 export class GaslessPreparation {
     o;
@@ -26,6 +26,7 @@ export class GaslessPreparation {
                 await this.o.records.repairReceipt(existing.record);
                 return existing.record;
             }
+            assertGaslessExecutionChain(request.chainId);
             await this.o.operations.assertProfileAvailable(profileHash);
             const binding = await gaslessOwner(state, profile), row = gaslessDeployment(request.chainId);
             if ([GASLESS_ZERO_ADDRESS, binding.owner.address, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {
