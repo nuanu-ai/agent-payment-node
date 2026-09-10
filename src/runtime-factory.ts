@@ -76,6 +76,7 @@ import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js"
 import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
 import { metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
 import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
+import { TtyOperationAbandonApproval, type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 
 export interface RuntimeFactoryOptions {
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -107,6 +108,7 @@ export interface RuntimeFactoryOptions {
   readonly smartAccountConsent?: SmartAccountConsentPort;
   readonly smartAccountSessionKeys?: SessionKeyFactoryPort;
   readonly smartAccountX402Material?: X402PaymentMaterialPort;
+  readonly operationAbandonApproval?: OperationAbandonApprovalPort;
 }
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
@@ -228,6 +230,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(options.wait === undefined ? {} : { wait: options.wait }),
     ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
     ...(providerAuthorizationStore === undefined ? {} : { providerAuthorizationStore }),
+    ...(bound.request.command === "operation.abandon" || options.operationAbandonApproval !== undefined
+      ? { operationAbandonApproval: options.operationAbandonApproval ?? new TtyOperationAbandonApproval() }
+      : {}),
   });
 }
 

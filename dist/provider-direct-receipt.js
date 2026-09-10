@@ -109,6 +109,18 @@ function assertTerminalReceipt(receipt, operation) {
             stateCorrupt("Provider direct rejection receipt is invalid.");
         return;
     }
+    if (receipt.state === "abandoned_unknown") {
+        const prior = operation.terminal ? operation.transitions.at(-2) : operation.transitions.at(-1);
+        if (operation.providerDirect?.executionMode !== "provider_atomic_send" ||
+            operation.transactionHash !== undefined || operation.providerEffect !== undefined ||
+            prior?.state !== "ambiguous_effect" || prior.terminal ||
+            receipt.reason !== "owner_acknowledged_unresolved_effect" ||
+            receipt.proofClass !== "owner_acknowledgement_only" ||
+            receipt.blockNumberAtomic !== undefined || receipt.exactTransferLog !== undefined ||
+            receipt.transactionHash !== undefined)
+            stateCorrupt("Provider direct owner-abandonment receipt is invalid.");
+        return;
+    }
     if (receipt.state !== "failed_before_effect" || receipt.blockNumberAtomic !== undefined ||
         receipt.exactTransferLog !== undefined || receipt.transactionHash !== undefined) {
         stateCorrupt("Provider direct orphan receipt has an unsupported terminal classification.");

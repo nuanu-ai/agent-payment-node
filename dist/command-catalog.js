@@ -14,7 +14,7 @@ const defaultProfile = { kind: "literal", value: "default" };
 const completedStates = { terminal: ["completed", "classified_failure"], non_terminal: [] };
 const mcpServerStates = { terminal: ["server_closed", "classified_failure"], non_terminal: ["serving"] };
 const directStates = {
-    terminal: ["completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert", "failed_proven_superseded"],
+    terminal: ["completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert", "failed_proven_superseded", "abandoned_unknown"],
     non_terminal: [
         "awaiting_approval", "started", "provider_pending", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
         "signed_not_submitted", "submitted_pending", "unknown_finality",
@@ -70,7 +70,7 @@ export const COMMAND_GROUPS = [
     { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
     { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
     { path: ["pay", "transfer"], summary: "Prepare and submit Base-USDC transfers.", kind: "group" },
-    { path: ["operation"], summary: "Read or recover durable operations.", kind: "group" },
+    { path: ["operation"], summary: "Read, recover or explicitly abandon eligible durable operations.", kind: "group" },
     { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ];
 const BASE_COMMANDS = [
@@ -160,8 +160,13 @@ const BASE_COMMANDS = [
     ], ["apn pay transfer approve --operation <operation-id> --rpc-url <https-base-rpc-url>"]),
     command(["operation", "status"], "apn operation status --operation <operation-id>", "Read one durable operation without network access.", [operationRequired], "local_read", "Reads public operation state and never resumes an effect.", "none", "Never.", allOperationStates, [
         { command_path: ["operation", "resume"], when: "When the returned state documents resumable recovery." },
+        { command_path: ["operation", "abandon"], when: "Only for a provider-atomic ambiguous effect with no transaction hash or provider recovery reference, after accepting the unresolved financial risk." },
         { command_path: ["receipt", "get"], when: "When the operation is terminal." },
     ], ["apn operation status --operation <operation-id>"]),
+    command(["operation", "abandon"], "apn operation abandon --operation <operation-id>", "Administratively terminalize one strictly eligible unknown provider effect.", [operationRequired], "local_write", "After exact owner confirmation, appends an abandonment transition and authoritative receipt without contacting a wallet, signer, provider or network.", "foreground_tty", "Requires the exact operation-bound phrase and acknowledgement that the financial outcome remains unknown.", { terminal: ["abandoned_unknown"], non_terminal: ["ambiguous_effect"] }, [
+        { command_path: ["operation", "status"], when: "To inspect the immutable administrative terminal state." },
+        { command_path: ["receipt", "get"], when: "To read the owner-acknowledgement receipt." },
+    ], ["apn operation abandon --operation <operation-id>"]),
     command(["operation", "resume"], "apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]", "Perform only the next legal durable recovery transition.", [operationRequired, rpcRequired, option("--wait-seconds", "integer_seconds", false, noDefault, ["canonical_integer_1_through_300", "x402_or_provider_approval_watch"], "operator_input")], "recovery", "Reuses protected effect material and may reconcile or resubmit only when the stored state permits.", "prior_operation_authorization", "Uses the authorization already bound to the durable operation; it cannot widen the frozen effect.", allOperationStates, [
         { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
         { command_path: ["receipt", "get"], when: "After terminal completion." },

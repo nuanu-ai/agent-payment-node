@@ -76,6 +76,7 @@ export type CommandRequest =
   }
   | { readonly command: "transfer.approve"; readonly operationId: string }
   | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number }
+  | { readonly command: "operation.abandon"; readonly operationId: string }
   | {
     readonly command: "operation.recover-provider-request";
     readonly operationId: string;

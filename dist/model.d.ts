@@ -3,7 +3,7 @@ import type { EvmDirectBinding } from "./evm-direct.js";
 import type { EvmTransferEvidence } from "./evm-ports.js";
 export type Address = `0x${string}`;
 export type Hex = `0x${string}`;
-export type OperationState = "awaiting_approval" | "started" | "provider_pending" | "provider_acknowledged" | "evidence_pending" | "ambiguous_effect" | "signed_not_submitted" | "submitted_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_provider_rejected" | "failed_confirmed_revert" | "failed_proven_superseded";
+export type OperationState = "awaiting_approval" | "started" | "provider_pending" | "provider_acknowledged" | "evidence_pending" | "ambiguous_effect" | "signed_not_submitted" | "submitted_pending" | "unknown_finality" | "abandoned_unknown" | "completed" | "failed_before_effect" | "failed_provider_rejected" | "failed_confirmed_revert" | "failed_proven_superseded";
 export interface Economics {
     readonly nonceAtomic: string;
     readonly gasLimitAtomic: string;

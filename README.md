@@ -85,7 +85,7 @@ apn mcp serve
 
 This source tree exposes catalog-derived tools for version, Keychain
 doctor, wallet, provider-permission and wallet-policy operations plus x402 inspect/prepare/approve,
-direct-transfer prepare/foreground handoff, operation status/resume and receipt
+direct-transfer prepare/foreground handoff, operation status/resume/abandon and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
 The manifest also covers explicit EVM assets, Solana, TRON, USDC gas fees and
 LI.FI route selection. Transfer, gasless and bridge approval through MCP hand off to the foreground
@@ -305,6 +305,26 @@ MetaMask, `operation recover-provider-request` binds that one request without
 creating, signing or submitting another transfer; ordinary `operation resume`
 then watches it and still requires the exact Base receipt and Transfer log.
 
+When a provider-atomic direct operation is `ambiguous_effect` and has neither a
+transaction hash nor a provider recovery reference, the owner may stop its APN
+lifecycle explicitly:
+
+```sh
+apn operation abandon --operation <operation-id>
+```
+
+The foreground terminal shows the full operation ID and fingerprint, profile,
+provider, amount, sender and recipient, and requires the exact
+`ABANDON APN UNKNOWN <fingerprint-suffix>` phrase. The resulting
+`abandoned_unknown` state and receipt record only the owner's acceptance of the
+continuing unknown financial outcome. They do not assert success, failure,
+cancellation, refund or no effect. This path never contacts a signer, wallet,
+provider or RPC; it refuses local, delegated, gasless, x402, bridge, known-hash
+and provider-reference operations. A separately prepared operation needs a new
+idempotency key and ordinary approval. Reusing the abandoned operation's old
+idempotency key still returns that immutable terminal operation. MCP exposes the
+command but only returns the exact foreground CLI handoff.
+
 Pinned `awal@2.12.1` parses its decimal argument through JavaScript floating-
 point arithmetic and also treats whole numbers greater than `100` as atomic
 units. Before durable start or child creation, the Coinbase adapter emulates
@@ -485,6 +505,7 @@ apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
 apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
 apn operation status --operation <operation-id>
+apn operation abandon --operation <operation-id>
 apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>]
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>

@@ -56,6 +56,7 @@ const EXPECTED_COMMANDS = [
   "pay transfer prepare",
   "pay transfer approve",
   "operation status",
+  "operation abandon",
   "operation resume",
   "operation recover-provider-request",
   "operation recover-transaction-settlement",

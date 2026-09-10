@@ -36,6 +36,10 @@ export async function serveMcpStdio() {
 async function callTool(tool, input, options) {
     try {
         const bound = bindMcpInput(tool.command, input);
+        if (bound.request.command === "operation.abandon") {
+            const handoff = createCliHandoff(["apn", "operation", "abandon", "--operation", bound.request.operationId]);
+            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review the unresolved financial risk and confirm abandonment in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
+        }
         if (bound.request.command === "gasless.transfer.approve") {
             const handoff = createCliHandoff(["apn", "gasless", "transfer", "approve", "--operation", bound.request.operationId]);
             return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review the USDC fee budget and persistent permission in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));

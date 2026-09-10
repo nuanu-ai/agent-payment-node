@@ -12,6 +12,7 @@ import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
+import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 export interface CoreDependencies {
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
     readonly gasless?: GaslessDependencies;
@@ -37,6 +38,7 @@ export interface CoreDependencies {
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+    readonly operationAbandonApproval?: OperationAbandonApprovalPort;
 }
 export declare class RuntimeContext {
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -63,6 +65,7 @@ export declare class RuntimeContext {
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+    readonly operationAbandonApproval?: OperationAbandonApprovalPort;
     private initialized;
     constructor(dependencies: CoreDependencies);
     ready(): Promise<void>;
@@ -74,6 +77,7 @@ export declare class RuntimeContext {
     requireProfileRepository(): ProviderProfileRepositoryPort;
     requireProviderRegistry(): ProviderRegistryPort;
     requireForegroundAuthentication(): ForegroundAuthenticationPort;
+    requireOperationAbandonApproval(): OperationAbandonApprovalPort;
     requireTransferApproval(): TransferApprovalPort;
     requireRpcUrl(): string;
     requireProviderAuthorizationStore(): ProviderAuthorizationStorePort;
