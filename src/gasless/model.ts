@@ -194,6 +194,9 @@ export interface GaslessPermissionInvalidation {
   readonly headBlock: GaslessBlock;
   readonly safeAccount: GaslessAccountState;
   readonly headAccount: GaslessAccountState;
+  /** Present together only for a known final seal whose EntryPoint nonce is invalidated. */
+  readonly userOperationMaterialHash?: string;
+  readonly userOperationHash?: Hex;
 }
 export interface GaslessObservation {
   readonly status: "not_found" | "pending" | "safe" | "unresolved" | "permissions_invalidated";

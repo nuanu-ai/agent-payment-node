@@ -5,7 +5,8 @@ import { assertGaslessEstimate } from "./economics.js";
 import { GaslessHttps } from "./https.js";
 import { observeGasless } from "./rpc-observe.js";
 import { rpcAddress, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, recheckBlock } from "./rpc-codec.js";
-import { gasPrices, readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "./rpc-state.js";
+import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "./rpc-state.js";
+import { bundlerGasPrices } from "./rpc-gas-prices.js";
 import { gaslessDeployment, gaslessProtocolHash } from "./registry.js";
 import { GASLESS_ESTIMATE_SIGNATURE, verifyGaslessBootstrap, verifyGaslessUserOperation } from "./signature.js";
 import { gaslessChain, gaslessFailure, gaslessSame } from "./validation.js";
@@ -33,6 +34,7 @@ export function gaslessRpcFactory(environment) {
     };
 }
 export class GaslessRpc {
+    transport;
     chainId;
     rpcOrigin;
     rpcEndpointHash;
@@ -45,6 +47,7 @@ export class GaslessRpc {
     rpcCall;
     bundlerCall;
     constructor(chainId, rpcUrl, bundlerUrl, transport = new GaslessHttps()) {
+        this.transport = transport;
         this.chainId = gaslessChain(chainId, "APN_RPC_CONFIG");
         this.deployment = gaslessDeployment(this.chainId);
         const rpc = endpoint(rpcUrl), bundler = endpoint(bundlerUrl ?? this.deployment.publicBundlerUrl);
@@ -54,14 +57,17 @@ export class GaslessRpc {
         this.bundlerOrigin = bundler.origin;
         this.rpcEndpointHash = sha256(this.rpcEndpoint);
         this.bundlerEndpointHash = sha256(this.bundlerEndpoint);
-        this.rpcCall = async (method, params) => await this.call("rpc", method, params, transport);
-        this.bundlerCall = async (method, params) => await this.call("bundler", method, params, transport);
+        this.rpcCall = async (method, params) => await this.call("rpc", method, params, this.transport);
+        this.bundlerCall = async (method, params) => await this.call("bundler", method, params, this.transport);
     }
     async assertChain() {
         const [rpcChain, bundlerChain, supported] = await Promise.all([
             this.rpcCall("eth_chainId", []), this.bundlerCall("eth_chainId", []),
             this.bundlerCall("eth_supportedEntryPoints", []),
         ]);
+        this.validateChain(rpcChain, bundlerChain, supported);
+    }
+    validateChain(rpcChain, bundlerChain, supported) {
         if (rpcQuantity(rpcChain) !== BigInt(this.chainId) || rpcQuantity(bundlerChain) !== BigInt(this.chainId)) {
             gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
         }
@@ -76,8 +82,9 @@ export class GaslessRpc {
             }))
             gaslessFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "gasless_entrypoint_unavailable");
     }
-    async snapshot(owner) {
-        await this.assertChain();
+    async snapshot(owner, approvedGas) {
+        const [rpcChain, bundler] = await Promise.all([this.rpcCall("eth_chainId", []), this.bundlerState()]);
+        this.validateChain(rpcChain, bundler[0], bundler[1]);
         const at = await rpcBlock(this.rpcCall, "latest");
         const [account, feeConfiguration, priority] = await Promise.all([
             readAccountAt(this.rpcCall, this.deployment, owner, at.block, true),
@@ -88,7 +95,7 @@ export class GaslessRpc {
         if (account.pendingEoaNonceAtomic !== account.eoaNonceAtomic) {
             gaslessFailure("APN_OPERATION_BLOCKED", "gasless_nonce_drift");
         }
-        const prices = gasPrices(at.raw.baseFeePerGas, priority);
+        const prices = bundlerGasPrices(bundler[2], at.raw.baseFeePerGas, priority, approvedGas);
         await recheckBlock(this.rpcCall, at.block);
         return { chainId: this.chainId, rpcOrigin: this.rpcOrigin, rpcEndpointHash: this.rpcEndpointHash,
             bundlerOrigin: this.bundlerOrigin, bundlerEndpointHash: this.bundlerEndpointHash, block: at.block,
@@ -97,6 +104,37 @@ export class GaslessRpc {
             allowanceAtomic: account.allowanceAtomic, permitNonceAtomic: account.permitNonceAtomic,
             entryPointNonceAtomic: account.entryPointNonceAtomic, eoaNonceAtomic: account.eoaNonceAtomic,
             pendingEoaNonceAtomic: account.pendingEoaNonceAtomic, delegation: account.delegation, feeConfiguration, ...prices };
+    }
+    /** One bounded, read-only HTTP batch; no effect call can enter this batch. */
+    async bundlerState() {
+        const methods = ["eth_chainId", "eth_supportedEntryPoints", "pimlico_getUserOperationGasPrice"];
+        const requests = methods.map(method => ({ jsonrpc: "2.0", id: (++this.sequence).toString(), method, params: [] }));
+        let response;
+        try {
+            response = await this.transport.request(this.bundlerEndpoint, "POST", canonicalJson(requests), MAX_RESPONSE, "APN_RPC_CONFIG");
+        }
+        catch {
+            throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable.");
+        }
+        if (response.status !== 200)
+            gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_HTTP_status");
+        const rows = rpcJson(response.body, MAX_RESPONSE);
+        if (!Array.isArray(rows) || rows.length !== requests.length)
+            gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
+        const results = new Map();
+        for (const value of rows) {
+            const row = rpcRecord(value), id = row.id;
+            const result = Object.hasOwn(row, "result"), error = Object.hasOwn(row, "error");
+            if (typeof id !== "string" || !requests.some(request => request.id === id) || results.has(id) ||
+                row.jsonrpc !== "2.0" || result === error ||
+                !exactKeys(row, result ? ["jsonrpc", "id", "result"] : ["jsonrpc", "id", "error"])) {
+                gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
+            }
+            if (error)
+                gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_provider_response");
+            results.set(id, row.result);
+        }
+        return requests.map(request => results.get(request.id));
     }
     async estimate(intent, bootstrap) {
         this.assertIntent(intent);

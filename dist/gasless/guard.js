@@ -16,7 +16,7 @@ export async function guardGaslessOperation(state, rpc, op, now) {
         rpc.rpcEndpointHash !== s.rpcEndpointHash || rpc.bundlerOrigin !== s.bundlerOrigin ||
         rpc.bundlerEndpointHash !== s.bundlerEndpointHash)
         gaslessFailure("APN_RPC_CONFIG", "gasless_endpoint_identity");
-    assertGaslessSnapshot(op.intent, await rpc.snapshot(op.intent.owner.address));
+    assertGaslessSnapshot(op.intent, await rpc.snapshot(op.intent.owner.address, op.intent.gas));
     await assertGaslessOwner(state, op.intent);
     assertGaslessRemaining(op, now());
 }

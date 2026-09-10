@@ -329,6 +329,8 @@ export declare const permissionInvalidationSchema: z.ZodObject<{
             expected: "expected";
         }>;
     }, z.core.$strict>;
+    userOperationMaterialHash: z.ZodOptional<z.ZodString>;
+    userOperationHash: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const observationSchema: z.ZodObject<{
     status: z.ZodEnum<{
@@ -457,6 +459,8 @@ export declare const observationSchema: z.ZodObject<{
                 expected: "expected";
             }>;
         }, z.core.$strict>;
+        userOperationMaterialHash: z.ZodOptional<z.ZodString>;
+        userOperationHash: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const consentSchema: z.ZodObject<{
@@ -770,6 +774,8 @@ export declare const transitionSchema: z.ZodObject<{
                     expected: "expected";
                 }>;
             }, z.core.$strict>;
+            userOperationMaterialHash: z.ZodOptional<z.ZodString>;
+            userOperationHash: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     settlement: z.ZodNullable<z.ZodObject<{
@@ -1171,6 +1177,8 @@ export declare const operationSchema: z.ZodObject<{
                         expected: "expected";
                     }>;
                 }, z.core.$strict>;
+                userOperationMaterialHash: z.ZodOptional<z.ZodString>;
+                userOperationHash: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
         settlement: z.ZodNullable<z.ZodObject<{
@@ -1471,6 +1479,8 @@ export declare const operationSchema: z.ZodObject<{
                     expected: "expected";
                 }>;
             }, z.core.$strict>;
+            userOperationMaterialHash: z.ZodOptional<z.ZodString>;
+            userOperationHash: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     settlement: z.ZodNullable<z.ZodObject<{

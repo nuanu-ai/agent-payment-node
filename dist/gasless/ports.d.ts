@@ -1,6 +1,6 @@
 import type { Address, Hex } from "../model.js";
 import type { GaslessOperationRecord, GaslessRole } from "./operation-model.js";
-import type { GaslessAuthorization, GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessIntent, GaslessObservation, GaslessOwner, GaslessSnapshot, GaslessUserOperation } from "./model.js";
+import type { GaslessAuthorization, GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessGas, GaslessIntent, GaslessObservation, GaslessOwner, GaslessSnapshot, GaslessUserOperation } from "./model.js";
 interface GaslessMaterialBinding {
     readonly schemaVersion: "apn.gasless-effect.v1";
     readonly profileHash: string;
@@ -33,8 +33,8 @@ export interface GaslessRpcPort {
     readonly bundlerOrigin: string;
     readonly bundlerEndpointHash: string;
     assertChain(): Promise<void>;
-    /** Verifies both endpoint chains and EntryPoint support before fresh canonical state reads. */
-    snapshot(owner: Address): Promise<GaslessSnapshot>;
+    /** Verifies endpoints, protocol and fresh fees; an approved offer is checked without alteration. */
+    snapshot(owner: Address, approvedGas?: GaslessGas): Promise<GaslessSnapshot>;
     estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial): Promise<GaslessEstimate>;
     send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex>;
     observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;

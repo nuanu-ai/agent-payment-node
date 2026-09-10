@@ -1,6 +1,6 @@
 import { assertGaslessEstimate } from "./economics.js";
 import type { GaslessEffect, GaslessMutable, GaslessOperationRecord } from "./operation-model.js";
-import { assertGaslessPermissionClosure, GASLESS_PERMISSIONS_INVALIDATED } from "./permission-invalidation.js";
+import { assertGaslessPermissionClosure } from "./permission-invalidation.js";
 import { validateGaslessSettlement } from "./settlement-validation.js";
 import { gaslessFailure, gaslessSame } from "./validation.js";
 
@@ -34,7 +34,7 @@ export function validateGaslessMutable(op: GaslessOperationRecord, s: GaslessMut
   }
   if (s.state === "failed_permissions_invalidated") {
     assertGaslessPermissionClosure(op, s);
-    if (s.failure !== GASLESS_PERMISSIONS_INVALIDATED) corrupt();
+    if (s.failure !== s.observation!.reason) corrupt();
   }
   for (const p of [observed, s.settlement]) {
     if (p === null) continue;

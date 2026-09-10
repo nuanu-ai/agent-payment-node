@@ -55,7 +55,8 @@ export const settlementSchema = z.strictObject({ chainId: chainSchema, userOpera
   effectAccount: accountSchema, safeAccount: accountSchema, accounting: accountingSchema });
 export const permissionInvalidationSchema = z.strictObject({ chainId: chainSchema, intentHash: hashSchema,
   bootstrapMaterialHash: hashSchema, protocolHash: hashSchema, safeBlock: blockSchema, headBlock: blockSchema,
-  safeAccount: accountSchema, headAccount: accountSchema });
+  safeAccount: accountSchema, headAccount: accountSchema,
+  userOperationMaterialHash: hashSchema.optional(), userOperationHash: wordSchema.optional() });
 export const observationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "safe", "unresolved", "permissions_invalidated"]),
   transactionHash: wordSchema.nullable(), settlement: settlementSchema.nullable(), cursor: cursorSchema,
   evidenceHash: hashSchema.nullable(), reason: reasonSchema.nullable(),

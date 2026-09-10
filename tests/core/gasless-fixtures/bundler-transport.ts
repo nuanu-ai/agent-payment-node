@@ -31,19 +31,32 @@ export async function bundledGaslessFixture(root: string) {
     baseFeePerGas: "0xf4240" };
   const calls: Array<{ method: string; bundler: boolean; afterApproval: boolean }> = [];
   let approved = false, limit = 20, intent: GaslessIntent | undefined;
-  let fault: "" | "chain" | "entrypoint" | "balance" | "allowance" | "nonce" = "";
+  let fault: "" | "chain" | "entrypoint" | "balance" | "allowance" | "nonce" | "fees" = "";
+  let batchReply: (rows: Json[]) => unknown = rows => rows;
+  let feeQuote: unknown;
   const transport: GaslessTransport = { request: async (endpoint, method, body) => {
     assert.equal(method, "POST"); assert.notEqual(body, null);
-    const request = JSON.parse(body!) as Json, bundler = endpoint === BUNDLER_URL;
+    const request = JSON.parse(body!) as Json | Json[], bundler = endpoint === BUNDLER_URL;
     assert.ok(bundler || endpoint === RPC_URL);
-    calls.push({ method: request.method, bundler, afterApproval: approved });
+    calls.push({ method: Array.isArray(request) ? "read_only_batch" : request.method, bundler, afterApproval: approved });
     if (bundler && calls.filter(c => c.bundler).length > limit) return { status: 429, body: "fixture limit" };
+    if (Array.isArray(request)) {
+      assert.equal(bundler, true); assert.equal(request.length, 3);
+      const rows = request.map(row => ({ jsonrpc: "2.0", id: row.id, result: response(row.method, row.params) }));
+      return { status: 200, body: JSON.stringify(batchReply(rows)) };
+    }
     const result = response(request.method, request.params as readonly unknown[]);
     return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
   } };
   function response(method: string, params: readonly unknown[]): unknown {
     if (method === "eth_chainId") return fault === "chain" ? "0x1" : "0x2105";
     if (method === "eth_supportedEntryPoints") return fault === "entrypoint" ? [] : [row.entryPoint];
+    if (method === "pimlico_getUserOperationGasPrice") return feeQuote ?? Object.fromEntries(
+      ["slow", "standard", "fast"].map((name, n) => {
+        const priority = fault === "fees" ? 1_000_000_000n : BigInt(200_000 + n * 50_000);
+        return [name, { maxFeePerGas: `0x${(2_000_000n + priority).toString(16)}`,
+          maxPriorityFeePerGas: `0x${priority.toString(16)}` }];
+      }));
     if (method === "eth_getBlockByNumber") { assert.ok(["latest", "safe", "0x64"].includes(params[0] as string)); return at; }
     if (method === "eth_maxPriorityFeePerGas") return "0x186a0";
     if (method === "eth_getBalance") return "0x0";
@@ -83,6 +96,8 @@ export async function bundledGaslessFixture(root: string) {
     clock: { now: () => new Date(s.now) } });
   return { ...s, core, rpc, calls, setLimit: (value: number) => { limit = value; },
     setFault: (value: typeof fault) => { fault = value; },
+    setBatchReply: (value: typeof batchReply) => { batchReply = value; },
+    setFeeQuote: (value: unknown) => { feeQuote = value; },
     prepare: async () => {
       const result = await core.execute({ command: "gasless.transfer.prepare", profile: s.profile,
         request: s.request, idempotencyKey: "bundler-request-budget-0001" });

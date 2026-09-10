@@ -38,7 +38,12 @@ export async function observeGasless(context: GaslessObservationContext, intent:
   try { candidate = await bundlerCandidate(context, intent, userOperationHash); }
   catch { /* A locator is never authoritative; canonical EntryPoint scanning follows. */ }
   if (candidate !== null) return await inspectSafely(context, intent, userOperationHash, candidate, cursor);
-  return await scan(context, intent, userOperationHash, cursor);
+  const scanned = await scan(context, intent, userOperationHash, cursor);
+  if (scanned.status === "not_found") {
+    const invalidation = await observeGaslessBootstrap(context, intent, identity, scanned.cursor);
+    if (invalidation.status === "permissions_invalidated") return invalidation;
+  }
+  return scanned;
 }
 
 async function scan(context: GaslessObservationContext, intent: GaslessIntent, userOperationHash: Hex,

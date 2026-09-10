@@ -1,4 +1,4 @@
-import { assertGaslessPermissionClosure, GASLESS_PERMISSIONS_INVALIDATED } from "./permission-invalidation.js";
+import { assertGaslessPermissionClosure } from "./permission-invalidation.js";
 import { observationSchema } from "./schema.js";
 import { assertGaslessSettlementContinuation, validateGaslessSettlement } from "./settlement-validation.js";
 import { gaslessSame } from "./validation.js";
@@ -53,7 +53,7 @@ export class GaslessObservationService {
         }
         if (result.status === "permissions_invalidated") {
             return await this.save(op, { state: "failed_permissions_invalidated", observation: result,
-                cursor: result.cursor, failure: GASLESS_PERMISSIONS_INVALIDATED });
+                cursor: result.cursor, failure: result.reason });
         }
         const proof = result.settlement;
         if (proof !== null) {
