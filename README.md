@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.9 targets Apple Silicon macOS and supports explicit local-wallet Base,
+APN 0.5.10 targets Apple Silicon macOS and supports explicit local-wallet Base,
 Ethereum and Arbitrum One native ETH / arbitrary ERC-20 direct transfers, plus
 independently network-bound canonical-USDC EIP-3009 x402. It does not require an
 Apple Developer identity, an app bundle, a daemon, a browser extension, or the
@@ -46,12 +46,13 @@ apn mcp config
 apn mcp serve
 ```
 
-This source tree exposes twenty-four catalog-derived tools: version, Keychain
+This source tree exposes twenty-eight catalog-derived tools: version, Keychain
 doctor, wallet, provider-permission and wallet-policy operations plus x402 inspect/prepare/approve,
 direct-transfer prepare/foreground handoff, operation status/resume and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
-The two added tools select an explicit asset for balance and direct preparation;
-direct approval still hands off to a foreground CLI terminal without payment.
+The asset-aware tools select an explicit asset for balance and direct
+preparation; direct approval still hands off to a foreground CLI terminal
+without payment.
 
 ## Supply-chain verification
 
@@ -536,7 +537,7 @@ live provider acceptance, payment proof or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
 are separately recorded release gates. The local stdio MCP surface projects
-the same seventeen catalog-selected wallet, policy, payment, operation and
+the same twenty-eight catalog-selected wallet, policy, payment, operation and
 receipt commands through the shared binder/runtime/core path. Direct approval
 remains foreground CLI only. Coinbase x402 source and deterministic product
 proof are included; live Coinbase/provider and paid acceptance are recorded as
