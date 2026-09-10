@@ -25,7 +25,7 @@ export function metaMaskGaslessProviderObservation(value: unknown,
   const p = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"], "mm_gasless_evidence_invalid");
   mmIso(p.observedAt, "mm_gasless_evidence_invalid");
   if (p.requestIdHash !== mmPrivateHash("request-id", op.intent.requestId) ||
-    !["pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(String(p.status))) mmFail("mm_gasless_evidence_invalid");
+    !["awaiting_approval", "pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(String(p.status))) mmFail("mm_gasless_evidence_invalid");
   if (p.txHash !== null) mmHex(p.txHash, 32, "mm_gasless_evidence_invalid");
   return p as unknown as MetaMaskGaslessProviderObservation;
 }
@@ -127,7 +127,8 @@ export class MetaMaskGaslessObservationService {
     }
     const usableHint = provider !== null && ["broadcasted", "confirmed"].includes(provider.status) &&
       provider.txHash !== null && provider.txHash === chain.observation.candidateTxHash;
-    const reason = providerFailure ?? (provider?.status === "failed" ? "mm_gasless_provider_failed" :
+    const reason = providerFailure ?? (provider?.status === "awaiting_approval" ? "mm_gasless_provider_approval" :
+      provider?.status === "failed" ? "mm_gasless_provider_failed" :
       provider?.status === "unavailable" ? "mm_gasless_provider_unavailable" : "mm_gasless_pending");
     return { ...base, state: usableHint ? "submitted_pending" : "unknown_finality", failure: mmFailure(reason) };
   }

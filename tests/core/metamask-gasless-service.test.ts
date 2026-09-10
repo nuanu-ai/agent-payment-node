@@ -110,6 +110,34 @@ test("MM canonical revert survives failed reads and later settles another transa
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("MM provider MFA remains visible through restart and completes by observation without resubmission", async () => {
+  const root = await sandbox();
+  try {
+    const f = await mmFixture(root), { id } = await f.prepare();
+    f.rpc.phase = "pending"; f.rpc.candidate = null;
+    f.provider.status = "awaiting_approval"; f.provider.txHash = null;
+    const approved = await f.core.execute({ command: "gasless.transfer.approve", operationId: id });
+    assert.equal(approved.ok, true, JSON.stringify(approved.error));
+    const saved = await f.record(id);
+    assert.equal(saved.state, "unknown_finality"); assert.equal(saved.failure?.reason, "mm_gasless_provider_approval");
+    assert.equal(saved.submissionAttempts, 1); assert.equal(saved.terminal, false);
+    const actions = (approved.operation as { next_actions: string[] }).next_actions;
+    assert.match(actions[0]!, /existing transaction in MetaMask Mobile or the email/u);
+    assert.equal(actions[1], `apn operation resume --operation ${id}`);
+    f.now.setTime(f.now.getTime() + 600_000);
+    const resumed = await f.restart().execute({ command: "operation.resume", operationId: id });
+    assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
+    assert.equal((await f.record(id)).failure?.reason, "mm_gasless_provider_approval");
+    assert.equal((await f.restart().execute({ command: "receipt.get", operationId: id })).ok, true);
+    f.provider.status = "confirmed"; f.provider.txHash = mmTestWord("transaction-a");
+    f.rpc.phase = "success"; f.rpc.candidate = f.provider.txHash;
+    const completed = await f.restart().execute({ command: "operation.resume", operationId: id });
+    assert.equal(completed.ok, true, JSON.stringify(completed.error));
+    assert.equal((await f.record(id)).state, "completed");
+    assert.equal(f.provider.submissions.length, 1); assert.equal(f.approval.calls.length, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("MM pre-effect expiry, refusal, clock rollback and state drift fail without submission", async () => {
   const root = await sandbox();
   try {

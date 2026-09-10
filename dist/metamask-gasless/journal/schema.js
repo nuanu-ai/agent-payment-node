@@ -121,7 +121,7 @@ function providerObservation(value, intent, at) {
         return null;
     const p = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"]);
     if (time(mmIso(p.observedAt)) > time(at) || p.requestIdHash !== mmPrivateHash("request-id", intent.requestId) ||
-        !["pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(p.status))
+        !["awaiting_approval", "pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(p.status))
         corrupt();
     if (p.txHash !== null)
         mmHex(p.txHash, 32);

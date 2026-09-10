@@ -150,7 +150,7 @@ export interface MetaMaskGaslessApproval {
 export interface MetaMaskGaslessProviderObservation {
   readonly observedAt: string;
   readonly requestIdHash: string;
-  readonly status: "pending" | "broadcasted" | "confirmed" | "failed" | "unavailable";
+  readonly status: "awaiting_approval" | "pending" | "broadcasted" | "confirmed" | "failed" | "unavailable";
   readonly txHash: Hex | null;
 }
 export interface MetaMaskGaslessCursor {

@@ -208,17 +208,16 @@ function providerObservation(value, intent, now, reason) {
         !isPlainRecord(value.tx) || String(value.tx.from).toLowerCase() !== intent.binding.address || value.tx.chainId !== intent.request.chainId) {
         mmFail(reason);
     }
-    const allowed = new Set(["requestId", "kind", "status", "tx", "txApprovalLink", "signedTransaction", "broadcastId", "txHash", "txBlock",
-        "failureCode", "failureDescription", "approval"]);
-    if (Object.keys(value).some((key) => !allowed.has(key)))
-        mmFail(reason);
+    // The SDK preserves backend metadata. Extract only the bound observation fields;
+    // approval details, links, signatures and any future metadata never leave this helper.
     const txHash = value.txHash === undefined ? null : mmHex(value.txHash, 32, reason);
-    const pending = ["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING"];
+    const pending = ["EVALUATING", "SIGNING", "BROADCASTING"];
     const failed = ["DENIED", "EXPIRED", "FAILED", "BROADCAST_FAILED"];
     const unavailableStatuses = ["BROADCAST_TRACKING_EXPIRED", "CONFIRMATION_TRACKING_EXPIRED"];
-    const status = pending.includes(value.status) ? "pending" : value.status === "BROADCASTED" ? "broadcasted" :
-        value.status === "CONFIRMED" ? "confirmed" : failed.includes(value.status) ? "failed" :
-            unavailableStatuses.includes(value.status) ? "unavailable" : mmFail(reason);
+    const status = value.status === "AWAITING_MFA" ? "awaiting_approval" : pending.includes(value.status) ? "pending" :
+        value.status === "BROADCASTED" ? "broadcasted" :
+            value.status === "CONFIRMED" ? "confirmed" : failed.includes(value.status) ? "failed" :
+                unavailableStatuses.includes(value.status) ? "unavailable" : mmFail(reason);
     return { observedAt: now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId), status, txHash };
 }
 function unavailable(intent, now) {
