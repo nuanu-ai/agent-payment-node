@@ -41,6 +41,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const asset of ["native", 
   const setup = evmCore(temporary.root);
   setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
+  if (chainId === 42161) setup.rpc.fees = { ...setup.rpc.fees, maxPriorityFeePerGasAtomic: "0" };
   const wallet = await setup.core.wallet.ensure("default") as { address: Address };
   setup.rpc.sender = wallet.address;
   const request = { ...EVM_REQUEST, asset: { chainId, token: asset }, amount: asset === "native" ? "0.000001" : "1.25" };
@@ -109,7 +110,7 @@ test("Arbitrum signs the frozen fee envelope when the fresh gas estimate and sug
   assert.equal(transaction.nonce?.toString(), setup.rpc.nonceAtomic);
   assert.equal(transaction.gas?.toString(), frozenFees.gasLimitAtomic);
   assert.equal(transaction.maxFeePerGas?.toString(), frozenFees.maxFeePerGasAtomic);
-  assert.equal(transaction.maxPriorityFeePerGas?.toString(), frozenFees.maxPriorityFeePerGasAtomic);
+  assert.equal((transaction.maxPriorityFeePerGas ?? 0n).toString(), frozenFees.maxPriorityFeePerGasAtomic);
 });
 
 test("EVM approval rejects only a changed nonce, insufficient frozen gas, or a base fee above the signed ceiling", async () => {
