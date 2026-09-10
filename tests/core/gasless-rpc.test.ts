@@ -243,8 +243,31 @@ for (let type = 0; type <= 4; type += 1) test(`gasless outer type ${type} is rec
   const signed = await signedOuter(type);
   const verified = await verifyGaslessOuterTransaction(signed.rpc, 8453, signed.hash);
   assert.equal(verified.from, OUTER.address); assert.equal(verified.to, gaslessDeployment(8453).entryPoint);
+  if (type === 4) {
+    assert.ok([signed.rpc.r, signed.rpc.s].some(value => value.length < 66));
+    assert.ok([signed.rpc.authorizationList[0].r, signed.rpc.authorizationList[0].s]
+      .some(value => value.length < 66));
+  }
+  const padded = { ...signed.rpc, r: word(BigInt(signed.rpc.r)), s: word(BigInt(signed.rpc.s)),
+    ...(type === 4 ? { authorizationList: signed.rpc.authorizationList.map((auth: Json) => ({ ...auth,
+      r: word(BigInt(auth.r)), s: word(BigInt(auth.s)) })) } : {}) };
+  assert.deepEqual(await verifyGaslessOuterTransaction(padded, 8453, signed.hash), verified);
   await assert.rejects(verifyGaslessOuterTransaction({ ...signed.rpc, input: "0x12345679" }, 8453, signed.hash),
     { code: "APN_RPC_PROTOCOL" });
+});
+
+test("gasless outer and authorization scalars remain bounded and authenticated", async () => {
+  const signed = await signedOuter(4);
+  for (const location of ["outer", "authorization"] as const) for (const key of ["r", "s"] as const) {
+    for (const value of ["0x0", word(0n), "0x01", `0x1${"0".repeat(64)}`, "0x", "0xgg", null, 1,
+      `0x${"f".repeat(64)}`]) {
+      const changed = structuredClone(signed.rpc);
+      const target = location === "outer" ? changed : changed.authorizationList[0];
+      target[key] = value;
+      await assert.rejects(verifyGaslessOuterTransaction(changed, 8453, signed.hash),
+        { code: "APN_RPC_PROTOCOL" }, `${location}.${key}=${String(value)}`);
+    }
+  }
 });
 
 test("gasless observation reports bootstrap-only permission without inventing a payment hash", async () => {
@@ -520,17 +543,18 @@ async function signedOuter(type: number) {
   else if (type === 3) transaction = { ...common, ...fees, type: "eip4844", accessList: [], maxFeePerBlobGas: 100n,
     blobVersionedHashes: [`0x01${"67".repeat(31)}`] };
   else transaction = { ...common, ...fees, type: "eip7702", accessList: [], authorizationList: [
-    await OUTER.signAuthorization({ chainId: 8453, contractAddress: deployment.delegate, nonce: 0 })] };
+    await OUTER.signAuthorization({ chainId: 8453, contractAddress: deployment.delegate, nonce: 33 })] };
   const raw = await OUTER.signTransaction(transaction), parsed = parseTransaction(raw) as Json, hash = keccak256(raw);
   const rpc = { hash, chainId: "0x2105", type: quantity(type), nonce: "0x7", from: OUTER.address, to: common.to,
-    gas: quantity(common.gas), value: "0x0", input: common.data, r: parsed.r, s: parsed.s,
+    gas: quantity(common.gas), value: "0x0", input: common.data, r: quantity(BigInt(parsed.r)), s: quantity(BigInt(parsed.s)),
     v: quantity(parsed.v ?? BigInt(parsed.yParity)), ...(type === 0 ? {} : { yParity: quantity(parsed.yParity),
       accessList: parsed.accessList ?? [] }), ...(type < 2 ? { gasPrice: quantity(fees.maxFeePerGas) } : {
       maxFeePerGas: quantity(fees.maxFeePerGas), maxPriorityFeePerGas: "0x0" }), ...(type === 3 ? {
       maxFeePerBlobGas: "0x64", blobVersionedHashes: parsed.blobVersionedHashes } : {}), ...(type === 4 ? {
       authorizationList: parsed.authorizationList.map((authorization: Json) => ({ ...authorization,
         chainId: quantity(authorization.chainId), nonce: quantity(authorization.nonce ?? 0),
-        yParity: quantity(authorization.yParity) })) } : {}) };
+        yParity: quantity(authorization.yParity), r: quantity(BigInt(authorization.r)),
+        s: quantity(BigInt(authorization.s)) })) } : {}) };
   return { hash, rpc };
 }
 

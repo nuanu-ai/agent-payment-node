@@ -27,7 +27,7 @@ export async function verifyGaslessOuterTransaction(raw: Record<string, unknown>
   const to = rpcAddress(raw.to), from = rpcAddress(raw.from);
   if (type > 4n || rpcHex(raw.hash, 32, 32) !== expectedHash) fail("gasless_outer_chain_or_hash");
   const data = rpcHex(raw.input, 256 * 1024), gas = rpcQuantity(raw.gas), value = rpcQuantity(raw.value);
-  const r = rpcHex(raw.r, 32, 32), s = rpcHex(raw.s, 32, 32), v = rpcQuantity(raw.v ?? raw.yParity);
+  const r = signatureScalar(raw.r), s = signatureScalar(raw.s), v = rpcQuantity(raw.v ?? raw.yParity);
   assertSignature(r, s);
   let y: number;
   if (type === 0n) {
@@ -68,7 +68,7 @@ export async function verifyGaslessOuterTransaction(raw: Record<string, unknown>
       }
       serializable = { ...feeFields, type: "eip7702", authorizationList: raw.authorizationList.map((item) => {
         const auth = rpcRecord(item), parity = safeNumber(rpcQuantity(auth.yParity));
-        const authR = rpcHex(auth.r, 32, 32), authS = rpcHex(auth.s, 32, 32);
+        const authR = signatureScalar(auth.r), authS = signatureScalar(auth.s);
         if (parity !== 0 && parity !== 1) fail("gasless_outer_authorization_parity");
         assertSignature(authR, authS);
         return { chainId: safeNumber(rpcQuantity(auth.chainId)), address: rpcAddress(auth.address),
@@ -87,6 +87,12 @@ export async function verifyGaslessOuterTransaction(raw: Record<string, unknown>
   return { typeAtomic: type.toString(), from, to, nonceAtomic: String(nonce), valueAtomic: value.toString(),
     dataHash: sha256(Buffer.from(data.slice(2), "hex")), gasLimitAtomic: gas.toString(),
     maxFeePerGasAtomic: maxFee.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
+}
+
+function signatureScalar(value: unknown): Hex {
+  // RPC signatures use quantities; retain fixed-width responses accepted by older runtimes.
+  if (typeof value === "string" && value.length === 66) return rpcHex(value, 32, 32);
+  return `0x${rpcQuantity(value).toString(16).padStart(64, "0")}`;
 }
 
 function assertSignature(r: Hex, s: Hex): void {
