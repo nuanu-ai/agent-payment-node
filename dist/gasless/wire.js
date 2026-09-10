@@ -1,7 +1,7 @@
 import { concat, decodeFunctionData, encodeFunctionData, hashTypedData, numberToHex, padHex } from "viem";
 import { GASLESS_ACCOUNT_ABI, GASLESS_TOKEN_ABI } from "./abi.js";
 import { GASLESS_FACTORY, GASLESS_MAX_UINT, GASLESS_ZERO_ADDRESS, gaslessAddress, gaslessExact, gaslessFailure, gaslessHex, gaslessSame, gaslessUint } from "./validation.js";
-const WIRE_FIELDS = ["sender", "nonce", "factory", "factoryData", "callData", "callGasLimit",
+const WIRE_FIELDS = ["sender", "nonce", "callData", "callGasLimit",
     "verificationGasLimit", "preVerificationGas", "maxFeePerGas", "maxPriorityFeePerGas", "paymaster",
     "paymasterVerificationGasLimit", "paymasterPostOpGasLimit", "paymasterData", "signature"];
 const AUTH_FIELDS = ["chainId", "address", "nonce", "yParity", "r", "s"];
@@ -68,8 +68,7 @@ export function gaslessUserOperation(intent, bootstrap, signature) {
     const base = {
         sender: intent.owner.address,
         nonce: quantity(intent.initialSnapshot.entryPointNonceAtomic),
-        factory: GASLESS_FACTORY,
-        factoryData: "0x",
+        ...(usesEip7702Marker(intent) ? { factory: GASLESS_FACTORY, factoryData: "0x" } : {}),
         callData: intent.callData,
         callGasLimit: quantity(intent.gas.callGasLimit),
         verificationGasLimit: quantity(intent.gas.verificationGasLimit),
@@ -105,7 +104,8 @@ export function gaslessUserOperationTypedData(intent, wire) {
         message: {
             sender: validated.sender,
             nonce: BigInt(validated.nonce),
-            initCode: intent.delegate,
+            // EntryPoint substitutes the delegate only when initCode carries the 7702 marker.
+            initCode: validated.factory === undefined ? "0x" : intent.delegate,
             callData: validated.callData,
             accountGasLimits: concat([padHex(validated.verificationGasLimit, { size: 16 }),
                 padHex(validated.callGasLimit, { size: 16 })]),
@@ -123,7 +123,8 @@ export function gaslessUserOperationHash(intent, wire) {
 }
 export function validateGaslessWire(intent, value) {
     const expectsAuthorization = intent.initialSnapshot.delegation === "empty";
-    const fields = expectsAuthorization ? [...WIRE_FIELDS, "eip7702Auth"] : WIRE_FIELDS;
+    const fields = [...WIRE_FIELDS, ...(usesEip7702Marker(intent) ? ["factory", "factoryData"] : []),
+        ...(expectsAuthorization ? ["eip7702Auth"] : [])];
     const record = gaslessExact(value, fields, "APN_PROVIDER_PROTOCOL");
     const wire = record;
     validateGaslessBatch(intent);
@@ -138,6 +139,11 @@ export function validateGaslessWire(intent, value) {
 export function gaslessEnvelopeBinding(intent) {
     const { unsignedEnvelopeHash: _hash, ...body } = intent;
     return { schemaVersion: "apn.gasless-envelope.v1", ...body, permitDeadlineAtomic: GASLESS_MAX_UINT.toString() };
+}
+function usesEip7702Marker(intent) {
+    if (intent.wireVersion !== undefined && intent.wireVersion !== "apn.gasless-wire.v2")
+        wireFailure();
+    return intent.wireVersion === undefined || intent.initialSnapshot.delegation === "empty";
 }
 function parsePaymasterData(intent, value) {
     const data = gaslessHex(value, 118, 118);

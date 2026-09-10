@@ -55,7 +55,8 @@ export const snapshotSchema = z.strictObject({ ...accountFields, chainId: chainS
     rpcOrigin: originSchema, rpcEndpointHash: hashSchema, bundlerOrigin: originSchema, bundlerEndpointHash: hashSchema,
     block: blockSchema, protocolHash: hashSchema, token: addressSchema, feeConfiguration: feeConfigurationSchema,
     baseFeePerGas: uintSchema, maxFeePerGas: uintSchema, maxPriorityFeePerGas: uintSchema });
-export const intentSchema = z.strictObject({ profile: ownerSchema.shape.profile, request: requestSchema,
+export const intentSchema = z.strictObject({ wireVersion: z.literal("apn.gasless-wire.v2").optional(),
+    profile: ownerSchema.shape.profile, request: requestSchema,
     owner: ownerSchema, providerBinding: providerBindingSchema, initialSnapshot: snapshotSchema, gas: gasSchema,
     token: addressSchema, tokenDomain: tokenDomainSchema, paymaster: addressSchema, entryPoint: addressSchema,
     delegate: addressSchema, feeCapAtomic: uintSchema, recipientAtomic: uintSchema, callData: hexSchema,

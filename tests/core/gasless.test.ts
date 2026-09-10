@@ -13,6 +13,7 @@ for (const chain of GASLESS_CHAINS) for (const delegation of ["empty", "expected
   test(`gasless ${chain} ${delegation} funds principal and gas from USDC with zero native balance`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await gaslessFixture(temporary.root, chain, { delegation }), { id, input, operation } = await s.prepare();
+    assert.equal(operation.intent.wireVersion, "apn.gasless-wire.v2");
     const calls = s.rpc.calls.length, loads = s.wrapping.loads;
     assert.equal(s.rpc.sends.length, 0); assert.equal(operation.intent.initialSnapshot.nativeBalanceWei, "0");
     const replay = await s.core.execute(input); assert.equal(replay.ok, true); assert.equal(s.rpc.calls.length, calls);
@@ -25,7 +26,11 @@ for (const chain of GASLESS_CHAINS) for (const delegation of ["empty", "expected
     assert.equal(stored.userOperation.signingAttempts, 1); assert.equal(stored.userOperation.submissionAttempts, 1);
     assert.equal(s.rpc.sends.length, 1); assert.equal(s.rpc.calls.filter((c) => c === "estimate").length, 1);
     const sealed = s.rpc.sends[0]!; assert.equal(sealed.role, "user_operation");
-    if (sealed.role === "user_operation") assert.equal(sealed.userOperation.eip7702Auth !== undefined, delegation === "empty");
+    if (sealed.role === "user_operation") {
+      assert.equal(sealed.userOperation.eip7702Auth !== undefined, delegation === "empty");
+      assert.equal("factory" in sealed.userOperation, delegation === "empty");
+      assert.equal("factoryData" in sealed.userOperation, delegation === "empty");
+    }
     assert.equal(s.approval.calls[0]!.exactPhrase, `APPROVE GASLESS ${stored.fingerprint}`);
     assert.equal(publicOp.fees.proven_sender_native_debit_wei, "0");
     assert.equal(BigInt(publicOp.transfer.actual_sender_debit_atomic) + BigInt(publicOp.transfer.unused_gross_atomic), 10000000n);

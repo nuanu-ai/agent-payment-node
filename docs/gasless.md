@@ -246,6 +246,12 @@ same verified archive or a compatible newer archive. An older binary does not
 provide gasless recovery; do not delete unresolved state or create a replacement
 payment to work around it.
 
+New local operations freeze wire format v2. First use includes the delegation
+authorization; repeated use sends an ordinary operation for the already
+delegated account. Saved operations without that version retain their original
+wire, hash and recovery semantics. Upgrading does not replace their approvals
+or signed material.
+
 Synthetic source and temporary-installed tests establish software behavior.
 They do not establish real-wallet, mainnet, receiving-human or public-release
 acceptance. Those checks require their own explicit approval and evidence.
