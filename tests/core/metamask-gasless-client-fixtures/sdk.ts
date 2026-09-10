@@ -73,7 +73,7 @@ export class SdkExchange implements FetchExchange {
     } else if (request.method === "POST" && request.url.includes("tx-sentinel-")) {
       body = this.malformed === "quote" ? { jsonrpc: "2.0", id: 10, result: { transactions: [] } } :
         { jsonrpc: "2.0", id: 10, result: { transactions: [{ fees: [{ tokenFees: [{ token: {
-        address: mmRegistry(this.chainId).row.token, symbol: "USDC", decimals: 6 }, balanceNeededToken: "1000",
+        address: mmRegistry(this.chainId).row.token, symbol: "USDC", decimals: 6 }, balanceNeededToken: "0x3e8",
       feeRecipient: FEE_RECIPIENT }] }] }] } };
     } else if (request.method === "POST" && request.url.endsWith("/transaction-requests")) {
       const posted = JSON.parse(request.body!) as { requestId: string; tx: unknown };

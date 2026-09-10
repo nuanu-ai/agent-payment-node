@@ -1,4 +1,4 @@
-import type { MetaMaskGaslessIntent } from "../model.js";
+import { type MetaMaskGaslessIntent } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 export interface FetchExchangeRequest {
     readonly url: string;

@@ -1,6 +1,7 @@
 import { request as httpsRequest } from "node:https";
 import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress } from "../../network-policy.js";
+import { MM_MAX_UINT } from "../model.js";
 import { MM_SENTINEL_SLUG, mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { encodeFunctionData, parseAbi } from "viem";
@@ -319,10 +320,10 @@ function validateSentinelResponse(value, context) {
                 mmFail("mm_gasless_provider_unavailable");
             for (const entry of fee.tokenFees) {
                 if (!isPlainRecord(entry) || !isPlainRecord(entry.token) || typeof entry.token.address !== "string" || typeof entry.token.symbol !== "string" ||
-                    !Number.isSafeInteger(entry.token.decimals) || typeof entry.balanceNeededToken !== "string" || typeof entry.feeRecipient !== "string") {
+                    !Number.isSafeInteger(entry.token.decimals) || !tokenFeeQuantity(entry.balanceNeededToken) || typeof entry.feeRecipient !== "string") {
                     mmFail("mm_gasless_provider_unavailable");
                 }
-                if (entry.token.address.toLowerCase() === context.input.token && entry.token.decimals === 6 && /^(?:0|[1-9][0-9]{0,77})$/u.test(entry.balanceNeededToken) &&
+                if (entry.token.address.toLowerCase() === context.input.token && entry.token.decimals === 6 &&
                     /^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient))
                     matching += 1;
             }
@@ -330,6 +331,11 @@ function validateSentinelResponse(value, context) {
     }
     if (matching < 1)
         mmFail("mm_gasless_provider_unavailable");
+}
+function tokenFeeQuantity(value) {
+    // Sentinel emits hex quantities; the SDK also accepts decimal strings through BigInt.
+    return typeof value === "string" && /^(?:0|[1-9][0-9]{0,77}|0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,63}))$/u.test(value) &&
+        BigInt(value) <= MM_MAX_UINT;
 }
 export class HttpsFetchExchange {
     async request(request) {
