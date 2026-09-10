@@ -14,6 +14,7 @@ export declare function gaslessCapabilities(profile?: string): {
         public_bundler_default: string;
         deployment_evidence_hash: string;
         executable_adapter: boolean;
+        execution_unavailable_reason: string | null;
         action_time_verification_required: boolean;
         mainnet_acceptance: string;
     }[];

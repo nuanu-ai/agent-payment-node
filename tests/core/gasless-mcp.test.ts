@@ -155,7 +155,8 @@ test("gasless capabilities are identical static CLI and MCP discovery with no lo
   };
   assert.equal(data.profile_binding_inspected, false);
   assert.deepEqual(data.networks.map((row) => row.chain_id), [1, 10, 130, 137, 8453, 42161, 43114]);
-  assert.equal(data.networks.every((row) => row.executable_adapter && row.mainnet_acceptance === "open"), true);
+  assert.equal(data.networks.every((row) => row.executable_adapter === (row.chain_id !== 43114) &&
+    row.mainnet_acceptance === "open"), true);
   assert.deepEqual(data.profiles.map((profile) => [profile.provider, profile.adapter, profile.mainnet_acceptance]), [
     ["local", "implemented", "open"],
     ["metamask-agent-wallet", "implemented", "open"],

@@ -11,7 +11,8 @@ import { gaslessOwner } from "./owner.js";
 import type { GaslessRpcFactory } from "./ports.js";
 import { gaslessDeployment } from "./registry.js";
 import { newGaslessOperation } from "./transitions.js";
-import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, gaslessFailure, validateGaslessRequest } from "./validation.js";
+import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, assertGaslessExecutionChain, gaslessFailure,
+  validateGaslessRequest } from "./validation.js";
 import { gaslessBatch, gaslessEnvelopeBinding } from "./wire.js";
 
 export interface GaslessPreparationOptions {
@@ -36,6 +37,7 @@ export class GaslessPreparation {
         if (existing.kind !== "gasless_transfer") gaslessFailure("APN_STATE_CORRUPT", "gasless_operation_kind");
         await this.o.records.repairReceipt(existing.record); return existing.record;
       }
+      assertGaslessExecutionChain(request.chainId);
       await this.o.operations.assertProfileAvailable(profileHash);
       const binding = await gaslessOwner(state, profile), row = gaslessDeployment(request.chainId);
       if ([GASLESS_ZERO_ADDRESS, binding.owner.address, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {

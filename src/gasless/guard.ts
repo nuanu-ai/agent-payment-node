@@ -4,7 +4,7 @@ import { assertGaslessSnapshot } from "./economics.js";
 import type { GaslessOperationRecord } from "./operation-model.js";
 import { assertGaslessOwner } from "./owner.js";
 import type { GaslessRpcPort } from "./ports.js";
-import { GASLESS_MIN_REMAINING_MS, gaslessFailure } from "./validation.js";
+import { GASLESS_MIN_REMAINING_MS, assertGaslessExecutionChain, gaslessFailure } from "./validation.js";
 
 export function assertGaslessRemaining(op: GaslessOperationRecord, now: number): void {
   if (!Number.isSafeInteger(now) || now < Date.parse(op.createdAt) ||
@@ -14,6 +14,7 @@ export function assertGaslessRemaining(op: GaslessOperationRecord, now: number):
 }
 export async function guardGaslessOperation(state: StateStore, rpc: GaslessRpcPort,
   op: GaslessOperationRecord, now: () => number): Promise<void> {
+  assertGaslessExecutionChain(op.intent.request.chainId);
   assertGaslessRemaining(op, now());
   await assertGaslessOwner(state, op.intent);
   const s = op.intent.initialSnapshot;

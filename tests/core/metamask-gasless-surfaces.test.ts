@@ -51,8 +51,9 @@ test("the combined gasless surface preserves seven local rows, adds eight MetaMa
   assert.equal(capabilities.profile, "surface-profile");
   assert.equal(capabilities.profile_binding_inspected, false);
   assert.deepEqual(capabilities.networks.map(row => row.chain_id), LOCAL_CHAINS);
-  assert.equal(capabilities.networks.every(row => row.executable_adapter && row.mainnet_acceptance === "open"), true);
-  assert.deepEqual(capabilities.provider_networks.local, LOCAL_CHAINS);
+  assert.equal(capabilities.networks.every(row => row.executable_adapter === (row.chain_id !== 43114) &&
+    row.mainnet_acceptance === "open"), true);
+  assert.deepEqual(capabilities.provider_networks.local, [1, 10, 130, 137, 8453, 42161]);
   assert.deepEqual(capabilities.provider_networks["metamask-agent-wallet"].map(row => row.chain_id), METAMASK_CHAINS);
   assert.equal(capabilities.provider_networks["metamask-agent-wallet"].every(row =>
     row.executable_adapter && row.action_time_verification_required && row.mainnet_acceptance === "open"), true);

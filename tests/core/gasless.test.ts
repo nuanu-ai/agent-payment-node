@@ -9,7 +9,7 @@ import { GASLESS_CHAINS } from "../../src/gasless/validation.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
 
-for (const chain of GASLESS_CHAINS) for (const delegation of ["empty", "expected"] as const) {
+for (const chain of GASLESS_CHAINS.filter(chain => chain !== 43114)) for (const delegation of ["empty", "expected"] as const) {
   test(`gasless ${chain} ${delegation} funds principal and gas from USDC with zero native balance`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await gaslessFixture(temporary.root, chain, { delegation }), { id, input, operation } = await s.prepare();
@@ -50,11 +50,28 @@ test("gasless capability matrix is static and separates four providers and mainn
   const c = gaslessCapabilities("no-wallet"); assert.equal(c.profile_binding_inspected, false);
   assert.equal(c.networks.length, 7); assert.equal(c.profiles.length, 4);
   assert.deepEqual(c.profiles.filter((p) => p.adapter === "implemented").map(p => p.provider), ["local", "metamask-agent-wallet"]);
-  assert.deepEqual(c.provider_networks.local, [1, 10, 130, 137, 8453, 42161, 43114]);
+  assert.deepEqual(c.provider_networks.local, [1, 10, 130, 137, 8453, 42161]);
+  assert.equal(c.networks.find(row => row.chain_id === 43114)?.executable_adapter, false);
   assert.deepEqual(c.provider_networks["metamask-agent-wallet"].map(row => row.chain_id), [1, 10, 137, 143, 1329, 8453, 42161, 59144]);
   assert.ok(c.profiles.every((p) => p.mainnet_acceptance === "open"));
   assert.equal(c.semantics.x402_support_implied, false);
 });
+
+for (const delegation of ["empty", "expected"] as const) {
+  test(`gasless Avalanche ${delegation} refuses a new offer before RPC, custody or operation creation`, async (t) => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await gaslessFixture(temporary.root, 43114, { delegation });
+    const key = "avalanche-capability-refusal";
+    const response = await s.core.execute({ command: "gasless.transfer.prepare", profile: s.profile,
+      request: s.request, idempotencyKey: key });
+    assert.equal(response.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+    assert.match(response.error?.message ?? "", /gasless_eip7702_unavailable/u);
+    assert.equal(await s.core.gasless.records.findOperation(s.state.operationId(s.profile, key)), null);
+    assert.deepEqual(s.rpc.calls, []); assert.equal(s.rpc.sends.length, 0);
+    assert.equal(s.wrapping.loads, 0); assert.equal(s.approval.calls.length, 0);
+    await new OperationService(s.state).assertProfileAvailable(s.state.profileHash(s.profile));
+  });
+}
 
 for (const boundary of ["decline", "expiry", "nonce", "allowance", "balance", "price", "domain"] as const) {
   test(`gasless ${boundary} after review fails before signing and releases its profile`, async (t) => {

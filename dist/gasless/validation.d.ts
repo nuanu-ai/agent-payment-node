@@ -2,6 +2,7 @@ import { type ErrorCode } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 import type { GaslessChainId, GaslessRequest } from "./model.js";
 export declare const GASLESS_CHAINS: readonly [1, 10, 130, 137, 8453, 42161, 43114];
+export declare const GASLESS_EIP7702_CHAINS: readonly GaslessChainId[];
 export declare const GASLESS_TTL_MS = 300000;
 export declare const GASLESS_MIN_REMAINING_MS = 15000;
 export declare const GASLESS_MAX_UINT: bigint;
@@ -18,6 +19,7 @@ export declare function gaslessAddress(value: unknown, code?: ErrorCode): Addres
 export declare function gaslessHex(value: unknown, maximum?: number, bytes?: number, code?: ErrorCode): Hex;
 export declare function gaslessHash(value: unknown, code?: ErrorCode): string;
 export declare function gaslessChain(value: unknown, code?: ErrorCode): GaslessChainId;
+export declare function assertGaslessExecutionChain(chainId: GaslessChainId): void;
 export declare function gaslessIso(value: unknown): string;
 export declare function gaslessSame(a: unknown, b: unknown): boolean;
 export declare function validateGaslessRequest(value: unknown, code?: ErrorCode): GaslessRequest;

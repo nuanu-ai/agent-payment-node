@@ -269,6 +269,53 @@ for (const boundary of ["bootstrap_signing", "user_signing", "user_sealed"] as c
   });
 }
 
+test("Avalanche admission correction preserves prior offers and disclosed-permission recovery", async (t) => {
+  const bundle = JSON.parse(await readFile(resolve("tests/core/gasless-fixtures/avax-prior-admission-741.json"), "utf8"));
+  assert.equal(bundle.syntheticOnly, true);
+  assert.equal(bundle.producerCommit, "6157f5763a37e0f2761436a00776b1bbaeecfb42");
+  assert.equal(bundle.cases.length, 2);
+  for (const fixture of bundle.cases) await t.test(fixture.phase, async (child) => {
+    const temp = await temporaryState(); child.after(temp.cleanup);
+    const before = JSON.parse(fixture.operationUtf8) as GaslessOperationRecord;
+    const now = new Date(Date.parse(before.createdAt) + 1000);
+    const rpc = new GaslessTestRpc(43114, before.intent.owner.address, "empty", now);
+    let custodyCalls = 0;
+    const denied = async (): Promise<never> => { custodyCalls++; throw new Error("Unexpected prior custody access"); };
+    const s = await gaslessFixture(temp.root, 43114, { rpc, now, initializeWallet: false,
+      custody: { load: denied, seal: denied } });
+    const opPath = resolve(temp.root, "gasless-operations", before.profileHash, `${before.operationId}.json`);
+    const receiptPath = resolve(temp.root, "gasless-receipts", before.profileHash, `${before.operationId}.json`);
+    await mkdir(resolve(opPath, ".."), { recursive: true, mode: 0o700 });
+    await mkdir(resolve(receiptPath, ".."), { recursive: true, mode: 0o700 });
+    await writeFile(opPath, fixture.operationUtf8, { mode: 0o600 });
+    await writeFile(receiptPath, fixture.receiptUtf8, { mode: 0o600 });
+    for (const command of ["operation.status", "receipt.get"] as const) {
+      const result = await s.core.execute({ command, operationId: before.operationId });
+      assert.equal(result.ok, true, result.error?.message);
+    }
+    assert.equal((await s.core.execute(fixture.input)).ok, true);
+    assert.equal(await readFile(opPath, "utf8"), fixture.operationUtf8);
+    assert.equal(await readFile(receiptPath, "utf8"), fixture.receiptUtf8);
+    if (fixture.phase === "awaiting_approval") {
+      assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: before.operationId })).ok, true);
+      assert.equal((await s.record(before.operationId)).failure, "gasless_eip7702_unavailable");
+      assert.equal((await s.record(before.operationId)).state, "failed_before_effect");
+      assert.deepEqual(rpc.calls, []);
+    } else {
+      rpc.observe = async () => { rpc.calls.push("observe"); return permissionObservation(before); };
+      assert.equal((await s.core.execute({ command: "operation.resume", operationId: before.operationId })).ok, true);
+      assert.equal((await s.record(before.operationId)).state, "failed_permissions_invalidated");
+      assert.deepEqual(rpc.calls, ["observe"]);
+    }
+    const after = await s.record(before.operationId);
+    assert.deepEqual(after.intent, before.intent); assert.equal(after.fingerprint, before.fingerprint);
+    assert.deepEqual(after.bootstrap, before.bootstrap); assert.deepEqual(after.userOperation, before.userOperation);
+    assert.deepEqual(after.transitions.slice(0, before.transitions.length), before.transitions);
+    assert.equal(custodyCalls, 0); assert.equal(s.wrapping.loads, 0); assert.equal(s.approval.calls.length, 0);
+    assert.equal(rpc.sends.length, 0); await new OperationService(s.state).assertProfileAvailable(before.profileHash);
+  });
+});
+
 function permissionObservation(op: GaslessOperationRecord): GaslessObservation {
   const i = op.intent.initialSnapshot;
   const nonce = (BigInt(i.eoaNonceAtomic) + (i.delegation === "empty" ? 1n : 0n)).toString();

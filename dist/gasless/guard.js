@@ -1,7 +1,7 @@
 import { ApnError } from "../errors.js";
 import { assertGaslessSnapshot } from "./economics.js";
 import { assertGaslessOwner } from "./owner.js";
-import { GASLESS_MIN_REMAINING_MS, gaslessFailure } from "./validation.js";
+import { GASLESS_MIN_REMAINING_MS, assertGaslessExecutionChain, gaslessFailure } from "./validation.js";
 export function assertGaslessRemaining(op, now) {
     if (!Number.isSafeInteger(now) || now < Date.parse(op.createdAt) ||
         Date.parse(op.intent.expiresAt) - now < GASLESS_MIN_REMAINING_MS) {
@@ -9,6 +9,7 @@ export function assertGaslessRemaining(op, now) {
     }
 }
 export async function guardGaslessOperation(state, rpc, op, now) {
+    assertGaslessExecutionChain(op.intent.request.chainId);
     assertGaslessRemaining(op, now());
     await assertGaslessOwner(state, op.intent);
     const s = op.intent.initialSnapshot;
