@@ -1,7 +1,17 @@
-import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { requireEvmFunding, requireEvmRpc, evmTransaction } from "./evm-direct.js";
 import { validateEconomics } from "./transfer-policy.js";
+function frozenEconomicsRemainExecutable(current, frozen) {
+    const freshMaximumFee = BigInt(current.maxFeePerGasAtomic);
+    const freshPriorityFee = BigInt(current.maxPriorityFeePerGasAtomic);
+    const freshBaseFeeTwice = freshMaximumFee - freshPriorityFee;
+    if (freshBaseFeeTwice < 0n || freshBaseFeeTwice % 2n !== 0n)
+        return false;
+    const freshBaseFee = freshBaseFeeTwice / 2n;
+    return current.nonceAtomic === frozen.nonceAtomic &&
+        BigInt(current.gasLimitAtomic) <= BigInt(frozen.gasLimitAtomic) &&
+        freshBaseFee <= BigInt(frozen.maxFeePerGasAtomic);
+}
 export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning) {
     const binding = operation.evm;
     if (binding === undefined || operation.economics === undefined)
@@ -20,15 +30,15 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning)
             rpc.nonce(operation.chainId, operation.walletAddress, "pending"),
             rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic)),
         ]);
-        if (canonicalJson(validateEconomics(nonce, fees)) !== canonicalJson(operation.economics)) {
-            throw new ApnError("APN_REPREPARE_REQUIRED", "Nonce or execution fee economics changed before approval.");
+        const current = validateEconomics(nonce, fees);
+        if (!frozenEconomicsRemainExecutable(current, operation.economics)) {
+            throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen nonce or transaction fee envelope is no longer executable before approval.");
         }
     }
     if (!beforeSigning && operation.chainId === 42161) {
         const fees = await rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic));
         const current = validateEconomics(operation.economics.nonceAtomic, fees);
-        if (BigInt(current.gasLimitAtomic) > BigInt(operation.economics.gasLimitAtomic) ||
-            BigInt(current.maxFeePerGasAtomic) > BigInt(operation.economics.maxFeePerGasAtomic)) {
+        if (!frozenEconomicsRemainExecutable({ ...current, nonceAtomic: operation.economics.nonceAtomic }, operation.economics)) {
             throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "Current Arbitrum inclusive gas or price exceeds the frozen signed envelope; retain this operation without replacement.");
         }
     }

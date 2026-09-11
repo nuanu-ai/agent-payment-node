@@ -100,7 +100,7 @@ export async function verifyEffect(effect, operation) {
         transaction.nonce?.toString() !== operation.economics.nonceAtomic ||
         transaction.gas?.toString() !== operation.economics.gasLimitAtomic ||
         transaction.maxFeePerGas?.toString() !== operation.economics.maxFeePerGasAtomic ||
-        transaction.maxPriorityFeePerGas?.toString() !== operation.economics.maxPriorityFeePerGasAtomic ||
+        (transaction.maxPriorityFeePerGas ?? 0n).toString() !== operation.economics.maxPriorityFeePerGasAtomic ||
         accessList.length !== 0 || recovered !== operation.walletAddress || transaction.r === undefined ||
         transaction.s === undefined || s === 0n || s > halfCurveOrder ||
         (transaction.yParity !== 0 && transaction.yParity !== 1))

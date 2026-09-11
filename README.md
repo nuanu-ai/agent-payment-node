@@ -5,15 +5,16 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.8 targets Apple Silicon macOS, Base (chain ID 8453), native ETH for gas,
-and canonical Base USDC. It does not require an Apple Developer identity, an
-app bundle, a daemon, a browser extension, or the AI Labs Hub.
+APN 0.5.11-demo.1 is a local demo build for Apple Silicon macOS. It combines
+the admitted sprint commands with APN 0.5.10 EVM fee-envelope corrections.
+The public Homebrew Formula remains a separate 0.5.10 release; use the exact
+versioned demo executable supplied with this build for the new commands.
 
-This unreleased source tree additionally implements explicit local-wallet Base,
-Ethereum and Arbitrum One native ETH / arbitrary ERC-20 direct transfers, plus
-independently network-bound Ethereum/Arbitrum canonical-USDC EIP-3009 x402. This is not a new public
-0.5.8 artifact or a Homebrew update. See [EVM asset transfers](docs/evm-assets.md)
-for the source-only capability, exact fee budget and evidence boundaries.
+The local wallet supports Base, Ethereum and Arbitrum One native ETH and
+arbitrary ERC-20 direct transfers, plus independently network-bound canonical
+USDC EIP-3009 x402. The approved transaction stays frozen while harmless fee
+recommendation changes remain executable. See [EVM asset transfers](docs/evm-assets.md)
+for fee limits and the separate source, installed and mainnet proof boundaries.
 
 It also adds local Solana mainnet SOL/USDC account, policy, transfer and recovery
 commands with a separate encrypted ed25519 wallet. Coinbase Solana account and
@@ -40,7 +41,7 @@ the total USDC budget, so the sender can have zero native gas balance. The
 recipient amount and maximum USDC fee are frozen before foreground approval;
 unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
 for commands, persistent account permissions and recovery. This remains
-unreleased source with separate mainnet acceptance still open.
+a local demo capability with separate per-network mainnet acceptance.
 
 The same gasless commands also support an existing MetaMask Agent server wallet
 on Ethereum, Optimism, Polygon PoS, Monad, Sei, Base, Arbitrum and Linea. The
@@ -59,6 +60,9 @@ acceptance remains open. See [Smart Account gasless transfers](docs/gasless.md#m
 and the [verified archive recovery preflight](docs/gasless.md#existing-state-and-upgrades).
 
 ## Install
+
+The command below installs the public release. The local demo build is supplied
+as a separate versioned archive and executable; verify `apn version` before use.
 
 ```sh
 brew install nuanu-ai/tap/apn
@@ -623,7 +627,7 @@ live provider acceptance, payment proof or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
 are separately recorded release gates. The local stdio MCP surface projects
-the same thirty-eight catalog-selected wallet, policy, payment, operation and
+the same forty-eight catalog-selected wallet, policy, payment, operation and
 receipt commands through the shared binder/runtime/core path. Direct approval
 remains foreground CLI only. Coinbase x402 source and deterministic product
 proof are included; live Coinbase/provider and paid acceptance are recorded as
@@ -632,7 +636,7 @@ policy, exact signed-effect and restart tests; its four required mainnet rows
 and provider economics gate remain open. Local TRON adds synthetic TRX/USDT,
 resource-fee, solidified receipt and interrupted-execution checks; its two
 required mainnet rows remain open. Hub, contracts, remote MCP and Stellar are
-outside this source change. The published 0.5.8 release is unchanged.
+outside this demo build. The public Homebrew release remains 0.5.10.
 
 The published npm archive includes `npm-shrinkwrap.json`, so Formula installation resolves the exact
 integrity-pinned production closure. It preserves direct MetaMask pins and overrides only the
