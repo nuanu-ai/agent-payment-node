@@ -200,6 +200,14 @@ export interface GaslessPermissionInvalidation {
   readonly userOperationMaterialHash?: string;
   readonly userOperationHash?: Hex;
 }
+export interface GaslessObservationSource {
+  readonly policy: "apn.gasless.observation-rpc.v1";
+  readonly environmentName: string;
+  readonly rpcOrigin: string;
+  readonly rpcEndpointHash: string;
+  readonly intentHash: string;
+  readonly initialBlock: GaslessBlock;
+}
 export interface GaslessObservation {
   readonly status: "not_found" | "pending" | "safe" | "unresolved" | "permissions_invalidated";
   readonly transactionHash: Hex | null;
@@ -208,4 +216,5 @@ export interface GaslessObservation {
   readonly evidenceHash: string | null;
   readonly reason: string | null;
   readonly permissionInvalidation?: GaslessPermissionInvalidation;
+  readonly source?: GaslessObservationSource;
 }

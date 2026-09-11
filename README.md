@@ -10,6 +10,11 @@ the admitted sprint commands with APN 0.5.10 EVM fee-envelope corrections.
 GitHub publication and the Homebrew Formula remain separate release gates; use
 only an exact verified 0.5.11 archive or installation for the new commands.
 
+This source tree also contains an unreleased [explicit observation RPC recovery
+option](docs/gasless.md#explicit-observation-rpc-recovery-unreleased) for saved
+Local gasless operations. It requires a verified artifact containing this
+change; the published 0.5.11 binary does not provide it.
+
 The local wallet supports Base, Ethereum and Arbitrum One native ETH and
 arbitrary ERC-20 direct transfers, plus independently network-bound canonical
 USDC EIP-3009 x402. The approved transaction stays frozen while harmless fee
@@ -519,7 +524,7 @@ apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <addre
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
 apn operation status --operation <operation-id>
 apn operation abandon --operation <operation-id>
-apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>]
+apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>] [--observation-rpc-env <APN_ENV_RPC_URL>]
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>

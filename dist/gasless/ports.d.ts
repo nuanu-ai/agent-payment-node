@@ -26,10 +26,15 @@ export interface GaslessCustodyPort {
     load(operation: GaslessOperationRecord, role: GaslessRole): Promise<GaslessSealedMaterial | null>;
     seal(operation: GaslessOperationRecord, role: GaslessRole, owner: GaslessOwner, bootstrap?: GaslessBootstrapMaterial): Promise<GaslessSealedMaterial>;
 }
-export interface GaslessRpcPort {
+/** Observation has no custody, fee estimation, disclosure or submission capability. */
+export interface GaslessObservationPort {
     readonly chainId: GaslessChainId;
     readonly rpcOrigin: string;
     readonly rpcEndpointHash: string;
+    observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
+}
+export type GaslessObservationRpcFactory = (chainId: GaslessChainId, environmentName: string) => GaslessObservationPort;
+export interface GaslessRpcPort extends GaslessObservationPort {
     readonly bundlerOrigin: string;
     readonly bundlerEndpointHash: string;
     assertChain(): Promise<void>;
@@ -37,7 +42,6 @@ export interface GaslessRpcPort {
     snapshot(owner: Address, approvedGas?: GaslessGas): Promise<GaslessSnapshot>;
     estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial): Promise<GaslessEstimate>;
     send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex>;
-    observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
 }
 export type GaslessRpcFactory = (chainId: GaslessChainId) => GaslessRpcPort;
 export interface GaslessApprovalPort {

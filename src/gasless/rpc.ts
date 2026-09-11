@@ -172,7 +172,7 @@ export class GaslessRpc implements GaslessRpcPort {
     const rpcChain = await this.rpcCall("eth_chainId", []);
     if (rpcQuantity(rpcChain) !== BigInt(this.chainId)) gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
     return await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin, deployment: this.deployment,
-      rpc: this.rpcCall, bundler: this.bundlerCall, snapshot: async (owner) => await this.snapshot(owner) }, intent, identity, cursor);
+      rpc: this.rpcCall, bundler: this.bundlerCall }, intent, identity, cursor);
   }
 
   private assertIntent(intent: GaslessIntent): void {

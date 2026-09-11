@@ -22,8 +22,9 @@ export interface GaslessObservationContext {
   readonly rpcOrigin: string;
   readonly deployment: GaslessDeployment;
   readonly rpc: GaslessRpcCall;
-  readonly bundler: GaslessRpcCall;
-  snapshot(owner: Address): Promise<GaslessSnapshot>;
+  readonly bundler?: GaslessRpcCall;
+  /** Retained for existing callers; canonical observation never uses an execution snapshot. */
+  readonly snapshot?: (owner: Address) => Promise<GaslessSnapshot>;
 }
 
 export async function observeGasless(context: GaslessObservationContext, intent: GaslessIntent,
@@ -168,6 +169,7 @@ async function inspect(context: GaslessObservationContext, intent: GaslessIntent
 
 async function bundlerCandidate(context: GaslessObservationContext, intent: GaslessIntent,
   userOperationHash: Hex): Promise<Hex | null> {
+  if (context.bundler === undefined) return null;
   const settled = await Promise.allSettled([
     context.bundler("eth_getUserOperationReceipt", [userOperationHash]),
     context.bundler("eth_getUserOperationByHash", [userOperationHash]),
