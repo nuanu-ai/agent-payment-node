@@ -1,9 +1,8 @@
 # Solana mainnet direct transfers
 
-This source tree adds local SOL and canonical USDC transfers on Solana mainnet.
-The package version remains 0.5.8; this code has not been published or installed
-as a new public release. Source tests and local package checks do not prove a
-live mainnet payment.
+This APN 0.5.11 package includes local SOL and canonical USDC transfers on
+Solana mainnet. Package availability, clean installation and live mainnet
+payment acceptance require separate evidence.
 
 | Profile | Account and balance | Direct transfer |
 | --- | --- | --- |

@@ -1,12 +1,12 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.5.11-demo.1",
+  "version": "0.5.11",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@nuanu-ai/apn",
-      "version": "0.5.11-demo.1",
+      "version": "0.5.11",
       "cpu": [
         "arm64"
       ],
@@ -1401,27 +1401,6 @@
         "ws": "8.18.0"
       }
     },
-    "node_modules/@ethersproject/providers/node_modules/ws": {
-      "version": "8.18.0",
-      "resolved": "https://registry.npmjs.org/ws/-/ws-8.18.0.tgz",
-      "integrity": "sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw==",
-      "license": "MIT",
-      "engines": {
-        "node": ">=10.0.0"
-      },
-      "peerDependencies": {
-        "bufferutil": "^4.0.1",
-        "utf-8-validate": ">=5.0.2"
-      },
-      "peerDependenciesMeta": {
-        "bufferutil": {
-          "optional": true
-        },
-        "utf-8-validate": {
-          "optional": true
-        }
-      }
-    },
     "node_modules/@ethersproject/random": {
       "version": "5.8.0",
       "resolved": "https://registry.npmjs.org/@ethersproject/random/-/random-5.8.0.tgz",
@@ -1800,20 +1779,6 @@
         "node": ">=22"
       }
     },
-    "node_modules/@metamask/account-api/node_modules/uuid": {
-      "version": "9.0.1",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-9.0.1.tgz",
-      "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "funding": [
-        "https://github.com/sponsors/broofa",
-        "https://github.com/sponsors/ctavan"
-      ],
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/account-tree-controller": {
       "version": "7.6.1",
       "resolved": "https://registry.npmjs.org/@metamask/account-tree-controller/-/account-tree-controller-7.6.1.tgz",
@@ -2157,20 +2122,6 @@
         "webextension-polyfill": "^0.10.0 || ^0.11.0 || ^0.12.0"
       }
     },
-    "node_modules/@metamask/accounts-controller/node_modules/@metamask/eth-snap-keyring/node_modules/uuid": {
-      "version": "9.0.1",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-9.0.1.tgz",
-      "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "funding": [
-        "https://github.com/sponsors/broofa",
-        "https://github.com/sponsors/ctavan"
-      ],
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/accounts-controller/node_modules/@metamask/keyring-api": {
       "version": "24.1.0",
       "resolved": "https://registry.npmjs.org/@metamask/keyring-api/-/keyring-api-24.1.0.tgz",
@@ -2343,16 +2294,6 @@
         "node": ">= 6"
       }
     },
-    "node_modules/@metamask/accounts-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/address-book-controller": {
       "version": "7.1.2",
       "resolved": "https://registry.npmjs.org/@metamask/address-book-controller/-/address-book-controller-7.1.2.tgz",
@@ -2504,16 +2445,6 @@
       },
       "peerDependencies": {
         "typescript": ">=5.0.0"
-      }
-    },
-    "node_modules/@metamask/analytics-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/approval-controller": {
@@ -2805,20 +2736,6 @@
         "node": ">= 6"
       }
     },
-    "node_modules/@metamask/assets-controller/node_modules/uuid": {
-      "version": "9.0.1",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-9.0.1.tgz",
-      "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "funding": [
-        "https://github.com/sponsors/broofa",
-        "https://github.com/sponsors/ctavan"
-      ],
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/assets-controllers": {
       "version": "110.1.1",
       "resolved": "https://registry.npmjs.org/@metamask/assets-controllers/-/assets-controllers-110.1.1.tgz",
@@ -2936,19 +2853,6 @@
       },
       "engines": {
         "node": ">=16.0.0"
-      }
-    },
-    "node_modules/@metamask/assets-controllers/node_modules/@metamask/abi-utils/node_modules/uuid": {
-      "version": "11.1.1",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-11.1.1.tgz",
-      "integrity": "sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==",
-      "funding": [
-        "https://github.com/sponsors/broofa",
-        "https://github.com/sponsors/ctavan"
-      ],
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/esm/bin/uuid"
       }
     },
     "node_modules/@metamask/assets-controllers/node_modules/@metamask/connectivity-controller": {
@@ -3243,16 +3147,6 @@
         "url": "https://paulmillr.com/funding/"
       }
     },
-    "node_modules/@metamask/assets-controllers/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/auth-network-utils": {
       "version": "0.3.1",
       "resolved": "https://registry.npmjs.org/@metamask/auth-network-utils/-/auth-network-utils-0.3.1.tgz",
@@ -3364,16 +3258,6 @@
         "typescript": ">=5.0.0"
       }
     },
-    "node_modules/@metamask/bridge-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/browser-passworder": {
       "version": "6.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/browser-passworder/-/browser-passworder-6.0.0.tgz",
@@ -3448,16 +3332,6 @@
       },
       "engines": {
         "node": "^18.18 || >=20"
-      }
-    },
-    "node_modules/@metamask/config-registry-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/connectivity-controller": {
@@ -3632,16 +3506,6 @@
       },
       "engines": {
         "node": "^18.18 || >=20"
-      }
-    },
-    "node_modules/@metamask/core-backend/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/delegation-abis": {
@@ -3878,16 +3742,6 @@
       },
       "engines": {
         "node": "^18.18 || >=20"
-      }
-    },
-    "node_modules/@metamask/eth-json-rpc-infura/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/eth-json-rpc-middleware": {
@@ -4501,27 +4355,6 @@
         }
       }
     },
-    "node_modules/@metamask/fox-sdk/node_modules/ws": {
-      "version": "8.20.1",
-      "resolved": "https://registry.npmjs.org/ws/-/ws-8.20.1.tgz",
-      "integrity": "sha512-It4dO0K5v//JtTXuPkfEOaI3uUN87iYPnqo/ZzqCoG3g8uhA66QUMs/SrM0YK7/NAu+r4LMh/9dq2A7k+rHs+w==",
-      "license": "MIT",
-      "engines": {
-        "node": ">=10.0.0"
-      },
-      "peerDependencies": {
-        "bufferutil": "^4.0.1",
-        "utf-8-validate": ">=5.0.2"
-      },
-      "peerDependenciesMeta": {
-        "bufferutil": {
-          "optional": true
-        },
-        "utf-8-validate": {
-          "optional": true
-        }
-      }
-    },
     "node_modules/@metamask/fox-sdk/node_modules/zod": {
       "version": "3.23.8",
       "resolved": "https://registry.npmjs.org/zod/-/zod-3.23.8.tgz",
@@ -4744,16 +4577,6 @@
         "@noble/hashes": "1.4.0",
         "@scure/bip32": "1.4.0",
         "@scure/bip39": "1.3.0"
-      }
-    },
-    "node_modules/@metamask/gas-fee-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/geolocation-controller": {
@@ -5407,20 +5230,6 @@
         "url": "https://paulmillr.com/funding/"
       }
     },
-    "node_modules/@metamask/keyring-sdk/node_modules/uuid": {
-      "version": "9.0.1",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-9.0.1.tgz",
-      "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "funding": [
-        "https://github.com/sponsors/broofa",
-        "https://github.com/sponsors/ctavan"
-      ],
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/keyring-snap-client": {
       "version": "10.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/keyring-snap-client/-/keyring-snap-client-10.0.0.tgz",
@@ -5461,20 +5270,6 @@
       "resolved": "https://registry.npmjs.org/@types/uuid/-/uuid-9.0.8.tgz",
       "integrity": "sha512-jg+97EGIcY9AGHJJRaaPVgetKDsrTgbRjQ5Msgjh/DQKEFl0DtyRr/VCOyD1T2R1MNeWPK/u7JoGhlDZnKBAfA==",
       "license": "MIT"
-    },
-    "node_modules/@metamask/keyring-snap-client/node_modules/uuid": {
-      "version": "9.0.1",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-9.0.1.tgz",
-      "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "funding": [
-        "https://github.com/sponsors/broofa",
-        "https://github.com/sponsors/ctavan"
-      ],
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
     },
     "node_modules/@metamask/keyring-utils": {
       "version": "5.0.0",
@@ -5629,16 +5424,6 @@
       },
       "engines": {
         "node": "^18.18 || >=20"
-      }
-    },
-    "node_modules/@metamask/message-manager/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/messenger": {
@@ -5984,20 +5769,6 @@
       },
       "engines": {
         "node": ">= 6"
-      }
-    },
-    "node_modules/@metamask/multichain-account-service/node_modules/uuid": {
-      "version": "9.0.1",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-9.0.1.tgz",
-      "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "funding": [
-        "https://github.com/sponsors/broofa",
-        "https://github.com/sponsors/ctavan"
-      ],
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/multichain-network-controller": {
@@ -6349,16 +6120,6 @@
         "@scure/bip39": "1.3.0"
       }
     },
-    "node_modules/@metamask/multichain-network-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/network-controller": {
       "version": "34.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/network-controller/-/network-controller-34.0.0.tgz",
@@ -6388,16 +6149,6 @@
       },
       "engines": {
         "node": "^18.18 || >=20"
-      }
-    },
-    "node_modules/@metamask/network-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/network-enablement-controller": {
@@ -6626,16 +6377,6 @@
         "@scure/bip39": "1.3.0"
       }
     },
-    "node_modules/@metamask/network-enablement-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/nonce-tracker": {
       "version": "6.1.0",
       "resolved": "https://registry.npmjs.org/@metamask/nonce-tracker/-/nonce-tracker-6.1.0.tgz",
@@ -6662,12 +6403,6 @@
         "node": ">=8.17.0",
         "npm": ">=6"
       }
-    },
-    "node_modules/@metamask/number-to-bn/node_modules/bn.js": {
-      "version": "5.2.1",
-      "resolved": "https://registry.npmjs.org/bn.js/-/bn.js-5.2.1.tgz",
-      "integrity": "sha512-eXRvHzWyYPBuB4NBy0cmYQjGitUrtqwbvlzP3G6VFnNRbsZQIxQ10PbKKHt8gZ/HW/D/747aDl+QkDqg3KQLMQ==",
-      "license": "MIT"
     },
     "node_modules/@metamask/object-multiplex": {
       "version": "2.1.0",
@@ -7067,16 +6802,6 @@
         "@scure/bip39": "1.3.0"
       }
     },
-    "node_modules/@metamask/polling-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/post-message-stream": {
       "version": "10.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/post-message-stream/-/post-message-stream-10.0.0.tgz",
@@ -7213,16 +6938,6 @@
       },
       "engines": {
         "node": "^18.18 || >=20"
-      }
-    },
-    "node_modules/@metamask/remote-feature-flag-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/rpc-errors": {
@@ -7680,20 +7395,6 @@
       },
       "engines": {
         "node": ">= 6"
-      }
-    },
-    "node_modules/@metamask/snap-account-service/node_modules/uuid": {
-      "version": "9.0.1",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-9.0.1.tgz",
-      "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "funding": [
-        "https://github.com/sponsors/broofa",
-        "https://github.com/sponsors/ctavan"
-      ],
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
       }
     },
     "node_modules/@metamask/snaps-controllers": {
@@ -8633,16 +8334,6 @@
         "url": "https://paulmillr.com/funding/"
       }
     },
-    "node_modules/@metamask/transaction-controller/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/@metamask/utils": {
       "version": "11.12.0",
       "resolved": "https://registry.npmjs.org/@metamask/utils/-/utils-11.12.0.tgz",
@@ -9039,13 +8730,14 @@
       }
     },
     "node_modules/@polymarket/builder-relayer-client/node_modules/axios": {
-      "version": "0.27.2",
-      "resolved": "https://registry.npmjs.org/axios/-/axios-0.27.2.tgz",
-      "integrity": "sha512-t+yRIyySRTp/wua5xEr+z1q60QmLq8ABsS5O9Me1AsE5dfKqgnCFzwiCZZ/cGNd1lq4/7akDWMxdhVlucjmnOQ==",
+      "version": "0.33.0",
+      "resolved": "https://registry.npmjs.org/axios/-/axios-0.33.0.tgz",
+      "integrity": "sha512-juz19g7B3UWT9r3+tgRFQf2Bdy6IKDVroiyuVOUrkILVKHpqHL++K1l8ybvfdEP9B/VE72vk8vllbnedVCm/og==",
       "license": "MIT",
       "dependencies": {
-        "follow-redirects": "^1.14.9",
-        "form-data": "^4.0.0"
+        "follow-redirects": "^1.15.4",
+        "form-data": "^4.0.4",
+        "proxy-from-env": "^1.1.0"
       }
     },
     "node_modules/@polymarket/builder-relayer-client/node_modules/ethers": {
@@ -9095,6 +8787,12 @@
         "@ethersproject/web": "5.8.0",
         "@ethersproject/wordlists": "5.8.0"
       }
+    },
+    "node_modules/@polymarket/builder-relayer-client/node_modules/proxy-from-env": {
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/proxy-from-env/-/proxy-from-env-1.1.0.tgz",
+      "integrity": "sha512-D+zkORCbA9f1tdWRK0RaCR3GPv50cMxcrz4X8k5LTSUD1Dkw47mKJEZQNunItRTkWwgtaUSo1RVFRIG9ZXiFYg==",
+      "license": "MIT"
     },
     "node_modules/@polymarket/builder-signing-sdk": {
       "version": "0.0.8",
@@ -10140,27 +9838,6 @@
       },
       "peerDependenciesMeta": {
         "typescript": {
-          "optional": true
-        }
-      }
-    },
-    "node_modules/@solana/rpc-subscriptions-channel-websocket/node_modules/ws": {
-      "version": "8.21.3",
-      "resolved": "https://registry.npmjs.org/ws/-/ws-8.21.3.tgz",
-      "integrity": "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==",
-      "license": "MIT",
-      "engines": {
-        "node": ">=10.0.0"
-      },
-      "peerDependencies": {
-        "bufferutil": "^4.0.1",
-        "utf-8-validate": ">=5.0.2"
-      },
-      "peerDependenciesMeta": {
-        "bufferutil": {
-          "optional": true
-        },
-        "utf-8-validate": {
           "optional": true
         }
       }
@@ -13123,16 +12800,6 @@
         "setimmediate": "^1.0.5"
       }
     },
-    "node_modules/ethereumjs-wallet/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/ethers": {
       "version": "6.17.0",
       "resolved": "https://registry.npmjs.org/ethers/-/ethers-6.17.0.tgz",
@@ -13206,6 +12873,27 @@
       "integrity": "sha512-ve2KP6f/JnbPBFyobGHuerC9g1FYGn/F8n1LWTwNxCEzd6IfqTwUQcNXgEtmmQ6DlRrC1hrSrBnCZPokRrDHjw==",
       "license": "MIT"
     },
+    "node_modules/ethers/node_modules/ws": {
+      "version": "8.21.0",
+      "resolved": "https://registry.npmjs.org/ws/-/ws-8.21.0.tgz",
+      "integrity": "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=10.0.0"
+      },
+      "peerDependencies": {
+        "bufferutil": "^4.0.1",
+        "utf-8-validate": ">=5.0.2"
+      },
+      "peerDependenciesMeta": {
+        "bufferutil": {
+          "optional": true
+        },
+        "utf-8-validate": {
+          "optional": true
+        }
+      }
+    },
     "node_modules/ethjs-abi": {
       "version": "0.2.1",
       "resolved": "https://registry.npmjs.org/ethjs-abi/-/ethjs-abi-0.2.1.tgz",
@@ -13222,9 +12910,9 @@
       }
     },
     "node_modules/ethjs-abi/node_modules/bn.js": {
-      "version": "4.11.6",
-      "resolved": "https://registry.npmjs.org/bn.js/-/bn.js-4.11.6.tgz",
-      "integrity": "sha512-XWwnNNFCuuSQ0m3r3C4LE3EiORltHd9M05pq6FOlVeiophzRbMo50Sbz1ehl8K3Z+jw9+vmgnXefY1hz8X+2wA==",
+      "version": "4.12.5",
+      "resolved": "https://registry.npmjs.org/bn.js/-/bn.js-4.12.5.tgz",
+      "integrity": "sha512-3aRg6/JxfffFD+OlOjOFR3Vo79l39ooBTFucxx+MT3dhCtzn3EmiUPQo+6/OZuI2jbXi3YKgmiTFBgChQMwIRQ==",
       "license": "MIT"
     },
     "node_modules/ethjs-abi/node_modules/js-sha3": {
@@ -14131,16 +13819,6 @@
       "integrity": "sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==",
       "license": "MIT"
     },
-    "node_modules/jayson/node_modules/uuid": {
-      "version": "8.3.2",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-      "integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-      "deprecated": "uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).",
-      "license": "MIT",
-      "bin": {
-        "uuid": "dist/bin/uuid"
-      }
-    },
     "node_modules/jayson/node_modules/ws": {
       "version": "7.5.13",
       "resolved": "https://registry.npmjs.org/ws/-/ws-7.5.13.tgz",
@@ -14599,9 +14277,9 @@
       }
     },
     "node_modules/number-to-bn/node_modules/bn.js": {
-      "version": "4.11.6",
-      "resolved": "https://registry.npmjs.org/bn.js/-/bn.js-4.11.6.tgz",
-      "integrity": "sha512-XWwnNNFCuuSQ0m3r3C4LE3EiORltHd9M05pq6FOlVeiophzRbMo50Sbz1ehl8K3Z+jw9+vmgnXefY1hz8X+2wA==",
+      "version": "4.12.5",
+      "resolved": "https://registry.npmjs.org/bn.js/-/bn.js-4.12.5.tgz",
+      "integrity": "sha512-3aRg6/JxfffFD+OlOjOFR3Vo79l39ooBTFucxx+MT3dhCtzn3EmiUPQo+6/OZuI2jbXi3YKgmiTFBgChQMwIRQ==",
       "license": "MIT"
     },
     "node_modules/oauth4webapi": {
@@ -15943,9 +15621,9 @@
       }
     },
     "node_modules/valibot": {
-      "version": "1.3.1",
-      "resolved": "https://registry.npmjs.org/valibot/-/valibot-1.3.1.tgz",
-      "integrity": "sha512-sfdRir/QFM0JaF22hqTroPc5xy4DimuGQVKFrzF1YfGwaS1nJot3Y8VqMdLO2Lg27fMzat2yD3pY5PbAYO39Gg==",
+      "version": "1.4.2",
+      "resolved": "https://registry.npmjs.org/valibot/-/valibot-1.4.2.tgz",
+      "integrity": "sha512-gjdCvJ6d3RyHAneqxMYMW9QMCwYMb3jpOO0IyHZV1bnRHFBHrX3VkIILt5XYR0WhwHiH7Mty8ovuPZ/O3gamrg==",
       "license": "MIT",
       "peerDependencies": {
         "typescript": ">=5"
@@ -16192,9 +15870,9 @@
       "license": "ISC"
     },
     "node_modules/ws": {
-      "version": "8.21.0",
-      "resolved": "https://registry.npmjs.org/ws/-/ws-8.21.0.tgz",
-      "integrity": "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==",
+      "version": "8.21.3",
+      "resolved": "https://registry.npmjs.org/ws/-/ws-8.21.3.tgz",
+      "integrity": "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==",
       "license": "MIT",
       "engines": {
         "node": ">=10.0.0"

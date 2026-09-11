@@ -5,10 +5,10 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.11-demo.1 is a local demo build for Apple Silicon macOS. It combines
+APN 0.5.11 is the ordinary release build for Apple Silicon macOS. It combines
 the admitted sprint commands with APN 0.5.10 EVM fee-envelope corrections.
-The public Homebrew Formula remains a separate 0.5.10 release; use the exact
-versioned demo executable supplied with this build for the new commands.
+GitHub publication and the Homebrew Formula remain separate release gates; use
+only an exact verified 0.5.11 archive or installation for the new commands.
 
 The local wallet supports Base, Ethereum and Arbitrum One native ETH and
 arbitrary ERC-20 direct transfers, plus independently network-bound canonical
@@ -41,7 +41,7 @@ the total USDC budget, so the sender can have zero native gas balance. The
 recipient amount and maximum USDC fee are frozen before foreground approval;
 unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
 for commands, persistent account permissions and recovery. This remains
-a local demo capability with separate per-network mainnet acceptance.
+an APN 0.5.11 capability with separate per-network mainnet acceptance.
 
 The same gasless commands also support an existing MetaMask Agent server wallet
 on Ethereum, Optimism, Polygon PoS, Monad, Sei, Base, Arbitrum and Linea. The
@@ -61,8 +61,8 @@ and the [verified archive recovery preflight](docs/gasless.md#existing-state-and
 
 ## Install
 
-The command below installs the public release. The local demo build is supplied
-as a separate versioned archive and executable; verify `apn version` before use.
+Homebrew installation is a separate publication gate. Verify that `apn version`
+reports `0.5.11` before using the commands described for this release.
 
 ```sh
 brew install nuanu-ai/tap/apn
@@ -636,7 +636,8 @@ policy, exact signed-effect and restart tests; its four required mainnet rows
 and provider economics gate remain open. Local TRON adds synthetic TRX/USDT,
 resource-fee, solidified receipt and interrupted-execution checks; its two
 required mainnet rows remain open. Hub, contracts, remote MCP and Stellar are
-outside this demo build. The public Homebrew release remains 0.5.10.
+outside this source build. Public tag, GitHub release, Homebrew delivery and
+installed acceptance remain separate gates until their exact evidence exists.
 
 The published npm archive includes `npm-shrinkwrap.json`, so Formula installation resolves the exact
 integrity-pinned production closure. It preserves direct MetaMask pins and overrides only the

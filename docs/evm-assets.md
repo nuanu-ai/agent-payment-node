@@ -1,8 +1,9 @@
 # Explicit EVM assets
 
-The APN 0.5.11-demo.1 build retains the released 0.5.10 EVM support for exactly Base (`eip155:8453`), Ethereum mainnet (`eip155:1`)
-and Arbitrum One (`eip155:42161`) for the local encrypted disposable wallet.
-Release availability and a fresh mainnet payment remain separate proof layers.
+The APN 0.5.11 package retains the released 0.5.10 EVM support for exactly
+Base (`eip155:8453`), Ethereum mainnet (`eip155:1`) and Arbitrum One
+(`eip155:42161`) for the local encrypted disposable wallet. Package availability
+and a fresh mainnet payment remain separate proof layers.
 
 ## One direct-transfer journey
 

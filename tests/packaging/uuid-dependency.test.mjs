@@ -40,6 +40,26 @@ test("MetaMask utils UUID override and production lock closure are exact", async
     "@metamask/utils": {
       uuid: "11.1.1",
     },
+    "axios@<0.33.0": "0.33.0",
+    "uuid@<11.1.1": "11.1.1",
+    "@metamask/number-to-bn": {
+      "bn.js": "5.2.5",
+    },
+    "ethjs-abi": {
+      "bn.js": "4.12.5",
+    },
+    "number-to-bn": {
+      "bn.js": "4.12.5",
+    },
+    "@nktkas/hyperliquid": {
+      valibot: "1.4.2",
+    },
+    "@ethersproject/providers": {
+      ws: "8.21.3",
+    },
+    "viem@2.52.2": {
+      ws: "8.21.3",
+    },
   });
   assert.deepEqual(lockBytes, shrinkwrapBytes);
 
