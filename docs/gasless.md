@@ -5,9 +5,10 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-This is an unreleased source capability. Mainnet transfer evidence and receiving
-human acceptance are tracked separately for each profile and network. `apn gasless capabilities`
-reports the exact adapter and acceptance state without reading a wallet,
+APN 0.5.11 includes this capability. Package availability, mainnet transfer
+evidence and receiving human acceptance are tracked separately for each profile
+and network. `apn gasless capabilities` reports the exact adapter and acceptance
+state without reading a wallet,
 Keychain, RPC or provider. MetaMask Smart Account is admitted on Base only.
 Coinbase Agentic Wallet remains required work with no executable adapter in this gasless command family.
 This same-chain transfer does not establish gasless x402 or bridge support.

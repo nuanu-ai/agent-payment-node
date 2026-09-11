@@ -1,10 +1,9 @@
 # TRON mainnet direct transfers
 
-This source tree adds local TRX and canonical USDT transfers on TRON mainnet.
-The package version remains 0.5.8; this code has not been published or installed
-as a new public release. Source tests, protocol review and read-only public RPC
-checks do not prove an APN-signed mainnet transfer. No TRX or USDT mainnet
-execution acceptance has been recorded yet.
+This APN 0.5.11 package includes local TRX and canonical USDT transfers on
+TRON mainnet. Package availability, clean installation and live mainnet transfer
+acceptance require separate evidence. No TRX or USDT mainnet execution acceptance
+has been recorded yet.
 
 | Profile | Account and balance | Direct transfer |
 | --- | --- | --- |
