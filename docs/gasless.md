@@ -178,6 +178,46 @@ unread range.
 contain hashes and public accounting, without permits, signatures, raw
 UserOperations, encrypted keys or provider response text.
 
+### Explicit observation RPC recovery (unreleased)
+
+This source change adds an explicit recovery option for a saved Local gasless
+operation whose original RPC cannot serve historical reads. The published
+0.5.11 binary does not include this option. Use the verified candidate artifact
+or a later release that includes it.
+
+```sh
+export APN_ETHEREUM_ARCHIVE_RPC_URL='<verified-public-https-rpc-url>'
+apn operation resume --operation <operation-id> \
+  --observation-rpc-env APN_ETHEREUM_ARCHIVE_RPC_URL
+```
+
+The option names a local environment variable; it does not take a URL. Names
+must match `APN_[A-Z0-9_]+_RPC_URL` and contain at most 128 characters. MCP uses
+the same optional `observation_rpc_env` field. Do not combine it with
+`--rpc-url` or `--wait-seconds`. Other operation kinds reject it.
+
+This mode only observes. It cannot access signing material, estimate fees,
+disclose permissions or send a transaction, even if an approved phase could
+otherwise continue. APN verifies the selected chain, registered contracts and
+token domain, and the original preparation block before accepting evidence.
+It uses the canonical EntryPoint scan without a bundler locator and keeps the
+same bounded scan, reorg, receipt, nonce and allowance rules described above.
+Unavailable or conflicting evidence retains the guard.
+
+Accepted observations include `observation_source`: the explicit recovery
+policy, environment-variable name, RPC origin, full-endpoint hash and binding
+to the original intent and preparation block. The full URL is never stored in
+the operation or receipt. The signed intent, original endpoint identities,
+sealed material and historical transitions remain unchanged. A nonterminal
+operation's next action retains the explicit environment-variable option.
+Terminal resume, status and receipt calls use saved evidence without network
+access.
+
+The new reader accepts existing records without rewriting their old fields.
+Older 0.5.11 readers reject records containing the new observation-source
+field. Verify a candidate against a protected state copy before global
+activation, and keep a compatible reader for records it subsequently writes.
+
 ## MetaMask Agent server wallet
 
 Use a profile already bound to the intended MetaMask Agent server-wallet address

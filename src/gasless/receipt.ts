@@ -5,7 +5,8 @@ import { validateGaslessOperation } from "./operation-validation.js";
 export function gaslessNextActions(op: GaslessOperationRecord): readonly string[] {
   if (op.terminal) return op.state === "completed" ? [] : ["apn gasless transfer prepare --help"];
   if (op.state === "awaiting_approval") return [`apn gasless transfer approve --operation ${op.operationId}`];
-  return [`apn operation resume --operation ${op.operationId}`];
+  const source = op.observation?.source;
+  return [`apn operation resume --operation ${op.operationId}${source === undefined ? "" : ` --observation-rpc-env ${source.environmentName}`}`];
 }
 export function gaslessProofClass(op: GaslessOperationRecord): string {
   if (op.state === "completed") return "rpc_safe_correlated";
@@ -55,6 +56,7 @@ export function publicGaslessOperation(op: GaslessOperationRecord) {
     gas: i.gas, effects, unsigned_envelope_hash: i.unsignedEnvelopeHash,
     user_operation_hash: op.userOperation.userOperationHash, transaction_hash: proof?.transactionHash ?? op.observation?.transactionHash ?? null,
     settlement: proof, scan_cursor: op.cursor,
+    ...(op.observation?.source === undefined ? {} : { observation_source: op.observation.source }),
     ...(invalidation === undefined ? {} : { permission_invalidation: invalidation,
       ...(invalidation.userOperationHash === undefined ? { payment_submitted: false } : {
         payment_submitted: null, payment_submission_attempted: op.userOperation.submissionAttempts === 1,

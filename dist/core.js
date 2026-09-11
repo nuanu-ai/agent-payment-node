@@ -22,6 +22,7 @@ import { BridgeService } from "./lifi/service.js";
 import { GaslessService } from "./gasless/service.js";
 import { gaslessCapabilities } from "./gasless/catalog.js";
 import { gaslessChain } from "./gasless/validation.js";
+import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
 import { mmFail } from "./metamask-gasless/reasons.js";
@@ -161,8 +162,16 @@ export class ApnCore {
                 return operationOutcome(operation.kind === "rail_transfer" ? await this.rails.approve(request.operationId) : await this.transfer.approve(request.operationId));
             }
             case "operation.resume": {
+                if (request.observationRpcEnv !== undefined) {
+                    gaslessObservationRpcEnv(request.observationRpcEnv);
+                    if (request.waitSeconds !== undefined || this.context.rpcUrl !== undefined)
+                        throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery cannot be combined with --rpc-url or --wait-seconds.", { reason: "gasless_observation_rpc_options" });
+                }
                 await this.context.ready();
                 const operation = await this.operations.required(request.operationId);
+                if (request.observationRpcEnv !== undefined && operation.kind !== "gasless_transfer") {
+                    throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery requires a saved Local gasless operation.", { reason: "gasless_observation_operation_kind" });
+                }
                 if (operation.kind === "smart_account_gasless_transfer") {
                     if (request.waitSeconds !== undefined)
                         saFail("sa_gasless_input");
@@ -176,7 +185,7 @@ export class ApnCore {
                 if (operation.kind === "gasless_transfer") {
                     if (request.waitSeconds !== undefined)
                         throw new ApnError("APN_INVALID_INPUT", "Gasless recovery performs one bounded observation; omit --wait-seconds.");
-                    return operationOutcome(await this.gasless.resume(request.operationId));
+                    return operationOutcome(await this.gasless.resume(request.operationId, request.observationRpcEnv));
                 }
                 if (operation.kind === "bridge_route") {
                     if (request.waitSeconds !== undefined)

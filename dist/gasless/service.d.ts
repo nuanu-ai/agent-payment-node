@@ -2,10 +2,11 @@ import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
 import type { GaslessChainId } from "./model.js";
 import { GaslessOperationRepository } from "./operation-repository.js";
-import type { GaslessApprovalPort, GaslessCustodyPort, GaslessRpcFactory } from "./ports.js";
+import type { GaslessApprovalPort, GaslessCustodyPort, GaslessObservationRpcFactory, GaslessRpcFactory } from "./ports.js";
 import { GaslessPreparation } from "./prepare.js";
 export interface GaslessDependencies {
     readonly rpcFor: GaslessRpcFactory;
+    readonly observationRpcFor?: GaslessObservationRpcFactory;
     readonly custody: GaslessCustodyPort;
     readonly approval?: GaslessApprovalPort;
 }
@@ -45,6 +46,7 @@ export declare class GaslessService {
         updated_at: string;
         expires_at: string;
         next_actions: readonly string[];
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -140,6 +142,7 @@ export declare class GaslessService {
         next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -238,6 +241,7 @@ export declare class GaslessService {
         prior_payment_effects: "unknown";
         final_permissions_invalidated: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -332,6 +336,7 @@ export declare class GaslessService {
         updated_at: string;
         expires_at: string;
         next_actions: readonly string[];
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -427,6 +432,7 @@ export declare class GaslessService {
         next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -525,6 +531,7 @@ export declare class GaslessService {
         prior_payment_effects: "unknown";
         final_permissions_invalidated: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -604,7 +611,7 @@ export declare class GaslessService {
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
     }>;
-    resume(operationId: string): Promise<{
+    resume(operationId: string, observationRpcEnv?: string): Promise<{
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -619,6 +626,7 @@ export declare class GaslessService {
         updated_at: string;
         expires_at: string;
         next_actions: readonly string[];
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -714,6 +722,7 @@ export declare class GaslessService {
         next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -812,6 +821,7 @@ export declare class GaslessService {
         prior_payment_effects: "unknown";
         final_permissions_invalidated: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -906,6 +916,7 @@ export declare class GaslessService {
         updated_at: string;
         expires_at: string;
         next_actions: readonly string[];
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -1001,6 +1012,7 @@ export declare class GaslessService {
         next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -1099,6 +1111,7 @@ export declare class GaslessService {
         prior_payment_effects: "unknown";
         final_permissions_invalidated: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
         operation_id: string;
@@ -1196,6 +1209,7 @@ export declare class GaslessService {
         updated_at: string;
         expires_at: string;
         next_actions: readonly string[];
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         operation_id: string;
         profile: string;
@@ -1293,6 +1307,7 @@ export declare class GaslessService {
         next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         operation_id: string;
         profile: string;
@@ -1393,6 +1408,7 @@ export declare class GaslessService {
         prior_payment_effects: "unknown";
         final_permissions_invalidated: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         operation_id: string;
         profile: string;

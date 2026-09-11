@@ -6,7 +6,8 @@ export interface GaslessObservationContext {
     readonly rpcOrigin: string;
     readonly deployment: GaslessDeployment;
     readonly rpc: GaslessRpcCall;
-    readonly bundler: GaslessRpcCall;
-    snapshot(owner: Address): Promise<GaslessSnapshot>;
+    readonly bundler?: GaslessRpcCall;
+    /** Retained for existing callers; canonical observation never uses an execution snapshot. */
+    readonly snapshot?: (owner: Address) => Promise<GaslessSnapshot>;
 }
 export declare function observeGasless(context: GaslessObservationContext, intent: GaslessIntent, identity: GaslessEffectIdentity, cursorInput: GaslessCursor): Promise<GaslessObservation>;

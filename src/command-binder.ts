@@ -14,6 +14,7 @@ import { solanaAddress } from "./solana/rpc.js";
 import { tronAddress } from "./tron/codec.js";
 import { bindBridgeCommand } from "./lifi/command-catalog.js";
 import { bindGaslessCommand } from "./gasless/command-catalog.js";
+import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 
 export interface BoundCommand {
   readonly request: CommandRequest;
@@ -205,14 +206,23 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     };
     case "operation status": return { request: { command: "operation.status", operationId: value(options, "--operation") } };
     case "operation abandon": return { request: { command: "operation.abandon", operationId: value(options, "--operation") } };
-    case "operation resume": return {
-      request: {
-        command: "operation.resume",
-        operationId: value(options, "--operation"),
-        ...(options["--wait-seconds"] === undefined ? {} : { waitSeconds: Number(options["--wait-seconds"]) }),
-      },
-      ...(options["--rpc-url"] === undefined ? {} : { rpcUrl: options["--rpc-url"] }),
-    };
+    case "operation resume": {
+      const observationRpcEnv = options["--observation-rpc-env"] === undefined ? undefined
+        : gaslessObservationRpcEnv(options["--observation-rpc-env"]);
+      if (observationRpcEnv !== undefined && (options["--rpc-url"] !== undefined || options["--wait-seconds"] !== undefined)) {
+        throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery cannot be combined with --rpc-url or --wait-seconds.",
+          { reason: "gasless_observation_rpc_options" });
+      }
+      return {
+        request: {
+          command: "operation.resume",
+          operationId: value(options, "--operation"),
+          ...(options["--wait-seconds"] === undefined ? {} : { waitSeconds: Number(options["--wait-seconds"]) }),
+          ...(observationRpcEnv === undefined ? {} : { observationRpcEnv }),
+        },
+        ...(options["--rpc-url"] === undefined ? {} : { rpcUrl: options["--rpc-url"] }),
+      };
+    }
     case "operation recover-provider-request": return {
       request: {
         command: "operation.recover-provider-request",

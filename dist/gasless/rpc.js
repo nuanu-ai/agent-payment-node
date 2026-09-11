@@ -178,7 +178,7 @@ export class GaslessRpc {
         if (rpcQuantity(rpcChain) !== BigInt(this.chainId))
             gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
         return await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin, deployment: this.deployment,
-            rpc: this.rpcCall, bundler: this.bundlerCall, snapshot: async (owner) => await this.snapshot(owner) }, intent, identity, cursor);
+            rpc: this.rpcCall, bundler: this.bundlerCall }, intent, identity, cursor);
     }
     assertIntent(intent) {
         if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId ||

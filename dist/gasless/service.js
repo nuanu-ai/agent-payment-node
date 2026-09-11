@@ -4,6 +4,8 @@ import { canonicalOperationId } from "../transfer-policy.js";
 import { GaslessExecution } from "./execution.js";
 import { GaslessOperationRepository } from "./operation-repository.js";
 import { gaslessOwner } from "./owner.js";
+import { GaslessObservationService } from "./observation.js";
+import { gaslessObservationRpcEnv } from "./observation-source.js";
 import { GaslessPreparation } from "./prepare.js";
 import { publicGaslessOperation } from "./receipt.js";
 import { gaslessDeployment } from "./registry.js";
@@ -49,7 +51,19 @@ export class GaslessService {
             return publicGaslessOperation(await this.execution(op).approve(op, approval));
         });
     }
-    async resume(operationId) {
+    async resume(operationId, observationRpcEnv) {
+        if (observationRpcEnv !== undefined) {
+            const environmentName = gaslessObservationRpcEnv(observationRpcEnv);
+            return await this.locked(operationId, async (op) => {
+                if (op.terminal || op.bootstrap.signingAttempts === 0)
+                    return publicGaslessOperation(op);
+                const factory = this.dependencies().observationRpcFor;
+                if (factory === undefined)
+                    gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_unavailable");
+                const observer = new GaslessObservationService(factory(op.intent.request.chainId, environmentName), async (previous, patch) => await this.save(previous, patch), environmentName);
+                return publicGaslessOperation(await observer.run(op));
+            });
+        }
         return await this.locked(operationId, async (op) => publicGaslessOperation(op.terminal || op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
     }
     async status(operationId) { return await this.locked(operationId, async (op) => publicGaslessOperation(op)); }
