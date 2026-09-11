@@ -75,7 +75,8 @@ export type CommandRequest =
     readonly maxFeeWei?: string;
   }
   | { readonly command: "transfer.approve"; readonly operationId: string }
-  | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number }
+  | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number;
+      readonly observationRpcEnv?: string }
   | { readonly command: "operation.abandon"; readonly operationId: string }
   | {
     readonly command: "operation.recover-provider-request";

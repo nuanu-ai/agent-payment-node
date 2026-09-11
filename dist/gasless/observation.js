@@ -1,3 +1,4 @@
+import { gaslessObservationSource } from "./observation-source.js";
 import { assertGaslessPermissionClosure } from "./permission-invalidation.js";
 import { observationSchema } from "./schema.js";
 import { assertGaslessSettlementContinuation, validateGaslessSettlement } from "./settlement-validation.js";
@@ -5,9 +6,11 @@ import { gaslessSame } from "./validation.js";
 export class GaslessObservationService {
     rpc;
     save;
-    constructor(rpc, save) {
+    recoveryEnvironment;
+    constructor(rpc, save, recoveryEnvironment) {
         this.rpc = rpc;
         this.save = save;
+        this.recoveryEnvironment = recoveryEnvironment;
     }
     async run(op) {
         if (op.terminal || op.bootstrap.signingAttempts === 0)
@@ -15,15 +18,22 @@ export class GaslessObservationService {
         let result;
         try {
             const s = op.intent.initialSnapshot;
-            if (this.rpc.chainId !== op.intent.request.chainId || this.rpc.rpcOrigin !== s.rpcOrigin ||
-                this.rpc.rpcEndpointHash !== s.rpcEndpointHash || this.rpc.bundlerOrigin !== s.bundlerOrigin ||
-                this.rpc.bundlerEndpointHash !== s.bundlerEndpointHash)
+            if (this.rpc.chainId !== op.intent.request.chainId)
+                throw new Error("chain");
+            const original = this.rpc;
+            if (this.recoveryEnvironment === undefined && (this.rpc.rpcOrigin !== s.rpcOrigin ||
+                this.rpc.rpcEndpointHash !== s.rpcEndpointHash || original.bundlerOrigin !== s.bundlerOrigin ||
+                original.bundlerEndpointHash !== s.bundlerEndpointHash))
                 throw new Error("endpoint");
             result = await this.rpc.observe(op.intent, { bootstrapMaterialHash: op.bootstrap.materialHash,
                 userOperationMaterialHash: op.userOperation.materialHash,
                 userOperationHash: op.userOperation.userOperationHash }, op.cursor);
             if (!observationSchema.safeParse(result).success || !gaslessSame(result.cursor.startBlock, op.cursor.startBlock))
                 throw new Error("shape");
+            if (this.recoveryEnvironment === undefined ? result.source !== undefined :
+                !gaslessSame(result.source, gaslessObservationSource(op.intent, this.recoveryEnvironment, this.rpc))) {
+                throw new Error("observation source");
+            }
             if (op.userOperation.submissionAttempts !== 1 && (result.transactionHash !== null || result.settlement !== null))
                 throw new Error("unsubmitted");
             if ((result.status === "safe") !== (result.settlement !== null))

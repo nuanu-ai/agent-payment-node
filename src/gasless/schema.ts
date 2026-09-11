@@ -58,10 +58,13 @@ export const permissionInvalidationSchema = z.strictObject({ chainId: chainSchem
   bootstrapMaterialHash: hashSchema, protocolHash: hashSchema, safeBlock: blockSchema, headBlock: blockSchema,
   safeAccount: accountSchema, headAccount: accountSchema,
   userOperationMaterialHash: hashSchema.optional(), userOperationHash: wordSchema.optional() });
+export const observationSourceSchema = z.strictObject({ policy: z.literal("apn.gasless.observation-rpc.v1"),
+  environmentName: z.string().max(128).regex(/^APN_[A-Z0-9_]+_RPC_URL$/u),
+  rpcOrigin: originSchema, rpcEndpointHash: hashSchema, intentHash: hashSchema, initialBlock: blockSchema });
 export const observationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "safe", "unresolved", "permissions_invalidated"]),
   transactionHash: wordSchema.nullable(), settlement: settlementSchema.nullable(), cursor: cursorSchema,
   evidenceHash: hashSchema.nullable(), reason: reasonSchema.nullable(),
-  permissionInvalidation: permissionInvalidationSchema.optional() });
+  permissionInvalidation: permissionInvalidationSchema.optional(), source: observationSourceSchema.optional() });
 export const consentSchema = z.strictObject({ policy: z.literal("apn.gasless.foreground-approval.v1"),
   fingerprint: hashSchema, approvedAt: isoSchema, expiresAt: isoSchema });
 export const stateSchema = z.enum(["awaiting_approval", "execution_pending", "bootstrap_pending", "user_operation_pending",
