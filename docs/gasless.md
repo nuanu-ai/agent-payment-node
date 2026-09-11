@@ -5,7 +5,7 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-APN 0.5.11 includes this capability. Package availability, mainnet transfer
+APN 0.5.12 includes this capability. Package availability, mainnet transfer
 evidence and receiving human acceptance are tracked separately for each profile
 and network. `apn gasless capabilities` reports the exact adapter and acceptance
 state without reading a wallet,
@@ -178,12 +178,12 @@ unread range.
 contain hashes and public accounting, without permits, signatures, raw
 UserOperations, encrypted keys or provider response text.
 
-### Explicit observation RPC recovery (unreleased)
+### Explicit observation RPC recovery
 
-This source change adds an explicit recovery option for a saved Local gasless
+APN 0.5.12 includes an explicit recovery option for a saved Local gasless
 operation whose original RPC cannot serve historical reads. The published
-0.5.11 binary does not include this option. Use the verified candidate artifact
-or a later release that includes it.
+0.5.11 binary does not include this option; use a verified 0.5.12 or later
+compatible artifact.
 
 ```sh
 export APN_ETHEREUM_ARCHIVE_RPC_URL='<verified-public-https-rpc-url>'
