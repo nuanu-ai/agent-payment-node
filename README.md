@@ -5,15 +5,14 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.11 is the ordinary release build for Apple Silicon macOS. It combines
+APN 0.5.12 is the ordinary release build for Apple Silicon macOS. It combines
 the admitted sprint commands with APN 0.5.10 EVM fee-envelope corrections.
 GitHub publication and the Homebrew Formula remain separate release gates; use
-only an exact verified 0.5.11 archive or installation for the new commands.
+only an exact verified 0.5.12 archive or installation for the new commands.
 
-This source tree also contains an unreleased [explicit observation RPC recovery
-option](docs/gasless.md#explicit-observation-rpc-recovery-unreleased) for saved
-Local gasless operations. It requires a verified artifact containing this
-change; the published 0.5.11 binary does not provide it.
+APN 0.5.12 includes [explicit observation RPC recovery](docs/gasless.md#explicit-observation-rpc-recovery)
+for saved Local gasless operations whose original RPC cannot serve historical
+reads. The published 0.5.11 binary does not provide this option.
 
 The local wallet supports Base, Ethereum and Arbitrum One native ETH and
 arbitrary ERC-20 direct transfers, plus independently network-bound canonical
@@ -46,7 +45,7 @@ the total USDC budget, so the sender can have zero native gas balance. The
 recipient amount and maximum USDC fee are frozen before foreground approval;
 unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
 for commands, persistent account permissions and recovery. This remains
-an APN 0.5.11 capability with separate per-network mainnet acceptance.
+an APN 0.5.12 capability with separate per-network mainnet acceptance.
 
 The same gasless commands also support an existing MetaMask Agent server wallet
 on Ethereum, Optimism, Polygon PoS, Monad, Sei, Base, Arbitrum and Linea. The
@@ -67,7 +66,7 @@ and the [verified archive recovery preflight](docs/gasless.md#existing-state-and
 ## Install
 
 Homebrew installation is a separate publication gate. Verify that `apn version`
-reports `0.5.11` before using the commands described for this release.
+reports `0.5.12` before using the commands described for this release.
 
 ```sh
 brew install nuanu-ai/tap/apn
