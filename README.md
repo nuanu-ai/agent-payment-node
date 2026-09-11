@@ -5,14 +5,64 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.10 targets Apple Silicon macOS and supports explicit local-wallet Base,
-Ethereum and Arbitrum One native ETH / arbitrary ERC-20 direct transfers, plus
-independently network-bound canonical-USDC EIP-3009 x402. It does not require an
-Apple Developer identity, an app bundle, a daemon, a browser extension, or the
-AI Labs Hub. See [EVM asset transfers](docs/evm-assets.md) for the exact fee
-budget and evidence boundaries.
+APN 0.5.11 is the ordinary release build for Apple Silicon macOS. It combines
+the admitted sprint commands with APN 0.5.10 EVM fee-envelope corrections.
+GitHub publication and the Homebrew Formula remain separate release gates; use
+only an exact verified 0.5.11 archive or installation for the new commands.
+
+The local wallet supports Base, Ethereum and Arbitrum One native ETH and
+arbitrary ERC-20 direct transfers, plus independently network-bound canonical
+USDC EIP-3009 x402. The approved transaction stays frozen while harmless fee
+recommendation changes remain executable. See [EVM asset transfers](docs/evm-assets.md)
+for fee limits and the separate source, installed and mainnet proof boundaries.
+
+It also adds local Solana mainnet SOL/USDC account, policy, transfer and recovery
+commands with a separate encrypted ed25519 wallet. Coinbase Solana account and
+balance inspection is implemented, while sending is blocked by the pinned
+provider's missing fee/rent guarantee. See [Solana direct transfers](docs/solana.md)
+for exact commands and the four open mainnet acceptance rows.
+
+Local TRON mainnet TRX and canonical USDT now use a separate encrypted
+secp256k1 wallet, explicit RPC, human policy and transfer approval, a bounded
+resource-price window and solidified transaction evidence. All three external
+wallet profiles remain unavailable for TRON. See [TRON direct transfers](docs/tron.md)
+for commands, total TRX caps and the two open mainnet acceptance rows.
+
+LI.FI route selection and local-wallet execution now cover canonical USDC
+between Ethereum, Base and Arbitrum through Across V4 and Stargate V2 Taxi.
+The bridge flow freezes both source effects, requires foreground approval and
+correlates safe delivery across both chains. See [LI.FI bridges](docs/lifi.md)
+for fee controls, recovery and the three open mainnet acceptance rows.
+
+The local wallet also has a USDC fee-transfer path on Ethereum, Base, Arbitrum,
+Optimism, Polygon PoS and Unichain. Avalanche C-Chain remains required but its
+admitted bundler lacks the needed EIP-7702 support. The gas fee comes from
+the total USDC budget, so the sender can have zero native gas balance. The
+recipient amount and maximum USDC fee are frozen before foreground approval;
+unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
+for commands, persistent account permissions and recovery. This remains
+an APN 0.5.11 capability with separate per-network mainnet acceptance.
+
+The same gasless commands also support an existing MetaMask Agent server wallet
+on Ethereum, Optimism, Polygon PoS, Monad, Sei, Base, Arbitrum and Linea. The
+successful sender debit equals the frozen recipient amount plus the exact USDC
+fee. APN requires the full operation ID and fingerprint in foreground approval,
+dispatches once and independently verifies settlement. Recovery only observes
+after dispatch, including after the APN deadline. All eight live acceptance rows
+remain open; see [MetaMask gasless transfers](docs/gasless.md#metamask-agent-server-wallet).
+
+An existing MetaMask Smart Account profile can use these commands on Base with
+its current owner, session and periodic USDC permission. The public facilitator
+pays native gas; the recipient receives the full approved USDC amount and the
+fee is zero. APN signs one expiring child permission, records disclosure before
+verification, and only observes on recovery after disclosure. Fresh Base
+acceptance remains open. See [Smart Account gasless transfers](docs/gasless.md#metamask-smart-account)
+and the [verified archive recovery preflight](docs/gasless.md#existing-state-and-upgrades).
 
 ## Install
+
+Homebrew installation is a separate publication gate. Verify that `apn version`
+reports `0.5.11` before using the commands described for this release.
 
 ```sh
 brew install nuanu-ai/tap/apn
@@ -46,13 +96,13 @@ apn mcp config
 apn mcp serve
 ```
 
-This source tree exposes twenty-eight catalog-derived tools: version, Keychain
+This source tree exposes catalog-derived tools for version, Keychain
 doctor, wallet, provider-permission and wallet-policy operations plus x402 inspect/prepare/approve,
-direct-transfer prepare/foreground handoff, operation status/resume and receipt
+direct-transfer prepare/foreground handoff, operation status/resume/abandon and receipt
 reads. It has no remote listener, remote transport or arbitrary sign/send tool.
-The asset-aware tools select an explicit asset for balance and direct
-preparation; direct approval still hands off to a foreground CLI terminal
-without payment.
+The manifest also covers explicit EVM assets, Solana, TRON, USDC gas fees and
+LI.FI route selection. Transfer, gasless and bridge approval through MCP hand off to the foreground
+CLI terminal without payment.
 
 ## Supply-chain verification
 
@@ -268,6 +318,26 @@ MetaMask, `operation recover-provider-request` binds that one request without
 creating, signing or submitting another transfer; ordinary `operation resume`
 then watches it and still requires the exact Base receipt and Transfer log.
 
+When a provider-atomic direct operation is `ambiguous_effect` and has neither a
+transaction hash nor a provider recovery reference, the owner may stop its APN
+lifecycle explicitly:
+
+```sh
+apn operation abandon --operation <operation-id>
+```
+
+The foreground terminal shows the full operation ID and fingerprint, profile,
+provider, amount, sender and recipient, and requires the exact
+`ABANDON APN UNKNOWN <fingerprint-suffix>` phrase. The resulting
+`abandoned_unknown` state and receipt record only the owner's acceptance of the
+continuing unknown financial outcome. They do not assert success, failure,
+cancellation, refund or no effect. This path never contacts a signer, wallet,
+provider or RPC; it refuses local, delegated, gasless, x402, bridge, known-hash
+and provider-reference operations. A separately prepared operation needs a new
+idempotency key and ordinary approval. Reusing the abandoned operation's old
+idempotency key still returns that immutable terminal operation. MCP exposes the
+command but only returns the exact foreground CLI handoff.
+
 Pinned `awal@2.12.1` parses its decimal argument through JavaScript floating-
 point arithmetic and also treats whole numbers greater than `100` as atomic
 units. Before durable start or child creation, the Coinbase adapter emulates
@@ -446,9 +516,10 @@ apn x402 inspect --url <https-url> [--method <method>] [--headers-json <json>] [
 apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
 apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
-apn pay transfer approve --operation <operation-id> --rpc-url <https-url>
+apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
 apn operation status --operation <operation-id>
-apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]
+apn operation abandon --operation <operation-id>
+apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>]
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
@@ -456,6 +527,25 @@ apn wallet policy show-network --chain <caip2> --profile <profile>
 apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
 apn x402 inspect-network --chain <caip2> --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch prepare-network --chain <caip2> --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
+apn wallet ensure-solana --profile <profile> --provider <local-or-coinbase-awal> [--accept-risk true]
+apn wallet balance-solana --profile <profile> --asset <sol-or-usdc>
+apn wallet capabilities-solana [--profile <profile>]
+apn policy admit-solana --profile <profile> --asset <sol-or-usdc> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-sol <decimal>
+apn pay transfer prepare-solana --profile <profile> --asset <sol-or-usdc> --to <solana-address> --amount <decimal> --max-fee-sol <decimal> --idempotency-key <key>
+apn wallet ensure-tron --profile <profile> --provider local --accept-risk true
+apn wallet balance-tron --profile <profile> --asset <trx-or-usdt>
+apn wallet capabilities-tron [--profile <profile>]
+apn policy admit-tron --profile <profile> --asset <trx-or-usdt> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-trx <decimal>
+apn pay transfer prepare-tron --profile <profile> --asset <trx-or-usdt> --to <tron-address> --amount <decimal> --max-fee-trx <decimal> --idempotency-key <key>
+apn bridge capabilities [--profile <profile>]
+apn bridge inventory
+apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --from-token <address> --to-token <address> --amount <decimal> --to <address> --min-output <decimal> --max-native-debit-wei <uint> --max-route-fee <decimal> --slippage-bps <uint>
+apn bridge prepare --profile <profile> --quote <snapshot-hash> --route <route-id> --idempotency-key <key>
+apn bridge approve --operation <operation-id>
+apn gasless capabilities [--profile <profile>]
+apn gasless balance --profile <profile> --chain <chain-id>
+apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --idempotency-key <key>
+apn gasless transfer approve --operation <operation-id>
 ```
 <!-- END APN COMMAND CATALOG -->
 
@@ -537,12 +627,17 @@ live provider acceptance, payment proof or production E2E.
 
 Public release, clean Homebrew install and bounded live Base/x402 acceptance
 are separately recorded release gates. The local stdio MCP surface projects
-the same twenty-eight catalog-selected wallet, policy, payment, operation and
+the same forty-eight catalog-selected wallet, policy, payment, operation and
 receipt commands through the shared binder/runtime/core path. Direct approval
 remains foreground CLI only. Coinbase x402 source and deterministic product
 proof are included; live Coinbase/provider and paid acceptance are recorded as
-separate release gates. Hub, contracts, remote MCP, other providers, Stellar,
-Solana and TRON are outside this release.
+separate release gates. Local Solana source integration has synthetic custody,
+policy, exact signed-effect and restart tests; its four required mainnet rows
+and provider economics gate remain open. Local TRON adds synthetic TRX/USDT,
+resource-fee, solidified receipt and interrupted-execution checks; its two
+required mainnet rows remain open. Hub, contracts, remote MCP and Stellar are
+outside this source build. Public tag, GitHub release, Homebrew delivery and
+installed acceptance remain separate gates until their exact evidence exists.
 
 The published npm archive includes `npm-shrinkwrap.json`, so Formula installation resolves the exact
 integrity-pinned production closure. It preserves direct MetaMask pins and overrides only the

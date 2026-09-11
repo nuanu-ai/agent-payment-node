@@ -130,6 +130,9 @@ function validateTransitions(values) {
         stateCorrupt("Operation has no transition history.");
 }
 function validateLocalDirect(operation) {
+    if (operation.state === "abandoned_unknown" || operation.transitions.some((transition) => transition.state === "abandoned_unknown")) {
+        stateCorrupt("Local direct operation cannot use provider owner abandonment.");
+    }
     if (operation.transactionData === undefined || operation.economics === undefined ||
         operation.preparedBlockNumberAtomic === undefined || operation.providerEffect !== undefined) {
         stateCorrupt("Local direct operation is missing its transaction economics.");
@@ -165,12 +168,12 @@ function validateProviderDirect(operation, binding) {
         stateCorrupt("Provider direct operation binding is invalid.");
     const providerStates = [
         "awaiting_approval", "started", "provider_pending", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
-        "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
+        "abandoned_unknown", "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
     ];
     if (!providerStates.includes(operation.state))
         stateCorrupt("Provider direct operation state is invalid.");
     const terminalStates = [
-        "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
+        "abandoned_unknown", "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
     ];
     if (operation.terminal !== terminalStates.includes(operation.state)) {
         stateCorrupt("Provider direct terminal posture is invalid.");
@@ -190,13 +193,18 @@ function validateProviderDirect(operation, binding) {
     if (operation.state === "awaiting_approval" && operation.providerEffect !== undefined) {
         stateCorrupt("Provider request exists before foreground approval.");
     }
+    if (operation.state === "abandoned_unknown" && (binding.executionMode !== "provider_atomic_send" || operation.transactionHash !== undefined ||
+        operation.providerEffect !== undefined || operation.reason !== "owner_acknowledged_unresolved_effect" ||
+        operation.proofClass !== "owner_acknowledgement_only"))
+        stateCorrupt("Provider direct owner abandonment classification is invalid.");
     const allowed = {
         awaiting_approval: ["started", "failed_before_effect"],
         started: ["provider_pending", "provider_acknowledged", "ambiguous_effect", "failed_before_effect", "failed_provider_rejected"],
         provider_pending: ["provider_acknowledged", "ambiguous_effect", "failed_provider_rejected"],
         provider_acknowledged: ["evidence_pending", "completed", "failed_confirmed_revert", "ambiguous_effect"],
         evidence_pending: ["completed", "failed_confirmed_revert", "ambiguous_effect"],
-        ambiguous_effect: ["provider_pending", "provider_acknowledged", "completed", "failed_provider_rejected", "failed_confirmed_revert"],
+        ambiguous_effect: ["provider_pending", "provider_acknowledged", "completed", "failed_provider_rejected", "failed_confirmed_revert", "abandoned_unknown"],
+        abandoned_unknown: [],
         completed: [],
         failed_before_effect: [],
         failed_provider_rejected: [],

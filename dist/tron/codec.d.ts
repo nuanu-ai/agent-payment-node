@@ -1,0 +1,12 @@
+export { TRON_GENESIS, TRON_USDT, TRON_USDT_HEX, TRON_TRANSFER_TOPIC } from "./constants.js";
+export declare function tronAddress(value: string): string;
+export declare function tronHex(value: string): string;
+export declare function tronWord(value: string): string;
+export declare function tronTransferData(recipient: string, amount: string): string;
+export declare function tronRecord(value: unknown): Record<string, unknown>;
+export declare function tronArray(value: unknown, maximum?: number): readonly unknown[];
+export declare function tronAtomic(value: unknown, omittedZero?: boolean): bigint;
+export declare function tronSafeNumber(value: bigint): number;
+export declare function tronHash(value: unknown): string;
+export declare function tronProtocolFailure(): never;
+export declare function tronReprepare(): never;

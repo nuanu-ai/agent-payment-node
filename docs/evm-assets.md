@@ -1,8 +1,9 @@
 # Explicit EVM assets
 
-APN 0.5.10 enables exactly Base (`eip155:8453`), Ethereum mainnet (`eip155:1`)
-and Arbitrum One (`eip155:42161`) for the local encrypted disposable wallet.
-Release availability and a fresh mainnet payment remain separate proof layers.
+The APN 0.5.11 package retains the released 0.5.10 EVM support for exactly
+Base (`eip155:8453`), Ethereum mainnet (`eip155:1`) and Arbitrum One
+(`eip155:42161`) for the local encrypted disposable wallet. Package availability
+and a fresh mainnet payment remain separate proof layers.
 
 ## One direct-transfer journey
 
@@ -109,8 +110,8 @@ safe/finalized chain evidence. Resume takes its network from the frozen operatio
 not a new caller override. GET and absent/empty/nonempty POST envelopes remain
 immutable across the same-material retry and result recovery.
 
-Production Ethereum and Arbitrum merchant/facilitator paths have not been
-qualified by a paid x402 run. The bounded D4-D9 direct acceptance completed on
+Direct transfers and paid x402 purchases have separate acceptance records.
+The bounded D4-D9 direct acceptance completed on
 2026-09-10 for Arbitrum native ETH, USDC and USDT0 plus Base native ETH, USDC
 and WETH: all six direct rows passed, both required Base WETH prerequisite
 transactions were confirmed, and Base USDC funding was skipped as unnecessary.

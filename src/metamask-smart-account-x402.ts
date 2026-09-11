@@ -7,10 +7,6 @@ import {
   decodeValueLteTerms,
   hashDelegation,
 } from "@metamask/delegation-core";
-import type { PermissionContext } from "@metamask/smart-accounts-kit";
-import {
-  createx402DelegationProvider,
-} from "@metamask/smart-accounts-kit/experimental";
 import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "@metamask/7715-permission-types";
 import {
   SIGNABLE_DELEGATION_TYPED_DATA,
@@ -18,9 +14,7 @@ import {
   encodeDelegations,
   toDelegationStruct,
 } from "@metamask/smart-accounts-kit/utils";
-import { x402Erc7710Client } from "@metamask/x402";
 import { getAddress, keccak256, pad, recoverTypedDataAddress, toHex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import type { SmartAccountX402MaterialStorePort } from "./encrypted-smart-account-x402-material-store.js";
@@ -45,6 +39,9 @@ import {
 } from "./x402-codec.js";
 import { materializePaymentIdentifier } from "./x402-policy.js";
 import type { X402OperationRecord } from "./x402-state-integrity.js";
+import { OfficialErc7710Engine } from "./smart-account-erc7710/engine.js";
+import type { Erc7710MaterialIntent, Erc7710PaymentPayload } from "./smart-account-erc7710/intent.js";
+import { validateErc7710Material } from "./smart-account-erc7710/validation.js";
 
 export interface SmartAccountX402EnginePort {
   create(input: {
@@ -58,22 +55,12 @@ export class OfficialSmartAccountX402Engine implements SmartAccountX402EnginePor
   async create(input: Parameters<SmartAccountX402EnginePort["create"]>[0]): Promise<PaymentPayload> {
     const binding = delegatedBinding(input.operation);
     const requirements = protectedRequirements(input.operation);
-    const account = privateKeyToAccount(input.record.session_private_key);
-    const provider = createx402DelegationProvider({
-      account,
-      environment: smartAccountEnvironment(),
-      from: input.record.session_address,
-      salt: deterministicSalt(input.operation),
-      parentPermissionContext: input.record.grant_context as PermissionContext,
-      caveats: [{
-        type: "timestamp",
-        afterThreshold: Number(input.operation.authorization.createdAt),
-        beforeThreshold: Number(binding.effectiveExpiryUnix),
-      }],
-      redeemers: { requireRedeemers: true, addresses: [...input.approvedFacilitators] },
+    const intent = x402Intent(input.operation, input.record, input.approvedFacilitators, requirements);
+    const material = await new OfficialErc7710Engine().create(intent, {
+      sessionPrivateKey: input.record.session_private_key,
+      rootContext: input.record.grant_context,
     });
-    const client = new x402Erc7710Client({ delegationProvider: provider });
-    const material = await client.createPaymentPayload(2, requirements);
+    await validateErc7710Material(intent, material);
     const resource = JSON.parse(input.operation.sellerWire.resourceCanonicalJson) as NonNullable<PaymentPayload["resource"]>;
     const paymentIdentifier = materializePaymentIdentifier(input.operation.paymentIdentifier);
     return {
@@ -264,6 +251,10 @@ async function validateOfficialMaterial(
   record: GrantedSmartAccountPermissionRecord,
 ): Promise<void> {
   const binding = delegatedBinding(operation);
+  await validateErc7710Material(
+    x402Intent(operation, record, binding.facilitatorAddresses, protectedRequirements(operation)),
+    { x402Version: 2, accepted: payload.accepted, payload: payload.payload } as unknown as Erc7710PaymentPayload,
+  );
   if (canonicalJson(payload.accepted) !== operation.selectedOffer.declaredCanonicalJson) protocol("Accepted requirements changed during materialization.");
   const delegationPayload = erc7710Payload(payload);
   if (delegationPayload.delegationManager.toLowerCase() !== binding.delegationManager ||
@@ -295,6 +286,28 @@ async function validateOfficialMaterial(
   });
   if (recovered.toLowerCase() !== binding.sessionAddress) protocol("ERC-7710 child was not signed by the frozen session account.");
   validateChildCaveats(child.caveats, operation, binding);
+}
+
+function x402Intent(operation: X402OperationRecord, record: GrantedSmartAccountPermissionRecord,
+  facilitators: readonly Address[], requirements: PaymentRequirements): Erc7710MaterialIntent {
+  const binding = delegatedBinding(operation);
+  return {
+    operationId: operation.operationId,
+    fingerprint: operation.fingerprint,
+    chainId: CHAIN_ID,
+    token: BASE_USDC.toLowerCase() as Address,
+    amountAtomic: operation.amountAtomic,
+    payee: operation.payee.toLowerCase() as Address,
+    ownerAddress: operation.wallet.toLowerCase() as Address,
+    sessionAddress: binding.sessionAddress.toLowerCase() as Address,
+    delegationManager: binding.delegationManager.toLowerCase() as Address,
+    afterUnix: Number(operation.authorization.createdAt),
+    beforeUnix: Number(binding.effectiveExpiryUnix),
+    facilitatorAddresses: facilitators.map(lower),
+    salt: deterministicSalt(operation),
+    requirements: requirements as Erc7710MaterialIntent["requirements"],
+    rootContext: record.grant_context.toLowerCase() as Hex,
+  };
 }
 
 function validateChildCaveats(

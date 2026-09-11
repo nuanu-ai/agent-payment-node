@@ -34,6 +34,9 @@ export function failureEnvelope(command, requestId, error) {
     };
 }
 function nextActions(error) {
+    const explicit = error.details?.nextActions;
+    if (Array.isArray(explicit) && explicit.every((value) => typeof value === "string"))
+        return explicit;
     switch (error.code) {
         case "APN_FOREGROUND_AUTH_REQUIRED": {
             const handoff = error.details?.cli_handoff;

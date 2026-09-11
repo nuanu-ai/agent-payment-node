@@ -13,6 +13,16 @@ const SELECTED_PATHS = [
     "wallet status",
     "wallet balance",
     "wallet balance-asset",
+    "wallet ensure-solana",
+    "wallet balance-solana",
+    "wallet capabilities-solana",
+    "policy admit-solana",
+    "pay transfer prepare-solana",
+    "wallet ensure-tron",
+    "wallet balance-tron",
+    "wallet capabilities-tron",
+    "policy admit-tron",
+    "pay transfer prepare-tron",
     "wallet policy show",
     "wallet policy set",
     "x402 inspect",
@@ -22,6 +32,7 @@ const SELECTED_PATHS = [
     "pay transfer prepare-asset",
     "pay transfer approve",
     "operation status",
+    "operation abandon",
     "operation resume",
     "operation recover-provider-request",
     "operation recover-transaction-settlement",
@@ -30,6 +41,8 @@ const SELECTED_PATHS = [
     "wallet policy set-network",
     "x402 inspect-network",
     "x402 fetch prepare-network",
+    "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
+    "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
 ];
 export function projectMcpTools(manifest = COMMAND_MANIFEST) {
     validateCommandManifest(manifest);

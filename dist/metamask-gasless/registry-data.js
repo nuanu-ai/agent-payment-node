@@ -1,0 +1,167 @@
+// Copied from the SHA-bound parent deployment input. Runtime action-time checks remain mandatory.
+export const MM_DEPLOYMENT_SOURCE_FILES = [
+    {
+        "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-enforcer-root-check-20260909.json",
+        "sha256": "663bd6ee72ab533eb9ef465111c3ce3a3c084cdf38764fe4be3a67102d8e9957",
+        "bytes": 328
+    },
+    {
+        "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-20260909.json",
+        "sha256": "b888dda3e244bedf900599e2d56559401d86fc2b8c239d6d9f603004fe59dc4a",
+        "bytes": 449999
+    },
+    {
+        "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-polygon-finalized-20260909.json",
+        "sha256": "1b4b540ecdbd955f8a1f2e5adfe84f67b3585d4e6d29af3622ece7ef9d467f1d",
+        "bytes": 64682
+    },
+    {
+        "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-runtime-template-check-20260909.json",
+        "sha256": "e4dd16882dc187b3a38f61ebfc0d2d899a15199968128796cb1cf48429f1a2b0",
+        "bytes": 109836
+    },
+    {
+        "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-token-proxy-check-20260909.json",
+        "sha256": "fa4d0d601551c89b59b41d3e09bb980549c97c8ae17f4c9fb0da68fb581ead0e",
+        "bytes": 392665
+    }
+];
+export const MM_DEPLOYMENTS = [
+    {
+        row: {
+            "chainId": 1,
+            "network": "ethereum",
+            "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "decimals": 6,
+            "finalityTag": "safe",
+            "protocol": { "manager": { "address": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "codeHash": "0x762a7ccac3fba1fce7751870298c097c0d050451d9b4a1f0935e65dc4078d1d3" }, "delegate": { "address": "0x63c0c19a282a1b52b07dd5a65b58948a07dae32b", "codeHash": "0x0b77e469f5603ed1e9ff0e7ee56238b61a8cf7cb3185b33e53e2eeaad50109ab" }, "limitedCalls": { "address": "0x04658b29f6b82ed55274221a06fc97d318e25416", "codeHash": "0x3a07a1b31d8f8f29cde4260f88fc5011e003e4bdbd519c8274fc7092d2356468" }, "exactBatch": { "address": "0x1e141e455d08721dd5bcda1baa6ea5633afd5017", "codeHash": "0x53a2556929c5ae83a4c66ae8b704594f5fea1a9a362cdda974445a575e9a941d" } },
+            "tokenProxyCodeHash": "0xd80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505",
+            "tokenImplementationSlot": "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
+            "tokenImplementationAddress": "0x43506849d7c04f9138d1a2050bbf3a0c054402dd",
+            "tokenImplementationCodeHash": "0xcdfb7d322961af3acae7a8f7ee8b69c205b36f576cc5b077f170c7eb8ecbe3ea",
+            "evidenceBlock": { "numberAtomic": "25938529", "hash": "0x01b29babae3745b33264ef4ebef89d5e021850eacda1ddac3f032d731e06ac0e", "timestampAtomic": "1788941399" },
+            "provenance": { "runtime": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-runtime-template-check-20260909.json", "rowIndex": 1 }, "token": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-token-proxy-check-20260909.json", "rowIndex": 1 }, "raw": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-20260909.json", "rowIndex": 1 } },
+        },
+        deploymentEvidenceHash: "4100f07e87baeb01266d0ce1d9fa8cd8598792c85dd98b8bb7c7222b540afdc3",
+    },
+    {
+        row: {
+            "chainId": 10,
+            "network": "optimism",
+            "token": "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+            "decimals": 6,
+            "finalityTag": "safe",
+            "protocol": { "manager": { "address": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "codeHash": "0x3f695baab0735fae5d65268fd20e23d5f5c3207dee19b1daabd24cd3b6376575" }, "delegate": { "address": "0x63c0c19a282a1b52b07dd5a65b58948a07dae32b", "codeHash": "0x076ce337739f2c16aff0d81341b32ec5826a0050060e54b1346f36c79d89b246" }, "limitedCalls": { "address": "0x04658b29f6b82ed55274221a06fc97d318e25416", "codeHash": "0x3a07a1b31d8f8f29cde4260f88fc5011e003e4bdbd519c8274fc7092d2356468" }, "exactBatch": { "address": "0x1e141e455d08721dd5bcda1baa6ea5633afd5017", "codeHash": "0x53a2556929c5ae83a4c66ae8b704594f5fea1a9a362cdda974445a575e9a941d" } },
+            "tokenProxyCodeHash": "0xaad43333d28e146557f1c682e8a4226743fb231fdd00a577512233bd9e920008",
+            "tokenImplementationSlot": "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
+            "tokenImplementationAddress": "0xded3b9a8dbedc2f9cb725b55d0e686a81e6d06dc",
+            "tokenImplementationCodeHash": "0x24c6e8b8e0aaea31861e014c15e9da1564402d3512eb474d46def8e8bb2b2259",
+            "evidenceBlock": { "numberAtomic": "156671474", "hash": "0xe6c6bc6b73f5c8e44a445651bc647173f0624d2436a0c572ad67a5aee0853e65", "timestampAtomic": "1788941725" },
+            "provenance": { "runtime": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-runtime-template-check-20260909.json", "rowIndex": 2 }, "token": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-token-proxy-check-20260909.json", "rowIndex": 2 }, "raw": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-20260909.json", "rowIndex": 2 } },
+        },
+        deploymentEvidenceHash: "106d624155cf7847d901b1efe096f2179f76cde83f225a72a462eb12ac75b62c",
+    },
+    {
+        row: {
+            "chainId": 137,
+            "network": "polygon",
+            "token": "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+            "decimals": 6,
+            "finalityTag": "finalized",
+            "protocol": { "manager": { "address": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "codeHash": "0x9e840526200d6736573e6f71bf8b80f618f0825075b7e3587924f81f50b534dd" }, "delegate": { "address": "0x63c0c19a282a1b52b07dd5a65b58948a07dae32b", "codeHash": "0x0a0b90e8b2bb4701283c0b44939f18a5292af9ab58e0f1f4a3413fdbdbebcc35" }, "limitedCalls": { "address": "0x04658b29f6b82ed55274221a06fc97d318e25416", "codeHash": "0x3a07a1b31d8f8f29cde4260f88fc5011e003e4bdbd519c8274fc7092d2356468" }, "exactBatch": { "address": "0x1e141e455d08721dd5bcda1baa6ea5633afd5017", "codeHash": "0x53a2556929c5ae83a4c66ae8b704594f5fea1a9a362cdda974445a575e9a941d" } },
+            "tokenProxyCodeHash": "0x7dbf0ee7d6d69b563891ceb7056cf0ff0fa09d21a48e5f812d89981c2ef95944",
+            "tokenImplementationSlot": "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
+            "tokenImplementationAddress": "0x235ae97b28466db30469b89a9fe4cff0659f82cb",
+            "tokenImplementationCodeHash": "0x39ec98a4509fb2d4380a9cd4623e7b20cf651cb58edb8d8332bfad9c3d698143",
+            "evidenceBlock": { "numberAtomic": "93491285", "hash": "0xf35f02e6bd1a39830f8310017f4a4a467d9c326bdc634e55f50475f60649b73e", "timestampAtomic": "1788941961" },
+            "provenance": { "runtime": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-runtime-template-check-20260909.json", "rowIndex": 7 }, "token": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-token-proxy-check-20260909.json", "rowIndex": 7 }, "raw": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-polygon-finalized-20260909.json", "rowIndex": 0 } },
+        },
+        deploymentEvidenceHash: "b0cca25cd5102b1f5ac71b14ca41c26c9d02e38fcb4be90169b2e13a5b608990",
+    },
+    {
+        row: {
+            "chainId": 143,
+            "network": "monad",
+            "token": "0x754704bc059f8c67012fed69bc8a327a5aafb603",
+            "decimals": 6,
+            "finalityTag": "safe",
+            "protocol": { "manager": { "address": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "codeHash": "0x85674a6f4a65e3b61df3b6d45a89f2bf6165efda91a83610b797ff917f64866f" }, "delegate": { "address": "0x63c0c19a282a1b52b07dd5a65b58948a07dae32b", "codeHash": "0xd4dee59ae6be4a997964e8f19ae6905f0a233c6ae88d9bc5d945bc60738376c1" }, "limitedCalls": { "address": "0x04658b29f6b82ed55274221a06fc97d318e25416", "codeHash": "0x3a07a1b31d8f8f29cde4260f88fc5011e003e4bdbd519c8274fc7092d2356468" }, "exactBatch": { "address": "0x1e141e455d08721dd5bcda1baa6ea5633afd5017", "codeHash": "0x53a2556929c5ae83a4c66ae8b704594f5fea1a9a362cdda974445a575e9a941d" } },
+            "tokenProxyCodeHash": "0xbb3557cf62a26950fb58073e6ce8e130af371e5aa13e5584856a1ce2ca47dc89",
+            "tokenImplementationSlot": "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
+            "tokenImplementationAddress": "0xbd520ea8cbb4f81b62aff3c3ffe7affd69800b6d",
+            "tokenImplementationCodeHash": "0xe96489833045c42bacced6259e6a6372290706ed665e79457aa2fe4d46bc3559",
+            "evidenceBlock": { "numberAtomic": "103275487", "hash": "0xd697c95c25481eef7908f5e3b6acada59827558ce1d37fe9e1e5e41c498472f1", "timestampAtomic": "1788941895" },
+            "provenance": { "runtime": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-runtime-template-check-20260909.json", "rowIndex": 3 }, "token": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-token-proxy-check-20260909.json", "rowIndex": 3 }, "raw": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-20260909.json", "rowIndex": 4 } },
+        },
+        deploymentEvidenceHash: "de42428deb5fc672b97c2a58dad3631d55edabc7bd3dd3e9236dd9581da94019",
+    },
+    {
+        row: {
+            "chainId": 1329,
+            "network": "sei",
+            "token": "0xe15fc38f6d8c56af07bbcbe3baf5708a2bf42392",
+            "decimals": 6,
+            "finalityTag": "safe",
+            "protocol": { "manager": { "address": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "codeHash": "0x69cce6abd56b27b4bc19d2e57159ddd6ec2837ab721329e2dbdefd3e338bb078" }, "delegate": { "address": "0x63c0c19a282a1b52b07dd5a65b58948a07dae32b", "codeHash": "0x634f046e2b3ca2c526112e0afcdcf23872f82f20c75a25c15aae544d9e8f9c66" }, "limitedCalls": { "address": "0x04658b29f6b82ed55274221a06fc97d318e25416", "codeHash": "0x3a07a1b31d8f8f29cde4260f88fc5011e003e4bdbd519c8274fc7092d2356468" }, "exactBatch": { "address": "0x1e141e455d08721dd5bcda1baa6ea5633afd5017", "codeHash": "0x53a2556929c5ae83a4c66ae8b704594f5fea1a9a362cdda974445a575e9a941d" } },
+            "tokenProxyCodeHash": "0xe43587ffe1bcce27e2c8d97957762667ac603083224e5028ccf00990de9b8071",
+            "tokenImplementationSlot": "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
+            "tokenImplementationAddress": "0xcafdc392214661c8c6c7165e491890ad84bed171",
+            "tokenImplementationCodeHash": "0x9efaef237ba96760e6b2de3cb24bda8b987e9b54352c3fd2100396363526f2e0",
+            "evidenceBlock": { "numberAtomic": "231052786", "hash": "0x12b33ebc4a7e9286c0026c5cb60cef20b6e41b4e48ec96b209e01a37a322c659", "timestampAtomic": "1788941897" },
+            "provenance": { "runtime": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-runtime-template-check-20260909.json", "rowIndex": 4 }, "token": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-token-proxy-check-20260909.json", "rowIndex": 4 }, "raw": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-20260909.json", "rowIndex": 5 } },
+        },
+        deploymentEvidenceHash: "82f8bddcc259f71f5ebb4acbea8c0682b3aa5589a7f1eaed52ea897775e632a6",
+    },
+    {
+        row: {
+            "chainId": 8453,
+            "network": "base",
+            "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+            "decimals": 6,
+            "finalityTag": "safe",
+            "protocol": { "manager": { "address": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "codeHash": "0x7c4661fe830df0bb9354f85a6a478882e436b7a234a0cf1f8206ce6753925670" }, "delegate": { "address": "0x63c0c19a282a1b52b07dd5a65b58948a07dae32b", "codeHash": "0x6af675ac126c441bec5d5013da3331a52e7465fc0d5a662a8708a9f33ce497ba" }, "limitedCalls": { "address": "0x04658b29f6b82ed55274221a06fc97d318e25416", "codeHash": "0x3a07a1b31d8f8f29cde4260f88fc5011e003e4bdbd519c8274fc7092d2356468" }, "exactBatch": { "address": "0x1e141e455d08721dd5bcda1baa6ea5633afd5017", "codeHash": "0x53a2556929c5ae83a4c66ae8b704594f5fea1a9a362cdda974445a575e9a941d" } },
+            "tokenProxyCodeHash": "0xa6705a10bb756b5dea144591118be77d7af0c3eee3bf2dfe2583dcb0364fefab",
+            "tokenImplementationSlot": "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
+            "tokenImplementationAddress": "0x2ce6311ddae708829bc0784c967b7d77d19fd779",
+            "tokenImplementationCodeHash": "0x11b75a237997ab8328f65b2d5a55c10f0346d0a175741ed42ddf4f2c66b9e873",
+            "evidenceBlock": { "numberAtomic": "51076257", "hash": "0xaf42322bf25b959a904513d15eb541e430e76e6eaf91df9536d05dc2db5744ea", "timestampAtomic": "1788941861" },
+            "provenance": { "runtime": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-runtime-template-check-20260909.json", "rowIndex": 0 }, "token": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-token-proxy-check-20260909.json", "rowIndex": 0 }, "raw": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-20260909.json", "rowIndex": 0 } },
+        },
+        deploymentEvidenceHash: "b62a524e4a19382c784c824552be4caf2198d462d07a8401a88d1eb698bcbfe4",
+    },
+    {
+        row: {
+            "chainId": 42161,
+            "network": "arbitrum",
+            "token": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+            "decimals": 6,
+            "finalityTag": "safe",
+            "protocol": { "manager": { "address": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "codeHash": "0xf97be22889657b7488c1e41994a763cee2d347200de980b01a19ce0cc743edc1" }, "delegate": { "address": "0x63c0c19a282a1b52b07dd5a65b58948a07dae32b", "codeHash": "0xa6603bc6f9f203be551ce8fcfe13b7802e3b6574828780b4c4fe05d1768d17de" }, "limitedCalls": { "address": "0x04658b29f6b82ed55274221a06fc97d318e25416", "codeHash": "0x3a07a1b31d8f8f29cde4260f88fc5011e003e4bdbd519c8274fc7092d2356468" }, "exactBatch": { "address": "0x1e141e455d08721dd5bcda1baa6ea5633afd5017", "codeHash": "0x53a2556929c5ae83a4c66ae8b704594f5fea1a9a362cdda974445a575e9a941d" } },
+            "tokenProxyCodeHash": "0xad30d819dbc47814b7e6cb837fd7cc57fcb591479a38596ee93de4fc52e8c435",
+            "tokenImplementationSlot": "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
+            "tokenImplementationAddress": "0x86e721b43d4ecfa71119dd38c0f938a75fdb57b3",
+            "tokenImplementationCodeHash": "0xda0578bf7fe0d04e320e166ab8f98061328fda8ae0a299882aeb38f1543c6a9d",
+            "evidenceBlock": { "numberAtomic": "503303301", "hash": "0x57678f3f4306d7d205e29182af7c62b1c17485f7f9bbd9866d1e45ea42b4996e", "timestampAtomic": "1788941344" },
+            "provenance": { "runtime": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-runtime-template-check-20260909.json", "rowIndex": 5 }, "token": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-token-proxy-check-20260909.json", "rowIndex": 5 }, "raw": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-20260909.json", "rowIndex": 6 } },
+        },
+        deploymentEvidenceHash: "f0d66b12a23cd913dbe931e73145db5aa52ea0c440f47b2b558445d1d0e43bca",
+    },
+    {
+        row: {
+            "chainId": 59144,
+            "network": "linea",
+            "token": "0x176211869ca2b568f2a7d4ee941e073a821ee1ff",
+            "decimals": 6,
+            "finalityTag": "safe",
+            "protocol": { "manager": { "address": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "codeHash": "0x96abab5740398a95df1e0567f5e89a0a3ccbe92f269e3d83a697789288014133" }, "delegate": { "address": "0x63c0c19a282a1b52b07dd5a65b58948a07dae32b", "codeHash": "0xeef4fc75d341d7b9b0ae6748cb847a4e6558f34e0d9f441b636c39e82b9a6082" }, "limitedCalls": { "address": "0x04658b29f6b82ed55274221a06fc97d318e25416", "codeHash": "0x3a07a1b31d8f8f29cde4260f88fc5011e003e4bdbd519c8274fc7092d2356468" }, "exactBatch": { "address": "0x1e141e455d08721dd5bcda1baa6ea5633afd5017", "codeHash": "0x53a2556929c5ae83a4c66ae8b704594f5fea1a9a362cdda974445a575e9a941d" } },
+            "tokenProxyCodeHash": "0x469a90ba4c77663d6a9512da10e00f54cae91fda8007c53ad1ba2789457ea5fb",
+            "tokenImplementationSlot": "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
+            "tokenImplementationAddress": "0xab838fe7d492c621a5b1b23952af99cc37a2e0d3",
+            "tokenImplementationCodeHash": "0x19eb6091deb13c10e3b2ef54f19471ae3e6757e350bfe4e423b5e5208c6459e1",
+            "evidenceBlock": { "numberAtomic": "31979261", "hash": "0x6906092b804be376ead20d17ecd80744e989f752ce824d9521b9e336f2e4df8a", "timestampAtomic": "1788935608" },
+            "provenance": { "runtime": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-runtime-template-check-20260909.json", "rowIndex": 6 }, "token": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-token-proxy-check-20260909.json", "rowIndex": 6 }, "raw": { "path": "tect/programs/agent-payment-node-v1/epochs/2026-08/scopes/scope-apn-mainnet-gasless-profiles-v1/proof/mm-public-deployments-20260909.json", "rowIndex": 7 } },
+        },
+        deploymentEvidenceHash: "27339dea39c7aea2049a493864e18895851369b30c23dab0b7c9ba815049a3e1",
+    },
+];
+//# sourceMappingURL=registry-data.js.map

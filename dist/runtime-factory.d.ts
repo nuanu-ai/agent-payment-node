@@ -12,7 +12,24 @@ import { type ProviderAuthorizationStorePort } from "./encrypted-provider-author
 import { type SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
 import { type SessionKeyFactoryPort } from "./metamask-smart-account-adapter.js";
 import { type SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
+import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
+import type { ChainPolicyApprovalPort } from "./chain-policy.js";
+import type { BridgeDependencies } from "./lifi/service.js";
+import type { GaslessDependencies } from "./gasless/service.js";
+import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
+import { type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
+import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 export interface RuntimeFactoryOptions {
+    readonly smartAccountGasless?: SmartAccountGaslessDependencies;
+    readonly metaMaskGasless?: MetaMaskGaslessDependencies;
+    readonly gasless?: GaslessDependencies;
+    readonly bridge?: BridgeDependencies;
+    readonly chainAccounts?: ChainWalletStoragePort;
+    readonly directRails?: readonly DirectRailPort[];
+    readonly railApproval?: RailApprovalPort;
+    readonly chainPolicyApproval?: ChainPolicyApprovalPort;
+    readonly solanaRpcUrl?: string;
+    readonly tronRpcUrl?: string;
     readonly stateRoot?: string;
     readonly native?: NativePort;
     readonly wrappingSecret?: WrappingSecretPort;
@@ -33,6 +50,7 @@ export interface RuntimeFactoryOptions {
     readonly smartAccountConsent?: SmartAccountConsentPort;
     readonly smartAccountSessionKeys?: SessionKeyFactoryPort;
     readonly smartAccountX402Material?: X402PaymentMaterialPort;
+    readonly operationAbandonApproval?: OperationAbandonApprovalPort;
 }
 export declare function createApnCore(bound: BoundCommand, options?: RuntimeFactoryOptions): ApnCore;
 export declare function executeBoundCommand(bound: BoundCommand, options?: RuntimeFactoryOptions): Promise<OutputEnvelope>;

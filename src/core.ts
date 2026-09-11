@@ -7,7 +7,7 @@ import { TransferService } from "./transfer-service.js";
 import { WalletService } from "./wallet-service.js";
 import { OperationService } from "./operation-service.js";
 import { inspectX402 } from "./x402-http.js";
-import { canonicalOperationId } from "./transfer-policy.js";
+import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
@@ -15,6 +15,22 @@ import { evmWalletBalance } from "./evm-wallet-balance.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
 import { ProviderPermissionService } from "./provider-permission-service.js";
+import { RailOperationService } from "./rail-operation-service.js";
+import { solanaCapabilities } from "./chain-policy-service.js";
+import { tronCapabilities } from "./tron/catalog.js";
+import { bridgeCapabilities } from "./lifi/catalog.js";
+import { BridgeService } from "./lifi/service.js";
+import { GaslessService } from "./gasless/service.js";
+import { gaslessCapabilities } from "./gasless/catalog.js";
+import { gaslessChain } from "./gasless/validation.js";
+import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
+import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
+import { mmFail } from "./metamask-gasless/reasons.js";
+import { canonicalProfile } from "./wallet-policy.js";
+import { OperationAbandonService } from "./operation-abandon-service.js";
+import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
+import { saRequest } from "./smart-account-gasless/schema.js";
+import { saFail } from "./smart-account-gasless/reasons.js";
 
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
@@ -28,16 +44,29 @@ export class ApnCore {
   readonly providerWallet: ProviderWalletService;
   readonly providerPermissions: ProviderPermissionService;
   readonly providerTransactionRecovery: ProviderX402TransactionRecoveryService;
+  readonly rails: RailOperationService;
+  readonly bridges: BridgeService;
+  readonly gasless: GaslessService;
+  readonly metaMaskGasless: MetaMaskGaslessService;
+  readonly smartAccountGasless: SmartAccountGaslessService;
+  readonly operationAbandon: OperationAbandonService;
 
   constructor(dependencies: CoreDependencies) {
     this.context = new RuntimeContext(dependencies);
     this.wallet = new WalletService(this.context);
     this.transfer = new TransferService(this.context);
-    this.operations = new OperationService(this.context.state, this.context.providerX402Repository);
+    this.operations = new OperationService(this.context.state, this.context.providerX402Repository,
+      undefined, undefined, undefined, this.context.metaMaskGasless?.records, this.context.smartAccountGasless?.records);
     this.x402 = new X402Service(this.context);
     this.providerWallet = new ProviderWalletService(this.context);
     this.providerPermissions = new ProviderPermissionService(this.context);
     this.providerTransactionRecovery = new ProviderX402TransactionRecoveryService(this.context);
+    this.rails = new RailOperationService(this.context);
+    this.bridges = new BridgeService(this.context);
+    this.gasless = new GaslessService(this.context);
+    this.metaMaskGasless = new MetaMaskGaslessService(this.context);
+    this.smartAccountGasless = new SmartAccountGaslessService(this.context);
+    this.operationAbandon = new OperationAbandonService(this.context);
   }
 
   async execute(request: CommandRequest): Promise<OutputEnvelope> {
@@ -51,6 +80,25 @@ export class ApnCore {
 
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
+      case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
+      case "gasless.balance": {
+        const provider = await this.gaslessProvider(request.profile);
+        return dataOutcome(provider === "metamask-smart-account"
+          ? await this.smartAccountGasless.balance(request.profile, request.chainId)
+          : provider === "metamask-agent-wallet" ? await this.metaMaskGasless.balance(request.profile, mmChain(request.chainId))
+          : await this.gasless.balance(request.profile, gaslessChain(request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")), "chain_verified_public_read");
+      }
+      case "gasless.transfer.prepare": return operationOutcome(await this.prepareGasless(request));
+      case "gasless.transfer.approve": {
+        const { kind } = await this.operations.required(request.operationId);
+        return operationOutcome(kind === "smart_account_gasless_transfer" ? await this.smartAccountGasless.approve(request.operationId)
+          : kind === "metamask_gasless_transfer" ? await this.metaMaskGasless.approve(request.operationId) : await this.gasless.approve(request.operationId));
+      }
+      case "bridge.capabilities": return dataOutcome(bridgeCapabilities(request.profile), "static_bridge_capabilities");
+      case "bridge.inventory": return dataOutcome(await this.bridges.inventory(), "provider_inventory_only");
+      case "bridge.routes": return dataOutcome(await this.bridges.routes(request.profile, request.request), "profile_bound_bridge_quote");
+      case "bridge.prepare": return operationOutcome(await this.bridges.prepare(request));
+      case "bridge.approve": return operationOutcome(await this.bridges.approve(request.operationId));
       case "version":
         return dataOutcome({
           product: "agent-payment-node",
@@ -60,6 +108,20 @@ export class ApnCore {
         }, "local_build_metadata");
       case "doctor.keychain": return dataOutcome(await this.wallet.doctorKeychain(), "encrypted_apn_home_status");
       case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
+      case "wallet.ensure-tron": return dataOutcome(await this.rails.policies.ensure(request.profile, "tron", request.provider, request.acceptRisk), "chain_account_binding");
+      case "wallet.balance-tron": return dataOutcome(await this.rails.policies.balance(request.profile, "tron", request.asset), "chain_verified_public_read");
+      case "wallet.capabilities-tron": return dataOutcome({ ...tronCapabilities(), ...(request.profile === undefined ? {} : {
+        profile: request.profile, account: await this.context.chainAccounts?.account(request.profile, "tron") ?? null,
+      }) }, "inspected_provider_capabilities");
+      case "policy.admit-tron": return dataOutcome(await this.rails.policies.admit({ ...request, rail: "tron" }), "human_admitted_chain_policy");
+      case "transfer.prepare-tron": return operationOutcome(await this.rails.prepare({ ...request, rail: "tron" }));
+      case "wallet.ensure-solana": return dataOutcome(await this.rails.policies.ensure(request.profile, "solana", request.provider, request.acceptRisk), "chain_account_binding");
+      case "wallet.balance-solana": return dataOutcome(await this.rails.policies.balance(request.profile, "solana", request.asset), "chain_verified_public_read");
+      case "wallet.capabilities-solana": return dataOutcome({ ...solanaCapabilities(), ...(request.profile === undefined ? {} : {
+        profile: request.profile, account: await this.context.chainAccounts?.account(request.profile, "solana") ?? null,
+      }) }, "inspected_provider_capabilities");
+      case "policy.admit-solana": return dataOutcome(await this.rails.policies.admit({ ...request, rail: "solana" }), "human_admitted_chain_policy");
+      case "transfer.prepare-solana": return operationOutcome(await this.rails.prepare({ ...request, rail: "solana" }));
       case "wallet.connect": return dataOutcome(await this.providerWallet.connect(request), "provider_profile_binding");
       case "wallet.permission.list":
       case "wallet.permission.sync":
@@ -82,7 +144,7 @@ export class ApnCore {
       case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, request.chainId), "seller_challenge_static");
       case "x402.fetch.prepare": {
         await assertLocalNetworkProfile(this.context, request.profile, request.chainId);
-        if ((request.chainId ?? 8453) === 8453) await this.providerWallet.assertPaymentAvailable(request.profile, "x402");
+        if ((request.chainId ?? 8453) === 8453) await this.providerWallet.assertPaymentAvailable(request.profile, "x402", request.idempotencyKey);
         return operationOutcome(await this.x402.prepare(request));
       }
       case "x402.fetch.approve": {
@@ -94,13 +156,41 @@ export class ApnCore {
       }
       case "transfer.prepare": {
         await assertLocalNetworkProfile(this.context, request.profile, request.asset?.chainId);
-        if ((request.asset?.chainId ?? 8453) === 8453) await this.providerWallet.assertPaymentAvailable(request.profile, "direct");
+        if ((request.asset?.chainId ?? 8453) === 8453) await this.providerWallet.assertPaymentAvailable(request.profile, "direct", request.idempotencyKey);
         return operationOutcome(await this.transfer.prepare(request));
       }
-      case "transfer.approve": return operationOutcome(await this.transfer.approve(request.operationId));
+      case "transfer.approve": {
+        const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "gasless_transfer" || operation.kind === "metamask_gasless_transfer" || operation.kind === "smart_account_gasless_transfer") throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Use the gasless approval command for this USDC transfer.", {
+          ...(operation.kind === "metamask_gasless_transfer" ? { reason: "mm_gasless_approval" } : {}),
+          ...(operation.kind === "smart_account_gasless_transfer" ? { reason: "sa_gasless_approval" } : {}),
+          nextActions: [`apn gasless transfer approve --operation ${request.operationId}`],
+        });
+        return operationOutcome(operation.kind === "rail_transfer" ? await this.rails.approve(request.operationId) : await this.transfer.approve(request.operationId));
+      }
       case "operation.resume": {
         await this.context.ready();
         const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "smart_account_gasless_transfer") {
+          if (request.waitSeconds !== undefined) saFail("sa_gasless_input");
+          return operationOutcome(await this.smartAccountGasless.resume(request.operationId));
+        }
+        if (operation.kind === "metamask_gasless_transfer") {
+          if (request.waitSeconds !== undefined) throw new ApnError("APN_INVALID_INPUT", "MetaMask gasless recovery performs one bounded observation; omit --wait-seconds.", { reason: "mm_gasless_input" });
+          return operationOutcome(await this.metaMaskGasless.resume(request.operationId));
+        }
+        if (operation.kind === "gasless_transfer") {
+          if (request.waitSeconds !== undefined) throw new ApnError("APN_INVALID_INPUT", "Gasless recovery performs one bounded observation; omit --wait-seconds.");
+          return operationOutcome(await this.gasless.resume(request.operationId));
+        }
+        if (operation.kind === "bridge_route") {
+          if (request.waitSeconds !== undefined) throw new ApnError("APN_INVALID_INPUT", "Bridge recovery performs one bounded observation; omit --wait-seconds.");
+          return operationOutcome(await this.bridges.resume(request.operationId));
+        }
+        if (operation.kind === "rail_transfer") {
+          if (request.waitSeconds !== undefined) throw new ApnError("APN_INVALID_INPUT", "Solana resume performs one bounded observation; omit --wait-seconds.");
+          return operationOutcome(await this.rails.resume(request.operationId));
+        }
         if (operation.kind === "x402_fetch") {
           const settlementWait = await this.x402.resume(request.operationId, request.waitSeconds);
           return await this.operations.x402Outcome(request.operationId, {
@@ -111,6 +201,7 @@ export class ApnCore {
         }
         return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds));
       }
+      case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));
       case "operation.recover-provider-request": return operationOutcome(
         await this.transfer.recoverProviderRequest(request.operationId, request.providerRequestId),
       );
@@ -129,23 +220,55 @@ export class ApnCore {
         await this.context.ready();
         await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "smart_account_gasless_transfer") return operationOutcome(await this.smartAccountGasless.status(request.operationId));
+        if (operation.kind === "bridge_route") return operationOutcome(await this.bridges.status(request.operationId));
+        if (operation.kind === "gasless_transfer") return operationOutcome(await this.gasless.status(request.operationId));
+        if (operation.kind === "metamask_gasless_transfer") return operationOutcome(await this.metaMaskGasless.status(request.operationId));
+        if (operation.kind === "rail_transfer") return operationOutcome(await this.operations.status(request.operationId));
         return operation.kind === "x402_fetch"
           ? await this.operations.x402Outcome(request.operationId, {
               exposeSellerResult: false,
               exposeTerminalReceipt: false,
             })
-          : operationOutcome(await this.operations.status(request.operationId));
+          : operationOutcome(await this.transfer.status(request.operationId));
       }
       case "receipt.get": {
         canonicalOperationId(request.operationId);
         await this.context.ready();
         await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "smart_account_gasless_transfer") return receiptOutcome(await this.smartAccountGasless.receipt(request.operationId));
+        if (operation.kind === "bridge_route") return receiptOutcome(await this.bridges.receipt(request.operationId));
+        if (operation.kind === "gasless_transfer") return receiptOutcome(await this.gasless.receipt(request.operationId));
+        if (operation.kind === "metamask_gasless_transfer") return receiptOutcome(await this.metaMaskGasless.receipt(request.operationId));
+        if (operation.kind === "rail_transfer") return receiptOutcome(await this.rails.receipt(request.operationId));
         return operation.kind === "x402_fetch"
           ? await this.operations.x402ReceiptOutcome(request.operationId)
           : receiptOutcome(await this.transfer.receipt(request.operationId));
       }
     }
+  }
+
+  private async prepareGasless(request: Extract<CommandRequest, { command: "gasless.transfer.prepare" }>) {
+    const key = canonicalIdempotencyKey(request.idempotencyKey);
+    const existing = await this.operations.findIdempotency(this.context.state.idempotencyHash(key));
+    if (existing?.kind === "smart_account_gasless_transfer")
+      return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
+    const provider = await this.gaslessProvider(request.profile);
+    if (provider === "metamask-smart-account") return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
+    if (provider === "metamask-agent-wallet") return await this.metaMaskGasless.prepare({ ...request, request: { ...request.request,
+      chainId: mmChain(request.request.chainId), recipient: mmAddress(request.request.recipient) } });
+    return await this.gasless.prepare({ ...request, request: { ...request.request,
+      chainId: gaslessChain(request.request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE") } });
+  }
+
+  private async gaslessProvider(input: string): Promise<"local" | "metamask-agent-wallet" | "metamask-smart-account"> {
+    const profile = canonicalProfile(input);
+    const stored = await this.context.state.loadProviderProfile(this.context.state.profileHash(profile));
+    if (stored === null || stored.provider_id === "local") return "local";
+    if (stored.provider_id === "metamask-agent-wallet") return "metamask-agent-wallet";
+    if (stored.provider_id === "metamask-smart-account") return "metamask-smart-account";
+    return mmFail("mm_gasless_capability_unavailable");
   }
 }
 

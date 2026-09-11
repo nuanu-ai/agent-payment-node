@@ -57,13 +57,14 @@ for (const file of files) {
     if (needle === "node:child_process" && [
       "macos-keychain.ts", "macos-advisory-lock.ts", "awal-process-adapter.ts",
       "awal-direct-adapter.ts", "awal-x402-adapter.ts", "metamask-process-runner.ts",
+      "metamask-gasless/client/process.ts",
     ].some((name) => file === join(sourceRoot, name))) continue;
     if (["node:child_process", "createServer(", "http://"].includes(needle) &&
       file === join(sourceRoot, "metamask-smart-account-consent.ts")) continue;
     if (["--chain-id", "--token"].includes(needle) && file === join(sourceRoot, "metamask-direct-adapter.ts")) continue;
     if (needle === "--chain-id" && file === join(sourceRoot, "metamask-x402-adapter.ts")) continue;
     if (needle === "--scheme" && file === join(sourceRoot, "awal-x402-adapter.ts")) continue;
-    if (needle === "signTypedData" && file === join(sourceRoot, "local-wallet-native.ts")) continue;
+    if (needle === "signTypedData" && ["local-wallet-native.ts", "gasless/custody.ts"].some((name) => file === join(sourceRoot, name))) continue;
     if (text.includes(needle)) violations.push(`${file.slice(productRoot.length + 1)}: ${needle}`);
   }
   if (file !== join(sourceRoot, "x402-codec.ts") && text.includes("@x402/core")) {
@@ -75,6 +76,17 @@ for (const file of files) {
     }
     for (const disallowed of ["npx", "execFile(", "process.env.PATH", "shell: true", "fork(", "ipc"]) {
       if (text.includes(disallowed)) violations.push(`src/awal-process-adapter.ts: ${disallowed}`);
+    }
+  }
+  if (file === join(sourceRoot, "metamask-gasless/client/process.ts")) {
+    for (const required of [
+      "process.execPath", "shell: false", "[HELPER_ENTRY]", "sanitizedEnvironment(options.environment)",
+      "[\"pipe\", \"pipe\", \"ignore\"]", "child.stdin.end(input)", "MAX_IO = 1024 * 1024",
+    ]) {
+      if (!text.includes(required)) violations.push(`src/metamask-gasless/client/process.ts: missing ${required}`);
+    }
+    for (const disallowed of ["npx", "execFile(", "process.env.PATH", "shell: true", "fork(", "ipc", "...process.env"]) {
+      if (text.includes(disallowed)) violations.push(`src/metamask-gasless/client/process.ts: ${disallowed}`);
     }
   }
   if (file === join(sourceRoot, "awal-direct-adapter.ts")) {
