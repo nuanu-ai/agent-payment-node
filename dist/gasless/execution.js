@@ -50,6 +50,13 @@ export class GaslessExecution {
         if (op.bootstrap.disclosureAttempts === 1 && op.bootstrap.estimate === null) {
             return await this.observation.run(await this.unknown(op, "gasless_bootstrap_unresolved"));
         }
+        if (this.now() >= Date.parse(op.intent.expiresAt) && op.bootstrap.materialHash !== null &&
+            op.userOperation.phase === "sealed" && op.userOperation.signingAttempts === 1 &&
+            op.userOperation.materialHash !== null && op.userOperation.userOperationHash !== null &&
+            op.userOperation.sealedAt !== null && op.userOperation.disclosureAttempts === 0 &&
+            op.userOperation.submissionAttempts === 0 && op.settlement === null) {
+            return await this.observation.run(op);
+        }
         if (op.bootstrap.materialHash !== null && op.userOperation.signingAttempts === 0 &&
             this.now() >= Date.parse(op.intent.expiresAt)) {
             return await this.observation.run(await this.unknown(op, "gasless_bootstrap_unresolved"));
