@@ -161,6 +161,8 @@ async function inspect(context, intent, userOperationHash, transactionHash, curs
     return { status: "safe", transactionHash, settlement, cursor: anchored, evidenceHash: hashObject(settlement), reason: null };
 }
 async function bundlerCandidate(context, intent, userOperationHash) {
+    if (context.bundler === undefined)
+        return null;
     const settled = await Promise.allSettled([
         context.bundler("eth_getUserOperationReceipt", [userOperationHash]),
         context.bundler("eth_getUserOperationByHash", [userOperationHash]),

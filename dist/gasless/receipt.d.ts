@@ -16,6 +16,7 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     updated_at: string;
     expires_at: string;
     next_actions: readonly string[];
+    observation_source?: import("./model.js").GaslessObservationSource;
     kind: "gasless_transfer";
     schema_version: "apn.gasless-operation.v1";
     operation_id: string;
@@ -111,6 +112,7 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     next_actions: readonly string[];
     payment_submitted: boolean;
     permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+    observation_source?: import("./model.js").GaslessObservationSource;
     kind: "gasless_transfer";
     schema_version: "apn.gasless-operation.v1";
     operation_id: string;
@@ -209,6 +211,7 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     prior_payment_effects: "unknown";
     final_permissions_invalidated: boolean;
     permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+    observation_source?: import("./model.js").GaslessObservationSource;
     kind: "gasless_transfer";
     schema_version: "apn.gasless-operation.v1";
     operation_id: string;
@@ -306,6 +309,7 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     updated_at: string;
     expires_at: string;
     next_actions: readonly string[];
+    observation_source?: import("./model.js").GaslessObservationSource;
     kind: "gasless_transfer";
     operation_id: string;
     profile: string;
@@ -403,6 +407,7 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     next_actions: readonly string[];
     payment_submitted: boolean;
     permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+    observation_source?: import("./model.js").GaslessObservationSource;
     kind: "gasless_transfer";
     operation_id: string;
     profile: string;
@@ -503,6 +508,7 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     prior_payment_effects: "unknown";
     final_permissions_invalidated: boolean;
     permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+    observation_source?: import("./model.js").GaslessObservationSource;
     kind: "gasless_transfer";
     operation_id: string;
     profile: string;

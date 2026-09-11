@@ -149,7 +149,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_pay_transfer_approve", properties: ["operation", "rpc_url"], required: ["operation"], defaults: {} },
       { name: "apn_operation_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_operation_abandon", properties: ["operation"], required: ["operation"], defaults: {} },
-      { name: "apn_operation_resume", properties: ["operation", "rpc_url", "wait_seconds"], required: ["operation"], defaults: {} },
+      { name: "apn_operation_resume", properties: ["operation", "rpc_url", "wait_seconds", "observation_rpc_env"], required: ["operation"], defaults: {} },
       {
         name: "apn_operation_recover_provider_request",
         properties: ["operation", "provider_request_id"],

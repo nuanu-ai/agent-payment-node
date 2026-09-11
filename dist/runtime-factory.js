@@ -35,6 +35,7 @@ import { bridgeRpcFactory } from "./lifi/rpc.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
+import { gaslessObservationRpcFactory } from "./gasless/observation-rpc.js";
 import { TtyGaslessApproval } from "./gasless/tty.js";
 import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
 import { metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
@@ -103,6 +104,7 @@ export function createApnCore(bound, options = {}) {
             ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyMetaMaskGaslessApproval() } : {}),
         },
         gasless: options.gasless ?? { rpcFor: gaslessRpcFactory(process.env),
+            observationRpcFor: gaslessObservationRpcFactory(process.env),
             custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
             ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyGaslessApproval() } : {}) },
         bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),

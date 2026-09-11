@@ -333,6 +333,18 @@ export declare const permissionInvalidationSchema: z.ZodObject<{
     userOperationMaterialHash: z.ZodOptional<z.ZodString>;
     userOperationHash: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
+export declare const observationSourceSchema: z.ZodObject<{
+    policy: z.ZodLiteral<"apn.gasless.observation-rpc.v1">;
+    environmentName: z.ZodString;
+    rpcOrigin: z.ZodString;
+    rpcEndpointHash: z.ZodString;
+    intentHash: z.ZodString;
+    initialBlock: z.ZodObject<{
+        numberAtomic: z.ZodString;
+        hash: z.ZodString;
+        timestampAtomic: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export declare const observationSchema: z.ZodObject<{
     status: z.ZodEnum<{
         pending: "pending";
@@ -462,6 +474,18 @@ export declare const observationSchema: z.ZodObject<{
         }, z.core.$strict>;
         userOperationMaterialHash: z.ZodOptional<z.ZodString>;
         userOperationHash: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+    source: z.ZodOptional<z.ZodObject<{
+        policy: z.ZodLiteral<"apn.gasless.observation-rpc.v1">;
+        environmentName: z.ZodString;
+        rpcOrigin: z.ZodString;
+        rpcEndpointHash: z.ZodString;
+        intentHash: z.ZodString;
+        initialBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const consentSchema: z.ZodObject<{
@@ -777,6 +801,18 @@ export declare const transitionSchema: z.ZodObject<{
             }, z.core.$strict>;
             userOperationMaterialHash: z.ZodOptional<z.ZodString>;
             userOperationHash: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        source: z.ZodOptional<z.ZodObject<{
+            policy: z.ZodLiteral<"apn.gasless.observation-rpc.v1">;
+            environmentName: z.ZodString;
+            rpcOrigin: z.ZodString;
+            rpcEndpointHash: z.ZodString;
+            intentHash: z.ZodString;
+            initialBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     settlement: z.ZodNullable<z.ZodObject<{
@@ -1182,6 +1218,18 @@ export declare const operationSchema: z.ZodObject<{
                 userOperationMaterialHash: z.ZodOptional<z.ZodString>;
                 userOperationHash: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
+            source: z.ZodOptional<z.ZodObject<{
+                policy: z.ZodLiteral<"apn.gasless.observation-rpc.v1">;
+                environmentName: z.ZodString;
+                rpcOrigin: z.ZodString;
+                rpcEndpointHash: z.ZodString;
+                intentHash: z.ZodString;
+                initialBlock: z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         settlement: z.ZodNullable<z.ZodObject<{
             chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
@@ -1483,6 +1531,18 @@ export declare const operationSchema: z.ZodObject<{
             }, z.core.$strict>;
             userOperationMaterialHash: z.ZodOptional<z.ZodString>;
             userOperationHash: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        source: z.ZodOptional<z.ZodObject<{
+            policy: z.ZodLiteral<"apn.gasless.observation-rpc.v1">;
+            environmentName: z.ZodString;
+            rpcOrigin: z.ZodString;
+            rpcEndpointHash: z.ZodString;
+            intentHash: z.ZodString;
+            initialBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     settlement: z.ZodNullable<z.ZodObject<{
