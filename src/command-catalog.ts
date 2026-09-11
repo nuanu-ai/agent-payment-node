@@ -1,5 +1,8 @@
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { EVM_COMMANDS } from "./evm-command-catalog.js";
+import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";
+import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";
+import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";
 import { networkCommandVariants } from "./network-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
 import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
@@ -81,7 +84,7 @@ const defaultProfile = { kind: "literal", value: "default" } as const;
 const completedStates = { terminal: ["completed", "classified_failure"], non_terminal: [] } as const;
 const mcpServerStates = { terminal: ["server_closed", "classified_failure"], non_terminal: ["serving"] } as const;
 const directStates = {
-  terminal: ["completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert", "failed_proven_superseded"],
+  terminal: ["completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert", "failed_proven_superseded", "abandoned_unknown"],
   non_terminal: [
     "awaiting_approval", "started", "provider_pending", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
     "signed_not_submitted", "submitted_pending", "unknown_finality",
@@ -126,6 +129,10 @@ const httpOptions = [
 const httpSynopsis = " [--method <method>] [--headers-json <json>] [--body-base64 <base64>]";
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = [
+  { path: ["gasless"], summary: "Transfer USDC with gas paid from the total USDC budget.", kind: "group" },
+  { path: ["gasless", "transfer"], summary: "Prepare and approve a USDC fee transfer.", kind: "group" },
+  { path: ["bridge"], summary: "Discover, prepare and recover finite LI.FI cross-chain routes.", kind: "group" },
+  { path: ["policy"], summary: "Explicit human admission of mainnet chain assets.", kind: "group" },
   { path: ["mcp"], summary: "Serve and discover the local APN MCP transport.", kind: "group" },
   { path: ["doctor"], summary: "Inspect local APN prerequisites.", kind: "group" },
   { path: ["wallet"], summary: "Create, inspect and configure the disposable wallet.", kind: "group" },
@@ -135,7 +142,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
   { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
   { path: ["pay", "transfer"], summary: "Prepare and submit Base-USDC transfers.", kind: "group" },
-  { path: ["operation"], summary: "Read or recover durable operations.", kind: "group" },
+  { path: ["operation"], summary: "Read, recover or explicitly abandon eligible durable operations.", kind: "group" },
   { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ] as const;
 
@@ -346,8 +353,17 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   ),
   command(["operation", "status"], "apn operation status --operation <operation-id>", "Read one durable operation without network access.", [operationRequired], "local_read", "Reads public operation state and never resumes an effect.", "none", "Never.", allOperationStates, [
     { command_path: ["operation", "resume"], when: "When the returned state documents resumable recovery." },
+    { command_path: ["operation", "abandon"], when: "Only for a provider-atomic ambiguous effect with no transaction hash or provider recovery reference, after accepting the unresolved financial risk." },
     { command_path: ["receipt", "get"], when: "When the operation is terminal." },
   ], ["apn operation status --operation <operation-id>"]),
+  command(["operation", "abandon"], "apn operation abandon --operation <operation-id>",
+    "Administratively terminalize one strictly eligible unknown provider effect.", [operationRequired], "local_write",
+    "After exact owner confirmation, appends an abandonment transition and authoritative receipt without contacting a wallet, signer, provider or network.",
+    "foreground_tty", "Requires the exact operation-bound phrase and acknowledgement that the financial outcome remains unknown.",
+    { terminal: ["abandoned_unknown"], non_terminal: ["ambiguous_effect"] }, [
+      { command_path: ["operation", "status"], when: "To inspect the immutable administrative terminal state." },
+      { command_path: ["receipt", "get"], when: "To read the owner-acknowledgement receipt." },
+    ], ["apn operation abandon --operation <operation-id>"]),
   command(
     ["operation", "resume"],
     "apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>]",
@@ -407,7 +423,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Read one durable terminal receipt.", [operationRequired], "local_read", "Reads a terminal receipt and never resumes an operation.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ] as const;
 
-export const COMMANDS: readonly CommandDefinition[] = [...BASE_COMMANDS, ...networkCommandVariants(BASE_COMMANDS)];
+export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...BRIDGE_COMMANDS, ...GASLESS_COMMANDS];
 
 export const COMMAND_MANIFEST = {
   schema_version: "apn.command-manifest.v1",

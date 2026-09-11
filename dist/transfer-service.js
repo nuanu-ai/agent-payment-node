@@ -13,6 +13,7 @@ import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, hasExa
 import { canonicalProfile } from "./wallet-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-recovery.js";
+import { ProviderDirectState } from "./provider-direct-state.js";
 export class TransferService {
     context;
     operations;
@@ -248,8 +249,16 @@ export class TransferService {
         return await this.providerDirectRecovery.recover(operationId, providerRequestId);
     }
     async status(operationIdInput) {
+        const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
-        return publicOperation(await this.requiredOperation(canonicalOperationId(operationIdInput)));
+        const found = await this.requiredOperation(operationId);
+        if (found.providerDirect === undefined)
+            return publicOperation(found);
+        return await this.context.state.withLocks([
+            `profile:${found.profileHash}`,
+            `operation:${operationId}`,
+        ], async () => publicOperation(await new ProviderDirectState(this.context)
+            .recoverOrphanTerminal(await this.requiredOperation(operationId))));
     }
     async receipt(operationIdInput) {
         await this.context.ready();

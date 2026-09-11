@@ -15,6 +15,7 @@ export type OperationState =
   | "signed_not_submitted"
   | "submitted_pending"
   | "unknown_finality"
+  | "abandoned_unknown"
   | "completed"
   | "failed_before_effect"
   | "failed_provider_rejected"

@@ -30,6 +30,7 @@ import {
 import { canonicalProfile } from "./wallet-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-recovery.js";
+import { ProviderDirectState } from "./provider-direct-state.js";
 
 export class TransferService {
   private readonly operations: OperationService;
@@ -263,8 +264,15 @@ export class TransferService {
   }
 
   async status(operationIdInput: string): Promise<unknown> {
+    const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
-    return publicOperation(await this.requiredOperation(canonicalOperationId(operationIdInput)));
+    const found = await this.requiredOperation(operationId);
+    if (found.providerDirect === undefined) return publicOperation(found);
+    return await this.context.state.withLocks([
+      `profile:${found.profileHash}`,
+      `operation:${operationId}`,
+    ], async () => publicOperation(await new ProviderDirectState(this.context)
+      .recoverOrphanTerminal(await this.requiredOperation(operationId))));
   }
 
   async receipt(operationIdInput: string): Promise<unknown> {

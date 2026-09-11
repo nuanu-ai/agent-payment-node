@@ -4,6 +4,10 @@ import type { OperationRecord } from "./model.js";
 import { validateOperation } from "./state-integrity.js";
 
 export function validateEvmOperationWrite(next: OperationRecord, previousValue: unknown): void {
+  if (next.providerDirect !== undefined || (previousValue !== null && typeof previousValue === "object" && "providerDirect" in previousValue)) {
+    validateProviderOperationWrite(next, previousValue);
+    return;
+  }
   if (next.evm === undefined && (previousValue === null || typeof previousValue !== "object" || !("evm" in previousValue))) return;
   validateOperation(next);
   if (previousValue === null) {
@@ -19,6 +23,41 @@ export function validateEvmOperationWrite(next: OperationRecord, previousValue: 
       canonicalJson(next.transitions.slice(0, previous.transitions.length)) !== canonicalJson(previous.transitions) ||
       (next.transitions.length === previous.transitions.length && previous.integrityHash !== next.integrityHash) ||
       (previous.terminal && previous.integrityHash !== next.integrityHash)) corrupt();
+}
+
+function validateProviderOperationWrite(next: OperationRecord, previousValue: unknown): void {
+  validateOperation(next);
+  if (next.providerDirect === undefined) corrupt();
+  if (previousValue === null) {
+    if (next.state !== "awaiting_approval" || next.transitions.length !== 1) corrupt();
+    return;
+  }
+  const previous = validateOperation(previousValue);
+  if (
+    previous.providerDirect === undefined ||
+    canonicalJson(providerFrozen(previous)) !== canonicalJson(providerFrozen(next)) ||
+    (previous.providerEffect !== undefined && canonicalJson(previous.providerEffect) !== canonicalJson(next.providerEffect)) ||
+    (previous.transactionHash !== undefined && previous.transactionHash !== next.transactionHash) ||
+    next.transitions.length < previous.transitions.length ||
+    canonicalJson(next.transitions.slice(0, previous.transitions.length)) !== canonicalJson(previous.transitions) ||
+    (next.transitions.length === previous.transitions.length && previous.integrityHash !== next.integrityHash) ||
+    (previous.terminal && previous.integrityHash !== next.integrityHash)
+  ) corrupt();
+}
+
+function providerFrozen(value: OperationRecord): unknown {
+  const {
+    state: _state,
+    terminal: _terminal,
+    reason: _reason,
+    proofClass: _proofClass,
+    transitions: _transitions,
+    integrityHash: _integrityHash,
+    providerEffect: _providerEffect,
+    transactionHash: _transactionHash,
+    ...frozen
+  } = value;
+  return frozen;
 }
 
 function corrupt(): never { throw new ApnError("APN_STATE_CORRUPT", "Generic direct operation cannot replace or rewind its frozen durable authority."); }

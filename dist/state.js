@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readdir, realpath, rename, stat, unlink, } from "node:fs/promises";
+import { lstat, mkdir, open, realpath, rename, stat, unlink, } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
 import { canonicalJson, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -87,8 +87,7 @@ export class StateStore extends SecureStateStore {
         return operation;
     }
     async findOperation(operationId) {
-        const operationsRoot = this.resolveRelative("operations");
-        const entries = await readdir(operationsRoot, { withFileTypes: true });
+        const entries = await this.readDirectory("operations");
         let found = null;
         for (const entry of entries) {
             if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/.test(entry.name)) {
@@ -110,8 +109,7 @@ export class StateStore extends SecureStateStore {
     }
     async listOperations(profileHash) {
         const directory = join("operations", profileHash);
-        await this.ensureDirectory(directory);
-        const entries = await readdir(this.resolveRelative(directory), { withFileTypes: true });
+        const entries = await this.readDirectory(directory);
         const operations = [];
         for (const entry of entries) {
             if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) {
@@ -185,8 +183,7 @@ export class StateStore extends SecureStateStore {
     async listX402Operations(profileHash) {
         stateIdentifier(profileHash, "x402 profile hash");
         const directory = join("x402-operations", profileHash);
-        await this.ensureDirectory(directory);
-        const entries = await readdir(this.resolveRelative(directory), { withFileTypes: true });
+        const entries = await this.readDirectory(directory);
         const operations = [];
         for (const entry of entries) {
             if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) {
@@ -278,8 +275,7 @@ export class StateStore extends SecureStateStore {
     async listX402Results(profileHash) {
         stateIdentifier(profileHash, "x402 profile hash");
         const directory = join("x402-results", profileHash);
-        await this.ensureDirectory(directory);
-        const entries = await readdir(this.resolveRelative(directory), { withFileTypes: true });
+        const entries = await this.readDirectory(directory);
         const results = [];
         for (const entry of entries) {
             if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name))
@@ -370,8 +366,7 @@ export class StateStore extends SecureStateStore {
     async listX402Receipts(profileHash) {
         stateIdentifier(profileHash, "x402 profile hash");
         const directory = join("x402-receipts", profileHash);
-        await this.ensureDirectory(directory);
-        const entries = await readdir(this.resolveRelative(directory), { withFileTypes: true });
+        const entries = await this.readDirectory(directory);
         const receipts = [];
         for (const entry of entries) {
             if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name))
@@ -463,7 +458,7 @@ export class StateStore extends SecureStateStore {
             stateCorrupt("x402 recovery receipt does not bind its authoritative operation.");
     }
     async operationProfiles(rootName) {
-        const entries = await readdir(this.resolveRelative(rootName), { withFileTypes: true });
+        const entries = await this.readDirectory(rootName);
         const profiles = [];
         for (const entry of entries) {
             if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/.test(entry.name)) {

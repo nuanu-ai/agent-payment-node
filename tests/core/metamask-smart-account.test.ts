@@ -1649,7 +1649,7 @@ test("Smart Account x402 requires the common approval and treats pre-exposure ex
   } finally { await fixture.temporary.cleanup(); }
 });
 
-test("Smart Account permission drift after prepare blocks approval before child, seal or paid HTTP", async () => {
+test("Smart Account permission disabled externally after prepare blocks approval before child, seal or paid HTTP", async () => {
   const fixture = await makeFixture();
   try {
     assert.equal((await fixture.core.execute(connectCommand())).ok, true);
@@ -1664,10 +1664,12 @@ test("Smart Account permission drift after prepare blocks approval before child,
     const disabled = await fixture.core.execute({
       command: "wallet.permission.disable", profile: PROFILE, expectedRevision: 1,
     });
-    assert.equal(disabled.ok, true, JSON.stringify(disabled));
+    assert.equal(disabled.error?.code, "APN_OPERATION_BLOCKED", JSON.stringify(disabled));
+    // External permission drift is injected below the guarded public lifecycle.
+    await fixture.adapter.disable(fixture.state.profileHash(PROFILE), 1);
     const rejected = await runtime.core.execute({ command: "x402.fetch.approve", operationId });
     assert.equal(rejected.ok, false, JSON.stringify(rejected));
-    assert.equal(rejected.error?.code, "APN_PROFILE_DRIFT");
+    assert.equal(rejected.error?.code, "APN_PERMISSION_INACTIVE");
     assert.equal(engine.calls, 0);
     assert.equal(await runtime.materials.load(operationId), null);
     assert.equal(http.calls.length, 1);

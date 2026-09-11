@@ -32,7 +32,7 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["gasless", "gasless transfer", "bridge", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "wallet balance-asset",
   "pay transfer prepare-asset",
@@ -56,6 +56,7 @@ const EXPECTED_COMMANDS = [
   "pay transfer prepare",
   "pay transfer approve",
   "operation status",
+  "operation abandon",
   "operation resume",
   "operation recover-provider-request",
   "operation recover-transaction-settlement",
@@ -64,6 +65,18 @@ const EXPECTED_COMMANDS = [
   "wallet policy set-network",
   "x402 inspect-network",
   "x402 fetch prepare-network",
+  "wallet ensure-solana",
+  "wallet balance-solana",
+  "wallet capabilities-solana",
+  "policy admit-solana",
+  "pay transfer prepare-solana",
+  "wallet ensure-tron",
+  "wallet balance-tron",
+  "wallet capabilities-tron",
+  "policy admit-tron",
+  "pay transfer prepare-tron",
+  "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
+  "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
 ];
 
 test("one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields", () => {
@@ -135,6 +148,12 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>] — Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.",
     "  apn wallet status [--profile <profile>] — Read wallet presence and public identity.",
     "  apn wallet balance [--profile <profile>] --rpc-url <https-url> — Read Base ETH and canonical Base-USDC balances.",
+    "  apn wallet ensure-solana --profile <profile> --provider <local-or-coinbase-awal> [--accept-risk true] — Ensure a separate local ed25519 wallet or link an existing authenticated awal Solana account.",
+    "  apn wallet balance-solana --profile <profile> --asset <sol-or-usdc> — Read SOL or canonical USDC and the separate SOL fee balance through APN_SOLANA_RPC_URL.",
+    "  apn wallet capabilities-solana [--profile <profile>] — Inspect all four provider capabilities, fee-contract gates and unavailable Solana x402.",
+    "  apn wallet ensure-tron --profile <profile> --provider local --accept-risk true — Ensure a separate encrypted local secp256k1 TRON wallet without funding or activation.",
+    "  apn wallet balance-tron --profile <profile> --asset <trx-or-usdt> — Read solidified TRX or canonical USDT and the separate TRX fee balance through APN_TRON_RPC_URL.",
+    "  apn wallet capabilities-tron [--profile <profile>] — Inspect all four provider capabilities and unavailable TRON x402, sponsorship and bridge execution.",
     "",
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet <child>",

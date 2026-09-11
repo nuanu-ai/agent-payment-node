@@ -22,9 +22,34 @@ import { EncryptedSmartAccountDirectEffectStore } from "./encrypted-smart-accoun
 import { MetaMaskSmartAccountDirectAdapter, OfficialSmartAccountAllowance, } from "./metamask-smart-account-direct.js";
 import { EncryptedSmartAccountX402MaterialStore } from "./encrypted-smart-account-x402-material-store.js";
 import { MetaMaskSmartAccountX402Adapter } from "./metamask-smart-account-x402.js";
+import { ChainAccountStore } from "./chain-account-store.js";
+import { TtyChainPolicyApproval, TtyRailApproval } from "./tty-approval.js";
+import { SolanaRpc } from "./solana/rpc.js";
+import { SolanaLocalAdapter } from "./solana/local-adapter.js";
+import { SolanaAwalAdapter } from "./solana/awal-adapter.js";
+import { TronLocalAdapter } from "./tron/local-adapter.js";
+import { TronRpc } from "./tron/rpc.js";
+import { LocalBridgeCustody } from "./lifi/custody.js";
+import { LifiProvider } from "./lifi/provider.js";
+import { bridgeRpcFactory } from "./lifi/rpc.js";
+import { TtyBridgeApproval } from "./lifi/tty.js";
+import { LocalGaslessCustody } from "./gasless/custody.js";
+import { gaslessRpcFactory } from "./gasless/rpc.js";
+import { TtyGaslessApproval } from "./gasless/tty.js";
+import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
+import { metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
+import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
+import { TtyOperationAbandonApproval } from "./operation-abandon-approval.js";
+import { smartAccountGaslessRuntime } from "./smart-account-gasless/runtime.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
+    const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
+    const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL);
+    const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL);
+    const directRails = options.directRails ?? [new SolanaLocalAdapter(chainAccounts, solanaRpc, () => options.clock?.now() ?? new Date()),
+        new SolanaAwalAdapter(chainAccounts, solanaRpc, undefined, undefined, () => options.clock?.now() ?? new Date()),
+        new TronLocalAdapter(chainAccounts, tronRpc, () => options.clock?.now() ?? new Date())];
     const native = needsNative(bound.request.command)
         ? options.native ?? new LocalWalletNative(state, wrappingSecret, options.approval)
         : undefined;
@@ -69,6 +94,23 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     return new ApnCore({
         state,
+        smartAccountGasless: options.smartAccountGasless ?? smartAccountGaslessRuntime({ state,
+            permissions: smartAccountPermissionStore, wrapping: wrappingSecret, environment: process.env,
+            clock: options.clock ?? { now: () => new Date() }, foregroundApproval: bound.request.command === "gasless.transfer.approve" }),
+        metaMaskGasless: options.metaMaskGasless ?? {
+            rpcFor: metaMaskGaslessRpcFactory(process.env, options.clock ?? { now: () => new Date() }),
+            provider: new MetaMaskGaslessProviderClient({ environment: process.env, clock: options.clock ?? { now: () => new Date() } }),
+            ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyMetaMaskGaslessApproval() } : {}),
+        },
+        gasless: options.gasless ?? { rpcFor: gaslessRpcFactory(process.env),
+            custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
+            ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyGaslessApproval() } : {}) },
+        bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
+            custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
+            ...(bound.request.command === "bridge.approve" ? { approval: new TtyBridgeApproval() } : {}) },
+        chainAccounts, directRails,
+        ...(bound.request.command === "transfer.approve" || options.railApproval !== undefined ? { railApproval: options.railApproval ?? new TtyRailApproval() } : {}),
+        ...(bound.request.command === "policy.admit-solana" || bound.request.command === "policy.admit-tron" || options.chainPolicyApproval !== undefined ? { chainPolicyApproval: options.chainPolicyApproval ?? new TtyChainPolicyApproval() } : {}),
         profileRepository,
         providerRegistry,
         ...(foregroundAuthentication === undefined ? {} : { foregroundAuthentication }),
@@ -84,6 +126,9 @@ export function createApnCore(bound, options = {}) {
         ...(options.wait === undefined ? {} : { wait: options.wait }),
         ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
         ...(providerAuthorizationStore === undefined ? {} : { providerAuthorizationStore }),
+        ...(bound.request.command === "operation.abandon" || options.operationAbandonApproval !== undefined
+            ? { operationAbandonApproval: options.operationAbandonApproval ?? new TtyOperationAbandonApproval() }
+            : {}),
     });
 }
 export async function executeBoundCommand(bound, options = {}) {

@@ -4,6 +4,14 @@ import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
+    smartAccountGasless;
+    metaMaskGasless;
+    gasless;
+    bridge;
+    directRails;
+    chainAccounts;
+    railApproval;
+    chainPolicyApproval;
     state;
     native;
     keychainProbe;
@@ -21,8 +29,24 @@ export class RuntimeContext {
     providerX402Repository;
     providerTransactionEvidence;
     providerAuthorizationStore;
+    operationAbandonApproval;
     initialized;
     constructor(dependencies) {
+        if (dependencies.smartAccountGasless !== undefined)
+            this.smartAccountGasless = dependencies.smartAccountGasless;
+        if (dependencies.metaMaskGasless !== undefined)
+            this.metaMaskGasless = dependencies.metaMaskGasless;
+        if (dependencies.gasless !== undefined)
+            this.gasless = dependencies.gasless;
+        if (dependencies.bridge !== undefined)
+            this.bridge = dependencies.bridge;
+        this.directRails = dependencies.directRails ?? [];
+        if (dependencies.chainAccounts !== undefined)
+            this.chainAccounts = dependencies.chainAccounts;
+        if (dependencies.railApproval !== undefined)
+            this.railApproval = dependencies.railApproval;
+        if (dependencies.chainPolicyApproval !== undefined)
+            this.chainPolicyApproval = dependencies.chainPolicyApproval;
         this.state = dependencies.state;
         if (dependencies.native !== undefined)
             this.native = dependencies.native;
@@ -53,6 +77,8 @@ export class RuntimeContext {
             this.providerTransactionEvidence = dependencies.providerTransactionEvidence;
         if (dependencies.providerAuthorizationStore !== undefined)
             this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
+        if (dependencies.operationAbandonApproval !== undefined)
+            this.operationAbandonApproval = dependencies.operationAbandonApproval;
     }
     async ready() {
         this.initialized ??= this.state.initialize();
@@ -103,6 +129,12 @@ export class RuntimeContext {
             throw new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "A foreground terminal is required for wallet provider authentication.");
         }
         return this.foregroundAuthentication;
+    }
+    requireOperationAbandonApproval() {
+        if (this.operationAbandonApproval === undefined) {
+            throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Unknown-effect abandonment requires exact foreground terminal confirmation.");
+        }
+        return this.operationAbandonApproval;
     }
     requireTransferApproval() {
         if (this.transferApproval === undefined) {

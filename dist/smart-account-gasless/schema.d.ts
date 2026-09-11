@@ -1,0 +1,22 @@
+import type { Address, Hex } from "../model.js";
+import { type SmartAccountGaslessBinding, type SmartAccountGaslessBlock, type SmartAccountGaslessIntent, type SmartAccountGaslessProviderBinding, type SmartAccountGaslessRequest, type SmartAccountGaslessRequirements, type SmartAccountGaslessSnapshot, type SmartAccountGaslessMutable } from "./model.js";
+import { type SmartAccountGaslessReason } from "./reasons.js";
+export declare function saExact(value: unknown, keys: readonly string[], reason?: SmartAccountGaslessReason): Record<string, unknown>;
+export declare function saUint(value: unknown, positive?: boolean, reason?: SmartAccountGaslessReason): bigint;
+export declare function saHash(value: unknown, reason?: SmartAccountGaslessReason): string;
+export declare function saHex(value: unknown, bytes?: number, reason?: SmartAccountGaslessReason): Hex;
+export declare function saAddress(value: unknown, reason?: SmartAccountGaslessReason): Address;
+export declare function saCanonicalAddress(value: unknown, reason?: SmartAccountGaslessReason): Address;
+export declare function saIso(value: unknown, reason?: SmartAccountGaslessReason): string;
+export declare function saUnix(value: unknown, reason?: SmartAccountGaslessReason): number;
+export declare function saOrigin(value: unknown, reason?: SmartAccountGaslessReason): string;
+export declare function saRequest(value: unknown, reason?: SmartAccountGaslessReason): SmartAccountGaslessRequest;
+export declare function saBinding(value: unknown): SmartAccountGaslessBinding;
+export declare function saBlock(value: unknown): SmartAccountGaslessBlock;
+export declare function saBlockOrder(first: SmartAccountGaslessBlock, second: SmartAccountGaslessBlock): void;
+export declare function saSnapshot(value: unknown, binding: SmartAccountGaslessBinding): SmartAccountGaslessSnapshot;
+export declare function saProviderBinding(value: unknown): SmartAccountGaslessProviderBinding;
+export declare function saRequirements(value: unknown): SmartAccountGaslessRequirements;
+export declare function saStateCounters(value: unknown): Pick<SmartAccountGaslessMutable, "state" | "signingAttempts" | "exposureAttempts" | "submissionAttempts">;
+/** Stored public input has a closed deep schema; all failures are sanitized state corruption. */
+export declare function validateSmartAccountGaslessIntent(value: unknown): SmartAccountGaslessIntent;

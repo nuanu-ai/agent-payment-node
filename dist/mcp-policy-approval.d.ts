@@ -9,4 +9,7 @@ export declare class RejectingMcpPolicyApproval implements ProfilePolicyApproval
     constructor(request: PolicySetRequest);
     approve(intent: ProfilePolicyApprovalIntent): Promise<void>;
 }
+export declare function chainPolicyHandoff(request: Extract<CommandRequest, {
+    readonly command: "policy.admit-solana" | "policy.admit-tron";
+}>): never;
 export {};

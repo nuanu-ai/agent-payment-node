@@ -1,6 +1,6 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.5.10",
+  "version": "0.5.11",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
   "private": false,
@@ -19,11 +19,15 @@
   "files": [
     "bin/apn.js",
     "dist/**",
-    "docs/evm-assets.md",
     "native/BUILD.md",
     "npm-shrinkwrap.json",
     "README.md",
-    "LICENSE"
+    "docs/solana.md",
+    "LICENSE",
+    "docs/tron.md",
+    "docs/lifi.md",
+    "docs/gasless.md",
+    "docs/evm-assets.md"
   ],
   "scripts": {
     "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",
@@ -43,13 +47,20 @@
   },
   "dependencies": {
     "@metamask/7715-permission-types": "2.0.0",
+    "@metamask/agent-sdk": "6.1.4",
     "@metamask/agent-wallet": "6.1.5",
+    "@metamask/fox-sdk": "2.7.0",
     "@metamask/smart-accounts-kit": "2.0.0",
     "@metamask/x402": "1.0.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@solana-program/system": "0.14.1",
+    "@solana-program/token": "0.16.1",
+    "@solana/kit": "8.2.0",
+    "@toruslabs/ethereum-controllers": "9.12.0",
     "@x402/core": "2.23.0",
     "@x402/evm": "2.23.0",
     "awal": "2.12.1",
+    "tronweb": "6.5.0",
     "viem": "2.55.19",
     "zod": "4.4.3"
   },
@@ -61,6 +72,26 @@
   "overrides": {
     "@metamask/utils": {
       "uuid": "11.1.1"
+    },
+    "axios@<0.33.0": "0.33.0",
+    "uuid@<11.1.1": "11.1.1",
+    "@metamask/number-to-bn": {
+      "bn.js": "5.2.5"
+    },
+    "ethjs-abi": {
+      "bn.js": "4.12.5"
+    },
+    "number-to-bn": {
+      "bn.js": "4.12.5"
+    },
+    "@nktkas/hyperliquid": {
+      "valibot": "1.4.2"
+    },
+    "@ethersproject/providers": {
+      "ws": "8.21.3"
+    },
+    "viem@2.52.2": {
+      "ws": "8.21.3"
     }
   },
   "license": "MIT",

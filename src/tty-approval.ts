@@ -3,6 +3,8 @@ import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import type { Address } from "./model.js";
 import type { EvmDirectBinding } from "./evm-direct.js";
+import type { RailApprovalPort } from "./direct-rail-ports.js";
+import { chainDisplay, type ChainPolicy, type ChainPolicyApprovalPort } from "./chain-policy.js";
 
 export const TTY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
@@ -179,7 +181,11 @@ async function readApprovalInput(
   expiresAt: string,
   deadlineMs: number,
   externalSignal?: AbortSignal,
+  maximumInputBytes = MAX_APPROVAL_INPUT_BYTES,
 ): Promise<string> {
+  if (!Number.isSafeInteger(maximumInputBytes) || maximumInputBytes < 1 || maximumInputBytes > 256) {
+    throw new ApnError("APN_INTERNAL", "The approval input bound is invalid.");
+  }
   const controller = new AbortController();
   const expiryMs = Date.parse(expiresAt);
   const remainingMs = Math.max(1, Math.min(deadlineMs, expiryMs - Date.now()));
@@ -197,7 +203,7 @@ async function readApprovalInput(
   process.once("SIGINT", onSigint);
   if (externalSignal?.aborted === true) abort("external");
 
-  const input = Buffer.alloc(MAX_APPROVAL_INPUT_BYTES);
+  const input = Buffer.alloc(maximumInputBytes);
   let length = 0;
   try {
     for await (const chunk of tty.read(controller.signal)) {
@@ -232,4 +238,57 @@ async function readApprovalInput(
 
 function approvalFailure(nativeCode: string, message: string): ApnError {
   return new ApnError("APN_NATIVE_REJECTED", message, { nativeCode });
+}
+
+export class TtyRailApproval implements RailApprovalPort {
+  constructor(private readonly options: TtyTransferApprovalOptions = {}) {}
+  async approve(input: Parameters<RailApprovalPort["approve"]>[0]): Promise<void> {
+    const { account, prepared } = input;
+    await exactChainConsent([
+      "Agent Payment Node direct-rail approval", `Profile: ${account.profile}`, `Provider: ${account.provider}`,
+      `Custody: ${account.custody}`, `Operation: ${input.operationId}`, `Mainnet: ${account.rail}`,
+      `Genesis: ${prepared.networkIdentity}`, `Asset: ${prepared.asset.identifier}`, `Decimals: ${prepared.asset.decimals}`,
+      `Sender: ${prepared.sender}`, `Recipient: ${prepared.recipient}`,
+      `Amount: ${chainDisplay(prepared.amountAtomic, prepared.asset.decimals)} ${prepared.asset.symbol} (${prepared.amountAtomic} atomic)`,
+      `Network fee payer: ${prepared.economics.networkFeePayer}`, `Maximum network fee: ${prepared.economics.networkFeeMaximumAtomic} native atomic`,
+      ...(prepared.rail === "solana" ? [`Recipient rent payer: ${prepared.economics.rentPayer ?? "none"}`, `Recipient rent: ${prepared.economics.recipientRentAtomic} native atomic`] : [
+        `Bandwidth bound: ${prepared.resources?.bandwidthBytesAtomic} bytes / ${prepared.resources?.bandwidthMaximumAtomic} TRX atomic`,
+        `Caller Energy fee_limit: ${prepared.resources?.energyFeeLimitAtomic} TRX atomic (Bandwidth is additional)`,
+        `Maximum activation component: ${prepared.resources?.accountActivationMaximumAtomic} TRX atomic`,
+        `Recipient active at solidified snapshot: ${prepared.resources?.recipientActivatedAtSolidHead === true ? "yes" : "no"}`,
+        `Resource cost rule: ${prepared.resources?.costRule}`, `Fee control: ${prepared.economics.feeControl}`,
+        `Next maintenance: ${prepared.resources?.nextMaintenanceMsAtomic} UTC epoch milliseconds`,
+      ]),
+      `Maximum sender fee${prepared.rail === "solana" ? " and rent" : " and resource"} debit: ${prepared.economics.maximumNativeDebitAtomic} native atomic`,
+      `Selected fee/${prepared.rail === "solana" ? "rent" : "resource"} cap: ${prepared.maximumFeeAtomic} native atomic`, `Policy: ${input.policyHash}`,
+      `Fingerprint: ${input.fingerprint}`, `Expires: ${prepared.expiresAt}`,
+    ], transferApprovalPhrase(input.fingerprint), prepared.expiresAt, this.options);
+  }
+}
+export class TtyChainPolicyApproval implements ChainPolicyApprovalPort {
+  constructor(private readonly options: TtyTransferApprovalOptions = {}) {}
+  async approve(policy: ChainPolicy): Promise<void> {
+    await exactChainConsent([
+      "Agent Payment Node mainnet asset admission", `Profile: ${policy.account.profile}`, `Provider: ${policy.account.provider}`,
+      `Custody: ${policy.account.custody}`, `Account: ${policy.account.address}`, `Mainnet: ${policy.account.rail}`,
+      `Genesis: ${policy.networkIdentity}`, `Asset: ${policy.asset.identifier}`, `Decimals: ${policy.asset.decimals}`,
+      `Maximum per transfer: ${policy.maximumPerTransferAtomic} asset atomic`, `Daily principal limit (UTC): ${policy.dailyLimitAtomic} asset atomic`,
+      `Maximum fee and ${policy.account.rail === "solana" ? "rent" : "resources"} per operation: ${policy.maximumNativeFeeAtomic} native atomic`, `Policy: ${policy.policyHash}`,
+      "Unresolved transfers continue to reserve limits across UTC days.",
+    ], `ADMIT APN ASSET ${policy.policyHash.slice(-16)}`, new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString(), this.options);
+  }
+}
+export async function exactChainConsent(lines: readonly string[], phrase: string, expiresAt: string,
+  options: TtyTransferApprovalOptions, maximumInputBytes = MAX_APPROVAL_INPUT_BYTES): Promise<void> {
+  if (Date.now() >= Date.parse(expiresAt)) throw approvalFailure("APN_APPROVAL_EXPIRED", "The chain approval expired.");
+  let terminal: ApprovalTerminal;
+  try { terminal = await (options.openTerminal ?? openApprovalTerminal)(); }
+  catch { throw approvalFailure("APN_TTY_UNAVAILABLE", "A foreground terminal is required for chain approval."); }
+  try {
+    if (!(options.isTerminal ?? isatty)(terminal.fd)) throw approvalFailure("APN_TTY_UNAVAILABLE", "The chain approval is not attached to a terminal.");
+    await terminal.write(`\n${lines.join("\n")}\nType exactly: ${phrase}\n> `);
+    const supplied = await readApprovalInput(terminal, expiresAt, options.deadlineMs ?? TTY_APPROVAL_DEADLINE_MS, options.signal, maximumInputBytes);
+    if (supplied !== phrase) throw approvalFailure("APN_APPROVAL_REFUSED", "The chain approval was refused.");
+    if (Date.now() >= Date.parse(expiresAt)) throw approvalFailure("APN_APPROVAL_EXPIRED", "The chain approval expired.");
+  } finally { await terminal.close(); }
 }

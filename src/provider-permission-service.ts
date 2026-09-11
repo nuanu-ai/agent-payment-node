@@ -7,6 +7,7 @@ import type { ProviderProfileRecord } from "./provider-profile.js";
 import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
 
 type PermissionCommand = Extract<CommandRequest, {
   readonly command: "wallet.permission.list" | "wallet.permission.sync" |
@@ -21,6 +22,7 @@ export class ProviderPermissionService {
     await this.context.ready();
     const profileHash = this.context.state.profileHash(profile);
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+      await assertWalletLifecycleAvailable(this.context, profileHash);
       const repository = this.context.requireProfileRepository();
       let bound = await repository.load(profileHash);
       if (bound === null || bound.provider_id === "local") {

@@ -2,7 +2,97 @@ import type { Address } from "./model.js";
 import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import type { ErrorDetails } from "./errors.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
+import type { ChainProvider } from "./direct-rail-ports.js";
+import type { BridgeRouteRequest } from "./lifi/model.js";
+import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
+    readonly command: "gasless.capabilities";
+    readonly profile?: string;
+} | {
+    readonly command: "gasless.balance";
+    readonly profile: string;
+    readonly chainId: GaslessCommandChainId;
+} | {
+    readonly command: "gasless.transfer.prepare";
+    readonly profile: string;
+    readonly request: GaslessCommandRequest;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "gasless.transfer.approve";
+    readonly operationId: string;
+} | {
+    readonly command: "bridge.capabilities";
+    readonly profile?: string;
+} | {
+    readonly command: "bridge.inventory";
+} | {
+    readonly command: "bridge.routes";
+    readonly profile: string;
+    readonly request: BridgeRouteRequest;
+} | {
+    readonly command: "bridge.prepare";
+    readonly profile: string;
+    readonly quote: string;
+    readonly route: string;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "bridge.approve";
+    readonly operationId: string;
+} | {
+    readonly command: "wallet.ensure-tron";
+    readonly profile: string;
+    readonly provider: "local";
+    readonly acceptRisk: boolean;
+} | {
+    readonly command: "wallet.balance-tron";
+    readonly profile: string;
+    readonly asset: "trx" | "usdt";
+} | {
+    readonly command: "wallet.capabilities-tron";
+    readonly profile?: string;
+} | {
+    readonly command: "policy.admit-tron";
+    readonly profile: string;
+    readonly asset: "trx" | "usdt";
+    readonly maximumPerTransfer: string;
+    readonly dailyLimit: string;
+    readonly maximumFee: string;
+} | {
+    readonly command: "transfer.prepare-tron";
+    readonly profile: string;
+    readonly asset: "trx" | "usdt";
+    readonly recipient: string;
+    readonly amount: string;
+    readonly maximumFee: string;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "wallet.ensure-solana";
+    readonly profile: string;
+    readonly provider: ChainProvider;
+    readonly acceptRisk: boolean;
+} | {
+    readonly command: "wallet.balance-solana";
+    readonly profile: string;
+    readonly asset: "sol" | "usdc";
+} | {
+    readonly command: "wallet.capabilities-solana";
+    readonly profile?: string;
+} | {
+    readonly command: "policy.admit-solana";
+    readonly profile: string;
+    readonly asset: "sol" | "usdc";
+    readonly maximumPerTransfer: string;
+    readonly dailyLimit: string;
+    readonly maximumFee: string;
+} | {
+    readonly command: "transfer.prepare-solana";
+    readonly profile: string;
+    readonly asset: "sol" | "usdc";
+    readonly recipient: string;
+    readonly amount: string;
+    readonly maximumFee: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "version";
 } | {
     readonly command: "doctor.keychain";
@@ -82,6 +172,9 @@ export type CommandRequest = {
     readonly command: "operation.resume";
     readonly operationId: string;
     readonly waitSeconds?: number;
+} | {
+    readonly command: "operation.abandon";
+    readonly operationId: string;
 } | {
     readonly command: "operation.recover-provider-request";
     readonly operationId: string;

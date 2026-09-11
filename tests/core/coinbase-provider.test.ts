@@ -1497,11 +1497,16 @@ test("profile revision, capability, observed sender and RPC drift all stop befor
       const operationId = (prepared.operation as Record<string, unknown>).operation_id as string;
       const profilePath = join(temporary.root, "profiles", sha256(`profile\0${profile}`), "profile.json");
       if (drift === "revision") {
-        runner.address = ADDRESS_B;
+        const original = await readFile(profilePath, "utf8");
         const rebound = await runCli([
           "wallet", "connect", "--profile", profile, "--provider", AWAL_PROVIDER_ID, "--expected-revision", "1",
         ], {}, { stateRoot: temporary.root, providerRegistry, foregroundAuthentication: new FixtureForeground() });
-        assert.equal(rebound.ok, true, JSON.stringify(rebound));
+        assert.equal(rebound.error?.code, "APN_OPERATION_BLOCKED", JSON.stringify(rebound));
+        assert.equal(await readFile(profilePath, "utf8"), original);
+        // Simulate external profile drift after proving the public lifecycle guard.
+        const record = JSON.parse(original) as Record<string, unknown>;
+        record.revision = 2;
+        await writeFile(profilePath, `${canonicalJson(record)}\n`, { mode: 0o600 });
       }
       if (drift === "capability") {
         const record = JSON.parse(await readFile(profilePath, "utf8")) as Record<string, unknown>;

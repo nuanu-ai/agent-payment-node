@@ -7,6 +7,12 @@ import { X402Service } from "./x402-service.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
 import { ProviderPermissionService } from "./provider-permission-service.js";
+import { RailOperationService } from "./rail-operation-service.js";
+import { BridgeService } from "./lifi/service.js";
+import { GaslessService } from "./gasless/service.js";
+import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
+import { OperationAbandonService } from "./operation-abandon-service.js";
+import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
 export declare class ApnCore {
@@ -18,7 +24,15 @@ export declare class ApnCore {
     readonly providerWallet: ProviderWalletService;
     readonly providerPermissions: ProviderPermissionService;
     readonly providerTransactionRecovery: ProviderX402TransactionRecoveryService;
+    readonly rails: RailOperationService;
+    readonly bridges: BridgeService;
+    readonly gasless: GaslessService;
+    readonly metaMaskGasless: MetaMaskGaslessService;
+    readonly smartAccountGasless: SmartAccountGaslessService;
+    readonly operationAbandon: OperationAbandonService;
     constructor(dependencies: CoreDependencies);
     execute(request: CommandRequest): Promise<OutputEnvelope>;
     private dispatch;
+    private prepareGasless;
+    private gaslessProvider;
 }

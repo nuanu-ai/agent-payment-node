@@ -55,7 +55,7 @@ test("payment MCP schemas project the existing catalog scalar contracts", () => 
   );
 });
 
-test("all nine payment tools bind through the shared catalog binder", () => {
+test("all ten payment tools bind through the shared catalog binder", () => {
   const tools = new Map(projectMcpTools().map((tool) => [tool.name, tool.command]));
   const operation = "a".repeat(64);
   const bind = (name: string, input: Record<string, unknown>) => {
@@ -94,6 +94,9 @@ test("all nine payment tools bind through the shared catalog binder", () => {
   }), { request: { command: "transfer.approve", operationId: operation }, rpcUrl: "https://rpc.example" });
   assert.deepEqual(bind("apn_operation_status", { operation }), {
     request: { command: "operation.status", operationId: operation },
+  });
+  assert.deepEqual(bind("apn_operation_abandon", { operation }), {
+    request: { command: "operation.abandon", operationId: operation },
   });
   assert.deepEqual(bind("apn_operation_resume", {
     operation, rpc_url: "https://rpc.example", wait_seconds: "300",

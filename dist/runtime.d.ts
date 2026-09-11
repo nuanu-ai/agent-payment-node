@@ -7,7 +7,22 @@ import type { TransferApprovalPort } from "./tty-approval.js";
 import type { ProviderX402Repository } from "./provider-x402-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
+import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
+import type { ChainPolicyApprovalPort } from "./chain-policy.js";
+import type { BridgeDependencies } from "./lifi/service.js";
+import type { GaslessDependencies } from "./gasless/service.js";
+import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
+import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
+import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 export interface CoreDependencies {
+    readonly smartAccountGasless?: SmartAccountGaslessDependencies;
+    readonly metaMaskGasless?: MetaMaskGaslessDependencies;
+    readonly gasless?: GaslessDependencies;
+    readonly bridge?: BridgeDependencies;
+    readonly directRails?: readonly DirectRailPort[];
+    readonly chainAccounts?: ChainWalletStoragePort;
+    readonly railApproval?: RailApprovalPort;
+    readonly chainPolicyApproval?: ChainPolicyApprovalPort;
     readonly state: StateStore;
     readonly native?: NativePort;
     readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
@@ -25,8 +40,17 @@ export interface CoreDependencies {
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+    readonly operationAbandonApproval?: OperationAbandonApprovalPort;
 }
 export declare class RuntimeContext {
+    readonly smartAccountGasless?: SmartAccountGaslessDependencies;
+    readonly metaMaskGasless?: MetaMaskGaslessDependencies;
+    readonly gasless?: GaslessDependencies;
+    readonly bridge?: BridgeDependencies;
+    readonly directRails: readonly DirectRailPort[];
+    readonly chainAccounts?: ChainWalletStoragePort;
+    readonly railApproval?: RailApprovalPort;
+    readonly chainPolicyApproval?: ChainPolicyApprovalPort;
     readonly state: StateStore;
     readonly native?: NativePort;
     readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
@@ -44,6 +68,7 @@ export declare class RuntimeContext {
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+    readonly operationAbandonApproval?: OperationAbandonApprovalPort;
     private initialized;
     constructor(dependencies: CoreDependencies);
     ready(): Promise<void>;
@@ -55,6 +80,7 @@ export declare class RuntimeContext {
     requireProfileRepository(): ProviderProfileRepositoryPort;
     requireProviderRegistry(): ProviderRegistryPort;
     requireForegroundAuthentication(): ForegroundAuthenticationPort;
+    requireOperationAbandonApproval(): OperationAbandonApprovalPort;
     requireTransferApproval(): TransferApprovalPort;
     requireRpcUrl(): string;
     requireProviderAuthorizationStore(): ProviderAuthorizationStorePort;
