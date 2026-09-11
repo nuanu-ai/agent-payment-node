@@ -1,9 +1,8 @@
-# Explicit EVM assets (unreleased source)
+# Explicit EVM assets
 
-The local EVM expansion enables exactly Base (`eip155:8453`), Ethereum mainnet
-(`eip155:1`) and Arbitrum One (`eip155:42161`) for the local encrypted disposable
-wallet. Public APN/Homebrew remains 0.5.8; these source changes do not
-alter that published artifact. No new mainnet payment is claimed here.
+The APN 0.5.11-demo.1 build retains the released 0.5.10 EVM support for exactly Base (`eip155:8453`), Ethereum mainnet (`eip155:1`)
+and Arbitrum One (`eip155:42161`) for the local encrypted disposable wallet.
+Release availability and a fresh mainnet payment remain separate proof layers.
 
 ## One direct-transfer journey
 
@@ -30,16 +29,25 @@ EIP-1559 execution cost, L1 data upper
 estimate for at most 512 signed bytes, and operator fee estimate. Native value
 must also be funded. The quote is rechecked before signing and every submission.
 Variable L1/operator fees may change at inclusion. Missing oracle evidence fails
-closed. Changing nonce or transaction fee fields requires a new operation before
-signing; a signed operation is never replaced or repriced automatically.
+closed. Before signing on every supported EVM chain, the nonce must remain
+exact, current required gas must fit within the frozen gas limit, and the
+current derived base fee must fit within the frozen signed maximum-fee
+envelope. Harmless lower gas estimates and fee-recommendation movement are
+accepted without changing the approved transaction. A signed operation is
+never replaced or repriced automatically.
 
 Arbitrum uses its full inclusive `eth_estimateGas` result: L2 execution and L1
 posting are paid within one gas envelope. Its `feeModel: arbitrum-inclusive`
 is frozen and shown at approval and in receipts; zero *separate* L1/operator
 surcharges do not mean posting is free. APN never calls the Base oracle or
-adds posting costs twice. Priority fee is zero. Before submission, a higher
-inclusive gas or fee estimate blocks the existing signed operation rather than
-replacing it; resume only that operation when its frozen envelope suffices.
+adds posting costs twice. Priority fee is zero. Arbitrum additionally rechecks
+the inclusive envelope after signing and before submission: required gas above
+the frozen gas limit or current base fee above the frozen ceiling blocks the
+existing signed operation rather than replacing it; resume only that operation
+when its frozen envelope suffices. Before signing on any chain, nonce drift,
+required gas above the frozen limit, or base fee above the frozen ceiling
+requires a new operation. APN always signs the original approved transaction
+unchanged.
 
 Exact foreground TTY approval precedes private-key access. MCP
 `apn_wallet_balance_asset` and `apn_pay_transfer_prepare_asset` use the same
@@ -101,16 +109,19 @@ safe/finalized chain evidence. Resume takes its network from the frozen operatio
 not a new caller override. GET and absent/empty/nonempty POST envelopes remain
 immutable across the same-material retry and result recovery.
 
-These are unreleased local capabilities. Production Ethereum and Arbitrum
-merchant/facilitator paths have not been qualified by a paid run. Fresh native, non-USDC and
-x402 mainnet rows remain required and held; protocol documentation and synthetic
-fixtures do not establish merchant availability or live settlement.
+Direct transfers and paid x402 purchases have separate acceptance records.
+The bounded D4-D9 direct acceptance completed on
+2026-09-10 for Arbitrum native ETH, USDC and USDT0 plus Base native ETH, USDC
+and WETH: all six direct rows passed, both required Base WETH prerequisite
+transactions were confirmed, and Base USDC funding was skipped as unnecessary.
+That is pre-release source/live proof, not APN 0.5.10 publication, Homebrew
+installation, merchant availability or x402 settlement proof.
 
 ## Capability boundary
 
 | Profile | Base / Ethereum / Arbitrum native and arbitrary ERC-20 direct | Base-USDC direct | Standard x402 |
 | --- | --- | --- | --- |
-| Local encrypted wallet | Source/test capability; fresh paid proof held | Existing journey preserved | Existing Base-USDC plus unreleased Ethereum/Arbitrum-USDC exact EIP-3009 |
+| Local encrypted wallet | APN 0.5.10 capability; bounded Base/Arbitrum D4-D9 direct proof passed on 2026-09-10 | Existing journey preserved; D5/D8 included in the bounded direct proof | Base plus APN 0.5.10 Ethereum/Arbitrum-USDC exact EIP-3009; fresh merchant proof held |
 | Coinbase Agentic Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route; pinned AWAL rejects present bodies, including empty |
 | MetaMask Agent Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route |
 | MetaMask Smart Account | Explicitly unsupported | Existing bounded consent route | Existing advertised ERC-7710 route |
@@ -121,6 +132,7 @@ unchanged. Legacy 0.5.8 operations retain their old schema/hash and recovery pat
 The earlier live provider proof was Local/Coinbase/MetaMask Agent on 0.5.6 and
 Smart Account only after its pending-consent recovery fix on 0.5.7.
 
-Local tests and local installation are not publication, Homebrew acceptance or
-fresh mainnet payment proof. Required new paid rows remain held until separately
-bounded wallet/recipient/asset/network/amount/fee authority is supplied.
+Local tests, the D4-D9 source/live result and a local installation are not
+publication or Homebrew acceptance. Required merchant/x402 paid rows remain
+held until separately bounded wallet/recipient/asset/network/amount/fee
+authority is supplied.

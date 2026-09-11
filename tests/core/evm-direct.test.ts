@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { parseTransaction } from "viem";
+import { keccak256, parseTransaction } from "viem";
 import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { ApnError } from "../../src/errors.js";
 import { evmAmount, MAX_EVM_UINT, resolveEvmAsset } from "../../src/evm-asset.js";
@@ -41,6 +41,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const asset of ["native", 
   const setup = evmCore(temporary.root);
   setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
+  if (chainId === 42161) setup.rpc.fees = { ...setup.rpc.fees, maxPriorityFeePerGasAtomic: "0" };
   const wallet = await setup.core.wallet.ensure("default") as { address: Address };
   setup.rpc.sender = wallet.address;
   const request = { ...EVM_REQUEST, asset: { chainId, token: asset }, amount: asset === "native" ? "0.000001" : "1.25" };
@@ -84,6 +85,101 @@ test("fee/value funding and chain mismatch fail before approval or signature", a
   await assert.rejects(setup.core.transfer.prepare(EVM_REQUEST), { code: "APN_CHAIN_MISMATCH" });
   assert.equal(setup.approval.intents.length, 0);
   assert.equal(setup.rpc.submissions.length, 0);
+});
+
+test("Arbitrum signs the frozen fee envelope when the fresh gas estimate and suggested maximum fee decrease", async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root);
+  setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
+  await setup.core.wallet.ensure("default");
+  const frozenFees = setup.rpc.fees;
+  const prepared = await setup.core.transfer.prepare({
+    ...EVM_REQUEST,
+    asset: { chainId: 42161, token: "native" },
+  }) as { operation_id: string };
+  setup.rpc.fees = {
+    ...frozenFees,
+    gasLimitAtomic: (BigInt(frozenFees.gasLimitAtomic) - 1n).toString(),
+    maxFeePerGasAtomic: (BigInt(frozenFees.maxFeePerGasAtomic) - 2n).toString(),
+  };
+
+  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "completed");
+  assert.equal(setup.approval.intents.length, 1);
+  assert.equal(setup.rpc.submissions.length, 1);
+  const transaction = parseTransaction(setup.rpc.submissions[0]!);
+  assert.equal(transaction.nonce?.toString(), setup.rpc.nonceAtomic);
+  assert.equal(transaction.gas?.toString(), frozenFees.gasLimitAtomic);
+  assert.equal(transaction.maxFeePerGas?.toString(), frozenFees.maxFeePerGasAtomic);
+  assert.equal((transaction.maxPriorityFeePerGas ?? 0n).toString(), frozenFees.maxPriorityFeePerGasAtomic);
+});
+
+test("EVM approval rejects only a changed nonce, insufficient frozen gas, or a base fee above the signed ceiling", async () => {
+  const cases = [
+    { name: "higher nonce", mutate: (setup: ReturnType<typeof evmCore>) => { setup.rpc.nonceAtomic = (BigInt(setup.rpc.nonceAtomic) + 1n).toString(); } },
+    { name: "lower nonce", mutate: (setup: ReturnType<typeof evmCore>) => { setup.rpc.nonceAtomic = (BigInt(setup.rpc.nonceAtomic) - 1n).toString(); } },
+    { name: "higher gas limit", mutate: (setup: ReturnType<typeof evmCore>) => { setup.rpc.fees = { ...setup.rpc.fees, gasLimitAtomic: (BigInt(setup.rpc.fees.gasLimitAtomic) + 1n).toString() }; } },
+    { name: "base fee above signed ceiling", mutate: (setup: ReturnType<typeof evmCore>) => { setup.rpc.fees = {
+      ...setup.rpc.fees,
+      maxFeePerGasAtomic: (2n * BigInt(setup.rpc.fees.maxFeePerGasAtomic) + BigInt(setup.rpc.fees.maxPriorityFeePerGasAtomic) + 2n).toString(),
+    }; } },
+  ] as const;
+
+  for (const scenario of cases) {
+    const temporary = await temporaryState();
+    try {
+      const setup = evmCore(temporary.root);
+      setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
+      await setup.core.wallet.ensure("default");
+      const prepared = await setup.core.transfer.prepare({
+        ...EVM_REQUEST,
+        idempotencyKey: `arbitrum-drift-${scenario.name.replaceAll(" ", "-")}`,
+        asset: { chainId: 42161, token: "native" },
+      }) as { operation_id: string };
+      const wrappingLoads = setup.wrapping.loads;
+      scenario.mutate(setup);
+
+      await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_REPREPARE_REQUIRED" }, scenario.name);
+      const status = await setup.core.transfer.status(prepared.operation_id) as { state: string; terminal: boolean; reason: string; proof_class: string };
+      assert.deepEqual(
+        { state: status.state, terminal: status.terminal, reason: status.reason, proofClass: status.proof_class },
+        { state: "failed_before_effect", terminal: true, reason: "fee_or_nonce_changed", proofClass: "durable_pre_effect_failure" },
+        scenario.name,
+      );
+      assert.equal(setup.approval.intents.length, 0, scenario.name);
+      assert.equal(setup.wrapping.loads, wrappingLoads, scenario.name);
+      assert.equal(setup.rpc.submissions.length, 0, scenario.name);
+    } finally {
+      await temporary.cleanup();
+    }
+  }
+});
+
+test("all EVM chains keep the frozen signed envelope across harmless live fee and gas-estimate movement", async () => {
+  for (const chainId of [8453, 1, 42161] as const) {
+    const temporary = await temporaryState();
+    try {
+      const setup = evmCore(temporary.root);
+      setup.rpc.chainId = chainId;
+      if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
+      await setup.core.wallet.ensure("default");
+      const prepared = await setup.core.transfer.prepare({
+        ...EVM_REQUEST,
+        idempotencyKey: `live-envelope-${chainId}`,
+        asset: { chainId, token: "native" },
+      }) as { operation_id: string };
+      setup.rpc.fees = {
+        ...setup.rpc.fees,
+        gasLimitAtomic: (BigInt(setup.rpc.fees.gasLimitAtomic) - 1n).toString(),
+        maxFeePerGasAtomic: (BigInt(setup.rpc.fees.maxFeePerGasAtomic) + 1_000_000_000n).toString(),
+      };
+
+      assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "completed");
+      assert.equal(setup.approval.intents.length, 1);
+      assert.equal(setup.rpc.submissions.length, 1);
+    } finally {
+      await temporary.cleanup();
+    }
+  }
 });
 
 test("fresh custody recovers the encrypted signature after process loss before public effect binding", async (context) => {
@@ -209,6 +305,43 @@ test("Arbitrum increasing inclusive gas after signing prevents first submission 
   assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
   assert.equal((await setup.state.findOperation(prepared.operation_id))!.transactionHash, signed.transactionHash);
   assert.equal(restarted.approval.intents.length, 0); assert.equal(setup.rpc.broadcastCount, 1);
+});
+
+test("Arbitrum base fee above the frozen signed ceiling retains and later submits the exact signed bytes", async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  let signedRaw: `0x${string}` | undefined;
+  const setup = evmCore(temporary.root, undefined, undefined, undefined, (native) => ({ request: async (request) => {
+    const result = await native.request(request);
+    if (request.operation === "directTransfer.approveAndSign") {
+      signedRaw = (result as { rawTransaction: `0x${string}` }).rawTransaction;
+      setup.rpc.fees = {
+        ...setup.rpc.fees,
+        maxFeePerGasAtomic: (2n * BigInt(setup.rpc.fees.maxFeePerGasAtomic) + BigInt(setup.rpc.fees.maxPriorityFeePerGasAtomic) + 2n).toString(),
+      };
+    }
+    return result;
+  } }));
+  setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
+  await setup.core.wallet.ensure("default");
+  const frozenFees = setup.rpc.fees;
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
+  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_FEE_BUDGET_EXCEEDED" });
+  const signed = (await setup.state.findOperation(prepared.operation_id))!;
+  assert.equal(signed.state, "signed_not_submitted"); assert.equal(setup.rpc.broadcastCount, 0);
+
+  const stillBlocked = evmCore(temporary.root, setup.rpc, setup.wrapping);
+  await assert.rejects(stillBlocked.core.transfer.resume(prepared.operation_id), { code: "APN_FEE_BUDGET_EXCEEDED" });
+  const retained = (await setup.state.findOperation(prepared.operation_id))!;
+  assert.equal(retained.state, "signed_not_submitted"); assert.equal(retained.transactionHash, signed.transactionHash);
+  assert.equal(retained.rawTransactionHash, signed.rawTransactionHash); assert.equal(setup.rpc.broadcastCount, 0);
+
+  setup.rpc.fees = frozenFees;
+  assert.equal((await stillBlocked.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
+  assert.equal((await setup.state.findOperation(prepared.operation_id))!.transactionHash, signed.transactionHash);
+  assert.equal((await setup.state.findOperation(prepared.operation_id))!.rawTransactionHash, signed.rawTransactionHash);
+  assert.equal(setup.rpc.submissions[0], signedRaw);
+  assert.equal(keccak256(setup.rpc.submissions[0]!), signed.rawTransactionHash);
+  assert.equal(stillBlocked.approval.intents.length, 0); assert.equal(setup.rpc.broadcastCount, 1);
 });
 
 for (const chainId of [8453, 1, 42161] as const) for (const decimals of [6, 18]) test(`chain ${chainId} arbitrary ERC20 with ${decimals} decimals preserves exact accounting`, async (context) => {

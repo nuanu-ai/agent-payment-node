@@ -1,6 +1,6 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.5.8",
+  "version": "0.5.11-demo.1",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
   "private": false,
@@ -26,7 +26,8 @@
     "LICENSE",
     "docs/tron.md",
     "docs/lifi.md",
-    "docs/gasless.md"
+    "docs/gasless.md",
+    "docs/evm-assets.md"
   ],
   "scripts": {
     "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",
