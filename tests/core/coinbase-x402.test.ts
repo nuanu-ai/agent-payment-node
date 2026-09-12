@@ -62,6 +62,7 @@ import type {
 import { StateProfileRepository } from "../../src/profile-repository.js";
 import { policyBinding, type ProfilePolicyPort } from "../../src/profile-policy.js";
 import { StateStore } from "../../src/state.js";
+import { appendTransition, sealOperation } from "../../src/state-integrity.js";
 import type { HttpGetRequest, HttpObservation } from "../../src/x402-model.js";
 import { TestClock, TestNative, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
 import { challengeObservation, TestHttp } from "./x402-helpers.js";
@@ -430,6 +431,37 @@ async function prepare(core: ApnCore, key = "provider-x402-001"): Promise<string
   assert.equal(typeof operationId, "string");
   return operationId as string;
 }
+
+test("an active provider x402 operation blocks a gasless alias for the same Coinbase account", async (t) => {
+  const fixture = await setup(t);
+  await new StateProfileRepository(fixture.state).save({ ...fixture.profile, profile: "provider-alias",
+    profile_hash: fixture.state.profileHash("provider-alias") });
+  await prepare(fixture.core, "x402-before-gasless-alias");
+  const response = await fixture.core.execute({ command: "gasless.transfer.prepare", profile: "provider-alias",
+    request: { chainId: 8453, recipient: "0x2222222222222222222222222222222222222222",
+      grossAtomic: "1000", maxFeeAtomic: "0", minReceivedAtomic: "1000" }, idempotencyKey: "gasless-after-x402" });
+  assert.equal(response.error?.code, "APN_OPERATION_BLOCKED");
+});
+
+test("provider x402 approval rechecks account exclusion against a historical direct alias", async (t) => {
+  const fixture = await setup(t), operationId = await prepare(fixture.core, "x402-approval-account-guard");
+  const transition = { at: fixture.clock.now().toISOString(), state: "awaiting_approval" as const, terminal: false,
+    reason: "prepared_provider_atomic_send", proofClass: "durable_provider_intent" };
+  await fixture.state.writeOperation(sealOperation({ schemaVersion: "apn.state.v1", operationId: "9".repeat(64),
+    idempotencyHash: "8".repeat(64), profile: "historical-alias", profileHash: "7".repeat(64), requestHash: "6".repeat(64),
+    fingerprint: "5".repeat(64), walletAddress: PAYER, recipient: X402_PAYEE, amountAtomic: "1", amountDecimal: "0.000001",
+    chainId: 8453, token: BASE_USDC, preparedAt: transition.at, expiresAt: new Date(fixture.clock.now().getTime() + 60_000).toISOString(),
+    state: transition.state, terminal: false, reason: transition.reason, proofClass: transition.proofClass,
+    transitions: appendTransition([], transition), providerDirect: { schemaVersion: "apn.provider-direct.v1",
+      providerId: AWAL_PROVIDER_ID, profileRevision: fixture.profile.revision, capabilityHash: fixture.profile.capability_hash,
+      accountBindingHash: fixture.profile.account_binding_hash, executionMode: "provider_atomic_send", executionOwner: "provider",
+      retryOwner: "apn_outer_no_replay_journal", rpcBindingHash: sha256("direct-rpc\0https://rpc.example/base?tenant=one"),
+      rpcOriginHash: sha256("direct-rpc-origin\0https://rpc.example"), policy: { identity: "apn.direct.foreground-approval.v1",
+        verdict: "foreground_approval_required", foregroundApprovalRequired: true } } }));
+  const approved = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  assert.equal(approved.error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(fixture.effect.calls.length, 0);
+});
 
 async function executeAwalEnvelope(value: unknown) {
   const launch: AwalX402LaunchPort = () => {

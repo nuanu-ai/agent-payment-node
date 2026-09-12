@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, parseAbiParameters } from "viem";
+import { encodeAbiParameters, encodeFunctionData, getAddress, keccak256, parseAbi, parseAbiParameters } from "viem";
 import { COINBASE_ACCOUNT_CODE_HASH, COINBASE_ACCOUNT_IMPLEMENTATION, COINBASE_ACCOUNT_IMPLEMENTATION_CODE_HASH,
   COINBASE_ENTRY_POINT, COINBASE_ENTRY_POINT_CODE_HASH, coinbaseGaslessSnapshot, observeCoinbaseGasless } from "../../src/coinbase-gasless-observer.js";
 import { BASE_USDC, TRANSFER_TOPIC } from "../../src/constants.js";
@@ -20,9 +20,11 @@ import { runCli } from "../../src/cli.js";
 import { temporaryState } from "./helpers.js";
 import { sha256 } from "../../src/canonical.js";
 import { OperationService } from "../../src/operation-service.js";
+import { accountBindingHash } from "../../src/provider-profile.js";
+import { HttpsBaseRpc } from "../../src/rpc.js";
 
-const SENDER = "0x1111111111111111111111111111111111111111" as Address;
-const RECIPIENT = "0x2222222222222222222222222222222222222222" as Address;
+const SENDER = getAddress("0xfa4ec96026e3ddbb90e7adc4ccd5ba08353eccd8") as Address;
+const RECIPIENT = getAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd") as Address;
 const IMPLEMENTATION = COINBASE_ACCOUNT_IMPLEMENTATION;
 const PAYMASTER = "0x4444444444444444444444444444444444444444" as Address;
 const OUTER = "0x5555555555555555555555555555555555555555" as Address;
@@ -92,7 +94,7 @@ class CoinbaseRpcFixture implements RpcPort {
       blockHash: this.transactionBlock.hash, transactionIndex: "0x0", logs: this.logs } : null;
     if (method === "eth_getCode") {
       if (arg === COINBASE_ENTRY_POINT) return ENTRY_POINT_CODE;
-      if (arg === SENDER) return this.unsupportedAccount ? "0x60016000" : ACCOUNT_CODE;
+      if (typeof arg === "string" && arg.toLowerCase() === SENDER.toLowerCase()) return this.unsupportedAccount ? "0x60016000" : ACCOUNT_CODE;
       if (arg === IMPLEMENTATION) return this.implementationCodeDriftAtInclusion && params[1] === "0x64" ? "0x60056000" : IMPLEMENTATION_CODE;
       if (arg === PAYMASTER) return PAYMASTER_CODE;
       return "0x";
@@ -147,6 +149,14 @@ test("Coinbase gasless observation classifies transaction, UserOp and hashless p
       assert.equal(observed.settlement.senderNativeDebitWei, "0");
     }
   }
+});
+
+test("Coinbase gasless observation accepts valid lowercase persisted sender and recipient identities", async () => {
+  const rpc = new CoinbaseRpcFixture(), operation = makeOperation(rpc);
+  const { integrityHash: _integrity, ...body } = operation;
+  const lowercase = sealOperation({ ...body, walletAddress: SENDER.toLowerCase() as Address,
+    recipient: RECIPIENT.toLowerCase() as Address });
+  assert.equal((await observeCoinbaseGasless(rpc, lowercase)).status, "safe");
 });
 
 test("Coinbase gasless observation retains ambiguity for multiple candidates and accounting mismatch", async () => {
@@ -234,6 +244,22 @@ test("a changed prior cursor boundary is unresolved and never skips the replaced
   assert.deepEqual(reorged.cursor, first.cursor);
 });
 
+test("Coinbase state integrity rejects skipped initial cursors and metadata on another provider family", () => {
+  const operation = makeOperation(new CoinbaseRpcFixture());
+  const { integrityHash: _integrity, ...body } = operation;
+  const skipped = sealOperation({ ...body, coinbaseGaslessCursor: { nextBlockAtomic: "110", previousEndBlock: null } });
+  assert.throws(() => validateOperation(skipped), { code: "APN_STATE_CORRUPT" });
+  const rewound = sealOperation({ ...body, coinbaseGaslessCursor: { nextBlockAtomic: "91", previousEndBlock: BLOCK_90 } });
+  assert.throws(() => validateOperation(rewound), { code: "APN_STATE_CORRUPT" });
+
+  const wrongProvider = sealOperation({ ...body, providerDirect: { ...operation.providerDirect!, providerId: "another-provider" } });
+  assert.throws(() => validateOperation(wrongProvider), { code: "APN_STATE_CORRUPT" });
+
+  const { coinbaseGasless: _binding, ...ordinaryBinding } = operation.providerDirect!;
+  const contradictory = sealOperation({ ...body, providerDirect: ordinaryBinding });
+  assert.throws(() => validateOperation(contradictory), { code: "APN_STATE_CORRUPT" });
+});
+
 test("an unresolved Coinbase account blocks a gasless alias bound to the same provider account", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const rpc = new CoinbaseRpcFixture(), state = new StateStore(temporary.root), ambiguous = makeOperation(rpc);
@@ -248,6 +274,72 @@ test("an unresolved Coinbase account blocks a gasless alias bound to the same pr
   await assert.rejects(() => service.assertProviderAccountAvailable("coinbase-agentic-wallet",
     operation.providerDirect!.accountBindingHash, operation.walletAddress), { code: "APN_OPERATION_BLOCKED" });
   await service.assertProviderAccountAvailable("coinbase-agentic-wallet", "6".repeat(64), OUTER);
+});
+
+test("gasless and ordinary Coinbase alias routes exclude both orders and concurrent preparation", async (t) => {
+  async function fixture() {
+    const temporary = await temporaryState();
+    let address: Address = SENDER;
+    const runner: AwalProcessRunnerPort = { run: async (argv) => argv[0] === "address"
+      ? { exitCode: 0, stdout: Buffer.from(address) }
+      : argv[0] === "balance" ? { exitCode: 0, stdout: Buffer.from(JSON.stringify({ address, chain: "Base",
+        balances: { USDC: { raw: "1000000", formatted: "1 USDC", decimals: 6 } }, timestamp: "2026-09-12T00:00:00.000Z" })) }
+      : { exitCode: 0, stdout: Buffer.alloc(0) } };
+    const direct: DirectExecutionPort = { mode: "provider_atomic_send", assertCompatibleIntent: () => {},
+      execute: async () => ({ disposition: "not_started", reason: "provider_child_not_created" }) };
+    const registry = new ProviderRegistry([{ provider_id: AWAL_PROVIDER_ID,
+      create: () => new AwalProcessAdapter(runner, direct).bundle() }]);
+    const foreground: ForegroundAuthenticationPort = { readIdentity: async () => "safe@example.invalid",
+      readChallengeResponse: async () => "123456", confirmRebind: async () => true };
+    for (const profile of ["alias-a", "alias-b"]) assert.equal((await runCli(["wallet", "connect", "--profile", profile,
+      "--provider", AWAL_PROVIDER_ID], {}, { stateRoot: temporary.root, providerRegistry: registry,
+      foregroundAuthentication: foreground })).ok, true);
+    address = OUTER;
+    assert.equal((await runCli(["wallet", "connect", "--profile", "distinct", "--provider", AWAL_PROVIDER_ID], {},
+      { stateRoot: temporary.root, providerRegistry: registry, foregroundAuthentication: foreground })).ok, true);
+    address = SENDER;
+    const state = new StateStore(temporary.root);
+    const core = new ApnCore({ state, profileRepository: new StateProfileRepository(state), providerRegistry: registry,
+      rpc: new CoinbaseRpcFixture(), rpcUrl: "https://rpc.example/", clock: { now: () => new Date("2026-09-12T00:00:00.000Z") },
+      gasless: { rpcFor: () => { throw new Error("local gasless must not run"); }, custody: {} as never,
+        approval: { confirm: async () => false } } });
+    return { temporary, core, state };
+  }
+  const gasless = (profile: string, key: string) => ({ command: "gasless.transfer.prepare" as const, profile,
+    request: { chainId: 8453 as const, recipient: RECIPIENT, grossAtomic: "1000", maxFeeAtomic: "0", minReceivedAtomic: "1000" },
+    idempotencyKey: key });
+  const ordinary = (profile: string, key: string) => ({ command: "transfer.prepare" as const, profile,
+    idempotencyKey: key, recipient: RECIPIENT, amount: "0.001" });
+
+  const first = await fixture(); t.after(first.temporary.cleanup);
+  assert.equal((await first.core.execute(gasless("alias-a", "gasless-first"))).ok, true);
+  assert.equal((await first.core.execute(ordinary("alias-b", "direct-after"))).error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal((await first.core.execute({ command: "x402.fetch.prepare", profile: "alias-b", idempotencyKey: "x402-after",
+    url: "https://merchant.example/resource", maxAmountAtomic: "1000" })).error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal((await first.core.execute(ordinary("distinct", "distinct-account"))).ok, true,
+    "an independently bound account remains available");
+
+  const second = await fixture(); t.after(second.temporary.cleanup);
+  assert.equal((await second.core.execute(ordinary("alias-a", "direct-first"))).ok, true);
+  assert.equal((await second.core.execute(gasless("alias-b", "gasless-after"))).error?.code, "APN_OPERATION_BLOCKED");
+  const directId = second.state.operationId("alias-a", "direct-first");
+  const directOperation = await second.state.findOperation(directId);
+  assert.ok(directOperation);
+  const { integrityHash: _directIntegrity, ...directBase } = directOperation;
+  const legacyAlias = sealOperation({ ...directBase, profile: "alias-b", profileHash: sha256("profile\0alias-b"),
+    operationId: second.state.operationId("alias-b", "historical-prepared"), idempotencyHash: sha256("idempotency\0historical-prepared"),
+    requestHash: "7".repeat(64), fingerprint: "8".repeat(64) });
+  await second.state.writeOperation(legacyAlias);
+  assert.equal((await second.core.execute({ command: "transfer.approve", operationId: directId })).error?.code,
+    "APN_OPERATION_BLOCKED", "dispatch-time account exclusion guards pre-existing alias operations");
+
+  const raced = await fixture(); t.after(raced.temporary.cleanup);
+  const outcomes = await Promise.all([raced.core.execute(gasless("alias-a", "race-gasless")),
+    raced.core.execute(ordinary("alias-b", "race-direct"))]);
+  assert.equal(outcomes.filter(row => row.ok).length, 1);
+  assert.deepEqual(outcomes.filter(row => !row.ok).map(row => row.error?.code), ["APN_OPERATION_BLOCKED"]);
+  assert.equal(accountBindingHash(AWAL_PROVIDER_ID, SENDER),
+    (await new StateProfileRepository(new StateStore(raced.temporary.root)).load(sha256("profile\0alias-a")))?.account_binding_hash);
 });
 
 test("a Coinbase canonical terminal receipt recovers an operation-write crash and settlement tampering fails integrity", async () => {
@@ -322,6 +414,39 @@ test("common gasless prepare/approve/status/resume/receipt uses the provider-dir
   const conflict = await core.execute({ command: "transfer.prepare", profile: "coinbase-gasless",
     idempotencyKey: "coinbase-gasless-001", recipient: RECIPIENT, amount: "0.001" });
   assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+});
+
+test("production CLI runtime binds APN_BASE_RPC_URL for Coinbase gasless balance", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const calls: string[] = [];
+  const runner: AwalProcessRunnerPort = { run: async (argv) => {
+    calls.push(argv[0] ?? "");
+    return argv[0] === "address" ? { exitCode: 0, stdout: Buffer.from(SENDER) }
+      : argv[0] === "balance" ? { exitCode: 0, stdout: Buffer.from(JSON.stringify({ address: SENDER, chain: "Base",
+        balances: { USDC: { raw: "1000", formatted: "0.001 USDC", decimals: 6 } }, timestamp: "2026-09-12T00:00:00.000Z" })) }
+      : { exitCode: 0, stdout: Buffer.alloc(0) };
+  } };
+  const registry = new ProviderRegistry([{ provider_id: AWAL_PROVIDER_ID,
+    create: () => new AwalProcessAdapter(runner).bundle() }]);
+  const foreground: ForegroundAuthenticationPort = { readIdentity: async () => "safe@example.invalid",
+    readChallengeResponse: async () => "123456", confirmRebind: async () => true };
+  const connected = await runCli(["wallet", "connect", "--profile", "coinbase-balance", "--provider", AWAL_PROVIDER_ID], {},
+    { stateRoot: temporary.root, providerRegistry: registry, foregroundAuthentication: foreground });
+  assert.equal(connected.ok, true, `${JSON.stringify(connected)} calls=${calls.join(",")}`);
+
+  const previousEnv = process.env.APN_BASE_RPC_URL, original = HttpsBaseRpc.prototype.getBalances;
+  process.env.APN_BASE_RPC_URL = "https://rpc.example/base";
+  HttpsBaseRpc.prototype.getBalances = async function (address) {
+    assert.equal(address.toLowerCase(), SENDER.toLowerCase());
+    return { address, ethAtomic: "0", usdcAtomic: "1000", blockNumberAtomic: "1", blockHash: `0x${"1".repeat(64)}` as Hex,
+      observedAt: "2026-09-12T00:00:00.000Z", rpcOrigin: this.rpcOrigin };
+  };
+  t.after(() => { HttpsBaseRpc.prototype.getBalances = original;
+    if (previousEnv === undefined) delete process.env.APN_BASE_RPC_URL; else process.env.APN_BASE_RPC_URL = previousEnv; });
+  const balance = await runCli(["gasless", "balance", "--profile", "coinbase-balance", "--chain", "8453"], {},
+    { stateRoot: temporary.root, providerRegistry: registry });
+  assert.equal(balance.ok, true, JSON.stringify(balance));
+  assert.equal((balance.data as any).balances.USDC.atomic, "1000");
 });
 
 function makeOperation(rpc: CoinbaseRpcFixture, locator?: OperationRecord["coinbaseGaslessLocator"]): OperationRecord {

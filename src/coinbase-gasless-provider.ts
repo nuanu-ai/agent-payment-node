@@ -34,17 +34,20 @@ export async function prepareCoinbaseGasless(
   if (gross <= 0n || minimum <= 0n || minimum > gross || maximumFee < 0n) throw new ApnError("APN_INVALID_INPUT", "Coinbase gasless amount bounds are invalid.");
   await context.ready();
   const state = context.state, profileHash = state.profileHash(profile), operationId = state.operationId(profile, idempotencyKey);
-  const idempotencyHash = state.idempotencyHash(idempotencyKey), rpcBindingHash = sha256(`direct-rpc\0${context.requireRpcUrl()}`);
+  const idempotencyHash = state.idempotencyHash(idempotencyKey), rpcBindingHash = sha256(`direct-rpc\0${context.requireCoinbaseRpcUrl()}`);
   const initialBound = await loadProfile(profileHash);
   assertCoinbaseProfile(initialBound);
   return await state.withLocks([`profile:${profileHash}`, `provider-account:${initialBound.provider_id}:${initialBound.account_binding_hash}`,
     `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
     const bound = await loadProfile(profileHash);
     assertCoinbaseProfile(bound);
-    if (bound.account_binding_hash !== initialBound.account_binding_hash || bound.public_address !== initialBound.public_address) {
+    if (bound.account_binding_hash !== initialBound.account_binding_hash ||
+      bound.public_address.toLowerCase() !== initialBound.public_address.toLowerCase()) {
       throw new ApnError("APN_PROFILE_DRIFT", "Coinbase account identity changed while acquiring its operation lock.");
     }
-    if (bound.public_address === recipient) throw new ApnError("APN_INVALID_INPUT", "Coinbase gasless sender and recipient must differ.");
+    if (bound.public_address.toLowerCase() === recipient.toLowerCase()) {
+      throw new ApnError("APN_INVALID_INPUT", "Coinbase gasless sender and recipient must differ.");
+    }
     const materialRequest = { method: "gasless.transfer", profile, providerId: bound.provider_id,
       profileRevision: bound.revision, capabilityHash: bound.capability_hash, accountBindingHash: bound.account_binding_hash,
       chainId: CHAIN_ID, token: BASE_USDC, sender: bound.public_address, recipient, grossAtomic: gross.toString(),
@@ -55,7 +58,7 @@ export async function prepareCoinbaseGasless(
     if (existing !== null) return publicOperation(existing.record as OperationRecord);
     await operations.assertProfileAvailable(profileHash);
     await operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
-    const snapshot = await coinbaseGaslessSnapshot(context.requireRpc(), bound.public_address);
+    const snapshot = await coinbaseGaslessSnapshot(context.requireCoinbaseRpc(), bound.public_address);
     if (BigInt(snapshot.balanceAtomic) < gross) throw new ApnError("APN_INSUFFICIENT_USDC", "USDC balance is insufficient for the gross transfer.");
     const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000);
     const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
@@ -86,7 +89,7 @@ export async function prepareCoinbaseGasless(
 export async function coinbaseGaslessPreconditionsMatch(context: RuntimeContext, operation: OperationRecord): Promise<boolean> {
   const frozen = operation.providerDirect?.coinbaseGasless;
   if (frozen === undefined) return true;
-  const snapshot = await coinbaseGaslessSnapshot(context.requireRpc(), operation.walletAddress);
+  const snapshot = await coinbaseGaslessSnapshot(context.requireCoinbaseRpc(), operation.walletAddress);
   return snapshot.rpcOrigin === frozen.rpcOrigin && snapshot.entryPointCodeHash === frozen.entryPointCodeHash &&
     snapshot.accountCodeHash === frozen.accountCodeHash && snapshot.accountImplementation === frozen.accountImplementation &&
     snapshot.accountImplementationCodeHash === frozen.accountImplementationCodeHash &&
@@ -96,7 +99,7 @@ export async function coinbaseGaslessPreconditionsMatch(context: RuntimeContext,
 export async function reobserveCoinbaseGasless(
   context: RuntimeContext, durable: ProviderDirectState, operation: OperationRecord,
 ): Promise<OperationRecord> {
-  const observed = await observeCoinbaseGasless(context.requireRpc(), operation);
+  const observed = await observeCoinbaseGasless(context.requireCoinbaseRpc(), operation);
   if (observed.status === "safe") return await durable.transition(operation, "completed", true,
     "confirmed_coinbase_gasless_transfer", "canonical_safe_coinbase_gasless_settlement",
     { transactionHash: observed.settlement.transactionHash, coinbaseGaslessCursor: observed.cursor,
