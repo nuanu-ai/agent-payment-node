@@ -57,10 +57,11 @@ export function createApnCore(bound, options = {}) {
     const policy = needsPolicy(bound.request.command)
         ? options.policy ?? new EncryptedProfilePolicy(state, wrappingSecret, options.policyApproval ?? new TtyProfilePolicyApproval(), options.clock)
         : undefined;
-    const gaslessBaseRpcUrl = ["gasless.transfer.prepare", "gasless.transfer.approve", "operation.resume"].includes(bound.request.command)
+    const coinbaseRpcUrl = ["gasless.balance", "gasless.transfer.prepare", "gasless.transfer.approve", "operation.resume"].includes(bound.request.command)
         ? process.env.APN_BASE_RPC_URL : undefined;
-    const effectiveRpcUrl = bound.rpcUrl ?? gaslessBaseRpcUrl;
+    const effectiveRpcUrl = bound.rpcUrl;
     const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl));
+    const coinbaseRpc = options.rpc;
     const http = options.http ?? (needsHttp(bound.request.command) ? new HttpsX402Http() : undefined);
     const profileRepository = options.profileRepository ?? new StateProfileRepository(state);
     const smartAccountPermissionStore = options.smartAccountPermissionStore ??
@@ -121,9 +122,12 @@ export function createApnCore(bound, options = {}) {
         ...(foregroundAuthentication === undefined ? {} : { foregroundAuthentication }),
         ...(transferApproval === undefined ? {} : { transferApproval }),
         ...(effectiveRpcUrl === undefined ? {} : { rpcUrl: effectiveRpcUrl }),
+        ...(coinbaseRpcUrl === undefined ? {} : { coinbaseRpcUrl }),
         ...(native === undefined ? {} : { native }),
         ...(bound.request.command === "doctor.keychain" ? { keychainProbe: wrappingSecret } : {}),
         ...(rpc === undefined ? {} : { rpc }),
+        ...(coinbaseRpc === undefined ? {} : { coinbaseRpc }),
+        ...(coinbaseRpcUrl === undefined || coinbaseRpc !== undefined ? {} : { coinbaseRpcFactory: () => new HttpsBaseRpc(coinbaseRpcUrl) }),
         ...(http === undefined ? {} : { http }),
         ...(policy === undefined ? {} : { policy }),
         ...(options.clock === undefined ? {} : { clock: options.clock }),

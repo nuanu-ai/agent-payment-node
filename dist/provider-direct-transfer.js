@@ -54,12 +54,13 @@ export class ProviderDirectTransferService {
         const operationId = state.operationId(profile, idempotencyKey);
         const idempotencyHash = state.idempotencyHash(idempotencyKey);
         const rpcBindingHash = sha256(`direct-rpc\0${this.context.requireRpcUrl()}`);
-        return await state.withLocks([
-            `profile:${profileHash}`,
-            `operation:${operationId}`,
-            `operation:idempotency:${idempotencyHash}`,
-        ], async () => {
+        const initialBound = await requiredProviderDirectProfile(this.context, profileHash);
+        return await state.withLocks([`profile:${profileHash}`, `provider-account:${initialBound.provider_id}:${initialBound.account_binding_hash}`,
+            `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
             const bound = await requiredProviderDirectProfile(this.context, profileHash);
+            if (bound.account_binding_hash !== initialBound.account_binding_hash ||
+                bound.public_address.toLowerCase() !== initialBound.public_address.toLowerCase())
+                throw new ApnError("APN_PROFILE_DRIFT", "Provider account identity changed while acquiring its operation lock.");
             const materialRequest = {
                 method: "pay.transfer",
                 profile,
@@ -88,6 +89,7 @@ export class ProviderDirectTransferService {
             if (existing !== null)
                 return publicOperation(existing.record);
             await this.operations.assertProfileAvailable(profileHash);
+            await this.operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
             const rpcIdentity = await this.context.requireRpc().assertBaseChain();
             const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
             const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
@@ -171,10 +173,9 @@ export class ProviderDirectTransferService {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const found = await this.requiredOperation(operationId);
-        return await this.context.state.withLocks([
-            `profile:${found.profileHash}`,
-            `operation:${operationId}`,
-        ], async () => {
+        const foundBinding = requiredBinding(found);
+        return await this.context.state.withLocks([`profile:${found.profileHash}`,
+            `provider-account:${foundBinding.providerId}:${foundBinding.accountBindingHash}`, `operation:${operationId}`], async () => {
             let operation = await this.requiredOperation(operationId);
             operation = await this.durable.recoverOrphanTerminal(operation);
             if (operation.terminal || operation.state !== "awaiting_approval")
@@ -183,6 +184,7 @@ export class ProviderDirectTransferService {
                 await this.failBeforeEffect(operation, "approval_window_expired");
             }
             const binding = requiredBinding(operation);
+            await this.operations.assertProviderAccountAvailable(binding.providerId, binding.accountBindingHash, operation.walletAddress, operation.operationId);
             await this.assertFrozenPreconditions(operation, binding);
             if (binding.coinbaseGasless !== undefined) {
                 const approval = this.context.gasless?.approval;
@@ -314,11 +316,12 @@ export class ProviderDirectTransferService {
         });
     }
     async assertFrozenPreconditions(operation, binding) {
+        const rpcUrl = binding.coinbaseGasless === undefined ? this.context.requireRpcUrl() : this.context.requireCoinbaseRpcUrl();
         if (binding.policy.identity !== DIRECT_POLICY.identity || binding.policy.verdict !== DIRECT_POLICY.verdict ||
             binding.policy.foregroundApprovalRequired !== true ||
-            sha256(`direct-rpc\0${this.context.requireRpcUrl()}`) !== binding.rpcBindingHash)
+            sha256(`direct-rpc\0${rpcUrl}`) !== binding.rpcBindingHash)
             await this.failBeforeEffect(operation, "frozen_policy_or_rpc_binding_changed");
-        const rpcIdentity = await this.context.requireRpc().assertBaseChain();
+        const rpcIdentity = await (binding.coinbaseGasless === undefined ? this.context.requireRpc() : this.context.requireCoinbaseRpc()).assertBaseChain();
         if (sha256(`direct-rpc-origin\0${rpcIdentity.rpcOrigin}`) !== binding.rpcOriginHash) {
             await this.failBeforeEffect(operation, "rpc_origin_changed");
         }
