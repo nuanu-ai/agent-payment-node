@@ -1,4 +1,6 @@
 import { canonicalJson, exactKeys, sha256 } from "../../canonical.js";
+import { performance } from "node:perf_hooks";
+import { setTimeout as sleep } from "node:timers/promises";
 import { parsePublicHttpsUrl } from "../../network-policy.js";
 import type { ClockPort } from "../../ports.js";
 import { parseJsonWithDuplicateRejection } from "../../x402-strict-json.js";
@@ -24,6 +26,19 @@ const READ_METHODS = new Set<SaRpcMethod>(["eth_chainId", "eth_getBlockByNumber"
 const MAX_RESPONSE = 4 * 1024 * 1024;
 const PASS_START_BUDGET_MS = 45_000;
 const CALL_ACTIVE_MS = 15_000;
+const REQUEST_START_INTERVAL_MS = 1_000;
+
+export interface SmartAccountGaslessRpcPacing {
+  readonly minimumIntervalMs: number;
+  monotonicNow(): number;
+  sleep(milliseconds: number): Promise<void>;
+}
+
+const defaultPacing = (): SmartAccountGaslessRpcPacing => ({
+  minimumIntervalMs: REQUEST_START_INTERVAL_MS,
+  monotonicNow: () => performance.now(),
+  sleep: async milliseconds => { await sleep(milliseconds); },
+});
 
 export interface SmartAccountGaslessRpcOptions {
   readonly chainId: 8453;
@@ -31,7 +46,13 @@ export interface SmartAccountGaslessRpcOptions {
   readonly clock: ClockPort;
   readonly validator: SmartAccountGaslessMaterialValidatorPort;
   readonly transport?: GaslessTransport;
-  readonly monotonicNow?: () => number;
+  readonly pacing?: SmartAccountGaslessRpcPacing;
+}
+
+interface SmartAccountGaslessRpcPass {
+  readonly startedAt: number;
+  calls: number;
+  failure: unknown | null;
 }
 
 /** Lazy binding performs no RPC, custody, provider or chain effect. */
@@ -57,15 +78,17 @@ export class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPort {
   private readonly clock: ClockPort;
   private readonly validator: SmartAccountGaslessMaterialValidatorPort;
   private readonly transport: GaslessTransport;
-  private readonly monotonicNow: () => number;
+  private readonly pacing: SmartAccountGaslessRpcPacing;
   private sequence = 0n;
+  private queue: Promise<void> = Promise.resolve();
+  private lastRequestStartedAt: number | null = null;
 
   constructor(options: SmartAccountGaslessRpcOptions) {
     if (options.chainId !== 8453) saFail("sa_gasless_rpc_binding");
     const endpoint = rpcEndpoint(options.rpcUrl);
     this.rpcUrl = endpoint.toString(); this.endpointOrigin = endpoint.origin;
     this.endpointHash = sha256(this.rpcUrl); this.clock = options.clock; this.validator = options.validator;
-    this.transport = options.transport ?? new GaslessHttps(); this.monotonicNow = options.monotonicNow ?? (() => performance.now());
+    this.transport = options.transport ?? new GaslessHttps(); this.pacing = options.pacing ?? defaultPacing();
   }
 
   async snapshot(binding: SmartAccountGaslessBinding,
@@ -128,21 +151,24 @@ export class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPort {
   }
 
   private pass(): SaRpcCall {
-    const started = this.monotonicNow();
-    let calls = 0;
+    const attempt: SmartAccountGaslessRpcPass = { startedAt: this.pacing.monotonicNow(), calls: 0, failure: null };
     return async (method, params) => {
-      const elapsed = this.monotonicNow() - started;
-      if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed >= PASS_START_BUDGET_MS || calls >= 64) {
-        throw new SaRpcBudgetError();
+      const elapsed = this.pacing.monotonicNow() - attempt.startedAt;
+      if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed >= PASS_START_BUDGET_MS || attempt.calls >= 64) {
+        const failure = new SaRpcBudgetError(); attempt.failure = failure; throw failure;
       }
-      calls += 1;
-      return await this.call(method, params);
+      attempt.calls += 1;
+      return await this.call(method, params, attempt);
     };
   }
 
-  private async call(method: SaRpcMethod, params: readonly unknown[]): Promise<unknown> {
+  private async call(method: SaRpcMethod, params: readonly unknown[], attempt: SmartAccountGaslessRpcPass): Promise<unknown> {
     if (!READ_METHODS.has(method)) saFail("sa_gasless_evidence");
     const id = (++this.sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
+    return await this.schedule(attempt, async () => await this.performCall(method, body, id));
+  }
+
+  private async performCall(method: SaRpcMethod, body: string, id: string): Promise<unknown> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let response: { readonly status: number; readonly body: string };
     try {
@@ -171,6 +197,31 @@ export class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPort {
       saFail("sa_gasless_rpc_unavailable");
     }
     return record.result;
+  }
+
+  private async schedule<T>(attempt: SmartAccountGaslessRpcPass, work: () => Promise<T>): Promise<T> {
+    const pending = this.queue.then(async () => {
+      if (attempt.failure !== null) throw attempt.failure;
+      if (this.lastRequestStartedAt !== null) {
+        const remaining = this.pacing.minimumIntervalMs -
+          (this.pacing.monotonicNow() - this.lastRequestStartedAt);
+        if (remaining > 0) await this.pacing.sleep(remaining);
+      }
+      const started = this.pacing.monotonicNow(), elapsed = started - attempt.startedAt;
+      if (!Number.isFinite(started) || !Number.isFinite(elapsed) || elapsed < 0 || elapsed >= PASS_START_BUDGET_MS) {
+        const failure = new SaRpcBudgetError(); attempt.failure = failure; throw failure;
+      }
+      if (attempt.failure !== null) throw attempt.failure;
+      this.lastRequestStartedAt = started;
+      try { return await work(); }
+      catch (error) {
+        // Range rejection is a bounded scan control signal; it may retry a smaller range in this same pass.
+        if (!(error instanceof SaRpcRangeError)) attempt.failure = error;
+        throw error;
+      }
+    });
+    this.queue = pending.then(() => undefined, () => undefined);
+    return await pending;
   }
 }
 
