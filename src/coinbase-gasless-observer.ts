@@ -93,7 +93,8 @@ export async function observeCoinbaseGasless(rpc: RpcPort, operation: OperationR
       await assertBlock(call, operation.coinbaseGaslessCursor.previousEndBlock);
     }
     const safe = block(await call("eth_getBlockByNumber", ["safe", false]));
-    const start = BigInt(operation.coinbaseGaslessCursor?.nextBlockAtomic ?? binding.safeBlock.numberAtomic);
+    const start = BigInt(operation.coinbaseGaslessCursor?.nextBlockAtomic ??
+      (BigInt(binding.safeBlock.numberAtomic) + 1n).toString());
     if (BigInt(safe.numberAtomic) < start) return { status: "pending", cursor: cursor(operation, null), reason: "coinbase_gasless_safe_head_before_cursor" };
     const end = minimum(BigInt(safe.numberAtomic), start + SCAN_WINDOW - 1n);
     const endBlock = block(await call("eth_getBlockByNumber", [quantity(end), false]));
@@ -138,7 +139,7 @@ async function inspectCandidate(call: RawCall, operation: OperationRecord, bindi
   const tx = record(txRaw), receipt = record(receiptRaw);
   if (rpcHash(tx.hash) !== transactionHash || rpcHash(receipt.transactionHash) !== transactionHash ||
     uint(receipt.status) !== 1n || address(tx.to) !== binding.entryPoint || uint(tx.value) !== 0n ||
-    address(tx.from) === operation.walletAddress) throw new CoinbaseObservationAmbiguity("coinbase_gasless_outer_identity");
+    sameAddress(address(tx.from), operation.walletAddress)) throw new CoinbaseObservationAmbiguity("coinbase_gasless_outer_identity");
   const blockNumber = uint(receipt.blockNumber), included = block(await call("eth_getBlockByNumber", [quantity(blockNumber), false]));
   if (included.hash !== rpcHash(receipt.blockHash) || rpcHash(tx.blockHash) !== included.hash || uint(tx.blockNumber) !== blockNumber ||
     BigInt(safe.numberAtomic) < blockNumber) return null;
@@ -158,7 +159,7 @@ async function inspectCandidate(call: RawCall, operation: OperationRecord, bindi
   }
   const ops = decoded.args[0];
   if (ops.length > 128) throw new CoinbaseObservationAmbiguity("coinbase_gasless_bundle_bound");
-  const selected = ops.filter(op => getAddress(op.sender) === operation.walletAddress);
+  const selected = ops.filter(op => sameAddress(getAddress(op.sender), operation.walletAddress));
   if (selected.length !== 1) throw new CoinbaseObservationAmbiguity("coinbase_gasless_bundle_sender_ambiguity");
   const userOp = selected[0]!;
   const userOperationHash = v06UserOperationHash(userOp, binding.entryPoint);
@@ -261,7 +262,7 @@ function assertExactAccountCall(callData: Hex, operation: OperationRecord): void
   const call = calls[0]!;
   if (getAddress(call.target) !== BASE_USDC || call.value !== 0n) throw new CoinbaseObservationAmbiguity("coinbase_gasless_inner_identity");
   const transfer = decodeFunctionData({ abi: TOKEN_ABI, data: call.data });
-  if (transfer.functionName !== "transfer" || getAddress(transfer.args[0]) !== operation.recipient ||
+  if (transfer.functionName !== "transfer" || !sameAddress(getAddress(transfer.args[0]), operation.recipient) ||
     transfer.args[1].toString() !== operation.amountAtomic) throw new CoinbaseObservationAmbiguity("coinbase_gasless_inner_transfer");
   if (encodeFunctionData({ abi: TOKEN_ABI, functionName: "transfer", args: transfer.args }) !== call.data) {
     throw new CoinbaseObservationAmbiguity("coinbase_gasless_inner_transfer_encoding");
@@ -281,6 +282,10 @@ function v06UserOperationHash(op: { readonly sender: Address; readonly nonce: bi
 function paymasterAddress(value: Hex): Address {
   if (value.length < 42) return ZERO_ADDRESS;
   return getAddress(`0x${value.slice(2, 42)}`) as Address;
+}
+
+function sameAddress(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
 }
 
 function receiptLogs(value: unknown, transactionHash: Hex, included: CoinbaseGaslessBlock, transactionIndex: bigint) {

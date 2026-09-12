@@ -195,7 +195,14 @@ function validateProviderDirect(operation: OperationRecord, binding: ProviderDir
     binding.policy.identity !== "apn.direct.foreground-approval.v1" ||
     binding.policy.verdict !== "foreground_approval_required" || binding.policy.foregroundApprovalRequired !== true
   ) stateCorrupt("Provider direct operation binding is invalid.");
-  if (binding.coinbaseGasless !== undefined) validateCoinbaseGasless(operation, binding.coinbaseGasless);
+  const hasCoinbaseMetadata = operation.coinbaseGaslessLocator !== undefined || operation.coinbaseGaslessCursor !== undefined ||
+    operation.coinbaseGaslessSettlement !== undefined;
+  if (binding.coinbaseGasless !== undefined) {
+    if (binding.providerId !== "coinbase-agentic-wallet" || binding.executionMode !== "provider_atomic_send") {
+      stateCorrupt("Coinbase gasless operation provider identity is invalid.");
+    }
+    validateCoinbaseGasless(operation, binding.coinbaseGasless);
+  } else if (hasCoinbaseMetadata) stateCorrupt("Non-Coinbase operation carries Coinbase gasless metadata.");
   const providerStates: readonly OperationState[] = [
     "awaiting_approval", "started", "provider_pending", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
     "abandoned_unknown", "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
@@ -281,10 +288,13 @@ function validateCoinbaseGasless(operation: OperationRecord, value: NonNullable<
   }
   const cursor = operation.coinbaseGaslessCursor;
   parseAtomic(cursor.nextBlockAtomic);
-  if (BigInt(cursor.nextBlockAtomic) <= BigInt(value.safeBlock.numberAtomic)) stateCorrupt("Coinbase gasless cursor does not follow its safe anchor.");
-  if (cursor.previousEndBlock !== null) {
+  const anchor = BigInt(value.safeBlock.numberAtomic), next = BigInt(cursor.nextBlockAtomic);
+  if (cursor.previousEndBlock === null) {
+    if (next !== anchor + 1n) stateCorrupt("Coinbase gasless initial cursor does not follow its safe anchor.");
+  } else {
     validateCoinbaseBlock(cursor.previousEndBlock);
-    if (BigInt(cursor.nextBlockAtomic) !== BigInt(cursor.previousEndBlock.numberAtomic) + 1n) stateCorrupt("Coinbase gasless cursor is discontinuous.");
+    const previousEnd = BigInt(cursor.previousEndBlock.numberAtomic);
+    if (previousEnd < anchor + 1n || next !== previousEnd + 1n) stateCorrupt("Coinbase gasless cursor is discontinuous.");
   }
   if (operation.coinbaseGaslessLocator !== undefined) {
     const locator = operation.coinbaseGaslessLocator;
