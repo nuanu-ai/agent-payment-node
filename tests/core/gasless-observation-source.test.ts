@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { ApnCore } from "../../src/core.js";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
+import { ApnError } from "../../src/errors.js";
 import type { GaslessObservation, GaslessObservationSource } from "../../src/gasless/model.js";
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
 import { assertGaslessObservationSource, gaslessObservationSource } from "../../src/gasless/observation-source.js";
@@ -146,6 +147,51 @@ test("accepted non-terminal alternate observation retains the explicit source in
   assert.deepEqual((result.operation as { next_actions: string[] }).next_actions,
     [`apn operation resume --operation ${id} --observation-rpc-env ${OBSERVATION_ENV}`]);
   assert.deepEqual(runtime.effects, { rpc: 0, factory: 1, load: 0, seal: 0 });
+});
+
+test("explicit observer availability failure is visible once and preserves accepted progress without effects", async (t) => {
+  const { fixture, id, before } = await submittedFixture(t, "observation-source-unavailable-0001");
+  const observer = new StaticObserver();
+  const previousEndBlock = { numberAtomic: before.cursor.nextBlockAtomic,
+    hash: testWord("observation-progress"), timestampAtomic: before.intent.initialSnapshot.block.timestampAtomic };
+  observer.result = { status: "not_found", transactionHash: null, settlement: null,
+    cursor: { startBlock: before.cursor.startBlock,
+      nextBlockAtomic: (BigInt(before.cursor.nextBlockAtomic) + 1n).toString(), previousEndBlock },
+    evidenceHash: hashObject({ id, previousEndBlock }), reason: null,
+    source: gaslessObservationSource(before.intent, OBSERVATION_ENV, observer) };
+  const runtime = observationCore(fixture, () => observer);
+  const progressed = await runtime.core.execute({ command: "operation.resume", operationId: id,
+    observationRpcEnv: OBSERVATION_ENV });
+  assert.equal(progressed.ok, true, JSON.stringify(progressed));
+  const accepted = await fixture.record(id);
+  assert.equal(accepted.cursor.nextBlockAtomic, observer.result.cursor.nextBlockAtomic);
+  assert.deepEqual(accepted.observation, observer.result);
+  assert.deepEqual(accepted.bootstrap, before.bootstrap);
+  assert.deepEqual(accepted.userOperation, before.userOperation);
+
+  observer.observe = async () => { throw new ApnError("APN_RPC_AMBIGUOUS", "redacted", {
+    reason: "gasless_observation_rpc_unavailable", retryable: true,
+  }); };
+  const unavailable = await runtime.core.execute({ command: "operation.resume", operationId: id,
+    observationRpcEnv: OBSERVATION_ENV });
+  assert.equal(unavailable.ok, true, JSON.stringify(unavailable));
+  assert.equal((unavailable.operation as { reason: string }).reason, "gasless_observation_rpc_unavailable");
+  const failed = await fixture.record(id);
+  assert.equal(failed.failure, "gasless_observation_rpc_unavailable");
+  assert.deepEqual(failed.cursor, accepted.cursor);
+  assert.deepEqual(failed.observation, accepted.observation);
+  assert.deepEqual(failed.bootstrap, before.bootstrap);
+  assert.deepEqual(failed.userOperation, before.userOperation);
+  assert.equal(failed.transitions.length, accepted.transitions.length + 1);
+  const failedHash = hashObject(failed), failedUpdatedAt = failed.updatedAt;
+
+  const repeated = await runtime.core.execute({ command: "operation.resume", operationId: id,
+    observationRpcEnv: OBSERVATION_ENV });
+  assert.equal(repeated.ok, true, JSON.stringify(repeated));
+  const unchanged = await fixture.record(id);
+  assert.equal(hashObject(unchanged), failedHash);
+  assert.equal(unchanged.updatedAt, failedUpdatedAt);
+  assert.deepEqual(runtime.effects, { rpc: 0, factory: 3, load: 0, seal: 0 });
 });
 
 test("explicit alternate observer closes known bootstrap material without custody or execution RPC", async (t) => {
