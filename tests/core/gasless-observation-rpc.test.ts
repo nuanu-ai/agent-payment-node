@@ -4,7 +4,8 @@ import { sha256 } from "../../src/canonical.js";
 import type { GaslessTransport } from "../../src/gasless/https.js";
 import type { GaslessEffectIdentity, GaslessIntent } from "../../src/gasless/model.js";
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
-import { GaslessObservationRpc, gaslessObservationRpcFactory } from "../../src/gasless/observation-rpc.js";
+import { GaslessObservationRpc, gaslessObservationRpcFactory,
+  type GaslessObservationPacing } from "../../src/gasless/observation-rpc.js";
 import { gaslessDeployment } from "../../src/gasless/registry.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { ObservationTransport, type ObservationFault } from "./gasless-fixtures/observation-transport.js";
@@ -21,7 +22,7 @@ test("concrete alternate RPC proves bootstrap and final permission invalidation 
       const { operation } = await prepared(child, phase, delegation);
       const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
       if (phase === "final") transport.setFinalIdentity(operation.userOperation.userOperationHash!);
-      const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport);
+      const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
       const originalEndpointHash = operation.intent.initialSnapshot.rpcEndpointHash;
       const result = await rpc.observe(operation.intent, identity(operation), operation.cursor);
       assert.equal(result.status, "permissions_invalidated");
@@ -62,14 +63,15 @@ test("alternate RPC rejects wrong binding, chain and preparation anchor before r
   const noNetwork = await ObservationTransport.create(ENDPOINT, operation.intent);
   for (const unsafe of [`${ENDPOINT}?key=canary`, `${ENDPOINT}#canary`,
     "https://user:password@archive.example/rpc", "http://archive.example/rpc", "https://127.0.0.1/rpc"]) {
-    assert.throws(() => new GaslessObservationRpc(8453, unsafe, ENVIRONMENT, noNetwork), { code: "APN_RPC_CONFIG" });
+    assert.throws(() => new GaslessObservationRpc(8453, unsafe, ENVIRONMENT, noNetwork, fastPacing()),
+      { code: "APN_RPC_CONFIG" });
   }
   assert.equal(noNetwork.calls.length, 0);
 
   for (const fault of ["chain", "initial_hash", "initial_timestamp", "post_initial_reorg"] as const) {
     const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
     transport.setFault(fault);
-    const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport);
+    const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
     await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor),
       { code: fault === "chain" ? "APN_CHAIN_MISMATCH" : "APN_RPC_PROTOCOL" }, fault);
   }
@@ -81,7 +83,7 @@ test("alternate RPC rejects wrong binding, chain and preparation anchor before r
   ];
   for (const [name, mutate] of mutations) {
     const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
-    const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport);
+    const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
     const changed = structuredClone(operation.intent) as unknown as Json; mutate(changed);
     await assert.rejects(rpc.observe(changed as GaslessIntent, identity(operation), operation.cursor),
       { code: "APN_STATE_CORRUPT" }, name);
@@ -92,24 +94,34 @@ test("alternate RPC rejects wrong binding, chain and preparation anchor before r
 test("current protocol, permission, finality and log faults retain the final guard", async t => {
   const { operation } = await prepared(t, "final", "empty");
   const protocolAndPermissionFaults: ObservationFault[] = ["protocol_code", "protocol_storage", "protocol_domain",
-    "permit", "allowance", "pending", "entrypoint", "eoa", "owner_code", "finality", "current_reorg"];
+    "permit", "allowance", "pending", "entrypoint", "eoa", "owner_code", "current_reorg"];
   for (const fault of protocolAndPermissionFaults) {
     const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
     transport.setFinalIdentity(operation.userOperation.userOperationHash!); transport.setFault(fault);
-    const result = await new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport)
+    const result = await new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing())
       .observe(operation.intent, identity(operation), operation.cursor);
     assert.notEqual(result.status, "permissions_invalidated", fault);
     assert.equal(result.permissionInvalidation, undefined, fault);
     assert.equal(result.settlement, null, fault);
   }
-  for (const fault of ["scan_error", "log_malformed", "log_truncated", "log_wrong_identity"] as const) {
+  for (const fault of ["log_malformed", "log_truncated", "log_wrong_identity"] as const) {
     const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
     transport.setFinalIdentity(operation.userOperation.userOperationHash!); transport.setFault(fault);
-    const result = await new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport)
+    const result = await new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing())
       .observe(operation.intent, identity(operation), operation.cursor);
     assert.equal(result.status, "unresolved", fault);
     assert.deepEqual(result.cursor, operation.cursor, fault);
     assert.equal(result.permissionInvalidation, undefined, fault);
+  }
+  for (const fault of ["finality", "scan_error"] as const) {
+    const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
+    transport.setFinalIdentity(operation.userOperation.userOperationHash!); transport.setFault(fault);
+    await assert.rejects(new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing())
+      .observe(operation.intent, identity(operation), operation.cursor), (error: any) => {
+      assert.equal(error.code, "APN_RPC_AMBIGUOUS", fault);
+      assert.equal(error.details?.reason, "gasless_observation_rpc_unavailable", fault);
+      return true;
+    });
   }
 });
 
@@ -118,7 +130,7 @@ test("bounded scan advances 256 blocks in ten-block requests and closes only aft
   const start = BigInt(operation.intent.initialSnapshot.block.numberAtomic), safe = start + 300n;
   const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
   transport.setFinalIdentity(operation.userOperation.userOperationHash!); transport.setScan(safe, safe);
-  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport);
+  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
   const first = await rpc.observe(operation.intent, identity(operation), operation.cursor);
   assert.equal(first.status, "not_found");
   assert.equal(first.permissionInvalidation, undefined);
@@ -131,7 +143,7 @@ test("bounded scan advances 256 blocks in ten-block requests and closes only aft
   const reorgTransport = await ObservationTransport.create(ENDPOINT, operation.intent);
   reorgTransport.setFinalIdentity(operation.userOperation.userOperationHash!);
   reorgTransport.setScan(safe, safe); reorgTransport.setFault("cursor_reorg");
-  const reset = await new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, reorgTransport)
+  const reset = await new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, reorgTransport, fastPacing())
     .observe(operation.intent, identity(operation), first.cursor);
   assert.equal(reset.status, "unresolved");
   assert.deepEqual(reset.cursor, operation.cursor);
@@ -151,7 +163,7 @@ test("canonical EntryPoint scan settles a submitted operation without a locator 
   const userOperationHash = operation.userOperation.userOperationHash!;
   const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
   await transport.installSettlement(userOperationHash);
-  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport);
+  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
   const settled = await rpc.observe(operation.intent, identity(operation), operation.cursor);
   assert.equal(settled.status, "safe");
   assert.equal(settled.settlement?.userOperationHash, userOperationHash);
@@ -165,7 +177,7 @@ test("canonical EntryPoint scan settles a submitted operation without a locator 
   for (const fault of ["receipt_missing", "receipt_conflict", "receipt_malformed"] as const) {
     const faulty = await ObservationTransport.create(ENDPOINT, operation.intent);
     await faulty.installSettlement(userOperationHash); faulty.setFault(fault);
-    const held = await new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, faulty)
+    const held = await new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, faulty, fastPacing())
       .observe(operation.intent, identity(operation), operation.cursor);
     assert.equal(held.status, "unresolved", fault);
     assert.equal(held.settlement, null, fault);
@@ -182,7 +194,9 @@ test("JSON-RPC envelope, response bounds, HTTP errors and transport failures red
       error: { message: canary } }) }), "APN_RPC_PROTOCOL"],
     ["missing result", async id => ({ status: 200, body: JSON.stringify({ jsonrpc: "2.0", id }) }), "APN_RPC_PROTOCOL"],
     ["invalid JSON", async () => ({ status: 200, body: `{${canary}` }), "APN_RPC_PROTOCOL"],
-    ["HTTP status", async () => ({ status: 503, body: canary }), "APN_RPC_PROTOCOL"],
+    ["HTTP unavailable", async () => ({ status: 503, body: canary }), "APN_RPC_AMBIGUOUS"],
+    ["HTTP throttled", async () => ({ status: 429, body: canary }), "APN_RPC_AMBIGUOUS"],
+    ["HTTP protocol", async () => ({ status: 400, body: canary }), "APN_RPC_PROTOCOL"],
     ["oversize", async () => ({ status: 200, body: canary.repeat(150_000) }), "APN_RPC_PROTOCOL"],
     ["provider error", async id => ({ status: 200, body: JSON.stringify({ jsonrpc: "2.0", id,
       error: { code: -32000, message: canary } }) }), "APN_RPC_PROTOCOL"],
@@ -193,9 +207,10 @@ test("JSON-RPC envelope, response bounds, HTTP errors and transport failures red
       const id = body === null ? "missing" : String((JSON.parse(body) as Json).id);
       return await response(id);
     } };
-    const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport);
+    const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
     await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor), (error: any) => {
       assert.equal(error.code, code, name);
+      if (code === "APN_RPC_AMBIGUOUS") assert.equal(error.details?.reason, "gasless_observation_rpc_unavailable", name);
       assert.equal(String(error.message).includes(canary), false, name);
       assert.equal(String(error).includes("canary-private-token"), false, name);
       return true;
@@ -204,12 +219,70 @@ test("JSON-RPC envelope, response bounds, HTTP errors and transport failures red
 
   let requests = 0;
   const transport: GaslessTransport = { request: async () => { requests += 1; throw new Error("network forbidden"); } };
-  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport);
+  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
   await assert.rejects((rpc as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> })
     .call("eth_sendUserOperation", []), { code: "APN_RPC_PROTOCOL" });
   await assert.rejects((rpc as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> })
     .call("eth_estimateUserOperationGas", []), { code: "APN_RPC_PROTOCOL" });
   assert.equal(requests, 0);
+});
+
+test("explicit observer serializes and spaces calls without retrying an unavailable request", async () => {
+  const timeline = pacingTimeline();
+  let active = 0, maximumActive = 0;
+  const starts: number[] = [];
+  const transport: GaslessTransport = { request: async (_endpoint, _method, body) => {
+    active += 1; maximumActive = Math.max(maximumActive, active); starts.push(timeline.now());
+    await Promise.resolve(); active -= 1;
+    const request = JSON.parse(body!) as Json;
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: "0x2105" }) };
+  } };
+  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, timeline.pacing);
+  const call = (rpc as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> }).call.bind(rpc);
+  await Promise.all([call("eth_chainId", []), call("eth_chainId", []), call("eth_chainId", [])]);
+  assert.equal(maximumActive, 1);
+  assert.deepEqual(starts, [0, 1_000, 2_000]);
+  assert.deepEqual(timeline.sleeps, [1_000, 1_000]);
+
+  let unavailableRequests = 0;
+  const unavailable: GaslessTransport = { request: async () => {
+    unavailableRequests += 1; return { status: 429, body: "canary_provider_secret" };
+  } };
+  const failed = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, unavailable, pacingTimeline().pacing);
+  const failedCall = (failed as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> }).call.bind(failed);
+  const results = await Promise.allSettled([failedCall("eth_chainId", []), failedCall("eth_chainId", [])]);
+  assert.equal(unavailableRequests, 1);
+  for (const result of results) {
+    assert.equal(result.status, "rejected");
+    if (result.status === "rejected") {
+      assert.equal(result.reason.code, "APN_RPC_AMBIGUOUS");
+      assert.equal(result.reason.details?.reason, "gasless_observation_rpc_unavailable");
+      assert.equal(String(result.reason).includes("canary_provider_secret"), false);
+    }
+  }
+});
+
+test("one unavailable observation does not poison a later same-instance recovery", async t => {
+  const { operation } = await prepared(t, "final", "expected");
+  const delegate = await ObservationTransport.create(ENDPOINT, operation.intent);
+  delegate.setFinalIdentity(operation.userOperation.userOperationHash!);
+  let unavailable = true, requests = 0;
+  const transport: GaslessTransport = { request: async (...args) => {
+    requests += 1;
+    if (unavailable) { unavailable = false; return { status: 429, body: "canary_provider_secret" }; }
+    return await delegate.request(...args);
+  } };
+  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
+  await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor), (error: any) => {
+    assert.equal(error.code, "APN_RPC_AMBIGUOUS");
+    assert.equal(error.details?.reason, "gasless_observation_rpc_unavailable");
+    return true;
+  });
+  assert.equal(requests, 1);
+  const recovered = await rpc.observe(operation.intent, identity(operation), operation.cursor);
+  assert.equal(recovered.status, "permissions_invalidated");
+  assert.equal(recovered.permissionInvalidation?.userOperationHash, operation.userOperation.userOperationHash);
+  assert.ok(requests > 1);
 });
 
 async function prepared(t: TestContext, phase: "bootstrap" | "final", delegation: "empty" | "expected") {
@@ -238,4 +311,13 @@ function ranges(transport: ObservationTransport): Array<[bigint, bigint]> {
     const filter = call.params[0] as Json;
     return [BigInt(filter.fromBlock), BigInt(filter.toBlock)];
   });
+}
+
+function fastPacing(): GaslessObservationPacing { return pacingTimeline().pacing; }
+
+function pacingTimeline(): { readonly pacing: GaslessObservationPacing; readonly sleeps: number[]; now(): number } {
+  let now = 0;
+  const sleeps: number[] = [];
+  return { sleeps, now: () => now, pacing: { minimumIntervalMs: 1_000, monotonicNow: () => now,
+    sleep: async (milliseconds) => { sleeps.push(milliseconds); now += milliseconds; } } };
 }
