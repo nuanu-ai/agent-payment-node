@@ -134,6 +134,9 @@ export class TransferService {
             return publicOperation(operation);
         });
     }
+    async prepareCoinbaseGasless(request) {
+        return await this.providerDirect.prepareCoinbaseGasless(request);
+    }
     async approve(operationIdInput) {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();

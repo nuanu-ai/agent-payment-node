@@ -55,7 +55,8 @@ export class ProviderDirectState {
     terminal: boolean,
     reason: string,
     proofClass: string,
-    extra: Partial<Pick<OperationRecord, "transactionHash" | "providerEffect">> = {},
+    extra: Partial<Pick<OperationRecord, "transactionHash" | "providerEffect" | "coinbaseGaslessLocator" |
+      "coinbaseGaslessCursor" | "coinbaseGaslessSettlement">> = {},
     rpcReceipt?: RpcReceipt,
   ): Promise<OperationRecord> {
     const at = this.context.clock.now().toISOString();

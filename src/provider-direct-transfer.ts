@@ -6,12 +6,11 @@ import { ApnError } from "./errors.js";
 import { formatAtomic, parseDecimal } from "./money.js";
 import type { OperationRecord, ProviderDirectBinding } from "./model.js";
 import { OperationService } from "./operation-service.js";
-import type { ProviderAdapterBundle, ProviderDirectExecutionInput, ProviderProfileRepositoryPort } from "./provider-ports.js";
+import type { ProviderAdapterBundle, ProviderDirectExecutionInput } from "./provider-ports.js";
 import {
   capabilityHash,
   LOCAL_PROVIDER_ID,
   markProviderProfileDrift,
-  type ProviderProfileRecord,
 } from "./provider-profile.js";
 import { providerDirectReceipt } from "./provider-direct-receipt.js";
 import {
@@ -31,13 +30,13 @@ import {
   publicReceipt,
 } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
-
+import { coinbaseGaslessPreconditionsMatch, prepareCoinbaseGasless, reobserveCoinbaseGasless } from "./coinbase-gasless-provider.js";
+import { requiredProviderBinding as requiredBinding, requiredProviderDirectProfile } from "./provider-direct-guards.js";
 const DIRECT_POLICY = {
   identity: "apn.direct.foreground-approval.v1",
   verdict: "foreground_approval_required",
   foregroundApprovalRequired: true,
 } as const;
-
 type DirectResult = Awaited<ReturnType<NonNullable<NonNullable<ProviderAdapterBundle["direct"]>["execute"]>>>;
 const DELEGATED_PRE_EFFECT_CODES = new Set([
   "APN_INSUFFICIENT_USDC", "APN_INSUFFICIENT_GAS", "APN_PERMISSION_INACTIVE",
@@ -45,16 +44,13 @@ const DELEGATED_PRE_EFFECT_CODES = new Set([
   "APN_PROVIDER_PROTOCOL", "APN_RPC_PROTOCOL", "APN_CHAIN_MISMATCH",
   "APN_RPC_AMBIGUOUS", "APN_RPC_CONFIG",
 ]);
-
 export class ProviderDirectTransferService {
   private readonly operations: OperationService;
   private readonly durable: ProviderDirectState;
-
   constructor(private readonly context: RuntimeContext) {
     this.operations = new OperationService(context.state);
     this.durable = new ProviderDirectState(context);
   }
-
   async canHandle(profileInput: string): Promise<boolean> {
     if (this.context.profileRepository === undefined) return false;
     await this.context.ready();
@@ -62,7 +58,6 @@ export class ProviderDirectTransferService {
     const stored = await this.context.requireProfileRepository().load(this.context.state.profileHash(profile));
     return stored !== null && stored.provider_id !== LOCAL_PROVIDER_ID;
   }
-
   async prepare(request: Extract<CommandRequest, { command: "transfer.prepare" }>): Promise<unknown> {
     const profile = canonicalProfile(request.profile);
     const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
@@ -80,7 +75,7 @@ export class ProviderDirectTransferService {
       `operation:${operationId}`,
       `operation:idempotency:${idempotencyHash}`,
     ], async () => {
-      const bound = await this.requiredProviderProfile(profileHash);
+      const bound = await requiredProviderDirectProfile(this.context, profileHash);
       const materialRequest = {
         method: "pay.transfer",
         profile,
@@ -183,7 +178,10 @@ export class ProviderDirectTransferService {
       return publicOperation(operation);
     });
   }
-
+  async prepareCoinbaseGasless(request: Extract<CommandRequest, { command: "gasless.transfer.prepare" }>): Promise<unknown> {
+    return await prepareCoinbaseGasless(this.context, this.operations, this.durable,
+      async (profileHash) => await requiredProviderDirectProfile(this.context, profileHash), request);
+  }
   async approve(operationIdInput: string): Promise<unknown> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
@@ -200,7 +198,15 @@ export class ProviderDirectTransferService {
       }
       const binding = requiredBinding(operation);
       await this.assertFrozenPreconditions(operation, binding);
-      await this.context.requireTransferApproval().approve({
+      if (binding.coinbaseGasless !== undefined) {
+        const approval = this.context.gasless?.approval;
+        if (approval === undefined) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve this Coinbase gasless transfer in a foreground terminal.", {
+          nextActions: [`apn gasless transfer approve --operation ${operation.operationId}`],
+        });
+        const accepted = await approval.confirm({ operationId: operation.operationId, fingerprint: operation.fingerprint,
+          exactPhrase: `APPROVE GASLESS ${operation.fingerprint}`, summary: publicOperation(operation) as Readonly<Record<string, unknown>> });
+        if (!accepted) await this.failBeforeEffect(operation, "coinbase_gasless_approval_rejected");
+      } else await this.context.requireTransferApproval().approve({
         profile: operation.profile,
         operationId: operation.operationId,
         fingerprint: operation.fingerprint,
@@ -242,7 +248,6 @@ export class ProviderDirectTransferService {
       return await this.applyExecutionResult(operation, binding, result);
     });
   }
-
   async resume(operationIdInput: string, waitSeconds?: number): Promise<unknown> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
@@ -256,6 +261,11 @@ export class ProviderDirectTransferService {
       }
       if (operation.state === "started" && operation.transactionHash === undefined) {
         const binding = requiredBinding(operation);
+        if (binding.coinbaseGasless !== undefined) {
+          operation = await this.durable.transition(operation, "ambiguous_effect", false,
+            "coinbase_gasless_observation_required", "provider_effect_no_replay");
+          return publicOperation(await this.observeCoinbaseGasless(operation));
+        }
         if (binding.executionMode === "delegated_session_transaction") {
           const adapter = this.requiredAdapter(binding);
           try {
@@ -272,6 +282,7 @@ export class ProviderDirectTransferService {
           operation, "ambiguous_effect", false, "provider_result_missing_after_restart", "provider_effect_no_replay",
         );
       }
+      if (requiredBinding(operation).coinbaseGasless !== undefined) return publicOperation(await this.observeCoinbaseGasless(operation));
       if (
         (operation.state === "provider_pending" || operation.state === "ambiguous_effect") &&
         operation.providerEffect !== undefined && operation.transactionHash === undefined
@@ -308,7 +319,6 @@ export class ProviderDirectTransferService {
       return publicOperation(await this.durable.inspectReceipt(operation));
     });
   }
-
   async receipt(operationIdInput: string): Promise<unknown> {
     await this.context.ready();
     const operationId = canonicalOperationId(operationIdInput);
@@ -330,7 +340,6 @@ export class ProviderDirectTransferService {
       return publicReceipt(receipt);
     });
   }
-
   private async assertFrozenPreconditions(operation: OperationRecord, binding: ProviderDirectBinding): Promise<void> {
     if (
       binding.policy.identity !== DIRECT_POLICY.identity || binding.policy.verdict !== DIRECT_POLICY.verdict ||
@@ -349,6 +358,9 @@ export class ProviderDirectTransferService {
       current.capability_snapshot.direct.retry_owner !== binding.retryOwner ||
       !sameFrozenProviderProfile(current, operation, binding)
     ) await this.failBeforeEffect(operation, "provider_profile_changed");
+    if (binding.coinbaseGasless !== undefined && !await coinbaseGaslessPreconditionsMatch(this.context, operation)) {
+      await this.failBeforeEffect(operation, "coinbase_gasless_deployment_or_balance_changed");
+    }
     if (binding.executionMode === "delegated_session_transaction") {
       const adapter = this.requiredAdapter(binding);
       const preflight = adapter.direct.preflight;
@@ -361,7 +373,6 @@ export class ProviderDirectTransferService {
       }
     }
   }
-
   private requiredAdapter(binding: ProviderDirectBinding): ProviderAdapterBundle & {
     readonly direct: Required<Pick<NonNullable<ProviderAdapterBundle["direct"]>, "execute">> & NonNullable<ProviderAdapterBundle["direct"]>;
   } {
@@ -374,7 +385,6 @@ export class ProviderDirectTransferService {
     ) throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The bound provider direct effect is unavailable.");
     return adapter as ReturnType<ProviderDirectTransferService["requiredAdapter"]>;
   }
-
   private async reobserveProvider(
     operation: OperationRecord,
     binding: ProviderDirectBinding,
@@ -410,12 +420,22 @@ export class ProviderDirectTransferService {
       ));
     }
   }
-
   private async applyExecutionResult(
     operation: OperationRecord,
     binding: ProviderDirectBinding,
     result: DirectResult,
   ): Promise<unknown> {
+    if (binding.coinbaseGasless !== undefined) {
+      const locator = result.disposition === "acknowledged" ? { schemaVersion: "apn.coinbase-gasless-locator.v1" as const,
+        hash: result.transactionHash, provenance: "awal_success_transaction_hash_field" as const }
+        : result.disposition === "ambiguous" && result.locatorHash !== undefined ? { schemaVersion: "apn.coinbase-gasless-locator.v1" as const,
+          hash: result.locatorHash, provenance: "awal_error_text_hint" as const } : undefined;
+      if (result.disposition === "not_started") return publicOperation(await this.durable.transition(operation, "failed_before_effect", true,
+        result.reason, "provider_child_not_created"));
+      operation = await this.durable.transition(operation, "ambiguous_effect", false,
+        "coinbase_gasless_observation_required", "provider_effect_no_replay", locator === undefined ? {} : { coinbaseGaslessLocator: locator });
+      return publicOperation(await this.observeCoinbaseGasless(operation));
+    }
     if (result.disposition === "not_started") return publicOperation(await this.durable.transition(
       operation, "failed_before_effect", true, result.reason, "provider_child_not_created",
     ));
@@ -439,7 +459,9 @@ export class ProviderDirectTransferService {
     );
     return publicOperation(await this.durable.inspectReceipt(acknowledged));
   }
-
+  private async observeCoinbaseGasless(operation: OperationRecord): Promise<OperationRecord> {
+    return await reobserveCoinbaseGasless(this.context, this.durable, operation);
+  }
   private async handleExecutionFailure(
     operation: OperationRecord,
     binding: ProviderDirectBinding,
@@ -458,30 +480,12 @@ export class ProviderDirectTransferService {
         ? { providerEffect: createProviderEffectReference(operation.operationId, "SUBMISSION_AMBIGUOUS") } : {},
     ));
   }
-
-  private async requiredProviderProfile(profileHash: string): Promise<ProviderProfileRecord> {
-    const profile = await (this.context.requireProfileRepository() as ProviderProfileRepositoryPort).load(profileHash);
-    if (
-      profile === null || profile.drift.state !== "bound" || profile.capability_snapshot.direct.available !== true ||
-      !(
-        (profile.capability_snapshot.direct.mode === "provider_atomic_send" &&
-          profile.capability_snapshot.direct.execution_owner === "provider" &&
-          profile.capability_snapshot.direct.retry_owner === "apn_outer_no_replay_journal") ||
-        (profile.capability_snapshot.direct.mode === "delegated_session_transaction" &&
-          profile.capability_snapshot.direct.execution_owner === "apn" &&
-          profile.capability_snapshot.direct.retry_owner === "apn_operation_state")
-      )
-    ) throw new ApnError("APN_PROFILE_DRIFT", "The provider profile is not bound for direct payment effects.");
-    return profile;
-  }
-
   private async requiredOperation(operationId: string): Promise<OperationRecord> {
     const operation = await this.context.state.findOperation(operationId);
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
     requiredBinding(operation);
     return operation;
   }
-
   private async failBeforeEffect(operation: OperationRecord, reason: string, failure?: ApnError): Promise<never> {
     await this.durable.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
     throw failure ?? new ApnError(
@@ -489,10 +493,4 @@ export class ProviderDirectTransferService {
       "Frozen transfer inputs changed before approval; prepare a new operation.",
     );
   }
-
-}
-
-function requiredBinding(operation: OperationRecord): ProviderDirectBinding {
-  if (operation.providerDirect === undefined) throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not provider-atomic.");
-  return operation.providerDirect;
 }

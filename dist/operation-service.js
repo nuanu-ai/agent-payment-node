@@ -75,6 +75,21 @@ export class OperationService {
             });
         }
     }
+    async assertProviderAccountAvailable(providerId, accountBindingHash, payer) {
+        const direct = (await this.state.listAllOperations()).filter((record) => !record.terminal &&
+            record.providerDirect?.providerId === providerId &&
+            (record.providerDirect.accountBindingHash === accountBindingHash || record.walletAddress === payer));
+        const providerPaid = (await this.providerX402.listAllOperations()).filter((record) => !record.terminal &&
+            record.provider.providerId === providerId &&
+            (record.provider.accountBindingHash === accountBindingHash || record.provider.payer === payer));
+        const blocking = direct[0] ?? providerPaid[0];
+        if (blocking !== undefined) {
+            throw new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this provider account is not terminal.", {
+                blockingOperationId: blocking.operationId,
+                blockingState: blocking.state,
+            });
+        }
+    }
     async required(operationId) {
         const canonicalId = canonicalOperationId(operationId);
         const direct = await this.state.findOperation(canonicalId);

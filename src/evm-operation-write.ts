@@ -37,6 +37,12 @@ function validateProviderOperationWrite(next: OperationRecord, previousValue: un
     previous.providerDirect === undefined ||
     canonicalJson(providerFrozen(previous)) !== canonicalJson(providerFrozen(next)) ||
     (previous.providerEffect !== undefined && canonicalJson(previous.providerEffect) !== canonicalJson(next.providerEffect)) ||
+    (previous.coinbaseGaslessLocator !== undefined && canonicalJson(previous.coinbaseGaslessLocator) !== canonicalJson(next.coinbaseGaslessLocator)) ||
+    (previous.coinbaseGaslessCursor !== undefined && next.coinbaseGaslessCursor !== undefined &&
+      (BigInt(next.coinbaseGaslessCursor.nextBlockAtomic) < BigInt(previous.coinbaseGaslessCursor.nextBlockAtomic) ||
+       (next.coinbaseGaslessCursor.nextBlockAtomic === previous.coinbaseGaslessCursor.nextBlockAtomic &&
+        canonicalJson(next.coinbaseGaslessCursor) !== canonicalJson(previous.coinbaseGaslessCursor)))) ||
+    (previous.coinbaseGaslessSettlement !== undefined && canonicalJson(previous.coinbaseGaslessSettlement) !== canonicalJson(next.coinbaseGaslessSettlement)) ||
     (previous.transactionHash !== undefined && previous.transactionHash !== next.transactionHash) ||
     next.transitions.length < previous.transitions.length ||
     canonicalJson(next.transitions.slice(0, previous.transitions.length)) !== canonicalJson(previous.transitions) ||
@@ -55,6 +61,9 @@ function providerFrozen(value: OperationRecord): unknown {
     integrityHash: _integrityHash,
     providerEffect: _providerEffect,
     transactionHash: _transactionHash,
+    coinbaseGaslessLocator: _coinbaseGaslessLocator,
+    coinbaseGaslessCursor: _coinbaseGaslessCursor,
+    coinbaseGaslessSettlement: _coinbaseGaslessSettlement,
     ...frozen
   } = value;
   return frozen;

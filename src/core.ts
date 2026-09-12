@@ -84,14 +84,19 @@ export class ApnCore {
       case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
       case "gasless.balance": {
         const provider = await this.gaslessProvider(request.profile);
-        return dataOutcome(provider === "metamask-smart-account"
+        return dataOutcome(provider === "coinbase-agentic-wallet"
+          ? request.chainId !== 8453 ? mmFail("mm_gasless_capability_unavailable") : await this.providerWallet.balance(request.profile)
+          : provider === "metamask-smart-account"
           ? await this.smartAccountGasless.balance(request.profile, request.chainId)
           : provider === "metamask-agent-wallet" ? await this.metaMaskGasless.balance(request.profile, mmChain(request.chainId))
           : await this.gasless.balance(request.profile, gaslessChain(request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")), "chain_verified_public_read");
       }
       case "gasless.transfer.prepare": return operationOutcome(await this.prepareGasless(request));
       case "gasless.transfer.approve": {
-        const { kind } = await this.operations.required(request.operationId);
+        const stored = await this.operations.required(request.operationId), { kind } = stored;
+        if (kind === "direct_transfer" && stored.record.providerDirect?.coinbaseGasless !== undefined) {
+          return operationOutcome(await this.transfer.approve(request.operationId));
+        }
         return operationOutcome(kind === "smart_account_gasless_transfer" ? await this.smartAccountGasless.approve(request.operationId)
           : kind === "metamask_gasless_transfer" ? await this.metaMaskGasless.approve(request.operationId) : await this.gasless.approve(request.operationId));
       }
@@ -262,22 +267,26 @@ export class ApnCore {
   private async prepareGasless(request: Extract<CommandRequest, { command: "gasless.transfer.prepare" }>) {
     const key = canonicalIdempotencyKey(request.idempotencyKey);
     const existing = await this.operations.findIdempotency(this.context.state.idempotencyHash(key));
+    if (existing?.kind === "direct_transfer" && existing.record.providerDirect?.coinbaseGasless !== undefined)
+      return await this.transfer.prepareCoinbaseGasless(request);
     if (existing?.kind === "smart_account_gasless_transfer")
       return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
     const provider = await this.gaslessProvider(request.profile);
     if (provider === "metamask-smart-account") return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
+    if (provider === "coinbase-agentic-wallet") return await this.transfer.prepareCoinbaseGasless(request);
     if (provider === "metamask-agent-wallet") return await this.metaMaskGasless.prepare({ ...request, request: { ...request.request,
       chainId: mmChain(request.request.chainId), recipient: mmAddress(request.request.recipient) } });
     return await this.gasless.prepare({ ...request, request: { ...request.request,
       chainId: gaslessChain(request.request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE") } });
   }
 
-  private async gaslessProvider(input: string): Promise<"local" | "metamask-agent-wallet" | "metamask-smart-account"> {
+  private async gaslessProvider(input: string): Promise<"local" | "metamask-agent-wallet" | "metamask-smart-account" | "coinbase-agentic-wallet"> {
     const profile = canonicalProfile(input);
     const stored = await this.context.state.loadProviderProfile(this.context.state.profileHash(profile));
     if (stored === null || stored.provider_id === "local") return "local";
     if (stored.provider_id === "metamask-agent-wallet") return "metamask-agent-wallet";
     if (stored.provider_id === "metamask-smart-account") return "metamask-smart-account";
+    if (stored.provider_id === "coinbase-agentic-wallet") return "coinbase-agentic-wallet";
     return mmFail("mm_gasless_capability_unavailable");
   }
 }

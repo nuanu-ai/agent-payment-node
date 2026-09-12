@@ -38,6 +38,12 @@ function validateProviderOperationWrite(next, previousValue) {
     if (previous.providerDirect === undefined ||
         canonicalJson(providerFrozen(previous)) !== canonicalJson(providerFrozen(next)) ||
         (previous.providerEffect !== undefined && canonicalJson(previous.providerEffect) !== canonicalJson(next.providerEffect)) ||
+        (previous.coinbaseGaslessLocator !== undefined && canonicalJson(previous.coinbaseGaslessLocator) !== canonicalJson(next.coinbaseGaslessLocator)) ||
+        (previous.coinbaseGaslessCursor !== undefined && next.coinbaseGaslessCursor !== undefined &&
+            (BigInt(next.coinbaseGaslessCursor.nextBlockAtomic) < BigInt(previous.coinbaseGaslessCursor.nextBlockAtomic) ||
+                (next.coinbaseGaslessCursor.nextBlockAtomic === previous.coinbaseGaslessCursor.nextBlockAtomic &&
+                    canonicalJson(next.coinbaseGaslessCursor) !== canonicalJson(previous.coinbaseGaslessCursor)))) ||
+        (previous.coinbaseGaslessSettlement !== undefined && canonicalJson(previous.coinbaseGaslessSettlement) !== canonicalJson(next.coinbaseGaslessSettlement)) ||
         (previous.transactionHash !== undefined && previous.transactionHash !== next.transactionHash) ||
         next.transitions.length < previous.transitions.length ||
         canonicalJson(next.transitions.slice(0, previous.transitions.length)) !== canonicalJson(previous.transitions) ||
@@ -46,7 +52,7 @@ function validateProviderOperationWrite(next, previousValue) {
         corrupt();
 }
 function providerFrozen(value) {
-    const { state: _state, terminal: _terminal, reason: _reason, proofClass: _proofClass, transitions: _transitions, integrityHash: _integrityHash, providerEffect: _providerEffect, transactionHash: _transactionHash, ...frozen } = value;
+    const { state: _state, terminal: _terminal, reason: _reason, proofClass: _proofClass, transitions: _transitions, integrityHash: _integrityHash, providerEffect: _providerEffect, transactionHash: _transactionHash, coinbaseGaslessLocator: _coinbaseGaslessLocator, coinbaseGaslessCursor: _coinbaseGaslessCursor, coinbaseGaslessSettlement: _coinbaseGaslessSettlement, ...frozen } = value;
     return frozen;
 }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "Generic direct operation cannot replace or rewind its frozen durable authority."); }

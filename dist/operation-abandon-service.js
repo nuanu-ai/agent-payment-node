@@ -53,6 +53,7 @@ export class OperationAbandonService {
 }
 function assertProviderAbandonFamily(operation) {
     if (operation.providerDirect?.executionMode !== "provider_atomic_send" ||
+        operation.providerDirect.coinbaseGasless !== undefined ||
         operation.chainId !== CHAIN_ID || operation.token !== BASE_USDC)
         ineligible();
 }
@@ -62,6 +63,6 @@ function assertEligible(operation) {
         ineligible();
 }
 function ineligible() {
-    throw new ApnError("APN_OPERATION_BLOCKED", "Only an ambiguous provider-atomic direct operation with no transaction hash or provider recovery reference can be abandoned.");
+    throw new ApnError("APN_OPERATION_BLOCKED", "Only an eligible ambiguous provider-atomic direct operation can be abandoned; Coinbase gasless guards have no manual release.");
 }
 //# sourceMappingURL=operation-abandon-service.js.map

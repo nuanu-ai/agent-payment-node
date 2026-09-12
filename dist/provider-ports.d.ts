@@ -136,6 +136,7 @@ export interface DirectExecutionPort {
     } | {
         readonly disposition: "ambiguous";
         readonly reason: string;
+        readonly locatorHash?: Hex;
     }>;
     observe?(input: {
         readonly recoveryToken: string;
