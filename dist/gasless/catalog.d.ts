@@ -53,7 +53,20 @@ export declare function gaslessCapabilities(profile?: string): {
             mainnet_acceptance: string;
             deployment_evidence_hash: string;
         }[];
-        "coinbase-agentic-wallet": never[];
+        "coinbase-agentic-wallet": {
+            chain_id: number;
+            token: string;
+            symbol: string;
+            decimals: number;
+            executable_adapter: boolean;
+            provider_cli: string;
+            gas_mechanism: string;
+            sender_token_fee_atomic: string;
+            sender_native_debit_wei: string;
+            action_time_verification_required: boolean;
+            recovery: string;
+            mainnet_acceptance: string;
+        }[];
     };
     provider_semantics: {
         "metamask-agent-wallet": {
@@ -84,6 +97,17 @@ export declare function gaslessCapabilities(profile?: string): {
             provider_status_is_settlement_proof: boolean;
             accounting_before_independent_proof: string;
             persistent_owner_designation: boolean;
+        };
+        "coinbase-agentic-wallet": {
+            amount: string;
+            fee_atomic: string;
+            native_gas_payer: string;
+            approved_sender_native_debit_wei: string;
+            one_dispatch: boolean;
+            recovery_after_dispatch: string;
+            finite_negative_closure: boolean;
+            ambiguous_guard_release: string;
+            provider_status_is_settlement_proof: boolean;
         };
     };
     semantics: {

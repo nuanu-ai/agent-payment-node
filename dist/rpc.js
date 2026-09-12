@@ -307,6 +307,16 @@ export class HttpsBaseRpc {
         }
         return null;
     }
+    async coinbaseGaslessCall(method, params) {
+        return await this.call(method, params);
+    }
+    async coinbaseGaslessLogs(filter) {
+        const result = await this.callX402Logs([filter]);
+        if (result.kind !== "complete" || !Array.isArray(result.value) || result.value.length > MAX_X402_LOGS) {
+            throw new ApnError("APN_RPC_AMBIGUOUS", "Coinbase gasless log observation is unavailable.");
+        }
+        return result.value;
+    }
     async call(method, params) {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });

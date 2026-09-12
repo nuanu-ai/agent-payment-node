@@ -76,7 +76,8 @@ export function validateOperation(value: unknown): OperationRecord {
   ];
   const optionalKeys = [
     "transactionData", "economics", "preparedBlockNumberAtomic", "providerDirect", "providerEffect",
-    "transactionHash", "rawTransactionHash", "lastSubmissionAt", "evm",
+    "transactionHash", "rawTransactionHash", "lastSubmissionAt", "evm", "coinbaseGaslessLocator",
+    "coinbaseGaslessCursor", "coinbaseGaslessSettlement",
   ];
   const actualKeys = Object.keys(value);
   if (
@@ -114,7 +115,7 @@ export function validateReceipt(value: unknown): ReceiptRecord {
     "schemaVersion", "operationId", "state", "terminal", "reason", "proofClass", "createdAt",
     "operationIntegrityHash", "integrityHash",
   ];
-  const optionalKeys = ["transactionHash", "blockNumberAtomic", "exactTransferLog", "evm", "amountAtomic", "evmEvidence"];
+  const optionalKeys = ["transactionHash", "blockNumberAtomic", "exactTransferLog", "evm", "amountAtomic", "evmEvidence", "coinbaseGaslessSettlement"];
   const actualKeys = Object.keys(value);
   if (
     requiredKeys.some((key) => !actualKeys.includes(key)) ||
@@ -178,7 +179,7 @@ function validateProviderDirect(operation: OperationRecord, binding: ProviderDir
       "executionOwner", "retryOwner", "rpcBindingHash", "rpcOriginHash", "policy",
       ...(binding.executionMode === "delegated_session_transaction" ? [
         "permissionRevision", "rootGrantFingerprint", "sessionAddress", "delegationManager", "permissionExpiresAtUnix",
-      ] : []),
+      ] : binding.coinbaseGasless === undefined ? [] : ["coinbaseGasless"]),
     ]) || binding.schemaVersion !== "apn.provider-direct.v1" ||
     !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(binding.providerId) ||
     !Number.isSafeInteger(binding.profileRevision) || binding.profileRevision < 1 ||
@@ -194,6 +195,7 @@ function validateProviderDirect(operation: OperationRecord, binding: ProviderDir
     binding.policy.identity !== "apn.direct.foreground-approval.v1" ||
     binding.policy.verdict !== "foreground_approval_required" || binding.policy.foregroundApprovalRequired !== true
   ) stateCorrupt("Provider direct operation binding is invalid.");
+  if (binding.coinbaseGasless !== undefined) validateCoinbaseGasless(operation, binding.coinbaseGasless);
   const providerStates: readonly OperationState[] = [
     "awaiting_approval", "started", "provider_pending", "provider_acknowledged", "evidence_pending", "ambiguous_effect",
     "abandoned_unknown", "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
@@ -232,7 +234,8 @@ function validateProviderDirect(operation: OperationRecord, binding: ProviderDir
     provider_pending: ["provider_acknowledged", "ambiguous_effect", "failed_provider_rejected"],
     provider_acknowledged: ["evidence_pending", "completed", "failed_confirmed_revert", "ambiguous_effect"],
     evidence_pending: ["completed", "failed_confirmed_revert", "ambiguous_effect"],
-    ambiguous_effect: ["provider_pending", "provider_acknowledged", "completed", "failed_provider_rejected", "failed_confirmed_revert", "abandoned_unknown"],
+    ambiguous_effect: ["provider_pending", "provider_acknowledged", "completed", "failed_provider_rejected", "failed_confirmed_revert", "abandoned_unknown",
+      ...(binding.coinbaseGasless === undefined ? [] : ["ambiguous_effect" as const])],
     abandoned_unknown: [],
     completed: [],
     failed_before_effect: [],
@@ -251,6 +254,69 @@ function validateProviderDirect(operation: OperationRecord, binding: ProviderDir
       stateCorrupt("Provider direct state transition is invalid.");
     }
   }
+}
+
+function validateCoinbaseGasless(operation: OperationRecord, value: NonNullable<ProviderDirectBinding["coinbaseGasless"]>): void {
+  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "chainId", "token", "grossAtomic", "netAtomic", "feeAtomic",
+    "maxFeeAtomic", "minReceivedAtomic", "senderNativeDebitWei", "sponsorship", "exclusiveAccountUseRequired", "awalPackage",
+    "awalVersion", "awalCommand", "rpcOrigin", "safeBlock", "entryPoint", "entryPointCodeHash", "accountCodeHash",
+    "accountImplementation", "accountImplementationCodeHash"]) || value.schemaVersion !== "apn.coinbase-gasless.v1" ||
+    value.chainId !== CHAIN_ID || value.token !== BASE_USDC || value.grossAtomic !== operation.amountAtomic ||
+    value.netAtomic !== operation.amountAtomic || value.feeAtomic !== "0" || value.senderNativeDebitWei !== "0" ||
+    value.sponsorship !== "coinbase_cdp_paymaster" || value.exclusiveAccountUseRequired !== true ||
+    value.awalPackage !== "awal" || value.awalVersion !== "2.12.1" || value.awalCommand !== "send_base_usdc" ||
+    typeof value.rpcOrigin !== "string" || value.rpcOrigin.length === 0 || value.entryPoint !== "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" ||
+    value.entryPointCodeHash !== "0xc93c806e738300b5357ecdc2e971d6438d34d8e4e17b99b758b1f9cac91c8e70" ||
+    value.accountCodeHash !== "0xaaa52c8cc8a0e3fd27ce756cc6b4e70c51423e9b597b11f32d3e49f8b1fc890d" ||
+    value.accountImplementation !== "0x00000110dCdEdC9581cb5eCB8467282f2926534d" ||
+    value.accountImplementationCodeHash !== "0x136185896fc519277ec953c0b3d048fc0c9f607b8d04022e60f23ef8dbc6c4d5") {
+    stateCorrupt("Coinbase gasless immutable binding is invalid.");
+  }
+  const gross = parseAtomic(value.grossAtomic, { positive: true }), minimum = parseAtomic(value.minReceivedAtomic, { positive: true });
+  parseAtomic(value.maxFeeAtomic); if (minimum > gross) stateCorrupt("Coinbase gasless amount bounds are invalid.");
+  validateCoinbaseBlock(value.safeBlock);
+  if (operation.providerEffect !== undefined || operation.state === "abandoned_unknown" ||
+    operation.transitions.some(row => row.state === "abandoned_unknown") || operation.coinbaseGaslessCursor === undefined) {
+    stateCorrupt("Coinbase gasless journal posture is invalid.");
+  }
+  const cursor = operation.coinbaseGaslessCursor;
+  parseAtomic(cursor.nextBlockAtomic);
+  if (BigInt(cursor.nextBlockAtomic) <= BigInt(value.safeBlock.numberAtomic)) stateCorrupt("Coinbase gasless cursor does not follow its safe anchor.");
+  if (cursor.previousEndBlock !== null) {
+    validateCoinbaseBlock(cursor.previousEndBlock);
+    if (BigInt(cursor.nextBlockAtomic) !== BigInt(cursor.previousEndBlock.numberAtomic) + 1n) stateCorrupt("Coinbase gasless cursor is discontinuous.");
+  }
+  if (operation.coinbaseGaslessLocator !== undefined) {
+    const locator = operation.coinbaseGaslessLocator;
+    if (!isPlainRecord(locator) || !exactKeys(locator, ["schemaVersion", "hash", "provenance"]) ||
+      locator.schemaVersion !== "apn.coinbase-gasless-locator.v1" || !/^0x[0-9a-f]{64}$/u.test(locator.hash) ||
+      !["awal_success_transaction_hash_field", "awal_error_text_hint"].includes(locator.provenance)) stateCorrupt("Coinbase gasless locator is invalid.");
+  }
+  if (operation.coinbaseGaslessSettlement !== undefined) {
+    const settlement = operation.coinbaseGaslessSettlement;
+    if (!isPlainRecord(settlement) || !exactKeys(settlement, ["schemaVersion", "userOperationHash", "transactionHash", "nonceAtomic",
+      "paymaster", "paymasterCodeHash", "block", "safeBlock", "evidenceHash", "grossAtomic", "netAtomic", "feeAtomic",
+      "senderNativeDebitWei"]) || settlement.schemaVersion !== "apn.coinbase-gasless-settlement.v1" ||
+      !/^0x[0-9a-f]{64}$/u.test(settlement.userOperationHash) || !/^0x[0-9a-f]{64}$/u.test(settlement.transactionHash) ||
+      !/^0x[0-9a-fA-F]{40}$/u.test(settlement.paymaster) || settlement.paymaster.toLowerCase() === "0x0000000000000000000000000000000000000000" ||
+      !/^0x[0-9a-f]{64}$/u.test(settlement.paymasterCodeHash) || !/^[a-f0-9]{64}$/u.test(settlement.evidenceHash) ||
+      settlement.grossAtomic !== operation.amountAtomic || settlement.netAtomic !== operation.amountAtomic ||
+      settlement.feeAtomic !== "0" || settlement.senderNativeDebitWei !== "0" || operation.transactionHash !== settlement.transactionHash ||
+      operation.state !== "completed" || !operation.terminal) stateCorrupt("Coinbase gasless settlement is invalid.");
+    parseAtomic(settlement.nonceAtomic); validateCoinbaseBlock(settlement.block); validateCoinbaseBlock(settlement.safeBlock);
+    if (BigInt(settlement.block.numberAtomic) <= BigInt(value.safeBlock.numberAtomic) ||
+      BigInt(settlement.safeBlock.numberAtomic) < BigInt(settlement.block.numberAtomic)) {
+      stateCorrupt("Coinbase gasless settlement falls outside its frozen safe observation range.");
+    }
+    const { evidenceHash, ...evidenceBody } = settlement;
+    if (evidenceHash !== hashObject(evidenceBody)) stateCorrupt("Coinbase gasless settlement evidence hash is invalid.");
+  } else if (operation.state === "completed") stateCorrupt("Coinbase gasless completion lacks settlement evidence.");
+}
+
+function validateCoinbaseBlock(value: import("./model.js").CoinbaseGaslessBlock): void {
+  if (!isPlainRecord(value) || !exactKeys(value, ["numberAtomic", "hash", "timestampAtomic"]) ||
+    !/^0x[0-9a-f]{64}$/u.test(value.hash)) stateCorrupt("Coinbase gasless block is invalid.");
+  parseAtomic(value.numberAtomic); parseAtomic(value.timestampAtomic);
 }
 
 function validDelegatedBinding(binding: ProviderDirectBinding): boolean {

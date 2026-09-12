@@ -9,6 +9,9 @@ export declare class ProviderDirectTransferService {
     prepare(request: Extract<CommandRequest, {
         command: "transfer.prepare";
     }>): Promise<unknown>;
+    prepareCoinbaseGasless(request: Extract<CommandRequest, {
+        command: "gasless.transfer.prepare";
+    }>): Promise<unknown>;
     approve(operationIdInput: string): Promise<unknown>;
     resume(operationIdInput: string, waitSeconds?: number): Promise<unknown>;
     receipt(operationIdInput: string): Promise<unknown>;
@@ -16,8 +19,8 @@ export declare class ProviderDirectTransferService {
     private requiredAdapter;
     private reobserveProvider;
     private applyExecutionResult;
+    private observeCoinbaseGasless;
     private handleExecutionFailure;
-    private requiredProviderProfile;
     private requiredOperation;
     private failBeforeEffect;
 }

@@ -56,6 +56,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     getReceipt(transactionHash: Hex): Promise<RpcReceipt | null>;
     getLatestConfirmedNonce(address: Address): Promise<string>;
     getConfirmedTransactionAtNonce(address: Address, nonceAtomic: string, startBlockNumberAtomic: string): Promise<Hex | null>;
+    coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params: readonly unknown[]): Promise<unknown>;
+    coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>): Promise<readonly unknown[]>;
     private call;
     private callX402Logs;
     private resolvePublicAddresses;

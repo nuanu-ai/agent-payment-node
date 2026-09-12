@@ -4,4 +4,5 @@ export declare class TtyGaslessApproval implements GaslessApprovalPort {
     private readonly options;
     constructor(options?: TtyTransferApprovalOptions);
     confirm(input: Parameters<GaslessApprovalPort["confirm"]>[0]): Promise<boolean>;
+    private confirmCoinbase;
 }

@@ -49,6 +49,64 @@ export interface ProviderAtomicDirectBinding extends ProviderDirectBindingBase {
   readonly executionMode: "provider_atomic_send";
   readonly executionOwner: "provider";
   readonly retryOwner: "apn_outer_no_replay_journal";
+  readonly coinbaseGasless?: CoinbaseGaslessBinding;
+}
+
+export interface CoinbaseGaslessBlock {
+  readonly numberAtomic: string;
+  readonly hash: Hex;
+  readonly timestampAtomic: string;
+}
+
+export interface CoinbaseGaslessBinding {
+  readonly schemaVersion: "apn.coinbase-gasless.v1";
+  readonly chainId: 8453;
+  readonly token: Address;
+  readonly grossAtomic: string;
+  readonly netAtomic: string;
+  readonly feeAtomic: "0";
+  readonly maxFeeAtomic: string;
+  readonly minReceivedAtomic: string;
+  readonly senderNativeDebitWei: "0";
+  readonly sponsorship: "coinbase_cdp_paymaster";
+  readonly exclusiveAccountUseRequired: true;
+  readonly awalPackage: "awal";
+  readonly awalVersion: "2.12.1";
+  readonly awalCommand: "send_base_usdc";
+  readonly rpcOrigin: string;
+  readonly safeBlock: CoinbaseGaslessBlock;
+  readonly entryPoint: Address;
+  readonly entryPointCodeHash: Hex;
+  readonly accountCodeHash: Hex;
+  readonly accountImplementation: Address;
+  readonly accountImplementationCodeHash: Hex;
+}
+
+export interface CoinbaseGaslessLocator {
+  readonly schemaVersion: "apn.coinbase-gasless-locator.v1";
+  readonly hash: Hex;
+  readonly provenance: "awal_success_transaction_hash_field" | "awal_error_text_hint";
+}
+
+export interface CoinbaseGaslessCursor {
+  readonly nextBlockAtomic: string;
+  readonly previousEndBlock: CoinbaseGaslessBlock | null;
+}
+
+export interface CoinbaseGaslessSettlement {
+  readonly schemaVersion: "apn.coinbase-gasless-settlement.v1";
+  readonly userOperationHash: Hex;
+  readonly transactionHash: Hex;
+  readonly nonceAtomic: string;
+  readonly paymaster: Address;
+  readonly paymasterCodeHash: Hex;
+  readonly block: CoinbaseGaslessBlock;
+  readonly safeBlock: CoinbaseGaslessBlock;
+  readonly evidenceHash: string;
+  readonly grossAtomic: string;
+  readonly netAtomic: string;
+  readonly feeAtomic: "0";
+  readonly senderNativeDebitWei: "0";
 }
 
 export interface ProviderDelegatedDirectBinding extends ProviderDirectBindingBase {
@@ -60,6 +118,7 @@ export interface ProviderDelegatedDirectBinding extends ProviderDirectBindingBas
   readonly sessionAddress: Address;
   readonly delegationManager: Address;
   readonly permissionExpiresAtUnix: number;
+  readonly coinbaseGasless?: never;
 }
 
 export type ProviderDirectBinding = ProviderAtomicDirectBinding | ProviderDelegatedDirectBinding;
@@ -101,6 +160,9 @@ export interface OperationRecord {
   readonly economics?: Economics;
   readonly providerDirect?: ProviderDirectBinding;
   readonly providerEffect?: ProviderEffectReference;
+  readonly coinbaseGaslessLocator?: CoinbaseGaslessLocator;
+  readonly coinbaseGaslessCursor?: CoinbaseGaslessCursor;
+  readonly coinbaseGaslessSettlement?: CoinbaseGaslessSettlement;
   readonly preparedAt: string;
   readonly preparedBlockNumberAtomic?: string;
   readonly expiresAt: string;
@@ -129,6 +191,7 @@ export interface ReceiptRecord {
   readonly evm?: EvmDirectBinding;
   readonly amountAtomic?: string;
   readonly evmEvidence?: EvmTransferEvidence;
+  readonly coinbaseGaslessSettlement?: CoinbaseGaslessSettlement;
   readonly schemaVersion: "apn.state.v1";
   readonly operationId: string;
   readonly state: OperationState;

@@ -57,16 +57,19 @@ export function createApnCore(bound, options = {}) {
     const policy = needsPolicy(bound.request.command)
         ? options.policy ?? new EncryptedProfilePolicy(state, wrappingSecret, options.policyApproval ?? new TtyProfilePolicyApproval(), options.clock)
         : undefined;
-    const rpc = options.rpc ?? (bound.rpcUrl === undefined ? undefined : new HttpsBaseRpc(bound.rpcUrl));
+    const gaslessBaseRpcUrl = ["gasless.transfer.prepare", "gasless.transfer.approve", "operation.resume"].includes(bound.request.command)
+        ? process.env.APN_BASE_RPC_URL : undefined;
+    const effectiveRpcUrl = bound.rpcUrl ?? gaslessBaseRpcUrl;
+    const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl));
     const http = options.http ?? (needsHttp(bound.request.command) ? new HttpsX402Http() : undefined);
     const profileRepository = options.profileRepository ?? new StateProfileRepository(state);
     const smartAccountPermissionStore = options.smartAccountPermissionStore ??
         new EncryptedSmartAccountPermissionStore(state, wrappingSecret);
     const smartAccountConsent = options.smartAccountConsent ?? new LoopbackMetaMaskConsent();
-    const smartAccountAllowance = rpc !== undefined && bound.rpcUrl !== undefined
-        ? new OfficialSmartAccountAllowance(bound.rpcUrl)
+    const smartAccountAllowance = rpc !== undefined && effectiveRpcUrl !== undefined
+        ? new OfficialSmartAccountAllowance(effectiveRpcUrl)
         : undefined;
-    const smartAccountDirect = rpc !== undefined && bound.rpcUrl !== undefined && smartAccountAllowance !== undefined
+    const smartAccountDirect = rpc !== undefined && effectiveRpcUrl !== undefined && smartAccountAllowance !== undefined
         ? new MetaMaskSmartAccountDirectAdapter(smartAccountPermissionStore, new EncryptedSmartAccountDirectEffectStore(state, wrappingSecret), rpc, smartAccountAllowance, undefined, () => options.clock?.now() ?? new Date())
         : undefined;
     const smartAccountX402 = options.smartAccountX402Material ?? (rpc !== undefined && smartAccountAllowance !== undefined
@@ -117,7 +120,7 @@ export function createApnCore(bound, options = {}) {
         providerRegistry,
         ...(foregroundAuthentication === undefined ? {} : { foregroundAuthentication }),
         ...(transferApproval === undefined ? {} : { transferApproval }),
-        ...(bound.rpcUrl === undefined ? {} : { rpcUrl: bound.rpcUrl }),
+        ...(effectiveRpcUrl === undefined ? {} : { rpcUrl: effectiveRpcUrl }),
         ...(native === undefined ? {} : { native }),
         ...(bound.request.command === "doctor.keychain" ? { keychainProbe: wrappingSecret } : {}),
         ...(rpc === undefined ? {} : { rpc }),

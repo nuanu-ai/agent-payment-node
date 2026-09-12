@@ -346,6 +346,19 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     return null;
   }
 
+  async coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0],
+    params: readonly unknown[]): Promise<unknown> {
+    return await this.call(method, params);
+  }
+
+  async coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>): Promise<readonly unknown[]> {
+    const result = await this.callX402Logs([filter]);
+    if (result.kind !== "complete" || !Array.isArray(result.value) || result.value.length > MAX_X402_LOGS) {
+      throw new ApnError("APN_RPC_AMBIGUOUS", "Coinbase gasless log observation is unavailable.");
+    }
+    return result.value;
+  }
+
   private async call(method: string, params: readonly unknown[]): Promise<unknown> {
     const id = (++this.sequence).toString();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
