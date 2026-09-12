@@ -1,3 +1,4 @@
+import { ApnError } from "../errors.js";
 import { gaslessObservationSource } from "./observation-source.js";
 import { assertGaslessPermissionClosure } from "./permission-invalidation.js";
 import { observationSchema } from "./schema.js";
@@ -55,11 +56,14 @@ export class GaslessObservationService {
                 assertGaslessSettlementContinuation(prior, proof);
             }
         }
-        catch {
+        catch (error) {
             // Preserve an already proven effect when a later safe-state observation is unavailable.
             if (op.state === "failed_effects_pending")
                 return op;
-            return await this.save(op, { state: "unknown_finality", failure: "gasless_receipt_unresolved" });
+            const failure = this.recoveryEnvironment !== undefined && error instanceof ApnError &&
+                error.details?.reason === "gasless_observation_rpc_unavailable"
+                ? "gasless_observation_rpc_unavailable" : "gasless_receipt_unresolved";
+            return await this.save(op, { state: "unknown_finality", failure });
         }
         if (result.status === "permissions_invalidated") {
             return await this.save(op, { state: "failed_permissions_invalidated", observation: result,
