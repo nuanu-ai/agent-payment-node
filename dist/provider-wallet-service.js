@@ -217,7 +217,8 @@ export class ProviderWalletService {
                 validateBalance(session, permission.session_address);
                 return permissionBalance(profile, bound, permission, owner, session);
             }
-            const snapshot = await this.context.requireRpc().getBalances(bound.public_address);
+            const snapshot = await (bound.provider_id === "coinbase-agentic-wallet"
+                ? this.context.requireCoinbaseRpc() : this.context.requireRpc()).getBalances(bound.public_address);
             validateBalance(snapshot, bound.public_address);
             const rebindCommand = `apn wallet connect --profile ${profile} --provider ${bound.provider_id} --expected-revision ${bound.revision}`;
             return {
@@ -284,6 +285,7 @@ export class ProviderWalletService {
                 }
                 throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This provider profile does not support the requested payment effect in this APN version.");
             }
+            await operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
         });
     }
     async connectPermissionProfile(request, profile, profileHash, existing, adapter, permissions) {

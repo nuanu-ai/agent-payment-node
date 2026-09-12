@@ -60,7 +60,7 @@ export declare class OperationService {
     /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
     findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null>;
     assertProfileAvailable(profileHash: string): Promise<void>;
-    assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string): Promise<void>;
+    assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;
     required(operationId: string): Promise<StoredMoneyOperation>;
     status(operationId: string): Promise<unknown>;
     x402Outcome(operationId: string, options: {

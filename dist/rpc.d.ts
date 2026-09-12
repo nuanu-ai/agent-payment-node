@@ -63,6 +63,15 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     private resolvePublicAddresses;
     private remainingTimeoutMs;
 }
+export declare function parseRpcResultEnvelope(raw: string, id: string): unknown;
+export declare function parseRpcLogEnvelope(raw: string, id: string): {
+    readonly kind: "complete";
+    readonly value: unknown;
+} | {
+    readonly kind: "pruned";
+} | {
+    readonly kind: "range_unavailable";
+};
 export declare function classifyX402LogAvailabilityMessage(message: string): "pruned" | "range_unavailable" | null;
 export { isPublicIp } from "./network-policy.js";
 export declare function acceptRpcHttpBody(status: number | undefined, allowJsonRpcClientError: boolean): boolean;

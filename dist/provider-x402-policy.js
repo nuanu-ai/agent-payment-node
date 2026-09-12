@@ -47,7 +47,7 @@ export function sameFrozenProviderProfile(profile, operation) {
     return profile.provider_id === operation.provider.providerId && profile.revision === operation.provider.profileRevision &&
         profile.capability_hash === operation.provider.capabilityHash &&
         profile.account_binding_hash === operation.provider.accountBindingHash &&
-        profile.public_address.toLowerCase() === operation.provider.payer;
+        profile.public_address.toLowerCase() === operation.provider.payer.toLowerCase();
 }
 export function sameFrozenProviderPolicy(operation, policy, effectiveCap) {
     return canonicalJson(freezeProviderPolicy(policy, operation.policy.callerCapAtomic, effectiveCap)) === canonicalJson(operation.policy);
