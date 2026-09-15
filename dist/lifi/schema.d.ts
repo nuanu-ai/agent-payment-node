@@ -160,8 +160,8 @@ export declare const feeQuoteSchema: z.ZodObject<{
 }, z.core.$strict>;
 export declare const envelopeSchema: z.ZodObject<{
     role: z.ZodEnum<{
-        approval: "approval";
         bridge: "bridge";
+        approval: "approval";
     }>;
     chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
     from: z.ZodString;
@@ -379,8 +379,8 @@ export declare const phaseSchema: z.ZodEnum<{
 export declare const effectSchema: z.ZodObject<{
     envelope: z.ZodObject<{
         role: z.ZodEnum<{
-            approval: "approval";
             bridge: "bridge";
+            approval: "approval";
         }>;
         chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
         from: z.ZodString;
@@ -411,8 +411,8 @@ export declare const effectSchema: z.ZodObject<{
         envelopeHash: z.ZodString;
     }, z.core.$strict>;
     role: z.ZodEnum<{
-        approval: "approval";
         bridge: "bridge";
+        approval: "approval";
     }>;
     phase: z.ZodEnum<{
         submitted_pending: "submitted_pending";
@@ -539,8 +539,8 @@ export declare const transitionSchema: z.ZodObject<{
     effects: z.ZodArray<z.ZodObject<{
         envelopeHash: z.ZodString;
         role: z.ZodEnum<{
-            approval: "approval";
             bridge: "bridge";
+            approval: "approval";
         }>;
         phase: z.ZodEnum<{
             submitted_pending: "submitted_pending";
@@ -802,8 +802,8 @@ export declare const operationSchema: z.ZodObject<{
     effects: z.ZodArray<z.ZodObject<{
         envelope: z.ZodObject<{
             role: z.ZodEnum<{
-                approval: "approval";
                 bridge: "bridge";
+                approval: "approval";
             }>;
             chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
             from: z.ZodString;
@@ -834,8 +834,8 @@ export declare const operationSchema: z.ZodObject<{
             envelopeHash: z.ZodString;
         }, z.core.$strict>;
         role: z.ZodEnum<{
-            approval: "approval";
             bridge: "bridge";
+            approval: "approval";
         }>;
         phase: z.ZodEnum<{
             submitted_pending: "submitted_pending";
@@ -1088,8 +1088,8 @@ export declare const operationSchema: z.ZodObject<{
         effects: z.ZodArray<z.ZodObject<{
             envelopeHash: z.ZodString;
             role: z.ZodEnum<{
-                approval: "approval";
                 bridge: "bridge";
+                approval: "approval";
             }>;
             phase: z.ZodEnum<{
                 submitted_pending: "submitted_pending";

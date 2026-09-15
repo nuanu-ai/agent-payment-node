@@ -1,3 +1,5 @@
+import { storedOperationDomains } from "../../src/operation-conflict-domain.js";
+import { OperationService } from "../../src/operation-service.js";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -155,10 +157,14 @@ test("pending MM operation preserves identical prepare and rejects competing pre
     { command: "x402.fetch.prepare", profile: f.profile, url: "https://seller.example/resource", maxAmountAtomic: "1000000", idempotencyKey: "mm-x402-new-0001" },
     { command: "bridge.prepare", profile: f.profile, quote: BRIDGE_QUOTE, route: "route-across", idempotencyKey: "mm-bridge-new-0001" },
   ];
+  const sameAccount = { blockingOperationId: id, blockingState: "awaiting_approval",
+    blockingNetwork: `evm:${operationBefore.intent.request.chainId}`, blockingAccount: operationBefore.intent.binding.address.toLowerCase() };
   for (const request of newFamilyRequests) {
     const result = await core.execute(request);
+    // The bridge quote is not owned by the profile, which is refused before its source chain and account are known.
+    if (request.command === "bridge.prepare") { assert.equal(result.error?.code, "APN_INVALID_INPUT", request.command); continue; }
     assert.equal(result.error?.code, "APN_OPERATION_BLOCKED", request.command);
-    assert.deepEqual(result.error?.details, { blockingOperationId: id, blockingState: "awaiting_approval" }, request.command);
+    assert.deepEqual(result.error?.details, sameAccount, request.command);
   }
   const collidingFamilyRequests: CommandRequest[] = [
     { command: "transfer.prepare", profile: f.profile, recipient: f.request.recipient, amount: "1", idempotencyKey: key },
@@ -211,7 +217,7 @@ test("unsupported provider and chain pairs fail before private identity or RPC",
   assert.equal((await f.core.metaMaskGasless.records.listAllOperations()).length, 0);
 });
 
-test("unresolved non-MM money journals block MM preparation and retain every state byte", async (t) => {
+test("unresolved non-MM money journals block MM preparation only on the same network and account and keep their bytes", async (t) => {
   const cases: ReadonlyArray<{
     readonly name: string;
     readonly build: (root: string) => Promise<{ readonly state: StateStore; readonly profile: string;
@@ -243,15 +249,28 @@ test("unresolved non-MM money journals block MM preparation and retain every sta
     const before = await regularFileBytes(temporary.root);
     assert.ok([...before.keys()].some(path => path.includes(old.operationId)), "old operation is in byte snapshot");
     assert.ok([...before.keys()].some(path => path.includes(old.state.profileHash(old.profile))), "profile is in byte snapshot");
-    const blocked = await mm.core.execute({ command: "gasless.transfer.prepare", profile: old.profile,
-      request: mm.request, idempotencyKey: `compat-mm-after-${item.name}-0001` });
-    assert.equal(blocked.error?.code, "APN_OPERATION_BLOCKED", JSON.stringify(blocked));
-    assert.deepEqual(blocked.error?.details, { blockingOperationId: old.operationId, blockingState: "awaiting_approval" });
+    const held = storedOperationDomains(await new OperationService(old.state).required(old.operationId));
+    assert.ok(held !== null && held.length > 0, "old journal exposes its network and account");
+    const mmAccount = MM_TEST_OWNER.toLowerCase(), mmNetwork = String(mm.request.chainId);
+    const shared = held.some(domain => domain.family === "evm" && domain.network === mmNetwork && domain.account === mmAccount);
     const conflict = await mm.core.execute({ command: "gasless.transfer.prepare", profile: old.profile,
       request: mm.request, idempotencyKey: old.idempotencyKey });
     assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT", JSON.stringify(conflict));
-    assert.deepEqual(mm.provider.calls, []); assert.deepEqual(mm.rpc.calls, []);
     assert.deepEqual(await regularFileBytes(temporary.root), before);
+    const next = await mm.core.execute({ command: "gasless.transfer.prepare", profile: old.profile,
+      request: mm.request, idempotencyKey: `compat-mm-after-${item.name}-0001` });
+    if (shared) {
+      assert.equal(next.error?.code, "APN_OPERATION_BLOCKED", JSON.stringify(next));
+      assert.deepEqual(next.error?.details, { blockingOperationId: old.operationId, blockingState: "awaiting_approval",
+        blockingNetwork: `evm:${mmNetwork}`, blockingAccount: mmAccount });
+      assert.deepEqual(mm.provider.calls, []); assert.deepEqual(mm.rpc.calls, []);
+      assert.deepEqual(await regularFileBytes(temporary.root), before);
+    } else {
+      // A journal on another network or account no longer blocks MetaMask, and its own bytes stay unchanged.
+      assert.notEqual(next.error?.code, "APN_OPERATION_BLOCKED", JSON.stringify(next));
+      const after = await regularFileBytes(temporary.root);
+      for (const [path, bytes] of before) if (path.includes(old.operationId)) assert.deepEqual(after.get(path), bytes, path);
+    }
   });
 });
 

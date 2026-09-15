@@ -1,3 +1,4 @@
+import { approvalCode } from "../approval-code.js";
 import { assertGaslessEstimate } from "./economics.js";
 import { assertGaslessRemaining, gaslessReason, guardGaslessOperation } from "./guard.js";
 import { validateGaslessMaterial } from "./material-validation.js";
@@ -29,7 +30,7 @@ export class GaslessExecution {
             return await this.halt(op, error);
         }
         const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
-            exactPhrase: `APPROVE GASLESS ${op.fingerprint}`, summary: publicGaslessOperation(op) });
+            exactPhrase: approvalCode("gasless", op.fingerprint), summary: publicGaslessOperation(op) });
         if (!accepted)
             return await this.save(op, { state: "failed_before_effect", failure: "gasless_approval_rejected" });
         try {

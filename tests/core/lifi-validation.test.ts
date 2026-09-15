@@ -1,3 +1,4 @@
+import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -143,16 +144,16 @@ test("LI.FI external profile selection cannot fall back to a local key or launch
   assert.equal(localReads, 0); assert.equal(s.provider.routeCalls, 0); assert.equal(s.wrapping.loads, 0);
 });
 
-test("LI.FI TTY requires the exact complete fingerprint and shows both chain economics and original deadline", async (t) => {
+test("LI.FI TTY requires the bound approval code and shows both chain economics and original deadline", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root, "eth-base", { now: new Date() });
-  const { id, operation } = await s.prepare(); const summary = publicBridgeOperation(operation), phrase = `APPROVE BRIDGE ${operation.fingerprint}`;
+  const { id, operation } = await s.prepare(); const summary = publicBridgeOperation(operation), phrase = approvalCode("bridge", operation.fingerprint);
   let printed = "", closed = 0, supplied = phrase;
   const tty = new TtyBridgeApproval({ isTerminal: () => true, openTerminal: async () => ({ fd: 123,
     write: async (text) => { printed += text; }, read: async function* () { yield Buffer.from(`${supplied}\n`); }, close: async () => { closed++; } }) });
   const input = { operationId: id, fingerprint: operation.fingerprint, exactPhrase: phrase, summary };
   assert.equal(await tty.confirm(input), true); assert.equal(closed, 1);
   for (const value of [phrase, operation.intent.expiresAt, "eip155:1", "eip155:8453", "10000000 USDC atomic", "approval:", "bridge:", "separate included approval costs gas", "no transaction-level on-chain cap", summary.rpc_origins.destination]) assert.ok(printed.includes(value), value);
-  assert.ok(!printed.includes(operation.effects[1]!.envelope.data)); supplied = `APPROVE BRIDGE ${operation.fingerprint.slice(-16)}`;
+  assert.ok(!printed.includes(operation.effects[1]!.envelope.data)); supplied = `APPROVE BRIDGE ${operation.fingerprint}`;
   assert.equal(await tty.confirm(input), false); assert.equal(closed, 2);
   assert.equal(s.source.submissions.length, 0); assert.equal(s.wrapping.loads, 0);
 });

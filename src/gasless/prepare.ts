@@ -38,8 +38,8 @@ export class GaslessPreparation {
         await this.o.records.repairReceipt(existing.record); return existing.record;
       }
       assertGaslessExecutionChain(request.chainId);
-      await this.o.operations.assertProfileAvailable(profileHash);
       const binding = await gaslessOwner(state, profile), row = gaslessDeployment(request.chainId);
+      await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, binding.owner.address);
       if ([GASLESS_ZERO_ADDRESS, binding.owner.address, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {
         gaslessFailure("APN_INVALID_INPUT", "gasless_recipient_alias");
       }

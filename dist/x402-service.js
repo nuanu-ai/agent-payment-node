@@ -58,8 +58,8 @@ export class X402Service extends X402PaidRequest {
             });
             if (existing !== null)
                 return publicX402Operation(existing.record);
-            await this.operations.assertProfileAvailable(profileHash);
             const payer = await resolveX402Payer(this.context, profileHash, network.chainId);
+            await this.operations.assertEvmAccountAvailable(profileHash, network.chainId, payer.wallet);
             const profilePolicy = requireProfilePolicy(await this.context.requirePolicy().load(payer.policy));
             const capAtomic = effectiveX402Cap(profilePolicy, callerCap);
             const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic, chainId: network.chainId, ...requestFields });

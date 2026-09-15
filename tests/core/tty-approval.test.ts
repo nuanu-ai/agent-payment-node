@@ -1,3 +1,4 @@
+import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
@@ -93,7 +94,7 @@ test("TTY input errors fail closed and close the terminal", async () => {
 test("real macOS PTY approval returns after one exact line without waiting for another byte", {
   skip: process.platform !== "darwin",
 }, async () => {
-  const result = await runPtyApproval({ input: `APPROVE APN TRANSFER ${"b".repeat(16)}\n` });
+  const result = await runPtyApproval({ input: `${approvalCode("transfer", "b".repeat(64))}\n` });
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /APPROVAL_DONE/);
 });
@@ -110,7 +111,7 @@ test("repeated real PTY approvals do not leak the original character-device desc
   skip: process.platform !== "darwin",
 }, async () => {
   const result = await runPtyApproval({
-    input: `APPROVE APN TRANSFER ${"b".repeat(16)}\n`,
+    input: `${approvalCode("transfer", "b".repeat(64))}\n`,
     count: 8,
     warmup: true,
   });
@@ -176,7 +177,7 @@ async function runPtyApproval(options: {
     if {$env(APN_SEND_INPUT) == "1"} {
       for {set index 0} {$index < $env(APN_APPROVAL_COUNT)} {incr index} {
         expect {
-          -re {Type exactly:} { send -- $env(APN_INPUT); send -- "\\r" }
+          -re {press Enter to confirm} { send -- $env(APN_INPUT); send -- "\\r" }
           timeout { exit 124 }
         }
       }

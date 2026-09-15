@@ -1,3 +1,4 @@
+import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -72,8 +73,8 @@ test("MM approval persists one marker before submit; lost response, restart and 
     const approved = await f.core.execute({ command: "gasless.transfer.approve", operationId: id });
     assert.equal(approved.ok, true, JSON.stringify(approved.error)); assert.equal((await f.record(id)).state, "unknown_finality");
     const phrase = f.approval.calls[0]!.exactPhrase;
-    assert.equal(phrase, `APPROVE GASLESS ${id} ${(await f.record(id)).fingerprint}`);
-    assert.ok(Buffer.byteLength(phrase) > 128);
+    assert.equal(phrase, approvalCode("gasless", id, (await f.record(id)).fingerprint));
+    assert.match(phrase, /^[0-9a-f]{6}$/u);
     f.now.setTime(f.now.getTime() + 600_000); f.provider.failObserve = true;
     const same = f.restart();
     assert.equal((await same.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);

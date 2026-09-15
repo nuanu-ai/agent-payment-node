@@ -126,7 +126,7 @@ export class ProviderX402Service {
       if (bound.account_binding_hash !== initialBound.account_binding_hash ||
         bound.public_address.toLowerCase() !== initialBound.public_address.toLowerCase())
         throw new ApnError("APN_PROFILE_DRIFT", "Provider account identity changed while acquiring its operation lock.");
-      await this.operations.assertProfileAvailable(profileHash);
+      await this.operations.assertEvmAccountAvailable(profileHash, 8453, bound.public_address);
       await this.operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
       assertProviderHttpRequest(requireProviderX402Adapter(this.context, bound).x402, httpRequest);
       const policy = requireProfilePolicy(await this.context.requirePolicy().load(policyBinding(bound)));

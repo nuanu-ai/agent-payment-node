@@ -7,11 +7,8 @@ import { formatAtomic, parseDecimal } from "./money.js";
 import type { OperationRecord, ProviderDirectBinding } from "./model.js";
 import { OperationService } from "./operation-service.js";
 import type { ProviderAdapterBundle, ProviderDirectExecutionInput } from "./provider-ports.js";
-import {
-  capabilityHash,
-  LOCAL_PROVIDER_ID,
-  markProviderProfileDrift,
-} from "./provider-profile.js";
+import { approvalCode } from "./approval-code.js";
+import { capabilityHash, LOCAL_PROVIDER_ID, markProviderProfileDrift } from "./provider-profile.js";
 import { providerDirectReceipt } from "./provider-direct-receipt.js";
 import {
   createProviderEffectReference,
@@ -103,7 +100,7 @@ export class ProviderDirectTransferService {
         requestHash,
       });
       if (existing !== null) return publicOperation(existing.record as OperationRecord);
-      await this.operations.assertProfileAvailable(profileHash);
+      await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, bound.public_address);
       await this.operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
       const rpcIdentity = await this.context.requireRpc().assertBaseChain();
       const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
@@ -207,7 +204,7 @@ export class ProviderDirectTransferService {
           nextActions: [`apn gasless transfer approve --operation ${operation.operationId}`],
         });
         const accepted = await approval.confirm({ operationId: operation.operationId, fingerprint: operation.fingerprint,
-          exactPhrase: `APPROVE GASLESS ${operation.fingerprint}`, summary: publicOperation(operation) as Readonly<Record<string, unknown>> });
+          exactPhrase: approvalCode("gasless", operation.fingerprint), summary: publicOperation(operation) as Readonly<Record<string, unknown>> });
         if (!accepted) await this.failBeforeEffect(operation, "coinbase_gasless_approval_rejected");
       } else await this.context.requireTransferApproval().approve({
         profile: operation.profile,

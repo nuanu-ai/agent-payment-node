@@ -77,7 +77,7 @@ export class ChainPolicyService {
     await this.context.ready();
     return await this.context.state.withLocks([`profile:${this.context.state.profileHash(profile)}`], async () => {
       const account = await this.account(profile, input.rail);
-      await this.operations.assertProfileAvailable(account.profileHash);
+      await this.operations.assertRailAccountAvailable(account.profileHash, account.rail, account.address);
       const networkIdentity = await this.adapter(input.rail, account.provider).assertNetwork();
       const policy = sealChainPolicy({ schemaVersion: "apn.chain-policy.v1", account, asset, networkIdentity,
         maximumPerTransferAtomic, dailyLimitAtomic, maximumNativeFeeAtomic, admittedAt: this.context.clock.now().toISOString() });

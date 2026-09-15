@@ -573,7 +573,7 @@ test("concurrent provider-atomic x402 and gasless preparation serialize one glob
   }
 });
 
-test("concurrent Solana rail and gasless preparation preserves the same-profile guard in both orders", { timeout: 15_000 }, async (t) => {
+test("concurrent Solana rail and gasless preparation on different networks both proceed in both orders", { timeout: 15_000 }, async (t) => {
   for (const first of ["gasless", "rail"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const rail = await solanaFixture(temporary.root);
@@ -589,7 +589,7 @@ test("concurrent Solana rail and gasless preparation preserves the same-profile 
     const originalPrepare = rail.adapter.prepare.bind(rail.adapter);
     if (first === "gasless") gasless.rpc.snapshot = async (owner) => { await gate.hold(); return await originalSnapshot(owner); };
     else rail.adapter.prepare = async (input) => { await gate.hold(); return await originalPrepare(input); };
-    const railCallsBefore = rail.rpc.calls.length, wrappingBefore = rail.wrapping.loads;
+    const wrappingBefore = rail.wrapping.loads;
     const gaslessInput = { command: "gasless.transfer.prepare" as const, profile: gasless.profile,
       request: gasless.request, idempotencyKey: `rail-${first}-gasless` };
     const railInput = { command: "transfer.prepare-solana" as const, profile: rail.account.profile, asset: "usdc" as const,
@@ -600,23 +600,17 @@ test("concurrent Solana rail and gasless preparation preserves the same-profile 
     await loserState.attempted; gate.release();
     const [winnerResult, loserResult] = await Promise.all([winner, loser]);
     assert.equal(winnerResult.ok, true, winnerResult.error?.message);
-    assert.equal(loserResult.error?.code, "APN_OPERATION_BLOCKED");
+    assert.equal(loserResult.ok, true, loserResult.error?.message);
     const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
     const railOperations = await rail.core.rails.records.listOperations(profileHash);
-    assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
-    assert.equal(railOperations.length, first === "rail" ? 1 : 0);
-    const operations = [...gaslessOperations, ...railOperations];
-    assert.equal(operations.length, 1); assert.equal(operations[0]?.terminal, false);
-    assert.equal(operations[0]?.operationId, gasless.state.operationId(gasless.profile,
-      first === "gasless" ? gaslessInput.idempotencyKey : railInput.idempotencyKey));
-    if (first === "gasless") assert.equal(rail.rpc.calls.length, railCallsBefore);
-    else assert.equal(gasless.rpc.calls.length, 0);
+    assert.equal(gaslessOperations.length, 1); assert.equal(railOperations.length, 1);
+    for (const operation of [...gaslessOperations, ...railOperations]) assert.equal(operation.terminal, false);
     assert.equal(rail.wrapping.loads, wrappingBefore); assert.equal(rail.approval.calls.length, 0);
     assert.equal(rail.rpc.submissions.length, 0); assert.equal(gasless.rpc.sends.length, 0); assert.equal(gasless.approval.calls.length, 0);
   }
 });
 
-test("concurrent LI.FI bridge and gasless preparation preserves the same-profile guard in both orders", { timeout: 15_000 }, async (t) => {
+test("concurrent LI.FI bridge and gasless preparation on different networks both proceed in both orders", { timeout: 15_000 }, async (t) => {
   for (const first of ["gasless", "bridge"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const bridge = await lifiFixture(temporary.root);
@@ -635,7 +629,8 @@ test("concurrent LI.FI bridge and gasless preparation preserves the same-profile
     const originalMaterialize = bridge.provider.materialize.bind(bridge.provider);
     if (first === "gasless") gasless.rpc.snapshot = async (owner) => { await gate.hold(); return await originalSnapshot(owner); };
     else bridge.provider.materialize = async (selected) => { await gate.hold(); return await originalMaterialize(selected); };
-    const wrappingBefore = bridge.wrapping.loads, sourceCallsBefore = bridge.source.calls.length;
+    const wrappingBefore = bridge.wrapping.loads;
+    assert.notEqual(gasless.request.chainId, bridge.request.fromChainId);
     const gaslessInput = { command: "gasless.transfer.prepare" as const, profile: gasless.profile,
       request: gasless.request, idempotencyKey: `bridge-${first}-gasless` };
     const bridgeInput = { command: "bridge.prepare" as const, profile: bridge.profile, quote,
@@ -646,18 +641,11 @@ test("concurrent LI.FI bridge and gasless preparation preserves the same-profile
     await loserState.attempted; gate.release();
     const [winnerResult, loserResult] = await Promise.all([winner, loser]);
     assert.equal(winnerResult.ok, true, winnerResult.error?.message);
-    assert.equal(loserResult.error?.code, "APN_OPERATION_BLOCKED");
+    assert.equal(loserResult.ok, true, loserResult.error?.message);
     const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
     const bridgeOperations = await bridge.core.bridges.records.listOperations(profileHash);
-    assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
-    assert.equal(bridgeOperations.length, first === "bridge" ? 1 : 0);
-    const operations = [...gaslessOperations, ...bridgeOperations];
-    assert.equal(operations.length, 1); assert.equal(operations[0]?.terminal, false);
-    assert.equal(operations[0]?.operationId, gasless.state.operationId(gasless.profile,
-      first === "gasless" ? gaslessInput.idempotencyKey : bridgeInput.idempotencyKey));
-    if (first === "gasless") {
-      assert.equal(bridge.provider.materializeCalls, 0); assert.equal(bridge.source.calls.length, sourceCallsBefore);
-    } else assert.equal(gasless.rpc.calls.length, 0);
+    assert.equal(gaslessOperations.length, 1); assert.equal(bridgeOperations.length, 1);
+    for (const operation of [...gaslessOperations, ...bridgeOperations]) assert.equal(operation.terminal, false);
     assert.equal(bridge.wrapping.loads, wrappingBefore); assert.equal(bridge.approval.calls.length, 0);
     assert.equal(bridge.source.submissions.length, 0); assert.equal(bridge.destination.submissions.length, 0);
     assert.equal(gasless.rpc.sends.length, 0); assert.equal(gasless.approval.calls.length, 0);

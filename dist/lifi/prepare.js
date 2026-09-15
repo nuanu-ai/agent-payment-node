@@ -40,10 +40,10 @@ export class BridgePreparation {
                 await this.o.records.repairReceipt(existing.record);
                 return existing.record;
             }
-            await this.o.operations.assertProfileAvailable(profileHash);
             const quote = await this.o.quotes.load(profileHash, quoteHash);
             if (quote === null)
                 bridgeFailure("APN_INVALID_INPUT", "quote_not_owned_by_profile");
+            await this.o.operations.assertEvmAccountAvailable(profileHash, quote.request.fromChainId, quote.owner.address);
             await assertBridgeOwner(state, quote);
             const selected = parseBridgeRoutes({ status: 200, body: quote.rawResponse }, quote.request, quote.owner.address).find((r) => r.choice.routeId === routeId);
             if (selected === undefined)

@@ -44,9 +44,9 @@ export class MetaMaskGaslessPreparation {
         await this.o.records.repairReceipt(existing.record);
         return existing.record;
       }
-      await this.o.operations.assertProfileAvailable(profileHash);
       const clock = new MetaMaskGaslessClock(this.o.clock); clock.check();
       const owner = await metaMaskGaslessOwner(state, profile); clock.check();
+      await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, owner.address);
       if ([MM_ZERO_ADDRESS, owner.address, row.token, ...Object.values(row.protocol).map(p => p.address)].includes(request.recipient)) {
         mmFail("mm_gasless_input");
       }

@@ -42,7 +42,7 @@ export class RailOperationService {
                     corrupt();
                 return publicRailOperation(existing.record);
             }
-            await this.operations.assertProfileAvailable(profileHash);
+            await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
             const policy = await this.policies.authorize(account, input.asset, amountAtomic, maximumFeeAtomic);
             const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
             validateRailPrepared(prepared, account);

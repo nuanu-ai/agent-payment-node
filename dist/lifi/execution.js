@@ -1,3 +1,4 @@
+import { approvalCode } from "../approval-code.js";
 import { ApnError } from "../errors.js";
 import { assertBridgeRemaining, guardBridgeEffect } from "./economics.js";
 import { validateMaterial } from "./effect-store.js";
@@ -32,7 +33,7 @@ export class BridgeExecution {
             return await this.haltUnsent(op, error);
         }
         const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
-            exactPhrase: `APPROVE BRIDGE ${op.fingerprint}`, summary: publicBridgeOperation(op) });
+            exactPhrase: approvalCode("bridge", op.fingerprint), summary: publicBridgeOperation(op) });
         if (!accepted)
             return await this.save(op, { state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null } });
         // Consent does not extend the exact materialization expiry.
