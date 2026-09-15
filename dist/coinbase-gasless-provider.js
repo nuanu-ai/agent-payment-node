@@ -45,7 +45,7 @@ export async function prepareCoinbaseGasless(context, operations, durable, loadP
         const existing = await operations.resolvePrepare({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash });
         if (existing !== null)
             return publicOperation(existing.record);
-        await operations.assertProfileAvailable(profileHash);
+        await operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, bound.public_address);
         await operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
         const snapshot = await coinbaseGaslessSnapshot(context.requireCoinbaseRpc(), bound.public_address);
         if (BigInt(snapshot.balanceAtomic) < gross)

@@ -60,14 +60,14 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
         known_source_fees_wei: string;
         actual_source_fees_wei: string | null;
         unresolved_source_fee_effects: {
-            role: "approval" | "bridge";
+            role: "bridge" | "approval";
             transaction_hash: `0x${string}` | null;
             quoted_fee_wei: string;
             included_fee_wei: string | null;
         }[];
     };
     effects: {
-        role: "approval" | "bridge";
+        role: "bridge" | "approval";
         phase: import("./operation-model.js").BridgeEffectPhase;
         envelope_hash: string;
         transaction_hash: `0x${string}` | null;
@@ -166,14 +166,14 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
         known_source_fees_wei: string;
         actual_source_fees_wei: string | null;
         unresolved_source_fee_effects: {
-            role: "approval" | "bridge";
+            role: "bridge" | "approval";
             transaction_hash: `0x${string}` | null;
             quoted_fee_wei: string;
             included_fee_wei: string | null;
         }[];
     };
     effects: {
-        role: "approval" | "bridge";
+        role: "bridge" | "approval";
         phase: import("./operation-model.js").BridgeEffectPhase;
         envelope_hash: string;
         transaction_hash: `0x${string}` | null;

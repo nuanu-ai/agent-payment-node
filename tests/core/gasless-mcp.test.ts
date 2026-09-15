@@ -1,3 +1,4 @@
+import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { stat } from "node:fs/promises";
 import test from "node:test";
@@ -175,7 +176,7 @@ test("gasless terminal approval renders exact USDC authority and rejects any ine
   const fixture = await gaslessFixture(temporary.root, 8453, { now: new Date() });
   const prepared = await fixture.prepare("gasless-tty-0001");
   const summary = publicGaslessOperation(prepared.operation);
-  const phrase = `APPROVE GASLESS ${prepared.operation.fingerprint}`;
+  const phrase = approvalCode("gasless", prepared.operation.fingerprint);
   const acceptedTerminal = terminal(`${phrase}\n`);
   const approval = new TtyGaslessApproval({ isTerminal: () => true, openTerminal: async () => acceptedTerminal.port });
   assert.equal(await approval.confirm({ operationId: prepared.id, fingerprint: prepared.operation.fingerprint,
@@ -189,7 +190,7 @@ test("gasless terminal approval renders exact USDC authority and rejects any ine
   assert.match(shown, /Paymaster permission: .* up to .* USDC/u);
   assert.match(shown, /Current paymaster allowance: 0 USDC/u);
   assert.match(shown, /The signed permit and operation have no on-chain expiry\. Delegation persists after this payment\./u);
-  assert.match(shown, new RegExp(`Type exactly: ${phrase}`, "u"));
+  assert.match(shown, new RegExp(`Type ${phrase} and press Enter to confirm`, "u"));
   assert.equal(acceptedTerminal.closes(), 1);
 
   const refusedTerminal = terminal(`${phrase} \n`);

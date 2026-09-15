@@ -60,6 +60,12 @@ export declare class OperationService {
     /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
     findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null>;
     assertProfileAvailable(profileHash: string): Promise<void>;
+    /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
+    assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
+    /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */
+    assertRailAccountAvailable(profileHash: string, rail: "solana" | "tron", account: string): Promise<void>;
+    private assertConflictDomainsAvailable;
+    private profileOperations;
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;
     required(operationId: string): Promise<StoredMoneyOperation>;
     status(operationId: string): Promise<unknown>;

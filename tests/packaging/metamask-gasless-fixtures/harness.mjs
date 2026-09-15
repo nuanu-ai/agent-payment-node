@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+export const approvalCode = (action, ...binding) => createHash("sha256").update(["apn.approval-code.v1", action, ...binding].join("\n"), "utf8").digest("hex").slice(0, 6);
 import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -113,7 +114,7 @@ export async function scenario(installed, chainId = 8453, options = {}) {
     approve: async (operationId, phrase) => {
       const op = await record(operationId);
       const result = await approvePty(getFixture().packageRoot, env, operationId,
-        phrase ?? `APPROVE GASLESS ${operationId} ${op.fingerprint}`);
+        phrase ?? approvalCode("gasless", operationId, op.fingerprint));
       safeOutput(result.output, getFixture(), refreshToken);
       const lines = result.output.split(/\r?\n/u);
       const envelope = lines.filter(line => line.startsWith("{")).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean).at(-1);
@@ -171,7 +172,7 @@ async function approvePty(packageRoot, env, operationId, phrase) {
     log_user 1
     spawn $env(APN_NODE_EXEC) --import $env(APN_PRELOAD) $env(APN_BINARY) gasless transfer approve --operation $env(APN_OPERATION)
     expect {
-      -re {Type exactly:} { send -- $env(APN_INPUT); send -- "\\r" }
+      -re {press Enter to confirm} { send -- $env(APN_INPUT); send -- "\\r" }
       eof { catch wait result; exit [lindex $result 3] }
       timeout { exit 124 }
     }

@@ -35,9 +35,9 @@ export async function prepareEvmTransfer(
   return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
     const existing = await operations.resolvePrepare({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash });
     if (existing !== null) return publicOperation(existing.record as OperationRecord);
-    await operations.assertProfileAvailable(profileHash);
     const wallet = await state.loadWallet(profileHash);
     if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+    await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
     const rpc = requireEvmRpc(context.requireRpc());
     const balance = await rpc.balance(wallet.address, selection);
     if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId ||

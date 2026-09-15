@@ -2,6 +2,7 @@ import { ApnError } from "./errors.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
+import { conflictDomainKey, evmConflictDomain, railConflictDomain, storedOperationDomains, type MoneyConflictDomain } from "./operation-conflict-domain.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import {
   publicX402Operation,
@@ -85,7 +86,46 @@ export class OperationService {
   }
 
   async assertProfileAvailable(profileHash: string): Promise<void> {
-    const active: StoredMoneyOperation[] = [
+    const blocking = (await this.profileOperations(profileHash)).find(({ record }) => !record.terminal);
+    if (blocking !== undefined) {
+      throw new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this profile is not terminal.", {
+        blockingOperationId: blocking.record.operationId,
+        blockingState: blocking.record.state,
+      });
+    }
+  }
+
+  /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
+  async assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
+    await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
+  }
+
+  /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */
+  async assertRailAccountAvailable(profileHash: string, rail: "solana" | "tron", account: string): Promise<void> {
+    await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
+  }
+
+  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[]): Promise<void> {
+    let wanted: ReadonlySet<string>;
+    try { wanted = new Set(domains().map(conflictDomainKey)); } catch { wanted = new Set(); }
+    for (const operation of await this.profileOperations(profileHash)) {
+      if (operation.record.terminal) continue;
+      const held = storedOperationDomains(operation);
+      const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
+      // An unreadable network or account on either side blocks the whole profile.
+      if (held !== null && wanted.size > 0 && shared === undefined) continue;
+      throw new ApnError("APN_OPERATION_BLOCKED", shared === undefined
+        ? "Another money operation for this profile is not terminal."
+        : "Another money operation for this network and account is not terminal.", {
+        blockingOperationId: operation.record.operationId,
+        blockingState: operation.record.state,
+        ...(shared === undefined ? {} : { blockingNetwork: `${shared.family}:${shared.network}`, blockingAccount: shared.account }),
+      });
+    }
+  }
+
+  private async profileOperations(profileHash: string): Promise<readonly StoredMoneyOperation[]> {
+    return [
       ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
       ...(await this.metaMaskGasless.listOperations(profileHash)).map((record) => ({ kind: "metamask_gasless_transfer" as const, record })),
       ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer" as const, record })),
@@ -95,13 +135,6 @@ export class OperationService {
       ...(await this.state.listX402Operations(profileHash)).map((record) => ({ kind: "x402_fetch" as const, strategy: "local" as const, record })),
       ...(await this.providerX402.listOperations(profileHash)).map((record) => ({ kind: "x402_fetch" as const, strategy: "provider_atomic" as const, record })),
     ];
-    const blocking = active.find(({ record }) => !record.terminal);
-    if (blocking !== undefined) {
-      throw new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this profile is not terminal.", {
-        blockingOperationId: blocking.record.operationId,
-        blockingState: blocking.record.state,
-      });
-    }
   }
 
   async assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void> {

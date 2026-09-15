@@ -1,6 +1,6 @@
 # LI.FI EVM cross-chain USDC
 
-This APN 0.5.14 package includes local-wallet route selection and execution for
+This APN 0.5.15 package includes local-wallet route selection and execution for
 canonical USDC between Ethereum, Base and Arbitrum One. It implements Across V4
 and Stargate V2 Taxi through the LI.FI API. Package availability, source tests
 and installed-package tests are separate from real mainnet acceptance, which
@@ -120,7 +120,7 @@ apn bridge approve --operation <operation-id>
 The foreground terminal shows both chains, assets, sender, recipient, principal,
 minimum output, declared and implicit fees, native budget, separate effect
 nonces and gas ceilings, RPC origins, policy, fingerprint and expiry. Approval
-requires the exact full phrase `APPROVE BRIDGE <fingerprint>` within 60 seconds
+requires the six-character approval code bound to the full fingerprint within 60 seconds
 or the earlier operation expiry. APN checks the same intent again after consent.
 The transaction materialization lasts at most 300 seconds, shortened by Across
 protocol timing; at least 15 seconds must remain after checks before each first

@@ -1,3 +1,4 @@
+import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -122,7 +123,7 @@ async function fixture(root: string, create = true) {
     observe: async input => { await call("observe"); return proof(input, observation, now); },
   };
   const approval: SmartAccountGaslessApprovalPort = { confirm: async input => {
-    assert.equal(input.exactPhrase, `APPROVE GASLESS ${input.operationId} ${input.fingerprint}`);
+    assert.equal(input.exactPhrase, approvalCode("gasless", input.operationId, input.fingerprint));
     assert.equal((input.summary.transfer as any).frozen_fee_atomic, "0"); await call("approval"); return accepted;
   } };
   const context = () => new RuntimeContext({ state, clock, smartAccountGasless: { rpcFor: () => rpc, provider, material, approval, records } });

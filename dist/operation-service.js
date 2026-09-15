@@ -1,4 +1,5 @@
 import { ApnError } from "./errors.js";
+import { conflictDomainKey, evmConflictDomain, railConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import { publicX402Operation, } from "./x402-state-integrity.js";
 import { publicProviderX402Operation, } from "./provider-x402-model.js";
@@ -57,7 +58,49 @@ export class OperationService {
         return matches[0] ?? null;
     }
     async assertProfileAvailable(profileHash) {
-        const active = [
+        const blocking = (await this.profileOperations(profileHash)).find(({ record }) => !record.terminal);
+        if (blocking !== undefined) {
+            throw new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this profile is not terminal.", {
+                blockingOperationId: blocking.record.operationId,
+                blockingState: blocking.record.state,
+            });
+        }
+    }
+    /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
+    async assertEvmAccountAvailable(profileHash, chainId, account) {
+        await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
+    }
+    /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */
+    async assertRailAccountAvailable(profileHash, rail, account) {
+        await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
+    }
+    async assertConflictDomainsAvailable(profileHash, domains) {
+        let wanted;
+        try {
+            wanted = new Set(domains().map(conflictDomainKey));
+        }
+        catch {
+            wanted = new Set();
+        }
+        for (const operation of await this.profileOperations(profileHash)) {
+            if (operation.record.terminal)
+                continue;
+            const held = storedOperationDomains(operation);
+            const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
+            // An unreadable network or account on either side blocks the whole profile.
+            if (held !== null && wanted.size > 0 && shared === undefined)
+                continue;
+            throw new ApnError("APN_OPERATION_BLOCKED", shared === undefined
+                ? "Another money operation for this profile is not terminal."
+                : "Another money operation for this network and account is not terminal.", {
+                blockingOperationId: operation.record.operationId,
+                blockingState: operation.record.state,
+                ...(shared === undefined ? {} : { blockingNetwork: `${shared.family}:${shared.network}`, blockingAccount: shared.account }),
+            });
+        }
+    }
+    async profileOperations(profileHash) {
+        return [
             ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
             ...(await this.metaMaskGasless.listOperations(profileHash)).map((record) => ({ kind: "metamask_gasless_transfer", record })),
             ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer", record })),
@@ -67,13 +110,6 @@ export class OperationService {
             ...(await this.state.listX402Operations(profileHash)).map((record) => ({ kind: "x402_fetch", strategy: "local", record })),
             ...(await this.providerX402.listOperations(profileHash)).map((record) => ({ kind: "x402_fetch", strategy: "provider_atomic", record })),
         ];
-        const blocking = active.find(({ record }) => !record.terminal);
-        if (blocking !== undefined) {
-            throw new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this profile is not terminal.", {
-                blockingOperationId: blocking.record.operationId,
-                blockingState: blocking.record.state,
-            });
-        }
     }
     async assertProviderAccountAvailable(providerId, accountBindingHash, payer, exceptOperationId) {
         const direct = (await this.state.listAllOperations()).filter((record) => !record.terminal &&

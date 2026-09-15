@@ -5,7 +5,7 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-APN 0.5.14 includes this capability. Package availability, mainnet transfer
+APN 0.5.15 includes this capability. Package availability, mainnet transfer
 evidence and receiving human acceptance are tracked separately for each profile
 and network. `apn gasless capabilities` reports the exact adapter and acceptance
 state without reading a wallet,
@@ -94,9 +94,10 @@ is `N + A`; APN does not move the spare fee budget to the recipient later.
 
 Preparation does not sign or submit. Approval displays the exact chain, USDC
 contract, sender, recipient, total budget, recipient amount, fee ceiling and
-permissions. The human types the displayed `APPROVE GASLESS` phrase with the
-full operation fingerprint in a foreground terminal. MetaMask additionally
-requires the full operation ID in the same phrase. MCP returns that exact
+permissions. The human types the displayed six-character approval code in a
+foreground terminal. The code is derived from the full operation fingerprint,
+and for MetaMask also from the full operation ID, so it approves only this
+operation. MCP returns that exact
 CLI handoff and cannot satisfy this approval with injected automation.
 
 The same global idempotency key and profile guards cover direct transfers,
@@ -317,11 +318,9 @@ apn gasless transfer approve --operation <operation-id>
 ```
 
 Preparation does not sign or submit. Approval displays the exact USDC debit,
-recipient amount, fee and persistent permission, then requires this full phrase:
-
-```text
-APPROVE GASLESS <operation-id> <full-fingerprint>
-```
+recipient amount, fee and persistent permission, then asks for the six-character
+approval code printed on the same screen. The code is bound to the full operation
+ID and fingerprint.
 
 The provider signs and executes the two transfers as one exact batch. It may
 install or preserve the pinned EIP-7702 designation on the same wallet address.
@@ -388,8 +387,9 @@ apn gasless transfer approve --operation <operation-id>
 
 Preparation saves the exact transfer and its five-minute deadline without
 signing. Foreground approval displays the owner, session, recipient, USDC
-amount, zero fee, existing root permission and expiry, and requires
-`APPROVE GASLESS <operation-id> <full-fingerprint>`. MCP supplies the same
+amount, zero fee, existing root permission and expiry, and asks for the
+six-character approval code bound to the full operation ID and fingerprint.
+MCP supplies the same
 foreground CLI handoff.
 
 APN signs one child permission for the exact transfer. The child has an
