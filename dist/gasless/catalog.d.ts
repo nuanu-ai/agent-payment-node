@@ -122,6 +122,41 @@ export declare function gaslessCapabilities(profile?: string): {
         automatic_native_fallback: boolean;
         x402_support_implied: boolean;
     };
+    local_facilitator: {
+        provider: string;
+        custody: string;
+        route: string;
+        networks: {
+            chain_id: 43114;
+            name: string;
+            token: `0x${string}`;
+            symbol: string;
+            decimals: 6;
+            rpc_environment: "APN_AVALANCHE_RPC_URL";
+            facilitator_origin: string;
+            approved_facilitator_signers: `0x${string}`[];
+            executable_adapter: boolean;
+            action_time_verification_required: boolean;
+            mainnet_acceptance: string;
+        }[];
+        semantics: {
+            amount: string;
+            fee_atomic: string;
+            native_gas_payer: string;
+            approved_sender_native_debit_wei: string;
+            one_signature: boolean;
+            one_verification: boolean;
+            one_settlement_dispatch: boolean;
+            authorization_validity_seconds: 120;
+            onchain_authorization_expiry: boolean;
+            persistent_delegation: boolean;
+            terminal_states: string[];
+            recovery_after_exposure: string;
+            owner_abandonment: string;
+            provider_status_is_settlement_proof: boolean;
+            paid_facilitator_tier: boolean;
+        };
+    };
     approval: string;
     proof_class: string;
     next_actions: string[];

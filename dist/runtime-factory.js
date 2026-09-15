@@ -42,6 +42,10 @@ import { metaMaskGaslessObservationRpcFactory, metaMaskGaslessRpcFactory } from 
 import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
 import { TtyOperationAbandonApproval } from "./operation-abandon-approval.js";
 import { smartAccountGaslessRuntime } from "./smart-account-gasless/runtime.js";
+import { LocalFacilitatorSigner } from "./facilitator-gasless/custody.js";
+import { PayAiFacilitator } from "./facilitator-gasless/facilitator.js";
+import { avalancheFacilitatorRpc } from "./facilitator-gasless/rpc.js";
+import { TtyFacilitatorApproval } from "./facilitator-gasless/tty.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -99,6 +103,9 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     return new ApnCore({
         state,
+        facilitatorGasless: options.facilitatorGasless ?? { rpc: () => avalancheFacilitatorRpc(process.env),
+            facilitator: new PayAiFacilitator(), signer: new LocalFacilitatorSigner(state, wrappingSecret),
+            ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyFacilitatorApproval() } : {}) },
         smartAccountGasless: options.smartAccountGasless ?? smartAccountGaslessRuntime({ state,
             permissions: smartAccountPermissionStore, wrapping: wrappingSecret, environment: process.env,
             clock: options.clock ?? { now: () => new Date() }, foregroundApproval: bound.request.command === "gasless.transfer.approve" }),

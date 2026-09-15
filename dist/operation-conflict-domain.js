@@ -35,6 +35,9 @@ export function storedOperationDomains(operation) {
         if (operation.kind === "metamask_gasless_transfer") {
             return [evmConflictDomain(operation.record.intent.request.chainId, operation.record.intent.binding.address)];
         }
+        if (operation.kind === "facilitator_gasless_transfer") {
+            return [evmConflictDomain(operation.record.intent.request.chainId, operation.record.intent.owner.address)];
+        }
         return [evmConflictDomain(operation.record.intent.request.chainId, operation.record.intent.binding.ownerAddress)];
     }
     catch {
