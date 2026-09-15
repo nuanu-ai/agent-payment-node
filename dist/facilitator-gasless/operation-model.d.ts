@@ -5,7 +5,7 @@ export declare const FACILITATOR_OPERATION_VERSION: "apn.facilitator-gasless-ope
 export declare const FACILITATOR_RECEIPT_VERSION: "apn.facilitator-gasless-receipt.v1";
 export declare const FACILITATOR_KIND: "facilitator_gasless_transfer";
 export declare const FACILITATOR_POLICY: "apn.facilitator-gasless.foreground-approval.v1";
-export declare const FACILITATOR_STATES: readonly ["awaiting_approval", "approved", "verify_started", "settle_started", "settle_submitted", "completed", "expired_unused", "failed_before_effect"];
+export declare const FACILITATOR_STATES: readonly ["awaiting_approval", "approved", "verify_started", "settle_started", "settle_submitted", "completed", "expired_unused", "failed_before_effect", "abandoned_unknown"];
 export type FacilitatorState = typeof FACILITATOR_STATES[number];
 export declare const FACILITATOR_TERMINAL: readonly FacilitatorState[];
 /** After the exposure marker the signature may be outside APN; only finalized chain evidence closes the operation. */

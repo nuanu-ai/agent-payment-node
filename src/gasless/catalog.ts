@@ -60,7 +60,8 @@ export function gaslessCapabilities(profile?: string) {
       semantics: { amount: "exact_gross_USDC_equals_recipient_net", fee_atomic: "0", native_gas_payer: "public_facilitator",
         approved_sender_native_debit_wei: "0", one_signature: true, one_verification: true, one_settlement_dispatch: true,
         authorization_validity_seconds: AVAX.validitySeconds, onchain_authorization_expiry: true, persistent_delegation: false,
-        terminal_states: ["completed", "expired_unused", "failed_before_effect"], recovery_after_exposure: "finalized_chain_evidence_only",
+        terminal_states: ["completed", "expired_unused", "failed_before_effect", "abandoned_unknown"],
+        recovery_after_exposure: "finalized_chain_evidence_only", owner_abandonment: "unproven_outcome_after_authorization_expiry",
         provider_status_is_settlement_proof: false, paid_facilitator_tier: false } },
     approval: "foreground_terminal_per_operation", proof_class: "static_gasless_capabilities",
     next_actions: ["apn gasless transfer prepare --help"] };

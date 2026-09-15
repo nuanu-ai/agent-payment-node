@@ -343,6 +343,15 @@ because nothing left APN. A resume after the approval deadline ends an
 unapproved operation the same way. An unresolved operation blocks new transfers
 from the same address on Avalanche only.
 
+If the RPC cannot prove either outcome, for example because the nonce reads as
+used but no matching receipt is found, the owner can release the address with
+`apn operation abandon --operation <operation-id>`. This is accepted only once
+the authorization has expired and one more facilitator timeout (60 seconds) has
+passed. APN first retries its read-only recovery, then asks for the exact
+acknowledgement and records `abandoned_unknown` with owner-acknowledgement-only
+proof. The authorization cannot execute after it expires, but whether it
+executed before then stays unknown.
+
 ## MetaMask Agent server wallet
 
 Use a profile already bound to the intended MetaMask Agent server-wallet address

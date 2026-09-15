@@ -152,6 +152,7 @@ export declare function gaslessCapabilities(profile?: string): {
             persistent_delegation: boolean;
             terminal_states: string[];
             recovery_after_exposure: string;
+            owner_abandonment: string;
             provider_status_is_settlement_proof: boolean;
             paid_facilitator_tier: boolean;
         };
