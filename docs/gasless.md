@@ -83,9 +83,12 @@ apn receipt get --operation <operation-id>
 ```
 
 The example permits a total amount of 10 USDC, a fee no greater than 0.2 USDC
-and delivery of at least 9.8 USDC. For a local wallet, preparation computes the conservative fee
-budget `F` from the frozen gas fields and current paymaster configuration.
-It fixes recipient amount `N = 10 - F`. If the actual fee `A` is lower than
+and delivery of at least 9.8 USDC. For a local wallet, preparation checks that the current
+paymaster quote fits these limits and freezes the whole fee budget
+`F = min(max-fee, amount - min-received)`, here 0.2 USDC. It fixes recipient amount
+`N = 10 - F`. A paymaster price increase between preparation and signing does not
+cancel the transfer while a fresh quote still fits `F`; operations prepared by
+APN 0.5.13 or earlier froze the exact quote instead. If the actual fee `A` is lower than
 `F`, the unused `F - A` stays with the sender. The sender's successful debit
 is `N + A`; APN does not move the spare fee budget to the recipient later.
 
@@ -258,6 +261,21 @@ Older 0.5.11 readers reject records containing the new observation-source
 field. Verify a candidate against a protected state copy before global
 activation, and keep a compatible reader for records it subsequently writes.
 
+### Failures before disclosure and owner abandonment
+
+If APN stops after a local signature but before any signed material is disclosed or
+submitted, for example because a fee, balance or nonce check fails right after
+signing, the operation ends as `failed_before_effect` and releases the profile.
+The sealed material is never sent.
+
+When signed material was disclosed or submitted and the outcome is still unknown
+after the approval window, the owner can release the profile with
+`apn operation abandon --operation <operation-id>`. APN first retries its read-only
+observation, then asks for the exact acknowledgement and records terminal
+`abandoned_unknown` with owner-acknowledgement-only proof. A signed delegation or
+UserOperation may still execute later because the fee permit and delegation do
+not expire.
+
 ## MetaMask Agent server wallet
 
 Use a profile already bound to the intended MetaMask Agent server-wallet address
@@ -337,6 +355,13 @@ full history preserves the saved guard and cannot authorize another dispatch.
 contains hashed provider identities and accounting, without the private
 request UUID, session token, unsigned wire or provider response. Unresolved
 operations block competing payments and wallet lifecycle changes for the profile.
+
+### MetaMask owner abandonment
+
+A MetaMask Agent transfer whose outcome is still unknown after its approval window
+can be released with `apn operation abandon --operation <operation-id>` after the
+exact acknowledgement. APN records `abandoned_unknown`; MetaMask may still relay the
+transfer later because its delegation has no on-chain expiry.
 
 ## MetaMask Smart Account
 

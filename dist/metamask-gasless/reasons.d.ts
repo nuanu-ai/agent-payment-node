@@ -24,6 +24,7 @@ export declare const MM_REASON_CODES: {
     readonly mm_gasless_provider_unavailable: "APN_PROVIDER_UNAVAILABLE";
     readonly mm_gasless_provider_failed: "APN_PROVIDER_EFFECT_UNAVAILABLE";
     readonly mm_gasless_transaction_reverted: "APN_PROVIDER_EFFECT_UNAVAILABLE";
+    readonly mm_gasless_owner_abandoned: "APN_OPERATION_BLOCKED";
     readonly mm_gasless_state_corrupt: "APN_STATE_CORRUPT";
     readonly mm_gasless_state_security: "APN_STATE_SECURITY";
     readonly mm_gasless_idempotency_conflict: "APN_IDEMPOTENCY_CONFLICT";

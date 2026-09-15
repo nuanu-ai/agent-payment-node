@@ -13,7 +13,7 @@ for (const chain of GASLESS_CHAINS.filter(chain => chain !== 43114)) for (const 
   test(`gasless ${chain} ${delegation} funds principal and gas from USDC with zero native balance`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await gaslessFixture(temporary.root, chain, { delegation }), { id, input, operation } = await s.prepare();
-    assert.equal(operation.intent.wireVersion, "apn.gasless-wire.v2");
+    assert.equal(operation.intent.wireVersion, "apn.gasless-wire.v3");
     const calls = s.rpc.calls.length, loads = s.wrapping.loads;
     assert.equal(s.rpc.sends.length, 0); assert.equal(operation.intent.initialSnapshot.nativeBalanceWei, "0");
     const replay = await s.core.execute(input); assert.equal(replay.ok, true); assert.equal(s.rpc.calls.length, calls);
@@ -126,4 +126,27 @@ test("gasless strict history binding rejects a rehashed amount mutation and repa
   const { integrityHash: _hash, ...body } = corrupt; corrupt.integrityHash = hashObject(body);
   await writeFile(operationPath, JSON.stringify(corrupt), { mode: 0o600 });
   assert.equal((await s.core.execute({ command: "operation.status", operationId: id })).error?.code, "APN_STATE_CORRUPT");
+});
+
+test("gasless freezes the owner's fee limit so a paymaster fee increase before signing still completes", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await gaslessFixture(temporary.root), { id, operation } = await s.prepare();
+  assert.equal(operation.intent.wireVersion, "apn.gasless-wire.v3");
+  assert.equal(operation.intent.feeCapAtomic, s.request.maxFeeAtomic);
+  assert.equal(operation.intent.recipientAtomic, (BigInt(s.request.grossAtomic) - BigInt(s.request.maxFeeAtomic)).toString());
+  s.rpc.current = { ...s.rpc.current, feeConfiguration: { ...s.rpc.current.feeConfiguration, nativeTokenPrice: "3000000000" } };
+  const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(response.ok, true, response.error?.message);
+  const stored = await s.record(id); assert.equal(stored.state, "completed"); assert.equal(s.rpc.sends.length, 1);
+  await new OperationService(s.state).assertProfileAvailable(stored.profileHash);
+});
+
+test("gasless refuses a prepare whose current quote exceeds the owner's fee limit", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await gaslessFixture(temporary.root), key = "gasless-quote-over-limit";
+  const response = await s.core.execute({ command: "gasless.transfer.prepare", profile: s.profile,
+    request: { ...s.request, maxFeeAtomic: "5000", minReceivedAtomic: "9900000" }, idempotencyKey: key });
+  assert.equal(response.error?.code, "APN_FEE_BUDGET_EXCEEDED");
+  assert.equal(await s.core.gasless.records.findOperation(s.state.operationId(s.profile, key)), null);
+  assert.equal(s.rpc.sends.length, 0); assert.equal(s.approval.calls.length, 0);
 });

@@ -90,7 +90,7 @@ export interface GaslessSnapshot extends GaslessAccountState {
 }
 export interface GaslessIntent {
   /** Absent on legacy journals; never reinterpret their signed wire or hash. */
-  readonly wireVersion?: "apn.gasless-wire.v2";
+  readonly wireVersion?: "apn.gasless-wire.v2" | "apn.gasless-wire.v3";
   readonly profile: string;
   readonly request: GaslessRequest;
   readonly owner: GaslessOwner;

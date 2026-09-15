@@ -2,7 +2,7 @@ import { hashObject } from "../canonical.js";
 export const MM_OPERATION_VERSION = "apn.metamask-gasless-operation.v1";
 export const MM_OPERATION_KIND = "metamask_gasless_transfer";
 export const MM_RECEIPT_VERSION = "apn.metamask-gasless-receipt.v1";
-export const MM_TERMINAL = ["completed", "failed_before_effect"];
+export const MM_TERMINAL = ["completed", "failed_before_effect", "abandoned_unknown"];
 export const MM_HISTORY_LIMIT = 96;
 export const MM_FILE_LIMIT = 1024 * 1024;
 export const MM_DISPATCH_RESERVE_TRANSITIONS = 8;

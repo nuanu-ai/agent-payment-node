@@ -193,7 +193,7 @@ export interface MetaMaskGaslessRpcObservation {
   readonly settlement: MetaMaskGaslessSettlement | null;
 }
 export type MetaMaskGaslessState = "awaiting_approval" | "execution_pending" | "dispatch_pending" |
-  "submitted_pending" | "unknown_finality" | "failed_effects_pending" | "completed" | "failed_before_effect";
+  "submitted_pending" | "unknown_finality" | "failed_effects_pending" | "completed" | "failed_before_effect" | "abandoned_unknown";
 export interface MetaMaskGaslessMutable {
   readonly state: MetaMaskGaslessState;
   readonly approval: MetaMaskGaslessApproval | null;

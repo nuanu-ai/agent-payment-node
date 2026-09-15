@@ -27,6 +27,8 @@ export function metaMaskGaslessNextActions(operation) {
 }
 export function metaMaskGaslessProofClass(operation) {
     const op = validateMetaMaskGaslessOperation(operation);
+    if (op.state === "abandoned_unknown")
+        return "owner_acknowledgement_only";
     if (op.state === "completed")
         return mmRegistry(op.intent.request.chainId).row.finalityTag === "finalized"
             ? "rpc_finalized_correlated" : "rpc_safe_correlated";
