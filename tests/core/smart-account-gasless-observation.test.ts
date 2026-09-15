@@ -27,6 +27,13 @@ interface Harness {
   readonly transactionHash: Hex;
 }
 
+interface HarnessGeometry {
+  readonly cursorOffset: bigint;
+  readonly includedOffset: bigint;
+  readonly safeOffset: bigint;
+  readonly finalizedOffset: bigint;
+}
+
 function syntheticIntent(intent: SmartAccountGaslessIntent): SmartAccountGaslessIntent {
   const facilitator = SA_OUTER.address.toLowerCase() as Address;
   return { ...intent, provider: { ...intent.provider, facilitatorAddresses: [facilitator] },
@@ -34,11 +41,16 @@ function syntheticIntent(intent: SmartAccountGaslessIntent): SmartAccountGasless
       facilitatorAddresses: [facilitator] } } };
 }
 
-async function successHarness(fault: HarnessFault = "none", hint: Hex | null = null): Promise<Harness> {
+async function successHarness(fault: HarnessFault = "none", hint: Hex | null = null,
+  geometry: HarnessGeometry = { cursorOffset: 0n, includedOffset: 3n, safeOffset: 10n,
+    finalizedOffset: 9n }): Promise<Harness> {
   const fixture = saRedemptionFixture(), intent = syntheticIntent(fixture.intent), start = intent.initialSnapshot.preparationBlock;
-  const safe = saTestBlock(BigInt(start.numberAtomic) + 10n, BigInt(start.timestampAtomic) + 20n);
-  const finalized = saTestBlock(BigInt(start.numberAtomic) + 9n, BigInt(start.timestampAtomic) + 18n);
-  const included = saTestBlock(BigInt(start.numberAtomic) + 3n, BigInt(start.timestampAtomic) + 10n);
+  const safe = saTestBlock(BigInt(start.numberAtomic) + geometry.safeOffset,
+    BigInt(start.timestampAtomic) + geometry.safeOffset * 2n);
+  const finalized = saTestBlock(BigInt(start.numberAtomic) + geometry.finalizedOffset,
+    BigInt(start.timestampAtomic) + geometry.finalizedOffset * 2n);
+  const included = saTestBlock(BigInt(start.numberAtomic) + geometry.includedOffset,
+    BigInt(start.timestampAtomic) + geometry.includedOffset * 2n);
   const signed = await saSignedOuter(2, fault === "malformed_input" ? "0x1234" : fixture.calldata, intent);
   const transaction = { ...signed.rpc, blockNumber: saQuantity(BigInt(included.numberAtomic)),
     blockHash: included.hash, transactionIndex: "0x0" };
@@ -96,8 +108,12 @@ async function successHarness(fault: HarnessFault = "none", hint: Hex | null = n
   };
   const context: SmartAccountObservationContext = { call, clock: { now: () => new Date(intent.preparedAt) },
     validator: fixture.validator };
+  const initial = initialSmartAccountGaslessCursor(intent), previousNumber = BigInt(start.numberAtomic) + geometry.cursorOffset - 1n;
+  const cursor = geometry.cursorOffset === 0n ? initial : { ...initial,
+    nextBlockAtomic: (BigInt(start.numberAtomic) + geometry.cursorOffset).toString(),
+    previousEndBlock: saTestBlock(previousNumber, BigInt(start.timestampAtomic) + (geometry.cursorOffset - 1n) * 2n) };
   const input: SmartAccountGaslessObserveInput = { operationId: "sa-chain-test", fingerprint: "6".repeat(64), intent,
-    material: fixture.material, cursor: initialSmartAccountGaslessCursor(intent), transactionHint: hint };
+    material: fixture.material, cursor, transactionHint: hint };
   return { context, input, calls, transactionHash: signed.hash };
 }
 
@@ -124,6 +140,51 @@ test("matching provider hint is tagged without replacing independent chain proof
   const result = await observeSmartAccountGasless(harness.context, harness.input);
   assert.equal(result.observation.phase, "success"); assert.equal(result.settlement?.source, "provider_hint");
   assert.equal(result.settlement?.txHash, harness.transactionHash);
+});
+
+test("an expired hinted transaction 37 blocks ahead checkpoints its completed scan before paced proof resumes", async () => {
+  const geometry = { cursorOffset: 88n, includedOffset: 125n, safeOffset: 175n, finalizedOffset: 170n };
+  const harness = await successHarness("none", null, geometry);
+  const input = { ...harness.input, transactionHint: harness.transactionHash };
+  let elapsed = 0, firstStarts = 0;
+  const pacedCall = async (method: any, params: readonly unknown[]) => {
+    if (elapsed >= 45_000) throw new SaRpcBudgetError();
+    elapsed += 1_000; firstStarts += 1;
+    if (method === "eth_chainId") return "0x2105";
+    return await harness.context.call(method, params);
+  };
+  await pacedCall("eth_chainId", []);
+  const first = await observeSmartAccountGasless({ ...harness.context, call: pacedCall }, input);
+  assert.equal(first.observation.phase, "pending"); assert.equal(first.observation.reason, "sa_gasless_partial");
+  assert.equal(first.observation.candidateTxHash, harness.transactionHash); assert.equal(first.settlement, null);
+  assert.ok(BigInt(first.cursor.nextBlockAtomic) > BigInt(input.cursor.nextBlockAtomic));
+  assert.deepEqual(first.cursor.candidateHashes, [harness.transactionHash]); assert.ok(first.cursor.expiryBlock);
+  assert.equal(firstStarts, 45);
+
+  let secondStarts = 0;
+  const resumedCall = async (method: any, params: readonly unknown[]) => {
+    secondStarts += 1;
+    if (secondStarts > 45) throw new SaRpcBudgetError();
+    if (method === "eth_chainId") return "0x2105";
+    return await harness.context.call(method, params);
+  };
+  await resumedCall("eth_chainId", []);
+  const settled = await observeSmartAccountGasless({ ...harness.context, call: resumedCall }, { ...input, cursor: first.cursor });
+  assert.equal(settled.observation.phase, "success"); assert.equal(settled.settlement?.txHash, harness.transactionHash);
+  assert.ok(secondStarts <= 45);
+
+  const previous = first.cursor.previousEndBlock!;
+  const changedCall = async (method: any, params: readonly unknown[]) => method === "eth_getBlockByNumber" &&
+    typeof params[0] === "string" && /^0x[0-9a-f]+$/u.test(params[0]) &&
+    BigInt(params[0]) === BigInt(previous.numberAtomic)
+    ? saRawBlock({ ...previous, hash: saWord(999n) }) : await harness.context.call(method, params);
+  const changed = await observeSmartAccountGasless({ ...harness.context, call: changedCall }, { ...input, cursor: first.cursor });
+  assert.equal(changed.observation.phase, "reorg"); assert.equal(changed.settlement, null);
+
+  const tamperedHash = saWord(998n), tamperedCursor = { ...first.cursor, candidateHashes: [tamperedHash] };
+  const tampered = await observeSmartAccountGasless(harness.context,
+    { ...input, cursor: tamperedCursor, transactionHint: tamperedHash });
+  assert.equal(tampered.observation.phase, "pending"); assert.equal(tampered.settlement, null);
 });
 
 test("altered calldata, receipt events, outflow or final spent state cannot complete", async () => {

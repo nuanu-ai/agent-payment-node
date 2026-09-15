@@ -5,9 +5,11 @@ import type { GaslessTransport } from "../../src/gasless/https.js";
 import { sha256 } from "../../src/canonical.js";
 import type { Hex } from "../../src/model.js";
 import { readCurrentAllowance, readCurrentNonce } from "../../src/smart-account-gasless/chain/allowance.js";
+import { initialSmartAccountGaslessCursor } from "../../src/smart-account-gasless/chain/scan.js";
 import { captureSmartAccountGaslessSnapshot, recheckSmartAccountPreparation } from
   "../../src/smart-account-gasless/chain/snapshot.js";
-import { SmartAccountGaslessRpc, smartAccountGaslessRpcFactory } from "../../src/smart-account-gasless/chain/rpc.js";
+import { SmartAccountGaslessRpc, smartAccountGaslessRpcFactory,
+  type SmartAccountGaslessRpcPacing } from "../../src/smart-account-gasless/chain/rpc.js";
 import { SA_PROTOCOL_NAMES } from "../../src/smart-account-gasless/model.js";
 import { saRegistry } from "../../src/smart-account-gasless/registry.js";
 import { SA_TEST_AT, saTestIntent } from "./smart-account-gasless-fixtures.js";
@@ -17,6 +19,15 @@ import { SA_RUNTIME_CODES, SA_RUNTIME_EVIDENCE_SHA256, saRawBlock, saRedemptionF
 const RPC_URL = "https://rpc.example/private-path";
 const clock = { now: () => new Date(SA_TEST_AT) };
 const rejected = { message: /Smart Account gasless operation could not advance safely/u };
+
+function pacingTimeline(minimumIntervalMs = 1_000) {
+  let now = 0; const sleeps: number[] = [];
+  const pacing: SmartAccountGaslessRpcPacing = { minimumIntervalMs, monotonicNow: () => now,
+    sleep: async milliseconds => { sleeps.push(milliseconds); now += milliseconds; } };
+  return { pacing, sleeps, now: () => now };
+}
+const fastPacing = (): SmartAccountGaslessRpcPacing => ({ minimumIntervalMs: 0,
+  monotonicNow: () => 0, sleep: async () => {} });
 
 class ReplyTransport implements GaslessTransport {
   readonly calls: Json[] = [];
@@ -52,7 +63,7 @@ function unspentRpc(spent: bigint, reorg = false) {
     throw new Error(`unexpected ${request.method}`);
   });
   return { fixture, safe, transport, rpc: new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL,
-    clock, validator: fixture.validator, transport }) };
+    clock, validator: fixture.validator, transport, pacing: fastPacing() }) };
 }
 
 test("Smart Account RPC binds the full endpoint and performs a numeric-block unspent guard", async () => {
@@ -110,14 +121,93 @@ test("snapshot accepts every exact runtime preimage and canonical safe-state ABI
     }
     throw new Error(`unexpected ${request.method}`);
   });
+  const timeline = pacingTimeline();
   const rpc = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
-    validator: saRedemptionFixture().validator, transport });
+    validator: saRedemptionFixture().validator, transport, pacing: timeline.pacing });
   const snapshot = await rpc.snapshot(intent.binding, preparation);
   assert.equal(snapshot.safeState.availableAtomic, "1000000"); assert.equal(snapshot.safeState.currentNonceAtomic, "0");
   assert.equal(snapshot.safeState.ownerCodeHash, registry.ownerDesignationCodeHash);
   assert.ok(transport.calls.length <= 64);
+  assert.equal(transport.calls.length, 27);
+  assert.equal(timeline.now(), 26_000);
   assert.ok(transport.calls.filter(call => ["eth_getCode", "eth_getStorageAt", "eth_call", "eth_getBalance"]
     .includes(call.method)).every(call => call.params.at(-1) === "0x2faf06c"));
+});
+
+test("Smart Account RPC serializes concurrent starts with one-second spacing", async () => {
+  const fixture = saRedemptionFixture(), timeline = pacingTimeline(), starts: number[] = [];
+  let active = 0, maximumActive = 0;
+  const transport: GaslessTransport = { request: async (_endpoint, _method, body) => {
+    starts.push(timeline.now()); active++; maximumActive = Math.max(maximumActive, active);
+    await Promise.resolve(); active--;
+    const request = JSON.parse(body!) as Json;
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: "0x2105" }) };
+  } };
+  const rpc = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
+    validator: fixture.validator, transport, pacing: timeline.pacing });
+  const pass = (rpc as unknown as { pass(): (method: "eth_chainId", params: readonly unknown[]) => Promise<unknown> }).pass();
+  assert.deepEqual(await Promise.all([pass("eth_chainId", []), pass("eth_chainId", []), pass("eth_chainId", [])]),
+    ["0x2105", "0x2105", "0x2105"]);
+  assert.deepEqual(starts, [0, 1_000, 2_000]);
+  assert.deepEqual(timeline.sleeps, [1_000, 1_000]);
+  assert.equal(maximumActive, 1);
+});
+
+test("one failed pass cancels its queued starts without retry and does not poison a later pass", async () => {
+  const fixture = saRedemptionFixture(), timeline = pacingTimeline(), starts: number[] = [];
+  const transport = new ReplyTransport((request, call) => {
+    starts.push(timeline.now());
+    if (call === 1) return { status: 429, body: "rate limited" };
+    return { jsonrpc: "2.0", id: request.id, result: "0x2105" };
+  });
+  const rpc = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
+    validator: fixture.validator, transport, pacing: timeline.pacing });
+  const first = (rpc as unknown as { pass(): (method: "eth_chainId", params: readonly unknown[]) => Promise<unknown> }).pass();
+  const failed = await Promise.allSettled([first("eth_chainId", []), first("eth_chainId", [])]);
+  assert.deepEqual(failed.map(result => result.status), ["rejected", "rejected"]);
+  assert.equal(transport.calls.length, 1);
+  const second = (rpc as unknown as { pass(): (method: "eth_chainId", params: readonly unknown[]) => Promise<unknown> }).pass();
+  assert.equal(await second("eth_chainId", []), "0x2105");
+  assert.equal(transport.calls.length, 2);
+  assert.deepEqual(starts, [0, 1_000]);
+});
+
+test("bounded log-range reduction remains usable after a range rejection", async () => {
+  const fixture = saRedemptionFixture(), timeline = pacingTimeline();
+  const transport = new ReplyTransport((_request, call) => call === 1 ? { status: 429, body: "range rejected" } : "0x2105");
+  const rpc = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
+    validator: fixture.validator, transport, pacing: timeline.pacing });
+  const pass = (rpc as unknown as { pass(): (method: "eth_getLogs" | "eth_chainId",
+    params: readonly unknown[]) => Promise<unknown> }).pass();
+  await assert.rejects(pass("eth_getLogs", [{}]));
+  assert.equal(await pass("eth_chainId", []), "0x2105");
+  assert.equal(transport.calls.length, 2); assert.equal(timeline.now(), 1_000);
+});
+
+test("Smart Account RPC rechecks the pass deadline at actual transport start", async () => {
+  const fixture = saRedemptionFixture(), timeline = pacingTimeline(45_000);
+  const transport = new ReplyTransport(() => "0x2105");
+  const rpc = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
+    validator: fixture.validator, transport, pacing: timeline.pacing });
+  const pass = (rpc as unknown as { pass(): (method: "eth_chainId", params: readonly unknown[]) => Promise<unknown> }).pass();
+  const results = await Promise.allSettled([pass("eth_chainId", []), pass("eth_chainId", [])]);
+  assert.equal(results[0]?.status, "fulfilled"); assert.equal(results[1]?.status, "rejected");
+  assert.equal(transport.calls.length, 1); assert.equal(timeline.now(), 45_000);
+});
+
+test("observation returns its unchanged cursor when spacing exhausts the pass budget", async () => {
+  const fixture = saRedemptionFixture(), timeline = pacingTimeline(45_000);
+  const intent = { ...fixture.intent, initialSnapshot: { ...fixture.intent.initialSnapshot,
+    endpointOrigin: "https://rpc.example", endpointHash: sha256(RPC_URL) } };
+  const transport = new ReplyTransport(() => "0x2105");
+  const rpc = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
+    validator: fixture.validator, transport, pacing: timeline.pacing });
+  const cursor = initialSmartAccountGaslessCursor(intent);
+  const result = await rpc.observe({ operationId: "sa-paced-observe", fingerprint: "6".repeat(64), intent,
+    material: fixture.material, cursor, transactionHint: null });
+  assert.deepEqual(result.cursor, cursor); assert.equal(result.observation.phase, "pending");
+  assert.equal(result.observation.reason, "sa_gasless_partial"); assert.equal(result.settlement, null);
+  assert.equal(result.unusedProof, null); assert.equal(transport.calls.length, 1);
 });
 
 test("Smart Account unspent guard rejects nonzero spend, changed anchor and changed material identity", async () => {
@@ -134,14 +224,15 @@ test("Smart Account RPC rejects noncanonical JSON-RPC envelopes and enforces its
   const fixture = saRedemptionFixture(), badTransport = new ReplyTransport(request => ({ jsonrpc: "2.0",
     id: request.id, result: "0x2105", error: { code: -1 } }));
   const bad = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
-    validator: fixture.validator, transport: badTransport });
+    validator: fixture.validator, transport: badTransport, pacing: fastPacing() });
   await assert.rejects(bad.assertUnspent({ binding: fixture.intent.binding, material: fixture.material,
     safeBlock: saTestBlock(50_000_020n) }), rejected);
 
   let monotonic = 0;
   const expired = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
     validator: fixture.validator, transport: new ReplyTransport(() => "0x2105"),
-    monotonicNow: () => { monotonic += 45_000; return monotonic; } });
+    pacing: { minimumIntervalMs: 0, monotonicNow: () => { monotonic += 45_000; return monotonic; },
+      sleep: async () => {} } });
   await assert.rejects(expired.assertUnspent({ binding: fixture.intent.binding, material: fixture.material,
     safeBlock: saTestBlock(50_000_020n) }));
 });
@@ -154,7 +245,7 @@ test("Smart Account RPC rejects duplicate JSON-RPC member names before accepting
   ]) {
     const transport = new ReplyTransport(request => ({ status: 200, body: duplicate(String(request.id)) }));
     const rpc = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
-      validator: fixture.validator, transport });
+      validator: fixture.validator, transport, pacing: fastPacing() });
     await assert.rejects(rpc.assertUnspent({ binding: fixture.intent.binding, material: fixture.material,
       safeBlock: saTestBlock(50_000_020n) }), rejected);
     assert.equal(transport.calls.length, 1);
