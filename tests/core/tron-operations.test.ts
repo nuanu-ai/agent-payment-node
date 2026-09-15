@@ -9,6 +9,7 @@ import { OperationService } from "../../src/operation-service.js";
 import { chainUsage } from "../../src/chain-policy.js";
 import { transitionRail } from "../../src/rail-operation-model.js";
 import { temporaryState } from "./helpers.js";
+import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import { SOL_RECIPIENT } from "./solana-helpers.js";
 import { TRON_RECIPIENT, tronFixture } from "./tron-helpers.js";
 
@@ -133,4 +134,26 @@ test("TRON and Solana reject reciprocal provider ownership drift before any key 
   assert.deepEqual(await s.storage.account(s.account.profile, "tron"), s.account);
   const foreign = await s.storage.ensureProvider({ profile: "provider-owned", rail: "solana", provider: "coinbase-awal", address: SOL_RECIPIENT }); const creates = s.wrapping.creates;
   assert.equal((await core.execute({ command: "wallet.ensure-tron", profile: foreign.profile, provider: "local", acceptRisk: true })).error?.code, "APN_PROFILE_DRIFT"); assert.equal(s.wrapping.creates, creates); assert.equal(s.rpc.calls.length, 0);
+});
+
+class RailAbandonApproval implements OperationAbandonApprovalPort {
+  readonly calls: OperationAbandonIntent[] = [];
+  async approve(intent: OperationAbandonIntent): Promise<void> { this.calls.push(intent); }
+}
+
+test("TRON expired unlanded transfer is owner-abandoned only after its solidified validity window and never resent", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const approval = new RailAbandonApproval();
+  const s = await tronFixture(temporary.root, { abandonApproval: approval }); const id = await s.prepare("usdt");
+  s.rpc.submissionTimeout = true; const first = await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal((first.operation as { state: string }).state, "unknown_finality"); const transaction = s.rpc.submissions[0]; assert.ok(transaction);
+  s.rpc.absentHistory = true;
+  assert.equal((await s.core.execute({ command: "operation.abandon", operationId: id })).error?.code, "APN_OPERATION_BLOCKED");
+  s.rpc.solidHead = 1100n; s.rpc.absentHistory = false;
+  assert.equal((await s.core.execute({ command: "operation.abandon", operationId: id })).error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(approval.calls.length, 0); s.rpc.absentHistory = true;
+  const abandoned = await s.core.execute({ command: "operation.abandon", operationId: id });
+  assert.equal(abandoned.ok, true, abandoned.error?.message); assert.equal((abandoned.operation as { state: string }).state, "abandoned_unknown");
+  assert.equal(approval.calls.length, 1); assert.equal(approval.calls[0]!.operationId, id); assert.deepEqual(s.rpc.submissions, [transaction]);
+  await new OperationService(s.core.context.state).assertProfileAvailable(s.account.profileHash);
+  assert.equal(((await s.core.execute({ command: "receipt.get", operationId: id })).receipt as { state: string }).state, "abandoned_unknown");
 });

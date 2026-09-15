@@ -29,6 +29,7 @@ export declare class SolanaLocalAdapter implements DirectRailPort {
         readonly transactionId: string;
     }>;
     inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<RailInspection>;
+    assertValidityExpired(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<void>;
     private currentAccount;
     private validBlock;
 }

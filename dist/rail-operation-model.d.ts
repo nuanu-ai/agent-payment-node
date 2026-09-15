@@ -1,5 +1,5 @@
 import type { ChainAccount, RailFinalEvidence, RailPreparedTransfer } from "./direct-rail-ports.js";
-export type RailState = "awaiting_approval" | "signing_started" | "signed_not_submitted" | "submitting" | "submitted_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert";
+export type RailState = "awaiting_approval" | "signing_started" | "signed_not_submitted" | "submitting" | "submitted_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert" | "abandoned_unknown";
 interface RailTransition {
     readonly state: RailState;
     readonly at: string;
