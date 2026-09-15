@@ -58,11 +58,13 @@ test("gasless production prepare and approval fit one public bundler request win
     afterApproval: bundler.filter(c => c.afterApproval).length,
     finalPhase: record.userOperation.phase, failure: record.failure }));
   assert.equal(bundler.filter(c => c.method === "eth_sendUserOperation").length, 1);
-  assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas").length, 1);
-  assert.equal(bundler.length, 14);
+  // One throwaway-key estimate runs before the approval screen; the owner's bootstrap estimate follows approval.
+  assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas").length, 2);
+  assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas" && !c.afterApproval).length, 1);
+  assert.equal(bundler.length, 15);
   assert.equal(bundler.filter(c => c.afterApproval).length, 12);
-  assert.equal(record.intent.gas.maxPriorityFeePerGas, "300000");
-  assert.equal(record.intent.gas.maxFeePerGas, "2300000");
+  assert.equal(record.intent.gas.maxPriorityFeePerGas, "600000");
+  assert.equal(record.intent.gas.maxFeePerGas, "2600000");
   assert.equal(record.bootstrap.signingAttempts, 1);
   assert.equal(record.userOperation.signingAttempts, 1);
   assert.equal(record.userOperation.submissionAttempts, 1);

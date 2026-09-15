@@ -1,10 +1,12 @@
 import { ApnError } from "../errors.js";
 import type { StateStore } from "../state.js";
 import { assertGaslessSnapshot } from "./economics.js";
+import type { GaslessFees } from "./model.js";
 import type { GaslessOperationRecord } from "./operation-model.js";
 import { assertGaslessOwner } from "./owner.js";
 import type { GaslessRpcPort } from "./ports.js";
 import { GASLESS_MIN_REMAINING_MS, assertGaslessExecutionChain, gaslessFailure } from "./validation.js";
+import { gaslessWireFees } from "./wire.js";
 
 export function assertGaslessRemaining(op: GaslessOperationRecord, now: number): void {
   if (!Number.isSafeInteger(now) || now < Date.parse(op.createdAt) ||
@@ -12,8 +14,12 @@ export function assertGaslessRemaining(op: GaslessOperationRecord, now: number):
     gaslessFailure("APN_OPERATION_BLOCKED", "gasless_action_expired");
   }
 }
+/**
+ * Returns the fees the next step uses. Until its UserOperation is signed, a v4 operation is priced from fresh bundler
+ * quotes within the owner's fee cap; signed fees, and every earlier intent's frozen fees, must cover the current slow tier.
+ */
 export async function guardGaslessOperation(state: StateStore, rpc: GaslessRpcPort,
-  op: GaslessOperationRecord, now: () => number): Promise<void> {
+  op: GaslessOperationRecord, now: () => number, signed?: GaslessFees): Promise<GaslessFees> {
   assertGaslessExecutionChain(op.intent.request.chainId);
   assertGaslessRemaining(op, now());
   await assertGaslessOwner(state, op.intent);
@@ -21,9 +27,14 @@ export async function guardGaslessOperation(state: StateStore, rpc: GaslessRpcPo
   if (rpc.chainId !== op.intent.request.chainId || rpc.rpcOrigin !== s.rpcOrigin ||
     rpc.rpcEndpointHash !== s.rpcEndpointHash || rpc.bundlerOrigin !== s.bundlerOrigin ||
     rpc.bundlerEndpointHash !== s.bundlerEndpointHash) gaslessFailure("APN_RPC_CONFIG", "gasless_endpoint_identity");
-  assertGaslessSnapshot(op.intent, await rpc.snapshot(op.intent.owner.address, op.intent.gas));
+  const fresh = op.intent.wireVersion === "apn.gasless-wire.v4" && signed === undefined;
+  const approved = fresh ? undefined : { ...op.intent.gas, ...gaslessWireFees(op.intent, signed) };
+  const current = await rpc.snapshot(op.intent.owner.address, approved);
+  const fees = gaslessWireFees(op.intent, approved ?? { maxFeePerGas: current.maxFeePerGas, maxPriorityFeePerGas: current.maxPriorityFeePerGas });
+  assertGaslessSnapshot(op.intent, current, fees);
   await assertGaslessOwner(state, op.intent);
   assertGaslessRemaining(op, now());
+  return fees;
 }
 /** Only reason tokens produced by this module family may enter the durable journal. */
 export function gaslessReason(error: unknown, fallback: string): string {

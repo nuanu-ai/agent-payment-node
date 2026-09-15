@@ -5,7 +5,7 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-APN 0.5.17 includes this capability. Package availability, mainnet transfer
+APN 0.5.18 includes this capability. Package availability, mainnet transfer
 evidence and receiving human acceptance are tracked separately for each profile
 and network. `apn gasless capabilities` reports the exact adapter and acceptance
 state without reading a wallet,
@@ -58,11 +58,56 @@ guards do not repeat that snapshot's network checks. Each signing and disclosure
 boundary still reads current account and protocol state. This reduces request
 volume without changing the approved operation or allowing submission retries.
 Each snapshot groups bundler chain identity, EntryPoint support and the current
-Pimlico gas-price quote into one read-only HTTP batch. New offers cover the fast
-tier. Before each effect, both frozen fee fields must still cover a fresh slow
-tier; a higher current fee stops the action without changing its approved budget.
+Pimlico gas-price quote into one read-only HTTP batch. v2 and v3 offers freeze
+both fee fields at preparation from the fast tier. Before each effect, those
+frozen fields must still cover a fresh slow tier. A higher current fee stops the
+action without changing its approved budget. v4 operations take fresh prices at
+each step until signing, as described below.
 Configured bundlers must support this batch and gas-price API. Batch members and
 HTTP requests are separate counts; a batch does not guarantee provider admission.
+
+### Offers, fee headroom and the pre-signing check
+
+New local operations freeze wire format v4. Its offer sizes each gas field from
+estimates of the exact first-use UserOperation measured on 2026-09-15, with at
+least 20 % margin.
+
+| Chain | Verification | Call | Paymaster verification | Pre-verification, first use |
+| --- | --- | --- | --- | --- |
+| Ethereum | 75,000 | 130,000 | 485,000 | 100,000 |
+| Polygon PoS | 75,000 | 140,000 | 695,000 | 100,000 |
+
+Circle's paymaster verification on Polygon needs about 576,000 gas, which the
+earlier 500,000 offer could not cover. A repeated use keeps 125,000
+pre-verification. Base, Arbitrum One, Optimism and Unichain keep their earlier
+sizes. Saved v2 and v3 operations keep their original offers and validation.
+
+New operations set gas prices when each step runs, not when the transfer is
+prepared. The approval screen and the fee permit freeze your maximum fee in
+USDC, and the Circle paymaster cannot charge more than that on-chain. After
+approval, before each step until the UserOperation is signed, APN reads
+Pimlico's current prices. It takes a priority fee of at least twice the fast
+tier and continues only while the whole offer at those prices fits your maximum
+fee. The UserOperation is signed with the prices chosen just before signing.
+The check before sending still requires those prices to cover the bundler's
+current slow tier. For these operations, the `gas` prices in the operation
+status are the preparation quote.
+
+A quote above your maximum fee is refused at preparation. After approval, a
+price rise beyond it ends the operation as `failed_before_effect` before the
+bootstrap is disclosed. After the bootstrap is disclosed, a price spike, rate
+limit or transport error in a check is retried every 5 seconds for up to about
+90 seconds before APN records `unknown_finality`. Saved v2 and v3 operations
+keep the prices frozen at preparation.
+
+Before the approval screen, APN estimates the same UserOperation signed by a
+throwaway key, with a state override that gives that key the transfer's USDC.
+If the estimate does not fit the frozen offer, or the bundler refuses the
+override, the operation ends as `failed_before_effect` with
+`gasless_mirror_estimate_bounds` or `gasless_mirror_estimate_unavailable`.
+Your key is not loaded, nothing is signed with it and nothing is disclosed. An
+operation that was approved but not yet signed runs the same check on resume
+before signing.
 
 There is no default chain, arbitrary token option or native-payment fallback.
 The USDC address comes from the verified chain registry. USDC has six decimals;

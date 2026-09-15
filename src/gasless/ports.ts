@@ -1,7 +1,7 @@
 import type { Address, Hex } from "../model.js";
 import type { GaslessOperationRecord, GaslessRole } from "./operation-model.js";
 import type { GaslessAuthorization, GaslessChainId, GaslessCursor, GaslessEffectIdentity,
-  GaslessEstimate, GaslessGas, GaslessIntent, GaslessObservation, GaslessOwner, GaslessSnapshot, GaslessUserOperation } from "./model.js";
+  GaslessEstimate, GaslessFees, GaslessGas, GaslessIntent, GaslessObservation, GaslessOwner, GaslessSnapshot, GaslessUserOperation } from "./model.js";
 
 interface GaslessMaterialBinding {
   readonly schemaVersion: "apn.gasless-effect.v1";
@@ -26,8 +26,9 @@ export interface GaslessUserOperationMaterial extends GaslessMaterialBinding {
 export type GaslessSealedMaterial = GaslessBootstrapMaterial | GaslessUserOperationMaterial;
 export interface GaslessCustodyPort {
   load(operation: GaslessOperationRecord, role: GaslessRole): Promise<GaslessSealedMaterial | null>;
+  /** A v4 UserOperation is signed at the `fees` its guard just chose; a bootstrap takes no fees. */
   seal(operation: GaslessOperationRecord, role: GaslessRole, owner: GaslessOwner,
-    bootstrap?: GaslessBootstrapMaterial): Promise<GaslessSealedMaterial>;
+    bootstrap?: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessSealedMaterial>;
 }
 /** Observation has no custody, fee estimation, disclosure or submission capability. */
 export interface GaslessObservationPort {
@@ -43,7 +44,10 @@ export interface GaslessRpcPort extends GaslessObservationPort {
   assertChain(): Promise<void>;
   /** Verifies endpoints, protocol and fresh fees; an approved offer is checked without alteration. */
   snapshot(owner: Address, approvedGas?: GaslessGas): Promise<GaslessSnapshot>;
-  estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial): Promise<GaslessEstimate>;
+  /** Estimates the offer's exact UserOperation shape at `fees`, signed by a throwaway key under a USDC balance override. */
+  mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate>;
+  /** v4 intents need the `fees` their guard chose before disclosure; earlier intents use their frozen fees. */
+  estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate>;
   send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex>;
 }
 export type GaslessRpcFactory = (chainId: GaslessChainId) => GaslessRpcPort;

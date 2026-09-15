@@ -1,7 +1,7 @@
 import { hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { toHex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { GaslessEffectStore } from "./effect-store.js";
 import { validateGaslessOperation } from "./operation-validation.js";
 import { assertGaslessOwner } from "./owner.js";
@@ -24,7 +24,7 @@ export class LocalGaslessCustody {
         validRole(role);
         return await this.state.withLocks([`custody:${operation.profileHash}`], async () => await this.effects.load(operation, role));
     }
-    async seal(operation, role, owner, bootstrap) {
+    async seal(operation, role, owner, bootstrap, fees) {
         validateGaslessOperation(operation);
         validRole(role);
         assertSigningGate(operation, role, owner, this.now());
@@ -50,13 +50,13 @@ export class LocalGaslessCustody {
                 if (account.address !== owner.address)
                     gaslessFailure("APN_WALLET_MISMATCH", "gasless_owner_key_binding");
                 if (role === "bootstrap") {
-                    if (bootstrap !== undefined)
+                    if (bootstrap !== undefined || fees !== undefined)
                         corrupt("gasless_unexpected_bootstrap_argument");
                     return await this.sealBootstrap(operation, account);
                 }
                 if (bootstrap === undefined)
                     corrupt("gasless_original_bootstrap_required");
-                return await this.sealUserOperation(operation, account, bootstrap);
+                return await this.sealUserOperation(operation, account, bootstrap, fees);
             }
             finally {
                 this.wallets.clear(wallet.secret);
@@ -96,7 +96,7 @@ export class LocalGaslessCustody {
         });
         return await this.effects.seal(operation, material);
     }
-    async sealUserOperation(operation, account, suppliedBootstrap) {
+    async sealUserOperation(operation, account, suppliedBootstrap, fees) {
         const original = await this.effects.load(operation, "bootstrap");
         if (original?.role !== "bootstrap")
             unavailable("gasless_bootstrap_seal_missing");
@@ -105,9 +105,9 @@ export class LocalGaslessCustody {
         if (operation.bootstrap.estimate === null)
             corrupt("gasless_checked_estimate_missing");
         const estimateHash = hashObject(operation.bootstrap.estimate);
-        const estimateWire = gaslessUserOperation(operation.intent, original, GASLESS_ESTIMATE_SIGNATURE);
+        const estimateWire = gaslessUserOperation(operation.intent, original, GASLESS_ESTIMATE_SIGNATURE, fees);
         const signature = await account.signTypedData(gaslessUserOperationTypedData(operation.intent, estimateWire));
-        const userOperation = gaslessUserOperation(operation.intent, original, signature);
+        const userOperation = gaslessUserOperation(operation.intent, original, signature, fees);
         const userOperationHash = await verifyGaslessUserOperation(operation.intent, userOperation);
         const body = {
             schemaVersion: "apn.gasless-effect.v1",
@@ -124,6 +124,19 @@ export class LocalGaslessCustody {
         const material = { ...body, materialHash: hashObject(body) };
         return await this.effects.seal(operation, material);
     }
+}
+/** Throwaway-key material for a pre-disclosure mirror estimate. The owner's wallet and key are never loaded. */
+export async function gaslessMirrorBootstrap(intent) {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const initialSnapshot = { ...intent.initialSnapshot, owner: account.address, delegation: "empty",
+        allowanceAtomic: "0", permitNonceAtomic: "0", entryPointNonceAtomic: "0", eoaNonceAtomic: "0", pendingEoaNonceAtomic: "0" };
+    const mirror = { ...intent, owner: { ...intent.owner, address: account.address }, initialSnapshot };
+    const permitSignature = await account.signTypedData(gaslessPermitTypedData(mirror));
+    const signed = await account.signAuthorization(gaslessAuthorizationRequest(mirror));
+    if (signed.yParity === undefined)
+        corrupt("gasless_authorization_parity");
+    return { intent: mirror, permitSignature, authorization: { chainId: toHex(signed.chainId), address: signed.address,
+            nonce: toHex(signed.nonce), yParity: toHex(signed.yParity), r: signed.r, s: signed.s } };
 }
 function assertSigningGate(operation, role, owner, now) {
     const effect = role === "bootstrap" ? operation.bootstrap : operation.userOperation;

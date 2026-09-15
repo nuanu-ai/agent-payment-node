@@ -1,6 +1,6 @@
 import { concat, decodeFunctionData, encodeFunctionData, hashTypedData, numberToHex, padHex } from "viem";
 import { GASLESS_ACCOUNT_ABI, GASLESS_TOKEN_ABI } from "./abi.js";
-import { GASLESS_FACTORY, GASLESS_MAX_UINT, GASLESS_ZERO_ADDRESS, gaslessAddress, gaslessExact, gaslessFailure, gaslessHex, gaslessSame, gaslessUint } from "./validation.js";
+import { GASLESS_FACTORY, GASLESS_MAX_UINT, GASLESS_MAX_UINT120, GASLESS_ZERO_ADDRESS, gaslessAddress, gaslessExact, gaslessFailure, gaslessHex, gaslessSame, gaslessUint } from "./validation.js";
 const WIRE_FIELDS = ["sender", "nonce", "callData", "callGasLimit",
     "verificationGasLimit", "preVerificationGas", "maxFeePerGas", "maxPriorityFeePerGas", "paymaster",
     "paymasterVerificationGasLimit", "paymasterPostOpGasLimit", "paymasterData", "signature"];
@@ -61,8 +61,9 @@ export function gaslessAuthorizationRequest(intent) {
         wireFailure();
     return { chainId: intent.request.chainId, address: intent.delegate, nonce: Number(nonce) };
 }
-export function gaslessUserOperation(intent, bootstrap, signature) {
+export function gaslessUserOperation(intent, bootstrap, signature, fees) {
     validateGaslessBatch(intent);
+    const priced = gaslessWireFees(intent, fees);
     const permit = structuralSignature(bootstrap.permitSignature);
     const accountSignature = structuralSignature(signature);
     const base = {
@@ -73,8 +74,8 @@ export function gaslessUserOperation(intent, bootstrap, signature) {
         callGasLimit: quantity(intent.gas.callGasLimit),
         verificationGasLimit: quantity(intent.gas.verificationGasLimit),
         preVerificationGas: quantity(intent.gas.preVerificationGas),
-        maxFeePerGas: quantity(intent.gas.maxFeePerGas),
-        maxPriorityFeePerGas: quantity(intent.gas.maxPriorityFeePerGas),
+        maxFeePerGas: quantity(priced.maxFeePerGas),
+        maxPriorityFeePerGas: quantity(priced.maxPriorityFeePerGas),
         paymaster: intent.paymaster,
         paymasterVerificationGasLimit: quantity(intent.gas.paymasterVerificationGasLimit),
         paymasterPostOpGasLimit: quantity(intent.gas.paymasterPostOpGasLimit),
@@ -131,17 +132,41 @@ export function validateGaslessWire(intent, value) {
     const permit = parsePaymasterData(intent, wire.paymasterData);
     structuralSignature(wire.signature);
     const authorization = expectsAuthorization ? validateAuthorization(intent, wire.eip7702Auth) : null;
-    const rebuilt = gaslessUserOperation(intent, { permitSignature: permit, authorization }, wire.signature);
+    const fees = intent.wireVersion === "apn.gasless-wire.v4"
+        ? { maxFeePerGas: wireQuantity(wire.maxFeePerGas), maxPriorityFeePerGas: wireQuantity(wire.maxPriorityFeePerGas) } : undefined;
+    const rebuilt = gaslessUserOperation(intent, { permitSignature: permit, authorization }, wire.signature, fees);
     if (!gaslessSame(rebuilt, wire))
         wireFailure();
     return wire;
+}
+/** v4 prices the UserOperation after approval, bounded on-chain by the permit's fee cap; earlier wires keep the prepared prices. */
+export function gaslessWireFees(intent, fees) {
+    if (intent.wireVersion !== "apn.gasless-wire.v4") {
+        if (fees !== undefined && (fees.maxFeePerGas !== intent.gas.maxFeePerGas ||
+            fees.maxPriorityFeePerGas !== intent.gas.maxPriorityFeePerGas))
+            wireFailure();
+        return { maxFeePerGas: intent.gas.maxFeePerGas, maxPriorityFeePerGas: intent.gas.maxPriorityFeePerGas };
+    }
+    if (fees === undefined)
+        return wireFailure();
+    const maximum = gaslessUint(fees.maxFeePerGas, true, "APN_PROVIDER_PROTOCOL");
+    const priority = gaslessUint(fees.maxPriorityFeePerGas, false, "APN_PROVIDER_PROTOCOL");
+    if (maximum > GASLESS_MAX_UINT120 || priority > maximum)
+        wireFailure();
+    return { maxFeePerGas: maximum.toString(), maxPriorityFeePerGas: priority.toString() };
+}
+/** The prices a validated UserOperation was signed with. */
+export function gaslessSignedFees(intent, value) {
+    const wire = validateGaslessWire(intent, value);
+    return { maxFeePerGas: wireQuantity(wire.maxFeePerGas), maxPriorityFeePerGas: wireQuantity(wire.maxPriorityFeePerGas) };
 }
 export function gaslessEnvelopeBinding(intent) {
     const { unsignedEnvelopeHash: _hash, ...body } = intent;
     return { schemaVersion: "apn.gasless-envelope.v1", ...body, permitDeadlineAtomic: GASLESS_MAX_UINT.toString() };
 }
 function usesEip7702Marker(intent) {
-    if (intent.wireVersion !== undefined && intent.wireVersion !== "apn.gasless-wire.v2" && intent.wireVersion !== "apn.gasless-wire.v3")
+    if (intent.wireVersion !== undefined && intent.wireVersion !== "apn.gasless-wire.v2" && intent.wireVersion !== "apn.gasless-wire.v3" &&
+        intent.wireVersion !== "apn.gasless-wire.v4")
         wireFailure();
     return intent.wireVersion === undefined || intent.initialSnapshot.delegation === "empty";
 }
@@ -163,6 +188,11 @@ function validateAuthorization(intent, value) {
 }
 function quantity(value) {
     return numberToHex(gaslessUint(value, false, "APN_PROVIDER_PROTOCOL"));
+}
+function wireQuantity(value) {
+    if (typeof value !== "string" || !/^0x(?:0|[1-9a-f][0-9a-f]{0,31})$/u.test(value))
+        wireFailure();
+    return BigInt(value).toString();
 }
 function word(value) { return numberToHex(gaslessUint(value), { size: 32 }); }
 function structuralSignature(value) {

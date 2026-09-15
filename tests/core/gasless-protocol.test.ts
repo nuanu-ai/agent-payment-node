@@ -81,7 +81,10 @@ test("the captured public Circle estimate fits a new offer but never enlarges a 
   assert.equal(JSON.stringify(legacyGas), frozen);
   assert.throws(() => assertGaslessEstimate(intent, { ...estimate, paymasterVerificationGasLimit: "500001" }),
     { code: "APN_FEE_BUDGET_EXCEEDED" });
-  assert.throws(() => validateGaslessGas({ ...intent.gas, callGasLimit: "250000" }),
+  // The legacy 250k call size is recognized only with its legacy paymaster size, never as a hybrid of the two offers.
+  assert.throws(() => validateGaslessStoredOffer({ ...intent.gas, callGasLimit: "250000" }, intent.initialSnapshot, intent.wireVersion),
+    { code: "APN_FEE_BUDGET_EXCEEDED" });
+  assert.throws(() => validateGaslessGas({ ...intent.gas, callGasLimit: "250000", paymasterVerificationGasLimit: "700000" }),
     { code: "APN_FEE_BUDGET_EXCEEDED" });
 });
 
@@ -91,18 +94,18 @@ test("stored offers retain only exact legacy or current gas, including legacy-on
     const state = snapshot(owner, designation), current = gaslessGas(state);
     const legacy = { ...current, callGasLimit: "250000", paymasterVerificationGasLimit: "200000" };
     const before = JSON.stringify(legacy);
-    assert.doesNotThrow(() => validateGaslessStoredOffer(current, state));
-    assert.doesNotThrow(() => validateGaslessStoredOffer(legacy, state));
+    assert.doesNotThrow(() => validateGaslessStoredOffer(current, state, undefined));
+    assert.doesNotThrow(() => validateGaslessStoredOffer(legacy, state, undefined));
     assert.equal(JSON.stringify(legacy), before);
     for (const change of [
       { callGasLimit: "199999" }, { callGasLimit: "200000" }, { paymasterVerificationGasLimit: "199999" },
       { paymasterVerificationGasLimit: "500000" }, { verificationGasLimit: "99999" },
       { preVerificationGas: "124999" }, { paymasterPostOpGasLimit: "35001" },
       { maxFeePerGas: "2100000001" }, { maxPriorityFeePerGas: "100000001" },
-    ]) assert.throws(() => validateGaslessStoredOffer({ ...legacy, ...change }, state), { code: "APN_FEE_BUDGET_EXCEEDED" });
+    ]) assert.throws(() => validateGaslessStoredOffer({ ...legacy, ...change }, state, undefined), { code: "APN_FEE_BUDGET_EXCEEDED" });
     const heavy = { ...state, feeConfiguration: { ...state.feeConfiguration, additionalGasCharge: "200000" } };
     assert.throws(() => gaslessGas(heavy), { code: "APN_FEE_BUDGET_EXCEEDED" });
-    assert.doesNotThrow(() => validateGaslessStoredOffer({ ...legacy, paymasterPostOpGasLimit: "200000" }, heavy));
+    assert.doesNotThrow(() => validateGaslessStoredOffer({ ...legacy, paymasterPostOpGasLimit: "200000" }, heavy, undefined));
   }
 });
 
@@ -463,12 +466,13 @@ test("v2 empty initCode hash matches deployed Base EntryPoint and differs from i
   assert.throws(() => validateGaslessWire(intent, legacyWire), { code: "APN_PROVIDER_PROTOCOL" });
 });
 
-test("the frozen wire version admits only legacy absence, v2 or v3", () => {
+test("the frozen wire version admits only legacy absence, v2, v3 or v4", () => {
   const version = intentSchema.shape.wireVersion;
   assert.equal(version.safeParse(undefined).success, true);
   assert.equal(version.safeParse("apn.gasless-wire.v2").success, true);
   assert.equal(version.safeParse("apn.gasless-wire.v3").success, true);
-  for (const invalid of [null, 2, "", "apn.gasless-wire.v1", "apn.gasless-wire.v4"]) {
+  assert.equal(version.safeParse("apn.gasless-wire.v4").success, true);
+  for (const invalid of [null, 2, "", "apn.gasless-wire.v1", "apn.gasless-wire.v5"]) {
     assert.equal(version.safeParse(invalid).success, false);
   }
 });

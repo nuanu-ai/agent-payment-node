@@ -20,7 +20,7 @@ test("gasless strict bundler batches accept reordered IDs and deny malformed, du
   const s = await bundledGaslessFixture(temporary.root); s.setLimit(100);
   s.setBatchReply(rows => rows.reverse());
   const good = await s.rpc.snapshot(s.account.address), approved = gaslessGas(good);
-  assert.equal(good.maxPriorityFeePerGas, "300000");
+  assert.equal(good.maxPriorityFeePerGas, "600000");
   const faults: Array<(rows: any[]) => unknown> = [
     rows => rows.slice(1), rows => [...rows, rows[0]], rows => [rows[0], rows[0], rows[2]],
     rows => [{ ...rows[0], id: "unknown" }, ...rows.slice(1)],
@@ -44,7 +44,7 @@ test("gasless existing offers are never enlarged when current bundler prices exc
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await bundledGaslessFixture(temporary.root); s.setLimit(100);
   const original = await s.rpc.snapshot(s.account.address), approved = gaslessGas(original), frozen = structuredClone(approved);
-  for (const quote of [tiers(2_300_001n, 200_000n), tiers(2_300_000n, 300_001n)]) {
+  for (const quote of [tiers(2_600_001n, 200_000n), tiers(2_300_000n, 600_001n)]) {
     s.setFeeQuote(quote);
     await assert.rejects(s.rpc.snapshot(s.account.address, approved), /gasless_bundler_fee_drift/u);
     assert.deepEqual(approved, frozen);
