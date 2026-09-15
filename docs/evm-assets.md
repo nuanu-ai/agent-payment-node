@@ -1,6 +1,6 @@
 # Explicit EVM assets
 
-The APN 0.5.12 package retains the released 0.5.10 EVM support for exactly
+The APN 0.5.13 package retains the released 0.5.10 EVM support for exactly
 Base (`eip155:8453`), Ethereum mainnet (`eip155:1`) and Arbitrum One
 (`eip155:42161`) for the local encrypted disposable wallet. Package availability
 and a fresh mainnet payment remain separate proof layers.
