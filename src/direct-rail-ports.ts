@@ -143,6 +143,8 @@ export interface DirectRailPort {
   /** Called only after durable `submitting`; a thrown error is ambiguous. */
   submit(binding: RailEffectBinding, effect: RailSignedEffect | null): Promise<{ readonly transactionId: string }>;
   inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, expectedRawPayloadHash?: string): Promise<RailInspection>;
+  /** Local rails: throws unless the frozen validity window has passed and RPC history shows no transaction. */
+  assertValidityExpired?(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<void>;
 }
 
 export interface ChainWalletStoragePort {

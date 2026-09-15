@@ -73,6 +73,7 @@ test("eligible owner abandonment is receipt-first, releases the prepare gate and
     recipient: RECIPIENT,
     amountAtomic: "1000000",
     amountDecimal: "1",
+    chainLabel: "Base (8453)", assetLabel: "canonical Base USDC", unit: "USDC", outcomeNote: "Financial outcome: UNKNOWN. The provider may already have sent this transfer.",
   }]);
   const publicOperation = result.operation as Record<string, unknown>;
   assert.equal(publicOperation.state, "abandoned_unknown");
@@ -386,6 +387,7 @@ function abandonIntent(): OperationAbandonIntent {
     operationId: "a".repeat(64), fingerprint: "b".repeat(64), profile: PROFILE,
     providerId: PROVIDER, walletAddress: WALLET, recipient: RECIPIENT,
     amountAtomic: "1000000", amountDecimal: "1",
+    chainLabel: "Base (8453)", assetLabel: "canonical Base USDC", unit: "USDC", outcomeNote: "Financial outcome: UNKNOWN. The provider may already have sent this transfer.",
   };
 }
 

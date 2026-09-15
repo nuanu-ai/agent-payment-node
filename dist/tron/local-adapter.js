@@ -196,6 +196,21 @@ export class TronLocalAdapter {
             mismatch();
         return await inspectTron(this.rpc, account, prepared, transactionId, expectedRawPayloadHash, this.now());
     }
+    async assertValidityExpired(account, prepared, transactionId) {
+        await this.currentAccount(account);
+        validateRailPrepared(prepared, account);
+        await assertTronNetwork(this.rpc);
+        const snapshot = prepared.resources;
+        if (snapshot === undefined || unsignedTronPrepared(prepared).txID !== transactionId)
+            mismatch();
+        // Consensus checks expiration against the previous head, so no block after this solidified head can include it.
+        if (tronBlock(await this.rpc.call("walletsolidity/getnowblock", {})).timestamp <= atomic(snapshot.expirationMsAtomic) + 3000n)
+            validityOpen();
+        const body = tronRecord(await this.rpc.call("walletsolidity/gettransactionbyid", { value: transactionId }));
+        const info = tronRecord(await this.rpc.call("walletsolidity/gettransactioninfobyid", { value: transactionId }));
+        if (Object.keys(body).length !== 0 || Object.keys(info).length !== 0)
+            validityOpen();
+    }
     requireAsset(asset) { if (canonicalJson(asset) !== canonicalJson(this.asset(asset.alias)))
         mismatch(); }
     async currentAccount(account) {
@@ -213,4 +228,5 @@ function requireFunds(native, token, amount, maximumFee, isNative) {
 function insufficientAsset() { throw new ApnError("APN_INSUFFICIENT_ASSET", "The canonical USDT balance is insufficient."); }
 function feeExceeded() { throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "TRON Bandwidth, activation or Energy cannot fit the selected total TRX fee cap."); }
 function mismatch() { throw new ApnError("APN_WALLET_MISMATCH", "The TRON account, asset or sealed effect does not match this operation."); }
+function validityOpen() { throw new ApnError("APN_OPERATION_BLOCKED", "The TRON transfer is still inside its validity window or visible in solidified history; use operation resume."); }
 //# sourceMappingURL=local-adapter.js.map
