@@ -138,6 +138,15 @@ export class TronLocalAdapter implements DirectRailPort {
     if (expectedRawPayloadHash === undefined) mismatch();
     return await inspectTron(this.rpc, account, prepared, transactionId, expectedRawPayloadHash, this.now());
   }
+  async assertValidityExpired(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<void> {
+    await this.currentAccount(account); validateRailPrepared(prepared, account); await assertTronNetwork(this.rpc);
+    const snapshot = prepared.resources; if (snapshot === undefined || unsignedTronPrepared(prepared).txID !== transactionId) mismatch();
+    // Consensus checks expiration against the previous head, so no block after this solidified head can include it.
+    if (tronBlock(await this.rpc.call("walletsolidity/getnowblock", {})).timestamp <= atomic(snapshot.expirationMsAtomic) + 3000n) validityOpen();
+    const body = tronRecord(await this.rpc.call("walletsolidity/gettransactionbyid", { value: transactionId }));
+    const info = tronRecord(await this.rpc.call("walletsolidity/gettransactioninfobyid", { value: transactionId }));
+    if (Object.keys(body).length !== 0 || Object.keys(info).length !== 0) validityOpen();
+  }
   private requireAsset(asset: ChainAsset): void { if (canonicalJson(asset) !== canonicalJson(this.asset(asset.alias))) mismatch(); }
   private async currentAccount(account: ChainAccount): Promise<void> {
     const stored = await this.account(account.profile); if (stored === null || canonicalJson(stored) !== canonicalJson(account)) mismatch();
@@ -150,3 +159,4 @@ function requireFunds(native: bigint, token: bigint, amount: bigint, maximumFee:
 function insufficientAsset(): never { throw new ApnError("APN_INSUFFICIENT_ASSET", "The canonical USDT balance is insufficient."); }
 function feeExceeded(): never { throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "TRON Bandwidth, activation or Energy cannot fit the selected total TRX fee cap."); }
 function mismatch(): never { throw new ApnError("APN_WALLET_MISMATCH", "The TRON account, asset or sealed effect does not match this operation."); }
+function validityOpen(): never { throw new ApnError("APN_OPERATION_BLOCKED", "The TRON transfer is still inside its validity window or visible in solidified history; use operation resume."); }

@@ -247,3 +247,13 @@ recovery. They do not use public network traffic or money. Local TRX and local
 USDT each retain an open mainnet acceptance row. Publication, clean installation
 and each bounded live transfer require separate evidence; none is established by
 this document, a capability response, a public RPC identity read or a fixture.
+
+## Expired unlanded transfer
+
+A local TRX or USDT transfer can stay `unknown_finality` when broadcast lost its response and solidified history never shows the transaction. `operation resume` keeps observing and never rebroadcasts it. After the solidified head timestamp passes the frozen expiration by more than one block interval and solidified history still has no transaction or info for its id, the owner may end the operation in a foreground terminal:
+
+```sh
+apn operation abandon --operation <operation-id>
+```
+
+The operation becomes `abandoned_unknown` with an owner-acknowledgement receipt, and the profile can prepare a new transfer. The financial outcome stays unknown because history can be incomplete; APN refuses abandonment while the expiration window is open or the transaction is visible.

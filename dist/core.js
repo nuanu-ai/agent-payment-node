@@ -60,7 +60,7 @@ export class ApnCore {
         this.gasless = new GaslessService(this.context);
         this.metaMaskGasless = new MetaMaskGaslessService(this.context);
         this.smartAccountGasless = new SmartAccountGaslessService(this.context);
-        this.operationAbandon = new OperationAbandonService(this.context);
+        this.operationAbandon = new OperationAbandonService(this.context, this.rails);
     }
     async execute(request) {
         const requestId = this.context.ids.next();

@@ -12,6 +12,8 @@ import { sealChainAccount } from "../../src/chain-account-store.js";
 import { inspectSolana } from "../../src/solana/evidence.js";
 import { solanaMessage } from "../../src/solana/message.js";
 import { temporaryState } from "./helpers.js";
+import { OperationService } from "../../src/operation-service.js";
+import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 
 test("Solana CLI and MCP use the same explicit profile/asset/amount binding", () => {
@@ -128,4 +130,25 @@ test("Solana HTTPS rejects wrong ids, malformed and oversized responses and cred
   await assert.rejects(new SolanaRpc("https://rpc.example", fetcher).call("getGenesisHash", []), (error: Error) => !error.message.includes("secret_external_data"));
   const oversized = (async () => new Response("x".repeat(2_097_153), { headers: { "content-type": "application/json" } })) as typeof fetch;
   await assert.rejects(new SolanaRpc("https://rpc.example", oversized).call("getGenesisHash", []), { code: "APN_RPC_PROTOCOL" });
+});
+
+class RailAbandonApproval implements OperationAbandonApprovalPort {
+  readonly calls: OperationAbandonIntent[] = [];
+  async approve(intent: OperationAbandonIntent): Promise<void> { this.calls.push(intent); }
+}
+
+test("Solana expired unlanded transfer is owner-abandoned only after its finalized validity window and never resent", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const approval = new RailAbandonApproval();
+  const s = await solanaFixture(temporary.root, { abandonApproval: approval }); const id = await s.prepare();
+  s.rpc.submissionTimeout = true; const first = await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal((first.operation as { state: string }).state, "unknown_finality"); assert.equal(s.rpc.submissions.length, 1);
+  s.rpc.absentHistory = true; s.rpc.blockHeight = 200n;
+  assert.equal((await s.core.execute({ command: "operation.abandon", operationId: id })).error?.code, "APN_OPERATION_BLOCKED");
+  s.rpc.blockHeight = 201n; s.rpc.absentHistory = false;
+  assert.equal((await s.core.execute({ command: "operation.abandon", operationId: id })).error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(approval.calls.length, 0); s.rpc.absentHistory = true;
+  const abandoned = await s.core.execute({ command: "operation.abandon", operationId: id });
+  assert.equal(abandoned.ok, true, abandoned.error?.message); assert.equal((abandoned.operation as { state: string }).state, "abandoned_unknown");
+  assert.equal(approval.calls.length, 1); assert.equal(s.rpc.submissions.length, 1);
+  await new OperationService(s.core.context.state).assertProfileAvailable(s.account.profileHash);
 });
