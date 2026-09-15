@@ -22,9 +22,11 @@ import type { BridgeDependencies } from "./lifi/service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
+import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 
 export interface CoreDependencies {
+  readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
   readonly gasless?: GaslessDependencies;
@@ -57,6 +59,7 @@ export interface CoreDependencies {
 }
 
 export class RuntimeContext {
+  readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
   readonly gasless?: GaslessDependencies;
@@ -90,6 +93,7 @@ export class RuntimeContext {
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
+    if (dependencies.facilitatorGasless !== undefined) this.facilitatorGasless = dependencies.facilitatorGasless;
     if (dependencies.smartAccountGasless !== undefined) this.smartAccountGasless = dependencies.smartAccountGasless;
     if (dependencies.metaMaskGasless !== undefined) this.metaMaskGasless = dependencies.metaMaskGasless;
     if (dependencies.gasless !== undefined) this.gasless = dependencies.gasless;

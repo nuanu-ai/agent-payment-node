@@ -15,7 +15,7 @@ type Stored = Readonly<Record<string, unknown>> & { readonly operationId: string
 interface Stores {
   readonly direct?: readonly Stored[]; readonly x402?: readonly Stored[]; readonly providerX402?: readonly Stored[];
   readonly rails?: readonly Stored[]; readonly bridges?: readonly Stored[]; readonly gasless?: readonly Stored[];
-  readonly metaMask?: readonly Stored[]; readonly smartAccount?: readonly Stored[];
+  readonly metaMask?: readonly Stored[]; readonly smartAccount?: readonly Stored[]; readonly facilitator?: readonly Stored[];
 }
 
 function service(stores: Stores): OperationService {
@@ -23,7 +23,7 @@ function service(stores: Stores): OperationService {
   const repository = (records?: readonly Stored[]) => ({ listOperations: owned(records) }) as never;
   const state = { listOperations: owned(stores.direct), listX402Operations: owned(stores.x402) } as never;
   return new OperationService(state, repository(stores.providerX402), repository(stores.rails), repository(stores.bridges),
-    repository(stores.gasless), repository(stores.metaMask), repository(stores.smartAccount));
+    repository(stores.gasless), repository(stores.metaMask), repository(stores.smartAccount), repository(stores.facilitator));
 }
 const open = (operationId: string, fields: Readonly<Record<string, unknown>>): Stored =>
   ({ operationId, state: "unknown_finality", terminal: false, ...fields });
@@ -55,6 +55,12 @@ test("a MetaMask gasless operation on Base blocks the same address on Base but n
   const operations = service({ metaMask: [open("mm-1", { intent: { request: { chainId: 8453 }, binding: { address: B } } })] });
   await assert.rejects(operations.assertEvmAccountAvailable(PROFILE, 8453, B), blockedOn("mm-1", "evm:8453", B));
   await operations.assertEvmAccountAvailable(PROFILE, 42161, B);
+});
+
+test("an Avalanche facilitator operation blocks the same Local address on Avalanche only", async () => {
+  const operations = service({ facilitator: [open("avax-1", { intent: { request: { chainId: 43114 }, owner: { address: A } } })] });
+  await assert.rejects(operations.assertEvmAccountAvailable(PROFILE, 43114, A), blockedOn("avax-1", "evm:43114", A.toLowerCase()));
+  await operations.assertEvmAccountAvailable(PROFILE, 8453, A);
 });
 
 test("rail operations are scoped by rail genesis and sender", async () => {
