@@ -463,11 +463,12 @@ test("v2 empty initCode hash matches deployed Base EntryPoint and differs from i
   assert.throws(() => validateGaslessWire(intent, legacyWire), { code: "APN_PROVIDER_PROTOCOL" });
 });
 
-test("the frozen wire version admits only legacy absence or v2", () => {
+test("the frozen wire version admits only legacy absence, v2 or v3", () => {
   const version = intentSchema.shape.wireVersion;
   assert.equal(version.safeParse(undefined).success, true);
   assert.equal(version.safeParse("apn.gasless-wire.v2").success, true);
-  for (const invalid of [null, 2, "", "apn.gasless-wire.v1", "apn.gasless-wire.v3"]) {
+  assert.equal(version.safeParse("apn.gasless-wire.v3").success, true);
+  for (const invalid of [null, 2, "", "apn.gasless-wire.v1", "apn.gasless-wire.v4"]) {
     assert.equal(version.safeParse(invalid).success, false);
   }
 });

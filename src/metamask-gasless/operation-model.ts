@@ -7,7 +7,7 @@ import type { MetaMaskGaslessReason } from "./reasons.js";
 export const MM_OPERATION_VERSION = "apn.metamask-gasless-operation.v1" as const;
 export const MM_OPERATION_KIND = "metamask_gasless_transfer" as const;
 export const MM_RECEIPT_VERSION = "apn.metamask-gasless-receipt.v1" as const;
-export const MM_TERMINAL: readonly MetaMaskGaslessState[] = ["completed", "failed_before_effect"];
+export const MM_TERMINAL: readonly MetaMaskGaslessState[] = ["completed", "failed_before_effect", "abandoned_unknown"];
 export const MM_HISTORY_LIMIT = 96;
 export const MM_FILE_LIMIT = 1024 * 1024;
 export const MM_DISPATCH_RESERVE_TRANSITIONS = 8;
@@ -51,7 +51,7 @@ export interface MetaMaskGaslessPublicOperation {
   readonly state: MetaMaskGaslessState;
   readonly terminal: boolean;
   readonly reason: MetaMaskGaslessReason;
-  readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_correlated";
+  readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_correlated" | "owner_acknowledgement_only";
   readonly transfer: {
     readonly chain_id: MetaMaskGaslessChainId; readonly token: Address; readonly symbol: "USDC"; readonly decimals: 6;
     readonly sender: Address; readonly recipient: Address; readonly fee_recipient: Address;

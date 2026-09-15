@@ -70,10 +70,14 @@ export function validateGaslessMutable(op, s, at) {
     if (s.state === "failed_effects_pending" && (observed === null || observed.accounting.success ||
         observed.safeAccount.allowanceAtomic === "0" || s.failure === null))
         corrupt();
-    if (s.state === "failed_before_effect" && (s.bootstrap.signingAttempts !== 0 || s.userOperation.signingAttempts !== 0 ||
+    if (s.state === "failed_before_effect" && (s.bootstrap.disclosureAttempts !== 0 || s.userOperation.disclosureAttempts !== 0 ||
+        s.userOperation.submissionAttempts !== 0 ||
         s.failure === null || s.observation !== null || s.settlement !== null))
         corrupt();
     if (s.state === "unknown_finality" && s.bootstrap.signingAttempts === 0)
+        corrupt();
+    if (s.state === "abandoned_unknown" && (s.bootstrap.disclosureAttempts !== 1 || s.settlement !== null ||
+        s.failure !== "gasless_owner_abandoned"))
         corrupt();
     if (["safe_success", "safe_revert"].includes(s.userOperation.phase) && (observed === null ||
         observed.accounting.success !== (s.userOperation.phase === "safe_success")))

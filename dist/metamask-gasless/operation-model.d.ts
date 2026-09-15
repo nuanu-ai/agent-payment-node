@@ -45,7 +45,7 @@ export interface MetaMaskGaslessPublicOperation {
     readonly state: MetaMaskGaslessState;
     readonly terminal: boolean;
     readonly reason: MetaMaskGaslessReason;
-    readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_correlated";
+    readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_correlated" | "owner_acknowledgement_only";
     readonly transfer: {
         readonly chain_id: MetaMaskGaslessChainId;
         readonly token: Address;

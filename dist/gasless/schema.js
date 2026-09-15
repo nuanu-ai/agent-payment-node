@@ -55,7 +55,7 @@ export const snapshotSchema = z.strictObject({ ...accountFields, chainId: chainS
     rpcOrigin: originSchema, rpcEndpointHash: hashSchema, bundlerOrigin: originSchema, bundlerEndpointHash: hashSchema,
     block: blockSchema, protocolHash: hashSchema, token: addressSchema, feeConfiguration: feeConfigurationSchema,
     baseFeePerGas: uintSchema, maxFeePerGas: uintSchema, maxPriorityFeePerGas: uintSchema });
-export const intentSchema = z.strictObject({ wireVersion: z.literal("apn.gasless-wire.v2").optional(),
+export const intentSchema = z.strictObject({ wireVersion: z.enum(["apn.gasless-wire.v2", "apn.gasless-wire.v3"]).optional(),
     profile: ownerSchema.shape.profile, request: requestSchema,
     owner: ownerSchema, providerBinding: providerBindingSchema, initialSnapshot: snapshotSchema, gas: gasSchema,
     token: addressSchema, tokenDomain: tokenDomainSchema, paymaster: addressSchema, entryPoint: addressSchema,
@@ -88,7 +88,7 @@ export const consentSchema = z.strictObject({ policy: z.literal("apn.gasless.for
     fingerprint: hashSchema, approvedAt: isoSchema, expiresAt: isoSchema });
 export const stateSchema = z.enum(["awaiting_approval", "execution_pending", "bootstrap_pending", "user_operation_pending",
     "submitted_pending", "unknown_finality", "included_success", "included_revert", "failed_effects_pending",
-    "completed", "failed_before_effect", "failed_confirmed_revert", "failed_permissions_invalidated"]);
+    "completed", "failed_before_effect", "failed_confirmed_revert", "failed_permissions_invalidated", "abandoned_unknown"]);
 export const phaseSchema = z.enum(["unsealed", "signing_started", "sealed", "disclosure_started", "checked",
     "submitting", "submitted_pending", "unknown_finality", "included_success", "included_revert", "safe_success", "safe_revert"]);
 const attemptSchema = z.union([z.literal(0), z.literal(1)]);

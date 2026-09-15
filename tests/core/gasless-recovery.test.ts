@@ -45,8 +45,10 @@ for (const boundary of phases) test(`gasless durable ${boundary} survives expiry
   assert.equal(after.userOperation.signingAttempts, before.userOperation.signingAttempts);
   assert.equal(s.rpc.calls.filter((c) => c === "estimate").length, estimates);
   assert.equal(s.rpc.sends.length, sends); assert.equal(restarted.approval.calls.length, 0);
-  assert.equal(after.state, boundary === "user_submitted" ? "completed" : "unknown_finality");
+  const undisclosed = boundary === "bootstrap_signing" || boundary === "bootstrap_sealed";
+  assert.equal(after.state, boundary === "user_submitted" ? "completed" : undisclosed ? "failed_before_effect" : "unknown_finality");
   if (!after.terminal) await assert.rejects(new OperationService(s.state).assertProfileAvailable(after.profileHash), { code: "APN_OPERATION_BLOCKED" });
+  else await new OperationService(s.state).assertProfileAvailable(after.profileHash);
 });
 
 for (const boundary of ["bootstrap_checked", "user_sealed"] as const) {

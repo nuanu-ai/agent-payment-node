@@ -67,7 +67,7 @@ export class ApnCore {
     this.gasless = new GaslessService(this.context);
     this.metaMaskGasless = new MetaMaskGaslessService(this.context);
     this.smartAccountGasless = new SmartAccountGaslessService(this.context);
-    this.operationAbandon = new OperationAbandonService(this.context, this.rails);
+    this.operationAbandon = new OperationAbandonService(this.context, this.rails, this.gasless, this.metaMaskGasless);
   }
 
   async execute(request: CommandRequest): Promise<OutputEnvelope> {

@@ -9,6 +9,8 @@ export function gaslessNextActions(op) {
     return [`apn operation resume --operation ${op.operationId}${source === undefined ? "" : ` --observation-rpc-env ${source.environmentName}`}`];
 }
 export function gaslessProofClass(op) {
+    if (op.state === "abandoned_unknown")
+        return "owner_acknowledgement_only";
     if (op.state === "completed")
         return "rpc_safe_correlated";
     if (op.state === "failed_permissions_invalidated")

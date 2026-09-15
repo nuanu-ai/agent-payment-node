@@ -47,6 +47,9 @@ export class GaslessExecution {
             return op;
         if (op.userOperation.submissionAttempts === 1 || op.state === "failed_effects_pending")
             return await this.observation.run(op);
+        if (undisclosed(op) && this.now() >= Date.parse(op.intent.expiresAt)) {
+            return await this.save(op, { state: "failed_before_effect", failure: "gasless_action_expired" });
+        }
         if (op.bootstrap.disclosureAttempts === 1 && op.bootstrap.estimate === null) {
             return await this.observation.run(await this.unknown(op, "gasless_bootstrap_unresolved"));
         }
@@ -159,7 +162,12 @@ export class GaslessExecution {
         return await this.unknown(op, reason);
     }
     async unknown(op, reason) {
-        return await this.save(op, { state: "unknown_finality", failure: reason });
+        // Material that never left custody cannot produce an effect, so it must not hold the profile guard.
+        return await this.save(op, { state: undisclosed(op) ? "failed_before_effect" : "unknown_finality", failure: reason });
     }
+}
+function undisclosed(op) {
+    return op.bootstrap.disclosureAttempts === 0 && op.userOperation.disclosureAttempts === 0 &&
+        op.userOperation.submissionAttempts === 0 && op.settlement === null;
 }
 //# sourceMappingURL=execution.js.map
