@@ -58,7 +58,7 @@
     "@solana/kit": "8.2.0",
     "@toruslabs/ethereum-controllers": "9.12.0",
     "@x402/core": "2.23.0",
-    "@x402/evm": "2.23.0",
+    "@x402/evm": "2.24.0",
     "awal": "2.12.1",
     "tronweb": "6.5.0",
     "viem": "2.55.19",
