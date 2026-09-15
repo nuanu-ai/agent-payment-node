@@ -5,10 +5,10 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.15 is the ordinary release build for Apple Silicon macOS. It combines
+APN 0.5.16 is the ordinary release build for Apple Silicon macOS. It combines
 the admitted sprint commands with APN 0.5.10 EVM fee-envelope corrections.
 GitHub publication and the Homebrew Formula remain separate release gates; use
-only an exact verified 0.5.15 archive or installation for the new commands.
+only an exact verified 0.5.16 archive or installation for the new commands.
 
 APN 0.5.12 includes [explicit observation RPC recovery](docs/gasless.md#explicit-observation-rpc-recovery)
 for saved Local gasless operations whose original RPC cannot serve historical
@@ -45,7 +45,7 @@ the total USDC budget, so the sender can have zero native gas balance. The
 recipient amount and maximum USDC fee are frozen before foreground approval;
 unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
 for commands, persistent account permissions and recovery. This remains
-an APN 0.5.15 capability with separate per-network mainnet acceptance.
+an APN 0.5.16 capability with separate per-network mainnet acceptance.
 
 The same gasless commands also support an existing MetaMask Agent server wallet
 on Ethereum, Optimism, Polygon PoS, Monad, Sei, Base, Arbitrum and Linea. The
@@ -66,7 +66,7 @@ and the [verified archive recovery preflight](docs/gasless.md#existing-state-and
 ## Install
 
 Homebrew installation is a separate publication gate. Verify that `apn version`
-reports `0.5.15` before using the commands described for this release.
+reports `0.5.16` before using the commands described for this release.
 
 ```sh
 brew install nuanu-ai/tap/apn

@@ -1,3 +1,4 @@
+import type { SmartAccountGaslessObservationRpcFactory } from "./ports.js";
 import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
 import type { SmartAccountGaslessApprovalPort, SmartAccountGaslessMaterialPort, SmartAccountGaslessProviderPort, SmartAccountGaslessRepositoryPort, SmartAccountGaslessRpcFactory } from "./ports.js";
@@ -5,6 +6,7 @@ import { SmartAccountGaslessPreparation } from "./prepare.js";
 export interface SmartAccountGaslessDependencies {
     readonly rpcFor: SmartAccountGaslessRpcFactory;
     readonly material: SmartAccountGaslessMaterialPort;
+    readonly observationRpcFor?: SmartAccountGaslessObservationRpcFactory;
     readonly provider: SmartAccountGaslessProviderPort;
     readonly approval?: SmartAccountGaslessApprovalPort;
     readonly records?: SmartAccountGaslessRepositoryPort;
@@ -38,7 +40,7 @@ export declare class SmartAccountGaslessService {
     }>;
     prepare(input: Parameters<SmartAccountGaslessPreparation["prepare"]>[0]): Promise<import("./operation-model.js").SmartAccountGaslessPublicOperation>;
     approve(operationId: string): Promise<import("./operation-model.js").SmartAccountGaslessPublicOperation>;
-    resume(operationId: string): Promise<import("./operation-model.js").SmartAccountGaslessPublicOperation>;
+    resume(operationId: string, observationRpcEnv?: string): Promise<import("./operation-model.js").SmartAccountGaslessPublicOperation>;
     status(operationId: string): Promise<import("./operation-model.js").SmartAccountGaslessPublicOperation>;
     receipt(operationId: string): Promise<import("./operation-model.js").SmartAccountGaslessReceipt>;
     private project;

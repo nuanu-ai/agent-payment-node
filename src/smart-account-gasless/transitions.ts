@@ -163,7 +163,14 @@ function journalMutable(value: unknown, intent: SmartAccountGaslessIntent, opera
     if (p.transactionHash !== null) saHex(p.transactionHash, 32);
   } else if (m.state === "submitted_pending") corrupt();
   if (m.observation !== null) {
-    const o = saExact(m.observation, ["observedAt", "phase", "reason", "candidateTxHash", "evidenceHash"]);
+    const sourced = typeof m.observation === "object" && m.observation !== null && Object.hasOwn(m.observation, "source");
+    const o = saExact(m.observation, ["observedAt", "phase", "reason", "candidateTxHash", "evidenceHash", ...(sourced ? ["source"] : [])]);
+    if (sourced) {
+      const s = saExact(o.source, ["environmentName", "endpointOrigin", "endpointHash"]);
+      if (typeof s.environmentName !== "string" || s.environmentName.length > 128 || !/^APN_[A-Z0-9_]+_RPC_URL$/u.test(s.environmentName) ||
+        typeof s.endpointOrigin !== "string" || s.endpointOrigin.length > 256 || !/^https:\/\/[^/?#]+$/u.test(s.endpointOrigin)) corrupt();
+      saHash(s.endpointHash);
+    }
     if (exposedAt === null || !["pending", "unavailable", "invalid", "reorg", "success", "expired_unused"].includes(o.phase as string)) corrupt();
     within(o.observedAt, exposedAt, at);
     if (o.reason !== null && (typeof o.reason !== "string" || !Object.hasOwn(SA_REASON_CODES, o.reason))) corrupt();
