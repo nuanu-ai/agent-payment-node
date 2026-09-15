@@ -4,6 +4,7 @@ import { gaslessAddress, gaslessDecimal, gaslessFailure } from "./validation.js"
 import { gaslessCommandChain, gaslessCommandRequest } from "./command-input.js";
 import { GASLESS_TERMINAL } from "./operation-model.js";
 import { SA_TERMINAL } from "../smart-account-gasless/operation-model.js";
+import { FACILITATOR_TERMINAL } from "../facilitator-gasless/operation-model.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[], required = true): CommandOption => ({
   name, type, constraints, required, default: { kind: "none" }, sensitivity: "operator_input",
@@ -14,10 +15,11 @@ const operation = option("--operation", "operation_id", ["64_lowercase_hex_chara
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
   success: "USDC gross, fee budget, recipient amount, permission state and independently verified settlement.",
   failures: ["Classified APN error with no automatic fallback or replacement signature."] } as const;
-const states = { terminal: [...new Set([...GASLESS_TERMINAL, ...SA_TERMINAL])],
+const states = { terminal: [...new Set([...GASLESS_TERMINAL, ...SA_TERMINAL, ...FACILITATOR_TERMINAL])],
   non_terminal: ["awaiting_approval", "execution_pending", "bootstrap_pending", "user_operation_pending", "submitted_pending",
     "included_success", "included_revert", "unknown_finality", "failed_effects_pending", "dispatch_pending",
-    "material_pending", "material_sealed", "exposure_pending", "verified_pending"] } as const;
+    "material_pending", "material_sealed", "exposure_pending", "verified_pending",
+    "approved", "verify_started", "settle_started", "settle_submitted"] } as const;
 const readApproval = { class: "none", when: "Never signs or submits." } as const;
 const done = { terminal: ["completed", "classified_failure"], non_terminal: [] };
 export const GASLESS_COMMANDS: readonly CommandDefinition[] = [
@@ -42,7 +44,7 @@ export const GASLESS_COMMANDS: readonly CommandDefinition[] = [
     examples: ["apn gasless transfer prepare --profile default --chain 8453 --to <recipient> --amount 10 --max-fee 0.2 --min-received 9.8 --idempotency-key <key>"] },
   { path: ["gasless", "transfer", "approve"], synopsis: "apn gasless transfer approve --operation <operation-id>",
     summary: "Approve the exact USDC transfer, fee and permission in a foreground terminal.",
-    options: [operation], effect: { class: "payment_submit", summary: "Local profiles sign the frozen Circle bootstrap/UserOperation. MetaMask server wallets request one provider-signed exact batch. Smart Account profiles sign and disclose one expiring ERC-7710 child, then request one externally sponsored settlement. Disclosure/send markers are durable; recovery never repeats them." },
+    options: [operation], effect: { class: "payment_submit", summary: "Local profiles sign the frozen Circle bootstrap/UserOperation. MetaMask server wallets request one provider-signed exact batch. Smart Account profiles sign and disclose one expiring ERC-7710 child, then request one externally sponsored settlement. Local profiles on Avalanche sign one expiring EIP-3009 authorization that the public PayAI x402 facilitator verifies and settles once. Disclosure/send markers are durable; recovery never repeats them." },
     approval: { class: "foreground_tty", when: "Each new operation; MCP always returns a CLI handoff." }, output, states,
     recovery: [{ command_path: ["operation", "resume"], when: "Continue an approved unattempted phase or observe the original operation; omit --wait-seconds." },
       { command_path: ["receipt", "get"], when: "Read saved delivery, fees and remaining permissions." }],
@@ -59,7 +61,7 @@ export function includeGaslessRecovery(commands: readonly CommandDefinition[]): 
     }),
     states: { terminal: [...new Set([...c.states.terminal, ...states.terminal])],
       non_terminal: [...new Set([...c.states.non_terminal, ...states.non_terminal])] },
-    effect: { ...c.effect, summary: `${c.effect.summary} Gasless operations retain USDC fee and permission evidence; each attempted disclosure/send is never repeated. Coinbase and MetaMask server-wallet recovery are read-only after dispatch. Smart Account recovery uses independent RPC only after disclosure, including verify rejection or a lost response; only correlated settlement or finalized unused expiry releases its guard. Recovery uses the frozen chain's APN_*_RPC_URL; local Circle also supports APN_*_BUNDLER_RPC_URL. Local operation resume optionally accepts --observation-rpc-env for verified read-only recovery through an explicitly selected RPC; it cannot sign, estimate or submit.` },
+    effect: { ...c.effect, summary: `${c.effect.summary} Gasless operations retain USDC fee and permission evidence; each attempted disclosure/send is never repeated. Coinbase and MetaMask server-wallet recovery are read-only after dispatch. Smart Account recovery uses independent RPC only after disclosure, including verify rejection or a lost response; only correlated settlement or finalized unused expiry releases its guard. Avalanche facilitator recovery reads only APN_AVALANCHE_RPC_URL; a correlated finalized settlement or a finalized unused expiry releases its guard. Recovery uses the frozen chain's APN_*_RPC_URL; local Circle also supports APN_*_BUNDLER_RPC_URL. Local operation resume optionally accepts --observation-rpc-env for verified read-only recovery through an explicitly selected RPC; it cannot sign, estimate or submit.` },
   });
 }
 export function bindGaslessCommand(path: string, o: Readonly<Record<string, string>>): CommandRequest {

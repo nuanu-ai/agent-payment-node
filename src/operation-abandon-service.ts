@@ -9,14 +9,16 @@ import type { RuntimeContext } from "./runtime.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import type { GaslessService } from "./gasless/service.js";
 import type { MetaMaskGaslessService } from "./metamask-gasless/service.js";
-import { abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
+import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
+import type { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 
 export class OperationAbandonService {
   private readonly operations: OperationService;
   private readonly durable: ProviderDirectState;
 
   constructor(private readonly context: RuntimeContext, private readonly rails: RailOperationService,
-    private readonly gasless: GaslessService, private readonly metaMaskGasless: MetaMaskGaslessService) {
+    private readonly gasless: GaslessService, private readonly metaMaskGasless: MetaMaskGaslessService,
+    private readonly facilitatorGasless?: FacilitatorGaslessService) {
     this.operations = new OperationService(context.state);
     this.durable = new ProviderDirectState(context);
   }
@@ -29,6 +31,9 @@ export class OperationAbandonService {
     const base = { context: this.context, operations: this.operations };
     if (found.kind === "gasless_transfer") return await abandonLocalGasless({ ...base, gasless: this.gasless }, operationId);
     if (found.kind === "metamask_gasless_transfer") return await abandonMetaMaskGasless({ ...base, metaMaskGasless: this.metaMaskGasless }, operationId);
+    if (found.kind === "facilitator_gasless_transfer" && this.facilitatorGasless !== undefined) {
+      return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
+    }
     if (found.kind !== "direct_transfer") return ineligible();
     const profileHash = found.record.profileHash;
     return await this.context.state.withLocks([
