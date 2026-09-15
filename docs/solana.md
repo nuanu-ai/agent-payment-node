@@ -1,6 +1,6 @@
 # Solana mainnet direct transfers
 
-This APN 0.5.12 package includes local SOL and canonical USDC transfers on
+This APN 0.5.13 package includes local SOL and canonical USDC transfers on
 Solana mainnet. Package availability, clean installation and live mainnet
 payment acceptance require separate evidence.
 
@@ -151,3 +151,13 @@ Local SOL, local USDC, Coinbase SOL and Coinbase USDC each retain an open mainne
 acceptance row. None is proven by test fixtures, package discovery or public
 RPC identity reads. Publication, installation and each bounded live payment
 require their own evidence.
+
+## Expired unlanded transfer
+
+A local SOL or USDC transfer can stay `unknown_finality` when submission lost its response and the RPC never reports the signature. `operation resume` keeps observing and never resends it. After the finalized block height passes the frozen `lastValidBlockHeight` and `getSignatureStatuses` with history still returns no status, the owner may end the operation in a foreground terminal:
+
+```sh
+apn operation abandon --operation <operation-id>
+```
+
+The terminal shows the account, recipient, amount and the exact phrase. The operation becomes `abandoned_unknown`, its receipt records owner acknowledgement only, and the profile can prepare a new transfer. The financial outcome stays unknown because RPC history can be incomplete; APN refuses abandonment while the window is open or the signature is visible.

@@ -29,6 +29,7 @@ export declare class TronLocalAdapter implements DirectRailPort {
         readonly transactionId: string;
     }>;
     inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, expectedRawPayloadHash?: string): Promise<RailInspection>;
+    assertValidityExpired(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<void>;
     private requireAsset;
     private currentAccount;
 }

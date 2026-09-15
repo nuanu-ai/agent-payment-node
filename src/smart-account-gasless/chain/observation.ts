@@ -63,14 +63,24 @@ export async function observeSmartAccountGasless(context: SmartAccountObservatio
   const discovered = cursor.candidateHashes[0] ?? null;
   if (discovered !== null) {
     const source = input.transactionHint === discovered ? "provider_hint" : "rpc_discovered";
-    const inspected = await inspectSafely(context, input, discovered, safe, source);
+    let inspected: Inspection;
+    try { inspected = await inspectSafely(context, input, discovered, safe, source); }
+    catch (error) {
+      if (error instanceof SaRpcBudgetError) return budgetPartial(cursor, discovered, context.clock);
+      throw error;
+    }
     if (inspected.kind === "success") return success(cursor, inspected.settlement);
     return adverse(cursor, inspected, context.clock, discovered);
   }
 
   if (cursor.childScanComplete && cursor.transferScanComplete) {
     if (cursor.transferAnomalies.length === 0) {
-      const unused = await unusedSafely(context, input, cursor, finalized);
+      let unused: SmartAccountGaslessRpcObservation | null;
+      try { unused = await unusedSafely(context, input, cursor, finalized); }
+      catch (error) {
+        if (error instanceof SaRpcBudgetError) return budgetPartial(cursor, null, context.clock);
+        throw error;
+      }
       if (unused !== null) return unused;
     } else {
       return observation(cursor, "pending", "sa_gasless_unknown", null,
@@ -82,12 +92,24 @@ export async function observeSmartAccountGasless(context: SmartAccountObservatio
     // A completed zero-child scan contradicts a hinted positive receipt; never let the hint override it.
     if (cursor.childScanComplete) return observation(cursor, "invalid", "sa_gasless_evidence", null, null,
       null, null, context.clock);
-    const inspected = await inspectSafely(context, input, input.transactionHint, safe, "provider_hint");
+    let inspected: Inspection;
+    try { inspected = await inspectSafely(context, input, input.transactionHint, safe, "provider_hint"); }
+    catch (error) {
+      if (error instanceof SaRpcBudgetError) return budgetPartial(cursor, input.transactionHint, context.clock);
+      throw error;
+    }
     if (inspected.kind === "success") return success(cursor, inspected.settlement);
     if (inspected.kind !== "pending") return adverse(cursor, inspected, context.clock, input.transactionHint);
   }
   return observation(cursor, "pending", "sa_gasless_unknown", input.transactionHint, null,
     null, null, context.clock);
+}
+
+/** Preserve only a fully rechecked scan checkpoint; candidate proof remains pending and is repeated next pass. */
+function budgetPartial(cursor: SmartAccountGaslessCursor, candidate: Hex | null,
+  clock: ClockPort): SmartAccountGaslessRpcObservation {
+  return observation(cursor, "pending", "sa_gasless_partial", candidate,
+    hashObject({ cursor, candidate, candidateProofComplete: false }), null, null, clock);
 }
 
 async function inspectSafely(context: SmartAccountObservationContext, input: SmartAccountGaslessObserveInput,

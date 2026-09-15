@@ -50,7 +50,7 @@ async function fixture(stateRoot: string) {
     capability_snapshot: capability, capability_hash: binding.capabilityHash, observed_at: SA_TEST_AT,
     drift: { state: "bound", reason: "none" } });
   let now = new Date(SA_TEST_AT), expired = false, sealed: SmartAccountGaslessSealedMaterial | null = null;
-  let custodyUnavailable = false;
+  let custodyUnavailable = false, snapshotFailureAt: number | null = null;
   const calls = { inspect: 0, snapshot: 0, supported: 0, seal: 0, load: 0, expose: 0, verify: 0, settle: 0, unspent: 0, observe: 0, approval: 0 };
   const clock = { now: () => now };
   const dependencies: SmartAccountGaslessDependencies = {
@@ -66,7 +66,9 @@ async function fixture(stateRoot: string) {
       settle: async () => { calls.settle++; return { observedAt: now.toISOString(), transactionHash: null, responseHash: "2".repeat(64) }; },
     },
     rpcFor: () => ({ chainId: 8453, endpointOrigin: original.initialSnapshot.endpointOrigin, endpointHash: original.initialSnapshot.endpointHash,
-      snapshot: async () => { calls.snapshot++; return { ...original.initialSnapshot, observedAt: now.toISOString() }; },
+      snapshot: async () => { calls.snapshot++;
+        if (calls.snapshot === snapshotFailureAt) throw saError("sa_gasless_rpc_unavailable");
+        return { ...original.initialSnapshot, observedAt: now.toISOString() }; },
       assertUnspent: async () => { calls.unspent++; },
       observe: async value => { calls.observe++; return expired ? saStructuralUnused(value, now.toISOString()) : {
         cursor: value.cursor, observation: { observedAt: now.toISOString(), phase: "pending", reason: "sa_gasless_unknown",
@@ -76,6 +78,7 @@ async function fixture(stateRoot: string) {
       `APPROVE GASLESS ${value.operationId} ${value.fingerprint}`); return true; } },
   };
   return { state, binding, calls, dependencies, options: { stateRoot, smartAccountGasless: dependencies, wrappingSecret: wrapping, clock },
+    failSnapshotAt: (value: number | null) => { snapshotFailureAt = value; },
     expire: () => { expired = true; custodyUnavailable = true; now = new Date(Date.parse(SA_TEST_AT) + 600_000); } };
 }
 
@@ -162,6 +165,25 @@ test("CLI approval dispatches once and cold public recovery/terminal replay uses
   assert.deepEqual(f.calls, finalCounts);
   const publicBytes = JSON.stringify([approved, resumed, cliReceipt]);
   for (const secret of ["0x1234", "permissionContext", "paymentPayload", "session_private_key"]) assert.equal(publicBytes.includes(secret), false, secret);
+});
+
+test("second pre-exposure guard failure freezes signed material without disclosure or submission", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await fixture(temporary.root), prepared = await runCli(argv, {}, f.options), op = prepared.operation as any;
+  assert.equal(prepared.ok, true, JSON.stringify(prepared.error)); assert.equal(f.calls.snapshot, 1);
+  f.failSnapshotAt(3);
+  const failed = await runCli(["gasless", "transfer", "approve", "--operation", op.operation_id], {}, f.options);
+  assert.equal(failed.ok, true, JSON.stringify(failed.error));
+  assert.deepEqual([(failed.operation as any).state, (failed.operation as any).reason],
+    ["failed_before_effect", "sa_gasless_rpc_unavailable"]);
+  assert.deepEqual([(failed.operation as any).signing_attempts, (failed.operation as any).exposure_attempts,
+    (failed.operation as any).submission_attempts], [1, 0, 0]);
+  assert.deepEqual([f.calls.approval, f.calls.seal, f.calls.expose, f.calls.verify, f.calls.settle], [1, 1, 0, 0, 0]);
+  const counts = { ...f.calls };
+  const replay = await runCli(["gasless", "transfer", "approve", "--operation", op.operation_id], {}, f.options);
+  const resumed = await runCli(["operation", "resume", "--operation", op.operation_id], {}, f.options);
+  assert.deepEqual(replay.operation, failed.operation); assert.deepEqual(resumed.operation, failed.operation);
+  assert.deepEqual(f.calls, counts);
 });
 
 test("non-Base Smart Account requests fail before material, provider or RPC access", async t => {

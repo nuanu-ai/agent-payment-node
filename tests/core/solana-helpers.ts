@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { OperationAbandonApprovalPort } from "../../src/operation-abandon-approval.js";
 import { address, createKeyPairSignerFromPrivateKeyBytes, getCompiledTransactionMessageDecoder, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 import { getMintEncoder, getTokenEncoder, TOKEN_PROGRAM_ADDRESS, ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
@@ -109,7 +110,7 @@ export class SolanaTestRpc implements SolanaRpcPort {
 }
 function info(owner: string, data: Buffer, lamports: bigint) { return { owner, data: [data.toString("base64"), "base64"], executable: false, lamports, rentEpoch: 0n, space: BigInt(data.length) }; }
 
-export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc; wrapping?: SolanaWrapping; approval?: SolanaApproval; admit?: boolean } = {}) {
+export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc; wrapping?: SolanaWrapping; approval?: SolanaApproval; admit?: boolean; abandonApproval?: OperationAbandonApprovalPort } = {}) {
   const now = new Date("2026-09-08T10:00:00.000Z"); const clock = { now: () => new Date(now) };
   const wrapping = options.wrapping ?? new SolanaWrapping(); const storage = new ChainAccountStore(root, wrapping);
   const account = await storage.ensureLocal({ profile: "solana-test", rail: "solana", create: async () => {
@@ -118,7 +119,7 @@ export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc
   const rpc = options.rpc ?? new SolanaTestRpc(); await rpc.bind(account.address);
   const adapter = new SolanaLocalAdapter(storage, rpc, clock.now); const approval = options.approval ?? new SolanaApproval();
   const core = new ApnCore({ state: new StateStore(root), chainAccounts: storage, directRails: [adapter], railApproval: approval,
-    chainPolicyApproval: { approve: async () => {} }, clock });
+    chainPolicyApproval: { approve: async () => {} }, clock, ...(options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {}) });
   if (options.admit !== false) for (const asset of ["sol", "usdc"] as const) {
     const admitted = await core.execute({ command: "policy.admit-solana", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "0.003" });
     assert.equal(admitted.ok, true, admitted.error?.message);
