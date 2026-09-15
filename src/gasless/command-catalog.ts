@@ -55,7 +55,7 @@ export function includeGaslessRecovery(commands: readonly CommandDefinition[]): 
       synopsis: `${c.synopsis.includes("[--rpc-url <https-url>]") ? c.synopsis : c.synopsis.replace("--rpc-url <https-url>", "[--rpc-url <https-url>]")} [--observation-rpc-env <APN_ENV_RPC_URL>]`,
       options: [...c.options.map(entry => entry.name === "--rpc-url" ? { ...entry, required: false,
         constraints: [...entry.constraints, "optional_for_gasless_operations_using_frozen_APN_chain_RPC_environment"] } : entry), option("--observation-rpc-env", "string",
-        ["explicit_APN_environment_variable_for_Local_readonly_observation", "cannot_combine_with_rpc_url_or_wait_seconds"], false)],
+        ["explicit_APN_environment_variable_for_gasless_readonly_observation", "cannot_combine_with_rpc_url_or_wait_seconds"], false)],
     }),
     states: { terminal: [...new Set([...c.states.terminal, ...states.terminal])],
       non_terminal: [...new Set([...c.states.non_terminal, ...states.non_terminal])] },

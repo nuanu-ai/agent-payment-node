@@ -5,7 +5,7 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-APN 0.5.15 includes this capability. Package availability, mainnet transfer
+APN 0.5.16 includes this capability. Package availability, mainnet transfer
 evidence and receiving human acceptance are tracked separately for each profile
 and network. `apn gasless capabilities` reports the exact adapter and acceptance
 state without reading a wallet,
@@ -225,7 +225,8 @@ UserOperations, encrypted keys or provider response text.
 ### Explicit observation RPC recovery
 
 APN 0.5.12 includes an explicit recovery option for a saved Local gasless
-operation whose original RPC cannot serve historical reads. The published
+operation whose original RPC cannot serve historical reads. APN 0.5.16 extends
+it to saved MetaMask Agent and Smart Account gasless operations. The published
 0.5.11 binary does not include this option; use a verified 0.5.12 or later
 compatible artifact.
 
@@ -238,7 +239,8 @@ apn operation resume --operation <operation-id> \
 The option names a local environment variable; it does not take a URL. Names
 must match `APN_[A-Z0-9_]+_RPC_URL` and contain at most 128 characters. MCP uses
 the same optional `observation_rpc_env` field. Do not combine it with
-`--rpc-url` or `--wait-seconds`. Other operation kinds reject it.
+`--rpc-url` or `--wait-seconds`. Local, MetaMask Agent and Smart Account gasless
+operations accept it; other operation kinds reject it.
 
 This mode only observes. It cannot access signing material, estimate fees,
 disclose permissions or send a transaction, even if an approved phase could
@@ -247,6 +249,14 @@ token domain, and the original preparation block before accepting evidence.
 It uses the canonical EntryPoint scan without a bundler locator and keeps the
 same bounded scan, reorg, receipt, nonce and allowance rules described above.
 Unavailable or conflicting evidence retains the guard.
+
+For MetaMask Agent and Smart Account gasless operations the option applies only
+after the original dispatch or exposure. APN proves the selected chain and the
+operation's frozen safe block before accepting evidence, then applies the
+family's usual finality and settlement rules. Approval, dispatch, verification
+and settlement never use the named RPC. The saved operation records the
+environment variable name, the RPC origin and a hash of the full URL; the URL
+itself is never stored.
 
 Accepted observations include `observation_source`: the explicit recovery
 policy, environment-variable name, RPC origin, full-endpoint hash and binding

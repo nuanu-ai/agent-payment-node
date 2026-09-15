@@ -19,12 +19,14 @@ export class MetaMaskGaslessObservationService {
     provider;
     clock;
     save;
-    constructor(state, rpcFor, provider, clock, save) {
+    observer;
+    constructor(state, rpcFor, provider, clock, save, observer) {
         this.state = state;
         this.rpcFor = rpcFor;
         this.provider = provider;
         this.clock = clock;
         this.save = save;
+        this.observer = observer;
     }
     async run(op, submitted) {
         if (op.terminal || op.submissionAttempts !== 1)
@@ -37,11 +39,13 @@ export class MetaMaskGaslessObservationService {
             const providerObservation = this.retainProvider(op, result.hint);
             let chain;
             try {
-                const rpc = this.rpcFor(op.intent.request.chainId);
-                if (rpc.chainId !== op.intent.request.chainId || rpc.endpointHash !== op.intent.initialSnapshot.endpointHash ||
-                    rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin)
+                const rpc = this.observer?.rpc ?? this.rpcFor(op.intent.request.chainId);
+                if (rpc.chainId !== op.intent.request.chainId || (this.observer === undefined &&
+                    (rpc.endpointHash !== op.intent.initialSnapshot.endpointHash || rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin))) {
                     mmFail("mm_gasless_rpc_binding");
+                }
                 chain = await rpc.observe(op.intent, op.cursor, providerObservation);
+                chain = { ...chain, observation: { ...chain.observation, ...this.source() } };
                 this.clock.check(op, [chain.observation.observedAt,
                     ...(chain.settlement === null ? [] : [chain.settlement.observedAt])]);
             }
@@ -55,7 +59,7 @@ export class MetaMaskGaslessObservationService {
                 chain = { cursor: op.cursor, settlement: null, observation: {
                         observedAt: at, phase: invalid ? "invalid" : "unavailable",
                         reason, candidateTxHash: op.observation?.candidateTxHash ?? null, transactionBlock: null,
-                        finalityBlock: null, evidenceHash: null,
+                        finalityBlock: null, evidenceHash: null, ...this.source(),
                     } };
             }
             // An unavailable request cannot discard a previously independently usable locator.
@@ -75,6 +79,11 @@ export class MetaMaskGaslessObservationService {
             }
             throw error;
         }
+    }
+    source() {
+        const observer = this.observer;
+        return observer === undefined ? {} : { source: { environmentName: observer.environmentName,
+                endpointOrigin: observer.rpc.endpointOrigin, endpointHash: observer.rpc.endpointHash } };
     }
     async readProvider(op) {
         try {

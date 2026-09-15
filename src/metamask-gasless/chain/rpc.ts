@@ -7,7 +7,7 @@ import { mmAssertStableQuote, mmQuote } from "../economics.js";
 import type { MetaMaskGaslessBalance, MetaMaskGaslessChainId, MetaMaskGaslessChainState,
   MetaMaskGaslessCursor, MetaMaskGaslessIntent, MetaMaskGaslessProviderObservation,
   MetaMaskGaslessRpcObservation, MetaMaskGaslessSnapshot } from "../model.js";
-import type { MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "../ports.js";
+import type { MetaMaskGaslessObservationRpcFactory, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "../ports.js";
 import { mmRegistry, MM_RPC_ENV } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
@@ -27,6 +27,8 @@ export interface MetaMaskGaslessRpcOptions {
   readonly rpcUrl: string;
   readonly clock: ClockPort;
   readonly transport?: GaslessTransport;
+  /** Observe saved operations only: prove the chain and the frozen anchor instead of the frozen endpoint identity. */
+  readonly observationOnly?: boolean;
 }
 
 /** Lazy environment binding. Merely creating the factory performs no DNS, RPC, provider, or state I/O. */
@@ -45,6 +47,22 @@ export function metaMaskGaslessRpcFactory(environment: Readonly<Record<string, s
   };
 }
 
+/** An owner-named RPC that observes saved operations only; it never serves approval-time balances or snapshots. */
+export function metaMaskGaslessObservationRpcFactory(environment: Readonly<Record<string, string | undefined>>,
+  clock: ClockPort, transport?: GaslessTransport): MetaMaskGaslessObservationRpcFactory {
+  const selectedTransport = transport ?? new GaslessHttps();
+  return (chainId, environmentName) => {
+    const rpcUrl = environment[mmObservationRpcEnv(environmentName)];
+    if (rpcUrl === undefined || rpcUrl.length === 0) mmFail("mm_gasless_rpc_binding");
+    return new MetaMaskGaslessRpc({ chainId: mmChain(chainId), rpcUrl, clock, transport: selectedTransport, observationOnly: true });
+  };
+}
+
+export function mmObservationRpcEnv(value: unknown): string {
+  if (typeof value !== "string" || value.length > 128 || !/^APN_[A-Z0-9_]+_RPC_URL$/u.test(value)) mmFail("mm_gasless_input");
+  return value as string;
+}
+
 export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
   readonly chainId: MetaMaskGaslessChainId;
   readonly endpointOrigin: string;
@@ -55,6 +73,7 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
   private readonly transport: GaslessTransport;
   private sequence = 0n;
   private readonly callRpc: MmRpcCall;
+  private readonly observationOnly: boolean;
 
   constructor(options: MetaMaskGaslessRpcOptions) {
     this.chainId = mmChain(options.chainId);
@@ -63,10 +82,12 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     this.rpcUrl = endpoint.toString(); this.endpointOrigin = endpoint.origin;
     this.endpointHash = sha256(this.rpcUrl); this.clock = options.clock;
     this.transport = options.transport ?? new GaslessHttps();
+    this.observationOnly = options.observationOnly === true;
     this.callRpc = async (method, params) => await this.call(method, params);
   }
 
   async balance(ownerInput: Address): Promise<MetaMaskGaslessBalance> {
+    if (this.observationOnly) mmFail("mm_gasless_rpc_binding");
     const owner = strictOwner(ownerInput);
     await this.assertChain();
     const at = await rpcBlock(this.callRpc, this.deployment.row.finalityTag);
@@ -79,6 +100,7 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
 
   async snapshot(input: { readonly owner: Address; readonly delegationHash: Hex;
     readonly grossAtomic: string }): Promise<MetaMaskGaslessSnapshot> {
+    if (this.observationOnly) mmFail("mm_gasless_rpc_binding");
     const owner = strictOwner(input.owner), delegationHash = mmHex(input.delegationHash, 32, "mm_gasless_evidence_invalid");
     const grossAtomic = mmUint(input.grossAtomic, true, "mm_gasless_evidence_invalid").toString();
     await this.assertChain();
@@ -102,17 +124,20 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation> {
     this.assertIntent(intent);
     await this.assertChain();
+    // Another provider must first prove the same chain history at the operation's frozen safe anchor.
+    if (this.observationOnly) await recheckBlock(this.callRpc, intent.initialSnapshot.safeBlock, "mm_gasless_rpc_binding");
     return await observeMetaMaskGasless({ deployment: this.deployment, call: this.callRpc, clock: this.clock },
       intent, cursor, provider);
   }
 
   private assertIntent(intent: MetaMaskGaslessIntent): void {
+    const frozen = this.observationOnly ? intent.initialSnapshot : this;
     if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId ||
-      intent.initialSnapshot.endpointHash !== this.endpointHash || intent.initialSnapshot.endpointOrigin !== this.endpointOrigin ||
+      intent.initialSnapshot.endpointHash !== frozen.endpointHash || intent.initialSnapshot.endpointOrigin !== frozen.endpointOrigin ||
       intent.token !== this.deployment.row.token || intent.deploymentEvidenceHash !== this.deployment.deploymentEvidenceHash ||
       intent.relayTo !== this.deployment.row.protocol.manager.address) mmFail("mm_gasless_rpc_binding");
     validateMetaMaskGaslessSnapshot(intent.initialSnapshot, { chainId: this.chainId,
-      endpointHash: this.endpointHash, endpointOrigin: this.endpointOrigin, grossAtomic: intent.request.grossAtomic });
+      endpointHash: frozen.endpointHash, endpointOrigin: frozen.endpointOrigin, grossAtomic: intent.request.grossAtomic });
     mmQuote(intent.quote, intent.request, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt");
     mmAssertStableQuote(intent.request, intent.quote, "mm_gasless_state_corrupt");
     mmValidateUnsigned({ unsignedDelegation: intent.unsignedDelegation, delegationHash: intent.delegationHash,

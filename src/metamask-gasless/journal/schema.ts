@@ -129,7 +129,10 @@ function cursor(value: unknown, intent: MetaMaskGaslessIntent): MetaMaskGaslessC
 }
 function observation(value: unknown, at: string): MetaMaskGaslessObservation | null {
   if (value === null) return null;
-  const o = mmExact(value, ["observedAt", "phase", "reason", "candidateTxHash", "transactionBlock", "finalityBlock", "evidenceHash"]);
+  const sourced = typeof value === "object" && value !== null && Object.hasOwn(value, "source");
+  const o = mmExact(value, ["observedAt", "phase", "reason", "candidateTxHash", "transactionBlock", "finalityBlock", "evidenceHash",
+    ...(sourced ? ["source"] : [])]);
+  if (sourced) observationSource(o.source);
   if (time(mmIso(o.observedAt)) > time(at) || !["pending", "unavailable", "invalid", "reorg", "reverted", "success"].includes(o.phase as string) ||
     typeof o.reason !== "string" || !Object.hasOwn(MM_REASON_CODES, o.reason)) corrupt();
   const exactReason: Readonly<Record<string, string>> = { pending: "mm_gasless_pending", unavailable: "mm_gasless_rpc_unavailable",
@@ -144,6 +147,11 @@ function observation(value: unknown, at: string): MetaMaskGaslessObservation | n
   if (["success", "reverted"].includes(o.phase as string) &&
     (o.candidateTxHash === null || transaction === null || finality === null || o.evidenceHash === null)) corrupt();
   return o as unknown as MetaMaskGaslessObservation;
+}
+function observationSource(value: unknown): void {
+  const s = mmExact(value, ["environmentName", "endpointOrigin", "endpointHash"]);
+  if (typeof s.environmentName !== "string" || s.environmentName.length > 128 || !/^APN_[A-Z0-9_]+_RPC_URL$/u.test(s.environmentName)) corrupt();
+  origin(s.endpointOrigin); mmHash(s.endpointHash);
 }
 function settlement(value: unknown, intent: MetaMaskGaslessIntent, at: string): MetaMaskGaslessSettlement | null {
   if (value === null) return null;
