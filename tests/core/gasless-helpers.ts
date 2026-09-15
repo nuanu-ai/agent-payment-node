@@ -6,14 +6,16 @@ import { hashObject } from "../../src/canonical.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { Address, Hex } from "../../src/model.js";
+import type { WaitPort } from "../../src/ports.js";
 import { StateStore, sealWallet } from "../../src/state.js";
 import { LocalGaslessCustody } from "../../src/gasless/custody.js";
-import type { GaslessAccountState, GaslessChainId, GaslessIntent, GaslessObservation, GaslessRequest,
+import type { GaslessAccountState, GaslessChainId, GaslessFees, GaslessGas, GaslessIntent, GaslessObservation, GaslessRequest,
   GaslessSnapshot } from "../../src/gasless/model.js";
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
 import type { OperationAbandonApprovalPort } from "../../src/operation-abandon-approval.js";
 import type { GaslessApprovalPort, GaslessCustodyPort, GaslessRpcPort, GaslessSealedMaterial } from "../../src/gasless/ports.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
+import { gaslessFailure } from "../../src/gasless/validation.js";
 
 export const GASLESS_TEST_RECIPIENT = getAddress("0x4444444444444444444444444444444444444444");
 export const GASLESS_TEST_OUTER = getAddress("0x5555555555555555555555555555555555555555");
@@ -27,6 +29,12 @@ export class GaslessApproval implements GaslessApprovalPort {
   calls: Parameters<GaslessApprovalPort["confirm"]>[0][] = []; accepted = true;
   async confirm(input: Parameters<GaslessApprovalPort["confirm"]>[0]) { this.calls.push(input); return this.accepted; }
 }
+/** Records guard retry pauses without sleeping. */
+export class GaslessWait implements WaitPort {
+  waits: number[] = [];
+  nowMs() { return 0; }
+  async wait(milliseconds: number) { this.waits.push(milliseconds); return "elapsed" as const; }
+}
 export class GaslessTestRpc implements GaslessRpcPort {
   readonly rpcOrigin: string; readonly rpcEndpointHash: string;
   readonly bundlerOrigin = "https://bundler.example"; readonly bundlerEndpointHash = hashObject("bundler");
@@ -36,6 +44,9 @@ export class GaslessTestRpc implements GaslessRpcPort {
   branch: "sponsored" | "post_op_reverted" | "prefund_too_low" = "sponsored";
   success = true; residual = "100"; safeAllowance: string | undefined;
   safeNumber = "102"; timeout = false; estimateFails = false; oversizedEstimate = false;
+  mirrorResult: "fit" | "misfit" | "unavailable" = "fit";
+  /** Approved-fee snapshots that report bundler fee drift before passing again. */
+  drift = 0; approvedFees: GaslessFees[] = []; estimateFees: (GaslessFees | undefined)[] = [];
   constructor(readonly chainId: GaslessChainId, owner: Address, delegation: "empty" | "expected", readonly now: Date) {
     this.rpcOrigin = `https://rpc-${chainId}.example`; this.rpcEndpointHash = hashObject(this.rpcOrigin);
     const row = gaslessDeployment(chainId);
@@ -48,12 +59,31 @@ export class GaslessTestRpc implements GaslessRpcPort {
       baseFeePerGas: "1000000", maxFeePerGas: "2100000", maxPriorityFeePerGas: "100000" };
   }
   async assertChain() { this.calls.push("assertChain"); }
-  async snapshot(owner: Address) { this.calls.push("snapshot"); assert.equal(owner, this.current.owner); return structuredClone(this.current); }
-  async estimate(intent: GaslessIntent) {
-    this.calls.push("estimate"); if (this.estimateFails) throw new Error("canary_provider_secret");
-    return { verificationGasLimit: "90000", callGasLimit: this.oversizedEstimate ? "250001" : "200000",
-      paymasterVerificationGasLimit: "180000", paymasterPostOpGasLimit: "35000",
-      preVerificationGas: intent.initialSnapshot.delegation === "empty" ? "140000" : "120000", responseHash: hashObject("estimate") };
+  async snapshot(owner: Address, approvedGas?: GaslessGas) {
+    this.calls.push("snapshot"); assert.equal(owner, this.current.owner);
+    if (approvedGas !== undefined) {
+      this.approvedFees.push({ maxFeePerGas: approvedGas.maxFeePerGas, maxPriorityFeePerGas: approvedGas.maxPriorityFeePerGas });
+      if (this.drift > 0) { this.drift -= 1; gaslessFailure("APN_OPERATION_BLOCKED", "gasless_bundler_fee_drift"); }
+    }
+    return structuredClone(this.current);
+  }
+  async mirrorEstimate(intent: GaslessIntent, _fees?: GaslessFees) {
+    this.calls.push("mirror_estimate");
+    if (this.mirrorResult === "unavailable") gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_mirror_estimate_unavailable");
+    if (this.mirrorResult === "misfit") gaslessFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_mirror_estimate_bounds");
+    return this.fixtureEstimate(intent, "mirror");
+  }
+  /** Calibrated v4 chains use their 2026-09-15 mirror sizes; other chains keep the historical fixture sizes. */
+  private fixtureEstimate(intent: GaslessIntent, label: string) {
+    const measured = this.chainId === 1 || this.chainId === 137, empty = intent.initialSnapshot.delegation === "empty";
+    return { verificationGasLimit: measured ? "61585" : "90000",
+      callGasLimit: this.oversizedEstimate ? "250001" : measured ? (this.chainId === 137 ? "95736" : "84248") : "200000",
+      paymasterVerificationGasLimit: measured ? (this.chainId === 137 ? "576312" : "400530") : "180000", paymasterPostOpGasLimit: "35000",
+      preVerificationGas: measured ? (empty ? "81835" : "57000") : empty ? "140000" : "120000", responseHash: hashObject(label) };
+  }
+  async estimate(intent: GaslessIntent, _bootstrap?: unknown, fees?: GaslessFees) {
+    this.calls.push("estimate"); this.estimateFees.push(fees); if (this.estimateFails) throw new Error("canary_provider_secret");
+    return this.fixtureEstimate(intent, "estimate");
   }
   async send(_intent: GaslessIntent, material: Parameters<GaslessRpcPort["send"]>[1]) {
     this.calls.push("send"); this.sends.push(structuredClone(material));
@@ -106,7 +136,8 @@ export async function gaslessFixture(root: string, chainId: GaslessChainId = 845
   const rpc = options.rpc ?? new GaslessTestRpc(chainId, account.address, options.delegation ?? "empty", now);
   const approval = new GaslessApproval(), custody = options.custody ?? new LocalGaslessCustody(state, wrapping, () => now.getTime());
   const dependencies = { rpcFor: (chain: GaslessChainId) => { assert.equal(chain, rpc.chainId); return rpc; }, custody, approval };
-  const core = new ApnCore({ state, gasless: dependencies, clock: { now: () => new Date(now) },
+  const wait = new GaslessWait();
+  const core = new ApnCore({ state, gasless: dependencies, clock: { now: () => new Date(now) }, wait,
     ...(options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {}) });
   const request: GaslessRequest = { chainId, recipient: GASLESS_TEST_RECIPIENT, grossAtomic: "10000000", maxFeeAtomic: "200000", minReceivedAtomic: "9800000" };
   const prepare = async (idempotencyKey = "gasless-fixture-0001") => {
@@ -117,5 +148,5 @@ export async function gaslessFixture(root: string, chainId: GaslessChainId = 845
     return { id, input, operation };
   };
   const record = async (id: string): Promise<GaslessOperationRecord> => (await core.gasless.records.findOperation(id))!;
-  return { now, key, account, profile, state, wrapping, wallets, rpc, approval, custody, dependencies, core, request, prepare, record };
+  return { now, key, account, profile, state, wrapping, wallets, rpc, approval, custody, dependencies, core, request, prepare, record, wait };
 }

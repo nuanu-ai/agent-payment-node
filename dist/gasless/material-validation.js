@@ -1,7 +1,7 @@
 import { hashObject } from "../canonical.js";
 import { verifyGaslessBootstrap, verifyGaslessUserOperation } from "./signature.js";
 import { gaslessExact, gaslessFailure, gaslessHash, gaslessHex, gaslessSame, } from "./validation.js";
-import { gaslessUserOperation, validateGaslessWire } from "./wire.js";
+import { gaslessSignedFees, gaslessUserOperation, validateGaslessWire } from "./wire.js";
 const BASE_KEYS = [
     "schemaVersion", "profileHash", "operationId", "role", "fingerprint", "envelopeHash",
 ];
@@ -58,7 +58,7 @@ async function validateUserOperation(value, operation, originalBootstrap) {
         corrupt("gasless_estimate_material_binding");
     }
     const wire = validateGaslessWire(operation.intent, record.userOperation);
-    const expected = gaslessUserOperation(operation.intent, originalBootstrap, wire.signature);
+    const expected = gaslessUserOperation(operation.intent, originalBootstrap, wire.signature, gaslessSignedFees(operation.intent, wire));
     if (!gaslessSame(wire, expected))
         corrupt("gasless_original_bootstrap_wire_binding");
     const verifiedHash = await verifyGaslessUserOperation(operation.intent, wire);

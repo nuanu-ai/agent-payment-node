@@ -1,10 +1,12 @@
+import { encodeAbiParameters, keccak256, numberToHex } from "viem";
 import { canonicalJson, exactKeys, hashObject, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
+import { gaslessMirrorBootstrap } from "./custody.js";
 import { assertGaslessEstimate } from "./economics.js";
 import { GaslessHttps, type GaslessTransport } from "./https.js";
-import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessGas, GaslessIntent,
+import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessFees, GaslessGas, GaslessIntent,
   GaslessObservation, GaslessSnapshot } from "./model.js";
 import type { GaslessBootstrapMaterial, GaslessRpcFactory, GaslessRpcPort, GaslessUserOperationMaterial } from "./ports.js";
 import { observeGasless } from "./rpc-observe.js";
@@ -132,12 +134,35 @@ export class GaslessRpc implements GaslessRpcPort {
     return requests.map(request => results.get(request.id));
   }
 
-  async estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial): Promise<GaslessEstimate> {
+  async mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate> {
+    assertGaslessExecutionChain(this.chainId);
+    this.assertIntent(intent);
+    // One bounded request: the guard snapshot before it already proved both endpoint chains and EntryPoint support.
+    const mirror = await gaslessMirrorBootstrap(intent);
+    const wire = gaslessUserOperation(mirror.intent, mirror, GASLESS_ESTIMATE_SIGNATURE, fees);
+    // FiatToken v2.2 keeps balances in the mapping at storage slot 9; the pinned implementation hash fixes that layout.
+    const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [mirror.intent.owner.address, 9n]));
+    const override = { [intent.token]: { stateDiff: { [slot]: numberToHex(BigInt(intent.request.grossAtomic), { size: 32 }) } } };
+    let raw: Record<string, unknown>;
+    try { raw = rpcRecord(await this.bundlerCall("eth_estimateUserOperationGas", [wire, intent.entryPoint, override])); }
+    catch { return gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_mirror_estimate_unavailable"); }
+    const fields = ["verificationGasLimit", "callGasLimit", "paymasterVerificationGasLimit",
+      "paymasterPostOpGasLimit", "preVerificationGas"] as const;
+    if (!exactKeys(raw, fields)) gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_mirror_estimate_unavailable");
+    const bounded = Object.fromEntries(fields.map((field) => [field, rpcQuantity(raw[field]).toString()])) as unknown as
+      Omit<GaslessEstimate, "responseHash">;
+    const estimate = { ...bounded, responseHash: hashObject(bounded) };
+    try { assertGaslessEstimate(intent, estimate); }
+    catch { gaslessFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_mirror_estimate_bounds"); }
+    return estimate;
+  }
+
+  async estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate> {
     assertGaslessExecutionChain(this.chainId);
     this.assertIntent(intent);
     await verifyGaslessBootstrap(intent, { permitSignature: bootstrap.permitSignature, authorization: bootstrap.authorization });
     await this.assertChain();
-    const wire = gaslessUserOperation(intent, bootstrap, GASLESS_ESTIMATE_SIGNATURE);
+    const wire = gaslessUserOperation(intent, bootstrap, GASLESS_ESTIMATE_SIGNATURE, fees);
     validateGaslessWire(intent, wire);
     const raw = rpcRecord(await this.bundlerCall("eth_estimateUserOperationGas", [wire, intent.entryPoint]));
     const fields = ["verificationGasLimit", "callGasLimit", "paymasterVerificationGasLimit",

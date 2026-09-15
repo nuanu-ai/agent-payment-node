@@ -83,7 +83,7 @@ export class GaslessService {
   private execution(op: GaslessOperationRecord) {
     const d = this.dependencies();
     return new GaslessExecution(this.context.state, d.rpcFor(op.intent.request.chainId), d.custody,
-      () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch));
+      () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), this.context.wait);
   }
   private async save(op: GaslessOperationRecord, patch: Partial<GaslessMutable>) {
     const next = transitionGasless(op, patch, this.context.clock.now().toISOString());

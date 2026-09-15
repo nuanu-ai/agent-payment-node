@@ -4,7 +4,7 @@ import { quantity, rpcQuantity, rpcRecord } from "./rpc-codec.js";
 import { gasPrices } from "./rpc-state.js";
 import { GASLESS_MAX_UINT120, gaslessFailure } from "./validation.js";
 
-/** Quote a new bounded offer from fast; an existing offer must still cover slow. */
+/** Quote a new offer from twice the fast priority; an existing offer must still cover slow. */
 export function bundlerGasPrices(raw: unknown, rawBase: unknown, rawPriority: unknown,
   approved?: GaslessGas): ReturnType<typeof gasPrices> {
   const tiers = rpcRecord(raw);
@@ -24,7 +24,8 @@ export function bundlerGasPrices(raw: unknown, rawBase: unknown, rawPriority: un
     gaslessFailure("APN_OPERATION_BLOCKED", "gasless_bundler_fee_drift");
   }
   const base = rpcQuantity(rawBase), rpcPriority = rpcQuantity(rawPriority);
-  const priority = [rpcPriority, fast.priority, fast.maximum - 2n * base].reduce((a, b) => a > b ? a : b);
+  // Twice the fast tier absorbs the bundler's short-window moves: Ethereum's slow priority moved 2x within 35 s.
+  const priority = [rpcPriority, fast.priority * 2n, fast.maximum - 2n * base].reduce((a, b) => a > b ? a : b);
   return gasPrices(rawBase, quantity(priority));
 }
 

@@ -1,6 +1,6 @@
 import type { Address, Hex } from "../model.js";
 import type { GaslessBootstrapMaterial } from "./ports.js";
-import type { GaslessIntent, GaslessUserOperation } from "./model.js";
+import type { GaslessFees, GaslessIntent, GaslessUserOperation } from "./model.js";
 export declare function gaslessBatch(token: Address, recipient: Address, recipientAtomic: string, paymaster: Address): Hex;
 export declare function validateGaslessBatch(intent: GaslessIntent): void;
 export declare function gaslessPermitTypedData(intent: GaslessIntent): {
@@ -42,7 +42,7 @@ export declare function gaslessAuthorizationRequest(intent: GaslessIntent): {
     readonly address: `0x${string}`;
     readonly nonce: number;
 };
-export declare function gaslessUserOperation(intent: GaslessIntent, bootstrap: Pick<GaslessBootstrapMaterial, "permitSignature" | "authorization">, signature: Hex): GaslessUserOperation;
+export declare function gaslessUserOperation(intent: GaslessIntent, bootstrap: Pick<GaslessBootstrapMaterial, "permitSignature" | "authorization">, signature: Hex, fees?: GaslessFees): GaslessUserOperation;
 export declare function gaslessUserOperationTypedData(intent: GaslessIntent, wire: GaslessUserOperation): {
     readonly types: {
         readonly PackedUserOperation: readonly [{
@@ -91,4 +91,8 @@ export declare function gaslessUserOperationTypedData(intent: GaslessIntent, wir
 };
 export declare function gaslessUserOperationHash(intent: GaslessIntent, wire: GaslessUserOperation): Hex;
 export declare function validateGaslessWire(intent: GaslessIntent, value: unknown): GaslessUserOperation;
+/** v4 prices the UserOperation after approval, bounded on-chain by the permit's fee cap; earlier wires keep the prepared prices. */
+export declare function gaslessWireFees(intent: GaslessIntent, fees?: GaslessFees): GaslessFees;
+/** The prices a validated UserOperation was signed with. */
+export declare function gaslessSignedFees(intent: GaslessIntent, value: unknown): GaslessFees;
 export declare function gaslessEnvelopeBinding(intent: Omit<GaslessIntent, "unsignedEnvelopeHash"> | GaslessIntent): unknown;
