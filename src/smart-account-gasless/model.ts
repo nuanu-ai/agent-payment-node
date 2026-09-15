@@ -168,6 +168,13 @@ export interface SmartAccountGaslessObservation {
   readonly reason: SmartAccountGaslessReason | null;
   readonly candidateTxHash: Hex | null;
   readonly evidenceHash: string | null;
+  readonly source?: SmartAccountGaslessObservationSource;
+}
+/** Redacted identity of an owner-named observation RPC; the URL itself is never stored. */
+export interface SmartAccountGaslessObservationSource {
+  readonly environmentName: string;
+  readonly endpointOrigin: string;
+  readonly endpointHash: string;
 }
 export interface SmartAccountGaslessSettlement {
   readonly observedAt: string;

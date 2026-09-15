@@ -166,6 +166,13 @@ export interface MetaMaskGaslessObservation {
   readonly transactionBlock: MetaMaskGaslessBlock | null;
   readonly finalityBlock: MetaMaskGaslessBlock | null;
   readonly evidenceHash: string | null;
+  readonly source?: MetaMaskGaslessObservationSource;
+}
+/** Redacted identity of an owner-named observation RPC; the URL itself is never stored. */
+export interface MetaMaskGaslessObservationSource {
+  readonly environmentName: string;
+  readonly endpointOrigin: string;
+  readonly endpointHash: string;
 }
 export interface MetaMaskGaslessSettlement {
   readonly observedAt: string;

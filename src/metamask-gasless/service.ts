@@ -1,3 +1,5 @@
+import { mmObservationRpcEnv } from "./chain/rpc.js";
+import type { MetaMaskGaslessObservationRpcFactory } from "./ports.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
@@ -20,6 +22,7 @@ import { mmChain } from "./validation.js";
 
 export interface MetaMaskGaslessDependencies {
   readonly rpcFor: MetaMaskGaslessRpcFactory;
+  readonly observationRpcFor?: MetaMaskGaslessObservationRpcFactory;
   readonly provider: MetaMaskGaslessProviderPort;
   readonly approval?: MetaMaskGaslessApprovalPort;
   readonly records?: MetaMaskGaslessRepositoryPort;
@@ -62,9 +65,16 @@ export class MetaMaskGaslessService {
       return this.project(await this.execution().approve(op, approval));
     });
   }
-  async resume(operationId: string) {
-    return await this.locked(operationId, async op => op.terminal || op.state === "awaiting_approval"
-      ? publicMetaMaskGaslessOperation(op) : this.project(await this.execution().run(op)));
+  async resume(operationId: string, observationRpcEnv?: string) {
+    const environmentName = observationRpcEnv === undefined ? undefined : mmObservationRpcEnv(observationRpcEnv);
+    return await this.locked(operationId, async op => {
+      if (op.terminal || op.state === "awaiting_approval") return publicMetaMaskGaslessOperation(op);
+      if (environmentName === undefined) return this.project(await this.execution().run(op));
+      const factory = this.dependencies().observationRpcFor;
+      if (factory === undefined) return mmFail("mm_gasless_rpc_binding");
+      return this.project(await this.execution().observeWith(op,
+        { rpc: factory(op.intent.request.chainId, environmentName), environmentName }));
+    });
   }
   async status(operationId: string) {
     return await this.locked(operationId, async op => publicMetaMaskGaslessOperation(op));

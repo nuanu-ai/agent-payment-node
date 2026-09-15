@@ -1,3 +1,4 @@
+import { saObservationRpcEnv } from "./chain/rpc.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
 import { canonicalOperationId } from "../transfer-policy.js";
@@ -52,9 +53,18 @@ export class SmartAccountGaslessService {
             return this.project(await this.execution().approve(op, approval));
         });
     }
-    async resume(operationId) {
-        return await this.locked(operationId, async (op) => op.terminal || op.state === "awaiting_approval" ?
-            publicSmartAccountGaslessOperation(op) : this.project(await this.execution().run(op)));
+    async resume(operationId, observationRpcEnv) {
+        const environmentName = observationRpcEnv === undefined ? undefined : saObservationRpcEnv(observationRpcEnv);
+        return await this.locked(operationId, async (op) => {
+            if (op.terminal || op.state === "awaiting_approval")
+                return publicSmartAccountGaslessOperation(op);
+            if (environmentName === undefined)
+                return this.project(await this.execution().run(op));
+            const factory = this.dependencies().observationRpcFor;
+            if (factory === undefined)
+                return saFail("sa_gasless_rpc_binding");
+            return this.project(await this.execution().observeWith(op, { rpc: factory(8453, environmentName), environmentName }));
+        });
     }
     async status(operationId) { return await this.locked(operationId, async (op) => publicSmartAccountGaslessOperation(op)); }
     async receipt(operationId) { return await this.locked(operationId, async (op) => await this.records.loadReceipt(op.profileHash, op.operationId)); }

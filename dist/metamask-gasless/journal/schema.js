@@ -147,7 +147,11 @@ function cursor(value, intent) {
 function observation(value, at) {
     if (value === null)
         return null;
-    const o = mmExact(value, ["observedAt", "phase", "reason", "candidateTxHash", "transactionBlock", "finalityBlock", "evidenceHash"]);
+    const sourced = typeof value === "object" && value !== null && Object.hasOwn(value, "source");
+    const o = mmExact(value, ["observedAt", "phase", "reason", "candidateTxHash", "transactionBlock", "finalityBlock", "evidenceHash",
+        ...(sourced ? ["source"] : [])]);
+    if (sourced)
+        observationSource(o.source);
     if (time(mmIso(o.observedAt)) > time(at) || !["pending", "unavailable", "invalid", "reorg", "reverted", "success"].includes(o.phase) ||
         typeof o.reason !== "string" || !Object.hasOwn(MM_REASON_CODES, o.reason))
         corrupt();
@@ -169,6 +173,13 @@ function observation(value, at) {
         (o.candidateTxHash === null || transaction === null || finality === null || o.evidenceHash === null))
         corrupt();
     return o;
+}
+function observationSource(value) {
+    const s = mmExact(value, ["environmentName", "endpointOrigin", "endpointHash"]);
+    if (typeof s.environmentName !== "string" || s.environmentName.length > 128 || !/^APN_[A-Z0-9_]+_RPC_URL$/u.test(s.environmentName))
+        corrupt();
+    origin(s.endpointOrigin);
+    mmHash(s.endpointHash);
 }
 function settlement(value, intent, at) {
     if (value === null)

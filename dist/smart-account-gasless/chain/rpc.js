@@ -39,6 +39,23 @@ export function smartAccountGaslessRpcFactory(environment, clock, validator, tra
         return cached;
     };
 }
+/** An owner-named RPC that observes saved operations only; it never serves pre-exposure snapshots or spent checks. */
+export function smartAccountGaslessObservationRpcFactory(environment, clock, validator, transport) {
+    return (chainId, environmentName) => {
+        if (chainId !== 8453)
+            saFail("sa_gasless_capability");
+        const rpcUrl = environment[saObservationRpcEnv(environmentName)];
+        if (rpcUrl === undefined || rpcUrl.length === 0)
+            saFail("sa_gasless_rpc_binding");
+        return new SmartAccountGaslessRpc({ chainId, rpcUrl, clock, validator, observationOnly: true,
+            ...(transport === undefined ? {} : { transport }) });
+    };
+}
+export function saObservationRpcEnv(value) {
+    if (typeof value !== "string" || value.length > 128 || !/^APN_[A-Z0-9_]+_RPC_URL$/u.test(value))
+        saFail("sa_gasless_input");
+    return value;
+}
 export class SmartAccountGaslessRpc {
     chainId = 8453;
     endpointOrigin;
@@ -47,6 +64,7 @@ export class SmartAccountGaslessRpc {
     clock;
     validator;
     transport;
+    observationOnly;
     pacing;
     sequence = 0n;
     queue = Promise.resolve();
@@ -62,8 +80,11 @@ export class SmartAccountGaslessRpc {
         this.validator = options.validator;
         this.transport = options.transport ?? new GaslessHttps();
         this.pacing = options.pacing ?? defaultPacing();
+        this.observationOnly = options.observationOnly === true;
     }
     async snapshot(binding, expectedPreparationBlock) {
+        if (this.observationOnly)
+            saFail("sa_gasless_rpc_binding");
         const call = this.pass();
         await this.assertChain(call);
         const snapshot = await captureSmartAccountGaslessSnapshot(call, this.chainId, this.endpointOrigin, this.endpointHash, this.clock, binding);
@@ -73,6 +94,8 @@ export class SmartAccountGaslessRpc {
         return snapshot;
     }
     async assertUnspent(input) {
+        if (this.observationOnly)
+            saFail("sa_gasless_rpc_binding");
         const call = this.pass(), binding = saBinding(input.binding), safeBlock = saBlock(input.safeBlock);
         const material = saExact(input.material, ["encodedRootHash", "encodedChildHash", "permissionContextHash",
             "payloadHash", "requirementsHash", "materialHash", "rootDelegationHash", "childDelegationHash", "sealedAt"]);
@@ -96,6 +119,9 @@ export class SmartAccountGaslessRpc {
         const call = this.pass();
         try {
             await this.assertChain(call);
+            // Another provider must first prove the same chain history at the operation's frozen safe anchor.
+            if (this.observationOnly)
+                await recheckBlock(call, input.intent.initialSnapshot.safeBlock, "sa_gasless_rpc_binding");
             return await observeSmartAccountGasless({ call, clock: this.clock, validator: this.validator }, input);
         }
         catch (error) {
@@ -110,8 +136,8 @@ export class SmartAccountGaslessRpc {
     assertInput(input) {
         validateSmartAccountGaslessObserveInput(input);
         const intent = validateSmartAccountGaslessIntent(input.intent), registry = saRegistry(8453);
-        if (!saSame(intent, input.intent) || intent.initialSnapshot.endpointHash !== this.endpointHash ||
-            intent.initialSnapshot.endpointOrigin !== this.endpointOrigin || intent.deploymentEvidenceHash !== registry.evidenceHash ||
+        if (!saSame(intent, input.intent) || (!this.observationOnly && (intent.initialSnapshot.endpointHash !== this.endpointHash ||
+            intent.initialSnapshot.endpointOrigin !== this.endpointOrigin)) || intent.deploymentEvidenceHash !== registry.evidenceHash ||
             intent.token !== registry.token.address)
             saFail("sa_gasless_rpc_binding");
     }

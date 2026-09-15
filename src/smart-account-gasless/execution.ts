@@ -1,3 +1,4 @@
+import type { SmartAccountGaslessObservationSource } from "./model.js";
 import type { ClockPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { saPolicyHash, saSame } from "./integrity.js";
@@ -23,6 +24,11 @@ export class SmartAccountGaslessExecution {
   constructor(private readonly state: StateStore, private readonly rpcFor: SmartAccountGaslessRpcFactory,
     private readonly material: SmartAccountGaslessMaterialPort, private readonly provider: SmartAccountGaslessProviderPort,
     clock: ClockPort, private readonly save: SmartAccountGaslessSave) { this.clock = new SmartAccountGaslessClock(clock); }
+
+  /** Observation through an owner-named RPC after exposure; approval, verification and settlement keep the frozen endpoint. */
+  async observeWith(op: SmartAccountGaslessOperationRecord, observer: SmartAccountGaslessObserver): Promise<SmartAccountGaslessStep> {
+    return op.terminal || op.exposureAttempts !== 1 ? { operation: op } : await this.observe(op, undefined, observer);
+  }
 
   async approve(op: SmartAccountGaslessOperationRecord, approval: SmartAccountGaslessApprovalPort): Promise<SmartAccountGaslessStep> {
     if (op.terminal || op.state !== "awaiting_approval") return { operation: op };
@@ -140,7 +146,8 @@ export class SmartAccountGaslessExecution {
     this.clock.fresh(op.intent.provider.observedAt, op);
     if (signing) this.clock.signing(op); else this.clock.live(op);
   }
-  private async observe(op: SmartAccountGaslessOperationRecord, priorFailure?: SmartAccountGaslessReason): Promise<SmartAccountGaslessStep> {
+  private async observe(op: SmartAccountGaslessOperationRecord, priorFailure?: SmartAccountGaslessReason,
+    observer?: SmartAccountGaslessObserver): Promise<SmartAccountGaslessStep> {
     try {
       this.clock.check(op);
       if (op.material === null || op.exposureAttempts !== 1) saFail("sa_gasless_state_corrupt");
@@ -151,9 +158,10 @@ export class SmartAccountGaslessExecution {
       }
       let chain: SmartAccountGaslessRpcObservation;
       try {
-        chain = await this.rpc(op).observe({ operationId: op.operationId, fingerprint: op.fingerprint, intent: op.intent,
+        chain = await (observer?.rpc ?? this.rpc(op)).observe({ operationId: op.operationId, fingerprint: op.fingerprint, intent: op.intent,
           material: op.material, cursor: op.cursor, transactionHint: op.providerSettlement?.transactionHash ?? null });
         saExact(chain, ["cursor", "observation", "settlement", "unusedProof"], "sa_gasless_evidence");
+        if (observer !== undefined) chain = { ...chain, observation: { ...chain.observation, source: observationSource(observer) } };
         this.clock.check(op, [chain.observation.observedAt, ...(chain.settlement === null ? [] : [chain.settlement.observedAt]),
           ...(chain.unusedProof === null ? [] : [chain.unusedProof.observedAt])]);
       } catch (error) {
@@ -162,7 +170,8 @@ export class SmartAccountGaslessExecution {
         const at = new Date(this.clock.check(op)).toISOString();
         chain = { cursor: op.cursor, settlement: null, unusedProof: null, observation: { observedAt: at,
           phase: failure.reason === "sa_gasless_evidence" || failure.reason === "sa_gasless_rpc_binding" ? "invalid" : "unavailable",
-          reason: failure.reason, candidateTxHash: op.observation?.candidateTxHash ?? null, evidenceHash: null } };
+          reason: failure.reason, candidateTxHash: op.observation?.candidateTxHash ?? null, evidenceHash: null,
+          ...(observer === undefined ? {} : { source: observationSource(observer) }) } };
       }
       const patch = this.decide(chain, priorFailure ?? op.failure?.reason);
       // A full terminal proof may still use the reserved space even after routine progress reaches its cap.
@@ -200,4 +209,13 @@ export class SmartAccountGaslessExecution {
       return { operation: op, warning: failure };
     return { operation: await this.save(op, { state: "failed_before_effect", failure }, this.clock.failureAt(op)) };
   }
+}
+
+/** An owner-named observation RPC with the environment variable that named it. */
+export interface SmartAccountGaslessObserver {
+  readonly rpc: SmartAccountGaslessRpcPort;
+  readonly environmentName: string;
+}
+function observationSource(observer: SmartAccountGaslessObserver): SmartAccountGaslessObservationSource {
+  return { environmentName: observer.environmentName, endpointOrigin: observer.rpc.endpointOrigin, endpointHash: observer.rpc.endpointHash };
 }

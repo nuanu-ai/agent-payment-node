@@ -7,7 +7,7 @@ import { parseJsonWithDuplicateRejection } from "../../x402-strict-json.js";
 import { GaslessHttps, type GaslessTransport } from "../../gasless/https.js";
 import type { SmartAccountGaslessBinding, SmartAccountGaslessBlock, SmartAccountGaslessMaterialDescriptor,
   SmartAccountGaslessSnapshot } from "../model.js";
-import type { SmartAccountGaslessMaterialValidatorPort, SmartAccountGaslessRpcFactory,
+import type { SmartAccountGaslessMaterialValidatorPort, SmartAccountGaslessObservationRpcFactory, SmartAccountGaslessRpcFactory,
   SmartAccountGaslessRpcPort, SmartAccountGaslessObserveInput } from "../ports.js";
 import { saFail } from "../reasons.js";
 import { saRegistry } from "../registry.js";
@@ -47,6 +47,8 @@ export interface SmartAccountGaslessRpcOptions {
   readonly validator: SmartAccountGaslessMaterialValidatorPort;
   readonly transport?: GaslessTransport;
   readonly pacing?: SmartAccountGaslessRpcPacing;
+  /** Observe saved operations only: prove the chain and the frozen anchor instead of the frozen endpoint identity. */
+  readonly observationOnly?: boolean;
 }
 
 interface SmartAccountGaslessRpcPass {
@@ -70,6 +72,24 @@ export function smartAccountGaslessRpcFactory(environment: Readonly<Record<strin
   };
 }
 
+/** An owner-named RPC that observes saved operations only; it never serves pre-exposure snapshots or spent checks. */
+export function smartAccountGaslessObservationRpcFactory(environment: Readonly<Record<string, string | undefined>>,
+  clock: ClockPort, validator: SmartAccountGaslessMaterialValidatorPort,
+  transport?: GaslessTransport): SmartAccountGaslessObservationRpcFactory {
+  return (chainId, environmentName) => {
+    if (chainId !== 8453) saFail("sa_gasless_capability");
+    const rpcUrl = environment[saObservationRpcEnv(environmentName)];
+    if (rpcUrl === undefined || rpcUrl.length === 0) saFail("sa_gasless_rpc_binding");
+    return new SmartAccountGaslessRpc({ chainId, rpcUrl, clock, validator, observationOnly: true,
+      ...(transport === undefined ? {} : { transport }) });
+  };
+}
+
+export function saObservationRpcEnv(value: unknown): string {
+  if (typeof value !== "string" || value.length > 128 || !/^APN_[A-Z0-9_]+_RPC_URL$/u.test(value)) saFail("sa_gasless_input");
+  return value as string;
+}
+
 export class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPort {
   readonly chainId = 8453 as const;
   readonly endpointOrigin: string;
@@ -78,6 +98,7 @@ export class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPort {
   private readonly clock: ClockPort;
   private readonly validator: SmartAccountGaslessMaterialValidatorPort;
   private readonly transport: GaslessTransport;
+  private readonly observationOnly: boolean;
   private readonly pacing: SmartAccountGaslessRpcPacing;
   private sequence = 0n;
   private queue: Promise<void> = Promise.resolve();
@@ -89,10 +110,12 @@ export class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPort {
     this.rpcUrl = endpoint.toString(); this.endpointOrigin = endpoint.origin;
     this.endpointHash = sha256(this.rpcUrl); this.clock = options.clock; this.validator = options.validator;
     this.transport = options.transport ?? new GaslessHttps(); this.pacing = options.pacing ?? defaultPacing();
+    this.observationOnly = options.observationOnly === true;
   }
 
   async snapshot(binding: SmartAccountGaslessBinding,
     expectedPreparationBlock?: SmartAccountGaslessBlock): Promise<SmartAccountGaslessSnapshot> {
+    if (this.observationOnly) saFail("sa_gasless_rpc_binding");
     const call = this.pass();
     await this.assertChain(call);
     const snapshot = await captureSmartAccountGaslessSnapshot(call, this.chainId, this.endpointOrigin,
@@ -106,6 +129,7 @@ export class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPort {
   async assertUnspent(input: { readonly binding: SmartAccountGaslessBinding;
     readonly material: SmartAccountGaslessMaterialDescriptor;
     readonly safeBlock: SmartAccountGaslessBlock }): Promise<void> {
+    if (this.observationOnly) saFail("sa_gasless_rpc_binding");
     const call = this.pass(), binding = saBinding(input.binding), safeBlock = saBlock(input.safeBlock);
     const material = saExact(input.material, ["encodedRootHash", "encodedChildHash", "permissionContextHash",
       "payloadHash", "requirementsHash", "materialHash", "rootDelegationHash", "childDelegationHash", "sealedAt"]);
@@ -127,6 +151,8 @@ export class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPort {
     const call = this.pass();
     try {
       await this.assertChain(call);
+      // Another provider must first prove the same chain history at the operation's frozen safe anchor.
+      if (this.observationOnly) await recheckBlock(call, input.intent.initialSnapshot.safeBlock, "sa_gasless_rpc_binding");
       return await observeSmartAccountGasless({ call, clock: this.clock, validator: this.validator }, input);
     } catch (error) {
       if (error instanceof SaRpcBudgetError) {
@@ -141,8 +167,8 @@ export class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPort {
   private assertInput(input: SmartAccountGaslessObserveInput): void {
     validateSmartAccountGaslessObserveInput(input);
     const intent = validateSmartAccountGaslessIntent(input.intent), registry = saRegistry(8453);
-    if (!saSame(intent, input.intent) || intent.initialSnapshot.endpointHash !== this.endpointHash ||
-      intent.initialSnapshot.endpointOrigin !== this.endpointOrigin || intent.deploymentEvidenceHash !== registry.evidenceHash ||
+    if (!saSame(intent, input.intent) || (!this.observationOnly && (intent.initialSnapshot.endpointHash !== this.endpointHash ||
+      intent.initialSnapshot.endpointOrigin !== this.endpointOrigin)) || intent.deploymentEvidenceHash !== registry.evidenceHash ||
       intent.token !== registry.token.address) saFail("sa_gasless_rpc_binding");
   }
 

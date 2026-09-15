@@ -53,6 +53,7 @@ export interface SmartAccountGaslessRpcPort {
   observe(input: SmartAccountGaslessObserveInput): Promise<SmartAccountGaslessRpcObservation>;
 }
 export type SmartAccountGaslessRpcFactory = (chainId: 8453) => SmartAccountGaslessRpcPort;
+export type SmartAccountGaslessObservationRpcFactory = (chainId: 8453, environmentName: string) => SmartAccountGaslessRpcPort;
 export interface SmartAccountGaslessApprovalPort {
   confirm(input: { readonly operationId: string; readonly fingerprint: string; readonly exactPhrase: string;
     readonly summary: Readonly<Record<string, unknown>> }): Promise<boolean>;

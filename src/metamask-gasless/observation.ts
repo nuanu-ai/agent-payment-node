@@ -5,7 +5,7 @@ import { assertMetaMaskGaslessObservationCapacity } from "./journal/transitions.
 import type { MetaMaskGaslessMutable, MetaMaskGaslessProviderObservation, MetaMaskGaslessRpcObservation } from "./model.js";
 import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { metaMaskGaslessOwner } from "./owner.js";
-import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory } from "./ports.js";
+import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "./ports.js";
 import { mmClassify, mmFail, mmFailure, type MetaMaskGaslessFailure, type MetaMaskGaslessFailureReason } from "./reasons.js";
 import { mmExact, mmHex, mmIso } from "./validation.js";
 
@@ -15,6 +15,11 @@ export interface MetaMaskGaslessStep {
   readonly operation: MetaMaskGaslessOperationRecord;
   /** Explicitly transient; never part of the stored operation or its receipt. */
   readonly warning?: MetaMaskGaslessFailure;
+}
+/** An owner-named observation RPC with the environment variable that named it. */
+export interface MetaMaskGaslessObserver {
+  readonly rpc: MetaMaskGaslessRpcPort;
+  readonly environmentName: string;
 }
 export interface MetaMaskGaslessProviderRead {
   readonly hint: MetaMaskGaslessProviderObservation | null;
@@ -33,7 +38,7 @@ export function metaMaskGaslessProviderObservation(value: unknown,
 export class MetaMaskGaslessObservationService {
   constructor(private readonly state: StateStore, private readonly rpcFor: MetaMaskGaslessRpcFactory,
     private readonly provider: MetaMaskGaslessProviderPort, private readonly clock: MetaMaskGaslessClock,
-    private readonly save: MetaMaskGaslessSave) {}
+    private readonly save: MetaMaskGaslessSave, private readonly observer?: MetaMaskGaslessObserver) {}
 
   async run(op: MetaMaskGaslessOperationRecord, submitted?: MetaMaskGaslessProviderRead): Promise<MetaMaskGaslessStep> {
     if (op.terminal || op.submissionAttempts !== 1) return { operation: op };
@@ -45,10 +50,13 @@ export class MetaMaskGaslessObservationService {
       const providerObservation = this.retainProvider(op, result.hint);
       let chain: MetaMaskGaslessRpcObservation;
       try {
-        const rpc = this.rpcFor(op.intent.request.chainId);
-        if (rpc.chainId !== op.intent.request.chainId || rpc.endpointHash !== op.intent.initialSnapshot.endpointHash ||
-          rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin) mmFail("mm_gasless_rpc_binding");
+        const rpc = this.observer?.rpc ?? this.rpcFor(op.intent.request.chainId);
+        if (rpc.chainId !== op.intent.request.chainId || (this.observer === undefined &&
+          (rpc.endpointHash !== op.intent.initialSnapshot.endpointHash || rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin))) {
+          mmFail("mm_gasless_rpc_binding");
+        }
         chain = await rpc.observe(op.intent, op.cursor, providerObservation);
+        chain = { ...chain, observation: { ...chain.observation, ...this.source() } };
         this.clock.check(op, [chain.observation.observedAt,
           ...(chain.settlement === null ? [] : [chain.settlement.observedAt])]);
       } catch (error) {
@@ -60,7 +68,7 @@ export class MetaMaskGaslessObservationService {
         chain = { cursor: op.cursor, settlement: null, observation: {
           observedAt: at, phase: invalid ? "invalid" : "unavailable",
           reason, candidateTxHash: op.observation?.candidateTxHash ?? null, transactionBlock: null,
-          finalityBlock: null, evidenceHash: null,
+          finalityBlock: null, evidenceHash: null, ...this.source(),
         } };
       }
       // An unavailable request cannot discard a previously independently usable locator.
@@ -79,6 +87,12 @@ export class MetaMaskGaslessObservationService {
       }
       throw error;
     }
+  }
+
+  private source() {
+    const observer = this.observer;
+    return observer === undefined ? {} : { source: { environmentName: observer.environmentName,
+      endpointOrigin: observer.rpc.endpointOrigin, endpointHash: observer.rpc.endpointHash } };
   }
 
   private async readProvider(op: MetaMaskGaslessOperationRecord): Promise<MetaMaskGaslessProviderRead> {
