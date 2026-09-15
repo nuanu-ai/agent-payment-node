@@ -6,16 +6,16 @@ import { ApnError } from "./errors.js";
 import { TRON_GENESIS } from "./tron/constants.js";
 import { validateTronFinalResources, validateTronResources } from "./tron/resource-model.js";
 
-export type RailState = "awaiting_approval" | "signing_started" | "signed_not_submitted" | "submitting" | "submitted_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert";
-const TERMINAL: readonly RailState[] = ["completed", "failed_before_effect", "failed_confirmed_revert"];
+export type RailState = "awaiting_approval" | "signing_started" | "signed_not_submitted" | "submitting" | "submitted_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert" | "abandoned_unknown";
+const TERMINAL: readonly RailState[] = ["completed", "failed_before_effect", "failed_confirmed_revert", "abandoned_unknown"];
 const EDGES: Readonly<Record<RailState, readonly RailState[]>> = {
   awaiting_approval: ["signing_started", "submitting", "failed_before_effect"],
   signing_started: ["signed_not_submitted", "failed_before_effect"],
   signed_not_submitted: ["submitting", "failed_before_effect"],
   submitting: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert"],
-  submitted_pending: ["unknown_finality", "completed", "failed_confirmed_revert"],
-  unknown_finality: ["completed", "failed_confirmed_revert"],
-  completed: [], failed_before_effect: [], failed_confirmed_revert: [],
+  submitted_pending: ["unknown_finality", "completed", "failed_confirmed_revert", "abandoned_unknown"],
+  unknown_finality: ["completed", "failed_confirmed_revert", "abandoned_unknown"],
+  completed: [], failed_before_effect: [], failed_confirmed_revert: [], abandoned_unknown: [],
 };
 interface RailTransition {
   readonly state: RailState;
@@ -124,7 +124,7 @@ export function validateRailOperation(value: unknown): RailOperationRecord {
     if (entry.transactionId !== null) validateRailTransactionId(entry.transactionId, account.rail);
     if (entry.rawPayloadHash !== null && (typeof entry.rawPayloadHash !== "string" || !HASH.test(entry.rawPayloadHash))) corrupt();
     if (account.provider === "local") {
-      if (["signed_not_submitted", "submitting", "submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert"].includes(entry.state) && (entry.transactionId === null || entry.rawPayloadHash === null)) corrupt();
+      if (["signed_not_submitted", "submitting", "submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "abandoned_unknown"].includes(entry.state) && (entry.transactionId === null || entry.rawPayloadHash === null)) corrupt();
       if (previous?.state === "awaiting_approval" && entry.state === "submitting") corrupt();
     } else if (["signing_started", "signed_not_submitted"].includes(entry.state) || entry.rawPayloadHash !== null) corrupt();
     if (["completed", "failed_confirmed_revert"].includes(entry.state)) {

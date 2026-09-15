@@ -143,6 +143,20 @@ export class SolanaLocalAdapter {
         validateRailPrepared(prepared, account);
         return await inspectSolana(this.rpc, account, prepared, transactionId, this.now());
     }
+    async assertValidityExpired(account, prepared, transactionId) {
+        await this.currentAccount(account);
+        validateRailPrepared(prepared, account);
+        await assertSolanaNetwork(this.rpc);
+        solanaSignature(transactionId);
+        if (prepared.lastValidBlockHeight === null)
+            validityOpen();
+        // A finalized chain above lastValidBlockHeight can no longer include a transaction using this blockhash.
+        if (rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "finalized" }])) <= atomic(prepared.lastValidBlockHeight))
+            validityOpen();
+        const statuses = rpcRecord(await this.rpc.call("getSignatureStatuses", [[transactionId], { searchTransactionHistory: true }])).value;
+        if (!Array.isArray(statuses) || statuses.length !== 1 || statuses[0] !== null)
+            validityOpen();
+    }
     async currentAccount(account) {
         const stored = await this.account(account.profile);
         if (stored === null || canonicalJson(stored) !== canonicalJson(account))
@@ -193,4 +207,5 @@ async function messageFee(rpc, messageBase64) {
 }
 function mismatch() { throw new ApnError("APN_WALLET_MISMATCH", "The Solana account, asset or sealed effect does not match this operation."); }
 function expired() { throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen Solana transaction or its funding bounds are no longer valid."); }
+function validityOpen() { throw new ApnError("APN_OPERATION_BLOCKED", "The Solana transfer is still inside its validity window or visible in RPC history; use operation resume."); }
 //# sourceMappingURL=local-adapter.js.map

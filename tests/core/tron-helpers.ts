@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { OperationAbandonApprovalPort } from "../../src/operation-abandon-approval.js";
 import { utils } from "tronweb";
 import { ApnCore } from "../../src/core.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
@@ -35,7 +36,7 @@ export class TronTestRpc implements TronRpcPort {
   badAmount = false; badSignature = false; badLog = false; extraLog = false; badBlock = false; feeExtra = 0n;
   badPermission = false; senderContract = false; wrongDecimals = false; simulationFailure = false;
   explicitDefaults = false; badResult: string | undefined;
-  headOffsetMs = 0; referenceMismatch = false; solidReferenceMismatch = false;
+  headOffsetMs = 0; referenceMismatch = false; solidReferenceMismatch = false; solidHead: bigint | undefined;
   transactionBlock = 1010n; inclusionTimeOverride: bigint | undefined; parentTimeOverride: bigint | undefined; badParentHash = false;
   signatureAlias = false;
   prepared?: RailPreparedTransfer;
@@ -72,7 +73,7 @@ export class TronTestRpc implements TronRpcPort {
       }
       case "walletsolidity/gettransactionbyid": return !this.solidified || this.absentHistory ? {} : this.transaction();
       case "walletsolidity/gettransactioninfobyid": return !this.solidified || this.absentHistory ? {} : this.info();
-      case "walletsolidity/getnowblock": return this.block(this.submissions.length > 0 ? 1020n : 960n);
+      case "walletsolidity/getnowblock": return this.block(this.solidHead ?? (this.submissions.length > 0 ? 1020n : 960n));
       case "walletsolidity/getblockbynum": return { ...this.block(BigInt(String(body.num)), BigInt(String(body.num)) === this.transactionBlock), ...(this.solidReferenceMismatch && Number(body.num) === 960 ? { blockID: tronTestBlockId(960n).slice(0, 16) + "cd".repeat(24) } : {}) };
       default: throw new Error("unexpected synthetic TRON method");
     }
@@ -135,7 +136,7 @@ export class TronTestRpc implements TronRpcPort {
   }
 }
 
-export async function tronFixture(root: string, options: { rpc?: TronTestRpc; wrapping?: TronWrapping; approval?: TronApproval; admit?: boolean } = {}) {
+export async function tronFixture(root: string, options: { rpc?: TronTestRpc; wrapping?: TronWrapping; approval?: TronApproval; admit?: boolean; abandonApproval?: OperationAbandonApprovalPort } = {}) {
   const now = options.rpc?.now ?? new Date("2026-09-08T10:00:00.000Z"); const clock = { now: () => new Date(now) };
   const wrapping = options.wrapping ?? new TronWrapping(); const storage = new ChainAccountStore(root, wrapping);
   const account = await storage.ensureLocal({ profile: "tron-test", rail: "tron", create: async () => {
@@ -144,7 +145,7 @@ export async function tronFixture(root: string, options: { rpc?: TronTestRpc; wr
   const rpc = options.rpc ?? new TronTestRpc(now); rpc.sender = account.address;
   const adapter = new TronLocalAdapter(storage, rpc, clock.now); const approval = options.approval ?? new TronApproval();
   const core = new ApnCore({ state: new StateStore(root), chainAccounts: storage, directRails: [adapter], railApproval: approval,
-    chainPolicyApproval: { approve: async () => {} }, clock });
+    chainPolicyApproval: { approve: async () => {} }, clock, ...(options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {}) });
   if (options.admit !== false) for (const asset of ["trx", "usdt"] as const) {
     const result = await core.execute({ command: "policy.admit-tron", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "30" });
     assert.equal(result.ok, true, result.error?.message);

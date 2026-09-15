@@ -4,15 +4,15 @@ import { atomic, isoDate, SOLANA_GENESIS, validateChainAsset } from "./chain-pol
 import { ApnError } from "./errors.js";
 import { TRON_GENESIS } from "./tron/constants.js";
 import { validateTronFinalResources, validateTronResources } from "./tron/resource-model.js";
-const TERMINAL = ["completed", "failed_before_effect", "failed_confirmed_revert"];
+const TERMINAL = ["completed", "failed_before_effect", "failed_confirmed_revert", "abandoned_unknown"];
 const EDGES = {
     awaiting_approval: ["signing_started", "submitting", "failed_before_effect"],
     signing_started: ["signed_not_submitted", "failed_before_effect"],
     signed_not_submitted: ["submitting", "failed_before_effect"],
     submitting: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert"],
-    submitted_pending: ["unknown_finality", "completed", "failed_confirmed_revert"],
-    unknown_finality: ["completed", "failed_confirmed_revert"],
-    completed: [], failed_before_effect: [], failed_confirmed_revert: [],
+    submitted_pending: ["unknown_finality", "completed", "failed_confirmed_revert", "abandoned_unknown"],
+    unknown_finality: ["completed", "failed_confirmed_revert", "abandoned_unknown"],
+    completed: [], failed_before_effect: [], failed_confirmed_revert: [], abandoned_unknown: [],
 };
 const HASH = /^[a-f0-9]{64}$/u;
 export function newRailOperation(intent) {
@@ -101,7 +101,7 @@ export function validateRailOperation(value) {
         if (entry.rawPayloadHash !== null && (typeof entry.rawPayloadHash !== "string" || !HASH.test(entry.rawPayloadHash)))
             corrupt();
         if (account.provider === "local") {
-            if (["signed_not_submitted", "submitting", "submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert"].includes(entry.state) && (entry.transactionId === null || entry.rawPayloadHash === null))
+            if (["signed_not_submitted", "submitting", "submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "abandoned_unknown"].includes(entry.state) && (entry.transactionId === null || entry.rawPayloadHash === null))
                 corrupt();
             if (previous?.state === "awaiting_approval" && entry.state === "submitting")
                 corrupt();

@@ -1,14 +1,17 @@
-import type { Address } from "./model.js";
 import { type TtyTransferApprovalOptions } from "./tty-approval.js";
 export interface OperationAbandonIntent {
     readonly operationId: string;
     readonly fingerprint: string;
     readonly profile: string;
     readonly providerId: string;
-    readonly walletAddress: Address;
-    readonly recipient: Address;
+    readonly walletAddress: string;
+    readonly recipient: string;
     readonly amountAtomic: string;
     readonly amountDecimal: string;
+    readonly chainLabel: string;
+    readonly assetLabel: string;
+    readonly unit: string;
+    readonly outcomeNote: string;
 }
 export interface OperationAbandonApprovalPort {
     approve(intent: OperationAbandonIntent): Promise<void>;
