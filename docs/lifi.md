@@ -1,6 +1,6 @@
 # LI.FI EVM cross-chain USDC
 
-This APN 0.5.17 package includes local-wallet route selection and execution for
+This APN 0.5.18 package includes local-wallet route selection and execution for
 canonical USDC between Ethereum, Base and Arbitrum One. It implements Across V4
 and Stargate V2 Taxi through the LI.FI API. Package availability, source tests
 and installed-package tests are separate from real mainnet acceptance, which

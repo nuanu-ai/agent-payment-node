@@ -109,6 +109,7 @@ export declare const intentSchema: z.ZodObject<{
     wireVersion: z.ZodOptional<z.ZodEnum<{
         "apn.gasless-wire.v2": "apn.gasless-wire.v2";
         "apn.gasless-wire.v3": "apn.gasless-wire.v3";
+        "apn.gasless-wire.v4": "apn.gasless-wire.v4";
     }>>;
     profile: z.ZodString;
     request: z.ZodObject<{
@@ -897,6 +898,7 @@ export declare const operationSchema: z.ZodObject<{
         wireVersion: z.ZodOptional<z.ZodEnum<{
             "apn.gasless-wire.v2": "apn.gasless-wire.v2";
             "apn.gasless-wire.v3": "apn.gasless-wire.v3";
+            "apn.gasless-wire.v4": "apn.gasless-wire.v4";
         }>>;
         profile: z.ZodString;
         request: z.ZodObject<{

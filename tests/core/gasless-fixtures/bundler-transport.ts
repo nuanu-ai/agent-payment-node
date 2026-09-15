@@ -30,6 +30,7 @@ export async function bundledGaslessFixture(root: string) {
   const at = { number: "0x64", hash: blockHash, timestamp: `0x${Math.floor(s.now.getTime() / 1000).toString(16)}`,
     baseFeePerGas: "0xf4240" };
   const calls: Array<{ method: string; bundler: boolean; afterApproval: boolean }> = [];
+  const estimates: unknown[][] = [];
   let approved = false, limit = 20, intent: GaslessIntent | undefined;
   let fault: "" | "chain" | "entrypoint" | "balance" | "allowance" | "nonce" | "fees" = "";
   let batchReply: (rows: Json[]) => unknown = rows => rows;
@@ -82,6 +83,7 @@ export async function bundledGaslessFixture(root: string) {
       const read = row.reads.find(r => r.kind === "call" && r.address === call.to && r.data === data);
       assert.ok(read); return read.expected;
     }
+    if (method === "eth_estimateUserOperationGas") { estimates.push([...params]); } 
     if (method === "eth_estimateUserOperationGas") return { verificationGasLimit: "0x15f90", callGasLimit: "0x30d40",
       paymasterVerificationGasLimit: "0x2bf20", paymasterPostOpGasLimit: "0x88b8", preVerificationGas: "0x222e0" };
     if (method === "eth_sendUserOperation") { assert.ok(intent); return gaslessUserOperationHash(intent, params[0] as never); }
@@ -93,8 +95,8 @@ export async function bundledGaslessFixture(root: string) {
   const confirm = s.approval.confirm.bind(s.approval);
   s.approval.confirm = async input => { approved = true; return await confirm(input); };
   const core = new ApnCore({ state: s.state, gasless: { ...s.dependencies, rpcFor: () => rpc },
-    clock: { now: () => new Date(s.now) } });
-  return { ...s, core, rpc, calls, setLimit: (value: number) => { limit = value; },
+    clock: { now: () => new Date(s.now) }, wait: s.wait });
+  return { ...s, core, rpc, calls, estimates, setLimit: (value: number) => { limit = value; },
     setFault: (value: typeof fault) => { fault = value; },
     setBatchReply: (value: typeof batchReply) => { batchReply = value; },
     setFeeQuote: (value: unknown) => { feeQuote = value; },

@@ -1,7 +1,7 @@
 import { hashObject } from "../canonical.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
-import { gaslessFee, gaslessGas } from "./economics.js";
+import { gaslessCalibratedGas, gaslessFee } from "./economics.js";
 import { gaslessOwner } from "./owner.js";
 import { gaslessDeployment } from "./registry.js";
 import { newGaslessOperation } from "./transitions.js";
@@ -33,7 +33,7 @@ export class GaslessPreparation {
                 gaslessFailure("APN_INVALID_INPUT", "gasless_recipient_alias");
             }
             const rpc = this.o.rpcFor(request.chainId);
-            const initialSnapshot = await rpc.snapshot(binding.owner.address), gas = gaslessGas(initialSnapshot);
+            const initialSnapshot = await rpc.snapshot(binding.owner.address), gas = gaslessCalibratedGas(initialSnapshot);
             // Freeze the owner's whole fee limit so a paymaster price move before signing cannot cancel the approval.
             const quoteAtomic = BigInt(gaslessFee(gas, initialSnapshot.feeConfiguration));
             const gross = BigInt(request.grossAtomic), spendable = gross - BigInt(request.minReceivedAtomic);
@@ -43,7 +43,7 @@ export class GaslessPreparation {
             }
             const feeCapAtomic = cap.toString();
             const preparedAt = new Date(this.o.now()).toISOString(), recipientAtomic = net.toString();
-            const unsigned = { wireVersion: "apn.gasless-wire.v3", profile, request, ...binding,
+            const unsigned = { wireVersion: "apn.gasless-wire.v4", profile, request, ...binding,
                 initialSnapshot, gas, token: row.token, tokenDomain: row.tokenDomain, paymaster: row.paymaster,
                 entryPoint: row.entryPoint, delegate: row.delegate, feeCapAtomic, recipientAtomic,
                 callData: gaslessBatch(row.token, request.recipient, recipientAtomic, row.paymaster), preparedAt,

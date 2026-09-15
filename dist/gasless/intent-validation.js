@@ -21,7 +21,7 @@ export function validateGaslessIntent(value) {
     if ([GASLESS_ZERO_ADDRESS, i.owner.address, i.token, i.paymaster, i.entryPoint, i.delegate].includes(r.recipient)) {
         gaslessFailure("APN_STATE_CORRUPT", "gasless_recipient_alias");
     }
-    validateGaslessStoredOffer(i.gas, s);
+    validateGaslessStoredOffer(i.gas, s, i.wireVersion);
     if (!gaslessFeeCapCovers(i, gaslessFee(i.gas, s.feeConfiguration)) ||
         gaslessUint(i.feeCapAtomic, true) + gaslessUint(i.recipientAtomic, true) !== gaslessUint(r.grossAtomic) ||
         gaslessUint(i.feeCapAtomic) > gaslessUint(r.maxFeeAtomic) || gaslessUint(i.recipientAtomic) < gaslessUint(r.minReceivedAtomic)) {
