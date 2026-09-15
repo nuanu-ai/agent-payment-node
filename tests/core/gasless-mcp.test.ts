@@ -161,7 +161,7 @@ test("gasless capabilities are identical static CLI and MCP discovery with no lo
     ["local", "implemented", "open"],
     ["metamask-agent-wallet", "implemented", "open"],
     ["metamask-smart-account", "implemented", "open"],
-    ["coinbase-agentic-wallet", "unavailable", "open"],
+    ["coinbase-agentic-wallet", "implemented", "open"],
   ]);
   assert.deepEqual(data.semantics, { ...data.semantics, sender_native_gas_required: false, automatic_native_fallback: false });
   assert.deepEqual(effects.calls, { rpc: 0, load: 0, seal: 0, approval: 0 });

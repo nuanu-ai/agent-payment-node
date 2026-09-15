@@ -27,6 +27,8 @@ export interface CoreDependencies {
     readonly native?: NativePort;
     readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
     readonly rpc?: RpcPort;
+    readonly coinbaseRpc?: RpcPort;
+    readonly coinbaseRpcFactory?: () => RpcPort;
     readonly http?: HttpPort;
     readonly clock?: ClockPort;
     readonly ids?: IdPort;
@@ -37,6 +39,7 @@ export interface CoreDependencies {
     readonly foregroundAuthentication?: ForegroundAuthenticationPort;
     readonly transferApproval?: TransferApprovalPort;
     readonly rpcUrl?: string;
+    readonly coinbaseRpcUrl?: string;
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
@@ -55,6 +58,7 @@ export declare class RuntimeContext {
     readonly native?: NativePort;
     readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
     readonly rpc?: RpcPort;
+    readonly coinbaseRpc?: RpcPort;
     readonly http?: HttpPort;
     readonly clock: ClockPort;
     readonly ids: IdPort;
@@ -65,16 +69,20 @@ export declare class RuntimeContext {
     readonly foregroundAuthentication?: ForegroundAuthenticationPort;
     readonly transferApproval?: TransferApprovalPort;
     readonly rpcUrl?: string;
+    readonly coinbaseRpcUrl?: string;
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
     readonly operationAbandonApproval?: OperationAbandonApprovalPort;
+    private readonly coinbaseRpcFactory?;
+    private coinbaseRpcInstance?;
     private initialized;
     constructor(dependencies: CoreDependencies);
     ready(): Promise<void>;
     requireNative(): NativePort;
     requireKeychainProbe(): Pick<WrappingSecretPort, "load">;
     requireRpc(): RpcPort;
+    requireCoinbaseRpc(): RpcPort;
     requireHttp(): HttpPort;
     requirePolicy(): ProfilePolicyPort;
     requireProfileRepository(): ProviderProfileRepositoryPort;
@@ -83,6 +91,7 @@ export declare class RuntimeContext {
     requireOperationAbandonApproval(): OperationAbandonApprovalPort;
     requireTransferApproval(): TransferApprovalPort;
     requireRpcUrl(): string;
+    requireCoinbaseRpcUrl(): string;
     requireProviderAuthorizationStore(): ProviderAuthorizationStorePort;
     nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest;
 }

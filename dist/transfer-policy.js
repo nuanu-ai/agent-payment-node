@@ -115,6 +115,7 @@ export function hasExactTransfer(receipt, operation) {
         log.topics[2]?.toLowerCase() === recipientTopic && log.data.toLowerCase() === value);
 }
 export function publicOperation(operation) {
+    const coinbaseGasless = operation.providerDirect?.coinbaseGasless;
     return {
         operation_id: operation.operationId,
         idempotency_hash: operation.idempotencyHash,
@@ -131,6 +132,17 @@ export function publicOperation(operation) {
         wallet_address: operation.walletAddress,
         recipient: operation.recipient,
         amount: { atomic: operation.amountAtomic, decimal: operation.amountDecimal, decimals: operation.evm?.asset.decimals ?? USDC_DECIMALS },
+        ...(coinbaseGasless === undefined ? {} : { gasless_provider: "coinbase-agentic-wallet", transfer: {
+                chain_id: coinbaseGasless.chainId, token: coinbaseGasless.token, sender: operation.walletAddress,
+                recipient: operation.recipient, gross_atomic: coinbaseGasless.grossAtomic, recipient_atomic: coinbaseGasless.netAtomic,
+                quoted_fee_budget_atomic: coinbaseGasless.feeAtomic, user_max_fee_atomic: coinbaseGasless.maxFeeAtomic,
+                minimum_received_atomic: coinbaseGasless.minReceivedAtomic, sender_native_debit_wei: coinbaseGasless.senderNativeDebitWei,
+            }, sponsorship: { mechanism: coinbaseGasless.sponsorship, gas_payer: "external_cdp_account", token_fee_atomic: "0" },
+            dispatch: { maximum_invocations: 1, retry_after_started: false, ambiguous_guard_retained: true,
+                exclusive_account_use_required: true }, rpc_origin: coinbaseGasless.rpcOrigin,
+            safe_anchor: coinbaseGasless.safeBlock, entry_point: coinbaseGasless.entryPoint,
+            ...(operation.coinbaseGaslessLocator === undefined ? {} : { locator: operation.coinbaseGaslessLocator }),
+            observation_cursor: operation.coinbaseGaslessCursor, settlement: operation.coinbaseGaslessSettlement ?? null }),
         ...(operation.economics === undefined ? {} : { economics: operation.economics }),
         prepared_at: operation.preparedAt,
         ...(operation.preparedBlockNumberAtomic === undefined ? {} : {
@@ -175,6 +187,7 @@ export function publicReceipt(receipt) {
         ...(receipt.transactionHash === undefined ? {} : { transaction_hash: receipt.transactionHash }),
         ...(receipt.blockNumberAtomic === undefined ? {} : { block_number_atomic: receipt.blockNumberAtomic }),
         ...(receipt.exactTransferLog === undefined ? {} : { exact_transfer_log: receipt.exactTransferLog }),
+        ...(receipt.coinbaseGaslessSettlement === undefined ? {} : { coinbase_gasless_settlement: receipt.coinbaseGaslessSettlement }),
         created_at: receipt.createdAt,
         receipt_hash: receipt.integrityHash,
         next_actions: [],
@@ -185,6 +198,17 @@ function addressTopic(address) {
     return `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
 }
 function operationNextActions(operation) {
+    if (operation.providerDirect?.coinbaseGasless !== undefined) {
+        if (operation.terminal)
+            return [];
+        if (operation.state === "awaiting_approval")
+            return [
+                `apn gasless transfer approve --operation ${operation.operationId}`,
+                `apn operation status --operation ${operation.operationId}`,
+            ];
+        return [`apn operation resume --operation ${operation.operationId}`,
+            `apn operation status --operation ${operation.operationId}`, `apn receipt get --operation ${operation.operationId}`];
+    }
     if (operation.evm !== undefined && operation.state === "failed_before_effect")
         return ["apn pay transfer prepare-asset --help"];
     if (operation.state === "failed_before_effect" && operation.reason === "provider_sender_changed" &&

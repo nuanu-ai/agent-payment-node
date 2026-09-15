@@ -1,5 +1,5 @@
 import { encodeAbiParameters } from "viem";
-import { HttpsBaseRpc } from "../../src/rpc.js";
+import { HttpsBaseRpc, parseRpcLogEnvelope, parseRpcResultEnvelope } from "../../src/rpc.js";
 import { tokenDomainSeparator } from "../../src/x402-policy.js";
 import { x402Network } from "../../src/x402-network.js";
 import assert from "node:assert/strict";
@@ -14,6 +14,22 @@ import { RECIPIENT, WALLET, temporaryState } from "./helpers.js";
 const BLOCK = { number: "0x3039", hash: EVM_BLOCK_HASH, baseFeePerGas: "0x1", parentHash: `0x${"a".repeat(64)}` };
 const HASH = `0x${"d".repeat(64)}` as Hex;
 const ECONOMICS = { nonceAtomic: "7", gasLimitAtomic: "65000", maxFeePerGasAtomic: "3", maxPriorityFeePerGasAtomic: "1", maximumGasCostAtomic: "195000" };
+
+test("production RPC envelope parser rejects duplicate, conflicting and extra JSON-RPC members", () => {
+  assert.deepEqual(parseRpcResultEnvelope('{"jsonrpc":"2.0","id":"1","result":[]}', "1"), []);
+  assert.deepEqual(parseRpcLogEnvelope('{"jsonrpc":"2.0","id":"1","result":[]}', "1"), { kind: "complete", value: [] });
+  for (const raw of [
+    '{"jsonrpc":"2.0","id":"1","result":[],"result":[]}',
+    '{"jsonrpc":"2.0","id":"1","id":"1","result":[]}',
+    '{"jsonrpc":"2.0","id":"1","result":[],"error":{"message":"pruned"}}',
+    '{"jsonrpc":"2.0","id":"1","result":[],"extra":true}',
+  ]) assert.throws(() => parseRpcResultEnvelope(raw, "1"), { code: "APN_RPC_PROTOCOL" });
+  for (const raw of [
+    '{"jsonrpc":"2.0","id":"1","error":{"message":"pruned"},"error":{"message":"pruned"}}',
+    '{"jsonrpc":"2.0","id":"1","id":"1","error":{"message":"pruned"}}',
+    '{"jsonrpc":"2.0","id":"1","error":{"message":"pruned"},"extra":true}',
+  ]) assert.throws(() => parseRpcLogEnvelope(raw, "1"), { code: "APN_RPC_PROTOCOL" });
+});
 
 class Wire {
   chain = "0x2105";

@@ -12,6 +12,8 @@ import { providerDirectExecutionInput } from "./provider-direct-execution-input.
 import { appendTransition, sealOperation } from "./state.js";
 import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, publicOperation, publicReceipt, } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { coinbaseGaslessPreconditionsMatch, prepareCoinbaseGasless, reobserveCoinbaseGasless } from "./coinbase-gasless-provider.js";
+import { requiredProviderBinding as requiredBinding, requiredProviderDirectProfile } from "./provider-direct-guards.js";
 const DIRECT_POLICY = {
     identity: "apn.direct.foreground-approval.v1",
     verdict: "foreground_approval_required",
@@ -52,12 +54,13 @@ export class ProviderDirectTransferService {
         const operationId = state.operationId(profile, idempotencyKey);
         const idempotencyHash = state.idempotencyHash(idempotencyKey);
         const rpcBindingHash = sha256(`direct-rpc\0${this.context.requireRpcUrl()}`);
-        return await state.withLocks([
-            `profile:${profileHash}`,
-            `operation:${operationId}`,
-            `operation:idempotency:${idempotencyHash}`,
-        ], async () => {
-            const bound = await this.requiredProviderProfile(profileHash);
+        const initialBound = await requiredProviderDirectProfile(this.context, profileHash);
+        return await state.withLocks([`profile:${profileHash}`, `provider-account:${initialBound.provider_id}:${initialBound.account_binding_hash}`,
+            `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
+            const bound = await requiredProviderDirectProfile(this.context, profileHash);
+            if (bound.account_binding_hash !== initialBound.account_binding_hash ||
+                bound.public_address.toLowerCase() !== initialBound.public_address.toLowerCase())
+                throw new ApnError("APN_PROFILE_DRIFT", "Provider account identity changed while acquiring its operation lock.");
             const materialRequest = {
                 method: "pay.transfer",
                 profile,
@@ -86,6 +89,7 @@ export class ProviderDirectTransferService {
             if (existing !== null)
                 return publicOperation(existing.record);
             await this.operations.assertProfileAvailable(profileHash);
+            await this.operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
             const rpcIdentity = await this.context.requireRpc().assertBaseChain();
             const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
             const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
@@ -162,14 +166,16 @@ export class ProviderDirectTransferService {
             return publicOperation(operation);
         });
     }
+    async prepareCoinbaseGasless(request) {
+        return await prepareCoinbaseGasless(this.context, this.operations, this.durable, async (profileHash) => await requiredProviderDirectProfile(this.context, profileHash), request);
+    }
     async approve(operationIdInput) {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const found = await this.requiredOperation(operationId);
-        return await this.context.state.withLocks([
-            `profile:${found.profileHash}`,
-            `operation:${operationId}`,
-        ], async () => {
+        const foundBinding = requiredBinding(found);
+        return await this.context.state.withLocks([`profile:${found.profileHash}`,
+            `provider-account:${foundBinding.providerId}:${foundBinding.accountBindingHash}`, `operation:${operationId}`], async () => {
             let operation = await this.requiredOperation(operationId);
             operation = await this.durable.recoverOrphanTerminal(operation);
             if (operation.terminal || operation.state !== "awaiting_approval")
@@ -178,19 +184,32 @@ export class ProviderDirectTransferService {
                 await this.failBeforeEffect(operation, "approval_window_expired");
             }
             const binding = requiredBinding(operation);
+            await this.operations.assertProviderAccountAvailable(binding.providerId, binding.accountBindingHash, operation.walletAddress, operation.operationId);
             await this.assertFrozenPreconditions(operation, binding);
-            await this.context.requireTransferApproval().approve({
-                profile: operation.profile,
-                operationId: operation.operationId,
-                fingerprint: operation.fingerprint,
-                walletAddress: operation.walletAddress,
-                recipient: operation.recipient,
-                amountAtomic: operation.amountAtomic,
-                amountDecimal: operation.amountDecimal,
-                expiresAt: operation.expiresAt,
-                providerId: binding.providerId,
-                policyIdentity: binding.policy.identity,
-            });
+            if (binding.coinbaseGasless !== undefined) {
+                const approval = this.context.gasless?.approval;
+                if (approval === undefined)
+                    throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve this Coinbase gasless transfer in a foreground terminal.", {
+                        nextActions: [`apn gasless transfer approve --operation ${operation.operationId}`],
+                    });
+                const accepted = await approval.confirm({ operationId: operation.operationId, fingerprint: operation.fingerprint,
+                    exactPhrase: `APPROVE GASLESS ${operation.fingerprint}`, summary: publicOperation(operation) });
+                if (!accepted)
+                    await this.failBeforeEffect(operation, "coinbase_gasless_approval_rejected");
+            }
+            else
+                await this.context.requireTransferApproval().approve({
+                    profile: operation.profile,
+                    operationId: operation.operationId,
+                    fingerprint: operation.fingerprint,
+                    walletAddress: operation.walletAddress,
+                    recipient: operation.recipient,
+                    amountAtomic: operation.amountAtomic,
+                    amountDecimal: operation.amountDecimal,
+                    expiresAt: operation.expiresAt,
+                    providerId: binding.providerId,
+                    policyIdentity: binding.policy.identity,
+                });
             const adapter = this.requiredAdapter(binding);
             try {
                 adapter.direct?.assertCompatibleIntent?.({
@@ -236,6 +255,10 @@ export class ProviderDirectTransferService {
             }
             if (operation.state === "started" && operation.transactionHash === undefined) {
                 const binding = requiredBinding(operation);
+                if (binding.coinbaseGasless !== undefined) {
+                    operation = await this.durable.transition(operation, "ambiguous_effect", false, "coinbase_gasless_observation_required", "provider_effect_no_replay");
+                    return publicOperation(await this.observeCoinbaseGasless(operation));
+                }
                 if (binding.executionMode === "delegated_session_transaction") {
                     const adapter = this.requiredAdapter(binding);
                     try {
@@ -247,6 +270,8 @@ export class ProviderDirectTransferService {
                 }
                 operation = await this.durable.transition(operation, "ambiguous_effect", false, "provider_result_missing_after_restart", "provider_effect_no_replay");
             }
+            if (requiredBinding(operation).coinbaseGasless !== undefined)
+                return publicOperation(await this.observeCoinbaseGasless(operation));
             if ((operation.state === "provider_pending" || operation.state === "ambiguous_effect") &&
                 operation.providerEffect !== undefined && operation.transactionHash === undefined) {
                 const binding = requiredBinding(operation);
@@ -291,11 +316,12 @@ export class ProviderDirectTransferService {
         });
     }
     async assertFrozenPreconditions(operation, binding) {
+        const rpcUrl = binding.coinbaseGasless === undefined ? this.context.requireRpcUrl() : this.context.requireCoinbaseRpcUrl();
         if (binding.policy.identity !== DIRECT_POLICY.identity || binding.policy.verdict !== DIRECT_POLICY.verdict ||
             binding.policy.foregroundApprovalRequired !== true ||
-            sha256(`direct-rpc\0${this.context.requireRpcUrl()}`) !== binding.rpcBindingHash)
+            sha256(`direct-rpc\0${rpcUrl}`) !== binding.rpcBindingHash)
             await this.failBeforeEffect(operation, "frozen_policy_or_rpc_binding_changed");
-        const rpcIdentity = await this.context.requireRpc().assertBaseChain();
+        const rpcIdentity = await (binding.coinbaseGasless === undefined ? this.context.requireRpc() : this.context.requireCoinbaseRpc()).assertBaseChain();
         if (sha256(`direct-rpc-origin\0${rpcIdentity.rpcOrigin}`) !== binding.rpcOriginHash) {
             await this.failBeforeEffect(operation, "rpc_origin_changed");
         }
@@ -306,6 +332,9 @@ export class ProviderDirectTransferService {
             current.capability_snapshot.direct.retry_owner !== binding.retryOwner ||
             !sameFrozenProviderProfile(current, operation, binding))
             await this.failBeforeEffect(operation, "provider_profile_changed");
+        if (binding.coinbaseGasless !== undefined && !await coinbaseGaslessPreconditionsMatch(this.context, operation)) {
+            await this.failBeforeEffect(operation, "coinbase_gasless_deployment_or_balance_changed");
+        }
         if (binding.executionMode === "delegated_session_transaction") {
             const adapter = this.requiredAdapter(binding);
             const preflight = adapter.direct.preflight;
@@ -356,6 +385,16 @@ export class ProviderDirectTransferService {
         }
     }
     async applyExecutionResult(operation, binding, result) {
+        if (binding.coinbaseGasless !== undefined) {
+            const locator = result.disposition === "acknowledged" ? { schemaVersion: "apn.coinbase-gasless-locator.v1",
+                hash: result.transactionHash, provenance: "awal_success_transaction_hash_field" }
+                : result.disposition === "ambiguous" && result.locatorHash !== undefined ? { schemaVersion: "apn.coinbase-gasless-locator.v1",
+                    hash: result.locatorHash, provenance: "awal_error_text_hint" } : undefined;
+            if (result.disposition === "not_started")
+                return publicOperation(await this.durable.transition(operation, "failed_before_effect", true, result.reason, "provider_child_not_created"));
+            operation = await this.durable.transition(operation, "ambiguous_effect", false, "coinbase_gasless_observation_required", "provider_effect_no_replay", locator === undefined ? {} : { coinbaseGaslessLocator: locator });
+            return publicOperation(await this.observeCoinbaseGasless(operation));
+        }
         if (result.disposition === "not_started")
             return publicOperation(await this.durable.transition(operation, "failed_before_effect", true, result.reason, "provider_child_not_created"));
         if (result.disposition === "ambiguous")
@@ -368,6 +407,9 @@ export class ProviderDirectTransferService {
         const acknowledged = await this.durable.transition(operation, "provider_acknowledged", false, "provider_transaction_identity_acknowledged", "provider_transaction_hash_only", { transactionHash: result.transactionHash });
         return publicOperation(await this.durable.inspectReceipt(acknowledged));
     }
+    async observeCoinbaseGasless(operation) {
+        return await reobserveCoinbaseGasless(this.context, this.durable, operation);
+    }
     async handleExecutionFailure(operation, binding, error) {
         if (error instanceof ApnError && error.code === "APN_STATE_CORRUPT")
             throw error;
@@ -378,18 +420,6 @@ export class ProviderDirectTransferService {
         }
         return publicOperation(await this.durable.transition(operation, "ambiguous_effect", false, "provider_invocation_outcome_unknown", "provider_effect_no_replay", binding.executionMode === "delegated_session_transaction"
             ? { providerEffect: createProviderEffectReference(operation.operationId, "SUBMISSION_AMBIGUOUS") } : {}));
-    }
-    async requiredProviderProfile(profileHash) {
-        const profile = await this.context.requireProfileRepository().load(profileHash);
-        if (profile === null || profile.drift.state !== "bound" || profile.capability_snapshot.direct.available !== true ||
-            !((profile.capability_snapshot.direct.mode === "provider_atomic_send" &&
-                profile.capability_snapshot.direct.execution_owner === "provider" &&
-                profile.capability_snapshot.direct.retry_owner === "apn_outer_no_replay_journal") ||
-                (profile.capability_snapshot.direct.mode === "delegated_session_transaction" &&
-                    profile.capability_snapshot.direct.execution_owner === "apn" &&
-                    profile.capability_snapshot.direct.retry_owner === "apn_operation_state")))
-            throw new ApnError("APN_PROFILE_DRIFT", "The provider profile is not bound for direct payment effects.");
-        return profile;
     }
     async requiredOperation(operationId) {
         const operation = await this.context.state.findOperation(operationId);
@@ -402,10 +432,5 @@ export class ProviderDirectTransferService {
         await this.durable.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
         throw failure ?? new ApnError("APN_REPREPARE_REQUIRED", "Frozen transfer inputs changed before approval; prepare a new operation.");
     }
-}
-function requiredBinding(operation) {
-    if (operation.providerDirect === undefined)
-        throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not provider-atomic.");
-    return operation.providerDirect;
 }
 //# sourceMappingURL=provider-direct-transfer.js.map

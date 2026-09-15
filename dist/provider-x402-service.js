@@ -69,8 +69,16 @@ export class ProviderX402Service {
         const requestHash = providerX402RequestHash({
             profile, canonicalUrl, rpcUrl, ...requestFields, ...(callerCap === undefined ? {} : { callerCapAtomic: callerCap }),
         });
+        const replay = await this.operations.resolvePrepare({ kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash });
+        if (replay !== null) {
+            if (replay.kind !== "x402_fetch" || replay.strategy !== "provider_atomic")
+                throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to a different operation strategy.");
+            return publicProviderX402Operation(replay.record);
+        }
+        const initialBound = await requireProviderX402Profile(this.context, profileHash);
         return await state.withLocks([
-            `profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`,
+            `profile:${profileHash}`, `provider-account:${initialBound.provider_id}:${initialBound.account_binding_hash}`,
+            `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`,
         ], async () => {
             const existing = await this.operations.resolvePrepare({
                 kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash,
@@ -81,8 +89,12 @@ export class ProviderX402Service {
                 }
                 return publicProviderX402Operation(existing.record);
             }
-            await this.operations.assertProfileAvailable(profileHash);
             const bound = await requireProviderX402Profile(this.context, profileHash);
+            if (bound.account_binding_hash !== initialBound.account_binding_hash ||
+                bound.public_address.toLowerCase() !== initialBound.public_address.toLowerCase())
+                throw new ApnError("APN_PROFILE_DRIFT", "Provider account identity changed while acquiring its operation lock.");
+            await this.operations.assertProfileAvailable(profileHash);
+            await this.operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
             assertProviderHttpRequest(requireProviderX402Adapter(this.context, bound).x402, httpRequest);
             const policy = requireProfilePolicy(await this.context.requirePolicy().load(policyBinding(bound)));
             const capAtomic = effectiveX402Cap(policy, callerCap);
@@ -155,6 +167,7 @@ export class ProviderX402Service {
                 return publicProviderX402Operation(await this.reconcile(current));
             let operation = current;
             try {
+                await this.operations.assertProviderAccountAvailable(operation.provider.providerId, operation.provider.accountBindingHash, operation.provider.payer, operation.operationId);
                 const bound = await requireProviderX402Profile(this.context, operation.profileHash);
                 if (!sameFrozenProviderProfile(bound, operation))
                     await this.failBeforeEffect(operation, "provider_profile_changed");
@@ -212,6 +225,8 @@ export class ProviderX402Service {
                 return publicProviderX402Operation(await this.reconcile(operation));
             }
             catch (error) {
+                if (error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED")
+                    throw error;
                 const durable = await this.repository.loadOperation(operation.profileHash, operation.operationId);
                 if (durable !== null && await this.repository.loadReceipt(durable.profileHash, durable.operationId) !== null) {
                     await this.recoverOrphanReceipt(durable);
@@ -376,7 +391,8 @@ export class ProviderX402Service {
         if (remaining !== undefined && remaining < 1)
             throw new ApnError("APN_STATE_BUSY", "Settlement wait deadline elapsed before lock acquisition.");
         return await this.context.state.withLocks([
-            `profile:${operation.profileHash}`, `operation:${operation.operationId}`, `operation:evidence:${operation.operationId}`,
+            `profile:${operation.profileHash}`, `provider-account:${operation.provider.providerId}:${operation.provider.accountBindingHash}`,
+            `operation:${operation.operationId}`, `operation:evidence:${operation.operationId}`,
         ], async () => {
             const current = await this.repository.loadOperation(operation.profileHash, operation.operationId);
             if (current === null)

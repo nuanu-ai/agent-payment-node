@@ -179,7 +179,7 @@ test("pending MM operation preserves identical prepare and rejects competing pre
   assert.deepEqual(await f.record(id), operationBefore);
 });
 
-test("unsupported provider and chain pairs fail before MM private identity or RPC", async (t) => {
+test("unsupported provider and chain pairs fail before private identity or RPC", async (t) => {
   for (const chainId of [130, 43114] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const f = await mmFixture(temporary.root);
@@ -204,9 +204,8 @@ test("unsupported provider and chain pairs fail before MM private identity or RP
   };
   await f.state.writeProviderProfile(incompatible);
   const result = await f.core.execute({ command: "gasless.transfer.prepare", profile: f.profile,
-    request: f.request, idempotencyKey: "mm-unsupported-provider-0001" });
+    request: { ...f.request, chainId: 1 }, idempotencyKey: "coinbase-unsupported-chain-0001" });
   assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-  assert.equal(result.error?.details?.reason, "mm_gasless_capability_unavailable");
   assert.deepEqual(f.provider.calls, []); assert.deepEqual(f.rpc.calls, []);
   assert.deepEqual(await f.state.loadProviderProfile(f.state.profileHash(f.profile)), incompatible);
   assert.equal((await f.core.metaMaskGasless.records.listAllOperations()).length, 0);

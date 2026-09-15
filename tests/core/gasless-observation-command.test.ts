@@ -137,6 +137,19 @@ test("core rejects observation RPC mode for a non-Local operation before recover
     submissions: rpc.submissions.length }, before);
 });
 
+test("ambient APN_BASE_RPC_URL does not conflict with explicit Local observation recovery", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const previousBase = process.env.APN_BASE_RPC_URL;
+  process.env.APN_BASE_RPC_URL = "http://127.0.0.1/invalid-ambient-base";
+  t.after(() => { if (previousBase === undefined) delete process.env.APN_BASE_RPC_URL;
+    else process.env.APN_BASE_RPC_URL = previousBase; });
+  const result = await runCli(["operation", "resume", "--operation", OPERATION_ID,
+    "--observation-rpc-env", OBSERVATION_ENV], {}, { stateRoot: temporary.root,
+    wrappingSecret: new ThrowingWrappingSecret(), gasless: effectCounters().dependencies });
+  assert.equal(result.error?.code, "APN_OPERATION_NOT_FOUND");
+  assert.notEqual(result.error?.details?.reason, "gasless_observation_rpc_options");
+});
+
 function requiredResumeTool() {
   const tool = projectMcpTools().find((item) => item.name === "apn_operation_resume");
   assert.notEqual(tool, undefined);

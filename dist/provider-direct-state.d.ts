@@ -6,7 +6,7 @@ export declare class ProviderDirectState {
     constructor(context: RuntimeContext);
     recoverOrphanTerminal(operation: OperationRecord): Promise<OperationRecord>;
     inspectReceipt(operation: OperationRecord): Promise<OperationRecord>;
-    transition(operation: OperationRecord, state: OperationRecord["state"], terminal: boolean, reason: string, proofClass: string, extra?: Partial<Pick<OperationRecord, "transactionHash" | "providerEffect">>, rpcReceipt?: RpcReceipt): Promise<OperationRecord>;
+    transition(operation: OperationRecord, state: OperationRecord["state"], terminal: boolean, reason: string, proofClass: string, extra?: Partial<Pick<OperationRecord, "transactionHash" | "providerEffect" | "coinbaseGaslessLocator" | "coinbaseGaslessCursor" | "coinbaseGaslessSettlement">>, rpcReceipt?: RpcReceipt): Promise<OperationRecord>;
     persist(operation: OperationRecord, rpcReceipt?: RpcReceipt): Promise<void>;
     private receiptPending;
     private receiptAmbiguous;

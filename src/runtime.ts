@@ -37,6 +37,8 @@ export interface CoreDependencies {
   readonly native?: NativePort;
   readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
   readonly rpc?: RpcPort;
+  readonly coinbaseRpc?: RpcPort;
+  readonly coinbaseRpcFactory?: () => RpcPort;
   readonly http?: HttpPort;
   readonly clock?: ClockPort;
   readonly ids?: IdPort;
@@ -47,6 +49,7 @@ export interface CoreDependencies {
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
   readonly transferApproval?: TransferApprovalPort;
   readonly rpcUrl?: string;
+  readonly coinbaseRpcUrl?: string;
   readonly providerX402Repository?: ProviderX402Repository;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
@@ -66,6 +69,7 @@ export class RuntimeContext {
   readonly native?: NativePort;
   readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
   readonly rpc?: RpcPort;
+  readonly coinbaseRpc?: RpcPort;
   readonly http?: HttpPort;
   readonly clock: ClockPort;
   readonly ids: IdPort;
@@ -76,10 +80,13 @@ export class RuntimeContext {
   readonly foregroundAuthentication?: ForegroundAuthenticationPort;
   readonly transferApproval?: TransferApprovalPort;
   readonly rpcUrl?: string;
+  readonly coinbaseRpcUrl?: string;
   readonly providerX402Repository?: ProviderX402Repository;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
   readonly operationAbandonApproval?: OperationAbandonApprovalPort;
+  private readonly coinbaseRpcFactory?: () => RpcPort;
+  private coinbaseRpcInstance?: RpcPort;
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
@@ -95,6 +102,8 @@ export class RuntimeContext {
     if (dependencies.native !== undefined) this.native = dependencies.native;
     if (dependencies.keychainProbe !== undefined) this.keychainProbe = dependencies.keychainProbe;
     if (dependencies.rpc !== undefined) this.rpc = dependencies.rpc;
+    if (dependencies.coinbaseRpc !== undefined) this.coinbaseRpc = dependencies.coinbaseRpc;
+    if (dependencies.coinbaseRpcFactory !== undefined) this.coinbaseRpcFactory = dependencies.coinbaseRpcFactory;
     if (dependencies.http !== undefined) this.http = dependencies.http;
     this.clock = dependencies.clock ?? { now: () => new Date() };
     this.ids = dependencies.ids ?? { next: () => randomUUID() };
@@ -105,6 +114,7 @@ export class RuntimeContext {
     if (dependencies.foregroundAuthentication !== undefined) this.foregroundAuthentication = dependencies.foregroundAuthentication;
     if (dependencies.transferApproval !== undefined) this.transferApproval = dependencies.transferApproval;
     if (dependencies.rpcUrl !== undefined) this.rpcUrl = dependencies.rpcUrl;
+    if (dependencies.coinbaseRpcUrl !== undefined) this.coinbaseRpcUrl = dependencies.coinbaseRpcUrl;
     if (dependencies.providerX402Repository !== undefined) this.providerX402Repository = dependencies.providerX402Repository;
     if (dependencies.providerTransactionEvidence !== undefined) this.providerTransactionEvidence = dependencies.providerTransactionEvidence;
     if (dependencies.providerAuthorizationStore !== undefined) this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
@@ -135,6 +145,12 @@ export class RuntimeContext {
       throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
     }
     return this.rpc;
+  }
+
+  requireCoinbaseRpc(): RpcPort {
+    if (this.coinbaseRpc !== undefined) return this.coinbaseRpc;
+    if (this.coinbaseRpcFactory !== undefined) return this.coinbaseRpcInstance ??= this.coinbaseRpcFactory();
+    return this.requireRpc();
   }
 
   requireHttp(): HttpPort {
@@ -185,6 +201,11 @@ export class RuntimeContext {
   requireRpcUrl(): string {
     if (this.rpcUrl === undefined) throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
     return this.rpcUrl;
+  }
+
+  requireCoinbaseRpcUrl(): string {
+    if (this.coinbaseRpcUrl !== undefined) return this.coinbaseRpcUrl;
+    return this.requireRpcUrl();
   }
 
   requireProviderAuthorizationStore(): ProviderAuthorizationStorePort {

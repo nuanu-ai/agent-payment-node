@@ -84,8 +84,8 @@ export class AwalDirectAdapter implements DirectExecutionPort {
       let spawned = false;
       let settled = false;
       let size = 0;
-      const chunks: Buffer[] = [];
-      const zeroChunks = (): void => { for (const chunk of chunks) chunk.fill(0); };
+      const chunks: Buffer[] = [], errorChunks: Buffer[] = [];
+      const zeroChunks = (): void => { for (const chunk of [...chunks, ...errorChunks]) chunk.fill(0); };
       const cleanup = (): void => {
         clearTimeout(timeout);
         child.stdout.removeListener("data", onStdout);
@@ -115,8 +115,11 @@ export class AwalDirectAdapter implements DirectExecutionPort {
         chunks.push(bytes);
       };
       const onStderr = (chunk: Buffer | string): void => {
+        const bytes = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, "utf8");
         if (Buffer.isBuffer(chunk)) chunk.fill(0);
-        else Buffer.from(chunk, "utf8").fill(0);
+        size += bytes.length;
+        if (size > MAX_SEND_OUTPUT_BYTES) { bytes.fill(0); finish({ disposition: "ambiguous", reason: "provider_output_too_large" }); child.kill(); return; }
+        errorChunks.push(bytes);
       };
       const onError = (): void => finish({
         disposition: "ambiguous",
@@ -124,7 +127,7 @@ export class AwalDirectAdapter implements DirectExecutionPort {
       });
       const onClose = (code: number | null): void => {
         if (code !== 0) {
-          finish({ disposition: "ambiguous", reason: "provider_exit_unclassified" });
+          finish({ disposition: "ambiguous", reason: "provider_exit_unclassified", ...locatorHint([...chunks, ...errorChunks]) });
           return;
         }
         const stdout = Buffer.concat(chunks);
@@ -138,6 +141,7 @@ export class AwalDirectAdapter implements DirectExecutionPort {
         finish({
           disposition: "ambiguous",
           reason: spawned ? "provider_process_timeout" : "provider_launch_outcome_unknown",
+          ...locatorHint([...chunks, ...errorChunks]),
         });
         child.kill();
       }, this.timeoutMs);
@@ -148,6 +152,12 @@ export class AwalDirectAdapter implements DirectExecutionPort {
       child.once("close", onClose);
     });
   }
+}
+
+function locatorHint(chunks: readonly Buffer[]): { readonly locatorHash?: Hex } {
+  const text = Buffer.concat(chunks).toString("utf8");
+  const matches = new Set((text.match(/0x[0-9a-fA-F]{64}/gu) ?? []).map(value => value.toLowerCase() as Hex));
+  return matches.size === 1 ? { locatorHash: [...matches][0]! } : {};
 }
 
 function pinnedAwalUsdcAtomic(amountDecimal: string): string | null {

@@ -9,6 +9,9 @@ export declare class TransferService {
     prepare(request: Extract<CommandRequest, {
         command: "transfer.prepare";
     }>): Promise<unknown>;
+    prepareCoinbaseGasless(request: Extract<CommandRequest, {
+        command: "gasless.transfer.prepare";
+    }>): Promise<unknown>;
     approve(operationIdInput: string): Promise<unknown>;
     resume(operationIdInput: string, waitSeconds?: number): Promise<unknown>;
     recoverProviderRequest(operationIdInput: string, providerRequestId: string): Promise<unknown>;

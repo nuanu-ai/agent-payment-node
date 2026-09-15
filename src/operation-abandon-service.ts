@@ -61,6 +61,7 @@ export class OperationAbandonService {
 function assertProviderAbandonFamily(operation: OperationRecord): void {
   if (
     operation.providerDirect?.executionMode !== "provider_atomic_send" ||
+    operation.providerDirect.coinbaseGasless !== undefined ||
     operation.chainId !== CHAIN_ID || operation.token !== BASE_USDC
   ) ineligible();
 }
@@ -75,6 +76,6 @@ function assertEligible(operation: OperationRecord): void {
 function ineligible(): never {
   throw new ApnError(
     "APN_OPERATION_BLOCKED",
-    "Only an ambiguous provider-atomic direct operation with no transaction hash or provider recovery reference can be abandoned.",
+    "Only an eligible ambiguous provider-atomic direct operation can be abandoned; Coinbase gasless guards have no manual release.",
   );
 }

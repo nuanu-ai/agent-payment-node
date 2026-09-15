@@ -148,6 +148,10 @@ export class TransferService {
     });
   }
 
+  async prepareCoinbaseGasless(request: Extract<CommandRequest, { command: "gasless.transfer.prepare" }>): Promise<unknown> {
+    return await this.providerDirect.prepareCoinbaseGasless(request);
+  }
+
   async approve(operationIdInput: string): Promise<unknown> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
