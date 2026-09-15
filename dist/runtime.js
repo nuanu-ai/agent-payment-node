@@ -16,6 +16,7 @@ export class RuntimeContext {
     native;
     keychainProbe;
     rpc;
+    coinbaseRpc;
     http;
     clock;
     ids;
@@ -26,10 +27,13 @@ export class RuntimeContext {
     foregroundAuthentication;
     transferApproval;
     rpcUrl;
+    coinbaseRpcUrl;
     providerX402Repository;
     providerTransactionEvidence;
     providerAuthorizationStore;
     operationAbandonApproval;
+    coinbaseRpcFactory;
+    coinbaseRpcInstance;
     initialized;
     constructor(dependencies) {
         if (dependencies.smartAccountGasless !== undefined)
@@ -54,6 +58,10 @@ export class RuntimeContext {
             this.keychainProbe = dependencies.keychainProbe;
         if (dependencies.rpc !== undefined)
             this.rpc = dependencies.rpc;
+        if (dependencies.coinbaseRpc !== undefined)
+            this.coinbaseRpc = dependencies.coinbaseRpc;
+        if (dependencies.coinbaseRpcFactory !== undefined)
+            this.coinbaseRpcFactory = dependencies.coinbaseRpcFactory;
         if (dependencies.http !== undefined)
             this.http = dependencies.http;
         this.clock = dependencies.clock ?? { now: () => new Date() };
@@ -71,6 +79,8 @@ export class RuntimeContext {
             this.transferApproval = dependencies.transferApproval;
         if (dependencies.rpcUrl !== undefined)
             this.rpcUrl = dependencies.rpcUrl;
+        if (dependencies.coinbaseRpcUrl !== undefined)
+            this.coinbaseRpcUrl = dependencies.coinbaseRpcUrl;
         if (dependencies.providerX402Repository !== undefined)
             this.providerX402Repository = dependencies.providerX402Repository;
         if (dependencies.providerTransactionEvidence !== undefined)
@@ -101,6 +111,13 @@ export class RuntimeContext {
             throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
         }
         return this.rpc;
+    }
+    requireCoinbaseRpc() {
+        if (this.coinbaseRpc !== undefined)
+            return this.coinbaseRpc;
+        if (this.coinbaseRpcFactory !== undefined)
+            return this.coinbaseRpcInstance ??= this.coinbaseRpcFactory();
+        return this.requireRpc();
     }
     requireHttp() {
         if (this.http === undefined) {
@@ -146,6 +163,11 @@ export class RuntimeContext {
         if (this.rpcUrl === undefined)
             throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
         return this.rpcUrl;
+    }
+    requireCoinbaseRpcUrl() {
+        if (this.coinbaseRpcUrl !== undefined)
+            return this.coinbaseRpcUrl;
+        return this.requireRpcUrl();
     }
     requireProviderAuthorizationStore() {
         if (this.providerAuthorizationStore === undefined) {

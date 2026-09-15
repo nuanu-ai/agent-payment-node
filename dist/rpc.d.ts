@@ -56,11 +56,22 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     getReceipt(transactionHash: Hex): Promise<RpcReceipt | null>;
     getLatestConfirmedNonce(address: Address): Promise<string>;
     getConfirmedTransactionAtNonce(address: Address, nonceAtomic: string, startBlockNumberAtomic: string): Promise<Hex | null>;
+    coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params: readonly unknown[]): Promise<unknown>;
+    coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>): Promise<readonly unknown[]>;
     private call;
     private callX402Logs;
     private resolvePublicAddresses;
     private remainingTimeoutMs;
 }
+export declare function parseRpcResultEnvelope(raw: string, id: string): unknown;
+export declare function parseRpcLogEnvelope(raw: string, id: string): {
+    readonly kind: "complete";
+    readonly value: unknown;
+} | {
+    readonly kind: "pruned";
+} | {
+    readonly kind: "range_unavailable";
+};
 export declare function classifyX402LogAvailabilityMessage(message: string): "pruned" | "range_unavailable" | null;
 export { isPublicIp } from "./network-policy.js";
 export declare function acceptRpcHttpBody(status: number | undefined, allowJsonRpcClientError: boolean): boolean;

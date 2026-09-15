@@ -3,13 +3,14 @@ import { performance } from "node:perf_hooks";
 import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, rpcString, nonzeroBytes32, x402RpcLog } from "./base-rpc-codec.js";
 import { x402Network } from "./x402-network.js";
 import type { EvmChainId } from "./evm-asset.js";
-import { sha256 } from "./canonical.js";
+import { exactKeys, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { EvmRpc } from "./evm-rpc.js";
 import { parseAtomic } from "./money.js";
 import type { Address, Hex } from "./model.js";
 import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses, type PinnedAddress } from "./network-policy.js";
+import { parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
 import type {
   BalanceSnapshot,
   FeeEstimate,
@@ -27,8 +28,6 @@ import type {
   X402RpcReceipt,
   X402TransferLogs,
 } from "./ports.js";
-
-type JsonRpcResult = { readonly jsonrpc: "2.0"; readonly id: string; readonly result: unknown };
 
 const AUTHORIZATION_STATE_SELECTOR = "0xe94a0102";
 const AUTHORIZATION_USED_TOPIC = "0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5";
@@ -346,18 +345,25 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     return null;
   }
 
+  async coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0],
+    params: readonly unknown[]): Promise<unknown> {
+    return await this.call(method, params);
+  }
+
+  async coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>): Promise<readonly unknown[]> {
+    const result = await this.callX402Logs([filter]);
+    if (result.kind !== "complete" || !Array.isArray(result.value) || result.value.length > MAX_X402_LOGS) {
+      throw new ApnError("APN_RPC_AMBIGUOUS", "Coinbase gasless log observation is unavailable.");
+    }
+    return result.value;
+  }
+
   private async call(method: string, params: readonly unknown[]): Promise<unknown> {
     const id = (++this.sequence).toString();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
     const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs());
-    let value: unknown;
-    try { value = JSON.parse(raw) as unknown; } catch { throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not valid JSON."); }
-    const message = record(value, "JSON-RPC response");
-    if (message.jsonrpc !== "2.0" || message.id !== id || !("result" in message) || "error" in message) {
-      throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates JSON-RPC identity or result requirements.");
-    }
-    return (message as JsonRpcResult).result;
+    return parseRpcResultEnvelope(raw, id);
   }
 
   private async callX402Logs(params: readonly unknown[]): Promise<
@@ -369,20 +375,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const body = JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params });
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
     const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), true);
-    let value: unknown;
-    try { value = JSON.parse(raw) as unknown; } catch { throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not valid JSON."); }
-    const message = record(value, "JSON-RPC response");
-    if (message.jsonrpc !== "2.0" || message.id !== id) {
-      throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates JSON-RPC identity requirements.");
-    }
-    if ("result" in message && !("error" in message)) return { kind: "complete", value: message.result };
-    if (!("error" in message) || "result" in message) throw new ApnError("APN_RPC_PROTOCOL", "RPC log response has no exclusive result or error.");
-    const error = record(message.error, "JSON-RPC error");
-    const availability = classifyX402LogAvailabilityMessage(
-      typeof error.message === "string" ? error.message : "",
-    );
-    if (availability !== null) return { kind: availability };
-    throw new ApnError("APN_RPC_PROTOCOL", "RPC log query failed without a recognized availability class.");
+    return parseRpcLogEnvelope(raw, id);
   }
 
   private async resolvePublicAddresses(): Promise<readonly PinnedAddress[]> {
@@ -394,6 +387,40 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const remaining = Math.floor(this.totalDeadlineMs - performance.now());
     if (remaining < 1) throw new ApnError("APN_RPC_AMBIGUOUS", "Bounded x402 RPC observation reached its deadline.");
     return Math.min(20_000, remaining);
+  }
+}
+
+export function parseRpcResultEnvelope(raw: string, id: string): unknown {
+  const message = strictRpcRecord(raw);
+  if (!exactKeys(message, ["jsonrpc", "id", "result"]) || message.jsonrpc !== "2.0" || message.id !== id) {
+    throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.");
+  }
+  return message.result;
+}
+
+export function parseRpcLogEnvelope(raw: string, id: string):
+  | { readonly kind: "complete"; readonly value: unknown }
+  | { readonly kind: "pruned" }
+  | { readonly kind: "range_unavailable" } {
+  const message = strictRpcRecord(raw);
+  if (message.jsonrpc !== "2.0" || message.id !== id) {
+    throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates JSON-RPC identity requirements.");
+  }
+  if (exactKeys(message, ["jsonrpc", "id", "result"])) return { kind: "complete", value: message.result };
+  if (!exactKeys(message, ["jsonrpc", "id", "error"])) {
+    throw new ApnError("APN_RPC_PROTOCOL", "RPC log response violates the exact result or error envelope.");
+  }
+  const error = record(message.error, "JSON-RPC error");
+  const availability = classifyX402LogAvailabilityMessage(typeof error.message === "string" ? error.message : "");
+  if (availability !== null) return { kind: availability };
+  throw new ApnError("APN_RPC_PROTOCOL", "RPC log query failed without a recognized availability class.");
+}
+
+function strictRpcRecord(raw: string): Record<string, unknown> {
+  try { return record(parseJsonWithDuplicateRejection(raw), "JSON-RPC response"); }
+  catch (error) {
+    if (error instanceof ApnError && error.code === "APN_RPC_PROTOCOL") throw error;
+    throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not strict JSON.");
   }
 }
 

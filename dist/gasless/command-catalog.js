@@ -49,12 +49,13 @@ export function includeGaslessRecovery(commands) {
     return commands.map((c) => !["operation resume", "operation status", "receipt get"].includes(c.path.join(" ")) ? c : {
         ...c,
         ...(c.path.join(" ") !== "operation resume" ? {} : {
-            synopsis: `${c.synopsis} [--observation-rpc-env <APN_ENV_RPC_URL>]`,
-            options: [...c.options, option("--observation-rpc-env", "string", ["explicit_APN_environment_variable_for_Local_readonly_observation", "cannot_combine_with_rpc_url_or_wait_seconds"], false)],
+            synopsis: `${c.synopsis.includes("[--rpc-url <https-url>]") ? c.synopsis : c.synopsis.replace("--rpc-url <https-url>", "[--rpc-url <https-url>]")} [--observation-rpc-env <APN_ENV_RPC_URL>]`,
+            options: [...c.options.map(entry => entry.name === "--rpc-url" ? { ...entry, required: false,
+                    constraints: [...entry.constraints, "optional_for_gasless_operations_using_frozen_APN_chain_RPC_environment"] } : entry), option("--observation-rpc-env", "string", ["explicit_APN_environment_variable_for_Local_readonly_observation", "cannot_combine_with_rpc_url_or_wait_seconds"], false)],
         }),
         states: { terminal: [...new Set([...c.states.terminal, ...states.terminal])],
             non_terminal: [...new Set([...c.states.non_terminal, ...states.non_terminal])] },
-        effect: { ...c.effect, summary: `${c.effect.summary} Gasless operations retain USDC fee and permission evidence; each attempted disclosure/send is never repeated. MetaMask server-wallet recovery is read-only after dispatch. Smart Account recovery uses independent RPC only after disclosure, including verify rejection or a lost response; only correlated settlement or finalized unused expiry releases its guard. Recovery uses the frozen chain's APN_*_RPC_URL; local Circle also supports APN_*_BUNDLER_RPC_URL. Local operation resume optionally accepts --observation-rpc-env for verified read-only recovery through an explicitly selected RPC; it cannot sign, estimate or submit.` },
+        effect: { ...c.effect, summary: `${c.effect.summary} Gasless operations retain USDC fee and permission evidence; each attempted disclosure/send is never repeated. Coinbase and MetaMask server-wallet recovery are read-only after dispatch. Smart Account recovery uses independent RPC only after disclosure, including verify rejection or a lost response; only correlated settlement or finalized unused expiry releases its guard. Recovery uses the frozen chain's APN_*_RPC_URL; local Circle also supports APN_*_BUNDLER_RPC_URL. Local operation resume optionally accepts --observation-rpc-env for verified read-only recovery through an explicitly selected RPC; it cannot sign, estimate or submit.` },
     });
 }
 export function bindGaslessCommand(path, o) {

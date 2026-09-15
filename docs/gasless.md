@@ -1,6 +1,6 @@
 # USDC transfers with gas paid from the amount
 
-Use an existing local wallet, MetaMask Agent server wallet or MetaMask Smart Account profile to send
+Use an existing local wallet, Coinbase Agentic Wallet, MetaMask Agent server wallet or MetaMask Smart Account profile to send
 canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
@@ -10,7 +10,7 @@ evidence and receiving human acceptance are tracked separately for each profile
 and network. `apn gasless capabilities` reports the exact adapter and acceptance
 state without reading a wallet,
 Keychain, RPC or provider. MetaMask Smart Account is admitted on Base only.
-Coinbase Agentic Wallet remains required work with no executable adapter in this gasless command family.
+Coinbase Agentic Wallet is executable for canonical Base USDC through its existing profile.
 This same-chain transfer does not establish gasless x402 or bridge support.
 
 ## Local wallet networks and configuration
@@ -100,6 +100,46 @@ The same global idempotency key and profile guards cover direct transfers,
 x402, Solana/TRON, LI.FI and gasless operations. Repeating the identical prepare
 returns its saved operation without another quote or signature. Different
 inputs with the same key are rejected.
+
+## Coinbase Agentic Wallet on Base
+
+Use an existing `coinbase-agentic-wallet` profile bound to the intended AWAL
+account. Set `APN_BASE_RPC_URL` to an explicit public HTTPS Base RPC before
+prepare, approve and resume. APN rechecks the provider address and the frozen
+smart-account proxy, implementation and EntryPoint deployment before the one
+provider invocation.
+
+```sh
+export APN_BASE_RPC_URL='<https-base-rpc-url>'
+apn gasless balance --profile coinbase --chain 8453
+apn gasless transfer prepare --profile coinbase --chain 8453 \
+  --to <recipient-address> --amount 0.001 --max-fee 0 --min-received 0.001 \
+  --idempotency-key <unique-key>
+apn gasless transfer approve --operation <operation-id>
+apn operation resume --operation <operation-id>
+apn operation status --operation <operation-id>
+apn receipt get --operation <operation-id>
+```
+
+Coinbase's CDP paymaster pays native gas. The exact successful accounting is
+`G = N`, `F = 0`: sender canonical-USDC debit and recipient credit both equal
+`--amount`, sender native debit is zero, and no token fee is deducted. Approval
+displays these values and requires the common foreground phrase.
+
+APN writes `started` before exactly one `awal@2.12.1 send ... --chain base
+--asset usdc --json` child. A returned transaction hash or a single hash found
+in error text is only a locator. A missing hash is allowed. After `started`,
+approval replay and resume never invoke AWAL again.
+
+Recovery scans at most 256 safe Base blocks per resume, in log requests of at
+most ten blocks. Finite absence advances the durable cursor but never proves
+failure or permits redispatch. Completion requires one independently verified
+EntryPoint v0.6 UserOperation for the frozen account call, exact canonical-USDC
+sender debit and recipient credit, a unique native-fee sponsorship event,
+unchanged account deployment, transaction/block membership and safe inclusion.
+Multiple candidates, deployment drift, reorgs, nonzero token fees, extra account
+calls or unavailable evidence retain the guard. Keep the bound Coinbase account
+exclusive to this operation until its positive settlement is terminal.
 
 ## Local wallet permissions and failures
 

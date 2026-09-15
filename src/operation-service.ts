@@ -104,6 +104,24 @@ export class OperationService {
     }
   }
 
+  async assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void> {
+    const direct = (await this.state.listAllOperations()).filter((record) => !record.terminal &&
+      record.operationId !== exceptOperationId &&
+      record.providerDirect?.providerId === providerId &&
+      (record.providerDirect.accountBindingHash === accountBindingHash || record.walletAddress.toLowerCase() === payer.toLowerCase()));
+    const providerPaid = (await this.providerX402.listAllOperations()).filter((record) => !record.terminal &&
+      record.operationId !== exceptOperationId &&
+      record.provider.providerId === providerId &&
+      (record.provider.accountBindingHash === accountBindingHash || record.provider.payer.toLowerCase() === payer.toLowerCase()));
+    const blocking = direct[0] ?? providerPaid[0];
+    if (blocking !== undefined) {
+      throw new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this provider account is not terminal.", {
+        blockingOperationId: blocking.operationId,
+        blockingState: blocking.state,
+      });
+    }
+  }
+
   async required(operationId: string): Promise<StoredMoneyOperation> {
     const canonicalId = canonicalOperationId(operationId);
     const direct = await this.state.findOperation(canonicalId);

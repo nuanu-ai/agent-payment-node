@@ -7,7 +7,7 @@ export function providerDirectExecutionInput(context, operation, binding) {
         recipient: operation.recipient,
         amountAtomic: operation.amountAtomic,
         amountDecimal: operation.amountDecimal,
-        rpcUrl: context.requireRpcUrl(),
+        rpcUrl: binding.coinbaseGasless === undefined ? context.requireRpcUrl() : context.requireCoinbaseRpcUrl(),
         preparedAt: operation.preparedAt,
         expiresAt: operation.expiresAt,
         requestHash: operation.requestHash,

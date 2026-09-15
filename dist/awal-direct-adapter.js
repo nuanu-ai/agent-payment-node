@@ -45,8 +45,8 @@ export class AwalDirectAdapter {
             let spawned = false;
             let settled = false;
             let size = 0;
-            const chunks = [];
-            const zeroChunks = () => { for (const chunk of chunks)
+            const chunks = [], errorChunks = [];
+            const zeroChunks = () => { for (const chunk of [...chunks, ...errorChunks])
                 chunk.fill(0); };
             const cleanup = () => {
                 clearTimeout(timeout);
@@ -79,10 +79,17 @@ export class AwalDirectAdapter {
                 chunks.push(bytes);
             };
             const onStderr = (chunk) => {
+                const bytes = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, "utf8");
                 if (Buffer.isBuffer(chunk))
                     chunk.fill(0);
-                else
-                    Buffer.from(chunk, "utf8").fill(0);
+                size += bytes.length;
+                if (size > MAX_SEND_OUTPUT_BYTES) {
+                    bytes.fill(0);
+                    finish({ disposition: "ambiguous", reason: "provider_output_too_large" });
+                    child.kill();
+                    return;
+                }
+                errorChunks.push(bytes);
             };
             const onError = () => finish({
                 disposition: "ambiguous",
@@ -90,7 +97,7 @@ export class AwalDirectAdapter {
             });
             const onClose = (code) => {
                 if (code !== 0) {
-                    finish({ disposition: "ambiguous", reason: "provider_exit_unclassified" });
+                    finish({ disposition: "ambiguous", reason: "provider_exit_unclassified", ...locatorHint([...chunks, ...errorChunks]) });
                     return;
                 }
                 const stdout = Buffer.concat(chunks);
@@ -105,6 +112,7 @@ export class AwalDirectAdapter {
                 finish({
                     disposition: "ambiguous",
                     reason: spawned ? "provider_process_timeout" : "provider_launch_outcome_unknown",
+                    ...locatorHint([...chunks, ...errorChunks]),
                 });
                 child.kill();
             }, this.timeoutMs);
@@ -115,6 +123,11 @@ export class AwalDirectAdapter {
             child.once("close", onClose);
         });
     }
+}
+function locatorHint(chunks) {
+    const text = Buffer.concat(chunks).toString("utf8");
+    const matches = new Set((text.match(/0x[0-9a-fA-F]{64}/gu) ?? []).map(value => value.toLowerCase()));
+    return matches.size === 1 ? { locatorHash: [...matches][0] } : {};
 }
 function pinnedAwalUsdcAtomic(amountDecimal) {
     const numeric = Number.parseFloat(amountDecimal);

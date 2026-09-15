@@ -1017,7 +1017,7 @@ test("Coinbase direct adapter uses one closed send argv and classifies every pos
     const direct = new AwalDirectAdapter(async () => "/exact/node_modules/awal/dist/index.js", () => {
       queueMicrotask(() => {
         child.emit("spawn");
-        if (kind === "nonzero") child.emit("close", 7);
+        if (kind === "nonzero") { child.stderr.emit("data", Buffer.from(`provider hint ${PROVIDER_TRANSACTION_HASH}`)); child.emit("close", 7); }
         if (kind === "malformed") { child.stdout.emit("data", Buffer.from("{")); child.emit("close", 0); }
         if (kind === "missing_hash") { child.stdout.emit("data", Buffer.from("{}")); child.emit("close", 0); }
         if (kind === "error") child.emit("error", new Error("lost"));
@@ -1026,6 +1026,7 @@ test("Coinbase direct adapter uses one closed send argv and classifies every pos
     }, 5);
     const classified = await direct.execute({ amountDecimal: "1", recipient: ADDRESS_B, sender: ADDRESS_A });
     assert.equal(classified.disposition, "ambiguous", kind);
+    if (kind === "nonzero") assert.equal(classified.disposition === "ambiguous" ? classified.locatorHash : undefined, PROVIDER_TRANSACTION_HASH);
     if (kind === "timeout") assert.equal(kills, 1);
     assert.equal(child.listenerCount("spawn"), 0);
     assert.equal(child.listenerCount("error"), 0);

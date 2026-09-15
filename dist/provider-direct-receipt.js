@@ -1,4 +1,5 @@
 import { ApnError } from "./errors.js";
+import { hashObject } from "./canonical.js";
 import { parseAtomic } from "./money.js";
 import { appendTransition, sealOperation, sealReceipt } from "./state-integrity.js";
 import { hasExactTransfer } from "./transfer-policy.js";
@@ -21,6 +22,8 @@ const DURABLE_PRE_EFFECT_REASONS = new Set([
     "delegated_apn_rpc_ambiguous",
     "delegated_apn_rpc_config",
     "delegated_apn_chain_mismatch",
+    "coinbase_gasless_approval_rejected",
+    "coinbase_gasless_deployment_or_balance_changed",
 ]);
 const CHILD_NOT_CREATED_REASONS = new Set([
     "provider_binary_unavailable",
@@ -39,6 +42,11 @@ export function providerDirectReceipt(operation, rpcReceipt) {
         reason: operation.reason,
         proofClass: operation.proofClass,
         ...(operation.transactionHash === undefined ? {} : { transactionHash: operation.transactionHash }),
+        ...(operation.coinbaseGaslessSettlement === undefined ? {} : {
+            coinbaseGaslessSettlement: operation.coinbaseGaslessSettlement,
+            blockNumberAtomic: operation.coinbaseGaslessSettlement.block.numberAtomic,
+            exactTransferLog: true,
+        }),
         ...(rpcReceipt === undefined ? {} : {
             blockNumberAtomic: rpcReceipt.blockNumberAtomic,
             exactTransferLog: rpcReceipt.status === "success" && hasExactTransfer(rpcReceipt, operation),
@@ -59,6 +67,10 @@ export function recoverProviderTerminalOperation(operation, receipt) {
     const { integrityHash: _previousIntegrityHash, ...base } = operation;
     const recovered = sealOperation({
         ...base,
+        ...(receipt.coinbaseGaslessSettlement === undefined ? {} : {
+            coinbaseGaslessSettlement: receipt.coinbaseGaslessSettlement,
+            transactionHash: receipt.coinbaseGaslessSettlement.transactionHash,
+        }),
         state: receipt.state,
         terminal: true,
         reason: receipt.reason,
@@ -85,10 +97,30 @@ export function assertProviderTerminalReceiptAuthority(operation, receipt) {
     assertTerminalReceipt(receipt, operation);
 }
 function assertTerminalReceipt(receipt, operation) {
-    if (receipt.transactionHash !== operation.transactionHash) {
+    const coinbaseSettlement = receipt.coinbaseGaslessSettlement;
+    if (coinbaseSettlement === undefined && receipt.transactionHash !== operation.transactionHash) {
         stateCorrupt("Provider direct terminal receipt transaction identity is inconsistent.");
     }
+    if (coinbaseSettlement !== undefined && (receipt.transactionHash !== coinbaseSettlement.transactionHash ||
+        (operation.transactionHash !== undefined && operation.transactionHash !== coinbaseSettlement.transactionHash))) {
+        stateCorrupt("Coinbase gasless receipt transaction identity is inconsistent.");
+    }
     if (receipt.state === "completed") {
+        if (operation.providerDirect?.coinbaseGasless !== undefined) {
+            const { evidenceHash, ...evidenceBody } = coinbaseSettlement ?? {};
+            if (receipt.reason !== "confirmed_coinbase_gasless_transfer" ||
+                receipt.proofClass !== "canonical_safe_coinbase_gasless_settlement" ||
+                coinbaseSettlement === undefined ||
+                (operation.coinbaseGaslessSettlement !== undefined &&
+                    JSON.stringify(coinbaseSettlement) !== JSON.stringify(operation.coinbaseGaslessSettlement)) ||
+                evidenceHash !== hashObject(evidenceBody) || coinbaseSettlement.grossAtomic !== operation.amountAtomic ||
+                coinbaseSettlement.netAtomic !== operation.amountAtomic || coinbaseSettlement.feeAtomic !== "0" ||
+                coinbaseSettlement.senderNativeDebitWei !== "0" ||
+                receipt.blockNumberAtomic !== coinbaseSettlement.block.numberAtomic || receipt.exactTransferLog !== true) {
+                stateCorrupt("Coinbase gasless completion receipt lacks canonical settlement evidence.");
+            }
+            return;
+        }
         if (receipt.reason !== "confirmed_exact_usdc_transfer" ||
             receipt.proofClass !== "confirmed_receipt_and_exact_transfer_log" ||
             receipt.blockNumberAtomic === undefined || receipt.exactTransferLog !== true)

@@ -32,7 +32,7 @@ const GASLESS_TOOLS = [
 ] as const;
 const OPERATION_ID = "a".repeat(64);
 
-test("the combined gasless surface preserves seven local rows, adds eight MetaMask rows, and adds no provider-specific command", () => {
+test("the combined gasless surface preserves common commands and exposes implemented provider rows", () => {
   const capabilities = gaslessCapabilities("surface-profile") as {
     profile: string;
     profile_binding_inspected: boolean;
@@ -61,7 +61,7 @@ test("the combined gasless surface preserves seven local rows, adds eight MetaMa
     ["local", "local_software", "implemented", "open"],
     ["metamask-agent-wallet", "provider_managed_server_wallet", "implemented", "open"],
     ["metamask-smart-account", "provider_owned_session_grant", "implemented", "open"],
-    ["coinbase-agentic-wallet", "provider_owned", "unavailable", "open"],
+    ["coinbase-agentic-wallet", "provider_owned", "implemented", "open"],
   ]);
 
   const commands = COMMANDS.filter(command => command.path[0] === "gasless");
