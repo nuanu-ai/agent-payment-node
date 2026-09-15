@@ -13,6 +13,7 @@ export function facilitatorNextActions(op: FacilitatorOperationRecord): readonly
 export function facilitatorProofClass(op: FacilitatorOperationRecord): string {
   if (op.state === "completed") return "rpc_finalized_correlated";
   if (op.state === "expired_unused") return "rpc_finalized_unused";
+  if (op.state === "abandoned_unknown") return "owner_acknowledgement_only";
   return op.verify === null ? "durable_pre_effect" : "effect_observation_pending";
 }
 

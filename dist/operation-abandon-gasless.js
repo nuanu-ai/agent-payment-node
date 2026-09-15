@@ -1,4 +1,7 @@
 import { ApnError } from "./errors.js";
+import { FACILITATOR_EXPOSED } from "./facilitator-gasless/operation-model.js";
+import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
+import { transitionFacilitator } from "./facilitator-gasless/transitions.js";
 import { publicGaslessOperation } from "./gasless/receipt.js";
 import { transitionGasless } from "./gasless/transitions.js";
 import { publicMetaMaskGaslessOperation } from "./metamask-gasless/journal/receipt.js";
@@ -50,6 +53,40 @@ export async function abandonMetaMaskGasless(d, operationId) {
         await d.metaMaskGasless.records.persist(next);
         return publicMetaMaskGaslessOperation(next);
     });
+}
+/** Owner release of an exposed Avalanche authorization whose use stayed unproven after its on-chain validity ended. */
+export async function abandonFacilitatorGasless(d, operationId) {
+    const initial = await facilitatorRecord(d, operationId);
+    if (initial.state === "abandoned_unknown" && initial.terminal)
+        return publicFacilitatorOperation(initial);
+    assertAuthorizationEnded(d, initial);
+    await d.facilitatorGasless.resume(operationId).catch(() => undefined);
+    return await d.context.state.withLocks([`profile:${initial.profileHash}`, `operation:${operationId}`], async () => {
+        const op = await facilitatorRecord(d, operationId);
+        if (op.terminal)
+            return publicFacilitatorOperation(op);
+        assertAuthorizationEnded(d, op);
+        const i = op.intent;
+        await d.context.requireOperationAbandonApproval().approve({ operationId, fingerprint: op.fingerprint, profile: i.profile,
+            providerId: "local", walletAddress: i.owner.address, recipient: i.request.recipient, amountAtomic: i.request.grossAtomic,
+            amountDecimal: usdc(i.request.grossAtomic), chainLabel: chainLabel(i.request.chainId), assetLabel: `USDC (${i.requirement.asset})`,
+            unit: "USDC", outcomeNote: "Financial outcome: UNKNOWN. The EIP-3009 authorization can no longer be used, but APN could not prove whether it was used before it expired." });
+        const next = transitionFacilitator(op, { state: "abandoned_unknown", failure: "facilitator_gasless_owner_abandoned" }, d.context.clock.now().toISOString());
+        await d.facilitatorGasless.records.persist(next);
+        return publicFacilitatorOperation(next);
+    });
+}
+async function facilitatorRecord(d, operationId) {
+    const found = await d.operations.required(operationId);
+    return found.kind === "facilitator_gasless_transfer" ? found.record : ineligible();
+}
+/** Chain timestamps can trail the local clock, so release also waits one facilitator timeout past validBefore. */
+function assertAuthorizationEnded(d, op) {
+    const validBefore = op.signed === null ? null : Number(op.signed.authorization.validBefore);
+    if (op.terminal || !FACILITATOR_EXPOSED.includes(op.state) || op.settlement !== null || validBefore === null ||
+        d.context.clock.now().getTime() / 1000 < validBefore + op.intent.requirement.maxTimeoutSeconds) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Only an exposed Avalanche facilitator transfer with an unproven outcome can be abandoned, and only after its authorization has expired.");
+    }
 }
 async function localRecord(d, operationId) {
     const found = await d.operations.required(operationId);

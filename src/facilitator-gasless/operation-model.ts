@@ -8,9 +8,10 @@ export const FACILITATOR_RECEIPT_VERSION = "apn.facilitator-gasless-receipt.v1" 
 export const FACILITATOR_KIND = "facilitator_gasless_transfer" as const;
 export const FACILITATOR_POLICY = "apn.facilitator-gasless.foreground-approval.v1" as const;
 export const FACILITATOR_STATES = ["awaiting_approval", "approved", "verify_started", "settle_started", "settle_submitted",
-  "completed", "expired_unused", "failed_before_effect"] as const;
+  "completed", "expired_unused", "failed_before_effect", "abandoned_unknown"] as const;
 export type FacilitatorState = typeof FACILITATOR_STATES[number];
-export const FACILITATOR_TERMINAL: readonly FacilitatorState[] = Object.freeze(["completed", "expired_unused", "failed_before_effect"]);
+export const FACILITATOR_TERMINAL: readonly FacilitatorState[] = Object.freeze(["completed", "expired_unused", "failed_before_effect",
+  "abandoned_unknown"]);
 /** After the exposure marker the signature may be outside APN; only finalized chain evidence closes the operation. */
 export const FACILITATOR_EXPOSED: readonly FacilitatorState[] = Object.freeze(["verify_started", "settle_started", "settle_submitted"]);
 export const FACILITATOR_HISTORY_LIMIT = 64;

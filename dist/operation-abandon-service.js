@@ -4,19 +4,21 @@ import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { OperationService } from "./operation-service.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
-import { abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
+import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
 export class OperationAbandonService {
     context;
     rails;
     gasless;
     metaMaskGasless;
+    facilitatorGasless;
     operations;
     durable;
-    constructor(context, rails, gasless, metaMaskGasless) {
+    constructor(context, rails, gasless, metaMaskGasless, facilitatorGasless) {
         this.context = context;
         this.rails = rails;
         this.gasless = gasless;
         this.metaMaskGasless = metaMaskGasless;
+        this.facilitatorGasless = facilitatorGasless;
         this.operations = new OperationService(context.state);
         this.durable = new ProviderDirectState(context);
     }
@@ -31,6 +33,9 @@ export class OperationAbandonService {
             return await abandonLocalGasless({ ...base, gasless: this.gasless }, operationId);
         if (found.kind === "metamask_gasless_transfer")
             return await abandonMetaMaskGasless({ ...base, metaMaskGasless: this.metaMaskGasless }, operationId);
+        if (found.kind === "facilitator_gasless_transfer" && this.facilitatorGasless !== undefined) {
+            return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
+        }
         if (found.kind !== "direct_transfer")
             return ineligible();
         const profileHash = found.record.profileHash;

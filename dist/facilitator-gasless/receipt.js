@@ -14,6 +14,8 @@ export function facilitatorProofClass(op) {
         return "rpc_finalized_correlated";
     if (op.state === "expired_unused")
         return "rpc_finalized_unused";
+    if (op.state === "abandoned_unknown")
+        return "owner_acknowledgement_only";
     return op.verify === null ? "durable_pre_effect" : "effect_observation_pending";
 }
 export function publicFacilitatorOperation(op) {

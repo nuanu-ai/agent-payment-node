@@ -7,10 +7,10 @@ import { facilitatorOperationSchema } from "./schema.js";
 const NEXT = {
     awaiting_approval: ["approved", "failed_before_effect"],
     approved: ["verify_started", "failed_before_effect"],
-    verify_started: ["verify_started", "settle_started", "completed", "expired_unused"],
-    settle_started: ["settle_started", "settle_submitted", "completed", "expired_unused"],
-    settle_submitted: ["settle_submitted", "completed", "expired_unused"],
-    completed: [], expired_unused: [], failed_before_effect: [],
+    verify_started: ["verify_started", "settle_started", "completed", "expired_unused", "abandoned_unknown"],
+    settle_started: ["settle_started", "settle_submitted", "completed", "expired_unused", "abandoned_unknown"],
+    settle_submitted: ["settle_submitted", "completed", "expired_unused", "abandoned_unknown"],
+    completed: [], expired_unused: [], failed_before_effect: [], abandoned_unknown: [],
 };
 export function facilitatorSame(left, right) { return canonicalJson(left) === canonicalJson(right); }
 function corrupt() { return facilitatorFail("facilitator_gasless_state_corrupt"); }
@@ -116,6 +116,7 @@ function validShape(op, m) {
         completed: sealed && m.verify !== null && m.settlement !== null,
         expired_unused: sealed && m.verify !== null && m.settlement === null && expired,
         failed_before_effect: untouched && !sealed && (m.approval === null) === (signed === null),
+        abandoned_unknown: sealed && m.verify !== null && m.settlement === null,
     };
     if (!shape[m.state])
         corrupt();

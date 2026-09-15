@@ -18,6 +18,7 @@ import { transitionFacilitator } from "../../src/facilitator-gasless/transitions
 import type { GaslessTransport } from "../../src/gasless/https.js";
 import type { GaslessBlock } from "../../src/gasless/model.js";
 import type { Address, Hex } from "../../src/model.js";
+import type { OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import { StateStore, sealWallet } from "../../src/state.js";
 import { GASLESS_TEST_RECIPIENT, GaslessApproval, GaslessWrapping, testWord } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -58,6 +59,7 @@ class Facilitator implements FacilitatorPort {
   payments: FacilitatorPayment[] = [];
   verifyFails: "rejected" | null = null;
   settleFails: "unavailable" | null = null;
+  settleLogMissing = false;
   constructor(private readonly rpc: AvalancheRpc) {}
   async supported() {
     this.calls.push("supported");
@@ -72,7 +74,8 @@ class Facilitator implements FacilitatorPort {
   async settle(payment: FacilitatorPayment) {
     this.calls.push("settle");
     // The relayer's transaction lands on-chain even when its response is lost.
-    this.rpc.usedNonce = payment.authorization.nonce; this.rpc.settledIn = TX; this.rpc.head = block(1002, SECONDS + 4);
+    this.rpc.usedNonce = payment.authorization.nonce; this.rpc.settledIn = this.settleLogMissing ? null : TX;
+    this.rpc.head = block(1002, SECONDS + 4);
     if (this.settleFails === "unavailable") throw new Error("canary_settle_secret");
     return { observedAt: NOW.toISOString(), transactionHash: TX, pending: false, responseHash: hashObject("settle") };
   }
@@ -88,9 +91,11 @@ async function fixture(root: string) {
   await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile, profileHash: state.profileHash(profile),
     address: identity.address, createdAt: identity.createdAt, bindingHash: identity.bindingHash }));
   const rpc = new AvalancheRpc(), facilitator = new Facilitator(rpc), approval = new GaslessApproval();
+  const abandonments: OperationAbandonIntent[] = [];
   let now = NOW.getTime();
   const core = new ApnCore({ state, clock: { now: () => new Date(now) }, facilitatorGasless: { rpc: () => rpc, facilitator,
-    signer: new LocalFacilitatorSigner(state, wrapping), approval } });
+    signer: new LocalFacilitatorSigner(state, wrapping), approval },
+    operationAbandonApproval: { approve: async (intent) => { abandonments.push(intent); } } });
   const request = { chainId: 43114 as const, recipient: GASLESS_TEST_RECIPIENT, grossAtomic: "1500000", maxFeeAtomic: "0",
     minReceivedAtomic: "1500000" };
   const prepareInput = (idempotencyKey: string) => ({ command: "gasless.transfer.prepare", profile, request, idempotencyKey }) as const;
@@ -100,7 +105,7 @@ async function fixture(root: string) {
     return (response.operation as { operation_id: string }).operation_id;
   };
   const record = async (id: string) => (await core.facilitatorGasless.records.findOperation(id))!;
-  return { key, account, profile, state, wrapping, rpc, facilitator, approval, core, prepareInput, prepare, record,
+  return { key, account, profile, state, wrapping, rpc, facilitator, approval, abandonments, core, prepareInput, prepare, record,
     advance: (milliseconds: number) => { now += milliseconds; } };
 }
 
@@ -194,6 +199,30 @@ test("a lost settlement response is recovered from the on-chain authorization wi
   assert.equal(canonicalJson(stored).includes("canary_settle_secret"), false);
 });
 
+test("a used nonce without a matching receipt stays unresolved until the owner abandons it after expiry", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await fixture(temporary.root), id = await s.prepare();
+  s.facilitator.settleFails = "unavailable"; s.facilitator.settleLogMissing = true;
+  const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(response.ok, true, response.error?.message);
+  const unresolved = response.operation as any;
+  assert.equal(unresolved.state, "settle_started"); assert.equal(unresolved.terminal, false);
+  assert.equal(unresolved.reason, "facilitator_gasless_evidence");
+  const early = await s.core.execute({ command: "operation.abandon", operationId: id });
+  assert.equal(early.ok, false); assert.equal(early.error?.code, "APN_OPERATION_BLOCKED"); assert.equal(s.abandonments.length, 0);
+
+  const validBefore = Number((await s.record(id)).signed!.authorization.validBefore);
+  s.rpc.head = block(1100, validBefore); s.advance((R.validitySeconds + R.maxTimeoutSeconds) * 1000);
+  const abandoned = await s.core.execute({ command: "operation.abandon", operationId: id });
+  assert.equal(abandoned.ok, true, abandoned.error?.message);
+  const closed = abandoned.operation as any;
+  assert.equal(closed.state, "abandoned_unknown"); assert.equal(closed.terminal, true);
+  assert.equal(closed.proof_class, "owner_acknowledgement_only"); assert.equal(closed.transfer.actual_delivered_atomic, null);
+  assert.equal(s.abandonments.length, 1); assert.equal(s.abandonments[0]!.chainLabel, "Avalanche (43114)");
+  assert.deepEqual(s.facilitator.calls, ["supported", "supported", "verify", "settle"]);
+  assert.notEqual(await s.prepare("avalanche-facilitator-0002"), id);
+});
+
 test("an approval interrupted before exposure closes on resume without chain or facilitator access", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await fixture(temporary.root), id = await s.prepare(), op = await s.record(id);
@@ -271,8 +300,9 @@ class JsonRpc implements GaslessTransport {
 const quantity = (value: bigint | number) => `0x${BigInt(value).toString(16)}`;
 const word = (value: string | bigint) => `0x${(typeof value === "bigint" ? value.toString(16) : value.slice(2).toLowerCase()).padStart(64, "0")}`;
 
-test("Avalanche evidence needs one exact authorization and transfer in a finalized receipt", async () => {
-  const owner = `0x${"a1".repeat(20)}` as Address, nonce = testWord("rpc-nonce"), included = testWord("included-1001");
+test("Avalanche evidence needs one exact authorization and transfer in a finalized receipt, also inside a Multicall batch", async () => {
+  const owner = `0x${"a1".repeat(20)}` as Address, other = `0x${"b2".repeat(20)}`, nonce = testWord("rpc-nonce");
+  const included = testWord("included-1001");
   let delivered = 1_500_000n;
   const log = (index: number, topics: readonly string[], data: string) => ({ address: R.token, topics, data, logIndex: quantity(index),
     transactionHash: TX, blockHash: included, blockNumber: quantity(1001), transactionIndex: "0x0", removed: false });
@@ -283,8 +313,10 @@ test("Avalanche evidence needs one exact authorization and transfer in a finaliz
         : { number: quantity(1001), hash: included, timestamp: quantity(SECONDS + 2) };
     }
     if (method === "eth_getTransactionReceipt") return { transactionHash: TX, status: "0x1", blockNumber: quantity(1001), blockHash: included,
-      transactionIndex: "0x0", logs: [log(0, [R.authorizationUsedTopic, word(owner), nonce], "0x"),
-        log(1, [R.transferTopic, word(owner), word(GASLESS_TEST_RECIPIENT)], word(delivered))] };
+      transactionIndex: "0x0", logs: [log(0, [R.authorizationUsedTopic, word(other), testWord("other-nonce")], "0x"),
+        log(1, [R.transferTopic, word(other), word(GASLESS_TEST_RECIPIENT)], word(7n)),
+        log(2, [R.authorizationUsedTopic, word(owner), nonce], "0x"),
+        log(3, [R.transferTopic, word(owner), word(GASLESS_TEST_RECIPIENT)], word(delivered))] };
     if (method === "eth_call") return word(1n);
     throw new Error(`unexpected ${method}`);
   });
