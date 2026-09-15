@@ -5,7 +5,7 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-APN 0.5.16 includes this capability. Package availability, mainnet transfer
+APN 0.5.17 includes this capability. Package availability, mainnet transfer
 evidence and receiving human acceptance are tracked separately for each profile
 and network. `apn gasless capabilities` reports the exact adapter and acceptance
 state without reading a wallet,
@@ -32,16 +32,15 @@ state. A changed or unavailable deployment fails closed.
 | Polygon PoS | 137 | `APN_POLYGON_RPC_URL` | `APN_POLYGON_BUNDLER_RPC_URL` |
 | Base | 8453 | `APN_BASE_RPC_URL` | `APN_BASE_BUNDLER_RPC_URL` |
 | Arbitrum One | 42161 | `APN_ARBITRUM_RPC_URL` | `APN_ARBITRUM_BUNDLER_RPC_URL` |
-| Avalanche C-Chain (execution unavailable) | 43114 | `APN_AVALANCHE_RPC_URL` | `APN_AVALANCHE_BUNDLER_RPC_URL` |
+| Avalanche C-Chain (this adapter unavailable) | 43114 | `APN_AVALANCHE_RPC_URL` | `APN_AVALANCHE_BUNDLER_RPC_URL` |
 
-The admitted Avalanche bundler path does not support EIP-7702. Its deployed
-EntryPoint and token paymaster alone cannot enable this Local adapter. New
-Avalanche offers and further signing or disclosure fail with
-`gasless_eip7702_unavailable`. The capability matrix retains its required row
-with `executable_adapter: false`; the executable Local list contains six chains.
-Existing Avalanche records, identical prepare lookups, status, receipts and
-permission-invalidation observation remain available. This admission correction
-does not establish Avalanche acceptance or invalidate previously disclosed material.
+The admitted Avalanche bundler path does not support EIP-7702, so this Circle
+paymaster adapter cannot run there. The capability matrix keeps its Avalanche
+row with `executable_adapter: false`; the executable list for this adapter
+contains six chains. Existing Avalanche records from this adapter, identical
+prepare lookups, status, receipts and permission-invalidation observation remain
+available. New Local transfers on Avalanche use the
+[x402 facilitator route](#local-wallet-on-avalanche-x402-facilitator) instead.
 See [Pimlico chain support](https://docs.pimlico.io/guides/supported-chains#avalanche).
 
 The default bundler is the selected chain's public Pimlico endpoint. The
@@ -286,6 +285,63 @@ observation, then asks for the exact acknowledgement and records terminal
 `abandoned_unknown` with owner-acknowledgement-only proof. A signed delegation or
 UserOperation may still execute later because the fee permit and delegation do
 not expire.
+
+## Local wallet on Avalanche (x402 facilitator)
+
+A local wallet sends Avalanche C-Chain USDC without holding AVAX. The owner
+signs one EIP-3009 `transferWithAuthorization` for the exact recipient and
+amount. PayAI's public x402 facilitator checks it and submits the transaction,
+paying the gas itself. No token fee is taken: the recipient receives the full
+amount, and the account keeps no delegation or allowance after the payment.
+
+| Item | Value |
+| --- | --- |
+| Chain | Avalanche C-Chain, chain ID 43114 (`eip155:43114`) |
+| Token | Native USDC `0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e`, 6 decimals |
+| Required RPC environment | `APN_AVALANCHE_RPC_URL` |
+| Facilitator | `https://facilitator.payai.network`, free public tier, x402 v2 `exact` |
+| Approved relayer | `0xc6699d2aada6c36dfea5c248dd70f9cb0235cb63` |
+| Authorization validity | 120 seconds after approval |
+
+```sh
+apn gasless balance --profile <profile> --chain 43114
+apn gasless transfer prepare --profile <profile> --chain 43114 --to <recipient> \
+  --amount 1.5 --max-fee 0 --min-received 1.5 --idempotency-key <key>
+apn gasless transfer approve --operation <operation-id>
+```
+
+`--max-fee` and `--min-received` keep the shared command shape. This route
+charges no fee, so any `--min-received` up to the amount is satisfied.
+
+Preparation checks the bound local wallet, the chain ID, the USDC balance at a
+finalized block and the facilitator's current support for Avalanche `exact`
+payments with an approved relayer. Approval asks for a six-character code. APN
+then repeats those checks, signs in memory and writes a durable marker before
+the authorization leaves the process. It calls the facilitator's verify and
+settle endpoints once each and never repeats them. The signature is never saved;
+state and receipts keep only its hash.
+
+After that marker only chain evidence ends the operation:
+
+- `completed` needs a finalized successful receipt with exactly one
+  `AuthorizationUsed` for the owner and nonce and exactly one USDC `Transfer`
+  of the exact amount to the recipient. A settlement batched with other
+  payments in one transaction is accepted.
+- `expired_unused` needs a finalized block at or after the authorization's
+  `validBefore` in which the nonce is still unused. EIP-3009 then rules out any
+  later use.
+
+A verification rejection, a failed settlement or a lost response does not end
+the operation. Run `apn operation resume --operation <operation-id>` after the
+120-second window to record the outcome. Recovery never signs or contacts the
+facilitator. It reads whichever `APN_AVALANCHE_RPC_URL` is configured at that
+moment, so an unavailable RPC can be replaced. A transaction hash reported by
+the facilitator is only a hint; the on-chain authorization state decides.
+
+An approval interrupted before the marker ends as `failed_before_effect`,
+because nothing left APN. A resume after the approval deadline ends an
+unapproved operation the same way. An unresolved operation blocks new transfers
+from the same address on Avalanche only.
 
 ## MetaMask Agent server wallet
 

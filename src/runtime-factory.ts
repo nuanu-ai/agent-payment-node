@@ -80,8 +80,14 @@ import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
 import { TtyOperationAbandonApproval, type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import { smartAccountGaslessRuntime } from "./smart-account-gasless/runtime.js";
+import { LocalFacilitatorSigner } from "./facilitator-gasless/custody.js";
+import { PayAiFacilitator } from "./facilitator-gasless/facilitator.js";
+import { avalancheFacilitatorRpc } from "./facilitator-gasless/rpc.js";
+import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
+import { TtyFacilitatorApproval } from "./facilitator-gasless/tty.js";
 
 export interface RuntimeFactoryOptions {
+  readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
   readonly gasless?: GaslessDependencies;
@@ -209,6 +215,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   );
   return new ApnCore({
     state,
+    facilitatorGasless: options.facilitatorGasless ?? { rpc: () => avalancheFacilitatorRpc(process.env),
+      facilitator: new PayAiFacilitator(), signer: new LocalFacilitatorSigner(state, wrappingSecret),
+      ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyFacilitatorApproval() } : {}) },
     smartAccountGasless: options.smartAccountGasless ?? smartAccountGaslessRuntime({ state,
       permissions: smartAccountPermissionStore, wrapping: wrappingSecret, environment: process.env,
       clock: options.clock ?? { now: () => new Date() }, foregroundApproval: bound.request.command === "gasless.transfer.approve" }),

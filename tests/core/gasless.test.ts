@@ -61,14 +61,14 @@ test("gasless capability matrix is static and separates four providers and mainn
 });
 
 for (const delegation of ["empty", "expected"] as const) {
-  test(`gasless Avalanche ${delegation} refuses a new offer before RPC, custody or operation creation`, async (t) => {
+  test(`gasless Avalanche ${delegation} never offers the EIP-7702 adapter and needs the facilitator runtime`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await gaslessFixture(temporary.root, 43114, { delegation });
     const key = "avalanche-capability-refusal";
     const response = await s.core.execute({ command: "gasless.transfer.prepare", profile: s.profile,
       request: s.request, idempotencyKey: key });
     assert.equal(response.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-    assert.match(response.error?.message ?? "", /gasless_eip7702_unavailable/u);
+    assert.match(response.error?.message ?? "", /Avalanche facilitator/u);
     assert.equal(await s.core.gasless.records.findOperation(s.state.operationId(s.profile, key)), null);
     assert.deepEqual(s.rpc.calls, []); assert.equal(s.rpc.sends.length, 0);
     assert.equal(s.wrapping.loads, 0); assert.equal(s.approval.calls.length, 0);

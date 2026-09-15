@@ -4,6 +4,7 @@ import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
+    facilitatorGasless;
     smartAccountGasless;
     metaMaskGasless;
     gasless;
@@ -36,6 +37,8 @@ export class RuntimeContext {
     coinbaseRpcInstance;
     initialized;
     constructor(dependencies) {
+        if (dependencies.facilitatorGasless !== undefined)
+            this.facilitatorGasless = dependencies.facilitatorGasless;
         if (dependencies.smartAccountGasless !== undefined)
             this.smartAccountGasless = dependencies.smartAccountGasless;
         if (dependencies.metaMaskGasless !== undefined)

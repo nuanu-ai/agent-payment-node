@@ -3,6 +3,7 @@ import { GASLESS_DEPLOYMENTS } from "./registry.js";
 import { metaMaskGaslessNetworks } from "../metamask-gasless/catalog.js";
 import { GASLESS_EIP7702_CHAINS } from "./validation.js";
 import { saRegistry } from "../smart-account-gasless/registry.js";
+import { AVALANCHE_FACILITATOR as AVAX } from "../facilitator-gasless/registry.js";
 
 export function gaslessCapabilities(profile?: string) {
   return { family: "gasless_transfer", purpose: "same_chain_USDC_transfer_with_fee_from_gross",
@@ -52,6 +53,15 @@ export function gaslessCapabilities(profile?: string) {
       recipient_amount: "gross_minus_frozen_fee_budget", unused_fee_budget: "remains_with_sender",
       sender_native_gas_required: false, failed_transfer_can_charge_USDC: true,
       persistent_EIP7702_delegation: true, automatic_native_fallback: false, x402_support_implied: false },
+    local_facilitator: { provider: "local", custody: "local_software", route: "x402_exact_eip3009_public_facilitator",
+      networks: [{ chain_id: AVAX.chainId, name: "Avalanche C-Chain", token: AVAX.token, symbol: "USDC", decimals: AVAX.decimals,
+        rpc_environment: AVAX.rpcEnv, facilitator_origin: AVAX.facilitatorOrigin, approved_facilitator_signers: [...AVAX.approvedSigners],
+        executable_adapter: true, action_time_verification_required: true, mainnet_acceptance: "open" }],
+      semantics: { amount: "exact_gross_USDC_equals_recipient_net", fee_atomic: "0", native_gas_payer: "public_facilitator",
+        approved_sender_native_debit_wei: "0", one_signature: true, one_verification: true, one_settlement_dispatch: true,
+        authorization_validity_seconds: AVAX.validitySeconds, onchain_authorization_expiry: true, persistent_delegation: false,
+        terminal_states: ["completed", "expired_unused", "failed_before_effect"], recovery_after_exposure: "finalized_chain_evidence_only",
+        provider_status_is_settlement_proof: false, paid_facilitator_tier: false } },
     approval: "foreground_terminal_per_operation", proof_class: "static_gasless_capabilities",
     next_actions: ["apn gasless transfer prepare --help"] };
 }
