@@ -64,6 +64,8 @@ export interface GaslessGas {
     readonly maxFeePerGas: string;
     readonly maxPriorityFeePerGas: string;
 }
+/** Prices a UserOperation is signed with: v4 chooses them after approval within the fee cap, earlier wires use the intent's. */
+export type GaslessFees = Pick<GaslessGas, "maxFeePerGas" | "maxPriorityFeePerGas">;
 export interface GaslessFeeConfiguration {
     readonly additionalGasCharge: string;
     readonly feeSpread: string;
@@ -96,7 +98,7 @@ export interface GaslessSnapshot extends GaslessAccountState {
 }
 export interface GaslessIntent {
     /** Absent on legacy journals; never reinterpret their signed wire or hash. */
-    readonly wireVersion?: "apn.gasless-wire.v2" | "apn.gasless-wire.v3";
+    readonly wireVersion?: "apn.gasless-wire.v2" | "apn.gasless-wire.v3" | "apn.gasless-wire.v4";
     readonly profile: string;
     readonly request: GaslessRequest;
     readonly owner: GaslessOwner;

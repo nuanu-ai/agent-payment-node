@@ -1,6 +1,6 @@
 import type { Address, Hex } from "../model.js";
 import { type GaslessTransport } from "./https.js";
-import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessGas, GaslessIntent, GaslessObservation, GaslessSnapshot } from "./model.js";
+import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessFees, GaslessGas, GaslessIntent, GaslessObservation, GaslessSnapshot } from "./model.js";
 import type { GaslessBootstrapMaterial, GaslessRpcFactory, GaslessRpcPort, GaslessUserOperationMaterial } from "./ports.js";
 export declare function gaslessRpcFactory(environment: Readonly<Record<string, string | undefined>>): GaslessRpcFactory;
 export declare class GaslessRpc implements GaslessRpcPort {
@@ -22,7 +22,8 @@ export declare class GaslessRpc implements GaslessRpcPort {
     snapshot(owner: Address, approvedGas?: GaslessGas): Promise<GaslessSnapshot>;
     /** One bounded, read-only HTTP batch; no effect call can enter this batch. */
     private bundlerState;
-    estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial): Promise<GaslessEstimate>;
+    mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate>;
+    estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate>;
     send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex>;
     observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
     private assertIntent;

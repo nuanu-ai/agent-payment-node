@@ -1,22 +1,36 @@
 import { exactKeys, isPlainRecord } from "../canonical.js";
-import type { GaslessEstimate, GaslessFeeConfiguration, GaslessGas, GaslessIntent, GaslessSnapshot } from "./model.js";
+import type { GaslessEstimate, GaslessFeeConfiguration, GaslessFees, GaslessGas, GaslessIntent, GaslessSnapshot } from "./model.js";
 import { GASLESS_MAX_UINT, GASLESS_MAX_UINT120, gaslessAddress, gaslessChain, gaslessExact, gaslessFailure,
   gaslessHash, gaslessHex, gaslessSame, gaslessUint } from "./validation.js";
+import { gaslessWireFees } from "./wire.js";
 
 const GAS_CEILINGS = {
   verificationGasLimit: 100_000n,
   callGasLimit: 250_000n,
-  paymasterVerificationGasLimit: 500_000n,
+  paymasterVerificationGasLimit: 700_000n,
   paymasterPostOpGasLimit: 200_000n,
   preVerificationGas: 150_000n,
 } as const;
 const REPEATED_PRE_VERIFICATION_GAS = 125_000n;
 const AUTHORIZATION_GAS = 25_000n;
 const MIN_POST_OP_GAS = 35_000n;
-// Preserve the legacy 250k call ceiling when reading existing intents. New offers
-// reserve more gas for Circle validation within the same 1m aggregate ceiling.
+// Preserve the legacy 250k call ceiling when reading existing intents. v3 offers
+// reserve more gas for Circle validation within a 1m aggregate.
 const OFFER_CALL_GAS = 200_000n;
-const MAX_TOTAL_GAS = 1_000_000n;
+const V3_VERIFICATION_GAS = 100_000n;
+const V3_PAYMASTER_VERIFICATION_GAS = 500_000n;
+const MAX_TOTAL_GAS = 1_100_000n;
+/**
+ * v4 offers sized from 2026-09-15 mirror estimates of the exact first-use UserOperation (Pimlico bundler, Circle
+ * paymaster): at least 20 % margin, plus 25k call gas for a recipient without a balance. Other chains keep v3 sizes.
+ */
+const CALIBRATED_OFFERS: Readonly<Partial<Record<number, {
+  readonly verification: bigint; readonly call: bigint; readonly paymasterVerification: bigint;
+  readonly firstUsePreVerification: bigint;
+}>>> = {
+  1: { verification: 75_000n, call: 130_000n, paymasterVerification: 485_000n, firstUsePreVerification: 100_000n },
+  137: { verification: 75_000n, call: 140_000n, paymasterVerification: 695_000n, firstUsePreVerification: 100_000n },
+};
 const PRICE_SCALE = 1_000_000_000_000_000_000n;
 const BPS_SCALE = 10_000n;
 const GAS_FIELDS = [
@@ -25,18 +39,28 @@ const GAS_FIELDS = [
 ] as const;
 
 export function gaslessGas(snapshot: GaslessSnapshot): GaslessGas {
-  return validateGaslessGas(gaslessGasFields(snapshot));
+  return validateGaslessGas(gaslessGasFields(snapshot, false));
 }
 
-/** Recognize the two admitted immutable offers without changing saved gas. */
-export function validateGaslessStoredOffer(gas: GaslessGas, snapshot: GaslessSnapshot): void {
+/** The v4 offer: calibrated limits on Ethereum and Polygon, the v3 sizes on every other chain. */
+export function gaslessCalibratedGas(snapshot: GaslessSnapshot): GaslessGas {
+  return validateGaslessGas(gaslessGasFields(snapshot, true));
+}
+
+/** Recognize each admitted immutable offer for its wire version without changing saved gas. */
+export function validateGaslessStoredOffer(gas: GaslessGas, snapshot: GaslessSnapshot,
+  wireVersion: GaslessIntent["wireVersion"]): void {
   validateGaslessGas(gas);
-  const current = gaslessGasFields(snapshot);
+  if (wireVersion === "apn.gasless-wire.v4") {
+    if (!gaslessSame(gas, gaslessGasFields(snapshot, true))) feeFailure();
+    return;
+  }
+  const current = gaslessGasFields(snapshot, false);
   const legacy = { ...current, callGasLimit: "250000", paymasterVerificationGasLimit: "200000" };
   if (!gaslessSame(gas, current) && !gaslessSame(gas, legacy)) feeFailure();
 }
 
-function gaslessGasFields(snapshot: GaslessSnapshot): GaslessGas {
+function gaslessGasFields(snapshot: GaslessSnapshot, calibrated: boolean): GaslessGas {
   const configuration = feeConfiguration(snapshot.feeConfiguration);
   const additional = BigInt(configuration.additionalGasCharge);
   if (additional > GAS_CEILINGS.paymasterPostOpGasLimit) feeFailure();
@@ -45,21 +69,25 @@ function gaslessGasFields(snapshot: GaslessSnapshot): GaslessGas {
   const maximum = checkedAdd(checkedMultiply(baseFee, 2n), priority);
   if (maximum > GASLESS_MAX_UINT120 || snapshot.maxFeePerGas !== maximum.toString()) feeFailure();
   if (snapshot.delegation !== "empty" && snapshot.delegation !== "expected") identityFailure();
+  const offer = calibrated ? CALIBRATED_OFFERS[snapshot.chainId] : undefined;
+  const firstUse = snapshot.delegation === "empty";
   return {
-    verificationGasLimit: GAS_CEILINGS.verificationGasLimit.toString(),
-    callGasLimit: OFFER_CALL_GAS.toString(),
-    paymasterVerificationGasLimit: GAS_CEILINGS.paymasterVerificationGasLimit.toString(),
+    verificationGasLimit: (offer?.verification ?? V3_VERIFICATION_GAS).toString(),
+    callGasLimit: (offer?.call ?? OFFER_CALL_GAS).toString(),
+    paymasterVerificationGasLimit: (offer?.paymasterVerification ?? V3_PAYMASTER_VERIFICATION_GAS).toString(),
     paymasterPostOpGasLimit: (additional > MIN_POST_OP_GAS ? additional : MIN_POST_OP_GAS).toString(),
-    preVerificationGas: (REPEATED_PRE_VERIFICATION_GAS +
-      (snapshot.delegation === "empty" ? AUTHORIZATION_GAS : 0n)).toString(),
+    preVerificationGas: (firstUse && offer !== undefined ? offer.firstUsePreVerification
+      : REPEATED_PRE_VERIFICATION_GAS + (firstUse ? AUTHORIZATION_GAS : 0n)).toString(),
     maxFeePerGas: maximum.toString(),
     maxPriorityFeePerGas: priority.toString(),
   };
 }
 
-/** v3 intents freeze the owner's whole fee limit; earlier intents froze the exact prepare quote. */
+/** v3 and v4 intents freeze the owner's whole fee limit; earlier intents froze the exact prepare quote. */
 export function gaslessFeeCapCovers(intent: Pick<GaslessIntent, "wireVersion" | "feeCapAtomic" | "request">, quoteAtomic: string): boolean {
-  if (intent.wireVersion !== "apn.gasless-wire.v3") return quoteAtomic === intent.feeCapAtomic;
+  if (intent.wireVersion !== "apn.gasless-wire.v3" && intent.wireVersion !== "apn.gasless-wire.v4") {
+    return quoteAtomic === intent.feeCapAtomic;
+  }
   const gross = BigInt(intent.request.grossAtomic), limit = BigInt(intent.request.maxFeeAtomic);
   const spendable = gross - BigInt(intent.request.minReceivedAtomic), cap = limit < spendable ? limit : spendable;
   return intent.feeCapAtomic === cap.toString() && BigInt(quoteAtomic) <= cap;
@@ -108,9 +136,10 @@ export function assertGaslessEstimate(intent: GaslessIntent, estimate: GaslessEs
     BigInt(estimate.preVerificationGas) < AUTHORIZATION_GAS) estimateFailure();
 }
 
-export function assertGaslessSnapshot(intent: GaslessIntent, current: GaslessSnapshot): void {
+/** `fees` are the prices the next step uses: v4 chooses them after approval, earlier intents keep their frozen gas. */
+export function assertGaslessSnapshot(intent: GaslessIntent, current: GaslessSnapshot, fees?: GaslessFees): void {
   const initial = validateSnapshot(intent.initialSnapshot), observed = validateSnapshot(current);
-  const gas = validateGaslessGas(intent.gas);
+  const gas = validateGaslessGas(intent.gas), priced = validateGaslessGas({ ...gas, ...gaslessWireFees(intent, fees ?? gas) });
   const gross = gaslessUint(intent.request.grossAtomic, true, "APN_STATE_CORRUPT");
   const cap = gaslessUint(intent.feeCapAtomic, true, "APN_STATE_CORRUPT");
   const delivered = gaslessUint(intent.recipientAtomic, true, "APN_STATE_CORRUPT");
@@ -135,8 +164,8 @@ export function assertGaslessSnapshot(intent: GaslessIntent, current: GaslessSna
   if (observed.allowanceAtomic !== "0") gaslessFailure("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "gasless_allowance_drift");
   if (BigInt(observed.balanceAtomic) < gross) gaslessFailure("APN_INSUFFICIENT_USDC", "gasless_fee_budget");
   if (BigInt(observed.feeConfiguration.additionalGasCharge) > BigInt(gas.paymasterPostOpGasLimit) ||
-    BigInt(observed.baseFeePerGas) > BigInt(gas.maxFeePerGas) ||
-    BigInt(gaslessFee(gas, observed.feeConfiguration)) > cap) feeFailure();
+    BigInt(observed.baseFeePerGas) > BigInt(priced.maxFeePerGas) ||
+    BigInt(gaslessFee(priced, observed.feeConfiguration)) > cap) feeFailure();
 }
 
 function validateSnapshot(value: GaslessSnapshot): GaslessSnapshot {
