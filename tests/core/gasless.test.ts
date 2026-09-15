@@ -1,3 +1,4 @@
+import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -31,7 +32,7 @@ for (const chain of GASLESS_CHAINS.filter(chain => chain !== 43114)) for (const 
       assert.equal("factory" in sealed.userOperation, delegation === "empty");
       assert.equal("factoryData" in sealed.userOperation, delegation === "empty");
     }
-    assert.equal(s.approval.calls[0]!.exactPhrase, `APPROVE GASLESS ${stored.fingerprint}`);
+    assert.equal(s.approval.calls[0]!.exactPhrase, approvalCode("gasless", stored.fingerprint));
     assert.equal(publicOp.fees.proven_sender_native_debit_wei, "0");
     assert.equal(BigInt(publicOp.transfer.actual_sender_debit_atomic) + BigInt(publicOp.transfer.unused_gross_atomic), 10000000n);
     assert.equal(publicOp.transfer.actual_delivered_atomic, operation.intent.recipientAtomic);

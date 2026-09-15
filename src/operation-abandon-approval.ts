@@ -1,3 +1,4 @@
+import { approvalCode } from "./approval-code.js";
 import { exactChainConsent, TTY_APPROVAL_DEADLINE_MS, type TtyTransferApprovalOptions } from "./tty-approval.js";
 
 export interface OperationAbandonIntent {
@@ -42,5 +43,5 @@ export class TtyOperationAbandonApproval implements OperationAbandonApprovalPort
 }
 
 export function operationAbandonPhrase(fingerprint: string): string {
-  return `ABANDON APN UNKNOWN ${fingerprint.slice(-16)}`;
+  return approvalCode("abandon", fingerprint);
 }

@@ -1,3 +1,4 @@
+import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
@@ -14,23 +15,23 @@ function approvalInput() {
       expires_at: new Date(Date.now() + 60_000).toISOString() } };
 }
 
-test("MetaMask approval displays exact debit, fee, permission and full 145-byte phrase without private UUID", async () => {
+test("MetaMask approval displays exact debit, fee, permission and the six-character code without private UUID", async () => {
   const input = approvalInput(), tty = terminal(`${input.exactPhrase}\n`);
-  assert.equal(input.exactPhrase.length, 145);
+  assert.match(input.exactPhrase, /^[0-9a-f]{6}$/u);
   assert.equal(await new TtyMetaMaskGaslessApproval({ openTerminal: async () => tty.port,
     isTerminal: () => true }).confirm(input), true);
   for (const text of ["Total sender debit: 10 USDC (10000000 atomic)",
     "Recipient receives: 9.95 USDC (9950000 atomic)", "Exact fee: 0.05 USDC (50000 atomic)",
     "Your fee ceiling: 0.05 USDC", "Your minimum receipt: 9.95 USDC", "without an onchain expiry",
     "Timeout, revert or later expiry does not revoke it", "exact address pending independent transaction evidence",
-    "Type exactly: " + input.exactPhrase]) assert.ok(tty.output().includes(text), text);
+    "Type " + input.exactPhrase + " and press Enter to confirm."]) assert.ok(tty.output().includes(text), text);
   assert.equal(tty.output().includes("12345678-1234-4234-8234-123456789abc"), false);
   assert.equal(tty.closes(), 1);
 });
 
 test("MetaMask approval refuses missing identity, altered fingerprint, trailing space and over-bound input", async () => {
   const input = approvalInput();
-  for (const supplied of [`APPROVE GASLESS ${input.fingerprint}`, input.exactPhrase.slice(0, -1) + "f",
+  for (const supplied of [approvalCode("gasless", input.fingerprint), input.exactPhrase.slice(0, -1) + (input.exactPhrase.endsWith("f") ? "e" : "f"),
     input.exactPhrase + " ", "a".repeat(257), input.exactPhrase + "\r"]) {
     assert.notEqual(supplied, input.exactPhrase);
     const tty = terminal(supplied + "\n");
@@ -41,8 +42,8 @@ test("MetaMask approval refuses missing identity, altered fingerprint, trailing 
 });
 
 test("shared approval keeps the legacy 128-byte bound unless explicitly widened", async () => {
-  const input = approvalInput(), tty = terminal(input.exactPhrase + "\n");
-  await assert.rejects(exactChainConsent([], input.exactPhrase, input.summary.expires_at,
+  const input = approvalInput(), longPhrase = "a".repeat(129), tty = terminal(longPhrase + "\n");
+  await assert.rejects(exactChainConsent([], longPhrase, input.summary.expires_at,
     { openTerminal: async () => tty.port, isTerminal: () => true }),
   { code: "APN_NATIVE_REJECTED", details: { nativeCode: "APN_APPROVAL_REFUSED" } });
   assert.equal(tty.closes(), 1);
@@ -70,7 +71,7 @@ test("actual macOS PTY rejects a shortened MetaMask phrase without requesting an
   skip: process.platform !== "darwin",
 }, async () => {
   const input = approvalInput();
-  const result = await runPty(input, `APPROVE GASLESS ${input.fingerprint}`);
+  const result = await runPty(input, input.exactPhrase.slice(0, -1));
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /MM_APPROVAL_RESULT:false/u);
 });
@@ -93,7 +94,7 @@ async function runPty(input: ReturnType<typeof approvalInput>, phrase = input.ex
     log_user 1
     spawn $env(APN_NODE_EXEC) --input-type=module -e $env(APN_NODE_SOURCE)
     expect {
-      -re {Type exactly:} { send -- $env(APN_INPUT); send -- "\\r" }
+      -re {press Enter to confirm} { send -- $env(APN_INPUT); send -- "\\r" }
       timeout { exit 124 }
     }
     expect {

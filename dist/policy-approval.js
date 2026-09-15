@@ -1,3 +1,4 @@
+import { approvalCode } from "./approval-code.js";
 import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -44,7 +45,7 @@ export class TtyProfilePolicyApproval {
                 `Maximum wallet ETH: ${intent.maxBalanceEthWei ?? "not configured"} wei`,
                 "These values are owner policy, not product defaults.",
                 `Fingerprint: ${intent.fingerprint}`,
-                `Type exactly: ${phrase}`,
+                `Type ${phrase} and press Enter to confirm.`,
                 "> ",
             ].join("\n"));
             const supplied = await readApprovalInput(tty, this.deadlineMs, this.signal);
@@ -58,7 +59,7 @@ export class TtyProfilePolicyApproval {
     }
 }
 export function profilePolicyApprovalPhrase(fingerprint) {
-    return `APPROVE APN POLICY ${fingerprint.slice(-16)}`;
+    return approvalCode("policy", fingerprint);
 }
 async function openApprovalTerminal() {
     const input = process.stdin;

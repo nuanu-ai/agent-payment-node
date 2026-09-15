@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { OperationService } from "../../src/operation-service.js";
+import { publicGaslessOperation } from "../../src/gasless/receipt.js";
 import { transitionGasless } from "../../src/gasless/transitions.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -17,6 +18,7 @@ test("gasless guard failure after the local bootstrap seal but before disclosure
   const stored = await s.record(id);
   assert.equal(stored.state, "failed_before_effect"); assert.equal(stored.terminal, true);
   assert.equal(stored.bootstrap.signingAttempts, 1); assert.equal(stored.bootstrap.disclosureAttempts, 0);
+  assert.equal(publicGaslessOperation(stored).proof_class, "durable_pre_effect");
   assert.equal(s.rpc.calls.filter((c) => c === "estimate").length, 0); assert.equal(s.rpc.sends.length, 0);
   await new OperationService(s.state).assertProfileAvailable(stored.profileHash);
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
@@ -42,6 +44,7 @@ test("a 0.5.13 unknown_finality record with an undisclosed sealed bootstrap resu
   assert.equal(resumed.ok, true, resumed.error?.message);
   const after = await s.record(id);
   assert.equal(after.state, "failed_before_effect"); assert.equal(after.terminal, true);
+  assert.equal(publicGaslessOperation(after).proof_class, "durable_pre_effect");
   assert.equal(s.rpc.calls.filter((c) => c === "estimate").length, 0); assert.equal(s.rpc.sends.length, 0);
   await new OperationService(s.state).assertProfileAvailable(after.profileHash);
 });

@@ -413,8 +413,9 @@ test("real encrypted custody completes the core x402 prepare and authorize bound
 
 test("direct-transfer approval phrase is byte-exact", () => {
   const phrase = transferApprovalPhrase("a".repeat(64));
+  assert.match(phrase, /^[0-9a-f]{6}$/u);
   assert.equal(isExactTransferApproval(phrase, phrase), true);
-  for (const variant of [phrase.toLowerCase(), `${phrase} `, phrase.slice(1), `${phrase}\r`]) {
+  for (const variant of [`APPROVE APN TRANSFER ${"a".repeat(16)}`, `${phrase} `, phrase.slice(1), `${phrase}\r`]) {
     assert.equal(isExactTransferApproval(phrase, variant), false);
   }
 });
