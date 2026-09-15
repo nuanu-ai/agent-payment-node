@@ -1,3 +1,4 @@
+import { approvalCode } from "../approval-code.js";
 import type { StateStore } from "../state.js";
 import { assertGaslessEstimate } from "./economics.js";
 import { assertGaslessRemaining, gaslessReason, guardGaslessOperation } from "./guard.js";
@@ -20,7 +21,7 @@ export class GaslessExecution {
     if (op.terminal || op.state !== "awaiting_approval") return op;
     try { await this.guard(op); } catch (error) { return await this.halt(op, error); }
     const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
-      exactPhrase: `APPROVE GASLESS ${op.fingerprint}`, summary: publicGaslessOperation(op) });
+      exactPhrase: approvalCode("gasless", op.fingerprint), summary: publicGaslessOperation(op) });
     if (!accepted) return await this.save(op, { state: "failed_before_effect", failure: "gasless_approval_rejected" });
     try { assertGaslessRemaining(op, this.now()); } catch (error) { return await this.halt(op, error); }
     op = await this.save(op, { state: "execution_pending", approval: { policy: "apn.gasless.foreground-approval.v1",

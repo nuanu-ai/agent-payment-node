@@ -1,3 +1,4 @@
+import { approvalCode } from "../approval-code.js";
 import { ApnError } from "../errors.js";
 import { exactChainConsent } from "../tty-approval.js";
 import { SA_MIN_REMAINING_MS, SA_TTL_MS } from "./model.js";
@@ -80,7 +81,7 @@ export function smartAccountGaslessSnapshot(value, binding, rpc, op) {
     return snapshot;
 }
 export function smartAccountGaslessApprovalPhrase(op) {
-    return `APPROVE GASLESS ${op.operationId} ${op.fingerprint}`;
+    return approvalCode("gasless", op.operationId, op.fingerprint);
 }
 export function smartAccountGaslessApprovalSummary(op, now) {
     return { ...publicSmartAccountGaslessOperation(op), remaining_ms: Math.max(0, Date.parse(op.intent.expiresAt) - now),

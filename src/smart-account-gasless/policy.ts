@@ -1,3 +1,4 @@
+import { approvalCode } from "../approval-code.js";
 import { ApnError } from "../errors.js";
 import type { ClockPort } from "../ports.js";
 import { exactChainConsent, type TtyTransferApprovalOptions } from "../tty-approval.js";
@@ -60,7 +61,7 @@ export function smartAccountGaslessSnapshot(value: unknown, binding: SmartAccoun
   return snapshot;
 }
 export function smartAccountGaslessApprovalPhrase(op: SmartAccountGaslessOperationRecord): string {
-  return `APPROVE GASLESS ${op.operationId} ${op.fingerprint}`;
+  return approvalCode("gasless", op.operationId, op.fingerprint);
 }
 export function smartAccountGaslessApprovalSummary(op: SmartAccountGaslessOperationRecord, now: number): Readonly<Record<string, unknown>> {
   return { ...publicSmartAccountGaslessOperation(op), remaining_ms: Math.max(0, Date.parse(op.intent.expiresAt) - now),

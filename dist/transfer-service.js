@@ -67,10 +67,10 @@ export class TransferService {
             });
             if (existing !== null)
                 return publicOperation(existing.record);
-            await this.operations.assertProfileAvailable(profileHash);
             const wallet = await state.loadWallet(profileHash);
             if (wallet === null)
                 throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+            await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, wallet.address);
             const rpc = this.context.requireRpc();
             await rpc.assertBaseChain();
             const data = transferData(recipient, amount.atomic);

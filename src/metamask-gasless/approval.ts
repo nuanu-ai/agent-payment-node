@@ -1,10 +1,11 @@
+import { approvalCode } from "../approval-code.js";
 import { publicMetaMaskGaslessOperation } from "./journal/receipt.js";
 import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { mmRegistry } from "./registry.js";
 import { mmFormat } from "./validation.js";
 
 export function metaMaskGaslessApprovalPhrase(op: MetaMaskGaslessOperationRecord): string {
-  return `APPROVE GASLESS ${op.operationId} ${op.fingerprint}`;
+  return approvalCode("gasless", op.operationId, op.fingerprint);
 }
 export function metaMaskGaslessApprovalSummary(op: MetaMaskGaslessOperationRecord, now: number): Readonly<Record<string, unknown>> {
   return { ...publicMetaMaskGaslessOperation(op), network: mmRegistry(op.intent.request.chainId).row.network,

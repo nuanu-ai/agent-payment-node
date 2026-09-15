@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+const approvalCode = (action, ...binding) => createHash("sha256").update(["apn.approval-code.v1", action, ...binding].join("\n"), "utf8").digest("hex").slice(0, 6);
 import { createRequire } from "node:module";
 import { chmod, mkdir, mkdtemp, readFile, realpath, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -182,7 +183,7 @@ async function approval(s, id, phrase) {
   const op = await s.operation(id), script = `set timeout 55
     spawn $env(APN_TEST_NODE) --import $env(APN_TEST_PRELOAD) $env(APN_TEST_BIN) gasless transfer approve --operation $env(APN_TEST_OPERATION)
     expect {
-      -re {Type exactly:} { send -- $env(APN_TEST_PHRASE); send -- "\\r" }
+      -re {press Enter to confirm} { send -- $env(APN_TEST_PHRASE); send -- "\\r" }
       eof { catch wait result; exit [lindex $result 3] }
       timeout { exit 124 }
     }
@@ -192,7 +193,7 @@ async function approval(s, id, phrase) {
     }`;
   const result = await run("/usr/bin/expect", ["-c", script], { timeoutMs: 60000, env: { ...s.env, TERM: "xterm-256color",
     APN_TEST_NODE: process.execPath, APN_TEST_PRELOAD: installed.preload, APN_TEST_BIN: join(installed.packageRoot, "bin/apn.js"),
-    APN_TEST_OPERATION: id, APN_TEST_PHRASE: phrase ?? `APPROVE GASLESS ${id} ${op.fingerprint}` } });
+    APN_TEST_OPERATION: id, APN_TEST_PHRASE: phrase ?? approvalCode("gasless", id, op.fingerprint) } });
   s.safe(result.stdout + result.stderr); assert.equal(result.stderr, ""); return result;
 }
 async function mcp(s) {

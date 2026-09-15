@@ -22,7 +22,7 @@ export class TtyGaslessApproval implements GaslessApprovalPort {
       `Paymaster permission: ${s.permission.paymaster}, up to ${usdc(s.permission.permit_amount_atomic)}`,
       `Current paymaster allowance: ${usdc(s.permission.initial_allowance_atomic)}`,
       "The signed permit and operation have no on-chain expiry. Delegation persists after this payment.",
-      "Success clears the paymaster allowance. An unresolved failure keeps the APN profile locked for reconciliation.",
+      "Success clears the paymaster allowance. An unresolved failure blocks new transfers from this wallet on this chain until it is reconciled.",
       `RPC: ${s.rpc_origin}`, `Bundler: ${s.bundler_origin}`, `Operation: ${s.operation_id}`,
       `Fingerprint: ${input.fingerprint}`, `Approve before: ${s.expires_at}`];
     try { await exactChainConsent(lines, input.exactPhrase, s.expires_at, this.options); return true; }
@@ -41,7 +41,7 @@ export class TtyGaslessApproval implements GaslessApprovalPort {
       "Gas is sponsored by the external Coinbase CDP paymaster and billed outside this wallet.",
       "Exactly one AWAL send invocation is permitted. APN never retries after dispatch starts.",
       "Another identical external send during observation makes attribution ambiguous.",
-      "An ambiguous outcome keeps this profile locked until canonical positive proof is found.",
+      "An ambiguous outcome blocks new transfers from this wallet on Base until canonical positive proof is found.",
       `RPC: ${s.rpc_origin}`, `Safe anchor: ${s.safe_anchor.numberAtomic} (${s.safe_anchor.hash})`,
       `Operation: ${s.operation_id}`, `Fingerprint: ${input.fingerprint}`, `Approve before: ${s.expires_at}`];
     try { await exactChainConsent(lines, input.exactPhrase, s.expires_at, this.options, 256); return true; }

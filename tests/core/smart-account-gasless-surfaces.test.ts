@@ -1,3 +1,4 @@
+import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -75,7 +76,7 @@ async function fixture(stateRoot: string) {
           candidateTxHash: null, evidenceHash: null }, settlement: null, unusedProof: null }; },
     }),
     approval: { confirm: async value => { calls.approval++; assert.equal(value.exactPhrase,
-      `APPROVE GASLESS ${value.operationId} ${value.fingerprint}`); return true; } },
+      approvalCode("gasless", value.operationId, value.fingerprint)); return true; } },
   };
   return { state, binding, calls, dependencies, options: { stateRoot, smartAccountGasless: dependencies, wrappingSecret: wrapping, clock },
     failSnapshotAt: (value: number | null) => { snapshotFailureAt = value; },

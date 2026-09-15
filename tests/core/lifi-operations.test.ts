@@ -1,3 +1,4 @@
+import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -24,7 +25,7 @@ for (const pair of ["eth-base", "base-arb", "arb-eth"] as const) for (const tool
     assert.ok(s.source.calls.indexOf("send") < s.source.calls.indexOf("estimate:bridge"));
     assert.equal(record.destinationProof!.transactionHash, LIFI_DESTINATION_HASH); assert.equal(record.failure?.residualAllowance?.amountAtomic, "0");
     assert.equal(s.approval.calls.length, 1); assert.equal(s.approval.calls[0]!.fingerprint, operation.fingerprint);
-    assert.equal(s.approval.calls[0]!.exactPhrase, `APPROVE BRIDGE ${operation.fingerprint}`);
+    assert.equal(s.approval.calls[0]!.exactPhrase, approvalCode("bridge", operation.fingerprint));
     assert.equal(s.source.submissions.length, 2); assert.ok(s.wrapping.loads > before); assert.equal(s.wrapping.creates, 0);
     const receipt = await s.core.execute({ command: "receipt.get", operationId: id }); assert.equal(receipt.ok, true, receipt.error?.message);
     const serialized = JSON.stringify(receipt); assert.equal(serialized.includes(LIFI_SYNTHETIC_KEY), false);

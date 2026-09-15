@@ -1,3 +1,4 @@
+import { approvalCode } from "./approval-code.js";
 import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -61,7 +62,7 @@ export class TtyTransferApproval {
                 ...(intent.maxPriorityFeePerGasAtomic === undefined ? [] : [`Max priority fee per gas: ${intent.maxPriorityFeePerGasAtomic} wei`]),
                 `Expires: ${intent.expiresAt}`,
                 `Fingerprint: ${intent.fingerprint}`,
-                `Type exactly: ${phrase}`,
+                `Type ${phrase} and press Enter to confirm.`,
                 "> ",
             ].join("\n"));
             const supplied = await readApprovalInput(tty, intent.expiresAt, this.deadlineMs, this.signal);
@@ -76,7 +77,7 @@ export class TtyTransferApproval {
     }
 }
 export function transferApprovalPhrase(fingerprint) {
-    return `APPROVE APN TRANSFER ${fingerprint.slice(-16)}`;
+    return approvalCode("transfer", fingerprint);
 }
 export function isExactTransferApproval(expected, supplied) {
     return supplied === expected;
@@ -243,7 +244,7 @@ export class TtyChainPolicyApproval {
             `Maximum per transfer: ${policy.maximumPerTransferAtomic} asset atomic`, `Daily principal limit (UTC): ${policy.dailyLimitAtomic} asset atomic`,
             `Maximum fee and ${policy.account.rail === "solana" ? "rent" : "resources"} per operation: ${policy.maximumNativeFeeAtomic} native atomic`, `Policy: ${policy.policyHash}`,
             "Unresolved transfers continue to reserve limits across UTC days.",
-        ], `ADMIT APN ASSET ${policy.policyHash.slice(-16)}`, new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString(), this.options);
+        ], approvalCode("asset-admission", policy.policyHash), new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString(), this.options);
     }
 }
 export async function exactChainConsent(lines, phrase, expiresAt, options, maximumInputBytes = MAX_APPROVAL_INPUT_BYTES) {
@@ -259,7 +260,7 @@ export async function exactChainConsent(lines, phrase, expiresAt, options, maxim
     try {
         if (!(options.isTerminal ?? isatty)(terminal.fd))
             throw approvalFailure("APN_TTY_UNAVAILABLE", "The chain approval is not attached to a terminal.");
-        await terminal.write(`\n${lines.join("\n")}\nType exactly: ${phrase}\n> `);
+        await terminal.write(`\n${lines.join("\n")}\nType ${phrase} and press Enter to confirm.\n> `);
         const supplied = await readApprovalInput(terminal, expiresAt, options.deadlineMs ?? TTY_APPROVAL_DEADLINE_MS, options.signal, maximumInputBytes);
         if (supplied !== phrase)
             throw approvalFailure("APN_APPROVAL_REFUSED", "The chain approval was refused.");

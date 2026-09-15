@@ -1,8 +1,9 @@
+import { approvalCode } from "../approval-code.js";
 import { publicMetaMaskGaslessOperation } from "./journal/receipt.js";
 import { mmRegistry } from "./registry.js";
 import { mmFormat } from "./validation.js";
 export function metaMaskGaslessApprovalPhrase(op) {
-    return `APPROVE GASLESS ${op.operationId} ${op.fingerprint}`;
+    return approvalCode("gasless", op.operationId, op.fingerprint);
 }
 export function metaMaskGaslessApprovalSummary(op, now) {
     return { ...publicMetaMaskGaslessOperation(op), network: mmRegistry(op.intent.request.chainId).row.network,

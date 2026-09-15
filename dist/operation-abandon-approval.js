@@ -1,3 +1,4 @@
+import { approvalCode } from "./approval-code.js";
 import { exactChainConsent, TTY_APPROVAL_DEADLINE_MS } from "./tty-approval.js";
 export class TtyOperationAbandonApproval {
     options;
@@ -23,6 +24,6 @@ export class TtyOperationAbandonApproval {
     }
 }
 export function operationAbandonPhrase(fingerprint) {
-    return `ABANDON APN UNKNOWN ${fingerprint.slice(-16)}`;
+    return approvalCode("abandon", fingerprint);
 }
 //# sourceMappingURL=operation-abandon-approval.js.map

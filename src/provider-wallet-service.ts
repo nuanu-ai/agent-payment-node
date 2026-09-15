@@ -264,10 +264,11 @@ export class ProviderWalletService {
         undefined, undefined, undefined, this.context.metaMaskGasless?.records);
       // Repeated/conflicting keys reach the family's resolver without a profile migration.
       if (await operations.findIdempotency(this.context.state.idempotencyHash(key)) !== null) return;
-      await operations.assertProfileAvailable(profileHash);
       const repository = this.context.requireProfileRepository();
       let bound = await repository.load(profileHash);
+      // Local profiles are guarded by their prepare step, which knows the exact network and account.
       if (bound === null || bound.provider_id === "local") return;
+      await operations.assertEvmAccountAvailable(profileHash, 8453, bound.public_address);
       const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
       bound = await upgradeProviderProfile(adapter, bound, repository);
       if (bound.drift.state !== "bound") {

@@ -35,9 +35,9 @@ export class SmartAccountGaslessPreparation {
         if (existing.kind !== "smart_account_gasless_transfer") saFail("sa_gasless_state_corrupt");
         await this.o.records.repairReceipt(existing.record); return existing.record;
       }
-      await this.o.operations.assertProfileAvailable(profileHash);
       const clock = new SmartAccountGaslessClock(this.o.clock); clock.check();
       const owner = await smartAccountGaslessOwner(state, profile); clock.check();
+      await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, owner.address);
       const binding = assertSmartAccountGaslessBinding(await this.o.material.inspect(owner, Math.floor(clock.check() / 1000)), owner);
       clock.check();
       if (request.recipient === binding.ownerAddress || request.recipient === binding.sessionAddress) saFail("sa_gasless_input");

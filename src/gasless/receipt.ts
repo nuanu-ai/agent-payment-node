@@ -10,6 +10,7 @@ export function gaslessNextActions(op: GaslessOperationRecord): readonly string[
 }
 export function gaslessProofClass(op: GaslessOperationRecord): string {
   if (op.state === "abandoned_unknown") return "owner_acknowledgement_only";
+  if (op.state === "failed_before_effect") return "durable_pre_effect";
   if (op.state === "completed") return "rpc_safe_correlated";
   if (op.state === "failed_permissions_invalidated") return op.observation?.permissionInvalidation?.userOperationHash === undefined
     ? "rpc_safe_permissions_invalidated" : "rpc_safe_final_permissions_invalidated";
