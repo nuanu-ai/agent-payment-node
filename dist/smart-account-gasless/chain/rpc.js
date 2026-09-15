@@ -1,4 +1,6 @@
 import { canonicalJson, exactKeys, sha256 } from "../../canonical.js";
+import { performance } from "node:perf_hooks";
+import { setTimeout as sleep } from "node:timers/promises";
 import { parsePublicHttpsUrl } from "../../network-policy.js";
 import { parseJsonWithDuplicateRejection } from "../../x402-strict-json.js";
 import { GaslessHttps } from "../../gasless/https.js";
@@ -16,6 +18,12 @@ const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getCod
 const MAX_RESPONSE = 4 * 1024 * 1024;
 const PASS_START_BUDGET_MS = 45_000;
 const CALL_ACTIVE_MS = 15_000;
+const REQUEST_START_INTERVAL_MS = 1_000;
+const defaultPacing = () => ({
+    minimumIntervalMs: REQUEST_START_INTERVAL_MS,
+    monotonicNow: () => performance.now(),
+    sleep: async (milliseconds) => { await sleep(milliseconds); },
+});
 /** Lazy binding performs no RPC, custody, provider or chain effect. */
 export function smartAccountGaslessRpcFactory(environment, clock, validator, transport) {
     let cached;
@@ -39,8 +47,10 @@ export class SmartAccountGaslessRpc {
     clock;
     validator;
     transport;
-    monotonicNow;
+    pacing;
     sequence = 0n;
+    queue = Promise.resolve();
+    lastRequestStartedAt = null;
     constructor(options) {
         if (options.chainId !== 8453)
             saFail("sa_gasless_rpc_binding");
@@ -51,7 +61,7 @@ export class SmartAccountGaslessRpc {
         this.clock = options.clock;
         this.validator = options.validator;
         this.transport = options.transport ?? new GaslessHttps();
-        this.monotonicNow = options.monotonicNow ?? (() => performance.now());
+        this.pacing = options.pacing ?? defaultPacing();
     }
     async snapshot(binding, expectedPreparationBlock) {
         const call = this.pass();
@@ -110,21 +120,25 @@ export class SmartAccountGaslessRpc {
             saFail("sa_gasless_rpc_binding");
     }
     pass() {
-        const started = this.monotonicNow();
-        let calls = 0;
+        const attempt = { startedAt: this.pacing.monotonicNow(), calls: 0, failure: null };
         return async (method, params) => {
-            const elapsed = this.monotonicNow() - started;
-            if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed >= PASS_START_BUDGET_MS || calls >= 64) {
-                throw new SaRpcBudgetError();
+            const elapsed = this.pacing.monotonicNow() - attempt.startedAt;
+            if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed >= PASS_START_BUDGET_MS || attempt.calls >= 64) {
+                const failure = new SaRpcBudgetError();
+                attempt.failure = failure;
+                throw failure;
             }
-            calls += 1;
-            return await this.call(method, params);
+            attempt.calls += 1;
+            return await this.call(method, params, attempt);
         };
     }
-    async call(method, params) {
+    async call(method, params, attempt) {
         if (!READ_METHODS.has(method))
             saFail("sa_gasless_evidence");
         const id = (++this.sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
+        return await this.schedule(attempt, async () => await this.performCall(method, body, id));
+    }
+    async performCall(method, body, id) {
         let timer;
         let response;
         try {
@@ -164,6 +178,38 @@ export class SmartAccountGaslessRpc {
             saFail("sa_gasless_rpc_unavailable");
         }
         return record.result;
+    }
+    async schedule(attempt, work) {
+        const pending = this.queue.then(async () => {
+            if (attempt.failure !== null)
+                throw attempt.failure;
+            if (this.lastRequestStartedAt !== null) {
+                const remaining = this.pacing.minimumIntervalMs -
+                    (this.pacing.monotonicNow() - this.lastRequestStartedAt);
+                if (remaining > 0)
+                    await this.pacing.sleep(remaining);
+            }
+            const started = this.pacing.monotonicNow(), elapsed = started - attempt.startedAt;
+            if (!Number.isFinite(started) || !Number.isFinite(elapsed) || elapsed < 0 || elapsed >= PASS_START_BUDGET_MS) {
+                const failure = new SaRpcBudgetError();
+                attempt.failure = failure;
+                throw failure;
+            }
+            if (attempt.failure !== null)
+                throw attempt.failure;
+            this.lastRequestStartedAt = started;
+            try {
+                return await work();
+            }
+            catch (error) {
+                // Range rejection is a bounded scan control signal; it may retry a smaller range in this same pass.
+                if (!(error instanceof SaRpcRangeError))
+                    attempt.failure = error;
+                throw error;
+            }
+        });
+        this.queue = pending.then(() => undefined, () => undefined);
+        return await pending;
     }
 }
 function rpcEndpoint(value) {
