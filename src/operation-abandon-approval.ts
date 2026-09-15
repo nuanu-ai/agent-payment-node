@@ -1,4 +1,3 @@
-import type { Address } from "./model.js";
 import { exactChainConsent, TTY_APPROVAL_DEADLINE_MS, type TtyTransferApprovalOptions } from "./tty-approval.js";
 
 export interface OperationAbandonIntent {
@@ -6,10 +5,14 @@ export interface OperationAbandonIntent {
   readonly fingerprint: string;
   readonly profile: string;
   readonly providerId: string;
-  readonly walletAddress: Address;
-  readonly recipient: Address;
+  readonly walletAddress: string;
+  readonly recipient: string;
   readonly amountAtomic: string;
   readonly amountDecimal: string;
+  readonly chainLabel: string;
+  readonly assetLabel: string;
+  readonly unit: string;
+  readonly outcomeNote: string;
 }
 
 export interface OperationAbandonApprovalPort {
@@ -26,12 +29,12 @@ export class TtyOperationAbandonApproval implements OperationAbandonApprovalPort
       `Fingerprint: ${intent.fingerprint}`,
       `Profile: ${intent.profile}`,
       `Provider: ${intent.providerId}`,
-      "Chain: Base (8453)",
-      "Asset: canonical Base USDC",
+      `Chain: ${intent.chainLabel}`,
+      `Asset: ${intent.assetLabel}`,
       `Sender: ${intent.walletAddress}`,
       `Recipient: ${intent.recipient}`,
-      `Amount: ${intent.amountDecimal} USDC (${intent.amountAtomic} atomic)`,
-      "Financial outcome: UNKNOWN. The provider may already have sent this transfer.",
+      `Amount: ${intent.amountDecimal} ${intent.unit} (${intent.amountAtomic} atomic)`,
+      intent.outcomeNote,
       "This administrative action does not prove success, failure, cancellation, refund or no effect.",
       "The original operation will never be submitted again; a new operation has independent risk.",
     ], operationAbandonPhrase(intent.fingerprint), new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString(), this.options);

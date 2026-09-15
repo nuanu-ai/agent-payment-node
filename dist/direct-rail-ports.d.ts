@@ -135,6 +135,8 @@ export interface DirectRailPort {
         readonly transactionId: string;
     }>;
     inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, expectedRawPayloadHash?: string): Promise<RailInspection>;
+    /** Local rails: throws unless the frozen validity window has passed and RPC history shows no transaction. */
+    assertValidityExpired?(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<void>;
 }
 export interface ChainWalletStoragePort {
     account(profile: string, rail: DirectRailName): Promise<ChainAccount | null>;
