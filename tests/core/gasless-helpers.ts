@@ -11,6 +11,7 @@ import { LocalGaslessCustody } from "../../src/gasless/custody.js";
 import type { GaslessAccountState, GaslessChainId, GaslessIntent, GaslessObservation, GaslessRequest,
   GaslessSnapshot } from "../../src/gasless/model.js";
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
+import type { OperationAbandonApprovalPort } from "../../src/operation-abandon-approval.js";
 import type { GaslessApprovalPort, GaslessCustodyPort, GaslessRpcPort, GaslessSealedMaterial } from "../../src/gasless/ports.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
 
@@ -89,7 +90,7 @@ export class GaslessTestRpc implements GaslessRpcPort {
 }
 export async function gaslessFixture(root: string, chainId: GaslessChainId = 8453, options: {
   now?: Date; wrapping?: GaslessWrapping; rpc?: GaslessTestRpc; key?: Hex; initializeWallet?: boolean;
-  delegation?: "empty" | "expected"; custody?: GaslessCustodyPort;
+  delegation?: "empty" | "expected"; custody?: GaslessCustodyPort; abandonApproval?: OperationAbandonApprovalPort;
 } = {}) {
   const now = options.now ?? new Date("2026-09-09T00:00:00.000Z"), key = options.key ?? generatePrivateKey();
   const account = privateKeyToAccount(key), profile = "gasless-local", state = new StateStore(root);
@@ -105,7 +106,8 @@ export async function gaslessFixture(root: string, chainId: GaslessChainId = 845
   const rpc = options.rpc ?? new GaslessTestRpc(chainId, account.address, options.delegation ?? "empty", now);
   const approval = new GaslessApproval(), custody = options.custody ?? new LocalGaslessCustody(state, wrapping, () => now.getTime());
   const dependencies = { rpcFor: (chain: GaslessChainId) => { assert.equal(chain, rpc.chainId); return rpc; }, custody, approval };
-  const core = new ApnCore({ state, gasless: dependencies, clock: { now: () => new Date(now) } });
+  const core = new ApnCore({ state, gasless: dependencies, clock: { now: () => new Date(now) },
+    ...(options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {}) });
   const request: GaslessRequest = { chainId, recipient: GASLESS_TEST_RECIPIENT, grossAtomic: "10000000", maxFeeAtomic: "200000", minReceivedAtomic: "9800000" };
   const prepare = async (idempotencyKey = "gasless-fixture-0001") => {
     const input = { command: "gasless.transfer.prepare", profile, request, idempotencyKey } as const;

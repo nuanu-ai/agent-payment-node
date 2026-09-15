@@ -13,10 +13,10 @@ const EDGES = {
     awaiting_approval: ["execution_pending", "failed_before_effect"],
     execution_pending: ["dispatch_pending", "failed_before_effect"],
     dispatch_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed"],
-    submitted_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed"],
-    unknown_finality: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed"],
+    submitted_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown"],
+    unknown_finality: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown"],
     failed_effects_pending: ["failed_effects_pending", "completed"],
-    completed: [], failed_before_effect: [],
+    completed: [], failed_before_effect: [], abandoned_unknown: [],
 };
 function corrupt() { return mmFail("mm_gasless_state_corrupt"); }
 function time(value) { return Date.parse(value); }
