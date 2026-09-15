@@ -7,12 +7,16 @@ import { OperationService } from "./operation-service.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
+import type { GaslessService } from "./gasless/service.js";
+import type { MetaMaskGaslessService } from "./metamask-gasless/service.js";
+import { abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
 
 export class OperationAbandonService {
   private readonly operations: OperationService;
   private readonly durable: ProviderDirectState;
 
-  constructor(private readonly context: RuntimeContext, private readonly rails: RailOperationService) {
+  constructor(private readonly context: RuntimeContext, private readonly rails: RailOperationService,
+    private readonly gasless: GaslessService, private readonly metaMaskGasless: MetaMaskGaslessService) {
     this.operations = new OperationService(context.state);
     this.durable = new ProviderDirectState(context);
   }
@@ -22,6 +26,9 @@ export class OperationAbandonService {
     await this.context.ready();
     const found = await this.operations.required(operationId);
     if (found.kind === "rail_transfer") return await this.abandonRail(found.record.profileHash, operationId);
+    const base = { context: this.context, operations: this.operations };
+    if (found.kind === "gasless_transfer") return await abandonLocalGasless({ ...base, gasless: this.gasless }, operationId);
+    if (found.kind === "metamask_gasless_transfer") return await abandonMetaMaskGasless({ ...base, metaMaskGasless: this.metaMaskGasless }, operationId);
     if (found.kind !== "direct_transfer") return ineligible();
     const profileHash = found.record.profileHash;
     return await this.context.state.withLocks([

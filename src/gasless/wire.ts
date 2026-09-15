@@ -146,7 +146,7 @@ export function gaslessEnvelopeBinding(intent: Omit<GaslessIntent, "unsignedEnve
 }
 
 function usesEip7702Marker(intent: GaslessIntent): boolean {
-  if (intent.wireVersion !== undefined && intent.wireVersion !== "apn.gasless-wire.v2") wireFailure();
+  if (intent.wireVersion !== undefined && intent.wireVersion !== "apn.gasless-wire.v2" && intent.wireVersion !== "apn.gasless-wire.v3") wireFailure();
   return intent.wireVersion === undefined || intent.initialSnapshot.delegation === "empty";
 }
 

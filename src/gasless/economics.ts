@@ -57,6 +57,14 @@ function gaslessGasFields(snapshot: GaslessSnapshot): GaslessGas {
   };
 }
 
+/** v3 intents freeze the owner's whole fee limit; earlier intents froze the exact prepare quote. */
+export function gaslessFeeCapCovers(intent: Pick<GaslessIntent, "wireVersion" | "feeCapAtomic" | "request">, quoteAtomic: string): boolean {
+  if (intent.wireVersion !== "apn.gasless-wire.v3") return quoteAtomic === intent.feeCapAtomic;
+  const gross = BigInt(intent.request.grossAtomic), limit = BigInt(intent.request.maxFeeAtomic);
+  const spendable = gross - BigInt(intent.request.minReceivedAtomic), cap = limit < spendable ? limit : spendable;
+  return intent.feeCapAtomic === cap.toString() && BigInt(quoteAtomic) <= cap;
+}
+
 export function gaslessFee(gas: GaslessGas, config: GaslessFeeConfiguration): string {
   const validated = validateGaslessGas(gas), configuration = feeConfiguration(config);
   const maximum = BigInt(validated.maxFeePerGas);
@@ -109,7 +117,7 @@ export function assertGaslessSnapshot(intent: GaslessIntent, current: GaslessSna
   const userMaximum = gaslessUint(intent.request.maxFeeAtomic, false, "APN_STATE_CORRUPT");
   const minimum = gaslessUint(intent.request.minReceivedAtomic, true, "APN_STATE_CORRUPT");
   if (cap > userMaximum || cap > gross - minimum || delivered !== gross - cap ||
-    gaslessFee(gas, initial.feeConfiguration) !== intent.feeCapAtomic ||
+    !gaslessFeeCapCovers(intent, gaslessFee(gas, initial.feeConfiguration)) ||
     gas.maxFeePerGas !== initial.maxFeePerGas || gas.maxPriorityFeePerGas !== initial.maxPriorityFeePerGas) feeFailure();
   if (initial.chainId !== intent.request.chainId || initial.token !== intent.token ||
     intent.tokenDomain.chainId !== intent.request.chainId || intent.tokenDomain.verifyingContract !== intent.token) protocolFailure();

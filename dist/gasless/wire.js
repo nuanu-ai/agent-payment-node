@@ -141,7 +141,7 @@ export function gaslessEnvelopeBinding(intent) {
     return { schemaVersion: "apn.gasless-envelope.v1", ...body, permitDeadlineAtomic: GASLESS_MAX_UINT.toString() };
 }
 function usesEip7702Marker(intent) {
-    if (intent.wireVersion !== undefined && intent.wireVersion !== "apn.gasless-wire.v2")
+    if (intent.wireVersion !== undefined && intent.wireVersion !== "apn.gasless-wire.v2" && intent.wireVersion !== "apn.gasless-wire.v3")
         wireFailure();
     return intent.wireVersion === undefined || intent.initialSnapshot.delegation === "empty";
 }

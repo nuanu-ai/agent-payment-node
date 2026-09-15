@@ -45,13 +45,16 @@ export class GaslessPreparation {
       }
       const rpc = this.o.rpcFor(request.chainId);
       const initialSnapshot = await rpc.snapshot(binding.owner.address), gas = gaslessGas(initialSnapshot);
-      const feeCapAtomic = gaslessFee(gas, initialSnapshot.feeConfiguration);
-      const net = BigInt(request.grossAtomic) - BigInt(feeCapAtomic);
-      if (BigInt(feeCapAtomic) > BigInt(request.maxFeeAtomic) || net < BigInt(request.minReceivedAtomic) || net <= 0n) {
+      // Freeze the owner's whole fee limit so a paymaster price move before signing cannot cancel the approval.
+      const quoteAtomic = BigInt(gaslessFee(gas, initialSnapshot.feeConfiguration));
+      const gross = BigInt(request.grossAtomic), spendable = gross - BigInt(request.minReceivedAtomic);
+      const cap = BigInt(request.maxFeeAtomic) < spendable ? BigInt(request.maxFeeAtomic) : spendable, net = gross - cap;
+      if (quoteAtomic > cap || net < BigInt(request.minReceivedAtomic) || net <= 0n) {
         gaslessFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_fee_budget");
       }
+      const feeCapAtomic = cap.toString();
       const preparedAt = new Date(this.o.now()).toISOString(), recipientAtomic = net.toString();
-      const unsigned: Omit<GaslessIntent, "unsignedEnvelopeHash"> = { wireVersion: "apn.gasless-wire.v2", profile, request, ...binding,
+      const unsigned: Omit<GaslessIntent, "unsignedEnvelopeHash"> = { wireVersion: "apn.gasless-wire.v3", profile, request, ...binding,
         initialSnapshot, gas, token: row.token, tokenDomain: row.tokenDomain, paymaster: row.paymaster,
         entryPoint: row.entryPoint, delegate: row.delegate, feeCapAtomic, recipientAtomic,
         callData: gaslessBatch(row.token, request.recipient, recipientAtomic, row.paymaster), preparedAt,

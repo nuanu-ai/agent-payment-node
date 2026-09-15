@@ -106,7 +106,10 @@ export declare const snapshotSchema: z.ZodObject<{
     }>;
 }, z.core.$strict>;
 export declare const intentSchema: z.ZodObject<{
-    wireVersion: z.ZodOptional<z.ZodLiteral<"apn.gasless-wire.v2">>;
+    wireVersion: z.ZodOptional<z.ZodEnum<{
+        "apn.gasless-wire.v2": "apn.gasless-wire.v2";
+        "apn.gasless-wire.v3": "apn.gasless-wire.v3";
+    }>>;
     profile: z.ZodString;
     request: z.ZodObject<{
         chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
@@ -498,6 +501,7 @@ export declare const stateSchema: z.ZodEnum<{
     awaiting_approval: "awaiting_approval";
     submitted_pending: "submitted_pending";
     unknown_finality: "unknown_finality";
+    abandoned_unknown: "abandoned_unknown";
     completed: "completed";
     failed_before_effect: "failed_before_effect";
     failed_confirmed_revert: "failed_confirmed_revert";
@@ -568,6 +572,7 @@ export declare const transitionSchema: z.ZodObject<{
         awaiting_approval: "awaiting_approval";
         submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
+        abandoned_unknown: "abandoned_unknown";
         completed: "completed";
         failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";
@@ -889,7 +894,10 @@ export declare const operationSchema: z.ZodObject<{
     updatedAt: z.ZodString;
     terminal: z.ZodBoolean;
     intent: z.ZodObject<{
-        wireVersion: z.ZodOptional<z.ZodLiteral<"apn.gasless-wire.v2">>;
+        wireVersion: z.ZodOptional<z.ZodEnum<{
+            "apn.gasless-wire.v2": "apn.gasless-wire.v2";
+            "apn.gasless-wire.v3": "apn.gasless-wire.v3";
+        }>>;
         profile: z.ZodString;
         request: z.ZodObject<{
             chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
@@ -984,6 +992,7 @@ export declare const operationSchema: z.ZodObject<{
             awaiting_approval: "awaiting_approval";
             submitted_pending: "submitted_pending";
             unknown_finality: "unknown_finality";
+            abandoned_unknown: "abandoned_unknown";
             completed: "completed";
             failed_before_effect: "failed_before_effect";
             failed_confirmed_revert: "failed_confirmed_revert";
@@ -1298,6 +1307,7 @@ export declare const operationSchema: z.ZodObject<{
         awaiting_approval: "awaiting_approval";
         submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
+        abandoned_unknown: "abandoned_unknown";
         completed: "completed";
         failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";

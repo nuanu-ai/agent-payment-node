@@ -23,7 +23,7 @@ import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmIso, mmRequest, mmSame, m
 const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const EMPTY_CODE_HASH = "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
 const STATES: readonly MetaMaskGaslessState[] = ["awaiting_approval", "execution_pending", "dispatch_pending",
-  "submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "failed_before_effect"];
+  "submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "failed_before_effect", "abandoned_unknown"];
 const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "providerObservation",
   "cursor", "observation", "settlement", "failure"] as const;
 
@@ -200,6 +200,7 @@ export function mmJournalMutable(value: Record<string, unknown>, intent: MetaMas
   if (state === "execution_pending" && a === null) corrupt();
   if (state === "dispatch_pending" && (before || a === null || provider !== null || o !== null || settled !== null || failed !== null)) corrupt();
   if (state === "failed_before_effect" && (!before || provider !== null || o !== null || settled !== null || failed === null)) corrupt();
+  if (state === "abandoned_unknown" && (before || a === null || settled !== null || failed?.reason !== "mm_gasless_owner_abandoned")) corrupt();
   if (state === "submitted_pending" && (before || a === null || settled !== null || failed?.reason !== "mm_gasless_pending" ||
     provider === null || !["broadcasted", "confirmed"].includes(provider.status) ||
     provider.txHash === null || o === null || o.phase !== "pending" || o.candidateTxHash !== provider.txHash)) corrupt();

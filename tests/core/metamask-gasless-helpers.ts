@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { OperationAbandonApprovalPort } from "../../src/operation-abandon-approval.js";
 import { createExactExecutionBatchTerms, createLimitedCallsTerms, hashDelegation } from "@metamask/delegation-core";
 import { TypedDataEncoder } from "ethers";
 import { encodeFunctionData, keccak256, parseAbi } from "viem";
@@ -146,7 +147,7 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
 }
 
 export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 8453,
-  designation: "empty" | "pinned" = "empty") {
+  designation: "empty" | "pinned" = "empty", options: { abandonApproval?: OperationAbandonApprovalPort } = {}) {
   const state = new StateStore(root), now = new Date("2026-09-09T00:00:00.000Z"), profile = "mm-fixture";
   await state.initialize(); const capabilities = metamaskDirectCapabilitySnapshot();
   const publicProfile: ProviderProfileRecord = { schema_version: "apn.provider-profile.v1", profile,
@@ -161,7 +162,8 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
     walletIdHash: mmWalletIdentityHash(MM_TEST_OWNER), namespace: "eip155", mode: "server", environment: "prod" };
   const provider = new MmTestProvider(binding, now), rpc = new MmTestRpc(chainId, now, designation), approval = new MmTestApproval();
   const dependencies = { rpcFor: (selected: MetaMaskGaslessChainId) => { assert.equal(selected, chainId); return rpc; }, provider, approval };
-  const clock = { now: () => new Date(now) }, core = new ApnCore({ state, metaMaskGasless: dependencies, clock });
+  const abandon = options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {};
+  const clock = { now: () => new Date(now) }, core = new ApnCore({ state, metaMaskGasless: dependencies, clock, ...abandon });
   const request: MetaMaskGaslessRequest = { chainId, recipient: MM_TEST_RECIPIENT,
     grossAtomic: "10000000", maxFeeAtomic: "50000", minReceivedAtomic: "9950000" };
   const record = async (id: string): Promise<MetaMaskGaslessOperationRecord> => (await core.metaMaskGasless.records.findOperation(id))!;
@@ -171,6 +173,6 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
     const id = (result.operation as { operation_id: string }).operation_id;
     return { id, input, operation: await record(id) };
   };
-  const restart = () => new ApnCore({ state: new StateStore(root), metaMaskGasless: dependencies, clock });
+  const restart = () => new ApnCore({ state: new StateStore(root), metaMaskGasless: dependencies, clock, ...abandon });
   return { state, now, profile, publicProfile, binding, provider, rpc, approval, dependencies, clock, core, request, prepare, record, restart };
 }
