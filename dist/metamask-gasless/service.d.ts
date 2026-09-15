@@ -1,3 +1,4 @@
+import type { MetaMaskGaslessObservationRpcFactory } from "./ports.js";
 import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
 import type { MetaMaskGaslessChainId } from "./model.js";
@@ -5,6 +6,7 @@ import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMask
 import { MetaMaskGaslessPreparation } from "./prepare.js";
 export interface MetaMaskGaslessDependencies {
     readonly rpcFor: MetaMaskGaslessRpcFactory;
+    readonly observationRpcFor?: MetaMaskGaslessObservationRpcFactory;
     readonly provider: MetaMaskGaslessProviderPort;
     readonly approval?: MetaMaskGaslessApprovalPort;
     readonly records?: MetaMaskGaslessRepositoryPort;
@@ -33,7 +35,7 @@ export declare class MetaMaskGaslessService {
     }>;
     prepare(input: Parameters<MetaMaskGaslessPreparation["prepare"]>[0]): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     approve(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
-    resume(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
+    resume(operationId: string, observationRpcEnv?: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     status(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     receipt(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessReceipt>;
     private project;

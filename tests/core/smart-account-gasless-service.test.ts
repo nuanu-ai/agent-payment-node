@@ -1,3 +1,5 @@
+import type { GaslessTransport } from "../../src/gasless/https.js";
+import { SmartAccountGaslessRpc, saObservationRpcEnv, smartAccountGaslessObservationRpcFactory } from "../../src/smart-account-gasless/chain/rpc.js";
 import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -336,3 +338,47 @@ if (childMode !== undefined) {
   const result = process.env.APN_SA_TEST_CHILD_ACTION === "approve" ? await f.service.approve(f.id) : await f.service.resume(f.id);
   process.stdout.write(`${canonicalJson({ state: result.state, calls: f.calls })}\n`);
 }
+
+test("Smart Account resume observes through an owner-named RPC after exposure and saves only its redacted identity", async (t) => {
+  const f = await fixture(await temporary(t)); await f.service.prepare(f.input); f.rejectVerify();
+  await f.service.approve(f.id);
+  const before = await f.records.findOperation(f.id); assert.ok(before);
+  assert.deepEqual([before.exposureAttempts, before.submissionAttempts, before.terminal], [1, 0, false]);
+  const calls = { ...f.calls }, archiveUrl = "https://archive.example/v2/private_archive_canary", requested: string[] = [];
+  let archiveObserves = 0;
+  const archive: SmartAccountGaslessRpcPort = { ...f.rpc, endpointOrigin: "https://archive.example", endpointHash: sha256(archiveUrl),
+    observe: async input => { archiveObserves += 1; return proof(input, "pending", when(120)); } };
+  const service = new SmartAccountGaslessService(new RuntimeContext({ state: f.state, clock: { now: () => when(120) },
+    smartAccountGasless: { rpcFor: () => f.rpc, provider: f.provider, material: f.material, records: f.records,
+      observationRpcFor: (chainId, name) => { requested.push(`${chainId}:${name}`); return archive; } } }));
+  const result = await service.resume(f.id, "APN_BASE_ARCHIVE_RPC_URL");
+  assert.equal(result.terminal, false);
+  const after = await f.records.findOperation(f.id); assert.ok(after);
+  assert.deepEqual(after.observation?.source, { environmentName: "APN_BASE_ARCHIVE_RPC_URL",
+    endpointOrigin: "https://archive.example", endpointHash: sha256(archiveUrl) });
+  assert.deepEqual(requested, ["8453:APN_BASE_ARCHIVE_RPC_URL"]); assert.equal(archiveObserves, 1);
+  assert.deepEqual({ ...f.calls }, calls);
+  assert.deepEqual([after.signingAttempts, after.exposureAttempts, after.submissionAttempts], [1, 1, 0]);
+  assert.equal(JSON.stringify(after).includes("private_archive_canary"), false);
+});
+
+test("Smart Account observation RPC is ignored before exposure, validates names and never serves snapshots", async (t) => {
+  const f = await fixture(await temporary(t)); await f.service.prepare(f.input);
+  let requested = 0;
+  const service = new SmartAccountGaslessService(new RuntimeContext({ state: f.state, clock: { now: () => when(10) },
+    smartAccountGasless: { rpcFor: () => f.rpc, provider: f.provider, material: f.material, records: f.records,
+      observationRpcFor: () => { requested += 1; return f.rpc; } } }));
+  assert.equal((await service.resume(f.id, "APN_BASE_ARCHIVE_RPC_URL")).state, "awaiting_approval"); assert.equal(requested, 0);
+  await assert.rejects(service.resume(f.id, "BASE_RPC_URL"), { details: { reason: "sa_gasless_input" } });
+  assert.throws(() => saObservationRpcEnv("APN_base_RPC_URL"), { details: { reason: "sa_gasless_input" } });
+  assert.throws(() => smartAccountGaslessObservationRpcFactory({}, { now: () => when(10) }, {} as never)(8453, "APN_BASE_ARCHIVE_RPC_URL"),
+    { details: { reason: "sa_gasless_rpc_binding" } });
+  const methods: string[] = [];
+  const transport: GaslessTransport = { request: async (_endpoint, _method, body) => { methods.push(String(body)); return { status: 500, body: "" }; } };
+  const rpc = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: "https://archive.example/v2/private_archive_canary",
+    clock: { now: () => when(10) }, validator: {} as never, transport, observationOnly: true });
+  await assert.rejects(rpc.snapshot(f.binding), { details: { reason: "sa_gasless_rpc_binding" } });
+  await assert.rejects(rpc.assertUnspent({ binding: f.binding, material: {} as never, safeBlock: {} as never }),
+    { details: { reason: "sa_gasless_rpc_binding" } });
+  assert.deepEqual(methods, []);
+});

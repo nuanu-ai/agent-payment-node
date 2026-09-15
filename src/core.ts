@@ -182,17 +182,18 @@ export class ApnCore {
         }
         await this.context.ready();
         const operation = await this.operations.required(request.operationId);
-        if (request.observationRpcEnv !== undefined && operation.kind !== "gasless_transfer") {
-          throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery requires a saved Local gasless operation.",
+        if (request.observationRpcEnv !== undefined && operation.kind !== "gasless_transfer" && operation.kind !== "metamask_gasless_transfer" &&
+          operation.kind !== "smart_account_gasless_transfer") {
+          throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery requires a saved Local, MetaMask or Smart Account gasless operation.",
             { reason: "gasless_observation_operation_kind" });
         }
         if (operation.kind === "smart_account_gasless_transfer") {
           if (request.waitSeconds !== undefined) saFail("sa_gasless_input");
-          return operationOutcome(await this.smartAccountGasless.resume(request.operationId));
+          return operationOutcome(await this.smartAccountGasless.resume(request.operationId, request.observationRpcEnv));
         }
         if (operation.kind === "metamask_gasless_transfer") {
           if (request.waitSeconds !== undefined) throw new ApnError("APN_INVALID_INPUT", "MetaMask gasless recovery performs one bounded observation; omit --wait-seconds.", { reason: "mm_gasless_input" });
-          return operationOutcome(await this.metaMaskGasless.resume(request.operationId));
+          return operationOutcome(await this.metaMaskGasless.resume(request.operationId, request.observationRpcEnv));
         }
         if (operation.kind === "gasless_transfer") {
           if (request.waitSeconds !== undefined) throw new ApnError("APN_INVALID_INPUT", "Gasless recovery performs one bounded observation; omit --wait-seconds.");

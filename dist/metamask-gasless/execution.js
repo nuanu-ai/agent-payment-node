@@ -23,6 +23,10 @@ export class MetaMaskGaslessExecution {
         this.clock = new MetaMaskGaslessClock(clock);
         this.observation = new MetaMaskGaslessObservationService(state, rpcFor, provider, this.clock, save);
     }
+    /** Observation through an owner-named RPC; approval and dispatch keep the frozen endpoint. */
+    async observeWith(op, observer) {
+        return await new MetaMaskGaslessObservationService(this.state, this.rpcFor, this.provider, this.clock, this.save, observer).run(op);
+    }
     async approve(op, approval) {
         if (op.terminal || op.state !== "awaiting_approval")
             return { operation: op };

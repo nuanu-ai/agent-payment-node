@@ -36,6 +36,7 @@ export interface MetaMaskGaslessRpcPort {
     provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
 }
 export type MetaMaskGaslessRpcFactory = (chainId: MetaMaskGaslessChainId) => MetaMaskGaslessRpcPort;
+export type MetaMaskGaslessObservationRpcFactory = (chainId: MetaMaskGaslessChainId, environmentName: string) => MetaMaskGaslessRpcPort;
 export interface MetaMaskGaslessApprovalPort {
   confirm(input: { readonly operationId: string; readonly fingerprint: string; readonly exactPhrase: string;
     readonly summary: Readonly<Record<string, unknown>> }): Promise<boolean>;

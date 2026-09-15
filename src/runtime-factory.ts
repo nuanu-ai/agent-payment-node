@@ -75,7 +75,7 @@ import { gaslessObservationRpcFactory } from "./gasless/observation-rpc.js";
 import { TtyGaslessApproval } from "./gasless/tty.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
-import { metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
+import { metaMaskGaslessObservationRpcFactory, metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
 import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
 import { TtyOperationAbandonApproval, type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
@@ -214,6 +214,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       clock: options.clock ?? { now: () => new Date() }, foregroundApproval: bound.request.command === "gasless.transfer.approve" }),
     metaMaskGasless: options.metaMaskGasless ?? {
       rpcFor: metaMaskGaslessRpcFactory(process.env, options.clock ?? { now: () => new Date() }),
+      observationRpcFor: metaMaskGaslessObservationRpcFactory(process.env, options.clock ?? { now: () => new Date() }),
       provider: new MetaMaskGaslessProviderClient({ environment: process.env, clock: options.clock ?? { now: () => new Date() } }),
       ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyMetaMaskGaslessApproval() } : {}),
     },

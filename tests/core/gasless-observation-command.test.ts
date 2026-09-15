@@ -39,7 +39,7 @@ test("operation resume projects one optional observation RPC environment through
   assert.equal(tool.inputSchema.required.includes("observation_rpc_env"), false);
   assert.deepEqual(tool.inputSchema.properties.observation_rpc_env, {
     type: "string",
-    description: "Catalog type string; constraints explicit_APN_environment_variable_for_Local_readonly_observation, cannot_combine_with_rpc_url_or_wait_seconds; sensitivity operator_input.",
+    description: "Catalog type string; constraints explicit_APN_environment_variable_for_gasless_readonly_observation, cannot_combine_with_rpc_url_or_wait_seconds; sensitivity operator_input.",
   });
 });
 
