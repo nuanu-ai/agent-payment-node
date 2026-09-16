@@ -55,14 +55,19 @@ export async function inspectCircleV2UpfrontOffline(input) {
     const fee = uint(response.feeTotalAmount);
     if (fee > maxFee || fee >= amount)
         fail("fee_ceiling");
-    // Circle appends the server-side PROTOCOL base fee after the requested FORWARD item.
-    if (!Array.isArray(response.items) || response.items.length !== 2)
+    // Iris may return only FORWARD, or append a PROTOCOL item. Both must be priced in the total.
+    if (!Array.isArray(response.items) || (response.items.length !== 1 && response.items.length !== 2))
         fail("fee_items");
     let sum = 0n;
     for (const [index, raw] of response.items.entries()) {
         const item = bridgeRecord(raw);
-        if (item.type !== (index === 0 ? "FORWARD" : "PROTOCOL") || !Array.isArray(item.args) || item.args.some(arg => typeof arg !== "string" || !/^0x[0-9a-fA-F]*$/u.test(arg) || arg.length > 1026))
+        if (item.type !== (index === 0 ? "FORWARD" : "PROTOCOL") || !Array.isArray(item.args) || item.args.some(arg => typeof arg !== "string" || !/^(?:0x[0-9a-fA-F]*|(?:0|[1-9][0-9]*))$/u.test(arg) || arg.length > 1026))
             fail("fee_item");
+        if (index === 0 && (item.args.length !== 5 || bridgeAddress(item.args[0]) !== WITH_FEES ||
+            item.args[1] !== "5" || bridgeAddress(item.args[2]) !== BASE_USDC ||
+            bridgeHex(item.args[3], 32, 32) !== BRIDGE_ZERO_WORD ||
+            bridgeHex(item.args[4], 1024) !== bridgeRecord(bridgeRecord(request.requests[0]).params).hookData))
+            fail("forward_args");
         bridgeHex(item.argsHash, 32, 32);
         sum += uint(item.amount);
     }
