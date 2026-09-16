@@ -20,6 +20,7 @@ import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from ".
 import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
 import type { CircleV2ApprovalExecutor } from "./lifi/circle-v2-approval-executor.js";
+import type { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
@@ -33,6 +34,7 @@ export interface CoreDependencies {
   readonly gasless?: GaslessDependencies;
   readonly bridge?: BridgeDependencies;
   readonly circleApproval?: CircleV2ApprovalExecutor;
+  readonly circleSource?: CircleV2SourceService;
   readonly directRails?: readonly DirectRailPort[];
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly railApproval?: RailApprovalPort;
@@ -67,6 +69,7 @@ export class RuntimeContext {
   readonly gasless?: GaslessDependencies;
   readonly bridge?: BridgeDependencies;
   readonly circleApproval?: CircleV2ApprovalExecutor;
+  readonly circleSource?: CircleV2SourceService;
   readonly directRails: readonly DirectRailPort[];
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly railApproval?: RailApprovalPort;
@@ -102,6 +105,7 @@ export class RuntimeContext {
     if (dependencies.gasless !== undefined) this.gasless = dependencies.gasless;
     if (dependencies.bridge !== undefined) this.bridge = dependencies.bridge;
     if (dependencies.circleApproval !== undefined) this.circleApproval = dependencies.circleApproval;
+    if (dependencies.circleSource !== undefined) this.circleSource = dependencies.circleSource;
     this.directRails = dependencies.directRails ?? [];
     if (dependencies.chainAccounts !== undefined) this.chainAccounts = dependencies.chainAccounts;
     if (dependencies.railApproval !== undefined) this.railApproval = dependencies.railApproval;

@@ -69,6 +69,8 @@ import { LifiProvider } from "./lifi/provider.js";
 import { bridgeRpcFactory } from "./lifi/rpc.js";
 import { CircleV2ApprovalExecutor, LocalCircleApprovalSigner, circleApprovalRpcFromBridge } from "./lifi/circle-v2-approval-executor.js";
 import type { CircleV2ApprovalExecutor as CircleApprovalService } from "./lifi/circle-v2-approval-executor.js";
+import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
+import { TtyCircleV2SourceApproval } from "./lifi/circle-v2-source-tty.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
@@ -95,6 +97,7 @@ export interface RuntimeFactoryOptions {
   readonly gasless?: GaslessDependencies;
   readonly bridge?: BridgeDependencies;
   readonly circleApproval?: CircleApprovalService;
+  readonly circleSource?: CircleV2SourceService;
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly directRails?: readonly DirectRailPort[];
   readonly railApproval?: RailApprovalPort;
@@ -229,6 +232,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)),
         new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits,
         () => options.clock?.now().getTime() ?? Date.now()),
+    } : {}),
+    ...(bound.request.command === "circle.source.submit" || options.circleSource !== undefined ? {
+      circleSource: options.circleSource ?? new CircleV2SourceService(state, wrappingSecret, process.env, new TtyCircleV2SourceApproval()),
     } : {}),
     facilitatorGasless: options.facilitatorGasless ?? { rpc: () => avalancheFacilitatorRpc(process.env),
       facilitator: new PayAiFacilitator(), signer: new LocalFacilitatorSigner(state, wrappingSecret),

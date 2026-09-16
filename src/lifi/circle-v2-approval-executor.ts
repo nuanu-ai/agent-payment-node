@@ -19,6 +19,7 @@ export interface CircleApprovalRecord {
   readonly id: string;
   readonly profile: string;
   readonly profileHash: string;
+  readonly rpcOrigin: string;
   readonly walletBindingHash: string;
   readonly walletCreatedAt: string;
   readonly preparation: CircleV2ApprovalPreparation;
@@ -32,6 +33,7 @@ export interface CircleApprovalRecord {
 }
 export interface CircleApprovalRpc {
   readonly chainId: 8453;
+  readonly origin: string;
   /** This reader must obtain balance and allowance from the same fresh Base block. */
   readonly read: CircleV2ApprovalStateReader;
   send(raw: Hex): Promise<Hex>;
@@ -51,6 +53,7 @@ export function circleApprovalRpcFromBridge(rpc: BridgeRpcPort): CircleApprovalR
   if (rpc.chainId !== 8453) bridgeFailure("APN_RPC_CONFIG", "circle_approval_base_only");
   return {
     chainId: 8453,
+    origin: rpc.origin,
     read: async query => {
       await rpc.assertChain();
       const payer = bridgeAddress(query.payer), token = bridgeAddress(query.token), spender = bridgeAddress(query.spender);
@@ -61,12 +64,17 @@ export function circleApprovalRpcFromBridge(rpc: BridgeRpcPort): CircleApprovalR
       ]);
       if (account.chainId !== 8453 || account.rpcOrigin !== rpc.origin || account.owner !== payer ||
         account.token !== token || account.spender !== spender) bridgeFailure("APN_RPC_PROTOCOL", "circle_approval_account_identity");
+      const maximumGasCostAtomic = (BigInt(gas.gasLimitAtomic) * BigInt(prices.maxFeePerGasAtomic)).toString();
+      const quote = await rpc.feeQuote({ economics: { nonceAtomic: account.latestNonceAtomic,
+        gasLimitAtomic: gas.gasLimitAtomic, maxFeePerGasAtomic: prices.maxFeePerGasAtomic,
+        maxPriorityFeePerGasAtomic: prices.maxPriorityFeePerGasAtomic, maximumGasCostAtomic } });
+      if (quote.chainId !== 8453 || BigInt(quote.totalQuoteWei) < BigInt(maximumGasCostAtomic)) bridgeFailure("APN_RPC_PROTOCOL", "circle_approval_base_fee_quote");
       return { chainId: 8453, payer, token, spender, blockNumber: account.block.numberAtomic,
         blockHash: account.block.hash, latestNonceAtomic: account.latestNonceAtomic,
         pendingNonceAtomic: account.pendingNonceAtomic, usdcBalanceAtomic: account.balanceAtomic,
         usdcAllowanceAtomic: account.allowanceAtomic, nativeBalanceWei: account.nativeBalanceWei,
         gasLimitAtomic: gas.gasLimitAtomic, maxFeePerGasWei: prices.maxFeePerGasAtomic,
-        maxPriorityFeePerGasWei: prices.maxPriorityFeePerGasAtomic };
+        maxPriorityFeePerGasWei: prices.maxPriorityFeePerGasAtomic, totalNativeDebitWei: quote.totalQuoteWei };
     },
     send: async raw => await rpc.send(raw),
     observe: async hash => {
@@ -93,7 +101,7 @@ class CircleApprovalJournal extends SecureStateStore {
   }
   async save(record: CircleApprovalRecord): Promise<void> {
     const old = await this.load(record.id);
-    if (old !== null && (old.profileHash !== record.profileHash || old.preparation.intentDigest !== record.preparation.intentDigest ||
+    if (old !== null && (old.profileHash !== record.profileHash || old.rpcOrigin !== record.rpcOrigin || old.preparation.intentDigest !== record.preparation.intentDigest ||
       record.submissionAttempts < old.submissionAttempts || (old.transactionHash !== null && old.transactionHash !== record.transactionHash) ||
       (old.rawTransaction !== null && old.rawTransaction !== record.rawTransaction))) bridgeFailure("APN_STATE_CORRUPT", "circle_approval_continuity");
     await this.initialize(); await this.ensureDirectory("circle-approvals");
@@ -182,7 +190,7 @@ export class CircleV2ApprovalExecutor {
           existing.profile !== input.profile) bridgeFailure("APN_OPERATION_BLOCKED", "circle_approval_existing_owner");
         return existing;
       }
-      const body = { schemaVersion: "apn.circle-v2-approval.v1" as const, id, profile: input.profile, profileHash,
+      const body = { schemaVersion: "apn.circle-v2-approval.v1" as const, id, profile: input.profile, profileHash, rpcOrigin: this.rpc.origin,
         walletBindingHash: input.walletBindingHash, walletCreatedAt: input.walletCreatedAt, preparation: p, limits: this.limits,
         phase: "prepared" as const, rawTransaction: null, transactionHash: null,
         submissionAttempts: 0 as const, observedAllowanceAtomic: null };
@@ -197,6 +205,7 @@ export class CircleV2ApprovalExecutor {
     return await this.state.withLocks([`profile:${initial.profileHash}`, `operation:${id}`], async () => {
       let r = await this.journal.load(id);
       if (r === null) bridgeFailure("APN_STATE_CORRUPT", "circle_approval_disappeared");
+      if (r.rpcOrigin !== this.rpc.origin) bridgeFailure("APN_RPC_CONFIG", "circle_approval_rpc_origin_changed");
       if (r.phase !== "prepared") return await this.observe(r);
       bound(r, this.now());
       if (!await confirm(r)) { r = update(r, { phase: "failed_before_effect" }); await this.journal.save(r); return r; }
@@ -222,6 +231,7 @@ export class CircleV2ApprovalExecutor {
     return await this.state.withLocks([`profile:${initial.profileHash}`, `operation:${id}`], async () => {
       const r = await this.journal.load(id);
       if (r === null) bridgeFailure("APN_STATE_CORRUPT", "circle_approval_disappeared");
+      if (r.rpcOrigin !== this.rpc.origin) bridgeFailure("APN_RPC_CONFIG", "circle_approval_rpc_origin_changed");
       return await this.observe(r);
     });
   }
