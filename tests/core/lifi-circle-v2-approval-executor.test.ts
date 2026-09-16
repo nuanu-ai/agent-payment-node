@@ -18,16 +18,17 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   await state.initialize();
   await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile: "test", profileHash: state.profileHash("test"),
     address: account.address, createdAt: "2026-01-01T00:00:00.000Z", bindingHash: "binding" }));
-  let sends = 0, signings = 0, allowance = "0", nonce = "7", balance = "434611", ambiguous = false, include = false, wrongLog = false;
+  let sends = 0, signings = 0, allowance = "0", nonce = "7", balance = "434611", ambiguous = false, include = false, wrongLog = false,
+    failAfterSign = false, signed = false;
   let raw: Hex | null = null;
   const rpc: CircleApprovalRpc = {
     chainId: 8453,
     origin: "https://base.example",
-    read: async () => ({ chainId: 8453, payer: account.address, token, spender, blockNumber: "12345",
+    read: async () => { if (signed && failAfterSign) throw new Error("synthetic RPC outage"); return ({ chainId: 8453, payer: account.address, token, spender, blockNumber: "12345",
       blockHash: `0x${"a".repeat(64)}`, latestNonceAtomic: nonce, pendingNonceAtomic: nonce,
       usdcBalanceAtomic: balance, usdcAllowanceAtomic: allowance, nativeBalanceWei: "200000000000000",
       gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000",
-      totalNativeDebitWei: "200000000000000" }),
+      totalNativeDebitWei: "200000000000000" }); },
     send: async sent => { sends++; raw = sent; if (ambiguous) throw new Error("lost response"); return keccak256(sent); },
     observe: async hash => include && raw !== null ? { status: "success", safe: true,
       receipt: { chainId: 8453, transactionHash: hash, blockNumberAtomic: "12345", blockHash: `0x${"a".repeat(64)}` as Hex,
@@ -36,6 +37,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   };
   const signer = { sign: async (r: CircleApprovalRecord) => {
     signings++;
+    signed = true;
     const e = r.preparation.transaction;
     return await account.signTransaction({ type: "eip1559", chainId: 8453, to: token as Hex,
       data: e.data as Hex, value: 0n, nonce: Number(e.nonceAtomic), gas: BigInt(e.gasLimitAtomic),
@@ -47,7 +49,8 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   return { make, prepare, get sends() { return sends; }, get signings() { return signings; },
     set nonce(v: string) { nonce = v; }, set balance(v: string) { balance = v; },
     set allowance(v: string) { allowance = v; }, set ambiguous(v: boolean) { ambiguous = v; },
-    set include(v: boolean) { include = v; }, set wrongLog(v: boolean) { wrongLog = v; } };
+    set include(v: boolean) { include = v; }, set wrongLog(v: boolean) { wrongLog = v; },
+    set failAfterSign(v: boolean) { failAfterSign = v; } };
 }
 
 test("durable one-send boundary survives restart and ambiguous response", async t => {
@@ -77,4 +80,16 @@ test("refused consent never signs or broadcasts", async t => {
   const f = await fixture(t), p = await f.prepare();
   assert.equal((await f.make().execute(p.id, async () => false)).phase, "failed_before_effect");
   assert.equal(f.signings, 0); assert.equal(f.sends, 0);
+});
+test("post-sign guard outage is durably unsent and cannot be submitted on resume", async t => {
+  const f = await fixture(t), p = await f.prepare(); f.failAfterSign = true;
+  const result = await f.make().execute(p.id, async () => true);
+  assert.equal(result.phase, "failed_before_effect");
+  assert.equal(result.submissionAttempts, 0);
+  assert.equal(result.transactionHash?.length, 66);
+  assert.equal(result.failureReason, "post_sign_guard:APN_PROVIDER_PROTOCOL:circle_v2_approval_base_unavailable");
+  assert.equal(f.sends, 0);
+  assert.equal((await f.make().status(p.id)).phase, "failed_before_effect");
+  assert.equal((await f.make().execute(p.id, async () => { throw new Error("must not request consent again"); })).phase, "failed_before_effect");
+  assert.equal(f.signings, 1); assert.equal(f.sends, 0);
 });

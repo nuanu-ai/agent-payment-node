@@ -1,5 +1,6 @@
 /** One-shot, durable Base USDC allowance effect. This does not execute a Circle transfer. */
 import { hashObject } from "../canonical.js";
+import { ApnError } from "../errors.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
@@ -29,6 +30,7 @@ export interface CircleApprovalRecord {
   readonly transactionHash: Hex | null;
   readonly submissionAttempts: 0 | 1;
   readonly observedAllowanceAtomic: string | null;
+  readonly failureReason?: string;
   readonly integrityHash: string;
 }
 export interface CircleApprovalRpc {
@@ -214,10 +216,10 @@ export class CircleV2ApprovalExecutor {
       // A crash during signing is ambiguous: never sign again or submit automatically.
       let raw: Hex;
       try { raw = await this.signer.sign(r); }
-      catch { return await this.unknown(r); }
+      catch (error) { return await this.unknown(r, failureReason("signing", error)); }
       const hash = await verifySigned(raw, r);
       r = update(r, { phase: "sealed", rawTransaction: raw, transactionHash: hash }); await this.journal.save(r);
-      try { await this.fresh(r); } catch { return await this.unknown(r); }
+      try { await this.fresh(r); } catch (error) { return await this.unknown(r, failureReason("post_sign_guard", error)); }
       r = update(r, { phase: "submitting", submissionAttempts: 1 }); await this.journal.save(r);
       try { if (await this.rpc.send(raw) !== hash) return await this.unknown(r); }
       catch { return await this.unknown(r); }
@@ -249,12 +251,15 @@ export class CircleV2ApprovalExecutor {
       BigInt(next.transaction.maxPriorityFeePerGasWei) > BigInt(p.transaction.maxPriorityFeePerGasWei) ||
       next.transaction.from !== p.transaction.from || next.transaction.data !== p.transaction.data) bridgeFailure("APN_REPREPARE_REQUIRED", "circle_approval_fresh_bounds");
   }
-  private async unknown(r: CircleApprovalRecord): Promise<CircleApprovalRecord> {
-    r = update(r, { phase: "unknown_finality" }); await this.journal.save(r); return r;
+  private async unknown(r: CircleApprovalRecord, reason = "observation_unavailable"): Promise<CircleApprovalRecord> {
+    // The durable submission marker is written before send. Without it APN has not called send.
+    r = update(r, { phase: r.submissionAttempts === 0 ? "failed_before_effect" : "unknown_finality",
+      failureReason: reason });
+    await this.journal.save(r); return r;
   }
   private async observe(r: CircleApprovalRecord): Promise<CircleApprovalRecord> {
     if (r.phase === "completed" || r.phase === "confirmed_revert" || r.phase === "failed_before_effect" || r.phase === "prepared") return r;
-    if (r.submissionAttempts === 0 || r.transactionHash === null || r.rawTransaction === null) return await this.unknown(r);
+    if (r.submissionAttempts === 0 || r.transactionHash === null || r.rawTransaction === null) return await this.unknown(r, "no_submission_marker");
     try {
       if (await verifySigned(r.rawTransaction, r) !== r.transactionHash) throw new Error("signed hash");
       const found = await this.rpc.observe(r.transactionHash);
@@ -276,4 +281,11 @@ export class CircleV2ApprovalExecutor {
       await this.journal.save(r); return r;
     } catch { return await this.unknown(r); }
   }
+}
+function failureReason(stage: "signing" | "post_sign_guard", error: unknown): string {
+  if (error instanceof ApnError) {
+    const reason = /^Bridge validation failed: ([a-z0-9_]+)\.$/u.exec(error.message)?.[1];
+    return `${stage}:${error.code}${reason === undefined ? "" : `:${reason}`}`;
+  }
+  return `${stage}:unavailable`;
 }
