@@ -108,11 +108,11 @@ test("installed CLI and MCP discovery enumerate the same finite gasless surface 
   assert.deepEqual(await s.trace(), []);
 });
 
-test("installed approval rejects missing TTY, incomplete phrase, expiry, changed fee and protocol before provider POST", { timeout: 180000 }, async (t) => {
-  for (const kind of ["missing-tty", "short-phrase", "expired", "changed-fee", "changed-protocol"]) await t.test(kind, async () => {
+test("installed approval rejects missing TTY, incomplete phrase, expiry, fee above cap and changed protocol before provider POST", { timeout: 180000 }, async (t) => {
+  for (const kind of ["missing-tty", "short-phrase", "expired", "fee-above-cap", "changed-protocol"]) await t.test(kind, async () => {
     const s = await scenario(installed), { id } = await s.prepare();
     if (kind === "expired") s.update({ nowOffsetMs: 301000 });
-    if (kind === "changed-fee") s.update({ rawFeeAtomic: "1100" });
+    if (kind === "fee-above-cap") s.update({ rawFeeAtomic: "2100", nowOffsetMs: 279000 });
     if (kind === "changed-protocol") s.update({ corruptProtocol: true });
     if (kind === "missing-tty") {
       const denied = await s.cli(["gasless", "transfer", "approve", "--operation", id]);
@@ -123,6 +123,23 @@ test("installed approval rejects missing TTY, incomplete phrase, expiry, changed
     assert.equal(record.submissionAttempts, 0); assert.equal(s.fixture().postCount, 0);
     await assertSafeTrace(s, 0);
   });
+});
+
+test("installed approval admits a fresh fee within the approved cap and binds the repriced dispatch", { timeout: 90000 }, async () => {
+  const s = await scenario(installed), { id } = await s.prepare();
+  s.update({ rawFeeAtomic: "1100" });
+  const result = await s.approve(id);
+  assert.equal(result.envelope.ok, true, JSON.stringify(result.envelope));
+  const record = await s.record(id);
+  assert.equal(record.state, "completed");
+  assert.equal(record.submissionAttempts, 1);
+  assert.equal(record.intent.quote.feeAtomic, "1000");
+  assert.equal(record.dispatch.quote.feeAtomic, "1100");
+  assert.equal(record.dispatch.quote.netAtomic, "998900");
+  assert.equal(record.settlement.feeAtomic, "1100");
+  assert.equal(record.settlement.deliveredAtomic, "998900");
+  assert.equal(s.fixture().postCount, 1);
+  await assertSafeTrace(s, 1);
 });
 
 test("installed POST response loss and helper termination retain the marker across expiry and fresh processes", { timeout: 120000 }, async (t) => {
