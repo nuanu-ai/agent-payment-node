@@ -23,26 +23,25 @@ export function circleApprovalRpcFromBridge(rpc) {
         read: async (query) => {
             await rpc.assertChain();
             const payer = bridgeAddress(query.payer), token = bridgeAddress(query.token), spender = bridgeAddress(query.spender);
-            const [account, gas, prices] = await Promise.all([
+            const [account, estimate] = await Promise.all([
                 rpc.account(payer, spender, token),
                 rpc.estimate({ chainId: 8453, from: payer, to: token, data: bridgeHex(query.data), valueAtomic: "0", gasLimitAtomic: "0" }),
-                rpc.prices(),
             ]);
             if (account.chainId !== 8453 || account.rpcOrigin !== rpc.origin || account.owner !== payer ||
                 account.token !== token || account.spender !== spender)
                 bridgeFailure("APN_RPC_PROTOCOL", "circle_approval_account_identity");
-            const maximumGasCostAtomic = (BigInt(gas.gasLimitAtomic) * BigInt(prices.maxFeePerGasAtomic)).toString();
+            const maximumGasCostAtomic = (BigInt(estimate.gasLimitAtomic) * BigInt(estimate.maxFeePerGasAtomic)).toString();
             const quote = await rpc.feeQuote({ economics: { nonceAtomic: account.latestNonceAtomic,
-                    gasLimitAtomic: gas.gasLimitAtomic, maxFeePerGasAtomic: prices.maxFeePerGasAtomic,
-                    maxPriorityFeePerGasAtomic: prices.maxPriorityFeePerGasAtomic, maximumGasCostAtomic } });
+                    gasLimitAtomic: estimate.gasLimitAtomic, maxFeePerGasAtomic: estimate.maxFeePerGasAtomic,
+                    maxPriorityFeePerGasAtomic: estimate.maxPriorityFeePerGasAtomic, maximumGasCostAtomic } });
             if (quote.chainId !== 8453 || BigInt(quote.totalQuoteWei) < BigInt(maximumGasCostAtomic))
                 bridgeFailure("APN_RPC_PROTOCOL", "circle_approval_base_fee_quote");
             return { chainId: 8453, payer, token, spender, blockNumber: account.block.numberAtomic,
                 blockHash: account.block.hash, latestNonceAtomic: account.latestNonceAtomic,
                 pendingNonceAtomic: account.pendingNonceAtomic, usdcBalanceAtomic: account.balanceAtomic,
                 usdcAllowanceAtomic: account.allowanceAtomic, nativeBalanceWei: account.nativeBalanceWei,
-                gasLimitAtomic: gas.gasLimitAtomic, maxFeePerGasWei: prices.maxFeePerGasAtomic,
-                maxPriorityFeePerGasWei: prices.maxPriorityFeePerGasAtomic, totalNativeDebitWei: quote.totalQuoteWei };
+                gasLimitAtomic: estimate.gasLimitAtomic, maxFeePerGasWei: estimate.maxFeePerGasAtomic,
+                maxPriorityFeePerGasWei: estimate.maxPriorityFeePerGasAtomic, totalNativeDebitWei: quote.totalQuoteWei };
         },
         send: async (raw) => await rpc.send(raw),
         observe: async (hash) => {
@@ -276,6 +275,7 @@ export class CircleV2ApprovalExecutor {
             BigInt(next.transaction.maxPriorityFeePerGasWei) > BigInt(p.transaction.maxPriorityFeePerGasWei) ||
             next.transaction.from !== p.transaction.from || next.transaction.data !== p.transaction.data)
             bridgeFailure("APN_REPREPARE_REQUIRED", "circle_approval_fresh_bounds");
+        bound(record, this.now());
     }
     async unknown(r, reason = "observation_unavailable") {
         // The durable submission marker is written before send. Without it APN has not called send.
