@@ -14,6 +14,8 @@ export interface CircleV2ExpectedBurn {
   readonly mintRecipient: string;
   readonly amountAtomic: string;
   readonly messageSender: string;
+  /** BurnMessageV2 sender when it differs from the CCTP header sender. */
+  readonly burnMessageSender?: string;
   /** Expected CCTP TokenMessengerV2 recipient on Solana, as bytes32. */
   readonly messageRecipient: string;
   readonly maxFeeAtomic: string;
@@ -82,11 +84,12 @@ export function inspectCircleV2IrisOffline(response: unknown, expected: CircleV2
   if (sourceTransactionHash === ZERO) fail("source_hash");
   const mintRecipient = hex(expected.mintRecipient, 32);
   const messageSender = hex(expected.messageSender, 32);
+  const burnMessageSender = hex(expected.burnMessageSender ?? expected.messageSender, 32);
   const messageRecipient = hex(expected.messageRecipient, 32);
   const expectedHook = expected.hookData === "0x" ? "0x" : hex(expected.hookData);
   const amount = BigInt(decimal(expected.amountAtomic, true));
   const maxFee = BigInt(decimal(expected.maxFeeAtomic));
-  if (mintRecipient === ZERO || messageSender === ZERO || messageRecipient === ZERO ||
+  if (mintRecipient === ZERO || messageSender === ZERO || burnMessageSender === ZERO || messageRecipient === ZERO ||
     maxFee > amount || ![1000, 2000].includes(expected.minFinalityThreshold) ||
     ![1000, 2000].includes(expected.finalityThresholdExecuted) ||
     expected.finalityThresholdExecuted < expected.minFinalityThreshold) fail("expected_binding");
@@ -114,7 +117,7 @@ export function inspectCircleV2IrisOffline(response: unknown, expected: CircleV2
     executedFinality !== expected.finalityThresholdExecuted ||
     uint(body, 0, 4) !== 1n || word(body, 4, 32) !== BASE_USDC ||
     word(body, 36, 32) !== mintRecipient || uint(body, 68, 32) !== amount ||
-    word(body, 100, 32) !== messageSender || uint(body, 132, 32) !== maxFee ||
+    word(body, 100, 32) !== burnMessageSender || uint(body, 132, 32) !== maxFee ||
     feeExecuted > maxFee || expirationBlock === 0n || hookData !== expectedHook) fail("message_binding");
 
   const eventNonce = decimal(entry.eventNonce);
@@ -126,7 +129,7 @@ export function inspectCircleV2IrisOffline(response: unknown, expected: CircleV2
     !sameWord(decoded.recipient, recipient) || !sameWord(decoded.destinationCaller, ZERO) ||
     hex(decoded.messageBody) !== body || !sameWord(decodedBody.burnToken, BASE_USDC) ||
     !sameWord(decodedBody.mintRecipient, mintRecipient) || !sameDecimal(decodedBody.amount, amount) ||
-    !sameWord(decodedBody.messageSender, messageSender)) fail("decoded_message_binding");
+    !sameWord(decodedBody.messageSender, burnMessageSender)) fail("decoded_message_binding");
   // Optional newer decoded fields must agree if Iris includes them.
   if (decoded.minFinalityThreshold !== undefined && !sameDecimal(decoded.minFinalityThreshold, BigInt(minFinality)) ||
     decoded.finalityThresholdExecuted !== undefined && !sameDecimal(decoded.finalityThresholdExecuted, BigInt(executedFinality)) ||
