@@ -26,6 +26,18 @@ export declare class GaslessRpc implements GaslessRpcPort {
     estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate>;
     send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex>;
     observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
+    /** Returns the admitted asset the intent names, so no caller has to re-derive it from a literal. */
     private assertIntent;
+    /**
+     * The row's `balanceLayout` is a claim about one token implementation's storage, never protocol knowledge, so it is
+     * proved twice before it is trusted. First the claim must name the implementation this chain is verified to run, so
+     * a layout description can never outlive the code it describes. Then it is measured: the owner's balance word at the
+     * claimed slot must equal the balance the frozen snapshot already read through `balanceOf` at that exact block.
+     * A row with no claim, a claim for another implementation, a zero witness balance or any disagreement fails closed
+     * rather than fabricating a balance at an unverified slot.
+     */
+    private provenBalanceSlot;
     private call;
 }
+/** Storage key of a Solidity `mapping(address => uint256)` entry at the given base slot. */
+export declare function gaslessBalanceSlot(holder: Address, base: string): Hex;

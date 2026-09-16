@@ -1,5 +1,6 @@
 import { hashObject } from "../canonical.js";
 import { validateGaslessOperation } from "./operation-validation.js";
+import { gaslessIntentAsset } from "./registry.js";
 export function gaslessNextActions(op) {
     if (op.terminal)
         return op.state === "completed" ? [] : ["apn gasless transfer prepare --help"];
@@ -27,6 +28,8 @@ export function gaslessProofClass(op) {
 export function publicGaslessOperation(op) {
     validateGaslessOperation(op);
     const i = op.intent, proof = op.settlement ?? op.observation?.settlement ?? null, a = proof?.accounting ?? null;
+    // The stored record is re-validated above; its display unit comes from the registry row it names, never a literal.
+    const asset = gaslessIntentAsset(i);
     const invalidation = op.observation?.permissionInvalidation;
     const fee = a === null ? null : BigInt(a.feeAtomic), delivered = a === null ? null : BigInt(a.deliveredAtomic);
     const effects = [op.bootstrap, op.userOperation].map((e) => ({ role: e.role, phase: e.phase,
@@ -40,7 +43,7 @@ export function publicGaslessOperation(op) {
         fingerprint: op.fingerprint, state: op.state, terminal: op.terminal, proof_class: gaslessProofClass(op),
         reason: op.failure ?? (op.state === "completed" ? "gasless_delivery_correlated" : op.state),
         execution_owner: "apn", retry_owner: "apn_observation_only_after_attempt", evidence_owner: "configured_chain_rpc",
-        transfer: { chain_id: i.request.chainId, token: i.token, symbol: "USDC", decimals: 6,
+        transfer: { chain_id: i.request.chainId, token: i.token, symbol: asset.symbol, decimals: asset.decimals,
             sender: i.owner.address, recipient: i.request.recipient, gross_atomic: i.request.grossAtomic,
             user_max_fee_atomic: i.request.maxFeeAtomic, minimum_received_atomic: i.request.minReceivedAtomic,
             quoted_fee_budget_atomic: i.feeCapAtomic, recipient_atomic: i.recipientAtomic,

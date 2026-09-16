@@ -34,11 +34,8 @@ export declare const requestSchema: z.ZodObject<{
     minReceivedAtomic: z.ZodString;
 }, z.core.$strict>;
 export declare const tokenDomainSchema: z.ZodObject<{
-    name: z.ZodEnum<{
-        USDC: "USDC";
-        "USD Coin": "USD Coin";
-    }>;
-    version: z.ZodLiteral<"2">;
+    name: z.ZodString;
+    version: z.ZodString;
     chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
     verifyingContract: z.ZodString;
     domainSeparator: z.ZodString;
@@ -177,11 +174,8 @@ export declare const intentSchema: z.ZodObject<{
     }, z.core.$strict>;
     token: z.ZodString;
     tokenDomain: z.ZodObject<{
-        name: z.ZodEnum<{
-            USDC: "USDC";
-            "USD Coin": "USD Coin";
-        }>;
-        version: z.ZodLiteral<"2">;
+        name: z.ZodString;
+        version: z.ZodString;
         chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
         verifyingContract: z.ZodString;
         domainSeparator: z.ZodString;
@@ -966,11 +960,8 @@ export declare const operationSchema: z.ZodObject<{
         }, z.core.$strict>;
         token: z.ZodString;
         tokenDomain: z.ZodObject<{
-            name: z.ZodEnum<{
-                USDC: "USDC";
-                "USD Coin": "USD Coin";
-            }>;
-            version: z.ZodLiteral<"2">;
+            name: z.ZodString;
+            version: z.ZodString;
             chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<10>, z.ZodLiteral<130>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<43114>]>;
             verifyingContract: z.ZodString;
             domainSeparator: z.ZodString;

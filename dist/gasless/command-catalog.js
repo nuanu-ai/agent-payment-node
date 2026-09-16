@@ -1,5 +1,7 @@
 import { gaslessAddress, gaslessDecimal, gaslessFailure } from "./validation.js";
 import { gaslessCommandChain, gaslessCommandRequest } from "./command-input.js";
+import { GASLESS_DEPLOYMENTS, gaslessAsset } from "./registry.js";
+import { mmRegistry } from "../metamask-gasless/registry.js";
 import { GASLESS_TERMINAL } from "./operation-model.js";
 import { SA_TERMINAL } from "../smart-account-gasless/operation-model.js";
 import { FACILITATOR_TERMINAL } from "../facilitator-gasless/operation-model.js";
@@ -60,6 +62,14 @@ export function includeGaslessRecovery(commands) {
         effect: { ...c.effect, summary: `${c.effect.summary} Gasless operations retain USDC fee and permission evidence; each attempted disclosure/send is never repeated. Coinbase and MetaMask server-wallet recovery are read-only after dispatch. Smart Account recovery uses independent RPC only after disclosure, including verify rejection or a lost response; only correlated settlement or finalized unused expiry releases its guard. Avalanche facilitator recovery reads only APN_AVALANCHE_RPC_URL; a correlated finalized settlement or a finalized unused expiry releases its guard. Recovery uses the frozen chain's APN_*_RPC_URL; local Circle also supports APN_*_BUNDLER_RPC_URL. Local operation resume optionally accepts --observation-rpc-env for verified read-only recovery through an explicitly selected RPC; it cannot sign, estimate or submit.` },
     });
 }
+/**
+ * Operator amount scale for one command chain, read from the registry row of the rail that admits it — the local rail's
+ * asset where it has one, otherwise the MetaMask rail's. A chain no admitted rail carries fails closed.
+ */
+function commandDecimals(chainId) {
+    const local = GASLESS_DEPLOYMENTS.find((r) => r.chainId === chainId);
+    return local === undefined ? mmRegistry(chainId).row.decimals : gaslessAsset(local.chainId, local.token).decimals;
+}
 export function bindGaslessCommand(path, o) {
     if (path === "gasless capabilities")
         return { command: "gasless.capabilities", ...(o["--profile"] === undefined ? {} : { profile: o["--profile"] }) };
@@ -72,9 +82,10 @@ export function bindGaslessCommand(path, o) {
         return { command: "gasless.balance", profile: o["--profile"], chainId };
     if (path !== "gasless transfer prepare")
         gaslessFailure("APN_INVALID_INPUT", "gasless_command");
+    const decimals = commandDecimals(chainId);
     return { command: "gasless.transfer.prepare", profile: o["--profile"], idempotencyKey: o["--idempotency-key"],
         request: gaslessCommandRequest({ chainId, recipient: gaslessAddress(o["--to"], "APN_INVALID_INPUT"),
-            grossAtomic: gaslessDecimal(o["--amount"], true), maxFeeAtomic: gaslessDecimal(o["--max-fee"]),
-            minReceivedAtomic: gaslessDecimal(o["--min-received"], true) }) };
+            grossAtomic: gaslessDecimal(o["--amount"], decimals, true), maxFeeAtomic: gaslessDecimal(o["--max-fee"], decimals),
+            minReceivedAtomic: gaslessDecimal(o["--min-received"], decimals, true) }) };
 }
 //# sourceMappingURL=command-catalog.js.map
