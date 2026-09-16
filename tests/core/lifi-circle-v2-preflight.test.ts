@@ -71,6 +71,15 @@ test("accepts the SDK's sparse claimable item response", async () => {
   const { transport } = harness(v => { v.items = [{ type: "FORWARD", argsMatch: true }, { type: "PROTOCOL", argsMatch: true }]; });
   assert.equal((await inspectCircleV2Preflight(await fixture(), transport)).executionAdmitted, false);
 });
+test("accepts a live-shaped FORWARD-only quote and validation", async () => {
+  const input = await fixture();
+  const quoted = input.quoteResponse as { feeTotalAmount: string; items: { amount: string }[] };
+  quoted.items = [{ ...quoted.items[0]!, amount: "20000" }];
+  const { transport } = harness(v => {
+    v.items = [{ ...v.items[0], amount: "20000" }];
+  });
+  assert.equal((await inspectCircleV2Preflight(input, transport)).executionAdmitted, false);
+});
 test("fails closed on Circle rejection or mismatched signed fields, items, and arguments", async () => {
   for (const change of [
     (v: any) => { v.claimable = false; },
