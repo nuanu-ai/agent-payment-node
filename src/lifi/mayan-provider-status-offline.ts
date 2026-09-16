@@ -3,7 +3,7 @@ import { getBase58Decoder, getBase58Encoder } from "@solana/kit";
 import { keccak256 } from "viem";
 import type { Hex } from "../model.js";
 import { decodeMayanBaseSolanaQuoteOffline, type MayanOfflineBinding } from "./mayan-offline.js";
-import { bridgeFailure, bridgeHex, bridgeRecord, bridgeUint, BRIDGE_ZERO_WORD } from "./validation.js";
+import { bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord, bridgeUint, BRIDGE_ZERO_WORD } from "./validation.js";
 
 export interface MayanProviderStatusInput {
   readonly quote: unknown;
@@ -71,8 +71,18 @@ export function inspectMayanProviderStatusOffline(input: MayanProviderStatusInpu
   const status = bridgeRecord(input.lifiStatuses[0]);
   const sending = bridgeRecord(status.sending);
   const receiving = bridgeRecord(status.receiving);
+  const sendingToken = bridgeRecord(sending.token);
+  const receivingToken = bridgeRecord(receiving.token);
   if (hash(status.transactionId) !== quote.transactionId.toLowerCase() ||
     hash(sending.txHash) !== sourceTransactionHash || status.tool !== "mayanMCTP" ||
+    sending.chainId !== quote.sourceChainId || receiving.chainId !== quote.destinationChainId ||
+    bridgeAddress(status.fromAddress) !== quote.sender || status.toAddress !== quote.solanaRecipient ||
+    bridgeUint(sending.amount, true).toString() !== quote.sourceAmountAtomic ||
+    bridgeUint(receiving.amount, true) < BigInt(quote.offchainToAmountMinAtomic) ||
+    bridgeAddress(sendingToken.address) !== quote.sourceToken || sendingToken.chainId !== quote.sourceChainId ||
+    sendingToken.symbol !== "USDC" || sendingToken.decimals !== 6 ||
+    receivingToken.address !== quote.destinationToken || receivingToken.chainId !== quote.destinationChainId ||
+    receivingToken.symbol !== "USDC" || receivingToken.decimals !== 6 ||
     status.status !== "DONE" || status.substatus !== "COMPLETED") fail("lifi_status_binding");
   const receivingSolanaSignature = signature(receiving.txHash);
   return { kind: "offline_mayan_mctp_provider_status_hint", transactionId: quote.transactionId,

@@ -2,7 +2,7 @@
 import { getBase58Decoder, getBase58Encoder } from "@solana/kit";
 import { keccak256 } from "viem";
 import { decodeMayanBaseSolanaQuoteOffline } from "./mayan-offline.js";
-import { bridgeFailure, bridgeHex, bridgeRecord, bridgeUint, BRIDGE_ZERO_WORD } from "./validation.js";
+import { bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord, bridgeUint, BRIDGE_ZERO_WORD } from "./validation.js";
 function fail(reason) { return bridgeFailure("APN_PROVIDER_PROTOCOL", `mayan_provider_${reason}`); }
 function hash(value) {
     const result = bridgeHex(value, 32, 32);
@@ -51,8 +51,18 @@ export function inspectMayanProviderStatusOffline(input) {
     const status = bridgeRecord(input.lifiStatuses[0]);
     const sending = bridgeRecord(status.sending);
     const receiving = bridgeRecord(status.receiving);
+    const sendingToken = bridgeRecord(sending.token);
+    const receivingToken = bridgeRecord(receiving.token);
     if (hash(status.transactionId) !== quote.transactionId.toLowerCase() ||
         hash(sending.txHash) !== sourceTransactionHash || status.tool !== "mayanMCTP" ||
+        sending.chainId !== quote.sourceChainId || receiving.chainId !== quote.destinationChainId ||
+        bridgeAddress(status.fromAddress) !== quote.sender || status.toAddress !== quote.solanaRecipient ||
+        bridgeUint(sending.amount, true).toString() !== quote.sourceAmountAtomic ||
+        bridgeUint(receiving.amount, true) < BigInt(quote.offchainToAmountMinAtomic) ||
+        bridgeAddress(sendingToken.address) !== quote.sourceToken || sendingToken.chainId !== quote.sourceChainId ||
+        sendingToken.symbol !== "USDC" || sendingToken.decimals !== 6 ||
+        receivingToken.address !== quote.destinationToken || receivingToken.chainId !== quote.destinationChainId ||
+        receivingToken.symbol !== "USDC" || receivingToken.decimals !== 6 ||
         status.status !== "DONE" || status.substatus !== "COMPLETED")
         fail("lifi_status_binding");
     const receivingSolanaSignature = signature(receiving.txHash);
