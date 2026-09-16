@@ -59,6 +59,7 @@ async function install() {
   const root = process.env.APN_SA_INSTALLED_EVIDENCE_DIR ? await realpath(process.env.APN_SA_INSTALLED_EVIDENCE_DIR) :
     await mkdtemp(join(await realpath(tmpdir()), "apn-sa-installed-"));
   let archive = process.env.APN_SA_TEST_ARCHIVE;
+  const suppliedArchive = Boolean(archive);
   if (!archive) {
     // Honor the package's real prepack gates. A previously verified archive may be supplied explicitly.
     const packEnv = { ...process.env }; delete packEnv.NODE_TEST_CONTEXT;
@@ -78,7 +79,10 @@ async function install() {
   const destination = await mkdtemp(join(root, "installation-"));
   const archiveSha256 = digest(await readFile(archive)), { packageRoot, members } = await unpackArchive(archive, destination, archiveSha256);
   const revision = await run("git", ["rev-parse", "HEAD"], { cwd: source }); assert.equal(revision.code, 0);
-  const sourceCommit = revision.stdout.trim(), files = await verifyFiles(packageRoot, packageRoot, members, sourceCommit, true);
+  const harnessCommit = revision.stdout.trim();
+  const sourceCommit = suppliedArchive ? process.env.APN_SA_TEST_ARCHIVE_COMMIT : harnessCommit;
+  assert.match(sourceCommit, /^[0-9a-f]{40}$/u, "pinned archive requires its exact source commit");
+  const files = await verifyFiles(packageRoot, packageRoot, members, sourceCommit, !suppliedArchive);
   const result = await run("npm", ["ci", "--omit=dev", "--ignore-scripts", "--offline", "--no-audit", "--no-fund"],
     { cwd: packageRoot, timeoutMs: 180000 });
   await writeFile(join(root, "install.log"), result.stdout + result.stderr); assert.equal(result.code, 0, result.stderr);
@@ -86,7 +90,7 @@ async function install() {
   const { assertMetaMaskSmartAccountPackageIdentity } = await moduleAt(packageRoot, "metamask-smart-account-package.js");
   await assertMetaMaskSmartAccountPackageIdentity();
   assert.equal(digest(await readFile(archive)), archiveSha256);
-  const manifest = { archive, archiveSha256, packageRoot, sourceCommit,
+  const manifest = { archive, archiveSha256, packageRoot, sourceCommit, harnessCommit,
     fileCount: files.length, allArchiveFilesMatchGitSourceAndInstalledBytes: true, files };
   const manifestPath = join(root, "archive-identity.json"); await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
   const { SA_RUNTIME_CODES } = await import(pathToFileURL(join(source, "dist-test/tests/core/smart-account-gasless-chain-fixtures.js")));
@@ -180,7 +184,9 @@ function safe(output, extra = []) {
     ...extra]) assert.equal(output.includes(forbidden), false, "private material in output");
 }
 async function approval(s, id, phrase) {
-  const op = await s.operation(id), script = `set timeout 55
+  // The installed RPC starts reads at least one second apart. Approval includes
+  // three full guard snapshots plus the subsequent observation pass.
+  const op = await s.operation(id), script = `set timeout 180
     spawn $env(APN_TEST_NODE) --import $env(APN_TEST_PRELOAD) $env(APN_TEST_BIN) gasless transfer approve --operation $env(APN_TEST_OPERATION)
     expect {
       -re {press Enter to confirm} { send -- $env(APN_TEST_PHRASE); send -- "\\r" }
@@ -191,10 +197,23 @@ async function approval(s, id, phrase) {
       eof { catch wait result; exit [lindex $result 3] }
       timeout { exit 124 }
     }`;
-  const result = await run("/usr/bin/expect", ["-c", script], { timeoutMs: 60000, env: { ...s.env, TERM: "xterm-256color",
+  const result = await run("/usr/bin/expect", ["-c", script], { timeoutMs: 190000, env: { ...s.env, TERM: "xterm-256color",
     APN_TEST_NODE: process.execPath, APN_TEST_PRELOAD: installed.preload, APN_TEST_BIN: join(installed.packageRoot, "bin/apn.js"),
     APN_TEST_OPERATION: id, APN_TEST_PHRASE: phrase ?? approvalCode("gasless", id, op.fingerprint) } });
   s.safe(result.stdout + result.stderr); assert.equal(result.stderr, ""); return result;
+}
+async function resumeUntilUnused(s, id) {
+  for (let pass = 0; pass < 3; pass += 1) {
+    const result = await s.cli(["operation", "resume", "--operation", id]);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (result.operation.terminal) {
+      assert.equal(result.operation.state, "expired_unused");
+      return result;
+    }
+    assert.equal(result.operation.state, "unknown_finality");
+    assert.equal((await s.operation(id)).observation.reason, "sa_gasless_partial");
+  }
+  assert.fail("unused proof did not complete within three paced RPC passes");
 }
 async function mcp(s) {
   const transport = new StdioClientTransport({ command: process.execPath, args: ["--import", installed.preload,
@@ -243,7 +262,7 @@ test("installed CLI and 48-tool MCP discover Base Smart Account gasless without 
   assert.deepEqual(await s.trace(), []); assert.equal((await stat(s.state.root)).mode & 0o777, 0o777);
 });
 
-test("installed ordinary prepare, real TTY, SDK, encrypted material and RPC-only unused recovery preserve one-effect bounds", { timeout: 240000 }, async () => {
+test("installed ordinary prepare, real TTY, SDK, encrypted material and RPC-only unused recovery preserve one-effect bounds", { timeout: 600000 }, async () => {
   const s = await scenario(), beforePrivate = await s.privateBytes(), connection = await mcp(s);
   let id;
   try {
@@ -264,8 +283,7 @@ test("installed ordinary prepare, real TTY, SDK, encrypted material and RPC-only
     const status = await connection.call("apn_operation_status", { operation: id }); assert.equal(status.operation.terminal, false);
     await s.cli(["operation", "resume", "--operation", id]); assert.deepEqual(await readFile(materialPath), sealed);
     await s.update({ offset: 700000, head: 50000350 });
-    const terminal = await s.cli(["operation", "resume", "--operation", id]); assert.equal(terminal.ok, true, JSON.stringify(terminal));
-    assert.equal(terminal.operation.state, "expired_unused"); assert.equal(terminal.operation.terminal, true);
+    const terminal = await resumeUntilUnused(s, id); assert.equal(terminal.operation.terminal, true);
     const bytes = await journalBytes(s, id), traceAtTerminal = await s.trace();
     const receipt = await s.cli(["receipt", "get", "--operation", id]);
     assert.deepEqual((await connection.call("apn_receipt_get", { operation: id })).receipt, receipt.receipt);
@@ -279,7 +297,7 @@ test("installed ordinary prepare, real TTY, SDK, encrypted material and RPC-only
   } finally { await connection.close(); }
 });
 
-test("installed process deaths at verification and settlement never repeat SDK signing or provider calls", { timeout: 240000 }, async t => {
+test("installed process deaths at verification and settlement never repeat SDK signing or provider calls", { timeout: 600000 }, async t => {
   for (const crash of ["verify", "settle"]) await t.test(crash, async () => {
     const s = await scenario(crash), prepared = await s.cli(s.prepareArgs(`crash-${crash}`));
     assert.equal(prepared.ok, true, JSON.stringify(prepared)); const id = prepared.operation.operation_id;
@@ -289,8 +307,7 @@ test("installed process deaths at verification and settlement never repeat SDK s
     assert.equal(op.state, crash === "settle" ? "dispatch_pending" : "exposure_pending");
     const sealed = await exposedMaterial(s, id);
     await s.update({ crash: null, denyKeychain: true, denyEffects: true, offset: 700000, head: 50000350 });
-    const resumed = await s.cli(["operation", "resume", "--operation", id]); assert.equal(resumed.ok, true, JSON.stringify(resumed));
-    assert.equal(resumed.operation.state, "expired_unused");
+    const resumed = await resumeUntilUnused(s, id); assert.equal(resumed.operation.state, "expired_unused");
     assert.deepEqual(await readFile(join(s.state.root, "smart-account-gasless-materials", `${id}.json`)), sealed);
     await effectCounts(s, { sign: 1, verify: 1, settle: crash === "settle" ? 1 : 0, supported: 1 });
   });
