@@ -1,7 +1,6 @@
-/** Isolated source-effect journal. Admission proof is synthetic and never grants execution authority.
- * The draft freezes calldata but has no nonce or EIP-1559 fee envelope. Those values are
- * frozen here under a synthetic, untrusted binding; its draft checksum does not validate them.
- * No route, custody, transport, or CLI imports this module.
+/** Source-effect journal. V1/V2 synthetic proof grants no live effect authority.
+ * V3 records the concrete Circle transport admission and exact source envelope.
+ * A journal transition alone never broadcasts a transaction.
  */
 import { hashObject, sha256 } from "../canonical.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
@@ -19,6 +18,11 @@ const call = z.strictObject({ chainId: z.literal(8453), from: addressSchema, to:
   accessList: z.tuple([]) });
 const proof = z.strictObject({ kind: z.literal("synthetic_untrusted"), claimedValidationHash: hashSchema,
   note: z.string().min(1).max(256) });
+const liveCircleProof = z.strictObject({ kind: z.literal("circle_v2_live_transport_v1"),
+  circleOrigin: z.literal("https://iris-api.circle.com"), rpcOrigin: z.string().url(),
+  quoteHash: hashSchema, validationHash: hashSchema, sourceBlockHash: wordSchema,
+  preparationDigest: hashSchema, payer: addressSchema, recipientOwner: z.string().min(32).max(44),
+  recipientAta: z.string().min(32).max(44), feeTotalAtomic: uintSchema });
 const safe = z.strictObject({ provenance: z.literal("synthetic_untrusted"), transactionHash: wordSchema, status: z.enum(["success", "reverted"]),
   blockNumberAtomic: uintSchema, blockHash: wordSchema, safeBlockNumberAtomic: uintSchema,
   safeBlockHash: wordSchema, observedAt: isoSchema });
@@ -43,12 +47,18 @@ const schemaV1 = z.strictObject({ schemaVersion: z.literal("apn.non-evm-source-j
   route: pair, sourceCall: call, maxSourceNativeDebitWei: uintSchema, admissionProof: proof, createdAt: isoSchema,
   ...snapshot.shape, transitions: z.array(entry).min(1).max(32), integrityHash: hashSchema });
 const schemaV2 = schemaV1.extend({ schemaVersion: z.literal("apn.non-evm-source-journal.v2"), protocolInputHash: hashSchema });
-const schema = z.discriminatedUnion("schemaVersion", [schemaV1, schemaV2]);
+const schemaV3 = schemaV1.omit({ schemaVersion: true, executionAdmitted: true, admissionProof: true }).extend({
+  schemaVersion: z.literal("apn.non-evm-source-journal.v3"), executionAdmitted: z.literal(true),
+  admissionProof: liveCircleProof, protocolInputHash: hashSchema });
+const schema = z.discriminatedUnion("schemaVersion", [schemaV1, schemaV2, schemaV3]);
 export type NonEvmSourceJournalV1 = z.infer<typeof schemaV1>;
 export type NonEvmSourceJournalV2 = z.infer<typeof schemaV2>;
-export type NonEvmSourceJournal = NonEvmSourceJournalV1 | NonEvmSourceJournalV2;
+export type NonEvmSourceJournalV3 = z.infer<typeof schemaV3>;
+export type NonEvmSourceJournal = NonEvmSourceJournalV1 | NonEvmSourceJournalV2 | NonEvmSourceJournalV3;
 export type NonEvmSourceBinding = Pick<NonEvmSourceJournalV1, "profileHash" | "operationId" | "draftIntegrityHash" | "route" | "sourceCall" | "maxSourceNativeDebitWei" | "admissionProof" | "createdAt">;
 export type NonEvmSourceBindingV2 = NonEvmSourceBinding & Pick<NonEvmSourceJournalV2, "schemaVersion" | "protocolInputHash">;
+export type LiveCircleSourceBinding = Omit<NonEvmSourceBinding, "admissionProof"> &
+  Pick<NonEvmSourceJournalV3, "admissionProof" | "protocolInputHash">;
 export type SafeSourceObservation = z.infer<typeof safe>;
 export type RpcObservedCircleSourceObservation = z.infer<typeof rpcObservedSafe>;
 export type RpcObservedNearTronSourceObservation = z.infer<typeof rpcObservedNearSafe>;
@@ -95,6 +105,10 @@ export function validateNonEvmSourceJournal(value: unknown): NonEvmSourceJournal
     (j.route === "base_usdc_to_solana_usdc_circle_cctp_v2"
       ? j.sourceCall.to !== BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES || !j.sourceCall.data.startsWith("0xc62fa55e")
       : j.sourceCall.to !== BRIDGE_DIAMOND || !j.sourceCall.data.startsWith("0x3110c7b9"))) corrupt();
+  if (j.schemaVersion === "apn.non-evm-source-journal.v3" &&
+    (j.route !== "base_usdc_to_solana_usdc_circle_cctp_v2" ||
+      j.admissionProof.payer !== j.sourceCall.from ||
+      j.admissionProof.sourceBlockHash.length !== 66)) corrupt();
   let prior: z.infer<typeof entry> | undefined;
   for (const e of j.transitions) {
     const { transitionHash, ...content } = e;
@@ -126,13 +140,13 @@ export function validateNonEvmSourceJournal(value: unknown): NonEvmSourceJournal
   if (prior === undefined || hashObject(snapshotOf(j)) !== hashObject(snapshotOf(prior as unknown as NonEvmSourceJournal))) corrupt();
   return j;
 }
-function build(binding: NonEvmSourceBinding | NonEvmSourceBindingV2, version: "v1" | "v2"): NonEvmSourceJournal {
+function build(binding: NonEvmSourceBinding | NonEvmSourceBindingV2 | LiveCircleSourceBinding, version: "v1" | "v2" | "v3"): NonEvmSourceJournal {
   if (version === "v1" && ("schemaVersion" in binding || "protocolInputHash" in binding)) corrupt();
   const initial: Snapshot = { phase: "staged_untrusted", signedTransaction: null, transactionHash: null,
     nonceAtomic: null, submissionAttempts: 0, safeSourceProof: null, reason: null };
   const first = { ...initial, at: binding.createdAt, previousHash: binding.draftIntegrityHash };
   const value = { schemaVersion: `apn.non-evm-source-journal.${version}`, kind: "non_evm_source_journal" as const,
-    executionAdmitted: false as const, ...binding, ...initial,
+    executionAdmitted: version === "v3", ...binding, ...initial,
     transitions: [{ ...first, transitionHash: hashObject(first) }] };
   return validateNonEvmSourceJournal({ ...value, integrityHash: hashObject(value) });
 }
@@ -166,7 +180,7 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
     const identity = { profileHash: j.profileHash, operationId: j.operationId,
       draftIntegrityHash: j.draftIntegrityHash, sender: j.sourceCall.from,
       nonceAtomic: j.sourceCall.nonceAtomic, transactionHash,
-      ...(j.schemaVersion === "apn.non-evm-source-journal.v2" ? { protocolInputHash: j.protocolInputHash } : {}) };
+      ...(j.schemaVersion !== "apn.non-evm-source-journal.v1" ? { protocolInputHash: j.protocolInputHash } : {}) };
     const record = { ...identity, integrityHash: hashObject(identity) };
     if (prior !== null) {
       if (hashObject(prior) !== hashObject(record)) blocked();
@@ -181,10 +195,10 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
     const identity = { profileHash: j.profileHash, operationId: j.operationId,
       draftIntegrityHash: j.draftIntegrityHash, sender: j.sourceCall.from,
       nonceAtomic: j.sourceCall.nonceAtomic, transactionHash: j.transactionHash,
-      ...(j.schemaVersion === "apn.non-evm-source-journal.v2" ? { protocolInputHash: j.protocolInputHash } : {}) };
+      ...(j.schemaVersion !== "apn.non-evm-source-journal.v1" ? { protocolInputHash: j.protocolInputHash } : {}) };
     if (prior === null || hashObject(prior) !== hashObject({ ...identity, integrityHash: hashObject(identity) })) corrupt();
   }
-  /** A synthetically supplied proof is permanently untrusted. An adapter must introduce a new versioned admission contract. */
+  /** Legacy synthetic proof remains permanently untrusted for live source execution. */
   async stage(binding: NonEvmSourceBinding): Promise<NonEvmSourceJournal> {
     return this.stageBuilt(build(binding, "v1"));
   }
@@ -193,12 +207,17 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
     if (binding.schemaVersion !== "apn.non-evm-source-journal.v2") corrupt();
     return this.stageBuilt(build(binding, "v2")) as Promise<NonEvmSourceJournalV2>;
   }
+  /** Only the concrete live Circle adapter may supply this versioned admission record. */
+  async stageLiveCircle(binding: LiveCircleSourceBinding): Promise<NonEvmSourceJournalV3> {
+    if (binding.admissionProof.kind !== "circle_v2_live_transport_v1") blocked();
+    return this.stageBuilt(build(binding, "v3")) as Promise<NonEvmSourceJournalV3>;
+  }
   private async stageBuilt(j: NonEvmSourceJournal): Promise<NonEvmSourceJournal> {
     await this.initialize();
     return this.withLocks([`profile:${j.profileHash}`, `operation:${j.operationId}`], async () => {
       const prior = await this.load(j.profileHash, j.operationId);
       if (prior !== null) { if (prior.schemaVersion !== j.schemaVersion ||
-        (prior.schemaVersion === "apn.non-evm-source-journal.v2" && j.schemaVersion === "apn.non-evm-source-journal.v2" && prior.protocolInputHash !== j.protocolInputHash) ||
+        ("protocolInputHash" in prior && "protocolInputHash" in j && prior.protocolInputHash !== j.protocolInputHash) ||
         prior.draftIntegrityHash !== j.draftIntegrityHash || prior.route !== j.route ||
         hashObject(prior.sourceCall) !== hashObject(j.sourceCall) ||
         hashObject(prior.admissionProof) !== hashObject(j.admissionProof) || prior.createdAt !== j.createdAt ||

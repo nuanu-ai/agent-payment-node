@@ -3,7 +3,7 @@ import { type Hex } from "viem";
 import { type CircleV2DraftInput } from "./circle-v2-draft.js";
 import { type CircleV2BaseStateReader, type CircleV2SourcePreparation, type CircleV2SourcePreparationLimits } from "./circle-v2-source-preparation.js";
 import { type CircleV2PreflightTransport } from "./circle-v2-preflight.js";
-import { NonEvmSourceJournalRepository, type NonEvmSourceJournal } from "./non-evm-source-journal.js";
+import { NonEvmSourceJournalRepository, type NonEvmSourceJournal, type NonEvmSourceJournalV3 } from "./non-evm-source-journal.js";
 export interface CircleV2SourceExecutionPorts {
     /** Fetch and assemble a new Circle quote and matching calldata for this invocation. */
     readonly freshDraft: () => Promise<CircleV2DraftInput>;
@@ -29,6 +29,8 @@ export interface CircleV2SourceExecutionPorts {
     readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
     readonly approve: (preparation: CircleV2SourcePreparation) => Promise<void>;
     readonly journal: NonEvmSourceJournalRepository;
+    /** Concrete HTTPS/RPC adapter supplies the final response digest and pinned origins. */
+    readonly admitLive?: (preparation: CircleV2SourcePreparation) => Promise<NonEvmSourceJournalV3["admissionProof"]>;
     readonly now?: () => number;
 }
 export interface CircleV2SourceExecutionIntent {
