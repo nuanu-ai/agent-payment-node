@@ -33,10 +33,18 @@ export function gaslessUint(value: unknown, positive = false, code: ErrorCode = 
   if (n > GASLESS_MAX_UINT || (positive && n === 0n)) gaslessFailure(code, "gasless_integer_bound");
   return n;
 }
-export function gaslessDecimal(value: unknown, positive = false): string {
-  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,71})(?:\.[0-9]{1,6})?$/u.test(value)) gaslessFailure("APN_INVALID_INPUT", "gasless_six_decimal_USDC");
+export const GASLESS_MAX_DECIMALS = 36;
+/** Scales one operator amount by the admitting registry row's `decimals`; never by a baked scale. */
+export function gaslessDecimal(value: unknown, decimals: number, positive = false): string {
+  if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > GASLESS_MAX_DECIMALS) {
+    gaslessFailure("APN_INVALID_INPUT", "gasless_decimal_scale");
+  }
+  const fractionPart = decimals === 0 ? "" : `(?:\\.[0-9]{1,${decimals}})?`;
+  if (typeof value !== "string" || !new RegExp(`^(?:0|[1-9][0-9]{0,71})${fractionPart}$`, "u").test(value)) {
+    gaslessFailure("APN_INVALID_INPUT", "gasless_decimal_amount");
+  }
   const [whole, fraction = ""] = value.split(".");
-  const n = (BigInt(whole!) * 1_000_000n + BigInt(fraction.padEnd(6, "0"))).toString();
+  const n = (BigInt(whole!) * 10n ** BigInt(decimals) + BigInt(fraction.padEnd(decimals, "0") || "0")).toString();
   gaslessUint(n, positive, "APN_INVALID_INPUT"); return n;
 }
 export function gaslessAddress(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): Address {

@@ -5,8 +5,8 @@ export declare function gaslessBatch(token: Address, recipient: Address, recipie
 export declare function validateGaslessBatch(intent: GaslessIntent): void;
 export declare function gaslessPermitTypedData(intent: GaslessIntent): {
     readonly domain: {
-        readonly name: "USDC" | "USD Coin";
-        readonly version: "2";
+        readonly name: string;
+        readonly version: string;
         readonly chainId: import("./model.js").GaslessChainId;
         readonly verifyingContract: `0x${string}`;
     };

@@ -1,5 +1,5 @@
 import { canonicalProfile } from "../wallet-policy.js";
-import { GASLESS_DEPLOYMENTS } from "./registry.js";
+import { GASLESS_DEPLOYMENTS, gaslessAsset } from "./registry.js";
 import { metaMaskGaslessNetworks } from "../metamask-gasless/catalog.js";
 import { GASLESS_EIP7702_CHAINS } from "./validation.js";
 import { saRegistry } from "../smart-account-gasless/registry.js";
@@ -8,12 +8,15 @@ import { AVALANCHE_FACILITATOR as AVAX } from "../facilitator-gasless/registry.j
 export function gaslessCapabilities(profile?: string) {
   return { family: "gasless_transfer", purpose: "same_chain_USDC_transfer_with_fee_from_gross",
     profile: profile === undefined ? null : canonicalProfile(profile), profile_binding_inspected: false,
-    networks: GASLESS_DEPLOYMENTS.map((r) => ({ chain_id: r.chainId, name: r.network, token: r.token,
-      symbol: "USDC", decimals: 6, rpc_environment: r.rpcEnv, bundler_environment: r.bundlerEnv,
-      public_bundler_default: r.publicBundlerUrl, deployment_evidence_hash: r.evidenceHash,
-      executable_adapter: GASLESS_EIP7702_CHAINS.includes(r.chainId),
-      execution_unavailable_reason: GASLESS_EIP7702_CHAINS.includes(r.chainId) ? null : "gasless_eip7702_unavailable",
-      action_time_verification_required: true, mainnet_acceptance: "open" })),
+    networks: GASLESS_DEPLOYMENTS.map((r) => {
+      const asset = gaslessAsset(r.chainId, r.token);
+      return { chain_id: r.chainId, name: r.network, token: r.token,
+        symbol: asset.symbol, decimals: asset.decimals, rpc_environment: r.rpcEnv, bundler_environment: r.bundlerEnv,
+        public_bundler_default: r.publicBundlerUrl, deployment_evidence_hash: r.evidenceHash,
+        executable_adapter: GASLESS_EIP7702_CHAINS.includes(r.chainId),
+        execution_unavailable_reason: GASLESS_EIP7702_CHAINS.includes(r.chainId) ? null : "gasless_eip7702_unavailable",
+        action_time_verification_required: true, mainnet_acceptance: "open" };
+    }),
     profiles: [
       { provider: "local", custody: "local_software", adapter: "implemented", mainnet_acceptance: "open",
         reason: "existing_local_wallet_with_Circle_USDC_paymaster_and_EIP7702" },
