@@ -36,7 +36,7 @@ test("rejects wrong target, unbounded cap, nonce, balance, gas, and fee drift", 
   for (const invalid of [
     { ...input, spender: payer }, { ...input, token: payer }, { ...input, chainId: 1 as 8453 },
     { ...input, approvalCapAtomic: ((1n << 256n) - 1n).toString() },
-    { ...input, approvalCapAtomic: "1000001" }, { ...input, approvalCapAtomic: "434612" },
+    { ...input, approvalCapAtomic: "434612" },
   ]) await assert.rejects(prepareCircleV2BaseUsdcApprovalReadOnly(invalid, reader(), limits), { code: "APN_PROVIDER_PROTOCOL" });
   for (const change of [
     (v: any) => { v.token = payer; }, (v: any) => { v.spender = payer; },
@@ -51,4 +51,11 @@ test("rejects wrong target, unbounded cap, nonce, balance, gas, and fee drift", 
     (v as any).maxFeePerGasWei = ((1n << 256n) - 1n).toString();
   }), { ...limits, maxFeePerGasWei: ((1n << 256n) - 1n).toString(), maxNativeDebitWei: ((1n << 256n) - 1n).toString() }),
   { code: "APN_PROVIDER_PROTOCOL" });
+});
+test("accepts a caller cap above 1 USDC when the current balance and limits cover it", async () => {
+  const prepared = await prepareCircleV2BaseUsdcApprovalReadOnly(
+    { ...input, approvalCapAtomic: "2000000" },
+    reader(v => { (v as any).usdcBalanceAtomic = "2000000"; }), limits, () => 1_800_000_000_000);
+  assert.equal(prepared.approvalCapAtomic, "2000000");
+  assert.deepEqual(decodeFunctionData({ abi, data: prepared.transaction.data as `0x${string}` }).args, [spender, 2000000n]);
 });
