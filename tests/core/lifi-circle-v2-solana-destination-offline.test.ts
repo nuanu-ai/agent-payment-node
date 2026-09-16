@@ -6,7 +6,7 @@ import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { SOLANA_USDC } from "../../src/chain-policy.js";
 import { associatedUsdc } from "../../src/solana/accounts.js";
 import { CIRCLE_V2_MESSAGE_TRANSMITTER as mt, CIRCLE_V2_TOKEN_MESSENGER as tm,
-  inspectCircleV2SolanaDestinationOffline } from "../../src/lifi/circle-v2-solana-destination-offline.js";
+  inspectCircleV2SolanaDestinationOffline, inspectCircleV2SolanaMintEventOffline } from "../../src/lifi/circle-v2-solana-destination-offline.js";
 
 const wallet = "So11111111111111111111111111111111111111112";
 const other = "11111111111111111111111111111111";
@@ -27,7 +27,8 @@ async function fixture() {
   return { signature, recipient: wallet, minimumOutputAtomic: "900000", attestedMessageHex: `0x${message.toString("hex")}`,
     nonceHex: `0x${Buffer.from(nonce).toString("hex")}`,
     signatureStatuses: { context: { slot: 321 }, value: [{ slot: 320, confirmationStatus: "finalized", confirmations: null, err: null }] },
-    transaction: { slot: 320, meta: { err: null, preTokenBalances: [balance("100000")], postTokenBalances: [balance("1100000")] },
+    transaction: { slot: 320, meta: { err: null, preTokenBalances: [balance("100000")], postTokenBalances: [balance("1100000")],
+      innerInstructions: [] as { index: number; instructions: { programIdIndex: number; accounts: number[]; data: string }[] }[] },
       transaction: { signatures: [signature], message: { accountKeys: [other, ata, mt, tm, used, wallet, SOLANA_USDC]
         .map(pubkey => ({ pubkey })), instructions: [{ programIdIndex: 2, accounts: [0, 5, 6, 2, 4, 3, 0], data: encode(data) }] } } } };
 }
@@ -48,4 +49,50 @@ test("rejects different nonce, message body, nonce PDA, program, or amount", asy
     (v: Awaited<ReturnType<typeof fixture>>) => { const b = Buffer.from(v.attestedMessageHex.slice(2), "hex"); b.writeUInt32BE(7, 4); v.attestedMessageHex = `0x${b.toString("hex")}`; },
   ];
   for (const change of changes) { const input = await fixture(); change(input); await assert.rejects(inspectCircleV2SolanaDestinationOffline(input)); }
+});
+
+const disc = (name: string) => createHash("sha256").update(name).digest().subarray(0, 8);
+const le32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
+const le64 = (n: bigint) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(n); return b; };
+const eventTag = Buffer.from("e445a52e51cb9a1d", "hex");
+async function eventFixture() {
+  const v = await fixture();
+  const message = Buffer.from(v.attestedMessageHex.slice(2), "hex"), body = message.subarray(148);
+  const ata = v.transaction.transaction.message.accountKeys[1]!.pubkey;
+  const keys = v.transaction.transaction.message.accountKeys;
+  keys.push({ pubkey: TOKEN_PROGRAM_ADDRESS });
+  const tokenIndex = keys.length - 1;
+  const handler = Buffer.concat([disc("global:handle_receive_finalized_message"), le32(6), message.subarray(44, 76), le32(2000), le32(body.length), body, Buffer.from([1])]);
+  const mint = Buffer.concat([eventTag, disc("event:MintAndWithdraw"), Buffer.from(decode(ata)), le64(1_000_000n), Buffer.from(decode(SOLANA_USDC)), le64(0n)]);
+  const received = Buffer.concat([eventTag, disc("event:MessageReceived"), Buffer.from(decode(wallet)), le32(6), message.subarray(12, 44),
+    message.subarray(44, 76), le32(2000), le32(body.length), body]);
+  const transfer = Buffer.concat([Buffer.from([3]), le64(1_000_000n)]);
+  v.transaction.meta.innerInstructions = [{ index: 0, instructions: [
+    { programIdIndex: 3, accounts: [0, 0, 0, 0, 0, 0, 0, 1, 0, tokenIndex], data: encode(handler) },
+    { programIdIndex: tokenIndex, accounts: [0, 1, 0], data: encode(transfer) },
+    { programIdIndex: 3, accounts: [], data: encode(mint) },
+    { programIdIndex: 2, accounts: [], data: encode(received) },
+  ] }];
+  return v;
+}
+test("binds receive, Circle handler, mint event, token transfer, and message event", async () => {
+  const result = await inspectCircleV2SolanaMintEventOffline(await eventFixture());
+  assert.equal(result.sourceMessageCorrelation, "receive_cpi_mint_transfer_events_matched");
+  assert.equal(result.executionAdmitted, false); assert.equal(result.bridgeCompletion, false);
+});
+test("rejects absent or altered mint provenance", async () => {
+  const changes = [
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions = []; },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions[0]!.index = 1; },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions[0]!.instructions[0]!.programIdIndex = 2; },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions[0]!.instructions[1]!.accounts[1] = 0; },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions[0]!.instructions[2]!.programIdIndex = 2; },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions[0]!.instructions[3]!.data = encode(new Uint8Array(32)); },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions[0]!.instructions.reverse(); },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions[0]!.instructions.splice(3, 0,
+      { ...v.transaction.meta.innerInstructions[0]!.instructions[2]! }); },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { const ix = v.transaction.meta.innerInstructions[0]!.instructions[2]!;
+      const raw = Buffer.from(decode(ix.data)); raw[48] = 1; ix.data = encode(raw); },
+  ];
+  for (const change of changes) { const v = await eventFixture(); change(v); await assert.rejects(inspectCircleV2SolanaMintEventOffline(v)); }
 });
