@@ -42,20 +42,21 @@ function transport() {
       ? { number: "0x63", hash: blockHash, timestamp: `0x${Math.floor(Date.now() / 1000).toString(16)}` }
       : "0x";
 }
-async function run(send: (raw: `0x${string}`) => Promise<`0x${string}`>, signerAddress = payer) {
+async function run(send: (raw: `0x${string}`) => Promise<`0x${string}`>, signerAddress = payer, driftAfterApproval = false) {
   const f = await fixture(), tmp = await temporaryState();
   const journal = new NonEvmSourceJournalRepository(tmp.root);
-  let sends = 0;
+  let sends = 0, approved = false;
   const action = () => submitCircleV2BaseSourceBurn({ payer, solanaWalletOwner: wallet, solanaRecipientAta: f.ata,
     recipientSetup: "existing_ata", profileHash: "d".repeat(64), operationId: "e".repeat(64), limits,
     claimedValidationHash: "f".repeat(64), minFinalityThreshold: 1000 }, {
     freshDraft: async () => f.input, preflight: transport(),
     readBase: async query => ({ chainId: 8453, payer, draftBlockHash: blockHash, blockNumber: query.freshBlockNumber,
       blockHash: query.freshBlockHash, latestNonceAtomic: "7", pendingNonceAtomic: "7", usdcBalanceAtomic: "1020000",
-      usdcAllowanceAtomic: "1020000", nativeBalanceWei: "200000000000000", gasLimitAtomic: "100000",
-      maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000" }),
+      usdcAllowanceAtomic: approved && driftAfterApproval ? "0" : "1020000", nativeBalanceWei: "200000000000000", gasLimitAtomic: "100000",
+      maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000",
+      l1DataFeeUpperWei: "0", operatorFeeUpperWei: "0" }),
     signer: { kind: "imported_evm_signer", address: signerAddress, signTransaction: tx => account.signTransaction(tx) },
-    sendRawTransaction: async raw => { sends++; return send(raw); }, approve: async () => {}, journal });
+    sendRawTransaction: async raw => { sends++; return send(raw); }, approve: async () => { approved = true; }, journal });
   return { action, sends: () => sends, cleanup: tmp.cleanup, journal };
 }
 test("persists one signed source attempt, with delivery still unobserved", async t => {
@@ -75,4 +76,10 @@ test("ambiguous send is durable unknown and cannot resend", async t => {
 test("wrong imported signer blocks before quote, journal and send", async t => {
   const h = await run(async raw => raw, getAddress("0x000000000000000000000000000000000000dEaD")); t.after(h.cleanup);
   await assert.rejects(h.action(), { code: "APN_OPERATION_BLOCKED" }); assert.equal(h.sends(), 0);
+});
+
+test("allowance lost during foreground consent blocks before durable send", async t => {
+  const h = await run(async raw => raw, payer, true); t.after(h.cleanup);
+  await assert.rejects(h.action()); assert.equal(h.sends(), 0);
+  assert.equal(await h.journal.load("d".repeat(64), "e".repeat(64)), null);
 });

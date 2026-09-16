@@ -55,7 +55,7 @@ function state(change?: (value: CircleV2BaseState) => void): (query: any) => Pro
     const value: CircleV2BaseState = { chainId: 8453, payer, draftBlockHash: hash, blockNumber: query.freshBlockNumber,
       blockHash: query.freshBlockHash, latestNonceAtomic: "7", pendingNonceAtomic: "7",
       usdcBalanceAtomic: "1020000", usdcAllowanceAtomic: "1020000", nativeBalanceWei: "200000000000000",
-      gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000" };
+      gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000", l1DataFeeUpperWei: "0", operatorFeeUpperWei: "0" };
     change?.(value);
     return value;
   };
@@ -128,4 +128,14 @@ test("rejects stale quote and gas prices in wrong units or beyond uint256 native
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(v => { (v as any).maxFeePerGasWei = ((1n << 256n) - 1n).toString(); }),
     { ...limits, maxFeePerGasWei: ((1n << 256n) - 1n).toString(), maxNativeDebitWei: ((1n << 256n) - 1n).toString() }),
     { code: "APN_PROVIDER_PROTOCOL" });
+});
+
+test("includes Base L1 and operator fee upper bounds in native debit", async () => {
+  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
+  const p = await prepareCircleV2BaseSourceReadOnly(draft, harness(), state(v => {
+    (v as any).l1DataFeeUpperWei = "1000"; (v as any).operatorFeeUpperWei = "2000";
+    (v as any).nativeBalanceWei = "200000000003000";
+  }), { ...limits, maxNativeDebitWei: "200000000003000" });
+  assert.equal(p.maximumNativeDebitWei, "200000000003000");
+  assert.equal(p.l1DataFeeUpperWei, "1000"); assert.equal(p.operatorFeeUpperWei, "2000");
 });

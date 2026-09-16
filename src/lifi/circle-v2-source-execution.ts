@@ -74,6 +74,19 @@ export async function submitCircleV2BaseSourceBurn(intent: CircleV2SourceExecuti
     BigInt(expiry.expiresAtBlock) - BigInt(p.sourceBlock.number) < 5n)) blocked("block_expiry_margin");
   await ports.approve(p);
   if (Date.parse(p.expiresAt) - now() < BRIDGE_MIN_REMAINING_MS) blocked("approval_expired");
+  // Consent can outlast a Base block. Refresh Circle validation, canonical simulation and balances before sealing.
+  const afterConsent = await prepareCircleV2BaseSourceReadOnly(draft, ports.preflight, ports.readBase, intent.limits, now);
+  if (afterConsent.quoteHash !== p.quoteHash || afterConsent.draftIntegrityDigest !== p.draftIntegrityDigest ||
+    afterConsent.recipient.wallet !== p.recipient.wallet || afterConsent.recipient.ata !== p.recipient.ata ||
+    afterConsent.transaction.from !== p.transaction.from || afterConsent.transaction.to !== p.transaction.to ||
+    afterConsent.transaction.data !== p.transaction.data || afterConsent.transaction.nonceAtomic !== p.transaction.nonceAtomic ||
+    BigInt(afterConsent.transaction.gasLimitAtomic) > BigInt(p.transaction.gasLimitAtomic) ||
+    BigInt(afterConsent.transaction.maxFeePerGasWei) > BigInt(p.transaction.maxFeePerGasWei) ||
+    BigInt(afterConsent.transaction.maxPriorityFeePerGasWei) > BigInt(p.transaction.maxPriorityFeePerGasWei) ||
+    Date.parse(afterConsent.expiresAt) - now() < BRIDGE_MIN_REMAINING_MS) blocked("post_approval_drift");
+  const refreshedExpiry = bridgeRecord(afterConsent.quote.expiry);
+  if (refreshedExpiry.mode === "BLOCK_NUMBER" && (typeof refreshedExpiry.expiresAtBlock !== "number" ||
+    BigInt(refreshedExpiry.expiresAtBlock) - BigInt(afterConsent.sourceBlock.number) < 5n)) blocked("post_approval_expiry");
   const binding = bindCircleV2SourcePreparationToJournal({ preparation: p, route: ROUTE, payer,
     draftIntegrityDigest: draft.integrityDigest, preparationDigest: p.preparationDigest,
     profileHash: intent.profileHash, operationId: intent.operationId, createdAt: new Date(now()).toISOString(),

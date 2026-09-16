@@ -21,7 +21,7 @@ function mock(change?: (method: string, params: any[]) => unknown) {
       query.method === "eth_chainId" ? "0x2105" :
       query.method === "eth_getBlockByNumber" ? { hash: query.params[0] === "0x62" ? oldHash : hash, baseFeePerGas: "0x3b9aca00" } :
       query.method === "eth_call" ? query.params[0].data === balanceData ? word(1_100_000n) :
-        query.params[0].data === allowanceData ? word(1_050_000n) : "0x" :
+        query.params[0].data === allowanceData ? word(1_050_000n) : word(0n) :
       query.method === "eth_getBalance" ? "0x38d7ea4c68000" :
       query.method === "eth_getTransactionCount" ? "0x7" :
       query.method === "eth_estimateGas" ? "0x186a0" :
