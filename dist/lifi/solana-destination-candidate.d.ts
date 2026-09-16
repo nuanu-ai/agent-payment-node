@@ -23,3 +23,5 @@ export interface SolanaDestinationCandidateInput {
 }
 /** Parse untrusted finalized RPC responses without admitting or completing a bridge operation. */
 export declare function parseSolanaDestinationCandidate(input: SolanaDestinationCandidateInput): Promise<SolanaDestinationCandidate>;
+/** Resolve compiled instruction indexes for getTransaction encoding:"json" (static, loaded writable, loaded readonly). */
+export declare function solanaJsonAccountKeys(resultValue: unknown): readonly string[];
