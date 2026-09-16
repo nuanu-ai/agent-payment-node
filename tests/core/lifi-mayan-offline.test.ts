@@ -27,8 +27,9 @@ test("synthetic Mayan fixture decodes for offline inspection only", () => {
   assert.equal(decoded.bridgeCompletion, false);
   assert.equal(decoded.approvalSpender, decoded.transactionTarget);
   assert.equal(decoded.sourceAmountAtomic, "100000000");
-  assert.equal(decoded.feeAmountAtomic, "250000");
+  assert.equal(decoded.lifiFeeAmountAtomic, "250000");
   assert.equal(decoded.bridgeAmountAtomic, "99750000");
+  assert.equal(decoded.mayanRedeemFeeAtomic, "1647869");
   assert.equal(decoded.offchainToAmountMinAtomic, "97619723");
   assert.equal(decoded.solanaRecipient, binding.solanaRecipient);
   assert.equal(decoded.refundRecipient, binding.sender);
@@ -55,7 +56,7 @@ test("synthetic Mayan source calldata rejects selectors, token, receiver, fee an
   const fee = clone(); fee.estimate.feeCosts[0].amount = "250001"; reject(fee, "fee_rows");
   const capped = clone(); assert.throws(() => decodeMayanBaseSolanaQuoteOffline(capped, { ...binding, maxFeeAtomic: "249999" }), /fee_cap/u);
   const principal = clone(); replaceWord(principal, "0000000000000000000000000000000000000000000000000000000005f5e100", "0000000000000000000000000000000000000000000000000000000005f5e101"); reject(principal);
-  const opaqueProtocolArg = clone(); replaceWord(opaqueProtocolArg, "00000000000000000000000000000000000000000000000000000000001924fd", "00000000000000000000000000000000000000000000000000000000001924fe"); reject(opaqueProtocolArg);
+  const redeemFee = clone(); replaceWord(redeemFee, "00000000000000000000000000000000000000000000000000000000001924fd", "00000000000000000000000000000000000000000000000000000000001924fe"); reject(redeemFee, "mayan_protocol");
 });
 
 test("synthetic Mayan quote rejects detached top-level and included-step claims", () => {

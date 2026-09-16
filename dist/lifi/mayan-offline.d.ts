@@ -19,13 +19,14 @@ export interface MayanOfflineDecode {
     readonly transactionTarget: Address;
     readonly transactionId: Hex;
     readonly sourceAmountAtomic: string;
-    readonly feeAmountAtomic: string;
+    /** LI.FI FeeForwarder fee, taken from the source amount. */
+    readonly lifiFeeAmountAtomic: string;
     readonly bridgeAmountAtomic: string;
+    /** Mayan redemption fee parameter in bridgeWithFee; separate from the LI.FI fee. */
+    readonly mayanRedeemFeeAtomic: string;
     /** API estimate only. Not an onchain destination guarantee in this call. */
     readonly offchainToAmountMinAtomic: string;
     readonly mayanProtocol: Address;
-    /** Unverified Mayan protocol scalar. No fee or output semantics are claimed. */
-    readonly mayanProtocolArg2: string;
     readonly mayanDestinationDomain: number;
     readonly refundRecipient: Address;
     readonly calldataSha256: string;
