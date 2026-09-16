@@ -100,6 +100,18 @@ export class ApnCore {
                     : await executor.status(request.operationId);
                 return dataOutcome(publicCircleApproval(record), record.phase === "completed" ? "circle_approval_safe_receipt_and_allowance" : "circle_approval_journal_state");
             }
+            case "oneclick.source.submit": {
+                const service = this.context.oneClickSource;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "1Click source runtime is unavailable.");
+                return dataOutcome(await service.submit(request), "oneclick_base_source_submission_only");
+            }
+            case "oneclick.source.status": {
+                const service = this.context.oneClickSource;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "1Click source runtime is unavailable.");
+                return dataOutcome(await service.status(request.operationId), "oneclick_source_and_provider_observation_untrusted");
+            }
             case "circle.source.submit": {
                 const service = this.context.circleSource;
                 if (service === undefined)

@@ -11,6 +11,7 @@ export class RuntimeContext {
     bridge;
     circleApproval;
     circleSource;
+    oneClickSource;
     directRails;
     chainAccounts;
     railApproval;
@@ -53,6 +54,8 @@ export class RuntimeContext {
             this.circleApproval = dependencies.circleApproval;
         if (dependencies.circleSource !== undefined)
             this.circleSource = dependencies.circleSource;
+        if (dependencies.oneClickSource !== undefined)
+            this.oneClickSource = dependencies.oneClickSource;
         this.directRails = dependencies.directRails ?? [];
         if (dependencies.chainAccounts !== undefined)
             this.chainAccounts = dependencies.chainAccounts;
