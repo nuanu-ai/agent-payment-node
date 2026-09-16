@@ -8,7 +8,6 @@ import { bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord, bridgeUint, BRID
 const WITH_FEES = getAddress("0x71f54F818671cD0D7ea140Da213e5C8b5C92a408");
 const BASE_USDC = getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
 const ABI = parseAbi([
-  "function depositForBurnWithFees(uint256 amount,uint32 destinationDomain,bytes32 mintRecipient,address burnToken,bytes32 destinationCaller,(bytes signedQuote,address refundAddress) claim) payable",
   "function depositForBurnWithHookAndFees(uint256 amount,uint32 destinationDomain,bytes32 mintRecipient,address burnToken,bytes32 destinationCaller,bytes hookData,(bytes signedQuote,address refundAddress) claim) payable",
 ]);
 const DEFAULT_HOOK = "0x636374702d666f72776172640000000000000000000000000000000000000000";
@@ -111,15 +110,12 @@ export async function inspectCircleV2UpfrontOffline(input: CircleV2UpfrontInput)
   if (!args || args[0] !== amount || args[1] !== 5 || String(args[2]).toLowerCase() !== mintRecipient ||
       getAddress(String(args[3])) !== BASE_USDC || String(args[4]).toLowerCase() !== BRIDGE_ZERO_WORD) fail("source_binding");
   const withSetup = input.recipientSetup === "create_ata";
-  if (!withSetup && decoded.functionName !== "depositForBurnWithFees") fail("method_setup");
-  if (withSetup && decoded.functionName !== "depositForBurnWithHookAndFees") fail("method_setup");
-  const claim = args[withSetup ? 6 : 5] as { signedQuote: string; refundAddress: string };
+  if (decoded.functionName !== "depositForBurnWithHookAndFees") fail("method_setup");
+  const claim = args[6] as { signedQuote: string; refundAddress: string };
   if (String(claim.signedQuote).toLowerCase() !== signedQuote || getAddress(claim.refundAddress) !== refundAddress) fail("claim");
-  if (withSetup) {
-    const expectedHook = hookForSetup(wallet);
-    if (String(args[5]).toLowerCase() !== expectedHook ||
-        bridgeRecord(request.requests[0]).hookData !== expectedHook) fail("setup_hook");
-  } else if (bridgeRecord(request.requests[0]).hookData !== undefined) fail("default_hook_quote");
+  const expectedHook = withSetup ? hookForSetup(wallet) : DEFAULT_HOOK;
+  if (String(args[5]).toLowerCase() !== expectedHook ||
+      bridgeRecord(request.requests[0]).hookData !== expectedHook) fail("forward_hook");
   try {
     if (encodeFunctionData({ abi: ABI, functionName: decoded.functionName, args: args as never }).toLowerCase() !== data) fail("noncanonical_calldata");
   } catch { return fail("noncanonical_calldata"); }
