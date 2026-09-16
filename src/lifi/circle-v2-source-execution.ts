@@ -2,7 +2,7 @@
 import { getAddress, keccak256, type Hex } from "viem";
 import { getBase58Encoder } from "@solana/kit";
 import { inspectCircleV2PreflightedDraft, type CircleV2DraftInput } from "./circle-v2-draft.js";
-import { prepareCircleV2BaseSourceReadOnly, type CircleV2BaseStateReader, type CircleV2SourcePreparationLimits } from "./circle-v2-source-preparation.js";
+import { prepareCircleV2BaseSourceReadOnly, type CircleV2BaseStateReader, type CircleV2SourcePreparation, type CircleV2SourcePreparationLimits } from "./circle-v2-source-preparation.js";
 import { bindCircleV2SourcePreparationToJournal } from "./circle-v2-source-journal.js";
 import { type CircleV2PreflightTransport } from "./circle-v2-preflight.js";
 import { NonEvmSourceJournalRepository, type NonEvmSourceJournal } from "./non-evm-source-journal.js";
@@ -22,6 +22,7 @@ export interface CircleV2SourceExecutionPorts {
     gas: bigint; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; accessList: readonly [];
   }>) => Promise<Hex> }>;
   readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
+  readonly approve: (preparation: CircleV2SourcePreparation) => Promise<void>;
   readonly journal: NonEvmSourceJournalRepository;
   readonly now?: () => number;
 }
@@ -71,6 +72,8 @@ export async function submitCircleV2BaseSourceBurn(intent: CircleV2SourceExecuti
   const expiry = bridgeRecord(p.quote.expiry);
   if (expiry.mode === "BLOCK_NUMBER" && (typeof expiry.expiresAtBlock !== "number" ||
     BigInt(expiry.expiresAtBlock) - BigInt(p.sourceBlock.number) < 5n)) blocked("block_expiry_margin");
+  await ports.approve(p);
+  if (Date.parse(p.expiresAt) - now() < BRIDGE_MIN_REMAINING_MS) blocked("approval_expired");
   const binding = bindCircleV2SourcePreparationToJournal({ preparation: p, route: ROUTE, payer,
     draftIntegrityDigest: draft.integrityDigest, preparationDigest: p.preparationDigest,
     profileHash: intent.profileHash, operationId: intent.operationId, createdAt: new Date(now()).toISOString(),
