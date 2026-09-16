@@ -35,8 +35,11 @@ export class MetaMaskGaslessClock {
     return now;
   }
 
-  beforeDispatch(op: MetaMaskGaslessOperationRecord, observedAt: string): number {
-    this.fresh(op.intent.initialSnapshot.observedAt, op);
+  /**
+   * The dispatch clock runs on the observation taken at the guard, never on the frozen prepare snapshot: a snapshot
+   * carried forward is identity and designation evidence, never a claim that the chain read is still current.
+   */
+  beforeDispatchAtCurrent(op: MetaMaskGaslessOperationRecord, observedAt: string): number {
     const now = this.fresh(observedAt, op);
     if (now + MM_MIN_REMAINING_MS > Date.parse(op.intent.expiresAt)) mmFail("mm_gasless_expired");
     return now;

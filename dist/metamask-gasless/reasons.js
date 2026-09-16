@@ -22,6 +22,7 @@ export const MM_REASON_CODES = {
     mm_gasless_pending: "APN_OPERATION_BLOCKED",
     mm_gasless_provider_approval: "APN_OPERATION_BLOCKED",
     mm_gasless_provider_unavailable: "APN_PROVIDER_UNAVAILABLE",
+    mm_gasless_guard_unavailable: "APN_PROVIDER_UNAVAILABLE",
     mm_gasless_provider_failed: "APN_PROVIDER_EFFECT_UNAVAILABLE",
     mm_gasless_transaction_reverted: "APN_PROVIDER_EFFECT_UNAVAILABLE",
     mm_gasless_owner_abandoned: "APN_OPERATION_BLOCKED",

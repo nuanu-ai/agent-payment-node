@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { OperationAbandonApprovalPort } from "../../src/operation-abandon-approval.js";
+import type { WaitPort } from "../../src/ports.js";
 import { createExactExecutionBatchTerms, createLimitedCallsTerms, hashDelegation } from "@metamask/delegation-core";
 import { TypedDataEncoder } from "ethers";
 import { encodeFunctionData, keccak256, parseAbi } from "viem";
@@ -15,7 +16,7 @@ import type { MetaMaskGaslessBinding, MetaMaskGaslessBlock, MetaMaskGaslessChain
   MetaMaskGaslessRequest, MetaMaskGaslessRpcObservation, MetaMaskGaslessUnsignedDelegation } from "../../src/metamask-gasless/model.js";
 import type { MetaMaskGaslessOperationRecord } from "../../src/metamask-gasless/operation-model.js";
 import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessQuoteInput,
-  MetaMaskGaslessRpcPort, MetaMaskGaslessUnsignedInput } from "../../src/metamask-gasless/ports.js";
+  MetaMaskGaslessRepositoryPort, MetaMaskGaslessRpcPort, MetaMaskGaslessUnsignedInput } from "../../src/metamask-gasless/ports.js";
 import { mmRegistry } from "../../src/metamask-gasless/registry.js";
 import { MM_ANY_BENEFICIARY, MM_BATCH_MODE, MM_ROOT_AUTHORITY } from "../../src/metamask-gasless/unsigned.js";
 
@@ -30,6 +31,13 @@ const types = { Caveat: [{ name: "enforcer", type: "address" }, { name: "terms",
 
 export function mmTestBlock(numberAtomic: string, now: Date): MetaMaskGaslessBlock {
   return { numberAtomic, hash: mmTestWord(numberAtomic), timestampAtomic: Math.floor(now.getTime() / 1000).toString() };
+}
+/** Records the guard's bounded retry pauses without sleeping. */
+export class MmTestWait implements WaitPort {
+  waits: number[] = [];
+  result: "elapsed" | "interrupted" = "elapsed";
+  nowMs() { return 0; }
+  async wait(milliseconds: number) { this.waits.push(milliseconds); return this.result; }
 }
 export class MmTestApproval implements MetaMaskGaslessApprovalPort {
   calls: Parameters<MetaMaskGaslessApprovalPort["confirm"]>[0][] = [];
@@ -163,7 +171,12 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
   const provider = new MmTestProvider(binding, now), rpc = new MmTestRpc(chainId, now, designation), approval = new MmTestApproval();
   const dependencies = { rpcFor: (selected: MetaMaskGaslessChainId) => { assert.equal(selected, chainId); return rpc; }, provider, approval };
   const abandon = options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {};
-  const clock = { now: () => new Date(now) }, core = new ApnCore({ state, metaMaskGasless: dependencies, clock, ...abandon });
+  const clock = { now: () => new Date(now) }, wait = new MmTestWait();
+  const makeCore = (records?: MetaMaskGaslessRepositoryPort) => new ApnCore({ state, clock, wait,
+    metaMaskGasless: records === undefined ? dependencies : { ...dependencies, records }, ...abandon });
+  const core = makeCore();
+  /** Emulates the owner reading the 25-line screen: one shared instant moves, so every later read is taken afresh. */
+  const advance = (milliseconds: number) => now.setTime(now.getTime() + milliseconds);
   const request: MetaMaskGaslessRequest = { chainId, recipient: MM_TEST_RECIPIENT,
     grossAtomic: "10000000", maxFeeAtomic: "50000", minReceivedAtomic: "9950000" };
   const record = async (id: string): Promise<MetaMaskGaslessOperationRecord> => (await core.metaMaskGasless.records.findOperation(id))!;
@@ -173,6 +186,7 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
     const id = (result.operation as { operation_id: string }).operation_id;
     return { id, input, operation: await record(id) };
   };
-  const restart = () => new ApnCore({ state: new StateStore(root), metaMaskGasless: dependencies, clock, ...abandon });
-  return { state, now, profile, publicProfile, binding, provider, rpc, approval, dependencies, clock, core, request, prepare, record, restart };
+  const restart = () => new ApnCore({ state: new StateStore(root), metaMaskGasless: dependencies, clock, wait, ...abandon });
+  return { state, now, profile, publicProfile, binding, provider, rpc, approval, dependencies, clock, wait, advance,
+    makeCore, core, request, prepare, record, restart };
 }

@@ -87,7 +87,7 @@ test("MM compiled registry retains every independently bound parent row and sour
 });
 
 test("MM reasons are closed and errors never need arbitrary provider messages", () => {
-  assert.equal(Object.keys(MM_REASON_CODES).length, 31);
+  assert.equal(Object.keys(MM_REASON_CODES).length, 32);
   assert.equal(MM_REASON_CODES.mm_gasless_success, null);
   for (const [reason, code] of Object.entries(MM_REASON_CODES)) {
     if (code === null) continue;
