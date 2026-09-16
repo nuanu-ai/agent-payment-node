@@ -1,7 +1,16 @@
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
+import { bridgeChain, bridgeNativeCoin, bridgeTokenRow } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
-import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_USDC, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeChain, bridgeFailure, bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeSame, bridgeUint } from "./validation.js";
+import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeSame, bridgeUint } from "./validation.js";
+/** The admitted row for the leg of the request that this chain identifies. Both chains are distinct by construction. */
+function requestAsset(request, chainId) {
+    if (chainId === request.fromChainId)
+        return bridgeTokenRow(chainId, request.fromToken);
+    if (chainId === request.toChainId)
+        return bridgeTokenRow(chainId, request.toToken);
+    return bridgeFailure("APN_PROVIDER_PROTOCOL", "route_chain_identity");
+}
 export function parseBridgeRoutes(response, request, sender) {
     if (response.status !== 200)
         bridgeFailure("APN_PROVIDER_UNAVAILABLE", "route_discovery_status");
@@ -81,7 +90,7 @@ export function validateRouteEconomics(m) {
     const additional = [];
     for (const fee of m.feeCosts) {
         if (fee.included) {
-            if ((fee.chainId !== r.fromChainId && fee.chainId !== r.toChainId) || fee.asset !== BRIDGE_USDC[fee.chainId])
+            if ((fee.chainId !== r.fromChainId && fee.chainId !== r.toChainId) || fee.asset !== requestAsset(r, fee.chainId).address)
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "included_fee_asset");
             included += bridgeUint(fee.amountAtomic);
         }
@@ -117,8 +126,10 @@ function assertStep(step, request, sender) {
     parseFees(estimate.feeCosts, request);
     for (const value of list(estimate.gasCosts, 8, "gas_cost_count")) {
         const gas = bridgeRecord(value), token = bridgeRecord(gas.token);
+        // Gas is always the source chain's first-class native coin; the zero address is only its wire sentinel.
         if (bridgeChain(token.chainId) !== request.fromChainId || bridgeAddress(token.address) !== BRIDGE_ZERO_ADDRESS ||
-            token.decimals !== 18 || typeof gas.type !== "string" || !["SEND", "APPROVE", "FEE"].includes(gas.type))
+            token.decimals !== bridgeNativeCoin(request.fromChainId).decimals || typeof gas.type !== "string" ||
+            !["SEND", "APPROVE", "FEE"].includes(gas.type))
             bridgeFailure("APN_PROVIDER_PROTOCOL", "gas_cost_asset");
         for (const key of ["price", "estimate", "limit", "amount"])
             bridgeUint(gas[key]);
@@ -134,8 +145,8 @@ function assertStep(step, request, sender) {
     }
 }
 function assertTuple(value, request, sender, action) {
-    assertToken(value.fromToken, request.fromChainId);
-    assertToken(value.toToken, request.toChainId);
+    assertToken(value.fromToken, request.fromChainId, request);
+    assertToken(value.toToken, request.toChainId, request);
     if (value.fromChainId !== request.fromChainId || value.toChainId !== request.toChainId || value.fromAmount !== request.amountAtomic ||
         bridgeAddress(value.fromAddress) !== sender || bridgeAddress(value.toAddress) !== request.recipient)
         bridgeFailure("APN_PROVIDER_PROTOCOL", "route_action_tuple");
@@ -147,8 +158,8 @@ function assertTuple(value, request, sender, action) {
 }
 function assertIncludedAction(a, request, amount, collection) {
     actionKeys(a);
-    assertToken(a.fromToken, request.fromChainId);
-    assertToken(a.toToken, collection ? request.fromChainId : request.toChainId);
+    assertToken(a.fromToken, request.fromChainId, request);
+    assertToken(a.toToken, collection ? request.fromChainId : request.toChainId, request);
     if (a.fromChainId !== request.fromChainId || a.toChainId !== (collection ? request.fromChainId : request.toChainId) ||
         a.fromAmount !== amount || bridgeAddress(a.fromAddress) !== BRIDGE_DIAMOND ||
         bridgeAddress(a.toAddress) !== (collection ? BRIDGE_DIAMOND : request.recipient) || a.slippage !== request.slippageBps / 10_000 ||
@@ -159,18 +170,22 @@ function actionKeys(a) {
     if (Object.keys(a).some((k) => !["fromChainId", "toChainId", "fromToken", "toToken", "fromAmount", "fromAddress", "toAddress", "slippage", "destinationGasConsumption"].includes(k)))
         bridgeFailure("APN_PROVIDER_PROTOCOL", "action_extension");
 }
-function assertToken(value, chainId) {
-    const token = bridgeRecord(value);
-    if (token.chainId !== chainId || token.decimals !== 6 || bridgeAddress(token.address) !== BRIDGE_USDC[chainId])
-        bridgeFailure("APN_PROVIDER_PROTOCOL", "canonical_USDC_metadata");
+function assertToken(value, chainId, request) {
+    const token = bridgeRecord(value), asset = requestAsset(request, chainId);
+    if (token.chainId !== chainId || token.decimals !== asset.decimals ||
+        bridgeAddress(token.address) !== asset.address)
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "admitted_asset_metadata");
 }
 function parseFees(value, request) {
     return list(value, 16, "fee_count").map((value) => {
         const fee = bridgeRecord(value), token = bridgeRecord(fee.token), chainId = bridgeChain(token.chainId), address = bridgeAddress(token.address);
         if (typeof fee.included !== "boolean" || typeof fee.name !== "string" || fee.name.length < 1 || fee.name.length > 192 || /[\u0000-\u001f\u007f]/u.test(fee.name))
             bridgeFailure("APN_PROVIDER_PROTOCOL", "fee_semantics");
-        if (fee.included ? token.decimals !== 6 || address !== BRIDGE_USDC[chainId] || ![request.fromChainId, request.toChainId].includes(chainId)
-            : token.decimals !== 18 || address !== BRIDGE_ZERO_ADDRESS || chainId !== request.fromChainId)
+        // An included fee must be the admitted asset on one of the two route chains; anything else is the native coin.
+        const onPair = [request.fromChainId, request.toChainId].includes(chainId);
+        if (fee.included ? !onPair || token.decimals !== requestAsset(request, chainId).decimals || address !== requestAsset(request, chainId).address
+            : token.decimals !== bridgeNativeCoin(request.fromChainId).decimals || address !== BRIDGE_ZERO_ADDRESS ||
+                chainId !== request.fromChainId)
             bridgeFailure("APN_PROVIDER_PROTOCOL", "fee_asset");
         return { name: fee.name, chainId, asset: fee.included ? address : "native", amountAtomic: bridgeUint(fee.amount).toString(), included: fee.included };
     });

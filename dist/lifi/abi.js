@@ -41,6 +41,7 @@ export const deploymentAbi = parseAbi([
     "function isContractSelectorWhitelisted(address target,bytes4 selector) view returns (bool)",
     "function owner() view returns (address)",
     "function decimals() view returns (uint8)",
+    "function implementation() view returns (address)",
     "function SPOKEPOOL() view returns (address)",
     "function WRAPPED_NATIVE() view returns (bytes32)",
     "function depositQuoteTimeBuffer() view returns (uint32)",

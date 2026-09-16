@@ -16,12 +16,15 @@ import { LifiProvider, normalizeLifiStatus, type LifiTransport } from "../../src
 import { validateBridgeQuote } from "../../src/lifi/quote-repository.js";
 import { bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { bridgeInventory } from "../../src/lifi/catalog.js";
-import { BRIDGE_USDC } from "../../src/lifi/validation.js";
+import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
+
+const BRIDGE_USDC = { 1: BRIDGE_ASSET_REGISTRY[1].tokens[0]!.address, 8453: BRIDGE_ASSET_REGISTRY[8453].tokens[0]!.address,
+  42161: BRIDGE_ASSET_REGISTRY[42161].tokens[0]!.address } as const;
 import { temporaryState } from "./helpers.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_SENDER, lifiFixture } from "./lifi-helpers.js";
 
 const routeArgs = { profile: "lifi-local", from_chain: "eip155:1", to_chain: "eip155:8453", from_token: BRIDGE_USDC[1],
-  to_token: BRIDGE_USDC[8453], amount: "10", to: LIFI_RECIPIENT, min_output: "9", max_native_debit_wei: "10000000000000000", max_route_fee: "1", slippage_bps: "50" };
+  to_token: BRIDGE_USDC[8453], amount: "10", to: LIFI_RECIPIENT, min_output: "9", max_native_debit_wei: "20000000000000000", max_route_fee: "1", slippage_bps: "50" };
 function argv(path: string[], args: Record<string, string>) { return [...path, ...Object.entries(args).flatMap(([k, v]) => [`--${k.replaceAll("_", "-")}`, v])]; }
 
 test("LI.FI all five CLI and MCP commands bind identically, without a generic RPC fallback", () => {
@@ -105,11 +108,15 @@ test("LI.FI RPC environment requires each exact admitted chain endpoint and reje
   assert.equal(rpc(8453).origin, "https://base.example"); assert.equal(rpc(1).origin, "https://ethereum.example"); assert.equal(rpc(8453), rpc(8453));
 });
 
-test("LI.FI public provider API contract uses fixed endpoints, finite tools, six pair inventories and bounded status normalization", async () => {
+test("LI.FI public provider API contract uses fixed endpoints, finite tools, one inventory per admitted asset pair and bounded status normalization", async () => {
   const calls: Parameters<LifiTransport["request"]>[] = [], provider = new LifiProvider({ async request(...args) { calls.push(args); return { status: 200, body: "{}" }; } });
-  await provider.inventory(); assert.equal(calls.length, 9);
+  // One connection probe per admitted (asset, peer) row, so the count follows the registry rather than a constant.
+  const admittedPairs = ([1, 8453, 42161] as const).reduce((sum, id) =>
+    sum + BRIDGE_ASSET_REGISTRY[id].tokens.reduce((rows, asset) => rows + asset.peers.length, 0), 0);
+  assert.equal(admittedPairs, 8);
+  await provider.inventory(); assert.equal(calls.length, 3 + admittedPairs);
   assert.deepEqual(new URL(calls.find((c) => c[0].includes("/tools?"))![0]).searchParams.getAll("chains"), ["1", "8453", "42161"]);
-  assert.equal(calls.filter((c) => c[0].includes("/connections?")).length, 6);
+  assert.equal(calls.filter((c) => c[0].includes("/connections?")).length, admittedPairs);
   const request = { fromChainId: 1 as const, toChainId: 8453 as const, fromToken: BRIDGE_USDC[1], toToken: BRIDGE_USDC[8453], recipient: LIFI_RECIPIENT,
     amountAtomic: "10000000", minOutputAtomic: "9000000", maxNativeDebitWei: routeArgs.max_native_debit_wei, maxRouteFeeAtomic: "1000000", slippageBps: 50 };
   await provider.routes(request, LIFI_SYNTHETIC_SENDER); const last = calls.at(-1)!; assert.equal(last[0], "https://li.quest/v1/advanced/routes");

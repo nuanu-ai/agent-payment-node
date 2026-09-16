@@ -5,7 +5,7 @@ import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./a
 import { decodeBridgeCall } from "./decode.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
 import type { AcrossCorrelation, BridgeDestinationProof, BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall, StargateCorrelation } from "./model.js";
-import { BRIDGE_DIAMOND, BRIDGE_USDC, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeSame, bridgeUint } from "./validation.js";
+import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeSame, bridgeUint } from "./validation.js";
 
 type BridgeEventData = Readonly<{
   transactionId: Hex; bridge: string; integrator: string; referrer: Address; sendingAssetId: Address;
@@ -85,14 +85,15 @@ function validateStoredSource(source: BridgeSourceProof, decoded: DecodedBridgeC
   fail("stored_correlation_kind");
 }
 
-export function destinationEventFilter(source: BridgeSourceProof): { address: Address; topics: readonly (Hex | null)[] } {
+/** The destination token selects the Stargate pool emitter; the Across spoke pool is asset independent. */
+export function destinationEventFilter(source: BridgeSourceProof, destinationToken: Address): { address: Address; topics: readonly (Hex | null)[] } {
   if (source.correlation.kind === "across") {
     const c = source.correlation;
-    return { address: bridgeProtocolEmitter(c.destinationChainId, "across"), topics: [EVENT_TOPICS.filledRelay, uintWord(c.originChainId), uintWord(c.depositId)] };
+    return { address: bridgeProtocolEmitter(c.destinationChainId, "across", destinationToken), topics: [EVENT_TOPICS.filledRelay, uintWord(c.originChainId), uintWord(c.depositId)] };
   }
   const c = source.correlation;
   const destination = chainForEid(c.destinationEid);
-  return { address: bridgeProtocolEmitter(destination, "stargateV2"), topics: [EVENT_TOPICS.oftReceived, bridgeHex(c.guid, 32, 32), addressWord(c.recipient)] };
+  return { address: bridgeProtocolEmitter(destination, "stargateV2", destinationToken), topics: [EVENT_TOPICS.oftReceived, bridgeHex(c.guid, 32, 32), addressWord(c.recipient)] };
 }
 
 function validateCommonSourceEvents(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): void {
@@ -111,7 +112,7 @@ function validateSourceTransfers(decoded: DecodedBridgeCall, receipt: BridgeProt
   const transfers = events(receipt, decoded.sourceToken, EVENT_TOPICS.transfer, "Transfer") as readonly Transfer[];
   const fromSender = transfers.filter((x) => x.from === decoded.sender);
   const fromDiamond = transfers.filter((x) => x.from === BRIDGE_DIAMOND);
-  const emitter = bridgeProtocolEmitter(decoded.sourceChainId, decoded.tool);
+  const emitter = bridgeProtocolEmitter(decoded.sourceChainId, decoded.tool, decoded.sourceToken);
   if (transfers.length !== 3 || fromSender.length !== 1 || fromSender[0]!.to !== BRIDGE_DIAMOND || fromSender[0]!.value.toString() !== decoded.sourceAmountAtomic ||
     fromDiamond.length !== 2 || !fromDiamond.some((x) => x.to === FEE_RECIPIENT && x.value.toString() === decoded.feeAmountAtomic) ||
     !fromDiamond.some((x) => x.to === emitter && x.value.toString() === decoded.bridgeAmountAtomic)) fail("source_token_movements");
@@ -120,7 +121,7 @@ function validateSourceTransfers(decoded: DecodedBridgeCall, receipt: BridgeProt
 function acrossSource(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): AcrossCorrelation {
   if (decoded.protocol.kind !== "across") return fail("across_shape");
   const p = decoded.protocol;
-  const emitter = bridgeProtocolEmitter(decoded.sourceChainId, "across");
+  const emitter = bridgeProtocolEmitter(decoded.sourceChainId, "across", decoded.sourceToken);
   const e = oneEvent(receipt, emitter, EVENT_TOPICS.fundsDeposited, "FundsDeposited") as FundsDeposited;
   if (e.inputToken.toLowerCase() !== p.sendingAssetId || e.outputToken.toLowerCase() !== p.receivingAssetId ||
     e.inputAmount.toString() !== decoded.bridgeAmountAtomic || e.outputAmount.toString() !== p.outputAmountAtomic ||
@@ -138,7 +139,7 @@ function acrossSource(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt
 
 function stargateSource(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): StargateCorrelation {
   if (decoded.protocol.kind !== "stargateV2") return fail("stargate_shape");
-  const emitter = bridgeProtocolEmitter(decoded.sourceChainId, "stargateV2");
+  const emitter = bridgeProtocolEmitter(decoded.sourceChainId, "stargateV2", decoded.sourceToken);
   const e = oneEvent(receipt, emitter, EVENT_TOPICS.oftSent, "OFTSent") as OFTSent;
   if (e.guid.toLowerCase() === BRIDGE_ZERO_WORD || e.dstEid !== decoded.protocol.dstEid || e.fromAddress !== BRIDGE_DIAMOND ||
     e.amountSentLD.toString() !== decoded.bridgeAmountAtomic || e.amountReceivedLD < BigInt(decoded.minimumOutputAtomic)) fail("OFTSent");
@@ -152,7 +153,7 @@ function stargateSource(decoded: DecodedBridgeCall, receipt: BridgeProtocolRecei
 function acrossDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeDestinationProof {
   if (source.correlation.kind !== "across") return fail("across_correlation");
   const c = source.correlation;
-  const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "across");
+  const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "across", decoded.destinationToken);
   const e = oneEvent(receipt, emitter, EVENT_TOPICS.filledRelay, "FilledRelay") as FilledRelay;
   const info = e.relayExecutionInfo;
   if (e.originChainId !== BigInt(c.originChainId) || e.depositId.toString() !== c.depositId || e.inputToken.toLowerCase() !== c.inputToken ||
@@ -175,7 +176,7 @@ function acrossDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall
 function stargateDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeDestinationProof {
   if (source.correlation.kind !== "stargateV2") return fail("stargate_correlation");
   const c = source.correlation;
-  const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "stargateV2");
+  const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "stargateV2", decoded.destinationToken);
   const received = oneEvent(receipt, emitter, EVENT_TOPICS.oftReceived, "OFTReceived") as OFTReceived;
   const cached = events(receipt, emitter, EVENT_TOPICS.unreceivedTokenCached, "UnreceivedTokenCached") as readonly { guid: Hex }[];
   if (cached.some((x) => x.guid.toLowerCase() === c.guid) || received.guid.toLowerCase() !== c.guid || received.srcEid !== c.sourceEid ||

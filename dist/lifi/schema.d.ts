@@ -160,6 +160,12 @@ export declare const feeQuoteSchema: z.ZodObject<{
     totalQuoteWei: z.ZodString;
     totalFeeEnforcedOnchain: z.ZodLiteral<false>;
 }, z.core.$strict>;
+export declare const feeCeilingSchema: z.ZodObject<{
+    policy: z.ZodLiteral<"apn.bridge-fee-headroom.v1">;
+    headroomBps: z.ZodNumber;
+    quotedMaxFeePerGasAtomic: z.ZodString;
+    quotedMaxPriorityFeePerGasAtomic: z.ZodString;
+}, z.core.$strict>;
 export declare const envelopeSchema: z.ZodObject<{
     role: z.ZodEnum<{
         bridge: "bridge";
@@ -191,6 +197,12 @@ export declare const envelopeSchema: z.ZodObject<{
         totalFeeEnforcedOnchain: z.ZodLiteral<false>;
     }, z.core.$strict>;
     provisionalGas: z.ZodBoolean;
+    feeCeiling: z.ZodObject<{
+        policy: z.ZodLiteral<"apn.bridge-fee-headroom.v1">;
+        headroomBps: z.ZodNumber;
+        quotedMaxFeePerGasAtomic: z.ZodString;
+        quotedMaxPriorityFeePerGasAtomic: z.ZodString;
+    }, z.core.$strict>;
     envelopeHash: z.ZodString;
 }, z.core.$strict>;
 export declare const txProofSchema: z.ZodObject<{
@@ -410,6 +422,12 @@ export declare const effectSchema: z.ZodObject<{
             totalFeeEnforcedOnchain: z.ZodLiteral<false>;
         }, z.core.$strict>;
         provisionalGas: z.ZodBoolean;
+        feeCeiling: z.ZodObject<{
+            policy: z.ZodLiteral<"apn.bridge-fee-headroom.v1">;
+            headroomBps: z.ZodNumber;
+            quotedMaxFeePerGasAtomic: z.ZodString;
+            quotedMaxPriorityFeePerGasAtomic: z.ZodString;
+        }, z.core.$strict>;
         envelopeHash: z.ZodString;
     }, z.core.$strict>;
     role: z.ZodEnum<{
@@ -833,6 +851,12 @@ export declare const operationSchema: z.ZodObject<{
                 totalFeeEnforcedOnchain: z.ZodLiteral<false>;
             }, z.core.$strict>;
             provisionalGas: z.ZodBoolean;
+            feeCeiling: z.ZodObject<{
+                policy: z.ZodLiteral<"apn.bridge-fee-headroom.v1">;
+                headroomBps: z.ZodNumber;
+                quotedMaxFeePerGasAtomic: z.ZodString;
+                quotedMaxPriorityFeePerGasAtomic: z.ZodString;
+            }, z.core.$strict>;
             envelopeHash: z.ZodString;
         }, z.core.$strict>;
         role: z.ZodEnum<{

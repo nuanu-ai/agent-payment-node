@@ -17,7 +17,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
     constructor(chainId: EvmChainId, origin: string, call: EvmRpcCall);
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
-    deployment(tool: BridgeTool, peerChainId: EvmChainId, block?: BridgeBlock): Promise<{
+    deployment(tool: BridgeTool, peerChainId: EvmChainId, token: Address, block?: BridgeBlock): Promise<{
         chainId: 1 | 8453 | 42161;
         peerChainId: 1 | 8453 | 42161;
         tool: BridgeTool;
@@ -27,7 +27,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         codeHash: string;
         configurationHash: string;
     }>;
-    account(owner: Address, spender: Address): Promise<{
+    account(owner: Address, spender: Address, token: Address): Promise<{
         chainId: 1 | 8453 | 42161;
         rpcOrigin: string;
         block: BridgeBlock;
