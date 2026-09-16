@@ -28,7 +28,7 @@ export declare class SecureStateStore {
     private directorySnapshot;
     private assertSameDirectorySnapshot;
     protected readJson(relativePath: string): Promise<unknown | null>;
-    protected writeJson(relativePath: string, value: unknown): Promise<void>;
+    protected writeJson(relativePath: string, value: unknown, createOnly?: boolean): Promise<void>;
     protected removeFile(relativePath: string): Promise<boolean>;
     private acquireLock;
     private validateOpenedLock;

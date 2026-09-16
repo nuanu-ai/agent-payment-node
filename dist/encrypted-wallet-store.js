@@ -6,6 +6,7 @@ import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from 
 import { CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
+import { listEncryptedWalletEnvelopes, listLocalProviderProfiles, listLocalWallets } from "./wallet-import-collision.js";
 const ENVELOPE_VERSION = "apn.wallet-envelope.v1";
 const SECRET_VERSION = "apn.wallet-secret.v1";
 const KDF_NAME = "HKDF-SHA-256";
@@ -77,7 +78,54 @@ export class EncryptedWalletStore {
             wrapping.fill(0);
         }
     }
-    async save(identity, secret, wrappingInput) {
+    async importNew(profileInput, privateKeyInput, expectedAddress) {
+        const profile = canonicalProfile(profileInput);
+        if (!PRIVATE_KEY.test(privateKeyInput))
+            throw new ApnError("APN_INVALID_INPUT", "Wallet key encoding is invalid.");
+        let address;
+        try {
+            address = privateKeyToAccount(privateKeyInput).address;
+        }
+        catch {
+            throw new ApnError("APN_INVALID_INPUT", "Wallet key scalar is invalid.");
+        }
+        if (address !== canonicalAddress(expectedAddress) || expectedAddress !== address) {
+            throw new ApnError("APN_WALLET_MISMATCH", "Imported wallet address does not match the expected checksum address.");
+        }
+        if (await this.state.loadEncryptedWalletEnvelope(profile) !== null) {
+            throw new ApnError("APN_PROFILE_DRIFT", "Wallet profile is already occupied.");
+        }
+        for (const wallet of await listLocalWallets(this.state)) {
+            if (wallet.address.toLowerCase() === address.toLowerCase()) {
+                throw new ApnError("APN_PROFILE_DRIFT", "Wallet address already belongs to a local profile.");
+            }
+        }
+        for (const provider of await listLocalProviderProfiles(this.state)) {
+            if (provider.public_address.toLowerCase() === address.toLowerCase()) {
+                throw new ApnError("APN_PROFILE_DRIFT", "Wallet address already belongs to a local profile.");
+            }
+        }
+        for (const entry of await listEncryptedWalletEnvelopes(this.state)) {
+            if (parseEnvelope(entry.value, entry.profile).identity.address.toLowerCase() === address.toLowerCase()) {
+                throw new ApnError("APN_PROFILE_DRIFT", "Wallet address already belongs to a local profile.");
+            }
+        }
+        const wrapping = await this.wrappingSecret.create();
+        const createdAt = new Date().toISOString();
+        const identity = { profile, address, chainId: CHAIN_ID, createdAt,
+            bindingHash: hashObject({ profile, address, createdAt }) };
+        const secret = { version: SECRET_VERSION, privateKey: privateKeyInput,
+            directEffects: {}, x402Effects: {} };
+        try {
+            await this.save(identity, secret, wrapping, true);
+            return identity;
+        }
+        finally {
+            this.clear(secret);
+            wrapping.fill(0);
+        }
+    }
+    async save(identity, secret, wrappingInput, createOnly = false) {
         const wrapping = wrappingInput === undefined ? await this.requiredWrappingSecret() : Buffer.from(wrappingInput);
         const salt = randomBytes(32);
         const nonce = randomBytes(12);
@@ -101,7 +149,10 @@ export class EncryptedWalletStore {
                     tag: cipher.getAuthTag().toString("base64"),
                 },
             };
-            await this.state.writeEncryptedWalletEnvelope(identity.profile, envelope);
+            if (createOnly)
+                await this.state.writeNewEncryptedWalletEnvelope(identity.profile, envelope);
+            else
+                await this.state.writeEncryptedWalletEnvelope(identity.profile, envelope);
             ciphertext.fill(0);
         }
         finally {

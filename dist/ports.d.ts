@@ -15,7 +15,7 @@ export interface WaitPort {
 export interface NativeRequest {
     readonly version: "apn.native.v1";
     readonly requestId: string;
-    readonly operation: "wallet.describe" | "wallet.ensure" | "directTransfer.approveAndSign" | "effectMaterial.get" | "x402Exact.approveAndAuthorize" | "x402Exact.authorizationMaterial.get";
+    readonly operation: "wallet.describe" | "wallet.ensure" | "wallet.import" | "directTransfer.approveAndSign" | "effectMaterial.get" | "x402Exact.approveAndAuthorize" | "x402Exact.authorizationMaterial.get";
     readonly payload: Readonly<Record<string, unknown>>;
 }
 export interface NativePort {

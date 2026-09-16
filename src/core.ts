@@ -122,6 +122,7 @@ export class ApnCore {
         }, "local_build_metadata");
       case "doctor.keychain": return dataOutcome(await this.wallet.doctorKeychain(), "encrypted_apn_home_status");
       case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
+      case "wallet.import": return dataOutcome(await this.wallet.importNew(request.profile, request.keyFile, request.keyName, request.expectedAddress), "encrypted_apn_home_status");
       case "wallet.ensure-tron": return dataOutcome(await this.rails.policies.ensure(request.profile, "tron", request.provider, request.acceptRisk), "chain_account_binding");
       case "wallet.balance-tron": return dataOutcome(await this.rails.policies.balance(request.profile, "tron", request.asset), "chain_verified_public_read");
       case "wallet.capabilities-tron": return dataOutcome({ ...tronCapabilities(), ...(request.profile === undefined ? {} : {
