@@ -1,5 +1,6 @@
 import { hashObject } from "../canonical.js";
 import type { Hex } from "../model.js";
+import { isEvmTransactionHash } from "../rail-status-binding.js";
 import type { BridgeDeploymentIdentity, BridgeTransactionProof } from "./model.js";
 import type { BridgeEffect, BridgeMutable, BridgeOperationRecord, BridgeVerifiedDestinationProof } from "./operation-model.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
@@ -93,7 +94,8 @@ export class BridgeObservation {
     } catch { /* Provider availability is independent of canonical chain evidence. */ }
     if (observation !== null) op = await this.save(op, { providerObservation: observation });
     const hint = op.providerObservation?.destinationTransactionHash;
-    if (hint !== null && hint !== undefined) {
+    // Only an EVM hash can address the EVM destination reader; a Solana hint falls through to the scan.
+    if (isEvmTransactionHash(hint)) {
       let proof: BridgeVerifiedDestinationProof | null = null;
       try { proof = await this.destinationCandidate(op, hint); } catch { /* Scan the exact protocol correlation next. */ }
       if (proof !== null) return await this.finish(await this.save(op, { destinationProof: proof }));

@@ -2,13 +2,14 @@ import { address, getBase58Decoder, getBase64EncodedWireTransaction, getCompiled
 import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { atomic, SOLANA_USDC } from "../chain-policy.js";
-import type { ChainAccount, RailFinalEvidence, RailInspection, RailPreparedTransfer } from "../direct-rail-ports.js";
+import type { ChainAccount, RailFinalEvidence, RailInspection, RailPreparedTransfer, RailSendBinding } from "../direct-rail-ports.js";
+import { railSendLifetime } from "../rail-send-binding.js";
 import { associatedUsdc } from "./accounts.js";
 import { solanaTransferInstructions, validateSolanaMessage } from "./message.js";
 import { assertSolanaNetwork, protocolFailure, rpcArray, rpcAtomic, rpcRecord, solanaAddress, solanaSignature, type SolanaRpcPort } from "./rpc.js";
 
 const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
-export async function inspectSolana(rpc: SolanaRpcPort, account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, now: Date): Promise<RailInspection> {
+export async function inspectSolana(rpc: SolanaRpcPort, account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, now: Date, send: RailSendBinding | null = null): Promise<RailInspection> {
   await assertSolanaNetwork(rpc); solanaSignature(transactionId);
   const response = rpcRecord(await rpc.call("getSignatureStatuses", [[transactionId], { searchTransactionHistory: true }]));
   const statuses = rpcArray(response.value, 1);
@@ -32,8 +33,8 @@ export async function inspectSolana(rpc: SolanaRpcPort, account: ChainAccount, p
     return solanaAddress(entry.pubkey);
   });
   if (new Set(keys).size !== keys.length || keys[0] !== prepared.economics.networkFeePayer || entries[0]?.signer !== true || entries[keys.indexOf(prepared.sender)]?.signer !== true) protocolFailure();
-  if (message.recentBlockhash !== prepared.blockReference && account.provider === "local") protocolFailure();
-  await verifyWire(rpc, transactionId, slot, account, prepared, signatures, message, entries);
+  if (message.recentBlockhash !== railSendLifetime(prepared, send).blockReference && account.provider === "local") protocolFailure();
+  await verifyWire(rpc, transactionId, slot, account, prepared, signatures, message, entries, send);
   await verifyInstructions(message.instructions, prepared);
   const pre = rpcArray(meta.preBalances, keys.length).map(rpcAtomic); const post = rpcArray(meta.postBalances, keys.length).map(rpcAtomic);
   if (pre.length !== keys.length || post.length !== keys.length) protocolFailure();
@@ -76,7 +77,7 @@ export async function inspectSolana(rpc: SolanaRpcPort, account: ChainAccount, p
   return { status: success ? "completed" : "failed_confirmed_revert", reason: success ? "exact_finalized_effect" : "exact_finalized_error", proofClass: "solana_finalized_transaction_effect", evidence };
 }
 
-async function verifyWire(rpc: SolanaRpcPort, transactionId: string, slot: bigint, account: ChainAccount, prepared: RailPreparedTransfer, signatures: readonly unknown[], parsed: Record<string, unknown>, entries: readonly Record<string, unknown>[]): Promise<void> {
+async function verifyWire(rpc: SolanaRpcPort, transactionId: string, slot: bigint, account: ChainAccount, prepared: RailPreparedTransfer, signatures: readonly unknown[], parsed: Record<string, unknown>, entries: readonly Record<string, unknown>[], send: RailSendBinding | null): Promise<void> {
   const response = rpcRecord(await rpc.call("getTransaction", [transactionId, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }]));
   if (rpcAtomic(response.slot) !== slot) protocolFailure();
   const encoded = rpcArray(response.transaction, 2);
@@ -85,7 +86,7 @@ async function verifyWire(rpc: SolanaRpcPort, transactionId: string, slot: bigin
   const tx = getTransactionDecoder().decode(bytes);
   if (getSignatureFromTransaction(tx) !== transactionId || Object.keys(tx.signatures).length !== signatures.length || getBase64EncodedWireTransaction(tx) !== encoded[0]) protocolFailure();
   if (account.provider === "local") {
-    const expected = await validateSolanaMessage(prepared);
+    const expected = await validateSolanaMessage(prepared, send);
     if (Buffer.from(tx.messageBytes).toString("base64") !== expected.messageBase64 || signatures.length !== 1) protocolFailure();
   }
   let signatureIndex = 0;

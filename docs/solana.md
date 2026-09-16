@@ -97,12 +97,65 @@ the admitted cap. USDC still needs SOL for these costs. If the recipient's
 associated account is absent, the frozen message includes its exact idempotent
 creation and rent payer.
 
-Approval expires after 60 seconds. The terminal displays the sender, recipient,
-network, asset, decimal and atomic amount, fee/rent payers and caps, policy,
-operation, fingerprint and expiry. It rechecks the frozen bounds before signing
-and submission. A stale preparation fails before effect and needs a new
-idempotency key. Solana uses `APN_SOLANA_RPC_URL`; the common `--rpc-url` option
-continues to select the EVM RPC for EVM operations.
+Approval expires after 240 seconds. That deadline bounds the owner's reading
+time only: it is not the sending window. Until 0.5.18 the whole operation was
+valid for 60 seconds and the block reference frozen at preparation had to
+survive the approval pause, so a careful owner could lose the transfer to a
+reference that expired while the screen was being read.
+
+The terminal displays the sender, recipient, network, asset, decimal and atomic
+amount, fee/rent payers and caps, policy, operation, fingerprint and expiry, and
+on a local Solana transfer states that the block reference is re-acquired after
+approval and these exact bytes simulated before anything is signed. It rechecks
+the frozen bounds before signing and submission. A stale preparation
+fails before effect and needs a new idempotency key. Solana uses
+`APN_SOLANA_RPC_URL`; the common `--rpc-url` option continues to select the EVM
+RPC for EVM operations.
+
+### The send guard
+
+After the owner approves and before anything is signed, the send guard runs
+once:
+
+1. It re-acquires the recent block reference and the current block height, so
+   the sending window opens after the reading time rather than being consumed
+   by it. The re-acquired window must not be older than the frozen one and must
+   still leave at least 38 blocks — about 15 seconds at mainnet slot times, the
+   same margin the bridge rail already demands. A validator that answers with an
+   almost-closed window is refused.
+2. It re-proves the frozen fee, rent, recipient-account and funding bounds
+   against the re-acquired reference.
+3. It simulates the exact bytes with `simulateTransaction` and `sigVerify:
+   false`. Simulation produces no on-chain effect and needs no signature, so a
+   transaction that would fail on chain is refused while no signature exists.
+
+The result is a send binding — block reference, last valid block height,
+observed block height, acquisition time and the simulation evidence — written
+exactly once, together with the durable `signing_started` transition. It is
+outside the operation fingerprint, so re-acquiring a window never restates the
+intent the owner approved, and it can never be restated afterwards: signing,
+submission, recovery and finalized evidence all read that one recorded window.
+`operation resume` reuses it and never simulates or re-binds a second time.
+Records that never re-bound, including every TRON record, omit the field
+entirely and keep their exact previous shape, identity hash and receipt.
+
+A refusal by the send guard is terminal before effect and carries its own
+reason, so a lost read never reads as a chain refusal:
+
+| Reason | Meaning |
+| --- | --- |
+| `solana_simulation_unavailable` | The simulation read was lost in transport. Re-run up to 4 times, 5 seconds apart, while the approved window still leaves 15 seconds; each attempt re-acquires a fresh window. |
+| `solana_simulation_protocol` | The simulation answer was malformed, or claimed success while executing nothing, so it proves nothing. |
+| `solana_simulation_blockhash_not_found` | The validator does not know the re-acquired reference. |
+| `solana_simulation_already_processed` | The validator has already seen this transaction. |
+| `solana_simulation_insufficient_funds` | Fee or rent funding no longer covers the transfer. |
+| `solana_simulation_instruction_error` | An instruction in the frozen message would fail. |
+| `solana_simulation_rejected` | Any other refusal the validator names. |
+| `pre_send_guard_refused` | The re-acquired window, fee, rent, recipient account or funding no longer matches the frozen intent. |
+
+Only the transport loss is retried. Every chain answer and every malformed
+answer is an answer, not noise, and ends the operation before any effect with
+nothing signed and nothing in custody.
 
 ## Recovery and completion
 

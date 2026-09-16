@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SOLANA_GENESIS } from "../../src/chain-policy.js";
-import { storedOperationDomains } from "../../src/operation-conflict-domain.js";
+import { bridgeConflictDomain, SOLANA_BRIDGE_CHAIN_ID, storedOperationDomains } from "../../src/operation-conflict-domain.js";
 import { OperationService, type StoredMoneyOperation } from "../../src/operation-service.js";
 import { TRON_GENESIS } from "../../src/tron/constants.js";
 
@@ -70,6 +70,45 @@ test("rail operations are scoped by rail genesis and sender", async () => {
   await operations.assertEvmAccountAvailable(PROFILE, 8453, A);
 });
 
+const bridgeOn = (chainId: number | string, address: string, operationId = "bridge-1") =>
+  open(operationId, { intent: { sourceDeployment: { chainId }, owner: { address } } });
+
+test("a Solana-side bridge takes the Solana rail lock, and an EVM bridge is unchanged", async () => {
+  const solana = service({ bridges: [bridgeOn(SOLANA_BRIDGE_CHAIN_ID, SOLANA)] });
+  // One money operation per profile: the bridge and a direct Solana transfer share the one lock.
+  await assert.rejects(solana.assertRailAccountAvailable(PROFILE, "solana", SOLANA), blockedOn("bridge-1", `solana:${SOLANA_GENESIS}`, SOLANA));
+  await assert.rejects(solana.assertProfileAvailable(PROFILE), {
+    code: "APN_OPERATION_BLOCKED", details: { blockingOperationId: "bridge-1", blockingState: "unknown_finality" },
+  });
+  // No accidental collision across chains or families.
+  await solana.assertRailAccountAvailable(PROFILE, "solana", "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFio");
+  await solana.assertRailAccountAvailable(PROFILE, "tron", TRON);
+  await solana.assertEvmAccountAvailable(PROFILE, 8453, A);
+  await solana.assertEvmAccountAvailable(PROFILE, 1, A);
+
+  const evm = service({ bridges: [bridgeOn(1, A)] });
+  await assert.rejects(evm.assertEvmAccountAvailable(PROFILE, 1, A), blockedOn("bridge-1", "evm:1", A.toLowerCase()));
+  await evm.assertEvmAccountAvailable(PROFILE, 8453, A);
+  await evm.assertRailAccountAvailable(PROFILE, "solana", SOLANA);
+});
+
+test("a terminal Solana-side bridge releases the profile and the rail account", async () => {
+  const released = service({ bridges: [{ ...bridgeOn(SOLANA_BRIDGE_CHAIN_ID, SOLANA), state: "completed", terminal: true }] });
+  await released.assertRailAccountAvailable(PROFILE, "solana", SOLANA);
+  await released.assertProfileAvailable(PROFILE);
+});
+
+test("the bridge domain refuses an account that is not its chain's own account form", () => {
+  assert.deepEqual(bridgeConflictDomain(SOLANA_BRIDGE_CHAIN_ID, SOLANA), { family: "solana", network: SOLANA_GENESIS, account: SOLANA });
+  assert.deepEqual(bridgeConflictDomain(8453, A), { family: "evm", network: "8453", account: A.toLowerCase() });
+  assert.deepEqual(bridgeConflictDomain("42161", B), { family: "evm", network: "42161", account: B });
+  // An EVM address on the Solana chain id, and a base58 address on an EVM chain id, are both refused.
+  assert.throws(() => bridgeConflictDomain(SOLANA_BRIDGE_CHAIN_ID, A), /Invalid Solana bridge conflict domain/u);
+  assert.throws(() => bridgeConflictDomain(SOLANA_BRIDGE_CHAIN_ID, "not-base58"), /Invalid Solana bridge conflict domain/u);
+  assert.throws(() => bridgeConflictDomain(8453, SOLANA), /Invalid EVM conflict domain/u);
+  assert.throws(() => bridgeConflictDomain(0, A), /Invalid EVM conflict domain/u);
+});
+
 test("terminal operations never block", async () => {
   await service({ gasless: [{ ...gaslessOn(137, A), state: "failed_before_effect", terminal: true }] }).assertEvmAccountAvailable(PROFILE, 137, A);
 });
@@ -91,7 +130,11 @@ test("every stored money family maps to its network and sending account", () => 
   assert.deepEqual(domains({ kind: "x402_fetch", strategy: "provider_atomic", record: open("p", { provider: { payer: B } }) }), evm("8453", B));
   assert.deepEqual(domains({ kind: "rail_transfer", record: open("r", { account: { rail: "solana", address: SOLANA } }) }),
     [{ family: "solana", network: SOLANA_GENESIS, account: SOLANA }]);
-  assert.deepEqual(domains({ kind: "bridge_route", record: open("b", { intent: { sourceDeployment: { chainId: 1 }, owner: { address: A } } }) }), evm("1", A));
+  assert.deepEqual(domains({ kind: "bridge_route", record: bridgeOn(1, A, "b") }), evm("1", A));
+  assert.deepEqual(domains({ kind: "bridge_route", record: bridgeOn(8453, B, "b") }), evm("8453", B));
+  assert.deepEqual(domains({ kind: "bridge_route", record: bridgeOn(SOLANA_BRIDGE_CHAIN_ID, SOLANA, "b") }),
+    [{ family: "solana", network: SOLANA_GENESIS, account: SOLANA }]);
+  assert.equal(domains({ kind: "bridge_route", record: bridgeOn(SOLANA_BRIDGE_CHAIN_ID, A, "b") }), null);
   assert.deepEqual(domains({ kind: "gasless_transfer", record: gaslessOn(137, A) }), evm("137", A));
   assert.deepEqual(domains({ kind: "metamask_gasless_transfer", record: open("m", { intent: { request: { chainId: 8453 }, binding: { address: B } } }) }), evm("8453", B));
   assert.deepEqual(domains({ kind: "smart_account_gasless_transfer", record: open("s", { intent: { request: { chainId: 8453 }, binding: { ownerAddress: A } } }) }), evm("8453", A));

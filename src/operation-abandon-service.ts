@@ -85,7 +85,7 @@ export class OperationAbandonService {
       const adapter = this.rails.policies.adapter(operation.account.rail, operation.account.provider);
       if (operation.terminal || operation.account.provider !== "local" || operation.transactionId === null ||
         !["unknown_finality", "submitted_pending"].includes(operation.state) || adapter.assertValidityExpired === undefined) ineligibleRail();
-      await adapter.assertValidityExpired(operation.account, operation.prepared, operation.transactionId);
+      await adapter.assertValidityExpired(operation.account, operation.prepared, operation.transactionId, operation.send ?? null);
       const { asset } = operation.prepared;
       await this.context.requireOperationAbandonApproval().approve({
         operationId: operation.operationId, fingerprint: operation.fingerprint, profile: operation.profile, providerId: operation.account.provider,

@@ -1,4 +1,4 @@
-import type { ChainAccount, ChainAsset, ChainAssetAlias, ChainBalance, ChainWalletStoragePort, DirectRailPort, RailEffectBinding, RailInspection, RailPreparedTransfer, RailSignedEffect } from "../direct-rail-ports.js";
+import type { ChainAccount, ChainAsset, ChainAssetAlias, ChainBalance, ChainWalletStoragePort, DirectRailPort, RailEffectBinding, RailInspection, RailPreparedTransfer, RailSendBinding, RailSignedEffect } from "../direct-rail-ports.js";
 import { type SolanaRpcPort } from "./rpc.js";
 export declare class SolanaLocalAdapter implements DirectRailPort {
     private readonly storage;
@@ -22,14 +22,20 @@ export declare class SolanaLocalAdapter implements DirectRailPort {
         readonly maximumFeeAtomic: string;
         readonly now: Date;
     }): Promise<RailPreparedTransfer>;
-    revalidate(account: ChainAccount, prepared: RailPreparedTransfer): Promise<void>;
+    revalidate(account: ChainAccount, prepared: RailPreparedTransfer, send?: RailSendBinding | null): Promise<void>;
+    /**
+     * The send guard. It runs after the owner approved and before anything is signed: it re-acquires
+     * the block reference so the reading time cannot have consumed the sending window, re-proves the
+     * frozen fee, rent and funding bounds, and simulates the exact bytes with `sigVerify: false`.
+     */
+    bindSend(account: ChainAccount, prepared: RailPreparedTransfer): Promise<RailSendBinding>;
     sign(binding: RailEffectBinding): Promise<RailSignedEffect>;
     recoverEffect(binding: RailEffectBinding): Promise<RailSignedEffect | null>;
     submit(binding: RailEffectBinding, effect: RailSignedEffect | null): Promise<{
         readonly transactionId: string;
     }>;
-    inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<RailInspection>;
-    assertValidityExpired(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<void>;
+    inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, _expectedRawPayloadHash?: string, send?: RailSendBinding | null): Promise<RailInspection>;
+    assertValidityExpired(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, send?: RailSendBinding | null): Promise<void>;
     private currentAccount;
     private validBlock;
 }
