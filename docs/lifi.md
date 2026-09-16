@@ -398,10 +398,12 @@ candidate; every other outcome and malformed value is refused.
 The candidate always has `sourceMessageCorrelation: "unverified"` and
 `bridgeCompletion: false`. There is no admitted route, prepare, approval,
 submission, completed operation or receipt for this lane. A later protocol
-packet must bind an actual LI.FI source quote and Base CCTP message to a
-specific Solana receive transaction before this candidate can support a bridge
-receipt. A recipient with no USDC associated token account is outside this
-kernel's proof contract; its creation and rent payer need separate admission.
+packet for the selected direct Circle CCTP V2 lane must bind its signed fee
+quote, Base burn and CCTP message to the specific Solana USDC mint and receive
+transaction before a bridge receipt can be supported. This LI.FI-shaped
+candidate does not establish that correlation. A recipient with no USDC
+associated token account is outside this kernel's proof contract; its creation
+and rent payer need separate admission.
 
 ## Offline Base to Solana Mayan quote inspection
 
