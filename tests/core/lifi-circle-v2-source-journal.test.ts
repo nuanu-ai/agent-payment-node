@@ -8,6 +8,7 @@ import type { CircleV2SourcePreparation } from "../../src/lifi/circle-v2-source-
 import { NonEvmSourceJournalRepository } from "../../src/lifi/non-evm-source-journal.js";
 import { BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES } from "../../src/lifi/circle-v2-source-receipt.js";
 import { associatedUsdc } from "../../src/solana/accounts.js";
+import { temporaryState } from "./helpers.js";
 
 const abi = parseAbi(["function depositForBurnWithHookAndFees(uint256 amount,uint32 destinationDomain,bytes32 mintRecipient,address burnToken,bytes32 destinationCaller,bytes hookData,(bytes signedQuote,address refundAddress) claim) payable"]);
 const payer = "0x000000000000000000000000000000000000bEEF";
@@ -63,6 +64,19 @@ test("maps an immutable Circle source envelope with deterministic untrusted prot
   assert.equal(a.binding.maxSourceNativeDebitWei, "200000000000000");
   assert.match(a.protocolInputHash, /^[a-f0-9]{64}$/);
   assert.deepEqual(Object.keys(a.binding).sort(), ["admissionProof", "createdAt", "draftIntegrityHash", "maxSourceNativeDebitWei", "operationId", "profileHash", "route", "sourceCall"].sort());
+});
+test("Circle projection stages its exact protocol hash in v2", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const projected = bindCircleV2SourcePreparationToJournal(input(await fixture()));
+  const repo = new NonEvmSourceJournalRepository(tmp.root);
+  const j = await repo.stageV2({ ...projected.binding,
+    schemaVersion: "apn.non-evm-source-journal.v2", protocolInputHash: projected.protocolInputHash });
+  assert.equal(j.protocolInputHash, projected.protocolInputHash);
+  assert.equal(j.executionAdmitted, false);
+  const loaded = await new NonEvmSourceJournalRepository(tmp.root).load(j.profileHash, j.operationId);
+  assert.equal(loaded?.schemaVersion, "apn.non-evm-source-journal.v2");
+  if (loaded?.schemaVersion !== "apn.non-evm-source-journal.v2") throw new Error("missing v2");
+  assert.equal(loaded.protocolInputHash, projected.protocolInputHash);
 });
 test("rejects altered digest, mutable preparation, wrong route payer draft and malformed hashes", async () => {
   const p = await fixture();
