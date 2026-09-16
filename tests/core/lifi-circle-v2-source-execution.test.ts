@@ -55,7 +55,7 @@ async function run(send: (raw: `0x${string}`) => Promise<`0x${string}`>, signerA
       usdcAllowanceAtomic: "1020000", nativeBalanceWei: "200000000000000", gasLimitAtomic: "100000",
       maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000" }),
     signer: { kind: "imported_evm_signer", address: signerAddress, signTransaction: tx => account.signTransaction(tx) },
-    sendRawTransaction: async raw => { sends++; return send(raw); }, journal });
+    sendRawTransaction: async raw => { sends++; return send(raw); }, approve: async () => {}, journal });
   return { action, sends: () => sends, cleanup: tmp.cleanup, journal };
 }
 test("persists one signed source attempt, with delivery still unobserved", async t => {
