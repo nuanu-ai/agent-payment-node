@@ -445,3 +445,20 @@ This is correlation within one source receipt, not destination delivery or
 finality proof. The caller must supply an authenticated transaction and receipt;
 the parser performs no RPC call, signature reconstruction, attestation lookup,
 or execution.
+
+`src/lifi/mayan-provider-status-offline.ts` accepts the frozen quote, an
+independently observed Base source transaction hash and CCTP V1 message
+hash/nonce, and caller-supplied responses from Circle
+`GET /v1/messages/6/{transactionHash}` and LI.FI `GET /status`. It checks the
+single Circle message's bytes, Keccak hash, V1 header and nonce; it also
+requires one LI.FI `DONE`/`COMPLETED` response with the quote transaction ID,
+source hash, Mayan tool, Base and Solana chain IDs, sender and recipient,
+canonical USDC token identities, the source amount, a receiving amount at
+least as large as the quoted minimum, and a canonical Solana receiving
+signature. Missing fields or contradictions are rejected. The result
+is a provider hint with `bridgeCompletion: false`. It does not fetch responses,
+authenticate their transport, cryptographically verify Circle's attestation,
+prove onchain Solana delivery, or admit execution. The source hash and message
+correlation must first come from a separately verified source receipt. The
+parser uses only fields shown in [Circle's V1 message response](https://developers.circle.com/cctp/migration-from-v1-to-v2)
+and [LI.FI status schema](https://docs.li.fi/agents/reference/endpoint-specs).
