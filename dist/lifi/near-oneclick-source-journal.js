@@ -11,7 +11,8 @@ function validate(value) {
         fail();
     const r = value;
     const { integrityHash, ...body } = r;
-    if (r.schemaVersion !== "apn.oneclick-source.v1" || hashObject(body) !== integrityHash ||
+    if ((r.schemaVersion !== "apn.oneclick-source.v1" && r.schemaVersion !== "apn.oneclick-source.v2") ||
+        hashObject(body) !== integrityHash ||
         !/^[a-f0-9]{64}$/u.test(r.operationId) || !/^[a-f0-9]{64}$/u.test(r.profileHash) ||
         !/^0x[a-fA-F0-9]{64}$/u.test(r.sourceBlockHash) ||
         !/^0x[a-fA-F0-9]{40}$/u.test(r.depositAddress) || r.sourceCall.to !== USDC ||
@@ -65,7 +66,7 @@ export class OneClickSourceJournal extends SecureStateStore {
             const prior = await this.load(body.operationId);
             if (prior !== null)
                 blocked();
-            const draft = { ...body, schemaVersion: "apn.oneclick-source.v1", phase: "prepared",
+            const draft = { ...body, schemaVersion: "apn.oneclick-source.v2", phase: "prepared",
                 rawTransaction: null, transactionHash: null, submissionAttempts: 0, sourceReceiptStatus: null,
                 sourceReceiptHash: null, destinationStatus: null, updatedAt: new Date().toISOString() };
             const record = validate({ ...draft, integrityHash: hashObject(draft) });

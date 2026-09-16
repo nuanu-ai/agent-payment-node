@@ -4,7 +4,7 @@ import { encodeFunctionData, getAddress, keccak256, parseAbi, parseTransaction, 
 import { bridgeFailure } from "./validation.js";
 
 export interface OneClickSourceRecord {
-  readonly schemaVersion: "apn.oneclick-source.v1";
+  readonly schemaVersion: "apn.oneclick-source.v1" | "apn.oneclick-source.v2";
   readonly operationId: string;
   readonly profileHash: string;
   readonly payer: string;
@@ -39,7 +39,8 @@ function validate(value: unknown): OneClickSourceRecord {
   if (typeof value !== "object" || value === null) fail();
   const r = value as OneClickSourceRecord;
   const { integrityHash, ...body } = r;
-  if (r.schemaVersion !== "apn.oneclick-source.v1" || hashObject(body) !== integrityHash ||
+  if ((r.schemaVersion !== "apn.oneclick-source.v1" && r.schemaVersion !== "apn.oneclick-source.v2") ||
+    hashObject(body) !== integrityHash ||
     !/^[a-f0-9]{64}$/u.test(r.operationId) || !/^[a-f0-9]{64}$/u.test(r.profileHash) ||
     !/^0x[a-fA-F0-9]{64}$/u.test(r.sourceBlockHash) ||
     !/^0x[a-fA-F0-9]{40}$/u.test(r.depositAddress) || r.sourceCall.to !== USDC ||
@@ -79,7 +80,7 @@ export class OneClickSourceJournal extends SecureStateStore {
     return this.withLocks([`oneclick:${body.operationId}`], async () => {
       const prior = await this.load(body.operationId);
       if (prior !== null) blocked();
-      const draft = { ...body, schemaVersion: "apn.oneclick-source.v1" as const, phase: "prepared" as const,
+      const draft = { ...body, schemaVersion: "apn.oneclick-source.v2" as const, phase: "prepared" as const,
         rawTransaction: null, transactionHash: null, submissionAttempts: 0 as const, sourceReceiptStatus: null,
         sourceReceiptHash: null, destinationStatus: null, updatedAt: new Date().toISOString() };
       const record = validate({ ...draft, integrityHash: hashObject(draft) });

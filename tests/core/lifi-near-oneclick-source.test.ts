@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { inspectOneClickSourceQuote } from "../../src/lifi/near-oneclick-source-service.js";
+import { inspectOneClickSourceQuote, oneClickStatusQuoteMatchesRecord, assertOneClickPostApproval } from "../../src/lifi/near-oneclick-source-service.js";
+import type { OneClickSourceRecord } from "../../src/lifi/near-oneclick-source-journal.js";
 import { bindOneClickCommand } from "../../src/lifi/near-oneclick-command-catalog.js";
 const now = Date.parse("2026-09-17T00:00:00.000Z");
 const request = { dry: false, swapType: "EXACT_INPUT", slippageTolerance: 100,
@@ -9,7 +10,7 @@ const request = { dry: false, swapType: "EXACT_INPUT", slippageTolerance: 100,
   amount: "3000000", refundTo: "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7", refundType: "ORIGIN_CHAIN",
   recipient: "TXHwnAuEUFnzk474xAKnY9DmemrZ8AsxpF", recipientType: "DESTINATION_CHAIN",
   deadline: "2026-09-17T00:03:00.000Z" };
-const response = { quoteRequest: request, quote: { amountIn: "3000000", minAmountIn: "2764874",
+const response = { timestamp: "2026-09-17T00:00:00.000Z", signature: "a".repeat(96), quoteRequest: request, quote: { amountIn: "3000000", minAmountIn: "2764874",
   amountOut: "1264167", minAmountOut: "1251525", deadline: "2026-09-20T00:00:00.000Z",
   depositAddress: "0x76b4c56085ED136a8744D52bE956396624a730E8", depositMemo: null } };
 test("1Click direct quote binds exact Base amount, recipient, minimum and short requested deadline", () => {
@@ -68,4 +69,54 @@ test("durable 1Click journal seals exact ERC20 transfer and permits one submissi
     await assert.rejects(repo.advance(record.operationId, record.integrityHash, "submitting"));
     assert.equal(record.submissionAttempts, 1);
   } finally { await temp.cleanup(); }
+});
+
+test("provider status binds the live quote shape despite a different outer correlation ID", () => {
+  const liveRequest = { ...request, depositMode: "SIMPLE", appFees: [{ limitOrderId: null,
+    recipient: "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd", fee: 25 }],
+    virtualChainRecipient: null, virtualChainRefundRecipient: null, referral: null, confidentiality: "public" };
+  const liveQuote = { ...response.quote, amountInFormatted: "2.75", amountInUsd: "2.75", amountOutFormatted: "1.014691",
+    amountOutUsd: "1.014691", timeWhenInactive: "2026-09-19T00:00:00.000Z", timeEstimate: 90,
+    refundFee: "0", withdrawFee: "0" };
+  const stable = { timestamp: "2026-09-17T00:00:00.000Z", signature: "a".repeat(96),
+    quoteRequest: liveRequest, quote: liveQuote };
+  const actualEnvelope = { correlationId: "quote-correlation", ...stable };
+  const statusEnvelope = { correlationId: "status-correlation", quoteResponse: stable, status: "PENDING_DEPOSIT" };
+  const inspected = inspectOneClickSourceQuote(actualEnvelope, request, 1000000n, 2000000n, now);
+  const record = { schemaVersion: "apn.oneclick-source.v2" as const, quoteHash: inspected.quoteHash, payer: request.refundTo, refundTo: request.refundTo,
+    recipient: request.recipient, depositAddress: response.quote.depositAddress,
+    quoteRequestDeadline: request.deadline, quoteDeadline: response.quote.deadline,
+    amountInAtomic: request.amount, quotedAmountOutAtomic: response.quote.amountOut,
+    minAmountOutAtomic: response.quote.minAmountOut } as unknown as OneClickSourceRecord;
+  assert.equal(oneClickStatusQuoteMatchesRecord(statusEnvelope.quoteResponse, record), true);
+  const oldRecord = { ...record, schemaVersion: "apn.oneclick-source.v1" as const, quoteHash: "0".repeat(64) };
+  assert.equal(oneClickStatusQuoteMatchesRecord(statusEnvelope.quoteResponse, oldRecord), true);
+  for (const [kind, changed] of [
+    ["signature", { signature: "b".repeat(96) }],
+    ["appFees", { quoteRequest: { ...liveRequest, appFees: [{ recipient: "other", fee: 999999 }] } }],
+    ["withdrawFee", { quote: { ...liveQuote, withdrawFee: "999999" } }],
+  ] as const) assert.equal(oneClickStatusQuoteMatchesRecord({ ...stable, ...changed }, record), false, kind);
+  for (const [kind, changed] of [
+    ["recipient", { quoteRequest: { ...liveRequest, recipient: "TWrong" } }],
+    ["origin", { quoteRequest: { ...liveRequest, originAsset: "nep141:eth-other" } }],
+    ["refund", { quoteRequest: { ...liveRequest, refundTo: "0x0000000000000000000000000000000000000001" } }],
+    ["amount", { quote: { ...liveQuote, amountIn: "2749999" } }],
+    ["deposit", { quote: { ...liveQuote, depositAddress: "0x0000000000000000000000000000000000000001" } }],
+    ["minimum", { quote: { ...liveQuote, minAmountOut: "1" } }],
+    ["deadline", { quoteRequest: { ...liveRequest, deadline: "2099-01-01T00:00:00.000Z" } }],
+  ] as const) {
+    assert.equal(oneClickStatusQuoteMatchesRecord({ ...stable, ...changed }, oldRecord), false, kind);
+  }
+});
+
+test("post approval permits bounded L1 oracle movement but rejects nonce, gas, fee and cap drift", () => {
+  const initial = { nonce: 141n, gas: 75572n, fee: 11000000n, tip: 1000000n };
+  const fresh = { ...initial, nativeDebit: 851597280174n };
+  const deadline = now + 120000;
+  assert.doesNotThrow(() => assertOneClickPostApproval(initial, fresh, 20000000000000n, deadline, now));
+  assert.throws(() => assertOneClickPostApproval(initial, { ...fresh, nonce: 142n }, 20000000000000n, deadline, now));
+  assert.throws(() => assertOneClickPostApproval(initial, { ...fresh, gas: 75573n }, 20000000000000n, deadline, now));
+  assert.throws(() => assertOneClickPostApproval(initial, { ...fresh, fee: 11000001n }, 20000000000000n, deadline, now));
+  assert.throws(() => assertOneClickPostApproval(initial, fresh, 850018837265n, deadline, now));
+  assert.throws(() => assertOneClickPostApproval(initial, fresh, 20000000000000n, deadline, deadline - 20000));
 });
