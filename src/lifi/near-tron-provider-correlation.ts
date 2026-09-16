@@ -64,6 +64,7 @@ export function correlateNearTronProviderStatusOffline(
   if (near.status !== "SUCCESS" || !eq(quote.depositAddress, source.depositAddress) ||
     quoteRequest.originAsset !== NEAR_BASE_USDC || quoteRequest.destinationAsset !== NEAR_TRON_USDT ||
     quoteRequest.swapType !== "EXACT_INPUT" || quoteRequest.depositType !== "ORIGIN_CHAIN" ||
+    quoteRequest.depositMode !== "SIMPLE" ||
     quoteRequest.recipientType !== "DESTINATION_CHAIN" || quoteRequest.refundType !== "ORIGIN_CHAIN" ||
     positive(quoteRequest.amount) !== positive(source.bridgeAmountAtomic) ||
     quote.depositMemo !== undefined && quote.depositMemo !== null && quote.depositMemo !== "" ||
