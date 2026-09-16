@@ -33,7 +33,7 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["gasless", "gasless transfer", "bridge", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["gasless", "gasless transfer", "bridge", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "wallet balance-asset",
   "pay transfer prepare-asset",
@@ -78,6 +78,7 @@ const EXPECTED_COMMANDS = [
   "policy admit-tron",
   "pay transfer prepare-tron",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
+  "circle approval prepare", "circle approval execute", "circle approval status", "circle source submit",
   "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
 ];
 

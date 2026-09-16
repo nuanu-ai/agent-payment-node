@@ -20,6 +20,9 @@ import { solanaCapabilities } from "./chain-policy-service.js";
 import { tronCapabilities } from "./tron/catalog.js";
 import { bridgeCapabilities } from "./lifi/catalog.js";
 import { BridgeService } from "./lifi/service.js";
+import { bridgeOwner } from "./lifi/owner.js";
+import { publicCircleApproval } from "./lifi/circle-v2-approval-executor.js";
+import { confirmCircleApproval } from "./lifi/circle-v2-approval-tty.js";
 import { GaslessService } from "./gasless/service.js";
 import { gaslessCapabilities } from "./gasless/catalog.js";
 import { gaslessChain } from "./gasless/validation.js";
@@ -87,6 +90,29 @@ export class ApnCore {
 
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
+      case "circle.approval.prepare": {
+        await this.context.ready();
+        const owner = (await bridgeOwner(this.context.state, request.profile)).owner;
+        const executor = this.context.circleApproval;
+        if (executor === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle approval executor is unavailable.");
+        return dataOutcome(publicCircleApproval(await executor.prepare({ profile: owner.profile, payer: owner.address,
+          walletBindingHash: owner.walletBindingHash, walletCreatedAt: owner.walletCreatedAt,
+          approvalCapAtomic: request.approvalCapAtomic })), "circle_approval_prepared_unsigned");
+      }
+      case "circle.approval.execute":
+      case "circle.approval.status": {
+        const executor = this.context.circleApproval;
+        if (executor === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle approval executor is unavailable.");
+        const record = request.command === "circle.approval.execute"
+          ? await executor.execute(request.operationId, confirmCircleApproval)
+          : await executor.status(request.operationId);
+        return dataOutcome(publicCircleApproval(record), record.phase === "completed" ? "circle_approval_safe_receipt_and_allowance" : "circle_approval_journal_state");
+      }
+      case "circle.source.submit": {
+        const service = this.context.circleSource;
+        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle source runtime is unavailable.");
+        return dataOutcome(await service.submit(request), "circle_base_source_submission_only");
+      }
       case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
       case "gasless.balance": {
         const provider = await this.gaslessProvider(request.profile);

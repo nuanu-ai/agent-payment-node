@@ -7,6 +7,7 @@ import { chainDecimal } from "./chain-policy.js";
 import { solanaAddress } from "./solana/rpc.js";
 import { tronAddress } from "./tron/codec.js";
 import { bindBridgeCommand } from "./lifi/command-catalog.js";
+import { bindCircleCommand } from "./lifi/circle-command-catalog.js";
 import { bindGaslessCommand } from "./gasless/command-catalog.js";
 import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 export function bindArgv(argv) {
@@ -45,6 +46,8 @@ function bindParsedCatalog(parsed) {
         return { request: bindGaslessCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "bridge")
         return { request: bindBridgeCommand(parsed.command.path.join(" "), options) };
+    if (parsed.command.path[0] === "circle")
+        return { request: bindCircleCommand(parsed.command.path.join(" "), options) };
     switch (parsed.command.path.join(" ")) {
         case "--version": return { request: { command: "version" } };
         case "doctor keychain": return { request: { command: "doctor.keychain" } };

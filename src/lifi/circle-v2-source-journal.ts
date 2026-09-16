@@ -74,7 +74,8 @@ export function bindCircleV2SourcePreparationToJournal(input: CircleV2SourceJour
   const maxAllowance = bridgeUint(p.maxAllowanceAtomic, true);
   if (fee >= principal || principal + fee !== bridgeUint(p.requiredUsdcDebitAtomic) ||
     maxAllowance < principal + fee || maxAllowance === (1n << 256n) - 1n ||
-    bridgeUint(p.maximumNativeDebitWei) !== bridgeUint(tx.gasLimitAtomic, true) * bridgeUint(tx.maxFeePerGasWei, true) ||
+    bridgeUint(p.maximumNativeDebitWei) !== bridgeUint(tx.gasLimitAtomic, true) * bridgeUint(tx.maxFeePerGasWei, true) +
+      bridgeUint(p.l1DataFeeUpperWei) + bridgeUint(p.operatorFeeUpperWei) ||
     bridgeUint(tx.maxPriorityFeePerGasWei) > bridgeUint(tx.maxFeePerGasWei)) fail("amount_or_fees");
   const gas = bridgeUint(tx.gasLimitAtomic, true), maxFee = bridgeUint(tx.maxFeePerGasWei, true);
   if (gas * maxFee > (1n << 256n) - 1n) fail("native_debit");
@@ -95,6 +96,7 @@ export function bindCircleV2SourcePreparationToJournal(input: CircleV2SourceJour
     recipient: p.recipient, principalAtomic: p.principalAtomic, requiredUsdcDebitAtomic: p.requiredUsdcDebitAtomic,
     maxAllowanceAtomic: maxAllowance.toString(),
     sourceRefundAddress: refund, hookData: bridgeHex(hookData), minFinalityThreshold: input.admission.minFinalityThreshold,
+    l1DataFeeUpperWei: p.l1DataFeeUpperWei, operatorFeeUpperWei: p.operatorFeeUpperWei,
     sourceBlock: p.sourceBlock, preparedAt: p.preparedAt, expiresAt: p.expiresAt, sourceCall: binding.sourceCall });
   return Object.freeze({ binding: Object.freeze({ ...binding, sourceCall: Object.freeze(binding.sourceCall),
     admissionProof: Object.freeze(binding.admissionProof) }), protocolInputHash, executionAdmitted: false, provenance: "synthetic_untrusted" });

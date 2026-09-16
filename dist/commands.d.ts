@@ -6,6 +6,31 @@ import type { ChainProvider } from "./direct-rail-ports.js";
 import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
+    readonly command: "circle.approval.prepare";
+    readonly profile: string;
+    readonly approvalCapAtomic: string;
+    readonly maxGasLimitAtomic: string;
+    readonly maxFeePerGasWei: string;
+    readonly maxPriorityFeePerGasWei: string;
+    readonly maxNativeDebitWei: string;
+} | {
+    readonly command: "circle.approval.execute" | "circle.approval.status";
+    readonly operationId: string;
+} | {
+    readonly command: "circle.source.submit";
+    readonly profile: string;
+    readonly expectedPayer: string;
+    readonly recipientOwner: string;
+    readonly recipientSetup: "existing_ata" | "create_ata";
+    readonly amountAtomic: string;
+    readonly maxSourceFeeAtomic: string;
+    readonly maxAllowanceAtomic: string;
+    readonly maxGasLimitAtomic: string;
+    readonly maxFeePerGasWei: string;
+    readonly maxPriorityFeePerGasWei: string;
+    readonly maxNativeDebitWei: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "gasless.capabilities";
     readonly profile?: string;
 } | {
