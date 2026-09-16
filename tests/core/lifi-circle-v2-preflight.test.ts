@@ -14,6 +14,7 @@ const payer = "0x000000000000000000000000000000000000bEEF";
 const zero = `0x${"0".repeat(64)}`;
 const hook = "0x636374702d666f72776172640000000000000000000000000000000000000000";
 const quote = "0x01020304";
+const blockHash = `0x${"a".repeat(64)}`;
 async function fixture(): Promise<CircleV2PreflightInput> {
   const recipient = `0x${Buffer.from(getBase58Encoder().encode(await associatedUsdc(wallet))).toString("hex")}` as `0x${string}`;
   const data = encodeFunctionData({ abi, functionName: "depositForBurnWithHookAndFees", args: [1_000_000n, 5, recipient, usdc, zero as `0x${string}`, hook, { signedQuote: quote, refundAddress: refund }] });
@@ -25,9 +26,11 @@ async function fixture(): Promise<CircleV2PreflightInput> {
     transaction: { to: wrapper, chainId: 8453, valueAtomic: "0", refundAddress: refund, data },
     recipientWallet: wallet, amountAtomic: "1000000", maxSourceFeeAtomic: "25000", recipientSetup: "existing_ata" };
 }
-function harness(change?: (response: Record<string, any>, request: any) => void, options?: { stale?: boolean; unavailable?: boolean; revert?: boolean }) {
+function harness(change?: (response: Record<string, any>, request: any) => void,
+  options?: { stale?: boolean; sameHeightReorg?: boolean; staleTimestamp?: boolean; unavailable?: boolean; revert?: boolean; rpcError?: boolean }) {
   const calls: any[] = [];
   let blockReads = 0;
+  const timestamp = `0x${Math.floor(Date.now() / 1000).toString(16)}`;
   const transport: CircleV2PreflightTransport = async request => {
     calls.push(request);
     if (request.target === "circle") {
@@ -39,7 +42,13 @@ function harness(change?: (response: Record<string, any>, request: any) => void,
       change?.(response, request);
       return response;
     }
-    if (request.method === "eth_blockNumber") return options?.stale && blockReads++ > 0 ? "0x64" : "0x63";
+    if (request.method === "eth_getBlockByNumber") {
+      if (options?.rpcError) throw Error("RPC unavailable");
+      const later = blockReads++ > 0;
+      return { number: options?.stale && later ? "0x64" : "0x63",
+        hash: options?.sameHeightReorg && later ? `0x${"b".repeat(64)}` : blockHash,
+        timestamp: options?.staleTimestamp ? "0x1" : timestamp };
+    }
     if (options?.revert) throw Error("revert");
     return "0x";
   };
@@ -51,10 +60,16 @@ test("validates exact frozen call and simulates it from payer at one Base block"
   const result = await inspectCircleV2Preflight(input, transport);
   assert.equal(result.executionAdmitted, false);
   assert.equal(result.blockNumber, "99");
+  assert.equal(result.blockHash, blockHash);
   assert.equal(calls[0].url, "https://iris-api.circle.com/v2/quote/validate/usdc/6");
   assert.equal(calls[0].body.args[0], "1000000");
   assert.deepEqual(calls[0].body.args[6], [quote, refund]);
-  assert.deepEqual(calls[2].params, [{ from: payer, to: wrapper, data: (input.transaction as any).data.toLowerCase(), value: "0x0" }, "0x63"]);
+  assert.deepEqual(calls[2].params, [{ from: payer, to: wrapper, data: (input.transaction as any).data.toLowerCase(), value: "0x0" },
+    { blockHash, requireCanonical: true }]);
+});
+test("accepts the SDK's sparse claimable item response", async () => {
+  const { transport } = harness(v => { v.items = [{ type: "FORWARD", argsMatch: true }, { type: "PROTOCOL", argsMatch: true }]; });
+  assert.equal((await inspectCircleV2Preflight(await fixture(), transport)).executionAdmitted, false);
 });
 test("fails closed on Circle rejection or mismatched signed fields, items, and arguments", async () => {
   for (const change of [
@@ -67,8 +82,9 @@ test("fails closed on Circle rejection or mismatched signed fields, items, and a
     (v: any) => { v.items[0].args = ["0xdead"]; },
   ]) await assert.rejects(inspectCircleV2Preflight(await fixture(), harness(change).transport), { code: "APN_PROVIDER_PROTOCOL" });
 });
-test("fails closed on unavailable endpoint, revert, and stale block", async () => {
-  for (const options of [{ unavailable: true }, { revert: true }, { stale: true }]) {
+test("fails closed on unavailable endpoint, RPC error, revert, stale block, and same-height reorg", async () => {
+  for (const options of [{ unavailable: true }, { rpcError: true }, { revert: true }, { stale: true },
+    { sameHeightReorg: true }, { staleTimestamp: true }]) {
     await assert.rejects(inspectCircleV2Preflight(await fixture(), harness(undefined, options).transport), { code: "APN_PROVIDER_PROTOCOL" });
   }
 });

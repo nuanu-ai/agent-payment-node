@@ -7,10 +7,10 @@ const ABI_SIGNATURE = "depositForBurnWithHookAndFees(uint256,uint32,bytes32,addr
 const ABI = parseAbi([`function ${ABI_SIGNATURE} payable`]);
 const VALIDATE_URL = "https://iris-api.circle.com/v2/quote/validate/usdc/6";
 type Request = { readonly target: "circle"; readonly url: typeof VALIDATE_URL; readonly body: { readonly abiSignature: typeof ABI_SIGNATURE; readonly args: readonly (string | readonly string[])[] } }
-  | { readonly target: "base"; readonly method: "eth_blockNumber" | "eth_call"; readonly params: readonly unknown[] };
+  | { readonly target: "base"; readonly method: "eth_getBlockByNumber" | "eth_call"; readonly params: readonly unknown[] };
 export type CircleV2PreflightTransport = (request: Request) => Promise<unknown>;
 export interface CircleV2PreflightInput extends CircleV2UpfrontInput { readonly payer: string }
-export interface CircleV2PreflightSnapshot { readonly kind: "circle_v2_preflight_snapshot"; readonly executionAdmitted: false; readonly blockNumber: string; readonly abiSignature: typeof ABI_SIGNATURE }
+export interface CircleV2PreflightSnapshot { readonly kind: "circle_v2_preflight_snapshot"; readonly executionAdmitted: false; readonly blockNumber: string; readonly blockHash: string; readonly abiSignature: typeof ABI_SIGNATURE }
 function fail(reason: string): never { return bridgeFailure("APN_PROVIDER_PROTOCOL", `circle_v2_preflight_${reason}`); }
 function quantity(value: unknown): bigint {
   if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(value)) fail("block_quantity");
@@ -21,8 +21,16 @@ function integer(value: unknown): bigint {
   return BigInt(value);
 }
 function sameHex(a: unknown, b: unknown): boolean { return bridgeHex(a, 16 * 1024) === bridgeHex(b, 16 * 1024); }
+function sourceBlock(value: unknown): { number: bigint; hash: string; timestamp: bigint } {
+  const block = bridgeRecord(value);
+  return { number: quantity(block.number), hash: bridgeHex(block.hash, 32, 32), timestamp: quantity(block.timestamp) };
+}
+function fresh(timestamp: bigint): boolean {
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  return timestamp <= now + 30n && now <= timestamp + 120n;
+}
 
-/** Both external checks are observations at one source block; the result never authorizes execution. */
+/** Circle checks its own current tip; Base simulation is pinned to a separate canonical block observation. Neither authorizes execution. */
 export async function inspectCircleV2Preflight(input: CircleV2PreflightInput, transport: CircleV2PreflightTransport): Promise<CircleV2PreflightSnapshot> {
   const tx = bridgeRecord(input.transaction);
   const data = bridgeHex(tx.data);
@@ -53,25 +61,27 @@ export async function inspectCircleV2Preflight(input: CircleV2PreflightInput, tr
   if (!Array.isArray(validation.items) || !Array.isArray(response.items) || validation.items.length !== response.items.length) fail("items");
   for (let i = 0; i < response.items.length; i += 1) {
     const actual = bridgeRecord(validation.items[i]), expected = bridgeRecord(response.items[i]);
-    if (actual.argsMatch !== true || actual.type !== expected.type || bridgeUint(actual.amount) !== bridgeUint(expected.amount) ||
-      !sameHex(actual.argsHash, expected.argsHash)) fail("item_binding");
+    if (actual.argsMatch !== true || actual.type !== expected.type) fail("item_binding");
+    if (actual.amount !== undefined && bridgeUint(actual.amount) !== bridgeUint(expected.amount)) fail("item_binding");
+    if (actual.argsHash !== undefined && !sameHex(actual.argsHash, expected.argsHash)) fail("item_binding");
     if (actual.computedArgsHash !== undefined && !sameHex(actual.computedArgsHash, expected.argsHash)) fail("item_binding");
     const actualArgs = actual.args, expectedArgs = expected.args;
     if (actualArgs !== undefined && (!Array.isArray(actualArgs) || !Array.isArray(expectedArgs) ||
       actualArgs.length !== expectedArgs.length || actualArgs.some((arg, index) => !sameHex(arg, expectedArgs[index])))) fail("item_args");
   }
-  let block: bigint;
-  try { block = quantity(await transport({ target: "base", method: "eth_blockNumber", params: [] })); }
+  let block: ReturnType<typeof sourceBlock>;
+  try { block = sourceBlock(await transport({ target: "base", method: "eth_getBlockByNumber", params: ["latest", false] })); }
   catch { return fail("base_unavailable"); }
-  await inspectCircleV2UpfrontOffline({ ...input, sourceBlockNumber: block.toString() });
-  if (expiry.mode === "BLOCK_NUMBER" && block >= integer(expiry.expiresAtBlock)) fail("expired_block");
-  const tag = `0x${block.toString(16)}`;
+  if (!fresh(block.timestamp)) fail("stale_block");
+  await inspectCircleV2UpfrontOffline({ ...input, sourceBlockNumber: block.number.toString() });
+  if (expiry.mode === "BLOCK_NUMBER" && block.number >= integer(expiry.expiresAtBlock)) fail("expired_block");
   try {
-    bridgeHex(await transport({ target: "base", method: "eth_call", params: [{ from: payer, to: source, data, value: `0x${value.toString(16)}` }, tag] }));
+    bridgeHex(await transport({ target: "base", method: "eth_call", params: [{ from: payer, to: source, data, value: `0x${value.toString(16)}` },
+      { blockHash: block.hash, requireCanonical: true }] }));
   } catch { return fail("simulation_reverted"); }
-  let after: bigint;
-  try { after = quantity(await transport({ target: "base", method: "eth_blockNumber", params: [] })); }
+  let after: ReturnType<typeof sourceBlock>;
+  try { after = sourceBlock(await transport({ target: "base", method: "eth_getBlockByNumber", params: ["latest", false] })); }
   catch { return fail("base_unavailable"); }
-  if (after !== block) fail("stale_block");
-  return { kind: "circle_v2_preflight_snapshot", executionAdmitted: false, blockNumber: block.toString(), abiSignature: ABI_SIGNATURE };
+  if (after.number !== block.number || after.hash !== block.hash || after.timestamp !== block.timestamp || !fresh(after.timestamp)) fail("stale_block");
+  return { kind: "circle_v2_preflight_snapshot", executionAdmitted: false, blockNumber: block.number.toString(), blockHash: block.hash, abiSignature: ABI_SIGNATURE };
 }
