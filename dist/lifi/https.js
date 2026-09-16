@@ -3,8 +3,12 @@ import { ApnError } from "../errors.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress } from "../network-policy.js";
 /** Shared finite transport: public DNS pin, default TLS, no redirect or implicit retry. */
 export class BridgeHttps {
+    resolveAddresses;
     active = 0;
     waiting = [];
+    constructor(resolveAddresses = resolvePublicAddresses) {
+        this.resolveAddresses = resolveAddresses;
+    }
     async request(endpointInput, method, body, maximumBytes, code) {
         const endpoint = parsePublicHttpsUrl(endpointInput, code, "Bridge endpoint", 2048);
         if (body !== null && Buffer.byteLength(body, "utf8") > 256 * 1024)
@@ -22,7 +26,7 @@ export class BridgeHttps {
         let timeout;
         try {
             const addresses = await Promise.race([
-                resolvePublicAddresses(endpoint, code, "Bridge endpoint"),
+                this.resolveAddresses(endpoint, code, "Bridge endpoint"),
                 new Promise((_, reject) => { timeout = setTimeout(() => reject(failure(code, "DNS_deadline")), 15_000); }),
             ]);
             clearTimeout(timeout);

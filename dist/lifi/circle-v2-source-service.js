@@ -38,11 +38,13 @@ export class CircleV2SourceService {
     wrapping;
     environment;
     approval;
-    constructor(state, wrapping, environment, approval) {
+    transport;
+    constructor(state, wrapping, environment, approval, transport = new BridgeHttps()) {
         this.state = state;
         this.wrapping = wrapping;
         this.environment = environment;
         this.approval = approval;
+        this.transport = transport;
     }
     async submit(request) {
         const profile = canonicalProfile(request.profile), payer = bridgeAddress(request.expectedPayer);
@@ -56,7 +58,7 @@ export class CircleV2SourceService {
         const rpcUrl = this.environment.APN_BASE_RPC_URL;
         if (rpcUrl === undefined)
             return fail("base_rpc_missing");
-        const rpc = new CircleBaseJsonRpc(rpcUrl);
+        const rpc = new CircleBaseJsonRpc(rpcUrl, this.transport);
         const walletStore = new EncryptedWalletStore(this.state, this.wrapping);
         await this.state.initialize();
         // No wallet.ensure or import is called here; an operator must import the exact payer profile separately.
@@ -79,9 +81,8 @@ export class CircleV2SourceService {
                 `${HOOK.slice(0, 50)}000000000000002101${Buffer.from(ownerBytes).toString("hex")}`;
             const quoteRequest = { amount: amount.toString(), feeToken: USDC,
                 requests: [{ type: "FORWARD", params: { hookData: hook } }] };
-            const transport = new BridgeHttps();
             const circlePost = async (path, body) => {
-                const response = await transport.request(`${CIRCLE}${path}`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
+                const response = await this.transport.request(`${CIRCLE}${path}`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
                 if (response.status !== 200)
                     fail("circle_http_status");
                 try {
