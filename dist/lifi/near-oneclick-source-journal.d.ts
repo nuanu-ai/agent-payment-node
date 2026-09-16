@@ -10,6 +10,8 @@ export interface OneClickSourceRecord {
     readonly depositAddress: string;
     readonly quoteHash: string;
     readonly quoteRequestDeadline: string;
+    readonly quoteDeadline: string;
+    readonly effectiveDeadline: string;
     readonly amountInAtomic: string;
     readonly minAmountOutAtomic: string;
     readonly quotedAmountOutAtomic: string;
