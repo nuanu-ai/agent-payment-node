@@ -73,9 +73,10 @@ test("trusted missing effect can end interrupted local signing, while missing co
   assert.equal((result.operation as { state: string }).state, "failed_before_effect"); assert.equal(s.rpc.submissions.length, 0);
   const nextId = await s.prepare("sol", "solana-missing-effect-0002");
   let next = (await s.core.rails.records.findOperation(nextId))!;
-  next = transitionRail(next, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect" });
+  const send = await s.adapter.bindSend(next.account, next.prepared);
+  next = transitionRail(next, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect", send });
   await s.core.rails.records.persist(next);
-  const effect = await s.adapter.sign({ account: next.account, prepared: next.prepared, operationId: next.operationId, fingerprint: next.fingerprint });
+  const effect = await s.adapter.sign({ account: next.account, prepared: next.prepared, operationId: next.operationId, fingerprint: next.fingerprint, send });
   next = transitionRail(next, { state: "signed_not_submitted", at: s.now.toISOString(), reason: "encrypted_effect_bound", proofClass: "durable_signed_effect", transactionId: effect.transactionId, rawPayloadHash: effect.rawPayloadHash });
   await s.core.rails.records.persist(next);
   s.adapter.recoverEffect = async () => null;

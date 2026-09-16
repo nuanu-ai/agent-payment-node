@@ -3,7 +3,8 @@ import type { Address } from "../model.js";
 import { BridgeHttps } from "./https.js";
 import type { BridgeProviderObservation, BridgeRouteRequest } from "./model.js";
 import type { LifiProviderPort, LifiResponse } from "./ports.js";
-import { BRIDGE_CHAINS, BRIDGE_USDC, bridgeHex, bridgeJson, bridgeRecord, validateBridgeRequest } from "./validation.js";
+import { railStatusIdentifier, type RailStatusIdentifier } from "../rail-status-binding.js";
+import { BRIDGE_CHAINS, BRIDGE_USDC, bridgeFailure, bridgeJson, bridgeRecord, validateBridgeRequest } from "./validation.js";
 
 const ORIGIN = "https://li.quest/v1";
 export const LIFI_ROUTE_RESPONSE_BYTES = 512 * 1024;
@@ -71,11 +72,20 @@ export function normalizeLifiStatus(response: LifiResponse, observedAt: string):
         else if (r.substatus === "REFUNDED") status = "refund_observed";
       }
     }
-    let destinationTransactionHash = null;
+    let destinationTransactionHash: RailStatusIdentifier | null = null;
     if (r.receiving !== undefined && r.receiving !== null) {
       const receiving = bridgeRecord(r.receiving);
-      if (receiving.txHash !== undefined) destinationTransactionHash = bridgeHex(receiving.txHash, 32, 32);
+      if (receiving.txHash !== undefined) destinationTransactionHash = bridgeStatusIdentifier(receiving.txHash);
     }
     return { status, destinationTransactionHash, responseHash, observedAt };
   } catch { return { status: response.status === 404 ? "not_found" : "unknown", destinationTransactionHash: null, responseHash, observedAt }; }
+}
+/**
+ * The provider names the destination transaction in its own rail's form. An EVM hash must still be
+ * a 32-byte hash; a Solana signature is accepted as itself. Anything else is refused, never widened.
+ */
+function bridgeStatusIdentifier(value: unknown): RailStatusIdentifier {
+  const identifier = railStatusIdentifier(value);
+  if (identifier === null) bridgeFailure("APN_PROVIDER_PROTOCOL", "rail_status_identity");
+  return identifier;
 }

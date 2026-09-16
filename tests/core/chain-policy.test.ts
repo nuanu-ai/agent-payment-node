@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { chainAsset, chainUsage, assertChainPolicy, sealChainPolicy } from "../../src/chain-policy.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
+import { SOLANA_APPROVAL_WINDOW_MS } from "../../src/rail-send-binding.js";
 import { temporaryState } from "./helpers.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 
@@ -52,7 +53,8 @@ test("an unresolved operation prevents policy replacement and expiry before sign
   const id = await s.prepare("sol");
   const replaced = await s.core.execute({ command: "policy.admit-solana", profile: s.account.profile, asset: "sol", maximumPerTransfer: "1", dailyLimit: "2", maximumFee: "0.003" });
   assert.equal(replaced.error?.code, "APN_OPERATION_BLOCKED");
-  s.now.setUTCMinutes(s.now.getUTCMinutes() + 2);
+  // Tied to the window constant so this can never silently stop testing expiry again.
+  s.now.setTime(s.now.getTime() + SOLANA_APPROVAL_WINDOW_MS + 1_000);
   await s.core.execute({ command: "transfer.approve", operationId: id });
   const record = (await s.core.rails.records.findOperation(id))!; assert.equal(record.state, "failed_before_effect");
   const policy = await s.core.rails.policies.requiredPolicy(s.account, "sol");

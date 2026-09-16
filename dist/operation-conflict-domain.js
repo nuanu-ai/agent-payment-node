@@ -11,6 +11,21 @@ export function railConflictDomain(rail, account) {
         throw new Error("Invalid rail conflict domain.");
     return { family: rail, network: rail === "solana" ? SOLANA_GENESIS : TRON_GENESIS, account };
 }
+/** LI.FI's own identifier for Solana mainnet. It is not an EVM chain id and never names one. */
+export const SOLANA_BRIDGE_CHAIN_ID = "1151111081099710";
+const SOLANA_BASE58_ACCOUNT = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/u;
+/**
+ * A bridge claims the lock of the chain it signs on. Every EVM source keeps the EVM domain it has
+ * always taken; a Solana source takes the same `solana:<genesis>:<address>` key a direct Solana
+ * transfer takes, so the two collide on one account and never collide across families.
+ */
+export function bridgeConflictDomain(chainId, account) {
+    if (String(chainId) !== SOLANA_BRIDGE_CHAIN_ID)
+        return evmConflictDomain(chainId, account);
+    if (!SOLANA_BASE58_ACCOUNT.test(account))
+        throw new Error("Invalid Solana bridge conflict domain.");
+    return railConflictDomain("solana", account);
+}
 export function conflictDomainKey(domain) {
     return `${domain.family}:${domain.network}:${domain.account}`;
 }
@@ -27,7 +42,7 @@ export function storedOperationDomains(operation) {
         if (operation.kind === "rail_transfer")
             return [railConflictDomain(operation.record.account.rail, operation.record.account.address)];
         if (operation.kind === "bridge_route") {
-            return [evmConflictDomain(operation.record.intent.sourceDeployment.chainId, operation.record.intent.owner.address)];
+            return [bridgeConflictDomain(operation.record.intent.sourceDeployment.chainId, operation.record.intent.owner.address)];
         }
         if (operation.kind === "gasless_transfer") {
             return [evmConflictDomain(operation.record.intent.request.chainId, operation.record.intent.owner.address)];

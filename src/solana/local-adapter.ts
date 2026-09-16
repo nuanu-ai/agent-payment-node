@@ -2,12 +2,14 @@ import { randomBytes } from "node:crypto";
 import { createKeyPairSignerFromPrivateKeyBytes, getBase64EncodedWireTransaction, getSignatureFromTransaction, signTransaction } from "@solana/kit";
 import { canonicalJson, sha256 } from "../canonical.js";
 import { atomic, chainAsset, SOLANA_GENESIS, SOLANA_USDC } from "../chain-policy.js";
-import type { ChainAccount, ChainAsset, ChainAssetAlias, ChainBalance, ChainWalletStoragePort, DirectRailPort, RailEffectBinding, RailInspection, RailPreparedTransfer, RailSignedEffect } from "../direct-rail-ports.js";
+import type { ChainAccount, ChainAsset, ChainAssetAlias, ChainBalance, ChainWalletStoragePort, DirectRailPort, RailEffectBinding, RailInspection, RailPreparedTransfer, RailSendBinding, RailSignedEffect } from "../direct-rail-ports.js";
 import { ApnError } from "../errors.js";
 import { validateRailPrepared } from "../rail-operation-model.js";
+import { railSendLifetime, SOLANA_APPROVAL_WINDOW_MS, validateRailSendBinding } from "../rail-send-binding.js";
 import { associatedUsdc, readAccounts, requireNativeAccount, requireSolanaFunds, requireUsdcMint, usdcAmount } from "./accounts.js";
 import { inspectSolana } from "./evidence.js";
 import { solanaMessage, validateSolanaEffect, validateSolanaMessage } from "./message.js";
+import { simulateSolanaSend } from "./simulation.js";
 import { assertSolanaNetwork, protocolFailure, rpcAtomic, rpcRecord, solanaAddress, solanaSignature, type SolanaRpcPort } from "./rpc.js";
 
 export class SolanaLocalAdapter implements DirectRailPort {
@@ -48,7 +50,7 @@ export class SolanaLocalAdapter implements DirectRailPort {
     const skeleton = {
       rail: "solana" as const, networkIdentity: SOLANA_GENESIS, asset, sender: account.address, recipient: input.recipient,
       amountAtomic: input.amountAtomic, maximumFeeAtomic: input.maximumFeeAtomic,
-      preparedAt: input.now.toISOString(), expiresAt: new Date(input.now.getTime() + 60_000).toISOString(),
+      preparedAt: input.now.toISOString(), expiresAt: new Date(input.now.getTime() + SOLANA_APPROVAL_WINDOW_MS).toISOString(),
       blockReference: block.blockhash, lastValidBlockHeight,
       sourceTokenAccount: snapshot.source, destinationTokenAccount: snapshot.destination,
       createsRecipientAccount: snapshot.createsRecipientAccount,
@@ -62,11 +64,14 @@ export class SolanaLocalAdapter implements DirectRailPort {
         networkFeePayer: account.address, rentPayer: rent > 0n ? account.address : null, feeControl: "signed_message" },
     }, account);
   }
-  async revalidate(account: ChainAccount, prepared: RailPreparedTransfer): Promise<void> {
+  async revalidate(account: ChainAccount, prepared: RailPreparedTransfer, send: RailSendBinding | null = null): Promise<void> {
     await this.currentAccount(account); validateRailPrepared(prepared, account); await this.assertNetwork();
-    const message = await validateSolanaMessage(prepared);
+    if (send !== null) validateRailSendBinding(send, prepared);
+    const message = await validateSolanaMessage(prepared, send);
+    // The bytes proven by the pre-send simulation are the only bytes this operation may ever seal.
+    if (send !== null && sha256(message.unsignedPayload) !== send.simulation.payloadHash) mismatch();
     if (this.now().getTime() >= Date.parse(prepared.expiresAt)) expired();
-    await this.validBlock(prepared);
+    await this.validBlock(prepared, send);
     const snapshot = await transferSnapshot(this.rpc, account, prepared.asset, prepared.recipient);
     if (snapshot.createsRecipientAccount && !prepared.createsRecipientAccount) expired();
     const rent = snapshot.createsRecipientAccount ? rpcAtomic(await this.rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }])) : 0n;
@@ -74,11 +79,36 @@ export class SolanaLocalAdapter implements DirectRailPort {
     if (fee > atomic(prepared.economics.networkFeeMaximumAtomic) || rent > atomic(prepared.economics.recipientRentAtomic)) expired();
     requireSolanaFunds(snapshot.native, snapshot.token, atomic(prepared.amountAtomic), atomic(prepared.economics.maximumNativeDebitAtomic), prepared.asset.kind === "native");
   }
+  /**
+   * The send guard. It runs after the owner approved and before anything is signed: it re-acquires
+   * the block reference so the reading time cannot have consumed the sending window, re-proves the
+   * frozen fee, rent and funding bounds, and simulates the exact bytes with `sigVerify: false`.
+   */
+  async bindSend(account: ChainAccount, prepared: RailPreparedTransfer): Promise<RailSendBinding> {
+    await this.currentAccount(account); validateRailPrepared(prepared, account); await this.assertNetwork();
+    await validateSolanaMessage(prepared);
+    if (this.now().getTime() >= Date.parse(prepared.expiresAt)) expired();
+    const block = rpcRecord(rpcRecord(await this.rpc.call("getLatestBlockhash", [{ commitment: "confirmed" }])).value);
+    if (typeof block.blockhash !== "string") protocolFailure(); solanaAddress(block.blockhash);
+    const observedBlockHeight = rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }]));
+    const candidate = { blockReference: block.blockhash, lastValidBlockHeight: rpcAtomic(block.lastValidBlockHeight).toString(),
+      observedBlockHeight: observedBlockHeight.toString(), acquiredAt: this.now().toISOString() };
+    const message = await solanaMessage(prepared, candidate);
+    const snapshot = await transferSnapshot(this.rpc, account, prepared.asset, prepared.recipient);
+    if (snapshot.createsRecipientAccount && !prepared.createsRecipientAccount) expired();
+    const rent = snapshot.createsRecipientAccount ? rpcAtomic(await this.rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }])) : 0n;
+    const fee = await messageFee(this.rpc, message.messageBase64);
+    if (fee > atomic(prepared.economics.networkFeeMaximumAtomic) || rent > atomic(prepared.economics.recipientRentAtomic)) expired();
+    requireSolanaFunds(snapshot.native, snapshot.token, atomic(prepared.amountAtomic), atomic(prepared.economics.maximumNativeDebitAtomic), prepared.asset.kind === "native");
+    const simulation = await simulateSolanaSend(this.rpc, message.unsignedPayload);
+    return validateRailSendBinding({ ...candidate, simulation }, prepared);
+  }
   async sign(binding: RailEffectBinding): Promise<RailSignedEffect> {
     const existing = await this.recoverEffect(binding);
     if (existing !== null) return existing;
-    await this.revalidate(binding.account, binding.prepared);
-    const message = await validateSolanaMessage(binding.prepared);
+    if (binding.send === null) mismatch();
+    await this.revalidate(binding.account, binding.prepared, binding.send);
+    const message = await validateSolanaMessage(binding.prepared, binding.send);
     const effect = await this.storage.withSeed(binding.account, async (seed) => {
       const signer = await createKeyPairSignerFromPrivateKeyBytes(seed);
       if (signer.address !== binding.account.address) mismatch();
@@ -87,34 +117,35 @@ export class SolanaLocalAdapter implements DirectRailPort {
       return { operationId: binding.operationId, fingerprint: binding.fingerprint,
         transactionId: getSignatureFromTransaction(transaction), rawPayload, rawPayloadHash: sha256(rawPayload) };
     });
-    await validateSolanaEffect(binding.prepared, effect);
+    await validateSolanaEffect(binding.prepared, effect, binding.send);
     await this.storage.saveEffect(binding.account, effect);
     return effect;
   }
   async recoverEffect(binding: RailEffectBinding): Promise<RailSignedEffect | null> {
     await this.currentAccount(binding.account);
     const effect = await this.storage.effect(binding.account, binding.operationId, binding.fingerprint);
-    if (effect !== null) await validateSolanaEffect(binding.prepared, effect);
+    if (effect !== null) await validateSolanaEffect(binding.prepared, effect, binding.send);
     return effect;
   }
   async submit(binding: RailEffectBinding, effect: RailSignedEffect | null): Promise<{ readonly transactionId: string }> {
     if (effect === null) mismatch();
     const stored = await this.recoverEffect(binding);
     if (stored === null || canonicalJson(stored) !== canonicalJson(effect)) mismatch();
-    await this.revalidate(binding.account, binding.prepared);
+    await this.revalidate(binding.account, binding.prepared, binding.send);
     const result = await this.rpc.call("sendTransaction", [effect.rawPayload, { encoding: "base64", skipPreflight: false, preflightCommitment: "confirmed", maxRetries: 0 }]);
     if (solanaSignature(result) !== effect.transactionId) throw new ApnError("APN_RPC_AMBIGUOUS", "Solana submission returned a different effect identity.");
     return { transactionId: effect.transactionId };
   }
-  async inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<RailInspection> {
+  async inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, _expectedRawPayloadHash?: string, send: RailSendBinding | null = null): Promise<RailInspection> {
     await this.currentAccount(account); validateRailPrepared(prepared, account);
-    return await inspectSolana(this.rpc, account, prepared, transactionId, this.now());
+    return await inspectSolana(this.rpc, account, prepared, transactionId, this.now(), send);
   }
-  async assertValidityExpired(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<void> {
+  async assertValidityExpired(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, send: RailSendBinding | null = null): Promise<void> {
     await this.currentAccount(account); validateRailPrepared(prepared, account); await assertSolanaNetwork(this.rpc); solanaSignature(transactionId);
-    if (prepared.lastValidBlockHeight === null) validityOpen();
+    const lastValidBlockHeight = railSendLifetime(prepared, send).lastValidBlockHeight;
+    if (lastValidBlockHeight === null) validityOpen();
     // A finalized chain above lastValidBlockHeight can no longer include a transaction using this blockhash.
-    if (rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "finalized" }])) <= atomic(prepared.lastValidBlockHeight)) validityOpen();
+    if (rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "finalized" }])) <= atomic(lastValidBlockHeight)) validityOpen();
     const statuses = rpcRecord(await this.rpc.call("getSignatureStatuses", [[transactionId], { searchTransactionHistory: true }])).value;
     if (!Array.isArray(statuses) || statuses.length !== 1 || statuses[0] !== null) validityOpen();
   }
@@ -122,8 +153,9 @@ export class SolanaLocalAdapter implements DirectRailPort {
     const stored = await this.account(account.profile);
     if (stored === null || canonicalJson(stored) !== canonicalJson(account)) mismatch();
   }
-  private async validBlock(prepared: RailPreparedTransfer): Promise<void> {
-    if (prepared.lastValidBlockHeight === null || rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }])) > atomic(prepared.lastValidBlockHeight)) expired();
+  private async validBlock(prepared: RailPreparedTransfer, send: RailSendBinding | null): Promise<void> {
+    const lastValidBlockHeight = railSendLifetime(prepared, send).lastValidBlockHeight;
+    if (lastValidBlockHeight === null || rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }])) > atomic(lastValidBlockHeight)) expired();
   }
 }
 

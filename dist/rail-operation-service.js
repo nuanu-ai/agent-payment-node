@@ -5,6 +5,7 @@ import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
 import { newRailOperation, publicRailOperation, transitionRail, validateRailPrepared, validateRailTransactionId } from "./rail-operation-model.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
+import { RAIL_PRESEND_ATTEMPTS, RAIL_PRESEND_MIN_REMAINING_MS, RAIL_PRESEND_RETRY_MS, railSendReason, railSendTransient } from "./rail-send-binding.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 export class RailOperationService {
@@ -75,7 +76,17 @@ export class RailOperationService {
             }
             if (adapter.execution === "provider_atomic")
                 return await this.submit(operation, adapter, null);
-            operation = await this.move(operation, "signing_started", "foreground_signing_started", "durable_pre_effect");
+            let send;
+            if (adapter.bindSend !== undefined) {
+                try {
+                    send = await this.patientBind(operation, adapter.bindSend.bind(adapter));
+                }
+                catch (error) {
+                    await this.move(operation, "failed_before_effect", railSendReason(error, "pre_send_guard_refused"), "durable_pre_effect");
+                    throw error;
+                }
+            }
+            operation = await this.move(operation, "signing_started", "foreground_signing_started", "durable_pre_effect", undefined, send);
             let effect;
             try {
                 effect = await adapter.sign(binding(operation));
@@ -133,6 +144,25 @@ export class RailOperationService {
         return found.record;
     }
     adapter(operation) { return this.policies.adapter(operation.account.rail, operation.account.provider); }
+    /**
+     * The send guard re-acquires a validity window and simulates, so a lost read must be re-run
+     * rather than reported as a refusal. Only a transport loss is retried, only while the owner's
+     * approved window still leaves room to send, and every attempt re-acquires a fresh window.
+     */
+    async patientBind(operation, bind) {
+        const deadline = Date.parse(operation.prepared.expiresAt) - RAIL_PRESEND_MIN_REMAINING_MS;
+        for (let attempt = 1;; attempt += 1) {
+            try {
+                return await bind(operation.account, operation.prepared);
+            }
+            catch (error) {
+                if (attempt >= RAIL_PRESEND_ATTEMPTS || !railSendTransient(error) ||
+                    this.context.clock.now().getTime() + RAIL_PRESEND_RETRY_MS >= deadline ||
+                    await this.context.wait.wait(RAIL_PRESEND_RETRY_MS) === "interrupted")
+                    throw error;
+            }
+        }
+    }
     async revalidate(operation, adapter) {
         if (this.context.clock.now().getTime() >= Date.parse(operation.prepared.expiresAt))
             throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen direct-rail approval expired.");
@@ -142,7 +172,7 @@ export class RailOperationService {
         const policy = await this.policies.authorize(current, operation.prepared.asset.alias, operation.prepared.amountAtomic, operation.prepared.maximumFeeAtomic, operation.operationId);
         if (policy.policyHash !== operation.policyHash)
             throw new ApnError("APN_PROFILE_DRIFT", "The chain policy changed after preparation.");
-        await adapter.revalidate(current, operation.prepared);
+        await adapter.revalidate(current, operation.prepared, operation.send ?? null);
     }
     async firstLocalSubmit(operation, adapter, effect) {
         try {
@@ -177,7 +207,7 @@ export class RailOperationService {
         try {
             if (await adapter.assertNetwork() !== operation.prepared.networkIdentity)
                 throw new Error("network mismatch");
-            result = await adapter.inspect(operation.account, operation.prepared, operation.transactionId, operation.rawPayloadHash ?? undefined);
+            result = await adapter.inspect(operation.account, operation.prepared, operation.transactionId, operation.rawPayloadHash ?? undefined, operation.send ?? null);
         }
         catch {
             return operation;
@@ -197,12 +227,12 @@ export class RailOperationService {
             (operation.rawPayloadHash !== null && effect.rawPayloadHash !== operation.rawPayloadHash))
             corrupt();
     }
-    async move(operation, state, reason, proofClass, effect = undefined) {
-        const next = transitionRail(operation, { state, at: this.context.clock.now().toISOString(), reason, proofClass, ...effect });
+    async move(operation, state, reason, proofClass, effect = undefined, send = undefined) {
+        const next = transitionRail(operation, { state, at: this.context.clock.now().toISOString(), reason, proofClass, ...effect, ...(send === undefined ? {} : { send }) });
         await this.records.persist(next);
         return next;
     }
 }
-function binding(operation) { return { account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, prepared: operation.prepared }; }
+function binding(operation) { return { account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, prepared: operation.prepared, send: operation.send ?? null }; }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "The direct-rail effect or operation binding is invalid."); }
 //# sourceMappingURL=rail-operation-service.js.map
