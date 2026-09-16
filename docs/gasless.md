@@ -5,7 +5,7 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-APN 0.5.18 includes this capability. Package availability, mainnet transfer
+APN 0.5.19 includes this capability. Package availability, mainnet transfer
 evidence and receiving human acceptance are tracked separately for each profile
 and network. `apn gasless capabilities` reports the exact adapter and acceptance
 state without reading a wallet,
@@ -93,12 +93,28 @@ The check before sending still requires those prices to cover the bundler's
 current slow tier. For these operations, the `gas` prices in the operation
 status are the preparation quote.
 
-A quote above your maximum fee is refused at preparation. After approval, a
-price rise beyond it ends the operation as `failed_before_effect` before the
-bootstrap is disclosed. After the bootstrap is disclosed, a price spike, rate
-limit or transport error in a check is retried every 5 seconds for up to about
-90 seconds before APN records `unknown_finality`. Saved v2 and v3 operations
-keep the prices frozen at preparation.
+A quote above your maximum fee is refused at preparation.
+
+After approval, every check retries a transient failure inside the approval
+window: a quote above your maximum fee, bundler price drift, a rate limit, a
+provider error, an RPC transport failure, or a mirror estimate the bundler
+could not run. A retry waits 5 seconds, takes at most 18 checks, and stops
+while the window still leaves room for the remaining steps. Interrupting the
+command stops the wait at once. A retry never re-signs, never re-discloses and
+never re-sends.
+
+These refusals are never retried: an expired window, a changed owner binding,
+nonce or paymaster allowance, a balance below the transfer, and a mirror
+estimate that does not fit the frozen offer.
+
+A transport failure that never clears is recorded as `gasless_rpc_unavailable`.
+The older `gasless_guard_unavailable` now means only an error APN could not
+classify.
+
+A receipt saved by an earlier release, whose only difference from today's
+projection is the proof class it named, is accepted and repaired the next time
+the operation is read. Saved v2 and v3 operations keep the prices frozen at
+preparation.
 
 Before the approval screen, APN estimates the same UserOperation signed by a
 throwaway key, with a state override that gives that key the transfer's USDC.
