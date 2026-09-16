@@ -34,7 +34,8 @@ function fixture() {
     near: { status: "SUCCESS", quoteResponse: { quoteRequest: {
       originAsset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
       destinationAsset: "nep141:tron-d28a265909efecdcee7c5028585214ea0b96f015.omft.near",
-      swapType: "EXACT_INPUT", depositType: "ORIGIN_CHAIN", recipientType: "DESTINATION_CHAIN", refundType: "ORIGIN_CHAIN",
+      swapType: "EXACT_INPUT", depositType: "ORIGIN_CHAIN", depositMode: "SIMPLE",
+      recipientType: "DESTINATION_CHAIN", refundType: "ORIGIN_CHAIN",
       amount: "99750000", recipient, refundTo: source.refundTo },
       quote: { depositAddress: source.depositAddress, amountIn: "99750000", minAmountOut: "97000000" } },
       swapDetails: { originChainTxHashes: [{ hash: sourceHash }], destinationChainTxHashes: [{ hash: destinationHash }], amountIn: "99750000", amountOut: "98500000" } },
@@ -82,6 +83,8 @@ test("refuses alternate 1Click assets, amount and request modes", () => {
   refused(f => { f.near.quoteResponse.quoteRequest.amount = "99750001"; });
   refused(f => { f.near.quoteResponse.quoteRequest.swapType = "EXACT_OUTPUT"; });
   refused(f => { f.near.quoteResponse.quoteRequest.depositType = "INTENTS"; });
+  refused(f => { f.near.quoteResponse.quoteRequest.depositMode = "MEMO"; });
+  refused(f => { f.near.quoteResponse.quoteRequest.depositMode = ""; });
   refused(f => { f.near.quoteResponse.quoteRequest.recipientType = "INTENTS"; });
   refused(f => { f.near.quoteResponse.quoteRequest.refundType = "INTENTS"; });
 });
