@@ -7,6 +7,7 @@ import type { LifiResponse } from "./ports.js";
 export class BridgeHttps {
   private active = 0;
   private readonly waiting: Array<() => void> = [];
+  constructor(private readonly resolveAddresses: typeof resolvePublicAddresses = resolvePublicAddresses) {}
   async request(endpointInput: string, method: "GET" | "POST", body: string | null, maximumBytes: number,
     code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG"): Promise<LifiResponse> {
     const endpoint = parsePublicHttpsUrl(endpointInput, code, "Bridge endpoint", 2048);
@@ -20,7 +21,7 @@ export class BridgeHttps {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const addresses = await Promise.race([
-        resolvePublicAddresses(endpoint, code, "Bridge endpoint"),
+        this.resolveAddresses(endpoint, code, "Bridge endpoint"),
         new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(failure(code, "DNS_deadline")), 15_000); }),
       ]);
       clearTimeout(timeout); timeout = undefined;

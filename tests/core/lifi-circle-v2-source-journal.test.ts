@@ -33,7 +33,7 @@ async function fixture(): Promise<CircleV2SourcePreparation> {
     sourceRefundAddress: refund, sourceBlock: { number: "99", hash: `0x${"c".repeat(64)}` },
     transaction: { type: "eip1559" as const, chainId: 8453 as const, from: payer, to: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES,
       data, valueAtomic: "0" as const, nonceAtomic: "7", gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000",
-      maxPriorityFeePerGasWei: "100000000" }, maximumNativeDebitWei: "200000000000000",
+      maxPriorityFeePerGasWei: "100000000" }, maximumNativeDebitWei: "200000000000000", l1DataFeeUpperWei: "0", operatorFeeUpperWei: "0",
     preparedAt: "2026-09-16T00:00:00.000Z", expiresAt: "2026-09-16T00:01:00.000Z" };
   return deepFreeze({ ...body, preparationDigest: `sha256:${hashObject(body)}` });
 }

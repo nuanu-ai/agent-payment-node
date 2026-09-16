@@ -33,6 +33,8 @@ export interface CircleV2ApprovalState {
   readonly gasLimitAtomic: string;
   readonly maxFeePerGasWei: string;
   readonly maxPriorityFeePerGasWei: string;
+  /** Base execution plus L1 data and operator fee upper estimate from the same RPC adapter. */
+  readonly totalNativeDebitWei: string;
 }
 /** Implementation must obtain allowance and balance at the same fresh Base block and estimate the supplied calldata. */
 export type CircleV2ApprovalStateReader = (query: Readonly<{
@@ -85,7 +87,8 @@ now: () => number = Date.now): Promise<CircleV2ApprovalPreparation> {
   const priority = bridgeUint(state.maxPriorityFeePerGasWei);
   if (gas === 0n || gas > BRIDGE_MAX_GAS || gas > bridgeUint(limits.maxGasLimitAtomic) || maxFee === 0n ||
     priority > maxFee || maxFee > bridgeUint(limits.maxFeePerGasWei) || priority > bridgeUint(limits.maxPriorityFeePerGasWei)) fail("gas_or_fee_cap");
-  const nativeDebit = gas * maxFee;
+  const nativeDebit = bridgeUint(state.totalNativeDebitWei);
+  if (nativeDebit < gas * maxFee) fail("total_fee_under_execution");
   if (nativeDebit > UINT256_MAX || nativeDebit > bridgeUint(limits.maxNativeDebitWei) ||
     bridgeUint(state.nativeBalanceWei) < nativeDebit) fail("native_balance_or_cap");
   const current = now();
