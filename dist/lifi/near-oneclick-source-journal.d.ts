@@ -1,7 +1,7 @@
 import { SecureStateStore } from "../secure-state-store.js";
 import { type Hex } from "viem";
 export interface OneClickSourceRecord {
-    readonly schemaVersion: "apn.oneclick-source.v1";
+    readonly schemaVersion: "apn.oneclick-source.v1" | "apn.oneclick-source.v2";
     readonly operationId: string;
     readonly profileHash: string;
     readonly payer: string;
