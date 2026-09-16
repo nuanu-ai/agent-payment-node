@@ -535,6 +535,14 @@ export declare const deploymentAbi: readonly [{
         readonly type: "uint8";
     }];
 }, {
+    readonly name: "implementation";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "address";
+    }];
+}, {
     readonly name: "SPOKEPOOL";
     readonly type: "function";
     readonly stateMutability: "view";

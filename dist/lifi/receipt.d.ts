@@ -30,6 +30,33 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
         lifi_transaction_id: `0x${string}`;
         included_step_identities: readonly string[];
     };
+    asset: {
+        from: {
+            chain: string;
+            token: `0x${string}`;
+            symbol: string;
+            coin_key: string;
+            decimals: number;
+            upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+            native_coin: {
+                symbol: string;
+                decimals: 18;
+            };
+        };
+        to: {
+            chain: string;
+            token: `0x${string}`;
+            symbol: string;
+            coin_key: string;
+            decimals: number;
+            upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+            native_coin: {
+                symbol: string;
+                decimals: 18;
+            };
+        };
+        native_principal_admitted: boolean;
+    };
     transfer: {
         sender: `0x${string}`;
         quoted_output_atomic: string;
@@ -52,6 +79,13 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
     fees: {
         declared: readonly import("./model.js").BridgeFee[];
         implicit_protocol_token_fee_atomic: string;
+        fee_headroom: {
+            policy: "apn.bridge-fee-headroom.v1";
+            headroom_bps: number;
+            approved_maximum_execution_fee_wei: string;
+            quoted_execution_fee_wei: string;
+            statement: string;
+        };
         token_loss_bound_atomic: string;
         native_debit_cap_wei: string;
         total_native_fee_enforced_onchain: boolean;
@@ -78,6 +112,7 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
         economics: import("../model.js").Economics;
         fee_quote: import("../evm-ports.js").EvmFeeQuote;
         gas_ceiling_provisional_at_consent: boolean;
+        fee_ceiling: import("./model.js").BridgeFeeCeiling;
         included_proof: import("./model.js").BridgeTransactionProof | null;
         safe_proof: import("./model.js").BridgeTransactionProof | null;
     }[];
@@ -136,6 +171,33 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
         lifi_transaction_id: `0x${string}`;
         included_step_identities: readonly string[];
     };
+    asset: {
+        from: {
+            chain: string;
+            token: `0x${string}`;
+            symbol: string;
+            coin_key: string;
+            decimals: number;
+            upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+            native_coin: {
+                symbol: string;
+                decimals: 18;
+            };
+        };
+        to: {
+            chain: string;
+            token: `0x${string}`;
+            symbol: string;
+            coin_key: string;
+            decimals: number;
+            upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+            native_coin: {
+                symbol: string;
+                decimals: 18;
+            };
+        };
+        native_principal_admitted: boolean;
+    };
     transfer: {
         sender: `0x${string}`;
         quoted_output_atomic: string;
@@ -158,6 +220,13 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
     fees: {
         declared: readonly import("./model.js").BridgeFee[];
         implicit_protocol_token_fee_atomic: string;
+        fee_headroom: {
+            policy: "apn.bridge-fee-headroom.v1";
+            headroom_bps: number;
+            approved_maximum_execution_fee_wei: string;
+            quoted_execution_fee_wei: string;
+            statement: string;
+        };
         token_loss_bound_atomic: string;
         native_debit_cap_wei: string;
         total_native_fee_enforced_onchain: boolean;
@@ -184,6 +253,7 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
         economics: import("../model.js").Economics;
         fee_quote: import("../evm-ports.js").EvmFeeQuote;
         gas_ceiling_provisional_at_consent: boolean;
+        fee_ceiling: import("./model.js").BridgeFeeCeiling;
         included_proof: import("./model.js").BridgeTransactionProof | null;
         safe_proof: import("./model.js").BridgeTransactionProof | null;
     }[];

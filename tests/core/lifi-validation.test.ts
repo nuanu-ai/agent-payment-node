@@ -10,15 +10,16 @@ import { validateBridgeOperation } from "../../src/lifi/operation-validation.js"
 import { publicBridgeOperation } from "../../src/lifi/receipt.js";
 import { materializeBridgeRoute, parseBridgeRoutes, validateRouteEconomics } from "../../src/lifi/routes.js";
 import { TtyBridgeApproval } from "../../src/lifi/tty.js";
-import { bridgeDecimal, bridgeUint } from "../../src/lifi/validation.js";
+import { bridgeDecimal } from "../../src/lifi/asset-registry.js";
+import { bridgeUint } from "../../src/lifi/validation.js";
 import { temporaryState } from "./helpers.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_KEY, LIFI_SYNTHETIC_SENDER, lifiFixture, lifiRoute } from "./lifi-helpers.js";
 
 test("LI.FI integer parsing preserves exact USDC and wei boundaries without coercion or rounding", () => {
-  assert.equal(bridgeDecimal("0.000001", true), "1"); assert.equal(bridgeDecimal("10.123456", true), "10123456"); assert.equal(bridgeDecimal("0"), "0");
+  assert.equal(bridgeDecimal("0.000001", 6, true), "1"); assert.equal(bridgeDecimal("10.123456", 6, true), "10123456"); assert.equal(bridgeDecimal("0", 6), "0");
   const maximum = (1n << 256n) - 1n; assert.equal(bridgeUint(maximum.toString()), maximum);
-  for (const value of ["", "00", "-1", "+1", "1e6", " 1", "1 ", "0.0000001", 1, null]) assert.throws(() => bridgeDecimal(value, true), { code: "APN_INVALID_INPUT" });
-  assert.throws(() => bridgeDecimal("0", true), { code: "APN_INVALID_INPUT" });
+  for (const value of ["", "00", "-1", "+1", "1e6", " 1", "1 ", "0.0000001", 1, null]) assert.throws(() => bridgeDecimal(value, 6, true), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => bridgeDecimal("0", 6, true), { code: "APN_INVALID_INPUT" });
   for (const value of [maximum + 1n, -(1n)]) assert.throws(() => bridgeUint(value.toString()), { code: "APN_PROVIDER_PROTOCOL" });
 });
 

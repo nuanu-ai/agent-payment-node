@@ -18,7 +18,8 @@ import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import type { BridgeApprovalPort, BridgeRpcPort, LifiProviderPort } from "../../src/lifi/ports.js";
 import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { BRIDGE_FEE_RULE_HASH } from "../../src/lifi/rpc-fees.js";
-import { BRIDGE_DIAMOND, BRIDGE_USDC } from "../../src/lifi/validation.js";
+import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
+import { BRIDGE_DIAMOND } from "../../src/lifi/validation.js";
 import { addressWord, makeDestinationReceipt, makeSourceReceipt } from "./lifi-event-fixtures.js";
 
 export type LifiJson = Record<string, any>;
@@ -96,14 +97,14 @@ export class LifiTestRpc implements BridgeRpcPort {
     return { numberAtomic: number, hash: `0x${sha256(`${this.chainId}:${number}:${this.changedBlock}`)}`,
       timestampAtomic: this.blockTimestamp };
   }
-  async deployment(tool: BridgeTool, peerChainId: EvmChainId, block?: BridgeBlock) {
-    this.calls.push("deployment"); const contract = bridgeDeployment(this.chainId, peerChainId, tool);
+  async deployment(tool: BridgeTool, peerChainId: EvmChainId, token: Address, block?: BridgeBlock) {
+    this.calls.push("deployment"); const contract = bridgeDeployment(this.chainId, peerChainId, tool, token);
     return { chainId: this.chainId, peerChainId, tool, block: block ?? await this.block("safe"), rpcOrigin: this.origin,
       contractHash: hashObject(contract), codeHash: this.drift ? "0".repeat(64) : hashObject(contract.code), configurationHash: hashObject(contract.reads) };
   }
-  async account(owner: Address, spender: Address) {
+  async account(owner: Address, spender: Address, token: Address) {
     this.calls.push("account"); if (this.failAccount) throw new Error("synthetic RPC unavailable");
-    return { chainId: this.chainId, rpcOrigin: this.origin, block: await this.block("latest"), owner, token: BRIDGE_USDC[this.chainId], spender,
+    return { chainId: this.chainId, rpcOrigin: this.origin, block: await this.block("latest"), owner, token, spender,
       balanceAtomic: this.balance.toString(), nativeBalanceWei: this.native.toString(), allowanceAtomic: this.allowance,
       latestNonceAtomic: this.nonce.toString(), pendingNonceAtomic: (this.pendingNonce ?? this.nonce).toString() };
   }
@@ -122,7 +123,7 @@ export class LifiTestRpc implements BridgeRpcPort {
   }
   async send(raw: Hex) {
     this.calls.push("send"); this.submissions.push(raw); const tx = parseTransaction(raw);
-    const approval = getAddress(tx.to!) === BRIDGE_USDC[this.chainId], role = approval ? "approval" : "bridge";
+    const approval = getAddress(tx.to!) !== BRIDGE_DIAMOND, role = approval ? "approval" : "bridge";
     this.nonce = BigInt(tx.nonce!) + 1n;
     if (!this.reverted.has(role)) this.allowance = approval ? this.op!.intent.materialization.request.amountAtomic : "0";
     if (this.sendTimeout) throw new Error("synthetic timeout after acceptance");
@@ -184,7 +185,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
   const dependencies = { provider, rpcFor: (chain: EvmChainId) => { assert.ok(chain === source.chainId || chain === destination.chainId); return chain === source.chainId ? source : destination; }, custody, approval };
   const core = new ApnCore({ state, bridge: dependencies, clock: { now: () => new Date(now) } });
   const request: BridgeRouteRequest = { fromChainId: a.fromChainId, toChainId: a.toChainId, fromToken: a.fromToken.address, toToken: a.toToken.address,
-    recipient: LIFI_RECIPIENT, amountAtomic: a.fromAmount, minOutputAtomic: "9000000", maxNativeDebitWei: "10000000000000000", maxRouteFeeAtomic: "1000000", slippageBps: 50 };
+    recipient: LIFI_RECIPIENT, amountAtomic: a.fromAmount, minOutputAtomic: "9000000", maxNativeDebitWei: "20000000000000000", maxRouteFeeAtomic: "1000000", slippageBps: 50 };
   const prepare = async (tool: BridgeTool = "across", key = "lifi-fixture-0001") => {
     const quotes = await core.execute({ command: "bridge.routes", profile, request }); assert.equal(quotes.ok, true, quotes.error?.message);
     const quote = (quotes.data as { quote_hash: string }).quote_hash;
