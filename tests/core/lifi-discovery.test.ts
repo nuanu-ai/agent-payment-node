@@ -15,7 +15,7 @@ import { BridgeHttps } from "../../src/lifi/https.js";
 import { LIFI_INVENTORY_RESPONSE_BYTES, LifiProvider, normalizeLifiStatus, type LifiTransport } from "../../src/lifi/provider.js";
 import { validateBridgeQuote } from "../../src/lifi/quote-repository.js";
 import { bridgeRpcFactory } from "../../src/lifi/rpc.js";
-import { bridgeInventory } from "../../src/lifi/catalog.js";
+import { bridgeCapabilities, bridgeInventory } from "../../src/lifi/catalog.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 import { BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "../../src/lifi/discovery-candidates.js";
 
@@ -27,6 +27,19 @@ import { LIFI_RECIPIENT, LIFI_SYNTHETIC_SENDER, lifiFixture } from "./lifi-helpe
 const routeArgs = { profile: "lifi-local", from_chain: "eip155:1", to_chain: "eip155:8453", from_token: BRIDGE_USDC[1],
   to_token: BRIDGE_USDC[8453], amount: "10", to: LIFI_RECIPIENT, min_output: "9", max_native_debit_wei: "20000000000000000", max_route_fee: "1", slippage_bps: "50" };
 function argv(path: string[], args: Record<string, string>) { return [...path, ...Object.entries(args).flatMap(([k, v]) => [`--${k.replaceAll("_", "-")}`, v])]; }
+
+test("v1 candidate lanes retain the exact pre-Circle LI.FI rows and indexes", () => {
+  assert.deepEqual(bridgeCapabilities().candidate_lanes, [
+    { from_chain: "eip155:8453", from_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      to_lifi_chain_id: 1151111081099710, to_token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      provider_route_state: "unverified_by_static_capabilities", executable: false,
+      missing_proof: ["selected_route_and_source_call", "solana_destination_delivery_and_finality", "fee_and_recovery_contract"] },
+    { from_chain: "eip155:8453", from_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      to_lifi_chain_id: 728126428, to_token: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", tool: "near",
+      provider_route_state: "unverified_by_static_capabilities", executable: false,
+      missing_proof: ["selected_near_route_and_source_call", "tron_solidified_destination_delivery_and_correlation", "fee_refund_and_recovery_contract"] },
+  ]);
+});
 
 test("LI.FI all five CLI and MCP commands bind identically, without a generic RPC fallback", () => {
   const argumentsByPath: Record<string, Record<string, string>> = {
