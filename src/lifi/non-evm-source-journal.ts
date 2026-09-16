@@ -22,12 +22,19 @@ const proof = z.strictObject({ kind: z.literal("synthetic_untrusted"), claimedVa
 const safe = z.strictObject({ provenance: z.literal("synthetic_untrusted"), transactionHash: wordSchema, status: z.enum(["success", "reverted"]),
   blockNumberAtomic: uintSchema, blockHash: wordSchema, safeBlockNumberAtomic: uintSchema,
   safeBlockHash: wordSchema, observedAt: isoSchema });
+const rpcObservedSafe = z.strictObject({ provenance: z.literal("rpc_observed_untrusted_circle_v2_base_source_v1"),
+  transactionHash: wordSchema, status: z.enum(["success", "reverted"]),
+  blockNumberAtomic: uintSchema, blockHash: wordSchema, safeBlockNumberAtomic: uintSchema,
+  safeBlockHash: wordSchema, observedAt: isoSchema, rpcOrigin: z.string().url(),
+  logsHash: hashSchema, receiptHash: hashSchema, protocolInputDigest: hashSchema,
+  protocolProofHash: hashSchema.nullable(), executionAdmitted: z.literal(false), bridgeCompletion: z.literal(false) });
+const sourceProof = z.union([safe, rpcObservedSafe]);
 const phase = z.enum(["staged_untrusted", "signing_started", "sealed", "submitting", "submitted_pending",
-  "unknown_finality", "source_confirmed", "source_reverted"]);
+  "unknown_finality", "source_observed_untrusted", "source_confirmed", "source_reverted"]);
 const signedHex = z.string().regex(/^0x(?:[a-f0-9]{2})*$/u).max(32_770);
 const snapshot = z.strictObject({ phase, signedTransaction: signedHex.nullable(), transactionHash: wordSchema.nullable(),
   nonceAtomic: uintSchema.nullable(), submissionAttempts: z.union([z.literal(0), z.literal(1)]),
-  safeSourceProof: safe.nullable(), reason: z.string().max(128).nullable() });
+  safeSourceProof: sourceProof.nullable(), reason: z.string().max(128).nullable() });
 const entry = z.strictObject({ ...snapshot.shape, at: isoSchema, previousHash: hashSchema, transitionHash: hashSchema });
 const schema = z.strictObject({ schemaVersion: z.literal("apn.non-evm-source-journal.v1"),
   kind: z.literal("non_evm_source_journal"), executionAdmitted: z.literal(false),
@@ -37,6 +44,7 @@ const schema = z.strictObject({ schemaVersion: z.literal("apn.non-evm-source-jou
 export type NonEvmSourceJournal = z.infer<typeof schema>;
 export type NonEvmSourceBinding = Pick<NonEvmSourceJournal, "profileHash" | "operationId" | "draftIntegrityHash" | "route" | "sourceCall" | "maxSourceNativeDebitWei" | "admissionProof" | "createdAt">;
 export type SafeSourceObservation = z.infer<typeof safe>;
+export type RpcObservedCircleSourceObservation = z.infer<typeof rpcObservedSafe>;
 type Phase = z.infer<typeof phase>;
 type Snapshot = z.infer<typeof snapshot>;
 function corrupt(): never { return bridgeFailure("APN_STATE_CORRUPT", "non_evm_source_journal"); }
@@ -48,9 +56,10 @@ function snapshotOf(j: NonEvmSourceJournal): Snapshot {
 }
 const edges: Record<Phase, readonly Phase[]> = {
   staged_untrusted: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
-  submitting: ["submitted_pending", "unknown_finality", "source_confirmed", "source_reverted"],
-  submitted_pending: ["unknown_finality", "source_confirmed", "source_reverted"],
-  unknown_finality: ["source_confirmed", "source_reverted"],
+  submitting: ["submitted_pending", "unknown_finality", "source_observed_untrusted", "source_confirmed", "source_reverted"],
+  submitted_pending: ["unknown_finality", "source_observed_untrusted", "source_confirmed", "source_reverted"],
+  unknown_finality: ["source_observed_untrusted", "source_confirmed", "source_reverted"],
+  source_observed_untrusted: ["unknown_finality"],
   source_confirmed: ["unknown_finality"], source_reverted: ["unknown_finality"],
 };
 function checkSigned(j: NonEvmSourceJournal, raw: `0x${string}`, nonce: string): string {
@@ -95,10 +104,13 @@ export function validateNonEvmSourceJournal(value: unknown): NonEvmSourceJournal
     }
     if (prior !== undefined && prior.phase !== "staged_untrusted" && prior.phase !== "signing_started" &&
       (prior.signedTransaction !== e.signedTransaction || prior.transactionHash !== e.transactionHash || prior.nonceAtomic !== e.nonceAtomic)) corrupt();
-    if ((e.phase === "source_confirmed" || e.phase === "source_reverted") !== (e.safeSourceProof !== null)) corrupt();
+    if ((e.phase === "source_observed_untrusted" || e.phase === "source_confirmed" || e.phase === "source_reverted") !== (e.safeSourceProof !== null)) corrupt();
     if (e.safeSourceProof !== null && (e.safeSourceProof.transactionHash !== e.transactionHash ||
-      e.safeSourceProof.status !== (e.phase === "source_confirmed" ? "success" : "reverted") ||
+      (e.phase !== "source_observed_untrusted" && e.safeSourceProof.status !== (e.phase === "source_confirmed" ? "success" : "reverted")) ||
       BigInt(e.safeSourceProof.safeBlockNumberAtomic) < BigInt(e.safeSourceProof.blockNumberAtomic))) corrupt();
+    if (e.safeSourceProof?.provenance === "rpc_observed_untrusted_circle_v2_base_source_v1" &&
+      (j.route !== "base_usdc_to_solana_usdc_circle_cctp_v2" || e.phase !== "source_observed_untrusted" ||
+        (e.safeSourceProof.status === "success") !== (e.safeSourceProof.protocolProofHash !== null))) corrupt();
     prior = e;
   }
   if (prior === undefined || hashObject(snapshotOf(j)) !== hashObject(snapshotOf(prior as unknown as NonEvmSourceJournal))) corrupt();
@@ -209,12 +221,24 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
     return this.change(profileHash, operationId, expectedHash, j => advance(j,
       { ...snapshotOf(j), phase: "unknown_finality", safeSourceProof: null, reason }, at));
   }
-  /** Stores a claimed safe observation for offline state testing; provenance remains untrusted. */
+  /** Stores a claimed safe observation for offline state testing; neither phase nor provenance grants trust. */
   async observeSafeSource(profileHash: string, operationId: string, expectedHash: string,
-    observation: SafeSourceObservation, at: string): Promise<NonEvmSourceJournal> {
+    observation: SafeSourceObservation | RpcObservedCircleSourceObservation, at: string): Promise<NonEvmSourceJournal> {
     if (!safe.safeParse(observation).success) blocked();
     return this.change(profileHash, operationId, expectedHash, j => advance(j,
-      { ...snapshotOf(j), phase: observation.status === "success" ? "source_confirmed" : "source_reverted",
+      { ...snapshotOf(j), phase: "source_observed_untrusted",
         safeSourceProof: observation, reason: null }, at));
+  }
+  /** Stores a bound RPC observation without granting its caller an authenticated provenance claim. */
+  async recordRpcObservedCircleSource(profileHash: string, operationId: string, expectedHash: string,
+    observation: RpcObservedCircleSourceObservation, at: string): Promise<NonEvmSourceJournal> {
+    if (!rpcObservedSafe.safeParse(observation).success) blocked();
+    return this.change(profileHash, operationId, expectedHash, async j => {
+      if (j.route !== "base_usdc_to_solana_usdc_circle_cctp_v2" || j.transactionHash === null ||
+        j.transactionHash !== observation.transactionHash || j.submissionAttempts !== 1) blocked();
+      await this.assertReservation(j);
+      return advance(j, { ...snapshotOf(j), phase: "source_observed_untrusted",
+        safeSourceProof: observation, reason: null }, at);
+    });
   }
 }
