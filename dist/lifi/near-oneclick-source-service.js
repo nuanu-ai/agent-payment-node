@@ -66,14 +66,16 @@ export function legacyStatusQuoteMatchesRecord(value, record) {
     }
 }
 export function oneClickStatusQuoteMatchesRecord(value, record) {
+    if (record.schemaVersion === "apn.oneclick-source.v1")
+        return legacyStatusQuoteMatchesRecord(value, record);
+    if (record.schemaVersion !== "apn.oneclick-source.v2")
+        return false;
     try {
-        if (quoteIdentity(value) === record.quoteHash)
-            return true;
+        return quoteIdentity(value) === record.quoteHash;
     }
     catch {
         return false;
     }
-    return legacyStatusQuoteMatchesRecord(value, record);
 }
 export function assertOneClickPostApproval(initial, fresh, maxNativeDebit, effectiveDeadlineMs, nowMs) {
     if (fresh.nonce !== initial.nonce || fresh.gas > initial.gas || fresh.fee > initial.fee ||
