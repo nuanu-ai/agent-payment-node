@@ -19,8 +19,12 @@ const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "vie
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }] as const;
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "eth_sendRawTransaction"]);
 export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 8453: "APN_BASE_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL" } as const;
-export function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>): BridgeRpcFactory {
-  const cache = new Map<EvmChainId, BridgeRpcPort>(), transport = new BridgeHttps();
+export function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options: {
+  readonly transport?: Pick<BridgeHttps, "request">;
+  readonly wait?: (milliseconds: number) => Promise<void>;
+} = {}): BridgeRpcFactory {
+  const cache = new Map<EvmChainId, BridgeRpcPort>(), transport = options.transport ?? new BridgeHttps();
+  const wait = options.wait ?? (async (milliseconds: number) => await new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   return (chainId) => {
     bridgeChain(chainId, "APN_RPC_CONFIG");
     const existing = cache.get(chainId); if (existing !== undefined) return existing;
@@ -31,12 +35,19 @@ export function bridgeRpcFactory(environment: Readonly<Record<string, string | u
     let sequence = 0n;
     const call: EvmRpcCall = async (method, params) => {
       if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
-      const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
-      const response = await transport.request(endpoint.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");
-      if (response.status !== 200) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_HTTP_status");
-      const r = evmRpcRecord(bridgeJson(response.body, 1024 * 1024));
-      if (r.jsonrpc !== "2.0" || r.id !== id || !Object.hasOwn(r, "result") || Object.hasOwn(r, "error")) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
-      return r.result;
+      for (let attempt = 0; ; attempt += 1) {
+        const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
+        const response = await transport.request(endpoint.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");
+        if (response.status === 429 && chainId === 8453 && method !== "eth_sendRawTransaction" && attempt < 2) {
+          await wait(attempt === 0 ? 1_000 : 2_000);
+          continue;
+        }
+        if (response.status === 429) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_HTTP_429");
+        if (response.status !== 200) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_HTTP_status");
+        const r = evmRpcRecord(bridgeJson(response.body, 1024 * 1024));
+        if (r.jsonrpc !== "2.0" || r.id !== id || !Object.hasOwn(r, "result") || Object.hasOwn(r, "error")) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
+        return r.result;
+      }
     };
     const rpc = new BridgeRpc(chainId, endpoint.origin, call); cache.set(chainId, rpc); return rpc;
   };
