@@ -64,8 +64,8 @@ test("LI.FI offline capability and MCP approval handoff do not inspect invalid s
     missing_proof: ["selected_route_and_source_call", "solana_destination_delivery_and_finality", "fee_and_recovery_contract"] },
     { from_chain: "eip155:8453", from_token: BASE_TRON_USDT_CANDIDATE.fromToken,
       to_lifi_chain_id: BASE_TRON_USDT_CANDIDATE.toChainId, to_token: BASE_TRON_USDT_CANDIDATE.toToken,
-      tool: "allbridge", provider_route_state: "unverified_by_static_capabilities", executable: false,
-      missing_proof: ["selected_allbridge_route_and_source_call", "tron_solidified_destination_delivery_and_correlation", "fee_refund_and_recovery_contract"] }]);
+      tool: "near", provider_route_state: "unverified_by_static_capabilities", executable: false,
+      missing_proof: ["selected_near_route_and_source_call", "tron_solidified_destination_delivery_and_correlation", "fee_refund_and_recovery_contract"] }]);
   const server = createMcpServer(options), client = new Client({ name: "bridge-contract", version: "1" });
   const [a, b] = InMemoryTransport.createLinkedPair(); await Promise.all([server.connect(a), client.connect(b)]); t.after(async () => { await client.close(); await server.close(); });
   const capability = await client.callTool({ name: "apn_bridge_capabilities", arguments: { profile: "unbound" } });
@@ -138,7 +138,7 @@ test("LI.FI public provider API contract uses fixed endpoints, finite tools, one
     responseHash: pairs.at(-2)!.responseHash, response: {} });
   assert.deepEqual(pairs.at(-1), { fromChainId: BASE_TRON_USDT_CANDIDATE.fromChainId,
     toChainId: BASE_TRON_USDT_CANDIDATE.toChainId, fromToken: BASE_TRON_USDT_CANDIDATE.fromToken,
-    toToken: BASE_TRON_USDT_CANDIDATE.toToken, tool: "allbridge", status: "unavailable", responseHash: null, response: null });
+    toToken: BASE_TRON_USDT_CANDIDATE.toToken, tool: "near", status: "unavailable", responseHash: null, response: null });
   const publicInventory = bridgeInventory(responses) as any;
   assert.equal(publicInventory.observed.connections.executable_capability, false);
   assert.deepEqual(publicInventory.observed.connections.provider_inventory.pairs.at(-1), pairs.at(-1));
@@ -157,7 +157,7 @@ test("LI.FI public provider API contract uses fixed endpoints, finite tools, one
   assert.equal(tron.searchParams.get("fromChain"), String(BASE_TRON_USDT_CANDIDATE.fromChainId));
   assert.equal(tron.searchParams.get("fromToken"), BASE_TRON_USDT_CANDIDATE.fromToken);
   assert.equal(tron.searchParams.get("toToken"), BASE_TRON_USDT_CANDIDATE.toToken);
-  assert.equal(tron.searchParams.get("allowBridges"), "allbridge");
+  assert.equal(tron.searchParams.get("allowBridges"), "near");
   assert.equal(tron.searchParams.get("allowSwitchChain"), "false");
   assert.equal(tron.searchParams.get("allowDestinationCall"), "false");
   assert.ok(calls.some((c) => c[0] === "https://li.quest/v1/chains?chainTypes=TVM"));
@@ -220,7 +220,7 @@ test("a failed discovery-only Solana probe remains unavailable while admitted EV
   await assert.rejects(admittedFailure.inventory(), /admitted lane unavailable/u);
 });
 
-test("TRON Allbridge candidate needs matching TVM chain, canonical token, tool and connection inventory", async (t) => {
+test("TRON NEAR candidate needs matching TVM chain, canonical token, tool and connection inventory", async (t) => {
   const tron = BASE_TRON_USDT_CANDIDATE;
   for (const failure of ["none", "chain", "token", "tool", "connection", "transport", "deep", "oversized"] as const) await t.test(failure, async () => {
     const provider = new LifiProvider({ async request(endpoint) {
@@ -244,7 +244,7 @@ test("TRON Allbridge candidate needs matching TVM chain, canonical token, tool a
     const pairs = JSON.parse((await provider.inventory()).connections.body).pairs as Array<Record<string, unknown>>;
     assert.equal(pairs.length, 10);
     assert.equal(pairs.at(-1)?.status, failure === "none" ? 200 : "unavailable");
-    assert.equal(pairs.at(-1)?.tool, "allbridge");
+    assert.equal(pairs.at(-1)?.tool, "near");
     assert.ok(pairs.slice(0, -2).every((pair) => pair.status === 200));
   });
 });

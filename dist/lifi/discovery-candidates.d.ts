@@ -13,7 +13,7 @@ export declare const BASE_TRON_USDT_CANDIDATE: {
     readonly toChainId: 728126428;
     readonly fromToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
     readonly toToken: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
-    readonly tool: "allbridge";
+    readonly tool: "near";
     readonly providerRouteState: "unverified_by_static_capabilities";
     readonly executable: false;
 };

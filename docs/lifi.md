@@ -35,18 +35,21 @@ and [token reference](https://docs.li.fi/mcp-server/tools); inventory must still
 be refreshed to learn current provider connectivity.
 
 Offline capabilities also identify **Base canonical USDC → TRON canonical USDT**
-as a discovery-only candidate through LI.FI tool `allbridge`. The LI.FI TRON
+as a discovery-only candidate through LI.FI tool `near` (NEAR Intents). The LI.FI TRON
 chain ID is `728126428` (`TVM`), and the destination contract is
 `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`. Inventory separately reads the TVM
-chain, token, bridge tool and exact Allbridge-filtered connection. If any read
+chain, token, bridge tool and exact NEAR-filtered connection. If any read
 fails, disagrees with those identities or exceeds the response bound, the
 candidate is unavailable or omitted while admitted EVM inventory remains
 usable. A connection reports provider inventory only: it supplies no
 amount-specific route, source call, fee bound, TRON delivery proof or recovery
 contract. `bridge routes`, `prepare` and `approve` do not admit this lane.
-The [LI.FI API reference](https://docs.li.fi/agents/reference/endpoint-specs)
-distinguishes connections from routes, and [Allbridge Core](https://docs-core.allbridge.io/product/how-does-allbridge-core-work)
-describes the stablecoin pool transfer.
+On 16 September 2026 an anonymous 100 USDC quote-only read for `near` returned
+a Base USDC → TRON USDT quote; the same filtered read for `allbridge` returned
+"Tool allbridge is currently disabled for this action." This dated quote is
+provider evidence, not APN execution admission. The [LI.FI API reference](https://docs.li.fi/agents/reference/endpoint-specs)
+distinguishes connections from routes, and the [NEAR Intents facet](https://github.com/lifinance/contracts/blob/main/docs/NEARIntentsFacet.md)
+requires separate source, destination and refund proof.
 
 ## Discover and select a route
 
