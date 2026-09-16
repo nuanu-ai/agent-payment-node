@@ -47,28 +47,46 @@ tested, and the full required aggregate gate passes once from a clean state.
 ### P0.2 Verify the installed v0.5.21 no-money path
 
 **Release proof: COMPLETE.** The official GitHub release is published; its
-manifest binds commit `94fabe3` to package `v0.5.21`. Archive SHA256
-`34c4b04cc1ae95a3782b59fa3c7aff9581015440b503ff22cf84a8e92c1c4974` matches
-the release manifest and installed Homebrew formula; the SBOM hash and byte
-counts also match the manifest. **Installed proof: partial:** `apn version`
-observed `0.5.21`, but the installed artifact retains the old status
-classification while the new local source fixes it. The disposable legacy
-journal check and guarded installed rehearsal remain **OPEN**.
+manifest binds commit `94fabe3` to package `v0.5.21`. The downloaded manifest
+SHA256 is
+`2f445c02411e8ec1d8532c5ae3d33fd628ef25ca7f414a700eeba76c0dd0c6e5`, and the
+archive SHA256 is
+`34c4b04cc1ae95a3782b59fa3c7aff9581015440b503ff22cf84a8e92c1c4974` with
+1,159,845 bytes; both match the release manifest and installed Homebrew
+formula. The SBOM SHA256 is
+`7b81c2627cabb8ef8e91a793d460e894a1aae53201402d73dfe12fa156de1984` with
+1,642,630 bytes, also matching the manifest. **Installed no-money proof:
+COMPLETE for this acceptance.** Homebrew `apn --version` returned `0.5.21`
+(`apn version` is unsupported by this CLI); all `dist` and `package.json`
+bytes across the 1,067 archive files match the installed package. The only
+installed difference is the Homebrew-generated `bin/apn.js` shebang wrapper.
 
 Use the exact release/package bytes, not the source tree, and preserve the
-existing APN state directory. Verify `apn version` is `0.5.21`, a legacy
-gasless journal loads unchanged, and the pre-send guard/recovery path refuses
-or completes only from saved evidence without signing, broadcasting, provider
-submission or money. Record archive/manifest/package hashes and the journal
-fixture or redacted operation evidence.
+existing APN state directory. The disposable legacy gasless journal contained
+23 operation files and 23 receipt files. Installed terminal `operation
+status`, `receipt get` and `operation resume` probes returned saved terminal
+evidence with unchanged terminal state; all 23+23 journal files remained
+byte-identical, represented by the identical sorted 46-file byte-hash
+manifest before and after
+(`8ad52c99486f7185966e7b8ab3901ff41f98dfbf11beaae0f2819f498f690858`).
+An isolated synthetic `awaiting_approval` record was accepted by the installed
+validator; `operation status` and `operation resume` remained
+`awaiting_approval`, the wait probe refused with `APN_INVALID_INPUT`, and its
+operation hash stayed
+`4904fd61d0fb0012918433e3eab0c7f0a31d03ee3cfbb189c2e748e9a159c` before and
+after the checks. No signing or network request (including broadcast, RPC or
+provider submission) occurred, and no money moved. This is recorded in the
+local P0.2 audit artifact
+(`evidence.md:1-13`, captured 2026-09-16; outside this repository).
 
 **Depends on:** a verified v0.5.21 artifact and a disposable copy of legacy
 state. **Accept when:** installed bytes, legacy journal compatibility and
 pre-send/no-money behavior are all evidenced; this does not close live rows.
 
-Run `operation status` and `receipt get` only against the disposable state copy:
-either command may initialize directories or repair saved local records. Compare
-the legacy journal bytes before and after inspection; do not use live state.
+Run `operation status`, `receipt get` and `operation resume` only against the
+disposable state copy: these commands may initialize directories or repair
+saved local records. Compare the legacy journal bytes before and after
+inspection; do not use live state.
 
 ### P0.3 Correct the Polygon row
 
@@ -80,16 +98,16 @@ the 0.2 USDC transfer completed and the rehearsal passed again
 calibrated Polygon offers and mirror estimate. Do not carry the old unchecked
 row into this plan.
 
-The remaining Polygon work is the installed `v0.5.21` legacy-journal,
-pre-send and regression check in P0.2. It must not trigger a fresh money
-transfer or be presented as new live acceptance.
+The installed `v0.5.21` legacy-journal and pre-send no-money check is recorded
+in P0.2. It did not trigger a fresh money transfer and is not new live
+acceptance.
 
 ## Current acceptance matrix
 
 | Row | Status | Evidence and next gate |
 | --- | --- | --- |
 | Local gasless / Polygon live acceptance | **COMPLETE on `v0.5.18`** | The existing owner proof records operation `106876bde0c4a8052fd34aefc277fe71add01c93e789fa9cac8809eee35f35e3`, 200000 atomic USDC delivered, sender debit 214536, fee 14536 and transaction `0x9b2ae9a8c04e727768d932e917df142c7456f38c0fccf335ab5c046233ea197e` (local Tect audit record, `current-state.md:11-14`; outside this repository). The execution handoff separately confirms the 0.2 USDC transfer and repeated Polygon rehearsal (local Tect audit record, `handoff.md:20`; outside this repository). |
-| Installed `v0.5.21` legacy journal and pre-send path | **PARTIAL / OPEN** | P0.2 proves terminal legacy journal reads, recovery/no-resend and unchanged disposable bytes, but no nonterminal operation was available for a harmless pre-send transition; fresh prepare, signing, send, provider submission and live acceptance were not performed (local P0.2 audit artifact, `evidence.md:10-12`, captured 2026-09-16; outside this repository). Finish the guarded installed rehearsal before closing this row. |
+| Installed `v0.5.21` legacy journal and pre-send path | **COMPLETE for no-money installed proof** | P0.2 proves release and installed code-byte parity, `23` operations plus `23` receipts, terminal status/receipt/resume recovery with the 46-file journal byte manifest unchanged, and a synthetic `awaiting_approval` pre-send guard whose operation hash remained unchanged through status/resume and refusal checks (local P0.2 audit artifact, `evidence.md:1-13`, captured 2026-09-16; outside this repository). The installed release still retains the older status classification; the source correction is unreleased. No approved nonterminal effect or fresh prepare was exercised, and no signing, send, provider submission, live bridge or live acceptance occurred. |
 | Every other owner-only live acceptance row below | **OPEN** | No source, release, installed or historical operation evidence closes a live row. Keep Ethereum, Avalanche, MetaMask Agent, Smart Account, Coinbase, Solana, TRON, LI.FI and Direct EVM rows open until their fresh owner-approved evidence is recorded. |
 
 ## Owner-only live acceptance packet
