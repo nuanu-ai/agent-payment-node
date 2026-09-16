@@ -98,7 +98,8 @@ export function mmImmutable(op: Pick<MetaMaskGaslessOperationRecord, "schemaVers
 }
 export function mmMutable(op: MetaMaskGaslessMutable): MetaMaskGaslessMutable {
   return { state: op.state, approval: op.approval, submissionAttempts: op.submissionAttempts,
-    dispatchStartedAt: op.dispatchStartedAt, providerObservation: op.providerObservation, cursor: op.cursor,
+    dispatchStartedAt: op.dispatchStartedAt, dispatch: op.dispatch,
+    providerObservation: op.providerObservation, cursor: op.cursor,
     observation: op.observation, settlement: op.settlement, failure: op.failure };
 }
 export function mmRequestHash(profileHash: string, intent: Pick<MetaMaskGaslessIntent, "request" | "token">): string {
