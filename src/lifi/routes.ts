@@ -121,6 +121,7 @@ function assertStep(step: Record<string, unknown>, request: BridgeRouteRequest, 
   const subs = list(step.includedSteps, 8, "included_step_count");
   for (const value of subs) {
     const sub = bridgeRecord(value); bridgeOpaque(sub.id); bridgeOpaque(sub.tool); rejectExecutionExtensions(sub);
+    includedActionKeys(bridgeRecord(sub.action));
     if (sub.includedSteps !== undefined && (!Array.isArray(sub.includedSteps) || sub.includedSteps.length !== 0)) bridgeFailure("APN_PROVIDER_PROTOCOL", "nested_effect_graph");
   }
 }
@@ -143,6 +144,14 @@ function assertIncludedAction(a: Record<string, unknown>, request: BridgeRouteRe
 function actionKeys(a: Record<string, unknown>): void {
   if (Object.keys(a).some((k) => !["fromChainId", "toChainId", "fromToken", "toToken", "fromAmount", "fromAddress", "toAddress", "slippage", "destinationGasConsumption"].includes(k))) bridgeFailure("APN_PROVIDER_PROTOCOL", "action_extension");
 }
+function includedActionKeys(a: Record<string, unknown>): void {
+  const { jitoBundle, integratorFees, integratorId, ...identity } = a;
+  actionKeys(identity);
+  if ((jitoBundle !== undefined && jitoBundle !== false) ||
+    (integratorId !== undefined && integratorId !== "lifi-api") ||
+    (integratorFees !== undefined && (jitoBundle !== false || integratorId !== "lifi-api"))) bridgeFailure("APN_PROVIDER_PROTOCOL", "included_action_metadata");
+  if (integratorFees !== undefined) bridgeRecord(integratorFees);
+}
 function assertToken(value: unknown, chainId: BridgeRouteRequest["fromChainId"], request: BridgeRouteRequest): void {
   const token = bridgeRecord(value), asset = requestAsset(request, chainId);
   if (token.chainId !== chainId || token.decimals !== asset.decimals ||
@@ -160,12 +169,15 @@ function parseFees(value: unknown, request: BridgeRouteRequest): readonly Bridge
     return { name: fee.name, chainId, asset: fee.included ? address : "native", amountAtomic: bridgeUint(fee.amount).toString(), included: fee.included };
   });
 }
-function stepIdentity(step: Record<string, unknown>): unknown {
-  const a = bridgeRecord(step.action), normalizeToken = (v: unknown) => { const t = bridgeRecord(v); return { address: bridgeAddress(t.address), chainId: t.chainId, decimals: t.decimals }; };
+function stepIdentity(step: Record<string, unknown>, included = false): unknown {
+  const rawAction = bridgeRecord(step.action);
+  const { jitoBundle: _jitoBundle, integratorFees: _integratorFees, integratorId: _integratorId, ...action } = rawAction;
+  const a = included ? action : rawAction;
+  const normalizeToken = (v: unknown) => { const t = bridgeRecord(v); return { address: bridgeAddress(t.address), chainId: t.chainId, decimals: t.decimals }; };
   return { id: step.id, type: step.type, tool: step.tool, integrator: step.integrator ?? "lifi-api", fee: step.fee ?? 0,
     executionType: step.executionType ?? "transaction", toolKey: step.toolDetails === undefined ? step.tool : bridgeRecord(step.toolDetails).key,
     action: { ...a, fromAddress: bridgeAddress(a.fromAddress), toAddress: bridgeAddress(a.toAddress), fromToken: normalizeToken(a.fromToken), toToken: normalizeToken(a.toToken) },
-    includedSteps: step.includedSteps === undefined ? [] : list(step.includedSteps, 8, "included_step_count").map((s) => stepIdentity(bridgeRecord(s))) };
+    includedSteps: step.includedSteps === undefined ? [] : list(step.includedSteps, 8, "included_step_count").map((s) => stepIdentity(bridgeRecord(s), true)) };
 }
 function rejectExecutionExtensions(step: Record<string, unknown>): void {
   for (const key of ["typedData", "permit", "permit2", "authorization", "destinationCall", "destinationCalls", "contractCalls", "userOperation"]) if (step[key] !== undefined) bridgeFailure("APN_PROVIDER_PROTOCOL", "execution_extension");
