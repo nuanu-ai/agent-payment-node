@@ -32,21 +32,25 @@ installation are separate gates.
 
 ### P0.1 Stabilize the aggregate test gate
 
-**Status: IN PROGRESS; do not claim the aggregate gate green yet.** PR #94
-reports a clean 1,443-test core suite and PR checks, but that is not the full
-aggregate gate below.
+**Status: COMPLETE for the source aggregate at `a655c1c` (based on
+`69c0974`).** One clean serial run passed `npm test` (1,447/1,447), cask
+syntax (13 scripts), packaging behavior (58/58), supply chain (6/6), and
+native `cargo fmt --check`, offline locked tests (29 unit and 4 integration),
+and clippy. The first packaging failure was a 120-second timeout while its
+reinstall fixture recursively copied the installed `node_modules` tree; the
+fixture now links the exact first `npm ci` dependency closure. A subsequent
+package identity failure exposed stale tracked `dist` bytes on merged main;
+the generated output was synchronized with TypeScript source before this run.
 
-**Next packet:** reproduce the reported aggregate-gate flake using the normal
-serial commands (`npm test`, the packaging behavior/supply-chain gates and the
-legacy native contract gate as applicable). Save the first failure and the
-environment, determine whether the cause is ordering, shared state, timing or
-the gate itself, fix that cause in source/tests, and obtain one clean aggregate
-run. A passing rerun without the cause and a clean rerun is not a green claim.
-
-**Depends on:** clean `v0.5.21` checkout and the exact gate invocation.
-
-**Accept when:** the flake is explained, the smallest corrective change is
-tested, and the full required aggregate gate passes once from a clean state.
+The installed historical I745 test used a separately verified, neutral copy
+of the retained archive (SHA256 `1883f117a84552e720319d2770ea9439fad30d8eb6f1bd3212f344854b0ce267`),
+its 883 unchanged shipped files, and dependencies reconstructed from its
+pinned lockfile. The reinstall fixture tests shipped archive bytes and recovery
+with the first installed closure; it does not prove a second independent
+dependency resolution. This source gate adds no release, installed, or live
+payment acceptance proof; those remain separately recorded below. Exact
+commands, log locations, and fixture hashes are in the local P0.1 aggregate
+evidence artifact.
 
 ### P0.2 Verify the installed v0.5.21 no-money path
 
