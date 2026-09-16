@@ -24,7 +24,10 @@ async function fixture(setup: "existing_ata" | "create_ata" = "existing_ata") {
   const data = encodeFunctionData({ abi: ABI, functionName: "depositForBurnWithHookAndFees", args: [1_000_000n, 5, recipient as `0x${string}`, usdc, zero as `0x${string}`, forwardingHook as `0x${string}`, { signedQuote, refundAddress }] });
   return { quoteEndpoint: "https://iris-api.circle.com/v2/quote/burn/usdc/6/5", quoteRequest: { amount: "1000000", feeToken: usdc, requests: [{ type: "FORWARD", params: { hookData: forwardingHook } }] },
     quoteResponse: { signedQuote, issuedAt: 1000, expiry: { mode: "BLOCK_NUMBER", expiresAtBlock: 100 }, feeTotalAmount: "20000", feeToken: usdc,
-      items: [{ type: "FORWARD", amount: "20000", args: [], argsHash: `0x${"1".repeat(64)}` }], nonce: "0" },
+      items: [
+        { type: "FORWARD", amount: "18000", args: [forwardingHook], argsHash: `0x${"1".repeat(64)}` },
+        { type: "PROTOCOL", amount: "2000", args: [], argsHash: `0x${"2".repeat(64)}` },
+      ], nonce: "0" },
     transaction: { to: wrapper, chainId: 8453, valueAtomic: "0", refundAddress, data },
     recipientWallet: wallet, amountAtomic: "1000000", maxSourceFeeAtomic: "25000", sourceBlockNumber: "99", recipientSetup: setup };
 }
@@ -43,6 +46,15 @@ test("rejects fee, route, recipient, expiry, and setup mutations", async () => {
     await assert.rejects(inspectCircleV2UpfrontOffline(value), { code: "APN_PROVIDER_PROTOCOL" });
   };
   await mutate(v => { v.quoteResponse.feeTotalAmount = "25001"; });
+  await mutate(v => { v.quoteResponse.feeTotalAmount = "19999"; });
+  await mutate(v => { v.quoteResponse.items[0]!.amount = "18001"; });
+  await mutate(v => { v.quoteResponse.items[1]!.amount = "2001"; });
+  await mutate(v => { v.quoteResponse.items.pop(); });
+  await mutate(v => { v.quoteResponse.items.push({ ...v.quoteResponse.items[1]! }); });
+  await mutate(v => { v.quoteResponse.items[1]!.type = "UNKNOWN"; });
+  await mutate(v => { v.quoteResponse.items[1]!.type = "FORWARD"; });
+  await mutate(v => { v.quoteResponse.items.reverse(); });
+  await mutate(v => { v.quoteRequest.requests.push({ type: "PRE_FINALITY", params: { hookData: "0x" } }); });
   await mutate(v => { v.quoteRequest.amount = "999999"; });
   await mutate(v => { v.quoteEndpoint = "https://iris-api.circle.com/v2/quote/burn/usdc/5/6"; });
   await mutate(v => { v.quoteRequest.requests[0]!.params.hookData = "0x"; });
