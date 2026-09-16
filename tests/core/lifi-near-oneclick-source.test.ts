@@ -74,14 +74,17 @@ test("durable 1Click journal seals exact ERC20 transfer and permits one submissi
 test("provider status binds the live quote shape despite a different outer correlation ID", () => {
   const liveRequest = { ...request, depositMode: "SIMPLE", appFees: [{ limitOrderId: null,
     recipient: "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd", fee: 25 }],
-    virtualChainRecipient: null, virtualChainRefundRecipient: null, referral: null, confidentiality: "public" };
+    confidentiality: "public", insured: false, quoteWaitingTimeMs: 0 };
+  const { insured: _insured, quoteWaitingTimeMs: _wait, ...statusBase } = liveRequest;
+  const statusRequest = { ...statusBase, referral: null, virtualChainRecipient: null, virtualChainRefundRecipient: null };
   const liveQuote = { ...response.quote, amountInFormatted: "2.75", amountInUsd: "2.75", amountOutFormatted: "1.014691",
     amountOutUsd: "1.014691", timeWhenInactive: "2026-09-19T00:00:00.000Z", timeEstimate: 90,
     refundFee: "0", withdrawFee: "0" };
   const stable = { timestamp: "2026-09-17T00:00:00.000Z", signature: "a".repeat(96),
     quoteRequest: liveRequest, quote: liveQuote };
   const actualEnvelope = { correlationId: "quote-correlation", ...stable };
-  const statusEnvelope = { correlationId: "status-correlation", quoteResponse: stable, status: "PENDING_DEPOSIT" };
+  const statusQuote = { ...stable, quoteRequest: statusRequest };
+  const statusEnvelope = { correlationId: "status-correlation", quoteResponse: statusQuote, status: "PENDING_DEPOSIT" };
   const inspected = inspectOneClickSourceQuote(actualEnvelope, request, 1000000n, 2000000n, now);
   const record = { schemaVersion: "apn.oneclick-source.v2" as const, quoteHash: inspected.quoteHash, payer: request.refundTo, refundTo: request.refundTo,
     recipient: request.recipient, depositAddress: response.quote.depositAddress,
@@ -93,9 +96,22 @@ test("provider status binds the live quote shape despite a different outer corre
   assert.equal(oneClickStatusQuoteMatchesRecord(statusEnvelope.quoteResponse, oldRecord), true);
   for (const [kind, changed] of [
     ["signature", { signature: "b".repeat(96) }],
-    ["appFees", { quoteRequest: { ...liveRequest, appFees: [{ recipient: "other", fee: 999999 }] } }],
+    ["appFees", { quoteRequest: { ...statusRequest, appFees: [{ recipient: "other", fee: 999999 }] } }],
     ["withdrawFee", { quote: { ...liveQuote, withdrawFee: "999999" } }],
-  ] as const) assert.equal(oneClickStatusQuoteMatchesRecord({ ...stable, ...changed }, record), false, kind);
+    ["recipient", { quoteRequest: { ...statusRequest, recipient: "TWrong" } }],
+    ["origin", { quoteRequest: { ...statusRequest, originAsset: "nep141:eth-other" } }],
+    ["refund", { quoteRequest: { ...statusRequest, refundTo: "0x0000000000000000000000000000000000000001" } }],
+    ["amount", { quote: { ...liveQuote, amountIn: "2749999" } }],
+    ["deposit", { quote: { ...liveQuote, depositAddress: "0x0000000000000000000000000000000000000001" } }],
+    ["minimum", { quote: { ...liveQuote, minAmountOut: "1" } }],
+    ["deadline", { quoteRequest: { ...statusRequest, deadline: "2099-01-01T00:00:00.000Z" } }],
+    ["insured", { quoteRequest: { ...statusRequest, insured: true } }],
+    ["wait", { quoteRequest: { ...statusRequest, quoteWaitingTimeMs: 1 } }],
+    ["referral", { quoteRequest: { ...statusRequest, referral: "other" } }],
+    ["virtual recipient", { quoteRequest: { ...statusRequest, virtualChainRecipient: "other" } }],
+  ] as const) assert.equal(oneClickStatusQuoteMatchesRecord({ ...statusQuote, ...changed }, record), false, kind);
+  const { referral: _referral, ...missingNull } = statusRequest;
+  assert.equal(oneClickStatusQuoteMatchesRecord({ ...statusQuote, quoteRequest: missingNull }, record), false);
   for (const [kind, changed] of [
     ["recipient", { quoteRequest: { ...liveRequest, recipient: "TWrong" } }],
     ["origin", { quoteRequest: { ...liveRequest, originAsset: "nep141:eth-other" } }],
