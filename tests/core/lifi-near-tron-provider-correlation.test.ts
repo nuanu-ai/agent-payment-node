@@ -37,7 +37,7 @@ function fixture() {
       swapType: "EXACT_INPUT", depositType: "ORIGIN_CHAIN", depositMode: "SIMPLE",
       recipientType: "DESTINATION_CHAIN", refundType: "ORIGIN_CHAIN",
       amount: "99750000", recipient, refundTo: source.refundTo },
-      quote: { depositAddress: source.depositAddress, amountIn: "99750000", minAmountOut: "97000000" } },
+      quote: { depositAddress: source.depositAddress, amountIn: "99750000", minAmountIn: "99650250", minAmountOut: "97000000" } },
       swapDetails: { originChainTxHashes: [{ hash: sourceHash }], destinationChainTxHashes: [{ hash: destinationHash }], amountIn: "99750000", amountOut: "98500000" } },
   };
 }
@@ -52,6 +52,28 @@ test("correlates exact provider IDs and destination candidate without admitting 
   assert.equal(result.providerOutcome, "correlated_success");
   assert.equal(result.executionAdmitted, false);
   assert.equal(result.bridgeCompletion, false);
+});
+test("correlates a synthetic SUCCESS with the live FLEX_INPUT quote shape only at the exact observed deposit", () => {
+  const f = fixture();
+  f.near.quoteResponse.quoteRequest.swapType = "FLEX_INPUT";
+  const result = correlateNearTronProviderStatusOffline(source, f.lifi, f.near, [destination]);
+  assert.equal(result.receivedAtomic, "98500000");
+  assert.equal(result.executionAdmitted, false);
+  assert.equal(result.bridgeCompletion, false);
+  refused(g => { g.near.quoteResponse.quoteRequest.swapType = "FLEX_INPUT"; g.near.quoteResponse.quote.minAmountIn = "99750001"; });
+  refused(g => { g.near.quoteResponse.quoteRequest.swapType = "FLEX_INPUT"; g.near.quoteResponse.quote.minAmountIn = "0"; });
+  refused(g => { g.near.quoteResponse.quoteRequest.swapType = "FLEX_INPUT"; g.near.swapDetails.amountIn = "99650250"; });
+  refused(g => { g.near.quoteResponse.quoteRequest.swapType = "FLEX_INPUT"; g.near.swapDetails.amountOut = "96999999"; });
+});
+test("refuses a live-schema-shaped unsubmitted PENDING_DEPOSIT status", () => {
+  const f = fixture();
+  f.near.status = "PENDING_DEPOSIT";
+  f.near.quoteResponse.quoteRequest.swapType = "FLEX_INPUT";
+  f.near.swapDetails.originChainTxHashes = [];
+  f.near.swapDetails.destinationChainTxHashes = [];
+  f.near.swapDetails.amountIn = "0";
+  f.near.swapDetails.amountOut = "0";
+  assert.throws(() => correlateNearTronProviderStatusOffline(source, f.lifi, f.near, [destination]), { code: "APN_PROVIDER_PROTOCOL" });
 });
 test("refuses LI.FI partial, refund, identity, chain, token and amount conflicts", () => {
   refused(f => { f.lifi.substatus = "PARTIAL"; });
