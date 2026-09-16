@@ -71,7 +71,21 @@ export function oneClickStatusQuoteMatchesRecord(value, record) {
     if (record.schemaVersion !== "apn.oneclick-source.v2")
         return false;
     try {
-        return quoteIdentity(value) === record.quoteHash;
+        if (quoteIdentity(value) === record.quoteHash)
+            return true;
+        const status = bridgeRecord(value), request = bridgeRecord(status.quoteRequest);
+        // 1Click's status response omits two neutral quote defaults and adds three null fields.
+        // Reconstruct only that observed representation; the signature, quote economics,
+        // deposit address, payer, recipient and deadlines still participate in the saved digest.
+        if (Object.hasOwn(request, "insured") || Object.hasOwn(request, "quoteWaitingTimeMs"))
+            return false;
+        const originalRequest = { ...request, insured: false, quoteWaitingTimeMs: 0 };
+        for (const key of ["referral", "virtualChainRecipient", "virtualChainRefundRecipient"]) {
+            if (!Object.hasOwn(originalRequest, key) || originalRequest[key] !== null)
+                return false;
+            delete originalRequest[key];
+        }
+        return quoteIdentity({ ...status, quoteRequest: originalRequest }) === record.quoteHash;
     }
     catch {
         return false;
