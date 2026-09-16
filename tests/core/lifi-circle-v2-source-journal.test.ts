@@ -86,9 +86,35 @@ test("rejects fee, nonce, calldata and quote identity drift even after a recompu
     (v: any) => { v.transaction.data = "0x"; },
     (v: any) => { v.quote.signedQuote = "0xdead"; },
     (v: any) => { v.recipient.ata = wallet; },
-  ]) assert.throws(() => bindCircleV2SourcePreparationToJournal({ ...input(p), preparation: mutate(p, change, true) }), { code: "APN_OPERATION_BLOCKED" });
+  ]) { const changed = mutate(p, change, true); assert.throws(() => bindCircleV2SourcePreparationToJournal(input(changed))); }
   const changed = bindCircleV2SourcePreparationToJournal({ ...input(p), admission: { ...input(p).admission, minFinalityThreshold: 2000 } });
   assert.notEqual(changed.protocolInputHash, bindCircleV2SourcePreparationToJournal(input(p)).protocolInputHash);
+});
+
+test("rejects re-digested call identity, native value, uint256 overflow and empty admission", async () => {
+  const p = await fixture();
+  const replacement = (change: (args: any[]) => void) => mutate(p, v => {
+    const args: any[] = [1_000_000n, 5, `0x${Buffer.from(getBase58Encoder().encode(v.recipient.ata)).toString("hex")}`,
+      token, `0x${"0".repeat(64)}`, hook, { signedQuote: v.quote.signedQuote, refundAddress: refund }];
+    change(args);
+    v.transaction.data = encodeFunctionData({ abi, functionName: "depositForBurnWithHookAndFees", args: args as never });
+  }, true);
+  for (const change of [
+    (v: any) => { v.transaction.valueAtomic = "1"; },
+    (v: any) => { v.maximumNativeDebitWei = "1"; },
+    (v: any) => { v.transaction.nonceAtomic = (1n << 256n).toString(); },
+    (v: any) => { v.transaction.gasLimitAtomic = (1n << 256n).toString(); },
+  ]) { const changed = mutate(p, change, true); assert.throws(() => bindCircleV2SourcePreparationToJournal(input(changed))); }
+  for (const change of [
+    (args: any[]) => { args[0] = 1_000_001n; },
+    (args: any[]) => { args[1] = 6; },
+    (args: any[]) => { args[2] = `0x${"1".repeat(64)}`; },
+    (args: any[]) => { args[3] = payer; },
+    (args: any[]) => { args[4] = `0x${"1".repeat(64)}`; },
+    (args: any[]) => { args[6] = { ...args[6], refundAddress: payer }; },
+  ]) { const changed = replacement(change); assert.throws(() => bindCircleV2SourcePreparationToJournal(input(changed))); }
+  assert.throws(() => bindCircleV2SourcePreparationToJournal({ ...input(p), admission: { ...input(p).admission, note: "" } }));
+  assert.throws(() => bindCircleV2SourcePreparationToJournal({ ...input(p), admission: {} as any }));
 });
 
 test("binding has no journal stage, signing, sealing or submission effect", async () => {
