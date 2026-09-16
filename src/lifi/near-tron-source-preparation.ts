@@ -10,9 +10,10 @@ const erc20 = parseAbi(["function balanceOf(address owner) view returns (uint256
 const UINT = /^(0|[1-9][0-9]*)$/u;
 const QUANTITY = /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u;
 const HASH = /^[0-9a-f]{64}$/u;
+const MAX_UINT256 = (1n << 256n) - 1n;
 function fail(reason: string): never { return bridgeFailure("APN_OPERATION_BLOCKED", `near_tron_prepare_${reason}`); }
-function uint(value: unknown): bigint { if (typeof value !== "string" || !UINT.test(value)) fail("integer"); return BigInt(value); }
-function quantity(value: unknown): bigint { if (typeof value !== "string" || !QUANTITY.test(value)) fail("rpc_quantity"); return BigInt(value); }
+function uint(value: unknown): bigint { if (typeof value !== "string" || !UINT.test(value)) fail("integer"); const n = BigInt(value); if (n > MAX_UINT256) fail("integer_overflow"); return n; }
+function quantity(value: unknown): bigint { if (typeof value !== "string" || !QUANTITY.test(value)) fail("rpc_quantity"); const n = BigInt(value); if (n > MAX_UINT256) fail("rpc_quantity_overflow"); return n; }
 function time(value: string): bigint { const n = Date.parse(value); if (!Number.isFinite(n)) fail("draft_time"); return BigInt(Math.floor(n / 1000)); }
 
 export interface NearTronSourcePreparationInput {
@@ -25,6 +26,8 @@ export interface NearTronSourcePreparationInput {
 export interface NearTronSourcePreparation {
   readonly kind: "read_only_near_tron_source_preparation";
   readonly executionAdmitted: false;
+  /** This artifact is derived from caller-supplied quote and RPC data; it is never an execution approval. */
+  readonly evidenceTrust: "untrusted_quote_and_rpc";
   readonly draftIntegrityHash: string;
   readonly quoteHash: string;
   readonly quoteId: Hex;
@@ -76,14 +79,14 @@ export async function prepareNearTronBaseSourceReadOnly(input: NearTronSourcePre
   const gasLimit = quantity(tx.gasLimit);
   if (gasLimit <= 0n || gasLimit > 5_000_000n) fail("gas_limit");
   const estimated = quantity(await rpc("eth_estimateGas", [{ from, to: BRIDGE_DIAMOND, value: "0x0", data: draft.sourceCall.data }]));
-  if (estimated > gasLimit) fail("gas_estimate");
+  if (estimated === 0n || estimated > gasLimit) fail("gas_estimate");
   const head = bridgeRecord(await rpc("eth_getBlockByNumber", ["latest", false]));
   const baseFee = quantity(head.baseFeePerGas);
   const tip = quantity(await rpc("eth_maxPriorityFeePerGas", []));
   const maxFee = baseFee * 2n + tip;
-  if (tip === 0n || maxFee <= tip) fail("fee");
+  if (tip === 0n || maxFee <= tip || maxFee > MAX_UINT256) fail("fee");
   const cap = uint(draft.maxSourceNativeDebitWei), debit = gasLimit * maxFee;
-  if (debit > cap || quantity(await rpc("eth_getBalance", [from, "latest"])) < debit) fail("native_balance_or_cap");
+  if (debit > MAX_UINT256 || debit > cap || quantity(await rpc("eth_getBalance", [from, "latest"])) < debit) fail("native_balance_or_cap");
   if (quantity(await rpc("eth_getTransactionCount", [from, "pending"])) !== latest) fail("nonce_changed");
   const safeFinal = bridgeRecord(await rpc("eth_getBlockByNumber", [proof.blockNumber, false]));
   if (safeFinal.hash !== proof.blockHash) fail("safe_block_changed");
@@ -95,6 +98,7 @@ export async function prepareNearTronBaseSourceReadOnly(input: NearTronSourcePre
     dataSha256: inspection.calldataSha256, type: "eip1559" as const, nonceAtomic: latest.toString(), gasLimitAtomic: gasLimit.toString(),
     maxFeePerGasAtomic: maxFee.toString(), maxPriorityFeePerGasAtomic: tip.toString(), accessList: Object.freeze([]) as readonly [] });
   const body = { kind: "read_only_near_tron_source_preparation" as const, executionAdmitted: false as const,
+    evidenceTrust: "untrusted_quote_and_rpc" as const,
     draftIntegrityHash: draft.integrityHash, quoteHash: proof.quoteSha256, quoteId: proof.quoteId,
     preflightBlockHash: proof.blockHash, sourceCall, maxSourceNativeDebitWei: cap.toString() };
   return Object.freeze({ ...body, preparationDigest: hashObject(body) });

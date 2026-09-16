@@ -78,7 +78,8 @@ import { freezeNonEvmBridgeOperation } from "../../src/lifi/non-evm-operation.js
 import { prepareNearTronBaseSourceReadOnly } from "../../src/lifi/near-tron-source-preparation.js";
 import { inspectNearBaseTronQuoteOffline } from "../../src/lifi/near-tron-offline.js";
 const erc20 = parseAbi(["function balanceOf(address owner) view returns (uint256)", "function allowance(address owner,address spender) view returns (uint256)"]);
-async function preparation(overrides: { insufficient?: boolean; allowance?: boolean; pending?: boolean; gas?: boolean; native?: boolean; reorg?: boolean; consumed?: boolean } = {}) {
+async function preparation(overrides: { insufficient?: boolean; allowance?: boolean; pending?: boolean; gas?: boolean; zeroGas?: boolean; hugeGas?: boolean;
+  hugeFee?: boolean; hugeNonce?: boolean; native?: boolean; reorg?: boolean; consumed?: boolean; malformedBalance?: boolean } = {}) {
   const { quote, pins } = await setup();
   const inspected = inspectNearBaseTronQuoteOffline(quote, binding);
   const draft = freezeNonEvmBridgeOperation({ schemaVersion: "apn.non-evm-bridge-operation.v2", kind: "non_evm_bridge_intent",
@@ -99,18 +100,21 @@ async function preparation(overrides: { insufficient?: boolean; allowance?: bool
   let headReads = 0;
   const rpc: NearTronReadOnlyRpc = { async request(method, params) {
     calls.push(method);
-    if (method === "eth_getTransactionCount") return params[1] === "pending" && overrides.pending ? "0x2" : "0x1";
+    if (method === "eth_getTransactionCount") return overrides.hugeNonce ? `0x1${"0".repeat(64)}` : params[1] === "pending" && overrides.pending ? "0x2" : "0x1";
     if (method === "eth_call") {
       const tx = params[0] as { data: string };
-      if (tx.data.startsWith("0x70a08231")) return encodeFunctionResult({ abi: erc20, functionName: "balanceOf", result: overrides.insufficient ? 1n : 100000000n });
+      if (tx.data.startsWith("0x70a08231")) return overrides.malformedBalance ? "0x00" :
+        encodeFunctionResult({ abi: erc20, functionName: "balanceOf", result: overrides.insufficient ? 1n : 100000000n });
       if (tx.data.startsWith("0xdd62ed3e")) return encodeFunctionResult({ abi: erc20, functionName: "allowance", result: overrides.allowance ? 0n : 100000000n });
     }
-    if (method === "eth_estimateGas") return overrides.gas ? "0x1000000" : "0x100000";
+    if (method === "eth_estimateGas") return overrides.hugeGas ? `0x1${"0".repeat(64)}` :
+      overrides.zeroGas ? "0x0" : overrides.gas ? "0x1000000" : "0x100000";
     if (method === "eth_maxPriorityFeePerGas") return "0x1";
     if (method === "eth_getBalance") return overrides.native ? "0x0" : "0x100000000000000";
     if (method === "eth_getBlockByNumber" && params[0] === "latest") {
       headReads++;
-      return { number: "0x7b", timestamp: "0x3e8", hash: `0x${(overrides.reorg && headReads > 1 ? "cd" : "ab").repeat(32)}`, baseFeePerGas: "0x1" };
+      return { number: "0x7b", timestamp: "0x3e8", hash: `0x${(overrides.reorg && headReads > 1 ? "cd" : "ab").repeat(32)}`,
+        baseFeePerGas: overrides.hugeFee ? `0x${"f".repeat(64)}` : "0x1" };
     }
     return original.request(method, params);
   } };
@@ -120,6 +124,7 @@ test("read-only preparation freezes the exact unchecked draft and quote with no 
   const input = await preparation();
   const result = await prepareNearTronBaseSourceReadOnly(input);
   assert.equal(result.executionAdmitted, false);
+  assert.equal(result.evidenceTrust, "untrusted_quote_and_rpc");
   assert.equal(result.sourceCall.nonceAtomic, "1");
   assert.equal(result.sourceCall.data, input.draft.sourceCall.data);
   assert.equal(result.sourceCall.maxFeePerGasAtomic, "3");
@@ -127,7 +132,8 @@ test("read-only preparation freezes the exact unchecked draft and quote with no 
   assert.ok(input.calls.every((method) => method.startsWith("eth_") && !/send|sign|approve/i.test(method)));
 });
 test("mutations, exhausted state, pending nonce, reorg and consumed quote fail closed", async () => {
-  for (const variant of ["insufficient", "allowance", "pending", "gas", "native", "reorg", "consumed"] as const) {
+  for (const variant of ["insufficient", "allowance", "pending", "gas", "zeroGas", "hugeGas", "hugeFee", "hugeNonce",
+    "native", "reorg", "consumed", "malformedBalance"] as const) {
     const input = await preparation({ [variant]: true });
     await assert.rejects(prepareNearTronBaseSourceReadOnly(input), variant);
   }
@@ -137,4 +143,14 @@ test("mutations, exhausted state, pending nonce, reorg and consumed quote fail c
   const { integrityHash: _, ...body } = input.draft;
   await assert.rejects(prepareNearTronBaseSourceReadOnly({ ...input, draft: freezeNonEvmBridgeOperation({ ...body,
     provider: { ...input.draft.provider, quoteId: `0x${"11".repeat(32)}` } } as any) }));
+  assert.throws(() => freezeNonEvmBridgeOperation({ ...body,
+    maxSourceNativeDebitWei: (1n << 256n).toString() } as any));
+  await assert.rejects(prepareNearTronBaseSourceReadOnly({ ...input, draft: freezeNonEvmBridgeOperation({ ...body,
+    source: { ...input.draft.source, amountAtomic: binding.minOutputAtomic } } as any) }));
+  await assert.rejects(prepareNearTronBaseSourceReadOnly({ ...input, draft: freezeNonEvmBridgeOperation({ ...body,
+    destination: { ...input.draft.destination, minimumReceivedAtomic: binding.sourceAmountAtomic } } as any) }));
+  await assert.rejects(prepareNearTronBaseSourceReadOnly({ ...input, pins: { ...input.pins,
+    nowUnixSeconds: inspectNearBaseTronQuoteOffline(input.quote, binding).deadline } }), /expired/);
+  await assert.rejects(prepareNearTronBaseSourceReadOnly({ ...input, draft: freezeNonEvmBridgeOperation({ ...body,
+    expiresAt: "1970-01-01T00:16:41.000Z" } as any) }), /expired/);
 });
