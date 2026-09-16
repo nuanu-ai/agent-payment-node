@@ -62,14 +62,31 @@ async function setup() {
   return { tmp, repo, j, intent, tx, receipt, rpc };
 }
 const at = "2026-09-16T00:00:04.000Z";
-test("canonical safe Base source proof is source-only and leaves nonce reservation intact", async t => {
+test("supplied RPC source observation remains untrusted and leaves nonce reservation intact", async t => {
   const f = await setup(); t.after(f.tmp.cleanup);
+  // This in-memory port has no block-membership verification. Its arbitrary safe hash
+  // must never be promoted to a trusted source-confirmed state.
+  f.tx.safeBlock = { ...safe, hash: `0x${"fa".repeat(32)}` };
   const j = await reconcileCircleV2BaseSource({ journal: f.j, repository: f.repo, rpc: f.rpc, intent: f.intent, expectedRpcOrigin: origin, observedAt: at });
-  assert.equal(j.phase, "source_confirmed"); assert.equal(j.safeSourceProof?.provenance, "canonical_circle_v2_base_source_v1");
+  assert.equal(j.phase, "source_observed_untrusted"); assert.equal(j.safeSourceProof?.provenance, "rpc_observed_untrusted_circle_v2_base_source_v1");
+  assert.equal(j.safeSourceProof?.status, "success"); assert.notEqual(j.phase, "source_confirmed");
   assert.equal(j.executionAdmitted, false); assert.equal(j.submissionAttempts, 1);
   assert.equal((j.safeSourceProof as { bridgeCompletion: boolean }).bridgeCompletion, false);
   assert.equal("destinationProof" in j, false);
   await assert.rejects(f.repo.committingSubmission(j.profileHash, j.operationId, j.integrityHash, at), { code: "APN_OPERATION_BLOCKED" });
+});
+test("a fabricated revert is also untrusted and its proof clears on inconsistent reobservation", async t => {
+  const f = await setup(); t.after(f.tmp.cleanup);
+  f.tx.status = "reverted";
+  const input = { journal: f.j, repository: f.repo, rpc: f.rpc, intent: f.intent, expectedRpcOrigin: origin, observedAt: at };
+  const observed = await reconcileCircleV2BaseSource(input);
+  assert.equal(observed.phase, "source_observed_untrusted");
+  assert.equal(observed.safeSourceProof?.status, "reverted");
+  assert.equal((observed.safeSourceProof as { protocolProofHash: string | null }).protocolProofHash, null);
+  f.tx.status = "success";
+  const changed = await reconcileCircleV2BaseSource({ ...input, journal: observed, observedAt: "2026-09-16T00:00:05.000Z" });
+  assert.equal(changed.phase, "unknown_finality");
+  assert.equal(changed.safeSourceProof, null);
 });
 test("missing safe block and each bound transaction or receipt field become unknown finality", async t => {
   const changes: Array<(f: Awaited<ReturnType<typeof setup>>) => void> = [
@@ -93,7 +110,7 @@ test("protocol intent mismatch and reorg clear source proof", async t => {
   const bad = await reconcileCircleV2BaseSource({ ...input, intent: { ...f.intent, solanaAtaBytes32: `0x${"cd".repeat(32)}` as Hex } });
   assert.equal(bad.phase, "unknown_finality");
   const good = await reconcileCircleV2BaseSource({ ...input, journal: bad, observedAt: "2026-09-16T00:00:05.000Z" });
-  assert.equal(good.phase, "source_confirmed");
+  assert.equal(good.phase, "source_observed_untrusted");
   f.tx.block = { ...block, hash: `0x${"ee".repeat(32)}` };
   f.receipt.blockHash = f.tx.block.hash;
   const reorg = await reconcileCircleV2BaseSource({ ...input, journal: good, observedAt: "2026-09-16T00:00:06.000Z" });

@@ -4,7 +4,7 @@ import { hashObject } from "../canonical.js";
 import type { Hex } from "../model.js";
 import { decodeCircleV2BaseSourceReceiptOffline, BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES,
   type CircleV2BurnIntent } from "./circle-v2-source-receipt.js";
-import type { NonEvmSourceJournal, NonEvmSourceJournalRepository, CanonicalCircleSourceObservation } from "./non-evm-source-journal.js";
+import type { NonEvmSourceJournal, NonEvmSourceJournalRepository, RpcObservedCircleSourceObservation } from "./non-evm-source-journal.js";
 import type { BridgeRpcPort } from "./ports.js";
 import { bridgeFailure } from "./validation.js";
 
@@ -34,10 +34,10 @@ function assertProtocolInput(j: NonEvmSourceJournal, intent: CircleV2BurnIntent)
     args[3] !== BASE_USDC || args[4] !== ZERO ||
     args[5].toLowerCase() !== intent.hookData.toLowerCase()) inconsistent();
 }
-function matchesPrior(j: NonEvmSourceJournal, next: CanonicalCircleSourceObservation): boolean {
+function matchesPrior(j: NonEvmSourceJournal, next: RpcObservedCircleSourceObservation): boolean {
   const previous = j.safeSourceProof;
   if (previous === null) return true;
-  if (previous.provenance !== "canonical_circle_v2_base_source_v1") return false;
+  if (previous.provenance !== "rpc_observed_untrusted_circle_v2_base_source_v1") return false;
   return previous.transactionHash === next.transactionHash && previous.status === next.status &&
     previous.blockNumberAtomic === next.blockNumberAtomic && previous.blockHash === next.blockHash &&
     previous.logsHash === next.logsHash && previous.receiptHash === next.receiptHash &&
@@ -46,7 +46,7 @@ function matchesPrior(j: NonEvmSourceJournal, next: CanonicalCircleSourceObserva
     BigInt(next.safeBlockNumberAtomic) >= BigInt(previous.safeBlockNumberAtomic) &&
     (next.safeBlockNumberAtomic !== previous.safeBlockNumberAtomic || next.safeBlockHash === previous.safeBlockHash);
 }
-/** Rechecks the canonical RPC result and persists only source evidence. Any inconsistency clears an earlier proof. */
+/** Rechecks the supplied RPC result and persists only untrusted source evidence. Any inconsistency clears an earlier proof. */
 export async function reconcileCircleV2BaseSource(input: CircleSourceReconciliationInput): Promise<NonEvmSourceJournal> {
   const { journal: j, repository: repo, rpc, intent, observedAt } = input;
   if (j.route !== "base_usdc_to_solana_usdc_circle_cctp_v2" || j.transactionHash === null ||
@@ -68,13 +68,14 @@ export async function reconcileCircleV2BaseSource(input: CircleSourceReconciliat
       tx.maxPriorityFeePerGasAtomic !== j.sourceCall.maxPriorityFeePerGasAtomic ||
       receipt.blockHash !== tx.block.hash || receipt.blockNumberAtomic !== tx.block.numberAtomic ||
       hashObject(receipt.logs) !== tx.logsHash || BigInt(safe.numberAtomic) < BigInt(tx.block.numberAtomic)) inconsistent();
-    // The RPC adapter reconstructs the signed transaction and verifies canonical receipt membership.
+    // A concrete BridgeRpc adapter reconstructs the transaction and verifies receipt membership;
+    // this structural port also accepts synthetic adapters, so its result has untrusted provenance.
     const proof = tx.status === "success" ? decodeCircleV2BaseSourceReceiptOffline(intent,
       { chainId: 8453, hash: tx.transactionHash, from: tx.from, to: tx.to },
       { chainId: 8453, transactionHash: receipt.transactionHash, status: "0x1", blockHash: receipt.blockHash,
         blockNumberAtomic: receipt.blockNumberAtomic, logs: receipt.logs }) : null;
-    const next: CanonicalCircleSourceObservation = {
-      provenance: "canonical_circle_v2_base_source_v1", transactionHash: tx.transactionHash,
+    const next: RpcObservedCircleSourceObservation = {
+      provenance: "rpc_observed_untrusted_circle_v2_base_source_v1", transactionHash: tx.transactionHash,
       status: tx.status, blockNumberAtomic: tx.block.numberAtomic, blockHash: tx.block.hash,
       safeBlockNumberAtomic: safe.numberAtomic, safeBlockHash: safe.hash, observedAt,
       rpcOrigin: tx.rpcOrigin, logsHash: tx.logsHash, receiptHash: hashObject(receipt),
@@ -86,7 +87,7 @@ export async function reconcileCircleV2BaseSource(input: CircleSourceReconciliat
       protocolProofHash: proof === null ? null : hashObject(proof), executionAdmitted: false, bridgeCompletion: false,
     };
     if (!matchesPrior(j, next)) inconsistent();
-    if (j.phase === "source_confirmed" || j.phase === "source_reverted") return j;
-    return await repo.recordCanonicalCircleSource(j.profileHash, j.operationId, j.integrityHash, next, observedAt);
+    if (j.phase === "source_observed_untrusted") return j;
+    return await repo.recordRpcObservedCircleSource(j.profileHash, j.operationId, j.integrityHash, next, observedAt);
   } catch { return await fail(); }
 }
