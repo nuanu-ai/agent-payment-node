@@ -4,6 +4,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { getBase58Encoder } from "@solana/kit";
 import { canonicalJson } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
+import { MAX_DIRECT_TRANSACTION_BYTES } from "../evm-asset.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { associatedUsdc } from "../solana/accounts.js";
 import type { StateStore } from "../state.js";
@@ -23,6 +24,9 @@ const HOOK = "0x636374702d666f72776172640000000000000000000000000000000000000000
 const ABI = parseAbi(["function depositForBurnWithHookAndFees(uint256,uint32,bytes32,address,bytes32,bytes,(bytes signedQuote,address refundAddress)) payable"]);
 const BALANCE = parseAbi(["function balanceOf(address) view returns (uint256)"]);
 const ALLOWANCE = parseAbi(["function allowance(address,address) view returns (uint256)"]);
+const ORACLE = getAddress("0x420000000000000000000000000000000000000F");
+const ORACLE_ABI = parseAbi(["function getL1FeeUpperBound(uint256 size) view returns (uint256)",
+  "function getOperatorFee(uint256 gas) view returns (uint256)"]);
 function fail(reason: string): never { return bridgeFailure("APN_OPERATION_BLOCKED", `circle_v2_source_service_${reason}`); }
 function q(n: bigint): Hex { return `0x${n.toString(16)}`; }
 function rq(value: unknown): bigint {
@@ -171,16 +175,22 @@ export class CircleBaseJsonRpc {
       this.call("eth_estimateGas", [{ from: payer, to: query.to, data: query.data, value: "0x0" }, tag]),
       this.call("eth_maxPriorityFeePerGas", []),
     ]);
-    const after = bridgeRecord(await this.call("eth_getBlockByNumber", [q(BigInt(query.freshBlockNumber)), false]));
-    if (bridgeHex(after.hash, 32, 32) !== query.freshBlockHash || rq(await this.call("eth_chainId", [])) !== 8453n) fail("block_drift");
     const gas = rq(estimated) * 12n / 10n + 1n;
     const tip = rq(priority), baseFee = rq(block.baseFeePerGas), maxFee = 2n * baseFee + tip;
+    const [l1, operator] = await Promise.all([
+      call(ORACLE, encodeFunctionData({ abi: ORACLE_ABI, functionName: "getL1FeeUpperBound",
+        args: [BigInt(MAX_DIRECT_TRANSACTION_BYTES)] })),
+      call(ORACLE, encodeFunctionData({ abi: ORACLE_ABI, functionName: "getOperatorFee", args: [gas] })),
+    ]);
+    const after = bridgeRecord(await this.call("eth_getBlockByNumber", [q(BigInt(query.freshBlockNumber)), false]));
+    if (bridgeHex(after.hash, 32, 32) !== query.freshBlockHash || rq(await this.call("eth_chainId", [])) !== 8453n) fail("block_drift");
     return { chainId: 8453 as const, payer, draftBlockHash: bridgeHex(draftBlock.hash, 32, 32),
       blockNumber: query.freshBlockNumber, blockHash: query.freshBlockHash,
       latestNonceAtomic: rq(latest).toString(), pendingNonceAtomic: rq(pending).toString(),
       usdcBalanceAtomic: rw(balance).toString(), usdcAllowanceAtomic: rw(allowance).toString(),
       nativeBalanceWei: rq(native).toString(), gasLimitAtomic: gas.toString(),
-      maxFeePerGasWei: maxFee.toString(), maxPriorityFeePerGasWei: tip.toString() };
+      maxFeePerGasWei: maxFee.toString(), maxPriorityFeePerGasWei: tip.toString(),
+      l1DataFeeUpperWei: rw(l1).toString(), operatorFeeUpperWei: rw(operator).toString() };
   }
   async send(raw: Hex): Promise<Hex> {
     const returned = bridgeHex(await this.call("eth_sendRawTransaction", [raw]), 32, 32);

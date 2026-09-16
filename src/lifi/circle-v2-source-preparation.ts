@@ -30,6 +30,8 @@ export interface CircleV2BaseState {
   readonly gasLimitAtomic: string;
   readonly maxFeePerGasWei: string;
   readonly maxPriorityFeePerGasWei: string;
+  readonly l1DataFeeUpperWei: string;
+  readonly operatorFeeUpperWei: string;
 }
 /** The implementation must only read Base state and pin token reads and gas estimate to the fresh preflight block. */
 export type CircleV2BaseStateReader = (query: Readonly<{ payer: string; token: string; spender: string; to: string; data: string; valueAtomic: string; draftBlockNumber: string; freshBlockNumber: string; freshBlockHash: string }>) => Promise<CircleV2BaseState>;
@@ -59,6 +61,8 @@ export interface CircleV2SourcePreparation {
   readonly sourceBlock: { readonly number: string; readonly hash: string };
   readonly transaction: { readonly type: "eip1559"; readonly chainId: 8453; readonly from: string; readonly to: string; readonly data: string; readonly valueAtomic: "0"; readonly nonceAtomic: string; readonly gasLimitAtomic: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string };
   readonly maximumNativeDebitWei: string;
+  readonly l1DataFeeUpperWei: string;
+  readonly operatorFeeUpperWei: string;
   readonly preparedAt: string;
   readonly expiresAt: string;
   readonly preparationDigest: string;
@@ -99,7 +103,8 @@ export async function prepareCircleV2BaseSourceReadOnly(draft: CircleV2Preflight
   const gas = quantity(state.gasLimitAtomic), maxFee = quantity(state.maxFeePerGasWei), priority = quantity(state.maxPriorityFeePerGasWei);
   if (gas === 0n || gas > BRIDGE_MAX_GAS || gas > quantity(limits.maxGasLimitAtomic) || maxFee === 0n || priority > maxFee ||
     maxFee > quantity(limits.maxFeePerGasWei) || priority > quantity(limits.maxPriorityFeePerGasWei)) fail("gas_or_fee_cap");
-  const nativeDebit = gas * maxFee + quantity(tx.valueAtomic);
+  const l1 = quantity(state.l1DataFeeUpperWei), operator = quantity(state.operatorFeeUpperWei);
+  const nativeDebit = gas * maxFee + l1 + operator + quantity(tx.valueAtomic);
   if (nativeDebit > (1n << 256n) - 1n) fail("native_debit_overflow");
   if (nativeDebit > quantity(limits.maxNativeDebitWei) || quantity(state.nativeBalanceWei) < nativeDebit) fail("native_balance_or_cap");
   const current = now();
@@ -125,6 +130,7 @@ export async function prepareCircleV2BaseSourceReadOnly(draft: CircleV2Preflight
     transaction: { type: "eip1559" as const, chainId: 8453 as const, from: payer, to: bridgeAddress(tx.to), data: bridgeHex(tx.data),
       valueAtomic: "0" as const, nonceAtomic: latest.toString(), gasLimitAtomic: gas.toString(), maxFeePerGasWei: maxFee.toString(),
       maxPriorityFeePerGasWei: priority.toString() }, maximumNativeDebitWei: nativeDebit.toString(),
+    l1DataFeeUpperWei: l1.toString(), operatorFeeUpperWei: operator.toString(),
     preparedAt: new Date(current).toISOString(), expiresAt: new Date(expiresAt).toISOString() };
   return freeze({ ...fields, preparationDigest: digest(fields) });
 }
