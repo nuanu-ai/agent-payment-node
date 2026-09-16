@@ -109,6 +109,8 @@ export class GaslessOperationRepository extends SecureStateStore {
         return `${root}/${profileHash}/${operationId}.json`;
     }
 }
+// Proof classes that earlier releases wrote for a transition whose projection now names a different one.
+const HISTORICAL_PROOF_CLASSES = ["effect_observation_pending"];
 function validateReceipt(value, op) {
     if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint)
         gaslessCorrupt();
@@ -119,7 +121,14 @@ function validateReceipt(value, op) {
     // A stale authentic receipt has its historical shape, including the absence
     // of optional proof fields added by a later transition. Exact comparison to
     // that transition rejects extra fields without requiring the latest shape.
-    if (index < 0 || !gaslessSame(value, gaslessReceipt(gaslessAtTransition(op, index))))
+    if (index < 0)
+        gaslessCorrupt();
+    const rebuilt = gaslessReceipt(gaslessAtTransition(op, index));
+    if (gaslessSame(value, rebuilt))
+        return;
+    // An authentic receipt of the same transition may still carry the proof class its own release named.
+    if (typeof value.proof_class !== "string" || !HISTORICAL_PROOF_CLASSES.includes(value.proof_class) ||
+        !gaslessSame({ ...body, proof_class: rebuilt.proof_class, receipt_hash: rebuilt.receipt_hash }, rebuilt))
         gaslessCorrupt();
 }
 //# sourceMappingURL=operation-repository.js.map
