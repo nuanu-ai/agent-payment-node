@@ -1,9 +1,9 @@
 /** Offline, read-only Circle V2 receive instruction inspection. Never import into execution. */
 import { createHash } from "node:crypto";
 import { address, getBase58Encoder, getProgramDerivedAddress } from "@solana/kit";
-import { parseSolanaDestinationCandidate } from "./solana-destination-candidate.js";
+import { parseSolanaDestinationCandidate, solanaJsonAccountKeys } from "./solana-destination-candidate.js";
 import { bridgeFailure, bridgeHex, bridgeRecord } from "./validation.js";
-import { rpcArray, solanaAddress } from "../solana/rpc.js";
+import { rpcArray } from "../solana/rpc.js";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { SOLANA_USDC } from "../chain-policy.js";
 // Circle's mainnet V2 deployments and receive_message.rs (used_nonce seeds).
@@ -14,6 +14,11 @@ const fail = () => bridgeFailure("APN_RPC_PROTOCOL", "circle_v2_solana_destinati
 const bytes = (value) => Uint8Array.from(Buffer.from(bridgeHex(value, 16 * 1024).slice(2), "hex"));
 const same = (a, b) => Buffer.from(a).equals(Buffer.from(b));
 const keyBytes = (key) => Uint8Array.from(getBase58Encoder().encode(key));
+const indexedKey = (keys, raw) => {
+    if (!Number.isSafeInteger(raw) || raw < 0 || raw >= keys.length)
+        fail();
+    return keys[raw];
+};
 /** A matched receive instruction and ATA delta are a candidate, not an event-backed mint receipt. */
 export async function inspectCircleV2SolanaDestinationOffline(input) {
     const message = bytes(input.attestedMessageHex);
@@ -41,12 +46,7 @@ export async function inspectCircleV2SolanaDestinationOffline(input) {
         fail();
     const tx = bridgeRecord(input.transaction);
     const wire = bridgeRecord(bridgeRecord(tx.transaction).message);
-    const keys = rpcArray(wire.accountKeys, 256).map(item => {
-        const pubkey = bridgeRecord(item).pubkey;
-        if (typeof pubkey !== "string")
-            return fail();
-        return solanaAddress(pubkey);
-    });
+    const keys = solanaJsonAccountKeys(tx);
     const instructions = rpcArray(wire.instructions, 64);
     if (instructions.length === 0)
         fail();
@@ -55,12 +55,13 @@ export async function inspectCircleV2SolanaDestinationOffline(input) {
     let matches = 0;
     for (const item of instructions) {
         const ix = bridgeRecord(item);
-        if (!Number.isSafeInteger(ix.programIdIndex) || keys[ix.programIdIndex] !== CIRCLE_V2_MESSAGE_TRANSMITTER)
+        const program = indexedKey(keys, ix.programIdIndex);
+        const accounts = rpcArray(ix.accounts, 64).map(index => indexedKey(keys, index));
+        if (program !== CIRCLE_V2_MESSAGE_TRANSMITTER)
             continue;
         const encoded = ix.data;
         if (typeof encoded !== "string")
             return fail();
-        const accounts = rpcArray(ix.accounts, 64);
         const raw = keyBytes(encoded);
         if (!same(raw.subarray(0, 8), RECEIVE))
             continue;
@@ -71,8 +72,7 @@ export async function inspectCircleV2SolanaDestinationOffline(input) {
             continue;
         const attestationSize = Buffer.from(raw).readUInt32LE(12 + size);
         if (attestationSize === 0 || raw.length !== 16 + size + attestationSize ||
-            accounts.length < 7 || accounts.some(index => !Number.isSafeInteger(index) || index < 0 || index >= keys.length) ||
-            keys[accounts[4]] !== usedNonce || keys[accounts[5]] !== CIRCLE_V2_TOKEN_MESSENGER)
+            accounts.length < 7 || accounts[4] !== usedNonce || accounts[5] !== CIRCLE_V2_TOKEN_MESSENGER)
             fail();
         matches++;
     }
@@ -91,12 +91,14 @@ export async function inspectCircleV2SolanaMintEventOffline(input) {
     const message = bytes(input.attestedMessageHex), body = message.subarray(148);
     const tx = bridgeRecord(input.transaction), meta = bridgeRecord(tx.meta);
     const wire = bridgeRecord(bridgeRecord(tx.transaction).message);
-    const keys = rpcArray(wire.accountKeys, 256).map(item => solanaAddress(bridgeRecord(item).pubkey));
+    const keys = solanaJsonAccountKeys(tx);
     const outer = rpcArray(wire.instructions, 64);
     const groups = rpcArray(meta.innerInstructions, 64);
     const receiveIndexes = outer.flatMap((item, index) => {
         const ix = bridgeRecord(item);
-        if (keys[ix.programIdIndex] !== CIRCLE_V2_MESSAGE_TRANSMITTER || typeof ix.data !== "string")
+        const program = indexedKey(keys, ix.programIdIndex);
+        rpcArray(ix.accounts, 64).forEach(account => indexedKey(keys, account));
+        if (program !== CIRCLE_V2_MESSAGE_TRANSMITTER || typeof ix.data !== "string")
             return [];
         const raw = keyBytes(ix.data);
         return same(raw.subarray(0, 8), RECEIVE) && raw.length >= 12 + message.length &&
@@ -110,15 +112,10 @@ export async function inspectCircleV2SolanaMintEventOffline(input) {
     const inner = rpcArray(bridgeRecord(matching[0]).instructions, 128);
     const parsed = inner.map(item => {
         const ix = bridgeRecord(item);
-        if (!Number.isSafeInteger(ix.programIdIndex) || ix.programIdIndex < 0 || ix.programIdIndex >= keys.length ||
-            typeof ix.data !== "string")
+        if (typeof ix.data !== "string")
             fail();
-        const accounts = rpcArray(ix.accounts, 64).map(index => {
-            if (!Number.isSafeInteger(index) || index < 0 || index >= keys.length)
-                fail();
-            return keys[index];
-        });
-        return { program: keys[ix.programIdIndex], accounts, data: keyBytes(ix.data) };
+        const accounts = rpcArray(ix.accounts, 64).map(index => indexedKey(keys, index));
+        return { program: indexedKey(keys, ix.programIdIndex), accounts, data: keyBytes(ix.data) };
     });
     const handler = discriminator("global:handle_receive_finalized_message");
     const mint = discriminator("event:MintAndWithdraw");
@@ -135,7 +132,7 @@ export async function inspectCircleV2SolanaMintEventOffline(input) {
     const receivedData = Buffer.concat([EVENT_CPI, received,
         Buffer.from(keyBytes((() => {
             const ix = bridgeRecord(outer[receiveIndexes[0]]);
-            return keys[rpcArray(ix.accounts, 64)[1]];
+            return indexedKey(keys, rpcArray(ix.accounts, 64)[1]);
         })())),
         Buffer.from(Uint8Array.of(6, 0, 0, 0)), Buffer.from(message.subarray(12, 44)),
         Buffer.from(message.subarray(44, 76)), Buffer.from(Uint8Array.of(...Buffer.from(message.subarray(144, 148)).reverse())),

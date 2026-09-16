@@ -27,10 +27,13 @@ async function fixture() {
   return { signature, recipient: wallet, minimumOutputAtomic: "900000", attestedMessageHex: `0x${message.toString("hex")}`,
     nonceHex: `0x${Buffer.from(nonce).toString("hex")}`,
     signatureStatuses: { context: { slot: 321 }, value: [{ slot: 320, confirmationStatus: "finalized", confirmations: null, err: null }] },
-    transaction: { slot: 320, meta: { err: null, preTokenBalances: [balance("100000")], postTokenBalances: [balance("1100000")],
-      innerInstructions: [] as { index: number; instructions: { programIdIndex: number; accounts: number[]; data: string }[] }[] },
-      transaction: { signatures: [signature], message: { accountKeys: [other, ata, mt, tm, used, wallet, SOLANA_USDC]
-        .map(pubkey => ({ pubkey })), instructions: [{ programIdIndex: 2, accounts: [0, 5, 6, 2, 4, 3, 0], data: encode(data) }] } } } };
+    transaction: { slot: 320, version: "legacy" as "legacy" | 0,
+      meta: { err: null, preTokenBalances: [balance("100000")], postTokenBalances: [balance("1100000")],
+        loadedAddresses: { writable: [] as string[], readonly: [] as string[] },
+        innerInstructions: [] as { index: number; instructions: { programIdIndex: number; accounts: number[]; data: string }[] }[] },
+      transaction: { signatures: [signature], message: { accountKeys: [other, ata, mt, tm, used, wallet, SOLANA_USDC],
+        addressTableLookups: undefined as undefined | { accountKey: string; writableIndexes: number[]; readonlyIndexes: number[] }[],
+        instructions: [{ programIdIndex: 2, accounts: [0, 5, 6, 2, 4, 3, 0], data: encode(data) }] } } } };
 }
 test("matches exact attested V2 receive bytes, nonce PDA and USDC delta but does not prove mint completion", async () => {
   const input = await fixture(); const result = await inspectCircleV2SolanaDestinationOffline(input);
@@ -58,9 +61,9 @@ const eventTag = Buffer.from("e445a52e51cb9a1d", "hex");
 async function eventFixture() {
   const v = await fixture();
   const message = Buffer.from(v.attestedMessageHex.slice(2), "hex"), body = message.subarray(148);
-  const ata = v.transaction.transaction.message.accountKeys[1]!.pubkey;
+  const ata = v.transaction.transaction.message.accountKeys[1]!;
   const keys = v.transaction.transaction.message.accountKeys;
-  keys.push({ pubkey: TOKEN_PROGRAM_ADDRESS });
+  keys.push(TOKEN_PROGRAM_ADDRESS);
   const tokenIndex = keys.length - 1;
   const handler = Buffer.concat([disc("global:handle_receive_finalized_message"), le32(6), message.subarray(44, 76), le32(2000), le32(body.length), body, Buffer.from([1])]);
   const mint = Buffer.concat([eventTag, disc("event:MintAndWithdraw"), Buffer.from(decode(ata)), le64(1_000_000n), Buffer.from(decode(SOLANA_USDC)), le64(0n)]);
@@ -80,6 +83,16 @@ test("binds receive, Circle handler, mint event, token transfer, and message eve
   assert.equal(result.sourceMessageCorrelation, "receive_cpi_mint_transfer_events_matched");
   assert.equal(result.executionAdmitted, false); assert.equal(result.bridgeCompletion, false);
 });
+test("resolves v0 readonly ALT token program for compiled inner instruction indexes", async () => {
+  const v = await eventFixture();
+  const tokenProgram = v.transaction.transaction.message.accountKeys.pop()!;
+  v.transaction.version = 0;
+  v.transaction.transaction.message.addressTableLookups = [{ accountKey: other, writableIndexes: [], readonlyIndexes: [0] }];
+  v.transaction.meta.loadedAddresses.readonly = [tokenProgram];
+  assert.equal((await inspectCircleV2SolanaMintEventOffline(v)).bridgeCompletion, false);
+  v.transaction.meta.loadedAddresses.readonly = [];
+  await assert.rejects(inspectCircleV2SolanaMintEventOffline(v), { code: "APN_RPC_PROTOCOL" });
+});
 test("rejects absent or altered mint provenance", async () => {
   const changes = [
     (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions = []; },
@@ -93,6 +106,8 @@ test("rejects absent or altered mint provenance", async () => {
       { ...v.transaction.meta.innerInstructions[0]!.instructions[2]! }); },
     (v: Awaited<ReturnType<typeof eventFixture>>) => { const ix = v.transaction.meta.innerInstructions[0]!.instructions[2]!;
       const raw = Buffer.from(decode(ix.data)); raw[48] = 1; ix.data = encode(raw); },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.transaction.message.accountKeys[1] = other; },
+    (v: Awaited<ReturnType<typeof eventFixture>>) => { v.transaction.meta.innerInstructions[0]!.instructions[2]!.accounts = [255]; },
   ];
   for (const change of changes) { const v = await eventFixture(); change(v); await assert.rejects(inspectCircleV2SolanaMintEventOffline(v)); }
 });
