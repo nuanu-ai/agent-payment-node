@@ -127,3 +127,18 @@ test("valid but changed caller quote metadata clears earlier observation", async
     observedAt: "2026-09-16T00:00:05.000Z" });
   assert.equal(result.phase, "unknown_finality"); assert.equal(result.safeSourceProof, null);
 });
+test("status drift and loss of safe block clear a prior untrusted observation", async t => {
+  for (const mutate of [
+    (f: Awaited<ReturnType<typeof setup>>) => { f.tx.status = "reverted"; },
+    (f: Awaited<ReturnType<typeof setup>>) => { f.tx.safeBlock = null; },
+  ]) {
+    const f = await setup(); t.after(f.tmp.cleanup);
+    const observed = await reconcileNearTronBaseSource(f.input);
+    assert.equal(observed.phase, "source_observed_untrusted");
+    mutate(f);
+    const changed = await reconcileNearTronBaseSource({ ...f.input, journal: observed,
+      observedAt: "2026-09-16T00:00:05.000Z" });
+    assert.equal(changed.phase, "unknown_finality"); assert.equal(changed.safeSourceProof, null);
+    assert.equal(changed.executionAdmitted, false);
+  }
+});
