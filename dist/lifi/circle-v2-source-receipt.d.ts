@@ -9,10 +9,16 @@ export interface CircleV2BurnIntent {
     readonly amountAtomic: string;
     /** Existing Solana USDC ATA, encoded as its raw 32-byte public key. */
     readonly solanaAtaBytes32: Hex;
+    /** CCTP burn maxFee, excluding any separate wrapper FORWARD fee; zero is valid for Standard. */
     readonly maxFeeAtomic: string;
     readonly minFinalityThreshold: number;
     readonly hookData: Hex;
 }
+/** This live path admits only a FORWARD quote. The wrapper then selects Standard CCTP with zero burn maxFee. */
+export declare function circleV2BurnTermsFromQuote(responseValue: unknown): {
+    maxFeeAtomic: string;
+    minFinalityThreshold: 1000 | 2000;
+};
 export interface CircleV2SourceProof {
     readonly kind: "offline_circle_cctp_v2_base_source_receipt";
     readonly sourceTransactionHash: Hex;

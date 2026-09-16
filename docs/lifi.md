@@ -525,7 +525,11 @@ with `TokenMessengerWithFees` as depositor and burn-body message sender, and one
 message header and burn body to every expected burn field: Base USDC, amount,
 sender, Solana USDC ATA bytes32, domain 5, Solana V2 TokenMessengerMinter,
 zero destination caller, maximum fee, finality threshold, and hook data. The
-V2 source message contains a zero nonce placeholder; the parser does not expose
+`maxFee` in that burn event is the CCTP burn field, separate from the USDC
+`FORWARD` fee collected by the wrapper. A `FORWARD`-only signed quote selects
+Standard finality (2000) and a zero CCTP `maxFee`; live source submission
+currently admits this exact quote shape and rejects additional fee items.
+The V2 source message contains a zero nonce placeholder; the parser does not expose
 or infer an attested nonce. Duplicate or ambiguous events fail closed. Its
 result is source evidence only (`executionAdmitted: false`,
 `bridgeCompletion: false`) and does not authenticate the caller's RPC evidence,
