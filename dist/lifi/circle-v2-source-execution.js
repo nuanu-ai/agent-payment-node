@@ -1,6 +1,7 @@
 /** Explicit Circle V2 Base source submission. Source success never implies Solana delivery. */
 import { getAddress, keccak256 } from "viem";
 import { getBase58Encoder } from "@solana/kit";
+import { hashObject } from "../canonical.js";
 import { inspectCircleV2PreflightedDraft } from "./circle-v2-draft.js";
 import { prepareCircleV2BaseSourceReadOnly } from "./circle-v2-source-preparation.js";
 import { bindCircleV2SourcePreparationToJournal } from "./circle-v2-source-journal.js";
@@ -67,10 +68,23 @@ export async function submitCircleV2BaseSourceBurn(intent, ports) {
         draftIntegrityDigest: draft.integrityDigest, preparationDigest: p.preparationDigest,
         profileHash: intent.profileHash, operationId: intent.operationId, createdAt: new Date(now()).toISOString(),
         admission: { claimedValidationHash: intent.claimedValidationHash, note: "live_source_execution", minFinalityThreshold: intent.minFinalityThreshold } });
-    let j = await ports.journal.stageV2({ ...binding.binding,
-        schemaVersion: "apn.non-evm-source-journal.v2", protocolInputHash: binding.protocolInputHash });
+    if (ports.admitLive === undefined)
+        blocked("live_admission_missing");
+    const admission = await ports.admitLive(afterConsent);
+    if (admission.kind !== "circle_v2_live_transport_v1" || admission.circleOrigin !== "https://iris-api.circle.com" ||
+        admission.payer !== payer || admission.recipientOwner !== p.recipient.wallet ||
+        admission.recipientAta !== p.recipient.ata || admission.quoteHash !== p.quoteHash.slice(7) ||
+        admission.sourceBlockHash !== afterConsent.sourceBlock.hash ||
+        admission.preparationDigest !== afterConsent.preparationDigest.slice(7) ||
+        admission.feeTotalAtomic !== p.quote.feeTotalAtomic ||
+        !/^https:\/\//u.test(admission.rpcOrigin) || !/^[a-f0-9]{64}$/u.test(admission.validationHash))
+        blocked("live_admission_binding");
+    let j = await ports.journal.stageLiveCircle({ ...binding.binding,
+        admissionProof: admission, protocolInputHash: hashObject({ binding: binding.protocolInputHash, admission }) });
     if (j.phase !== "staged_untrusted")
         blocked("already_started");
+    if (j.schemaVersion !== "apn.non-evm-source-journal.v3" || j.executionAdmitted !== true)
+        blocked("synthetic_admission");
     j = await ports.journal.signingStarted(j.profileHash, j.operationId, j.integrityHash, new Date(now()).toISOString());
     const tx = p.transaction, nonce = BigInt(tx.nonceAtomic);
     if (nonce > BigInt(Number.MAX_SAFE_INTEGER) || Date.parse(p.expiresAt) - now() < BRIDGE_MIN_REMAINING_MS)

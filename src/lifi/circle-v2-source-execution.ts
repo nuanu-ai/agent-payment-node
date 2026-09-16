@@ -1,11 +1,12 @@
 /** Explicit Circle V2 Base source submission. Source success never implies Solana delivery. */
 import { getAddress, keccak256, type Hex } from "viem";
 import { getBase58Encoder } from "@solana/kit";
+import { hashObject } from "../canonical.js";
 import { inspectCircleV2PreflightedDraft, type CircleV2DraftInput } from "./circle-v2-draft.js";
 import { prepareCircleV2BaseSourceReadOnly, type CircleV2BaseStateReader, type CircleV2SourcePreparation, type CircleV2SourcePreparationLimits } from "./circle-v2-source-preparation.js";
 import { bindCircleV2SourcePreparationToJournal } from "./circle-v2-source-journal.js";
 import { type CircleV2PreflightTransport } from "./circle-v2-preflight.js";
-import { NonEvmSourceJournalRepository, type NonEvmSourceJournal } from "./non-evm-source-journal.js";
+import { NonEvmSourceJournalRepository, type NonEvmSourceJournal, type NonEvmSourceJournalV3 } from "./non-evm-source-journal.js";
 import { bridgeAddress, bridgeFailure, bridgeRecord, BRIDGE_MIN_REMAINING_MS } from "./validation.js";
 
 const ROUTE = "base_usdc_to_solana_usdc_circle_cctp_v2" as const;
@@ -24,6 +25,8 @@ export interface CircleV2SourceExecutionPorts {
   readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
   readonly approve: (preparation: CircleV2SourcePreparation) => Promise<void>;
   readonly journal: NonEvmSourceJournalRepository;
+  /** Concrete HTTPS/RPC adapter supplies the final response digest and pinned origins. */
+  readonly admitLive?: (preparation: CircleV2SourcePreparation) => Promise<NonEvmSourceJournalV3["admissionProof"]>;
   readonly now?: () => number;
 }
 export interface CircleV2SourceExecutionIntent {
@@ -91,9 +94,19 @@ export async function submitCircleV2BaseSourceBurn(intent: CircleV2SourceExecuti
     draftIntegrityDigest: draft.integrityDigest, preparationDigest: p.preparationDigest,
     profileHash: intent.profileHash, operationId: intent.operationId, createdAt: new Date(now()).toISOString(),
     admission: { claimedValidationHash: intent.claimedValidationHash, note: "live_source_execution", minFinalityThreshold: intent.minFinalityThreshold } });
-  let j: NonEvmSourceJournal = await ports.journal.stageV2({ ...binding.binding,
-    schemaVersion: "apn.non-evm-source-journal.v2", protocolInputHash: binding.protocolInputHash });
+  if (ports.admitLive === undefined) blocked("live_admission_missing");
+  const admission = await ports.admitLive(afterConsent);
+  if (admission.kind !== "circle_v2_live_transport_v1" || admission.circleOrigin !== "https://iris-api.circle.com" ||
+    admission.payer !== payer || admission.recipientOwner !== p.recipient.wallet ||
+    admission.recipientAta !== p.recipient.ata || admission.quoteHash !== p.quoteHash.slice(7) ||
+    admission.sourceBlockHash !== afterConsent.sourceBlock.hash ||
+    admission.preparationDigest !== afterConsent.preparationDigest.slice(7) ||
+    admission.feeTotalAtomic !== p.quote.feeTotalAtomic ||
+    !/^https:\/\//u.test(admission.rpcOrigin) || !/^[a-f0-9]{64}$/u.test(admission.validationHash)) blocked("live_admission_binding");
+  let j: NonEvmSourceJournal = await ports.journal.stageLiveCircle({ ...binding.binding,
+    admissionProof: admission, protocolInputHash: hashObject({ binding: binding.protocolInputHash, admission }) });
   if (j.phase !== "staged_untrusted") blocked("already_started");
+  if (j.schemaVersion !== "apn.non-evm-source-journal.v3" || j.executionAdmitted !== true) blocked("synthetic_admission");
   j = await ports.journal.signingStarted(j.profileHash, j.operationId, j.integrityHash, new Date(now()).toISOString());
   const tx = p.transaction, nonce = BigInt(tx.nonceAtomic);
   if (nonce > BigInt(Number.MAX_SAFE_INTEGER) || Date.parse(p.expiresAt) - now() < BRIDGE_MIN_REMAINING_MS) blocked("signing_expired");

@@ -18,6 +18,11 @@ const call = z.strictObject({ chainId: z.literal(8453), from: addressSchema, to:
     accessList: z.tuple([]) });
 const proof = z.strictObject({ kind: z.literal("synthetic_untrusted"), claimedValidationHash: hashSchema,
     note: z.string().min(1).max(256) });
+const liveCircleProof = z.strictObject({ kind: z.literal("circle_v2_live_transport_v1"),
+    circleOrigin: z.literal("https://iris-api.circle.com"), rpcOrigin: z.string().url(),
+    quoteHash: hashSchema, validationHash: hashSchema, sourceBlockHash: wordSchema,
+    preparationDigest: hashSchema, payer: addressSchema, recipientOwner: z.string().min(32).max(44),
+    recipientAta: z.string().min(32).max(44), feeTotalAtomic: uintSchema });
 const safe = z.strictObject({ provenance: z.literal("synthetic_untrusted"), transactionHash: wordSchema, status: z.enum(["success", "reverted"]),
     blockNumberAtomic: uintSchema, blockHash: wordSchema, safeBlockNumberAtomic: uintSchema,
     safeBlockHash: wordSchema, observedAt: isoSchema });
@@ -42,7 +47,11 @@ const schemaV1 = z.strictObject({ schemaVersion: z.literal("apn.non-evm-source-j
     route: pair, sourceCall: call, maxSourceNativeDebitWei: uintSchema, admissionProof: proof, createdAt: isoSchema,
     ...snapshot.shape, transitions: z.array(entry).min(1).max(32), integrityHash: hashSchema });
 const schemaV2 = schemaV1.extend({ schemaVersion: z.literal("apn.non-evm-source-journal.v2"), protocolInputHash: hashSchema });
-const schema = z.discriminatedUnion("schemaVersion", [schemaV1, schemaV2]);
+const schemaV3 = schemaV1.omit({ schemaVersion: true, executionAdmitted: true, admissionProof: true }).extend({
+    schemaVersion: z.literal("apn.non-evm-source-journal.v3"), executionAdmitted: z.literal(true),
+    admissionProof: liveCircleProof, protocolInputHash: hashSchema
+});
+const schema = z.discriminatedUnion("schemaVersion", [schemaV1, schemaV2, schemaV3]);
 function corrupt() { return bridgeFailure("APN_STATE_CORRUPT", "non_evm_source_journal"); }
 function blocked() { return bridgeFailure("APN_OPERATION_BLOCKED", "non_evm_source_transition_blocked"); }
 function snapshotOf(j) {
@@ -92,6 +101,11 @@ export function validateNonEvmSourceJournal(value) {
         (j.route === "base_usdc_to_solana_usdc_circle_cctp_v2"
             ? j.sourceCall.to !== BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES || !j.sourceCall.data.startsWith("0xc62fa55e")
             : j.sourceCall.to !== BRIDGE_DIAMOND || !j.sourceCall.data.startsWith("0x3110c7b9")))
+        corrupt();
+    if (j.schemaVersion === "apn.non-evm-source-journal.v3" &&
+        (j.route !== "base_usdc_to_solana_usdc_circle_cctp_v2" ||
+            j.admissionProof.payer !== j.sourceCall.from ||
+            j.admissionProof.sourceBlockHash.length !== 66))
         corrupt();
     let prior;
     for (const e of j.transitions) {
@@ -145,7 +159,7 @@ function build(binding, version) {
         nonceAtomic: null, submissionAttempts: 0, safeSourceProof: null, reason: null };
     const first = { ...initial, at: binding.createdAt, previousHash: binding.draftIntegrityHash };
     const value = { schemaVersion: `apn.non-evm-source-journal.${version}`, kind: "non_evm_source_journal",
-        executionAdmitted: false, ...binding, ...initial,
+        executionAdmitted: version === "v3", ...binding, ...initial,
         transitions: [{ ...first, transitionHash: hashObject(first) }] };
     return validateNonEvmSourceJournal({ ...value, integrityHash: hashObject(value) });
 }
@@ -185,7 +199,7 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
         const identity = { profileHash: j.profileHash, operationId: j.operationId,
             draftIntegrityHash: j.draftIntegrityHash, sender: j.sourceCall.from,
             nonceAtomic: j.sourceCall.nonceAtomic, transactionHash,
-            ...(j.schemaVersion === "apn.non-evm-source-journal.v2" ? { protocolInputHash: j.protocolInputHash } : {}) };
+            ...(j.schemaVersion !== "apn.non-evm-source-journal.v1" ? { protocolInputHash: j.protocolInputHash } : {}) };
         const record = { ...identity, integrityHash: hashObject(identity) };
         if (prior !== null) {
             if (hashObject(prior) !== hashObject(record))
@@ -202,7 +216,7 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
         const identity = { profileHash: j.profileHash, operationId: j.operationId,
             draftIntegrityHash: j.draftIntegrityHash, sender: j.sourceCall.from,
             nonceAtomic: j.sourceCall.nonceAtomic, transactionHash: j.transactionHash,
-            ...(j.schemaVersion === "apn.non-evm-source-journal.v2" ? { protocolInputHash: j.protocolInputHash } : {}) };
+            ...(j.schemaVersion !== "apn.non-evm-source-journal.v1" ? { protocolInputHash: j.protocolInputHash } : {}) };
         if (prior === null || hashObject(prior) !== hashObject({ ...identity, integrityHash: hashObject(identity) }))
             corrupt();
     }
@@ -216,13 +230,19 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
             corrupt();
         return this.stageBuilt(build(binding, "v2"));
     }
+    /** Only the concrete live Circle adapter may supply this versioned admission record. */
+    async stageLiveCircle(binding) {
+        if (binding.admissionProof.kind !== "circle_v2_live_transport_v1")
+            blocked();
+        return this.stageBuilt(build(binding, "v3"));
+    }
     async stageBuilt(j) {
         await this.initialize();
         return this.withLocks([`profile:${j.profileHash}`, `operation:${j.operationId}`], async () => {
             const prior = await this.load(j.profileHash, j.operationId);
             if (prior !== null) {
                 if (prior.schemaVersion !== j.schemaVersion ||
-                    (prior.schemaVersion === "apn.non-evm-source-journal.v2" && j.schemaVersion === "apn.non-evm-source-journal.v2" && prior.protocolInputHash !== j.protocolInputHash) ||
+                    ("protocolInputHash" in prior && "protocolInputHash" in j && prior.protocolInputHash !== j.protocolInputHash) ||
                     prior.draftIntegrityHash !== j.draftIntegrityHash || prior.route !== j.route ||
                     hashObject(prior.sourceCall) !== hashObject(j.sourceCall) ||
                     hashObject(prior.admissionProof) !== hashObject(j.admissionProof) || prior.createdAt !== j.createdAt ||

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getBase58Encoder } from "@solana/kit";
-import { canonicalJson } from "../canonical.js";
+import { canonicalJson, hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "../evm-asset.js";
 import { associatedUsdc } from "../solana/accounts.js";
@@ -81,12 +81,16 @@ export class CircleV2SourceService {
                 `${HOOK.slice(0, 50)}000000000000002101${Buffer.from(ownerBytes).toString("hex")}`;
             const quoteRequest = { amount: amount.toString(), feeToken: USDC,
                 requests: [{ type: "FORWARD", params: { hookData: hook } }] };
+            let validationHash;
             const circlePost = async (path, body) => {
                 const response = await this.transport.request(`${CIRCLE}${path}`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
                 if (response.status !== 200)
                     fail("circle_http_status");
                 try {
-                    return JSON.parse(response.body);
+                    const parsed = JSON.parse(response.body);
+                    if (path === "/v2/quote/validate/usdc/6")
+                        validationHash = hashObject({ request: body, response: parsed });
+                    return parsed;
                 }
                 catch {
                     return fail("circle_json");
@@ -117,6 +121,14 @@ export class CircleV2SourceService {
                 sendRawTransaction: raw => rpc.send(raw),
                 approve: p => this.approval.approve(p),
                 journal: new NonEvmSourceJournalRepository(this.state.root),
+                admitLive: async (p) => {
+                    if (validationHash === undefined)
+                        fail("validation_missing");
+                    return { kind: "circle_v2_live_transport_v1", circleOrigin: CIRCLE, rpcOrigin: rpc.origin,
+                        quoteHash: p.quoteHash.slice(7), validationHash, sourceBlockHash: p.sourceBlock.hash,
+                        preparationDigest: p.preparationDigest.slice(7), payer, recipientOwner: p.recipient.wallet,
+                        recipientAta: p.recipient.ata, feeTotalAtomic: p.quote.feeTotalAtomic };
+                },
             });
             return { operationId, sourceTransactionHash: result.sourceTransactionHash, sourceState: result.sourceState,
                 submissionAttempts: 1, bridgeCompletion: false, circleAttestationObserved: false,
