@@ -1,9 +1,19 @@
 import { sha256 } from "../canonical.js";
 import { canonicalProfile } from "../wallet-policy.js";
-import { BRIDGE_CHAINS, BRIDGE_USDC, bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
+import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS } from "./asset-registry.js";
+import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
 export function bridgeCapabilities(profile) {
     return { schema_version: "apn.bridge-capabilities.v1", ...(profile === undefined ? {} : { profile: canonicalProfile(profile), profile_binding_inspected: false }),
-        chains: BRIDGE_CHAINS.map((id) => ({ chain: `eip155:${id}`, token: BRIDGE_USDC[id], decimals: 6, symbol: "USDC" })),
+        chains: BRIDGE_CHAINS.map((id) => {
+            const row = BRIDGE_ASSET_REGISTRY[id];
+            return { chain: row.caip2, name: row.name,
+                native_coin: { symbol: row.nativeCoin.symbol, coin_key: row.nativeCoin.coinKey, decimals: row.nativeCoin.decimals,
+                    bridgeable_principal: false, role: "gas_and_messaging_fee_only" },
+                tokens: row.tokens.map((asset) => ({ token: asset.address, symbol: asset.symbol, coin_key: asset.coinKey,
+                    decimals: asset.decimals, upgradeability: asset.code.upgradeability,
+                    tools: asset.stargate === null ? ["across"] : ["across", "stargateV2"],
+                    peers: asset.peers.map((peer) => BRIDGE_ASSET_REGISTRY[peer].caip2) })) };
+        }),
         tools: [{ tool: "across", variant: "Across V4, empty message, no exclusivity", decoder_implemented: true },
             { tool: "stargateV2", variant: "Stargate V2 Taxi, empty compose/options", decoder_implemented: true }],
         route_executable: "requires_current_route_materialization_and_chain_checks",
@@ -18,10 +28,15 @@ export function bridgeCapabilities(profile) {
             { provider: "coinbase-awal", custody: "provider", execution_owner: "provider", retry_owner: "provider",
                 evidence_owner: "provider_and_chain_RPC", implemented: false, unavailable_reason: "bridge_execution_and_recovery_contract_unavailable", prerequisites: ["admitted_provider_bridge_adapter"] },
         ],
-        rpc_environment: { "eip155:1": "APN_ETHEREUM_RPC_URL", "eip155:8453": "APN_BASE_RPC_URL", "eip155:42161": "APN_ARBITRUM_RPC_URL" },
+        rpc_environment: Object.fromEntries(BRIDGE_CHAINS.map((id) => [BRIDGE_ASSET_REGISTRY[id].caip2, BRIDGE_ASSET_REGISTRY[id].rpcEnvironment])),
         inventory_only: [{ tool: "polymer", reason: "protocol_unproved_unique_source_destination_correlation" },
+            { asset: "native_principal", reason: "fee_forwarder_allowance_and_Transfer_log_evidence_are_ERC20_shaped" },
+            { asset: "fee_on_transfer_or_rebasing_token", reason: "exact_three_Transfer_log_proof_cannot_hold" },
+            { asset: "stargate_pool_asset_other_than_1", reason: "pool_not_reviewed_the_way_USDC_was" },
             { tool: "stargateV2-bus", reason: "protocol_unproved_ticket_passenger_GUID_mapping" }, { tool: "all_other_tools", reason: "finite_decoder_and_protocol_proof_unavailable" }],
-        fee_control: "USDC_loss_and_native_debit_checked_before_each_first_send; Base_total_native_fee_is_not_an_onchain_cap",
+        fee_control: "token_loss_and_native_debit_checked_before_each_first_send; Base_total_native_fee_is_not_an_onchain_cap",
+        fee_headroom: { policy: BRIDGE_FEE_HEADROOM_POLICY, headroom_bps: BRIDGE_FEE_HEADROOM_BPS,
+            statement: "The approved maximum is the preparation quote raised by this headroom; a fresh estimate above it is refused, never repriced." },
         mainnet_acceptance: { complete: false, passed: 0, required: 3, named_human_acceptance: "open" },
         next_actions: ["apn bridge routes --help"],
     };
@@ -53,7 +68,8 @@ function inventoryValue(value, depth) {
         return value.map((entry) => inventoryValue(entry, depth + 1));
     }
     const r = bridgeRecord(value);
-    return Object.fromEntries(Object.entries(r).filter(([key]) => SAFE_FIELDS.has(key) || /^(?:1|8453|42161)$/u.test(key))
+    const admitted = new Set(BRIDGE_CHAINS.map(String));
+    return Object.fromEntries(Object.entries(r).filter(([key]) => SAFE_FIELDS.has(key) || admitted.has(key))
         .map(([key, entry]) => [key, inventoryValue(entry, depth + 1)]));
 }
 //# sourceMappingURL=catalog.js.map

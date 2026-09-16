@@ -58,9 +58,11 @@ export const economicsSchema = z.strictObject({ nonceAtomic: uintSchema, gasLimi
 export const feeQuoteSchema = z.strictObject({ chainId: chainSchema, feeModel: z.literal("arbitrum-inclusive").optional(),
     blockNumberAtomic: uintSchema, blockHash: wordSchema, observedAt: isoSchema, rpcOrigin: originSchema, l1DataFeeUpperWei: uintSchema, operatorFeeUpperWei: uintSchema,
     maximumExecutionFeeWei: uintSchema, totalQuoteWei: uintSchema, totalFeeEnforcedOnchain: z.literal(false) });
+export const feeCeilingSchema = z.strictObject({ policy: z.literal("apn.bridge-fee-headroom.v1"),
+    headroomBps: z.number().int().min(0).max(10_000), quotedMaxFeePerGasAtomic: uintSchema, quotedMaxPriorityFeePerGasAtomic: uintSchema });
 export const envelopeSchema = z.strictObject({ role: z.enum(["approval", "bridge"]), chainId: chainSchema, from: addressSchema,
     to: addressSchema, valueAtomic: uintSchema, data: hexSchema, economics: economicsSchema, feeQuote: feeQuoteSchema,
-    provisionalGas: z.boolean(), envelopeHash: hashSchema });
+    provisionalGas: z.boolean(), feeCeiling: feeCeilingSchema, envelopeHash: hashSchema });
 export const txProofSchema = z.strictObject({ chainId: chainSchema, transactionHash: wordSchema, block: blockSchema,
     safeBlock: blockSchema.nullable(), rpcOrigin: originSchema, from: addressSchema, to: addressSchema,
     nonceAtomic: uintSchema, valueAtomic: uintSchema, dataHash: hashSchema, gasLimitAtomic: uintSchema,

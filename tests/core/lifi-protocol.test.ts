@@ -11,7 +11,10 @@ import { decodeBridgeCall } from "../../src/lifi/decode.js";
 import { bridgeDeployment, bridgeEndpointId, bridgeProtocolEmitter } from "../../src/lifi/deployments.js";
 import type { BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall } from "../../src/lifi/model.js";
 import { bridgeDestinationProof, bridgeSourceProof, destinationEventFilter } from "../../src/lifi/protocol-evidence.js";
-import { BRIDGE_DIAMOND, BRIDGE_USDC, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD } from "../../src/lifi/validation.js";
+import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
+import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD } from "../../src/lifi/validation.js";
+
+const usdc = (chainId: 1 | 8453 | 42161) => BRIDGE_ASSET_REGISTRY[chainId].tokens.find((row) => row.symbol === "USDC")!.address;
 
 type Json = Record<string, any>;
 const HASH = `0x${"ab".repeat(32)}` as Hex;
@@ -137,9 +140,9 @@ test("Stargate binds Taxi, endpoint, receiver, amounts, refund, and native fee",
 test("deployment contracts pin code, legacy proxies, protocol configuration, and Stargate peers", () => {
   for (const [source, destination] of [[1, 8453], [1, 42161], [8453, 1], [8453, 42161], [42161, 1], [42161, 8453]] as const) {
     for (const tool of ["across", "stargateV2"] as const) {
-      const d = bridgeDeployment(source, destination, tool);
+      const d = bridgeDeployment(source, destination, tool, usdc(source));
       assert.equal(d.chainId, source); assert.equal(d.peerChainId, destination); assert.equal(d.tool, tool);
-      assert.equal(d.diamond, BRIDGE_DIAMOND); assert.equal(d.feeForwarder, FEE_FORWARDER); assert.equal(d.token, BRIDGE_USDC[source]);
+      assert.equal(d.diamond, BRIDGE_DIAMOND); assert.equal(d.feeForwarder, FEE_FORWARDER); assert.equal(d.token, usdc(source));
       assert.ok(d.code.length >= 7); assert.ok(d.code.every((x) => /^0x[0-9a-f]{64}$/.test(x.codeHash)));
       assert.ok(d.reads.some((x) => x.kind === "storage" && x.data.startsWith("0x7050c9")));
       assert.ok(d.reads.some((x) => x.kind === "storage" && x.data.startsWith("0x10d6a5")));
@@ -152,8 +155,8 @@ test("deployment contracts pin code, legacy proxies, protocol configuration, and
     }
   }
   for (const chainId of [1, 8453, 42161] as const) {
-    assert.throws(() => bridgeDeployment(chainId, chainId, "across"), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
-    assert.throws(() => bridgeDeployment(chainId, chainId, "stargateV2"), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
+    assert.throws(() => bridgeDeployment(chainId, chainId, "across", usdc(chainId)), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
+    assert.throws(() => bridgeDeployment(chainId, chainId, "stargateV2", usdc(chainId)), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
   }
 });
 
@@ -166,8 +169,8 @@ test("source and destination proofs correlate both tools across all three direct
     const destination = bridgeDestinationProof(source, m, decoded, destinationReceipt);
     assert.equal(destination.amountAtomic, source.correlation.kind === "across" ? source.correlation.outputAmountAtomic : source.correlation.amountReceivedAtomic);
     assert.equal(destination.correlationHash, sha256(canonicalJson(source.correlation)));
-    const filter = destinationEventFilter(source);
-    assert.equal(filter.address, bridgeProtocolEmitter(decoded.destinationChainId, decoded.tool));
+    const filter = destinationEventFilter(source, decoded.destinationToken);
+    assert.equal(filter.address, bridgeProtocolEmitter(decoded.destinationChainId, decoded.tool, decoded.destinationToken));
     assert.equal(filter.topics.length, 3);
   }
 });
@@ -207,7 +210,7 @@ test("Across destination requires the full tuple while accepting an independent 
     assert.equal(proof.fillType, fillType); assert.equal(proof.relayerCredit, fillType === 2 ? BRIDGE_ZERO_WORD : addressWord(RELAYER));
     assert.equal(proof.repaymentChainIdAtomic, fillType === 2 ? "0" : String(d.destinationChainId));
     const transfer = eventArgs(receipt.logs[1]!, "Transfer");
-    assert.equal(transfer.from, fillType === 2 ? bridgeProtocolEmitter(d.destinationChainId, "across") : PAYER);
+    assert.equal(transfer.from, fillType === 2 ? bridgeProtocolEmitter(d.destinationChainId, "across", d.destinationToken) : PAYER);
     assert.notEqual(addressWord(transfer.from), proof.relayerCredit);
   }
   const good = makeDestinationReceipt(d, source);
@@ -268,7 +271,7 @@ test("Stargate destination requires GUID, source EID, receiver, amount, and exac
   }
   const c = source.correlation;
   assert.equal(c.kind, "stargateV2");
-  const cached = eventLog(bridgeProtocolEmitter(d.destinationChainId, d.tool), "UnreceivedTokenCached", {
+  const cached = eventLog(bridgeProtocolEmitter(d.destinationChainId, d.tool, d.destinationToken), "UnreceivedTokenCached", {
     guid: c.guid, index: 0, srcEid: c.sourceEid, receiver: d.recipient, amountLD: BigInt(c.amountReceivedAtomic), composeMsg: "0x",
   });
   assert.throws(() => bridgeDestinationProof(source, m, d, { ...good, logs: [...good.logs, cached] }), { code: "APN_RPC_PROTOCOL" });
@@ -287,7 +290,7 @@ test("destination proof rejects forged stored source correlations and wrong rece
 });
 
 function makeSourceReceipt(d: DecodedBridgeCall): BridgeProtocolReceipt {
-  const emitter = bridgeProtocolEmitter(d.sourceChainId, d.tool);
+  const emitter = bridgeProtocolEmitter(d.sourceChainId, d.tool, d.sourceToken);
   const logs: BridgeLog[] = [
     eventLog(d.sourceToken, "Transfer", { from: d.sender, to: BRIDGE_DIAMOND, value: BigInt(d.sourceAmountAtomic) }),
     eventLog(d.sourceToken, "Transfer", { from: BRIDGE_DIAMOND, to: FEE_RECIPIENT, value: BigInt(d.feeAmountAtomic) }),
@@ -309,7 +312,7 @@ function makeSourceReceipt(d: DecodedBridgeCall): BridgeProtocolReceipt {
 }
 
 function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourceProof, fillType: 0 | 1 | 2 = 0): BridgeProtocolReceipt {
-  const emitter = bridgeProtocolEmitter(d.destinationChainId, d.tool);
+  const emitter = bridgeProtocolEmitter(d.destinationChainId, d.tool, d.destinationToken);
   if (source.correlation.kind === "across") {
     const c = source.correlation;
     return receipt(d.destinationChainId, [eventLog(emitter, "FilledRelay", {

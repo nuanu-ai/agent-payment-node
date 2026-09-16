@@ -11,7 +11,7 @@ const TX_HASH = `0x${"12".repeat(32)}` as Hex;
 const RELAYER = getAddress("0x2222222222222222222222222222222222222222");
 const PAYER = getAddress("0x3333333333333333333333333333333333333333");
 export function makeSourceReceipt(d: DecodedBridgeCall): BridgeProtocolReceipt {
-  const emitter = bridgeProtocolEmitter(d.sourceChainId, d.tool);
+  const emitter = bridgeProtocolEmitter(d.sourceChainId, d.tool, d.sourceToken);
   const logs: BridgeLog[] = [
     eventLog(d.sourceToken, "Transfer", { from: d.sender, to: BRIDGE_DIAMOND, value: BigInt(d.sourceAmountAtomic) }),
     eventLog(d.sourceToken, "Transfer", { from: BRIDGE_DIAMOND, to: FEE_RECIPIENT, value: BigInt(d.feeAmountAtomic) }),
@@ -33,7 +33,7 @@ export function makeSourceReceipt(d: DecodedBridgeCall): BridgeProtocolReceipt {
 }
 
 export function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourceProof, fillType: 0 | 1 | 2 = 0): BridgeProtocolReceipt {
-  const emitter = bridgeProtocolEmitter(d.destinationChainId, d.tool);
+  const emitter = bridgeProtocolEmitter(d.destinationChainId, d.tool, d.destinationToken);
   if (source.correlation.kind === "across") {
     const c = source.correlation;
     return receipt(d.destinationChainId, [eventLog(emitter, "FilledRelay", {

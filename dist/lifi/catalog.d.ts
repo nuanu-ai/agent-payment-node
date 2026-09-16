@@ -2,9 +2,23 @@ import type { LifiResponse } from "./ports.js";
 export declare function bridgeCapabilities(profile?: string): {
     chains: {
         chain: string;
-        token: `0x${string}`;
-        decimals: number;
-        symbol: string;
+        name: string;
+        native_coin: {
+            symbol: string;
+            coin_key: string;
+            decimals: 18;
+            bridgeable_principal: boolean;
+            role: string;
+        };
+        tokens: {
+            token: `0x${string}`;
+            symbol: string;
+            coin_key: string;
+            decimals: number;
+            upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+            tools: string[];
+            peers: string[];
+        }[];
     }[];
     tools: {
         tool: string;
@@ -32,15 +46,23 @@ export declare function bridgeCapabilities(profile?: string): {
         prerequisites: string[];
     })[];
     rpc_environment: {
-        "eip155:1": string;
-        "eip155:8453": string;
-        "eip155:42161": string;
+        [k: string]: string;
     };
-    inventory_only: {
+    inventory_only: ({
         tool: string;
         reason: string;
-    }[];
+        asset?: never;
+    } | {
+        asset: string;
+        reason: string;
+        tool?: never;
+    })[];
     fee_control: string;
+    fee_headroom: {
+        policy: "apn.bridge-fee-headroom.v1";
+        headroom_bps: number;
+        statement: string;
+    };
     mainnet_acceptance: {
         complete: boolean;
         passed: number;
@@ -66,9 +88,23 @@ export declare function bridgeInventory(responses: Readonly<Record<"chains" | "t
     capability: {
         chains: {
             chain: string;
-            token: `0x${string}`;
-            decimals: number;
-            symbol: string;
+            name: string;
+            native_coin: {
+                symbol: string;
+                coin_key: string;
+                decimals: 18;
+                bridgeable_principal: boolean;
+                role: string;
+            };
+            tokens: {
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                tools: string[];
+                peers: string[];
+            }[];
         }[];
         tools: {
             tool: string;
@@ -96,15 +132,23 @@ export declare function bridgeInventory(responses: Readonly<Record<"chains" | "t
             prerequisites: string[];
         })[];
         rpc_environment: {
-            "eip155:1": string;
-            "eip155:8453": string;
-            "eip155:42161": string;
+            [k: string]: string;
         };
-        inventory_only: {
+        inventory_only: ({
             tool: string;
             reason: string;
-        }[];
+            asset?: never;
+        } | {
+            asset: string;
+            reason: string;
+            tool?: never;
+        })[];
         fee_control: string;
+        fee_headroom: {
+            policy: "apn.bridge-fee-headroom.v1";
+            headroom_bps: number;
+            statement: string;
+        };
         mainnet_acceptance: {
             complete: boolean;
             passed: number;

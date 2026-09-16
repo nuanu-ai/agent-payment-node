@@ -30,6 +30,7 @@ export interface BridgeProviderBinding {
 export interface BridgeFee {
     readonly name: string;
     readonly chainId: EvmChainId;
+    /** `"native"` is the chain's first-class native coin, never the provider's zero-address wire sentinel. */
     readonly asset: Address | "native";
     readonly amountAtomic: string;
     readonly included: boolean;
@@ -216,6 +217,13 @@ export interface BridgeDestinationProof {
     readonly relayerCredit: Hex | null;
     readonly repaymentChainIdAtomic: string | null;
 }
+/** The stated headroom the owner approves: `economics` is `quoted * (1 + headroomBps/10_000)`, rounded up. */
+export interface BridgeFeeCeiling {
+    readonly policy: "apn.bridge-fee-headroom.v1";
+    readonly headroomBps: number;
+    readonly quotedMaxFeePerGasAtomic: string;
+    readonly quotedMaxPriorityFeePerGasAtomic: string;
+}
 export interface BridgeEnvelope {
     readonly role: "approval" | "bridge";
     readonly chainId: EvmChainId;
@@ -226,6 +234,7 @@ export interface BridgeEnvelope {
     readonly economics: Economics;
     readonly feeQuote: EvmFeeQuote;
     readonly provisionalGas: boolean;
+    readonly feeCeiling: BridgeFeeCeiling;
     readonly envelopeHash: string;
 }
 export interface BridgeTransactionProof {
