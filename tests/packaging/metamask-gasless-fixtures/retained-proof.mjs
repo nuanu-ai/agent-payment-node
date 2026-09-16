@@ -41,21 +41,35 @@ export async function runInstalledRetainedProof(installed) {
     else s.update({ packageRoot: reinstalledRoot });
 
     const blocked = await s.cli(s.prepareArgv(`mm-after-${name}-0001`));
-    assert.equal(blocked.ok, false, JSON.stringify(blocked));
-    assert.equal(blocked.error.code, "APN_OPERATION_BLOCKED", name);
-    assert.deepEqual(blocked.error.details, {
-      blockingOperationId: old.operationId,
-      blockingState: "awaiting_approval",
-    }, name);
+    const sameDomain = ["local-direct", "local-x402", "provider-x402", "local-gasless"].includes(name);
+    if (sameDomain) {
+      assert.equal(blocked.ok, false, `${name}: ${JSON.stringify(blocked)}`);
+      assert.deepEqual(blocked.error.details, {
+        blockingOperationId: old.operationId,
+        blockingState: "awaiting_approval",
+        blockingNetwork: "evm:8453",
+        blockingAccount: s.fixture().owner.toLowerCase(),
+      }, name);
+    } else {
+      // Solana and source-chain bridge journals use different conflict domains, so MetaMask
+      // may prepare on Base while retaining the old operation byte-for-byte.
+      assert.equal(blocked.ok, true, `${name}: ${JSON.stringify(blocked)}`);
+      assert.notEqual(blocked.error?.code, "APN_OPERATION_BLOCKED", name);
+    }
     const conflict = await s.cli(s.prepareArgv(old.idempotencyKey));
     assert.equal(conflict.ok, false, JSON.stringify(conflict));
     assert.equal(conflict.error.code, "APN_IDEMPOTENCY_CONFLICT", name);
 
-    assert.deepEqual(await s.trace(), traceBefore, `${name}: no installed transport call`);
+    const traceAfter = await s.trace();
+    if (sameDomain) assert.deepEqual(traceAfter, traceBefore, `${name}: no installed transport call`);
+    assert.deepEqual(traceAfter.filter(entry => entry.kind === "provider-post"), [], `${name}: no provider POST`);
     assert.equal(s.fixture().postCount, 0, `${name}: no provider POST`);
     assert.deepEqual(await s.privateBytes(), privateBefore, `${name}: MetaMask private state retained`);
-    assert.deepEqual(await retainedSnapshot(s), before, `${name}: durable tree retained byte-for-byte`);
-    reverse.push({ family: name, operationId: old.operationId, blockingState: "awaiting_approval",
+    const after = await retainedSnapshot(s);
+    assert.deepEqual(after.files.get(old.operationPath), before.files.get(old.operationPath), `${name}: old operation retained`);
+    assert.deepEqual(after.files.get(old.profilePath), before.files.get(old.profilePath), `${name}: provider profile retained`);
+    if (sameDomain) assert.deepEqual(after, before, `${name}: blocked operation made no write`);
+    reverse.push({ family: name, operationId: old.operationId, blockingState: sameDomain ? "awaiting_approval" : "different_conflict_domain",
       sameKey: "APN_IDEMPOTENCY_CONFLICT", transportCalls: 0, providerPosts: 0 });
   }
 
