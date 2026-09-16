@@ -38,15 +38,23 @@ const facet = "0x2222222222222222222222222222222222222222" as const;
 const code = "0x60016000" as const;
 const loupeAbi = parseAbi(["function facetAddress(bytes4 selector) view returns (address)"]);
 const consumedAbi = parseAbi(["function isQuoteConsumed(bytes32 quoteId) view returns (bool)"]);
-function mockRpc(overrides: { code?: string; consumed?: boolean; revert?: boolean } = {}): NearTronReadOnlyRpc {
+function mockRpc(overrides: { code?: string; consumed?: boolean; revert?: boolean; remapFacet?: boolean; staleBlock?: boolean; reorg?: boolean } = {}): NearTronReadOnlyRpc {
+  let blockReads = 0;
   return { async request(method, params) {
     if (method === "eth_chainId") return "0x2105";
-    if (method === "eth_getBlockByNumber") return { number: "0x7b", hash: `0x${"ab".repeat(32)}`, timestamp: "0x3e8" };
-    if (method === "eth_getCode") return overrides.code ?? code;
+    if (method === "eth_getBlockByNumber") {
+      blockReads++;
+      return { number: "0x7b", hash: `0x${(overrides.reorg && blockReads > 1 ? "cd" : "ab").repeat(32)}`,
+        timestamp: overrides.staleBlock ? "0x3d0" : "0x3e8" };
+    }
+    if (method === "eth_getCode") {
+      assert.equal(params[1], "0x7b");
+      return overrides.code ?? (overrides.remapFacet && params[0] === diamond ? "0x60026000" : code);
+    }
     if (method === "eth_call") {
       const tx = params[0] as { data: string; from?: string; value?: string };
       assert.equal(params[1], "0x7b");
-      if (tx.data.startsWith("0xcdffacc6")) return encodeFunctionResult({ abi: loupeAbi, functionName: "facetAddress", result: facet });
+      if (tx.data.startsWith("0xcdffacc6")) return encodeFunctionResult({ abi: loupeAbi, functionName: "facetAddress", result: overrides.remapFacet ? diamond : facet });
       if (tx.data.startsWith("0x")) {
         if (tx.data.startsWith(encodeFunctionData({ abi: consumedAbi, functionName: "isQuoteConsumed", args: [`0x${"00".repeat(32)}`] }).slice(0, 10)))
           return encodeFunctionResult({ abi: consumedAbi, functionName: "isQuoteConsumed", result: overrides.consumed ?? false });
@@ -81,4 +89,16 @@ test("facet upgrade, signer mismatch, consumed quote, expiry and simulation reve
     [{ ...pins, nowUnixSeconds: "9999999999" }, mockRpc()],
     [pins, mockRpc({ revert: true })],
   ] as const) await assert.rejects(preflightNearBaseTronSourceReadOnly(quote, binding, changedPins, rpc));
+});
+
+test("selector remap, stale safe block and block hash change fail at their safety gates", async () => {
+  const { quote, pins } = await setup();
+  for (const [rpc, reason] of [
+    [mockRpc({ remapFacet: true }), "facet_code_changed"],
+    [mockRpc({ staleBlock: true }), "stale_safe_block"],
+    [mockRpc({ reorg: true }), "block_changed"],
+  ] as const) {
+    await assert.rejects(preflightNearBaseTronSourceReadOnly(quote, binding, pins, rpc),
+      new RegExp(`near_tron_preflight_${reason}`));
+  }
 });
