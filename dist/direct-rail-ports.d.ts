@@ -64,6 +64,26 @@ export interface RailPreparedTransfer {
     /** Required only on TRON. Omitted on existing Solana records. */
     readonly resources?: TronResourceSnapshot;
 }
+/** Proof that the exact bytes about to be signed would succeed. `sigVerify: false` has no on-chain effect. */
+export interface RailSimulationEvidence {
+    readonly outcome: "would_succeed";
+    readonly slotAtomic: string;
+    readonly unitsConsumedAtomic: string;
+    readonly signatureVerified: false;
+    readonly payloadHash: string;
+}
+/**
+ * Acquired once, after the owner approved and before anything is signed, so that the time the owner
+ * spends reading the screen cannot consume the sending window. It supersedes the preparation-time
+ * block reference for the bytes that are signed, submitted and later proven.
+ */
+export interface RailSendBinding {
+    readonly blockReference: string;
+    readonly lastValidBlockHeight: string;
+    readonly observedBlockHeight: string;
+    readonly acquiredAt: string;
+    readonly simulation: RailSimulationEvidence;
+}
 /** Reusable bytes belong only in encrypted custody storage, never public state. */
 export interface RailSignedEffect {
     readonly operationId: string;
@@ -107,6 +127,8 @@ export interface RailEffectBinding {
     readonly operationId: string;
     readonly fingerprint: string;
     readonly prepared: RailPreparedTransfer;
+    /** Null until the send guard has re-acquired one, and on rails that do not re-bind. */
+    readonly send: RailSendBinding | null;
 }
 export interface DirectRailPort {
     readonly rail: DirectRailName;
@@ -126,7 +148,14 @@ export interface DirectRailPort {
         readonly maximumFeeAtomic: string;
         readonly now: Date;
     }): Promise<RailPreparedTransfer>;
-    revalidate(account: ChainAccount, prepared: RailPreparedTransfer): Promise<void>;
+    /** `send` is the re-acquired window once the send guard has taken one; without it the frozen one is checked. */
+    revalidate(account: ChainAccount, prepared: RailPreparedTransfer, send?: RailSendBinding | null): Promise<void>;
+    /**
+     * Local-only send guard, run after the owner approved and before any signature: re-acquire the
+     * validity window and prove on chain that these exact bytes would succeed. Refusal means nothing
+     * was signed.
+     */
+    bindSend?(account: ChainAccount, prepared: RailPreparedTransfer): Promise<RailSendBinding>;
     /** Local-only: seal exactly one matching effect before returning it. */
     sign(binding: RailEffectBinding): Promise<RailSignedEffect>;
     recoverEffect(binding: RailEffectBinding): Promise<RailSignedEffect | null>;
@@ -134,9 +163,9 @@ export interface DirectRailPort {
     submit(binding: RailEffectBinding, effect: RailSignedEffect | null): Promise<{
         readonly transactionId: string;
     }>;
-    inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, expectedRawPayloadHash?: string): Promise<RailInspection>;
+    inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, expectedRawPayloadHash?: string, send?: RailSendBinding | null): Promise<RailInspection>;
     /** Local rails: throws unless the frozen validity window has passed and RPC history shows no transaction. */
-    assertValidityExpired?(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<void>;
+    assertValidityExpired?(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, send?: RailSendBinding | null): Promise<void>;
 }
 export interface ChainWalletStoragePort {
     account(profile: string, rail: DirectRailName): Promise<ChainAccount | null>;

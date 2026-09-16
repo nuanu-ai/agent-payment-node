@@ -1,6 +1,7 @@
 import { canonicalJson, sha256 } from "../canonical.js";
 import { BridgeHttps } from "./https.js";
-import { BRIDGE_CHAINS, BRIDGE_USDC, bridgeHex, bridgeJson, bridgeRecord, validateBridgeRequest } from "./validation.js";
+import { railStatusIdentifier } from "../rail-status-binding.js";
+import { BRIDGE_CHAINS, BRIDGE_USDC, bridgeFailure, bridgeJson, bridgeRecord, validateBridgeRequest } from "./validation.js";
 const ORIGIN = "https://li.quest/v1";
 export const LIFI_ROUTE_RESPONSE_BYTES = 512 * 1024;
 export const LIFI_INVENTORY_RESPONSE_BYTES = 4 * 1024 * 1024;
@@ -85,12 +86,22 @@ export function normalizeLifiStatus(response, observedAt) {
         if (r.receiving !== undefined && r.receiving !== null) {
             const receiving = bridgeRecord(r.receiving);
             if (receiving.txHash !== undefined)
-                destinationTransactionHash = bridgeHex(receiving.txHash, 32, 32);
+                destinationTransactionHash = bridgeStatusIdentifier(receiving.txHash);
         }
         return { status, destinationTransactionHash, responseHash, observedAt };
     }
     catch {
         return { status: response.status === 404 ? "not_found" : "unknown", destinationTransactionHash: null, responseHash, observedAt };
     }
+}
+/**
+ * The provider names the destination transaction in its own rail's form. An EVM hash must still be
+ * a 32-byte hash; a Solana signature is accepted as itself. Anything else is refused, never widened.
+ */
+function bridgeStatusIdentifier(value) {
+    const identifier = railStatusIdentifier(value);
+    if (identifier === null)
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "rail_status_identity");
+    return identifier;
 }
 //# sourceMappingURL=provider.js.map

@@ -2,6 +2,8 @@ import { z } from "zod";
 export declare const hashSchema: z.ZodString;
 export declare const hexSchema: z.ZodString;
 export declare const wordSchema: z.ZodString;
+/** The EVM word is unchanged; a base58 Solana signature is admitted beside it, nothing else. */
+export declare const railStatusSchema: z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>;
 export declare const uintSchema: z.ZodString;
 export declare const addressSchema: z.ZodString;
 export declare const isoSchema: z.ZodString;
@@ -331,7 +333,7 @@ export declare const providerObservationSchema: z.ZodObject<{
         refund_observed: "refund_observed";
         failed_observed: "failed_observed";
     }>;
-    destinationTransactionHash: z.ZodNullable<z.ZodString>;
+    destinationTransactionHash: z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>>;
     observedAt: z.ZodString;
     responseHash: z.ZodNullable<z.ZodString>;
 }, z.core.$strict>;
@@ -758,7 +760,7 @@ export declare const transitionSchema: z.ZodObject<{
             refund_observed: "refund_observed";
             failed_observed: "failed_observed";
         }>;
-        destinationTransactionHash: z.ZodNullable<z.ZodString>;
+        destinationTransactionHash: z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>>;
         observedAt: z.ZodString;
         responseHash: z.ZodNullable<z.ZodString>;
     }, z.core.$strict>>;
@@ -1307,7 +1309,7 @@ export declare const operationSchema: z.ZodObject<{
                 refund_observed: "refund_observed";
                 failed_observed: "failed_observed";
             }>;
-            destinationTransactionHash: z.ZodNullable<z.ZodString>;
+            destinationTransactionHash: z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>>;
             observedAt: z.ZodString;
             responseHash: z.ZodNullable<z.ZodString>;
         }, z.core.$strict>>;
@@ -1430,7 +1432,7 @@ export declare const operationSchema: z.ZodObject<{
             refund_observed: "refund_observed";
             failed_observed: "failed_observed";
         }>;
-        destinationTransactionHash: z.ZodNullable<z.ZodString>;
+        destinationTransactionHash: z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>>;
         observedAt: z.ZodString;
         responseHash: z.ZodNullable<z.ZodString>;
     }, z.core.$strict>>;

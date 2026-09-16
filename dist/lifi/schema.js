@@ -1,8 +1,11 @@
 import { z } from "zod";
+import { isSolanaTransactionSignature } from "../rail-status-binding.js";
 import { bridgeAddress, bridgeIso, bridgeUint } from "./validation.js";
 export const hashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 export const hexSchema = z.string().regex(/^0x(?:[a-f0-9]{2})*$/u).max(24_578);
 export const wordSchema = z.string().regex(/^0x[a-f0-9]{64}$/u);
+/** The EVM word is unchanged; a base58 Solana signature is admitted beside it, nothing else. */
+export const railStatusSchema = z.union([wordSchema, z.string().refine(isSolanaTransactionSignature)]);
 export const uintSchema = z.string().refine((v) => { try {
     return bridgeUint(v) >= 0n;
 }
@@ -88,7 +91,7 @@ export const destinationProofSchema = z.strictObject({ tool: toolSchema, chainId
     safeBlock: blockSchema, rpcOrigin: originSchema, transactionProofHash: hashSchema });
 export const scanSchema = z.strictObject({ startBlock: blockSchema, nextBlockAtomic: uintSchema, previousEndBlock: blockSchema.nullable() });
 export const providerObservationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "completed_observed", "partial_observed", "refund_observed", "failed_observed", "unknown"]),
-    destinationTransactionHash: wordSchema.nullable(), observedAt: isoSchema, responseHash: hashSchema.nullable() });
+    destinationTransactionHash: railStatusSchema.nullable(), observedAt: isoSchema, responseHash: hashSchema.nullable() });
 export const failureSchema = z.strictObject({ reason: reasonSchema, residualAllowance: z.strictObject({ amountAtomic: uintSchema, block: blockSchema, rpcOrigin: originSchema }).nullable() });
 export const consentSchema = z.strictObject({ policy: z.literal("apn.bridge.foreground-approval.v1"), fingerprint: hashSchema, approvedAt: isoSchema, expiresAt: isoSchema });
 export const stateSchema = z.enum(["awaiting_approval", "execution_pending", "source_pending", "destination_pending", "unknown_finality", "completed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"]);

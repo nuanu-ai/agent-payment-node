@@ -1,4 +1,5 @@
 import { hashObject } from "../canonical.js";
+import { isEvmTransactionHash } from "../rail-status-binding.js";
 import { bridgeDestinationProof, bridgeSourceProof, destinationEventFilter } from "./protocol-evidence.js";
 import { approvalIncluded } from "./transaction.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
@@ -104,7 +105,8 @@ export class BridgeObservation {
         if (observation !== null)
             op = await this.save(op, { providerObservation: observation });
         const hint = op.providerObservation?.destinationTransactionHash;
-        if (hint !== null && hint !== undefined) {
+        // Only an EVM hash can address the EVM destination reader; a Solana hint falls through to the scan.
+        if (isEvmTransactionHash(hint)) {
             let proof = null;
             try {
                 proof = await this.destinationCandidate(op, hint);

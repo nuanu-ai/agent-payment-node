@@ -2,6 +2,7 @@ import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical
 import { validateChainAccount } from "./chain-account-store.js";
 import { atomic, isoDate, SOLANA_GENESIS, validateChainAsset } from "./chain-policy.js";
 import { ApnError } from "./errors.js";
+import { validateRailSendBinding } from "./rail-send-binding.js";
 import { TRON_GENESIS } from "./tron/constants.js";
 import { validateTronFinalResources, validateTronResources } from "./tron/resource-model.js";
 const TERMINAL = ["completed", "failed_before_effect", "failed_confirmed_revert", "abandoned_unknown"];
@@ -15,6 +16,9 @@ const EDGES = {
     completed: [], failed_before_effect: [], failed_confirmed_revert: [], abandoned_unknown: [],
 };
 const HASH = /^[a-f0-9]{64}$/u;
+const RECORD_KEYS = ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash",
+    "account", "prepared", "policyHash", "fingerprint", "state", "terminal", "reason", "proofClass", "transactionId",
+    "rawPayloadHash", "evidence", "createdAt", "updatedAt", "transitions", "integrityHash"];
 export function newRailOperation(intent) {
     const fingerprint = hashObject(intent);
     const entry = {
@@ -36,7 +40,8 @@ export function transitionRail(operation, input) {
         previousHash: operation.transitions[operation.transitions.length - 1].transitionHash,
     };
     const { integrityHash: _hash, ...body } = operation;
-    const result = seal({ ...body, ...latest(entry), terminal: TERMINAL.includes(entry.state),
+    const result = seal({ ...body, ...(input.send === undefined ? {} : { send: input.send }),
+        ...latest(entry), terminal: TERMINAL.includes(entry.state),
         transitions: [...operation.transitions, { ...entry, transitionHash: hashObject(entry) }],
     });
     validateRailContinuity(operation, result);
@@ -50,9 +55,12 @@ export function validateRailContinuity(previous, next) {
     if (previous.terminal || previous.fingerprint !== next.fingerprint || next.transitions.length !== previous.transitions.length + 1 ||
         canonicalJson(next.transitions.slice(0, -1)) !== canonicalJson(previous.transitions))
         corrupt();
+    // A send binding is taken once: it may appear, and afterwards it can never be restated.
+    if (previous.send !== undefined && canonicalJson(previous.send) !== canonicalJson(next.send))
+        corrupt();
 }
 export function validateRailOperation(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "account", "prepared", "policyHash", "fingerprint", "state", "terminal", "reason", "proofClass", "transactionId", "rawPayloadHash", "evidence", "createdAt", "updatedAt", "transitions", "integrityHash"]))
+    if (!isPlainRecord(value) || !exactKeys(value, Object.hasOwn(value, "send") ? [...RECORD_KEYS, "send"] : RECORD_KEYS))
         corrupt();
     if (value.schemaVersion !== "apn.rail-operation.v1" || value.kind !== "rail_transfer")
         corrupt();
@@ -63,6 +71,12 @@ export function validateRailOperation(value) {
     const prepared = validateRailPrepared(value.prepared, account);
     if (value.profile !== account.profile || value.profileHash !== account.profileHash)
         corrupt();
+    if (value.send !== undefined) {
+        if (account.provider !== "local" || !Array.isArray(value.transitions) ||
+            !value.transitions.some((entry) => isPlainRecord(entry) && entry.state === "signing_started"))
+            corrupt();
+        validateRailSendBinding(value.send, prepared);
+    }
     const operation = value;
     if (hashObject(intentOf(operation)) !== value.fingerprint)
         corrupt();
@@ -216,7 +230,8 @@ export function publicRailOperation(operation) {
         kind: operation.kind, schema_version: operation.schemaVersion, operation_id: operation.operationId,
         profile: operation.profile, provider: operation.account.provider, custody: operation.account.custody,
         account: operation.account.address, fingerprint: operation.fingerprint, policy_hash: operation.policyHash,
-        transfer, state: operation.state, terminal: operation.terminal, proof_class: operation.proofClass,
+        transfer, ...(operation.send === undefined ? {} : { send_binding: operation.send }),
+        state: operation.state, terminal: operation.terminal, proof_class: operation.proofClass,
         reason: operation.reason, transaction_id: operation.transactionId, evidence: operation.evidence,
         created_at: operation.createdAt, updated_at: operation.updatedAt, next_actions: railNextActions(operation),
     };
@@ -238,8 +253,10 @@ export function railHistoricalReceipt(operation, transitionIndex) {
     const entry = operation.transitions[transitionIndex];
     if (entry === undefined)
         corrupt();
-    const { integrityHash: _hash, ...body } = operation;
-    return railReceipt(seal({ ...body, ...latest(entry), terminal: TERMINAL.includes(entry.state), transitions: operation.transitions.slice(0, transitionIndex + 1) }));
+    const { integrityHash: _hash, send, ...body } = operation;
+    const transitions = operation.transitions.slice(0, transitionIndex + 1);
+    const bound = send !== undefined && transitions.some((item) => item.state === "signing_started") ? { send } : {};
+    return railReceipt(seal({ ...body, ...bound, ...latest(entry), terminal: TERMINAL.includes(entry.state), transitions }));
 }
 function intentOf(operation) {
     return { schemaVersion: operation.schemaVersion, kind: operation.kind, operationId: operation.operationId,
