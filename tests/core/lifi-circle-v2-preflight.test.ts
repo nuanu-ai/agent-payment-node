@@ -27,7 +27,8 @@ async function fixture(): Promise<CircleV2PreflightInput> {
     recipientWallet: wallet, amountAtomic: "1000000", maxSourceFeeAtomic: "25000", recipientSetup: "existing_ata" };
 }
 function harness(change?: (response: Record<string, any>, request: any) => void,
-  options?: { stale?: boolean; sameHeightReorg?: boolean; staleTimestamp?: boolean; unavailable?: boolean; revert?: boolean; rpcError?: boolean }) {
+  options?: { headAdvance?: boolean; headRegression?: boolean; expiredAtAdvancedHead?: boolean;
+    sameHeightReorg?: boolean; staleTimestamp?: boolean; unavailable?: boolean; revert?: boolean; rpcError?: boolean }) {
   const calls: any[] = [];
   let blockReads = 0;
   const timestamp = `0x${Math.floor(Date.now() / 1000).toString(16)}`;
@@ -45,8 +46,11 @@ function harness(change?: (response: Record<string, any>, request: any) => void,
     if (request.method === "eth_getBlockByNumber") {
       if (options?.rpcError) throw Error("RPC unavailable");
       const later = blockReads++ > 0;
-      return { number: options?.stale && later ? "0x64" : "0x63",
-        hash: options?.sameHeightReorg && later ? `0x${"b".repeat(64)}` : blockHash,
+      const latest = request.params[0] === "latest";
+      return { number: later && latest && options?.headAdvance ? "0x64" :
+        later && latest && options?.headRegression ? "0x62" :
+        later && latest && options?.expiredAtAdvancedHead ? "0x64" : "0x63",
+        hash: options?.sameHeightReorg && later && !latest ? `0x${"b".repeat(64)}` : blockHash,
         timestamp: options?.staleTimestamp ? "0x1" : timestamp };
     }
     if (options?.revert) throw Error("revert");
@@ -66,6 +70,16 @@ test("validates exact frozen call and simulates it from payer at one Base block"
   assert.deepEqual(calls[0].body.args[6], [quote, refund]);
   assert.deepEqual(calls[2].params, [{ from: payer, to: wrapper, data: (input.transaction as any).data.toLowerCase(), value: "0x0" },
     { blockHash, requireCanonical: true }]);
+  assert.deepEqual(calls[4].params, ["0x63", false]);
+});
+test("accepts a new Base head while the simulated block remains canonical at its height", async () => {
+  const input = await fixture();
+  (input.quoteResponse as { expiry: { expiresAtBlock: number } }).expiry.expiresAtBlock = 101;
+  const { transport, calls } = harness(v => { v.expiry.expiresAtBlock = 101; }, { headAdvance: true });
+  const result = await inspectCircleV2Preflight(input, transport);
+  assert.equal(result.blockNumber, "99");
+  assert.deepEqual(calls[3].params, ["latest", false]);
+  assert.deepEqual(calls[4].params, ["0x63", false]);
 });
 test("accepts the SDK's sparse claimable item response", async () => {
   const { transport } = harness(v => { v.items = [{ type: "FORWARD", argsMatch: true }, { type: "PROTOCOL", argsMatch: true }]; });
@@ -91,11 +105,18 @@ test("fails closed on Circle rejection or mismatched signed fields, items, and a
     (v: any) => { v.items[0].args = ["0xdead"]; },
   ]) await assert.rejects(inspectCircleV2Preflight(await fixture(), harness(change).transport), { code: "APN_PROVIDER_PROTOCOL" });
 });
-test("fails closed on unavailable endpoint, RPC error, revert, stale block, and same-height reorg", async () => {
-  for (const options of [{ unavailable: true }, { rpcError: true }, { revert: true }, { stale: true },
+test("fails closed on unavailable endpoint, RPC error, revert, regressed head, and pinned-block reorg", async () => {
+  for (const options of [{ unavailable: true }, { rpcError: true }, { revert: true }, { headRegression: true },
     { sameHeightReorg: true }, { staleTimestamp: true }]) {
     await assert.rejects(inspectCircleV2Preflight(await fixture(), harness(undefined, options).transport), { code: "APN_PROVIDER_PROTOCOL" });
   }
+});
+test("advancing Base head cannot pass a block-number quote expiry", async () => {
+  const input = await fixture();
+  const quote = input.quoteResponse as { expiry: { expiresAtBlock: number } };
+  quote.expiry.expiresAtBlock = 100;
+  const { transport } = harness(undefined, { expiredAtAdvancedHead: true });
+  await assert.rejects(inspectCircleV2Preflight(input, transport), { code: "APN_PROVIDER_PROTOCOL" });
 });
 test("rejects transaction arguments that differ from the frozen quote", async () => {
   const input = await fixture();
