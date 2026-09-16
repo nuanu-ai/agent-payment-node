@@ -8,6 +8,12 @@ import type { NearTronSourceDepositCandidate } from "./near-tron-source-receipt.
 import type { TronDestinationCandidate } from "./tron-destination-candidate.js";
 import { bridgeFailure } from "./validation.js";
 
+// Pinned to the official 1Click supported-assets listing for this one route.
+// Unknown or changed asset IDs require a new review before offline correlation.
+const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+const NEAR_BASE_USDC = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
+const NEAR_TRON_USDT = "nep141:tron-d28a265909efecdcee7c5028585214ea0b96f015.omft.near";
+
 export interface NearTronProviderCorrelation {
   readonly kind: "offline_near_tron_provider_correlation";
   readonly executionAdmitted: false;
@@ -42,7 +48,8 @@ export function correlateNearTronProviderStatusOffline(
   destinationCandidates: readonly TronDestinationCandidate[],
 ): NearTronProviderCorrelation {
   if (source.kind !== "offline_near_tron_source_deposit_candidate" || source.executionAdmitted !== false || source.bridgeCompletion !== false ||
-    source.status !== "unverified" || source.recipientDelivery !== "unverified" || source.chainId !== 8453) fail("source_candidate");
+    source.status !== "unverified" || source.recipientDelivery !== "unverified" || source.chainId !== 8453 ||
+    !eq(source.sourceToken, BASE_USDC)) fail("source_candidate");
   const lifi = record(lifiRaw), near = record(nearRaw);
   const sending = record(lifi.sending), receiving = record(lifi.receiving);
   if (lifi.status !== "DONE" || lifi.substatus !== "COMPLETED" ||
@@ -55,6 +62,10 @@ export function correlateNearTronProviderStatusOffline(
   const quoteResponse = record(near.quoteResponse), quoteRequest = record(quoteResponse.quoteRequest), quote = record(quoteResponse.quote);
   const details = record(near.swapDetails);
   if (near.status !== "SUCCESS" || !eq(quote.depositAddress, source.depositAddress) ||
+    quoteRequest.originAsset !== NEAR_BASE_USDC || quoteRequest.destinationAsset !== NEAR_TRON_USDT ||
+    quoteRequest.swapType !== "EXACT_INPUT" || quoteRequest.depositType !== "ORIGIN_CHAIN" ||
+    quoteRequest.recipientType !== "DESTINATION_CHAIN" || quoteRequest.refundType !== "ORIGIN_CHAIN" ||
+    positive(quoteRequest.amount) !== positive(source.bridgeAmountAtomic) ||
     quote.depositMemo !== undefined && quote.depositMemo !== null && quote.depositMemo !== "" ||
     quoteRequest.recipient !== source.tronRecipient || !eq(quoteRequest.refundTo, source.refundTo) ||
     positive(quote.minAmountOut) !== positive(source.minimumOutputAtomic) ||

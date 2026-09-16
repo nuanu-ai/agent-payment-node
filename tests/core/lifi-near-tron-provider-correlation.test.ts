@@ -15,7 +15,7 @@ const source: NearTronSourceDepositCandidate = {
   recipientDelivery: "unverified", status: "unverified", chainId: 8453, transactionHash: sourceHash as Hex,
   blockNumberAtomic: "100", blockHash: `0x${"45".repeat(32)}`, logsHash: "logsha", transactionId: transactionId as Hex,
   quoteId: `0x${"56".repeat(32)}`, depositAddress: "0x1111111111111111111111111111111111111111",
-  sourceToken: "0x2222222222222222222222222222222222222222", bridgeAmountAtomic: "99750000",
+  sourceToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", bridgeAmountAtomic: "99750000",
   facetMinimumOutputAtomic: "97000000", tronRecipient: recipient,
   facetNonEvmReceiver: `0x${"00".repeat(12)}${"33".repeat(20)}`,
   quotedDestinationToken: TRON_USDT, minimumOutputAtomic: "97000000",
@@ -31,7 +31,11 @@ function fixture() {
     lifi: { transactionId, sending: { txHash: sourceHash, chainId: 8453, token: { address: source.sourceToken } },
       receiving: { txHash: destinationHash, chainId: 728126428, token: { address: TRON_USDT }, amount: "98500000" },
       tool: "near", status: "DONE", substatus: "COMPLETED" },
-    near: { status: "SUCCESS", quoteResponse: { quoteRequest: { recipient, refundTo: source.refundTo },
+    near: { status: "SUCCESS", quoteResponse: { quoteRequest: {
+      originAsset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+      destinationAsset: "nep141:tron-d28a265909efecdcee7c5028585214ea0b96f015.omft.near",
+      swapType: "EXACT_INPUT", depositType: "ORIGIN_CHAIN", recipientType: "DESTINATION_CHAIN", refundType: "ORIGIN_CHAIN",
+      amount: "99750000", recipient, refundTo: source.refundTo },
       quote: { depositAddress: source.depositAddress, amountIn: "99750000", minAmountOut: "97000000" } },
       swapDetails: { originChainTxHashes: [{ hash: sourceHash }], destinationChainTxHashes: [{ hash: destinationHash }], amountIn: "99750000", amountOut: "98500000" } },
   };
@@ -70,6 +74,16 @@ test("refuses NEAR incomplete, refunded, mismatched quote, hashes and output", (
   refused(f => { f.near.swapDetails.amountOut = "1"; });
   refused(f => { f.near.swapDetails.amountIn = "1"; });
   refused(f => { f.near.swapDetails.originChainTxHashes.push({ hash: sourceHash }); });
+});
+test("refuses alternate 1Click assets, amount and request modes", () => {
+  refused(f => { f.near.quoteResponse.quoteRequest.originAsset = "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near"; });
+  refused(f => { f.near.quoteResponse.quoteRequest.destinationAsset = "nep141:tron.omft.near"; });
+  refused(f => { f.near.quoteResponse.quoteRequest.originAsset = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omdep.near"; });
+  refused(f => { f.near.quoteResponse.quoteRequest.amount = "99750001"; });
+  refused(f => { f.near.quoteResponse.quoteRequest.swapType = "EXACT_OUTPUT"; });
+  refused(f => { f.near.quoteResponse.quoteRequest.depositType = "INTENTS"; });
+  refused(f => { f.near.quoteResponse.quoteRequest.recipientType = "INTENTS"; });
+  refused(f => { f.near.quoteResponse.quoteRequest.refundType = "INTENTS"; });
 });
 test("refuses missing or duplicate destination candidates and conflicting receipt", () => {
   refused(() => {}, []);
