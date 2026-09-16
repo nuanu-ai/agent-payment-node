@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { stdin, stderr } from "node:process";
-import { encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
+import { encodeFunctionData, getAddress, keccak256, pad, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
@@ -18,6 +18,7 @@ const ORIGIN = "https://1click.chaindefuser.com";
 const BASE_USDC = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
 const TRON_USDT = "nep141:tron-d28a265909efecdcee7c5028585214ea0b96f015.omft.near";
 const TRANSFER = parseAbi(["function transfer(address,uint256) returns (bool)", "function balanceOf(address) view returns (uint256)"]);
+const TRANSFER_TOPIC = keccak256(Buffer.from("Transfer(address,address,uint256)"));
 const FEE = parseAbi(["function getL1FeeUpperBound(uint256) view returns (uint256)", "function getOperatorFee(uint256) view returns (uint256)"]);
 function fail(reason) { return bridgeFailure("APN_OPERATION_BLOCKED", `oneclick_source_${reason}`); }
 function quantity(value) { if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(value))
@@ -55,19 +56,14 @@ export class OneClickSourceService {
     state;
     wrapping;
     environment;
-    https;
-    now;
-    approve;
-    constructor(state, wrapping, environment, https = new BridgeHttps(), now = Date.now, approve = approveTty) {
+    constructor(state, wrapping, environment) {
         this.state = state;
         this.wrapping = wrapping;
         this.environment = environment;
-        this.https = https;
-        this.now = now;
-        this.approve = approve;
     }
     journal() { return new OneClickSourceJournal(this.state.root); }
     async submit(input) {
+        const https = new BridgeHttps(), now = Date.now;
         const profile = canonicalProfile(input.profile), payer = bridgeAddress(input.expectedPayer), recipient = tron(input.recipient);
         const amount = bridgeUint(input.amountAtomic, true), minOutput = bridgeUint(input.minOutputAtomic, true);
         const maxLoss = bridgeUint(input.maxQuotedLossAtomic), maxGas = bridgeUint(input.maxGasLimitAtomic, true);
@@ -84,7 +80,7 @@ export class OneClickSourceService {
         const rpcUrl = this.environment.APN_BASE_RPC_URL;
         if (rpcUrl === undefined)
             fail("base_rpc_missing");
-        const rpc = new CircleBaseJsonRpc(rpcUrl, this.https), walletStore = new EncryptedWalletStore(this.state, this.wrapping);
+        const rpc = new CircleBaseJsonRpc(rpcUrl, https), walletStore = new EncryptedWalletStore(this.state, this.wrapping);
         await this.state.initialize();
         const loaded = await walletStore.describe(profile);
         if (loaded === null)
@@ -96,9 +92,9 @@ export class OneClickSourceService {
             const quoteRequest = { dry: true, swapType: "EXACT_INPUT", slippageTolerance: 100, originAsset: BASE_USDC,
                 depositType: "ORIGIN_CHAIN", destinationAsset: TRON_USDT, amount: amount.toString(), refundTo: payer,
                 refundType: "ORIGIN_CHAIN", recipient, recipientType: "DESTINATION_CHAIN",
-                deadline: new Date(this.now() + 180_000).toISOString() };
+                deadline: new Date(now() + 180_000).toISOString() };
             const getQuote = async (body) => {
-                const response = await this.https.request(`${ORIGIN}/v0/quote`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
+                const response = await https.request(`${ORIGIN}/v0/quote`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
                 if (response.status !== 201)
                     fail("quote_http");
                 try {
@@ -115,53 +111,61 @@ export class OneClickSourceService {
                 fail("dry_quote");
             const actualRequest = { ...quoteRequest, dry: false };
             const actual = await getQuote(actualRequest);
-            const q = inspectOneClickSourceQuote(actual, actualRequest, minOutput, maxLoss, this.now());
+            const q = inspectOneClickSourceQuote(actual, actualRequest, minOutput, maxLoss, now());
             const data = encodeFunctionData({ abi: TRANSFER, functionName: "transfer", args: [q.deposit, amount] });
-            if (quantity(await rpc.call("eth_chainId", [])) !== 8453n)
-                fail("chain");
-            const block = bridgeRecord(await rpc.call("eth_getBlockByNumber", ["safe", false]));
-            const blockHash = bridgeHex(block.hash, 32, 32), blockNumber = quantity(block.number);
-            const tag = { blockHash, requireCanonical: true };
-            const [tokenBalance, nativeBalance, latest, pending, gasEstimate, tipEstimate, simulation] = await Promise.all([
-                rpc.call("eth_call", [{ to: USDC, data: encodeFunctionData({ abi: TRANSFER, functionName: "balanceOf", args: [payer] }) }, tag]),
-                rpc.call("eth_getBalance", [payer, tag]), rpc.call("eth_getTransactionCount", [payer, "latest"]),
-                rpc.call("eth_getTransactionCount", [payer, "pending"]),
-                rpc.call("eth_estimateGas", [{ from: payer, to: USDC, data, value: "0x0" }, tag]),
-                rpc.call("eth_maxPriorityFeePerGas", []),
-                rpc.call("eth_call", [{ from: payer, to: USDC, data, value: "0x0" }, tag]),
-            ]);
-            if (word(tokenBalance) < amount || quantity(latest) !== quantity(pending) ||
-                bridgeHex(simulation, 32, 32) !== `0x${"0".repeat(63)}1`)
-                fail("balance_nonce_or_simulation");
-            const gas = quantity(gasEstimate) * 12n / 10n + 1n;
-            const tip = quantity(tipEstimate), fee = 2n * quantity(block.baseFeePerGas) + tip;
-            if (gas > maxGas || fee > maxFee || tip > maxPriority)
-                fail("gas_fee");
-            const [l1, operator] = await Promise.all([
-                rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: FEE, functionName: "getL1FeeUpperBound", args: [BigInt(MAX_DIRECT_TRANSACTION_BYTES)] }) }, tag]),
-                rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: FEE, functionName: "getOperatorFee", args: [gas] }) }, tag]),
-            ]);
-            const nativeDebit = gas * fee + word(l1) + word(operator);
-            if (nativeDebit > maxNative || quantity(nativeBalance) < nativeDebit)
-                fail("native_balance_or_cap");
-            const check = bridgeRecord(await rpc.call("eth_getBlockByNumber", [hex(blockNumber), false]));
-            if (bridgeHex(check.hash, 32, 32) !== blockHash || this.now() > Date.parse(actualRequest.deadline) - 45_000)
-                fail("block_or_quote_expired");
+            const readBase = async () => {
+                if (quantity(await rpc.call("eth_chainId", [])) !== 8453n)
+                    fail("chain");
+                const block = bridgeRecord(await rpc.call("eth_getBlockByNumber", ["safe", false]));
+                const blockHash = bridgeHex(block.hash, 32, 32), blockNumber = quantity(block.number);
+                const tag = { blockHash, requireCanonical: true };
+                const [tokenBalance, nativeBalance, latest, pending, gasEstimate, tipEstimate, simulation] = await Promise.all([
+                    rpc.call("eth_call", [{ to: USDC, data: encodeFunctionData({ abi: TRANSFER, functionName: "balanceOf", args: [payer] }) }, tag]),
+                    rpc.call("eth_getBalance", [payer, tag]), rpc.call("eth_getTransactionCount", [payer, "latest"]),
+                    rpc.call("eth_getTransactionCount", [payer, "pending"]),
+                    rpc.call("eth_estimateGas", [{ from: payer, to: USDC, data, value: "0x0" }, tag]),
+                    rpc.call("eth_maxPriorityFeePerGas", []),
+                    rpc.call("eth_call", [{ from: payer, to: USDC, data, value: "0x0" }, tag]),
+                ]);
+                const nonce = quantity(latest);
+                if (nonce > BigInt(Number.MAX_SAFE_INTEGER) || word(tokenBalance) < amount || nonce !== quantity(pending) ||
+                    bridgeHex(simulation, 32, 32) !== `0x${"0".repeat(63)}1`)
+                    fail("balance_nonce_or_simulation");
+                const gas = quantity(gasEstimate) * 12n / 10n + 1n;
+                const tip = quantity(tipEstimate), fee = 2n * quantity(block.baseFeePerGas) + tip;
+                if (gas > maxGas || fee > maxFee || tip > maxPriority)
+                    fail("gas_fee");
+                const [l1, operator] = await Promise.all([
+                    rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: FEE, functionName: "getL1FeeUpperBound", args: [BigInt(MAX_DIRECT_TRANSACTION_BYTES)] }) }, tag]),
+                    rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: FEE, functionName: "getOperatorFee", args: [gas] }) }, tag]),
+                ]);
+                const nativeDebit = gas * fee + word(l1) + word(operator);
+                if (nativeDebit > maxNative || quantity(nativeBalance) < nativeDebit)
+                    fail("native_balance_or_cap");
+                const check = bridgeRecord(await rpc.call("eth_getBlockByNumber", [hex(blockNumber), false]));
+                if (bridgeHex(check.hash, 32, 32) !== blockHash || now() > Date.parse(actualRequest.deadline) - 45_000)
+                    fail("block_or_quote_expired");
+                return { blockHash, nonce, gas, fee, tip, nativeDebit };
+            };
+            const initial = await readBase();
             let record = await journal.stage({ operationId, profileHash, payer, recipient, refundTo: payer,
                 depositAddress: q.deposit, quoteHash: q.quoteHash, quoteRequestDeadline: actualRequest.deadline,
                 amountInAtomic: q.amountIn.toString(), minAmountOutAtomic: q.minimum.toString(),
-                quotedAmountOutAtomic: q.amountOut.toString(), sourceBlockHash: blockHash,
-                sourceCall: { to: USDC, data, nonce: quantity(latest).toString(), gas: gas.toString(),
-                    maxFeePerGas: fee.toString(), maxPriorityFeePerGas: tip.toString(), maxNativeDebitWei: nativeDebit.toString() } });
-            await this.approve(record);
-            if (this.now() > Date.parse(record.quoteRequestDeadline) - 30_000)
-                fail("quote_expired_after_approval");
+                quotedAmountOutAtomic: q.amountOut.toString(), sourceBlockHash: initial.blockHash,
+                sourceCall: { to: USDC, data, nonce: initial.nonce.toString(), gas: initial.gas.toString(),
+                    maxFeePerGas: initial.fee.toString(), maxPriorityFeePerGas: initial.tip.toString(), maxNativeDebitWei: initial.nativeDebit.toString() } });
+            await new TtyOneClickSourceApproval().approve(record);
+            const fresh = await readBase();
+            if (fresh.nonce !== initial.nonce || fresh.gas > initial.gas || fresh.fee > initial.fee ||
+                fresh.tip > initial.tip || fresh.nativeDebit > initial.nativeDebit ||
+                now() > Date.parse(record.quoteRequestDeadline) - 30_000)
+                fail("post_approval_drift");
             record = await journal.advance(operationId, record.integrityHash, "signing_started");
             const raw = await privateKeyToAccount(loaded.secret.privateKey).signTransaction({ type: "eip1559", chainId: 8453,
-                to: USDC, data, value: 0n, nonce: Number(quantity(latest)), gas,
-                maxFeePerGas: fee, maxPriorityFeePerGas: tip, accessList: [] });
+                to: USDC, data, value: 0n, nonce: Number(initial.nonce), gas: initial.gas,
+                maxFeePerGas: initial.fee, maxPriorityFeePerGas: initial.tip, accessList: [] });
             record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) });
-            if (this.now() > Date.parse(record.quoteRequestDeadline) - 15_000)
+            if (now() > Date.parse(record.quoteRequestDeadline) - 15_000)
                 fail("quote_expired_before_send");
             record = await journal.advance(operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
             try {
@@ -188,12 +192,12 @@ export class OneClickSourceService {
         const rpcUrl = this.environment.APN_BASE_RPC_URL;
         if (rpcUrl === undefined)
             fail("base_rpc_missing");
-        const rpc = new CircleBaseJsonRpc(rpcUrl, this.https);
-        const source = record.transactionHash === null ? null : await this.observeBase(rpcUrl, rpc, record);
+        const https = new BridgeHttps(), rpc = new CircleBaseJsonRpc(rpcUrl, https);
+        const source = record.transactionHash === null ? null : await this.observeBase(rpcUrl, rpc, https, record);
         // Destination status is obtained from a separate provider read and is never inferred from this Base receipt.
         const endpoint = new URL(`${ORIGIN}/v0/status`);
         endpoint.searchParams.set("depositAddress", record.depositAddress);
-        const response = await this.https.request(endpoint.toString(), "GET", null, 1024 * 1024, "APN_HTTP_CONFIG");
+        const response = await https.request(endpoint.toString(), "GET", null, 1024 * 1024, "APN_HTTP_CONFIG");
         let providerStatus = null;
         if (response.status === 200) {
             try {
@@ -207,10 +211,11 @@ export class OneClickSourceService {
             }
         }
         return { operationId, sourceTransactionHash: record.transactionHash, sourceState: record.phase,
-            sourceReceipt: source, oneClickProviderStatus: providerStatus, tronDestinationClaimed: providerStatus === "SUCCESS", providerStatusProvenance: "oneclick_https_untrusted" };
+            sourceReceipt: source, oneClickProviderStatus: providerStatus, tronDestinationClaimed: providerStatus === "SUCCESS", providerStatusProvenance: "oneclick_https_untrusted",
+            tronDestinationFinalized: false };
     }
-    async observeBase(url, rpc, record) {
-        const response = await this.https.request(url, "POST", canonicalJson({ jsonrpc: "2.0", id: 1, method: "eth_getTransactionReceipt", params: [record.transactionHash] }), 1024 * 1024, "APN_RPC_CONFIG");
+    async observeBase(url, rpc, https, record) {
+        const response = await https.request(url, "POST", canonicalJson({ jsonrpc: "2.0", id: 1, method: "eth_getTransactionReceipt", params: [record.transactionHash] }), 1024 * 1024, "APN_RPC_CONFIG");
         if (response.status !== 200)
             fail("receipt_http");
         let receipt;
@@ -233,24 +238,48 @@ export class OneClickSourceService {
         if (quantity(r.blockNumber) > quantity(safe.number))
             return { safe: false, transactionHash: record.transactionHash };
         const included = bridgeRecord(await rpc.call("eth_getBlockByNumber", [r.blockNumber, false]));
-        if (bridgeHex(included.hash, 32, 32) !== bridgeHex(r.blockHash, 32, 32))
-            fail("receipt_block");
-        return { safe: true, transactionHash: record.transactionHash, status: quantity(r.status) === 1n ? "success" : "reverted",
+        const index = quantity(r.transactionIndex), status = quantity(r.status);
+        if (bridgeHex(included.hash, 32, 32) !== bridgeHex(r.blockHash, 32, 32) ||
+            !Array.isArray(included.transactions) || included.transactions.length > 20_000 ||
+            index >= BigInt(included.transactions.length) || included.transactions[Number(index)] !== record.transactionHash ||
+            (status !== 0n && status !== 1n))
+            fail("receipt_block_or_membership");
+        if (status === 1n) {
+            if (!Array.isArray(r.logs) || r.logs.length > 256)
+                fail("receipt_logs");
+            const transfers = r.logs.filter((raw) => {
+                const log = bridgeRecord(raw);
+                return bridgeAddress(log.address) === USDC && Array.isArray(log.topics) && log.topics.length === 3 &&
+                    log.topics[0] === TRANSFER_TOPIC && log.topics[1] === pad(bridgeAddress(record.payer)).toLowerCase() &&
+                    log.topics[2] === pad(bridgeAddress(record.depositAddress)).toLowerCase() &&
+                    word(log.data) === BigInt(record.amountInAtomic) &&
+                    bridgeHex(log.transactionHash, 32, 32) === record.transactionHash &&
+                    bridgeHex(log.blockHash, 32, 32) === bridgeHex(r.blockHash, 32, 32);
+            });
+            if (transfers.length !== 1)
+                fail("source_transfer_log");
+        }
+        const recheck = bridgeRecord(await rpc.call("eth_getBlockByNumber", [r.blockNumber, false]));
+        if (bridgeHex(recheck.hash, 32, 32) !== bridgeHex(r.blockHash, 32, 32))
+            fail("receipt_reorg");
+        return { safe: true, transactionHash: record.transactionHash, status: status === 1n ? "success" : "reverted",
             blockNumber: quantity(r.blockNumber).toString(), blockHash: bridgeHex(r.blockHash, 32, 32),
             receiptHash: hashObject(receipt), destinationDelivered: false };
     }
 }
-async function approveTty(record) {
-    if (!stdin.isTTY || !stderr.isTTY)
-        fail("foreground_tty_required");
-    stderr.write(`1Click Base USDC to TRON USDT\nPayer: ${record.payer}\nRecipient: ${record.recipient}\nDeposit: ${record.depositAddress}\nAmount: ${record.amountInAtomic} atomic USDC\nMinimum: ${record.minAmountOutAtomic} atomic USDT\nQuote deadline: ${record.quoteRequestDeadline}\nMaximum Base debit: ${record.sourceCall.maxNativeDebitWei} wei\n`);
-    const rl = createInterface({ input: stdin, output: stderr });
-    try {
-        if ((await rl.question(`Type ${record.operationId} to sign and submit once: `)).trim() !== record.operationId)
-            fail("approval_denied");
-    }
-    finally {
-        rl.close();
+export class TtyOneClickSourceApproval {
+    async approve(record) {
+        if (!stdin.isTTY || !stderr.isTTY)
+            fail("foreground_tty_required");
+        stderr.write(`1Click Base USDC to TRON USDT\nPayer: ${record.payer}\nRecipient: ${record.recipient}\nDeposit: ${record.depositAddress}\nAmount: ${record.amountInAtomic} atomic USDC\nMinimum: ${record.minAmountOutAtomic} atomic USDT\nQuote deadline: ${record.quoteRequestDeadline}\nMaximum Base debit: ${record.sourceCall.maxNativeDebitWei} wei\n`);
+        const rl = createInterface({ input: stdin, output: stderr });
+        try {
+            if ((await rl.question(`Type ${record.operationId} to sign and submit once: `)).trim() !== record.operationId)
+                fail("approval_denied");
+        }
+        finally {
+            rl.close();
+        }
     }
 }
 //# sourceMappingURL=near-oneclick-source-service.js.map
