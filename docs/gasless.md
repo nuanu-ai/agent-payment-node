@@ -278,7 +278,8 @@ of at most ten blocks each. Failed requests and invalid logs never advance the
 cursor; a reorganization can rewind it. The next observation cannot skip an
 unread range.
 
-`operation status` and `receipt get` read saved evidence locally. Receipts
+`operation status` and `receipt get` use saved evidence without network access;
+they may repair local operation or receipt records after an interrupted write. Receipts
 contain hashes and public accounting, without permits, signatures, raw
 UserOperations, encrypted keys or provider response text.
 
@@ -520,7 +521,8 @@ canonical receipt and finality, exact two-call batch, consumed permission,
 USDC delivery/fee/debit and outer gas payer. A temporarily unusable clock or
 full history preserves the saved guard and cannot authorize another dispatch.
 
-`operation status` and `receipt get` read saved evidence locally. Public output
+`operation status` and `receipt get` use saved evidence without network access;
+they may repair local operation or receipt records after an interrupted write. Public output
 contains hashed provider identities and accounting, without the private
 request UUID, session token, unsigned wire or provider response. Unresolved
 operations block competing payments and wallet lifecycle changes for the profile.

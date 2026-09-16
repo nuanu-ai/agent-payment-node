@@ -203,7 +203,8 @@ before submission. APN durably records submission intent before the first
 broadcast. A crash before that boundary can recover and first-submit the same
 approved sealed transaction. Once a broadcast may have occurred, approval
 replay, status and resume never send it again.
-`operation status` and `receipt get` are local durable reads. `operation resume`
+`operation status` and `receipt get` use local durable evidence and may initialize
+state directories or repair local records after an interrupted write. `operation resume`
 uses `APN_TRON_RPC_URL` for one bounded solidified-history observation of the
 same transaction ID; omit `--wait-seconds` for this rail.
 
