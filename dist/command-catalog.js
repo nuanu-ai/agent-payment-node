@@ -158,7 +158,7 @@ const BASE_COMMANDS = [
         { command_path: ["operation", "resume"], when: "When documented durable recovery is permitted." },
         { command_path: ["receipt", "get"], when: "After terminal completion." },
     ], ["apn pay transfer approve --operation <operation-id> --rpc-url <https-base-rpc-url>"]),
-    command(["operation", "status"], "apn operation status --operation <operation-id>", "Read one durable operation without network access.", [operationRequired], "local_read", "Reads public operation state and never resumes an effect.", "none", "Never.", allOperationStates, [
+    command(["operation", "status"], "apn operation status --operation <operation-id>", "Inspect one durable operation without network access.", [operationRequired], "local_write", "May initialize local state and repair saved operation or receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", allOperationStates, [
         { command_path: ["operation", "resume"], when: "When the returned state documents resumable recovery." },
         { command_path: ["operation", "abandon"], when: "Only for a provider-atomic ambiguous effect with no transaction hash or provider recovery reference, a local Solana/TRON transfer whose validity window passed with no RPC history, or a Local or MetaMask gasless transfer still unknown after its approval window, after accepting the unresolved financial risk." },
         { command_path: ["receipt", "get"], when: "When the operation is terminal." },
@@ -187,7 +187,7 @@ const BASE_COMMANDS = [
         { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
         { command_path: ["receipt", "get"], when: "After terminal recovery." },
     ], ["apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <idempotency-key> --rpc-url <https-base-rpc-url>"]),
-    command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Read one durable terminal receipt.", [operationRequired], "local_read", "Reads a terminal receipt and never resumes an operation.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
+    command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Inspect one durable terminal receipt.", [operationRequired], "local_write", "May initialize local state and repair saved operation or receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ];
 export const COMMANDS = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...BRIDGE_COMMANDS, ...GASLESS_COMMANDS];
 export const COMMAND_MANIFEST = {

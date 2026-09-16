@@ -5,6 +5,8 @@ import type { BridgeProviderObservation, BridgeRouteRequest } from "./model.js";
 import type { LifiProviderPort, LifiResponse } from "./ports.js";
 import { railStatusIdentifier, type RailStatusIdentifier } from "../rail-status-binding.js";
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgePeerToken, validateBridgeRequest } from "./asset-registry.js";
+import { BASE_SOLANA_USDC_CANDIDATE } from "./discovery-candidates.js";
+import { validateBridgeInventoryCandidate } from "./catalog.js";
 import { bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
 
 const ORIGIN = "https://li.quest/v1";
@@ -28,7 +30,29 @@ export class LifiProvider implements LifiProviderPort {
           response: bridgeJson(response.body, LIFI_INVENTORY_RESPONSE_BYTES) };
       })),
     ]);
-    const body = canonicalJson({ pairs: connections });
+    // This unadmitted candidate cannot make the established EVM inventory fail.
+    const candidate = BASE_SOLANA_USDC_CANDIDATE;
+    const candidateIdentity = { fromChainId: candidate.fromChainId, toChainId: candidate.toChainId,
+      fromToken: candidate.fromToken, toToken: candidate.toToken };
+    let candidateConnection;
+    try {
+      const response = await this.get("/connections", { fromChain: String(candidate.fromChainId), toChain: String(candidate.toChainId),
+        fromToken: candidate.fromToken, toToken: candidate.toToken, allowSwitchChain: "false", allowDestinationCall: "false" },
+      LIFI_INVENTORY_RESPONSE_BYTES);
+      if (response.status !== 200) throw new Error("Candidate connection is unavailable.");
+      const candidateResponse = bridgeRecord(bridgeJson(response.body, LIFI_INVENTORY_RESPONSE_BYTES));
+      validateBridgeInventoryCandidate(candidateResponse);
+      candidateConnection = { ...candidateIdentity, status: response.status, responseHash: sha256(response.body),
+        response: candidateResponse };
+      bridgeJson(canonicalJson({ pairs: [...connections, candidateConnection] }), LIFI_INVENTORY_RESPONSE_BYTES);
+    } catch {
+      candidateConnection = { ...candidateIdentity, status: "unavailable", responseHash: null, response: null };
+    }
+    let body = canonicalJson({ pairs: [...connections, candidateConnection] });
+    // A full admitted inventory may leave no room even for the optional unavailable marker.
+    if (candidateConnection.status === "unavailable" && Buffer.byteLength(body, "utf8") > LIFI_INVENTORY_RESPONSE_BYTES) {
+      body = canonicalJson({ pairs: connections });
+    }
     bridgeJson(body, LIFI_INVENTORY_RESPONSE_BYTES);
     return { chains, tokens, tools, connections: { status: 200, body } };
   }

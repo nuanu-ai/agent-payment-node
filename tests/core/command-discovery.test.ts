@@ -22,6 +22,7 @@ import {
   type ScalarType,
 } from "../../src/command-catalog.js";
 import { runCli } from "../../src/cli.js";
+import { projectMcpTools } from "../../src/mcp-projection.js";
 import { PRODUCT_VERSION } from "../../src/constants.js";
 import { ApnError } from "../../src/errors.js";
 import type { NativePort } from "../../src/ports.js";
@@ -128,6 +129,17 @@ test("root, every group and every leaf have identical prefix/suffix text discove
       assert.match(prefix.output, /Subgroups:/u);
       assert.match(prefix.output, /Commands:/u);
     }
+  }
+});
+
+test("status and receipt discovery disclose possible local recovery writes in CLI and MCP", () => {
+  for (const path of [["operation", "status"], ["receipt", "get"]] as const) {
+    const command = COMMANDS.find((entry) => entry.path.join(" ") === path.join(" "));
+    assert.equal(command?.effect.class, "local_write");
+    assert.match(command.effect.summary, /repair saved operation or receipt records/u);
+    assert.match(renderHelp(path), /Effect: local_write — May initialize local state and repair saved operation or receipt records/u);
+    const tool = projectMcpTools().find((entry) => entry.command.path.join(" ") === path.join(" "));
+    assert.match(tool?.description ?? "", /Effect: local_write — May initialize local state and repair saved operation or receipt records/u);
   }
 });
 

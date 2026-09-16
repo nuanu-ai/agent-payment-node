@@ -1,0 +1,1 @@
+{"version":3,"file":"discovery-candidates.js","sourceRoot":"","sources":["../../src/lifi/discovery-candidates.ts"],"names":[],"mappings":"AAAA,mGAAmG;AACnG,MAAM,CAAC,MAAM,0BAA0B,GAAG;IACxC,WAAW,EAAE,IAAI;IACjB,SAAS,EAAE,gBAAgB;IAC3B,SAAS,EAAE,4CAA4C;IACvD,OAAO,EAAE,8CAA8C;IACvD,kBAAkB,EAAE,mCAAmC;IACvD,UAAU,EAAE,KAAK;CACT,CAAC"}

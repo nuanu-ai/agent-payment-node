@@ -19,6 +19,21 @@ support. Solana and TRON bridge directions, Stargate Bus, Polymer and other
 bridge tools remain outside this execution profile. Direct Solana/TRON rails
 and gasless payment profiles have separate acceptance requirements.
 
+Offline capabilities identify Base USDC → Solana USDC as a discovery-only
+candidate, using LI.FI Solana chain ID `1151111081099710` and the Solana USDC
+mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Inventory makes one
+additional anonymous `/connections` read for that exact pair. A returned
+connection is provider inventory, not an amount-specific route or an APN
+execution capability. `bridge routes`, `prepare` and `approve` still refuse
+this lane; no Solana destination proof or recovery contract is admitted.
+If its connection read fails or returns malformed data, inventory reports that
+candidate as `unavailable` while retaining the admitted EVM results.
+If the admitted inventory itself leaves no room for that optional marker within
+the response bound, the candidate is omitted from this inventory result.
+The identifiers follow LI.FI's [Solana provider documentation](https://docs.li.fi/introduction/lifi-architecture/solana-overview)
+and [token reference](https://docs.li.fi/mcp-server/tools); inventory must still
+be refreshed to learn current provider connectivity.
+
 ## Discover and select a route
 
 ```sh
