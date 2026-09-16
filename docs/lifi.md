@@ -361,3 +361,39 @@ packet must bind an actual LI.FI source quote and Base CCTP message to a
 specific Solana receive transaction before this candidate can support a bridge
 receipt. A recipient with no USDC associated token account is outside this
 kernel's proof contract; its creation and rent payer need separate admission.
+
+## Offline Base to Solana Mayan quote inspection
+
+`src/lifi/mayan-offline.ts` inspects **one captured synthetic LI.FI quote shape**
+for Base canonical USDC to Solana canonical USDC through `mayanMCTP`. Its
+opaque protocol argument is pinned to that capture; other valid Mayan quotes
+may be rejected. This is not general Mayan route acceptance. It is a pure
+decoder and is not connected to route admission, preparation, approval,
+execution, status or completion. Its result always says `bridgeCompletion:
+false`. The fixture in
+`tests/core/lifi-fixtures/base-solana-mayan-mctp-quote-synthetic-20260916.json`
+uses public synthetic source and destination addresses and was captured with
+the read-only `/v1/quote` endpoint for 100 USDC. It must never be submitted.
+
+The decoder uses [LI.FI contracts commit
+`4b4b8138`](https://github.com/lifinance/contracts/tree/4b4b8138a6f12e8c32ad72040fae5f1a763e3fc6):
+`MayanFacet.sol`, `ILiFi.sol`, `LibSwap.sol`, `FeeForwarder.sol` and the Base
+deployment record. It checks the Base Diamond and approval spender, current
+nine-field Mayan ABI, one same-token FeeForwarder step, the included fee and
+caller-supplied fee cap, source principal, source and destination identities,
+non-EVM receiver bytes, refund recipient, zero native value, and the nested
+MayanCircle `bridgeWithFee` selector and amount. It also binds the top-level
+transaction ID and integrator, source amount, token chain IDs and decimals, and
+both included steps' tools, amounts, assets, recipient and fee rows to the
+decoded calldata. Its pinned MayanCircle address
+and destination domain are observed from the synthetic quote, not an
+independent deployment proof. Changes to either must be reviewed explicitly.
+
+The API's `estimate.toAmountMin` is an offchain estimate. The decoded source
+call does not expose an onchain destination minimum or a quote expiry. The
+Mayan protocol's other scalar parameters have not been independently verified
+against Mayan's ABI; the observed opaque uint64 is pinned to this fixture and
+is not an execution guard. A future executable
+lane needs current deployment and bytecode proof, complete Mayan protocol
+semantics, destination and refund proof, fresh quote timing, and a separate
+admission review before this candidate can join the executable registry.
