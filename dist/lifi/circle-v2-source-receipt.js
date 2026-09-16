@@ -15,6 +15,19 @@ const MESSAGE_ABI = parseAbi(["event MessageSent(bytes message)"]);
 const BURN_TOPIC = toEventSelector(BURN_ABI[0]);
 const MESSAGE_TOPIC = toEventSelector(MESSAGE_ABI[0]);
 const BASE_USDC = getAddress(BASE_SOLANA_USDC_CANDIDATE.fromToken);
+/** This live path admits only a FORWARD quote. The wrapper then selects Standard CCTP with zero burn maxFee. */
+export function circleV2BurnTermsFromQuote(responseValue) {
+    const response = bridgeRecord(responseValue, "APN_PROVIDER_PROTOCOL");
+    if (!Array.isArray(response.items) || response.items.length !== 1)
+        fail("quote_items");
+    const forward = bridgeRecord(response.items[0], "APN_PROVIDER_PROTOCOL");
+    if (forward.type !== "FORWARD")
+        fail("quote_items");
+    const forwardFee = bridgeUint(forward.amount, false, "APN_PROVIDER_PROTOCOL");
+    if (forwardFee !== bridgeUint(response.feeTotalAmount, false, "APN_PROVIDER_PROTOCOL"))
+        fail("quote_fee_sum");
+    return { maxFeeAtomic: "0", minFinalityThreshold: 2000 };
+}
 function fail(reason) { return bridgeFailure("APN_RPC_PROTOCOL", `circle_v2_source_${reason}`); }
 function part(value, offset, length) { return `0x${value.slice(2 + offset * 2, 2 + (offset + length) * 2)}`; }
 function int(value) { return BigInt(value); }
@@ -33,7 +46,7 @@ export function decodeCircleV2BaseSourceReceiptOffline(intent, transactionValue,
     const from = bridgeAddress(intent.sourceFrom, "APN_RPC_PROTOCOL");
     const ata = bridgeHex(intent.solanaAtaBytes32, 32, 32, "APN_RPC_PROTOCOL");
     const amount = bridgeUint(intent.amountAtomic, false, "APN_RPC_PROTOCOL");
-    const maxFee = bridgeUint(intent.maxFeeAtomic, true, "APN_RPC_PROTOCOL");
+    const maxFee = bridgeUint(intent.maxFeeAtomic, false, "APN_RPC_PROTOCOL");
     const hook = bridgeHex(intent.hookData, 12 * 1024, undefined, "APN_RPC_PROTOCOL");
     if (hash === ZERO || ata === ZERO || amount === 0n || maxFee >= amount ||
         !Number.isInteger(intent.minFinalityThreshold) || intent.minFinalityThreshold < 0 || intent.minFinalityThreshold > 0xffffffff)
@@ -73,7 +86,7 @@ export function decodeCircleV2BaseSourceReceiptOffline(intent, transactionValue,
         b.destinationCaller !== ZERO || b.maxFee !== maxFee || b.minFinalityThreshold !== intent.minFinalityThreshold ||
         b.hookData.toLowerCase() !== hook)
         fail("burn_intent_binding");
-    message = bridgeHex(message, 12 * 1024, 376, "APN_RPC_PROTOCOL");
+    message = bridgeHex(message, 12 * 1024, 376 + (hook.length - 2) / 2, "APN_RPC_PROTOCOL");
     if (int(part(message, 0, 4)) !== 1n || int(part(message, 4, 4)) !== 6n || int(part(message, 8, 4)) !== 5n ||
         part(message, 12, 32) !== ZERO || part(message, 44, 32) !== word(BASE_CCTP_V2_TOKEN_MESSENGER) ||
         part(message, 76, 32) !== SOLANA_TOKEN_MESSENGER_BYTES32 || part(message, 108, 32) !== ZERO ||

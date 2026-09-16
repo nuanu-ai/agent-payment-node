@@ -16,6 +16,7 @@ import { TtyCircleV2SourceApproval } from "./circle-v2-source-tty.js";
 import { inspectCircleV2PreflightedDraft, type CircleV2DraftInput } from "./circle-v2-draft.js";
 import { prepareCircleV2BaseSourceReadOnly, type CircleV2BaseStateReader, type CircleV2SourcePreparationLimits } from "./circle-v2-source-preparation.js";
 import { bindCircleV2SourcePreparationToJournal } from "./circle-v2-source-journal.js";
+import { circleV2BurnTermsFromQuote } from "./circle-v2-source-receipt.js";
 import type { CircleV2PreflightTransport } from "./circle-v2-preflight.js";
 import type { NonEvmSourceJournal, NonEvmSourceJournalV3 } from "./non-evm-source-journal.js";
 import type { CircleV2SourcePreparation } from "./circle-v2-source-preparation.js";
@@ -116,7 +117,7 @@ export class CircleV2SourceService {
         limits: { maxAllowanceAtomic: request.maxAllowanceAtomic, maxGasLimitAtomic: request.maxGasLimitAtomic,
           maxFeePerGasWei: request.maxFeePerGasWei, maxPriorityFeePerGasWei: request.maxPriorityFeePerGasWei,
           maxNativeDebitWei: request.maxNativeDebitWei, ttlMs: 60_000 },
-        claimedValidationHash: hash(canonicalJson({ quoteRequest, operationId })), minFinalityThreshold: 1000 }, {
+        claimedValidationHash: hash(canonicalJson({ quoteRequest, operationId })) }, {
         freshDraft: async () => {
           const response = bridgeRecord(await circlePost("/v2/quote/burn/usdc/6/5", quoteRequest));
           const signedQuote = bridgeHex(response.signedQuote, 16 * 1024);
@@ -244,7 +245,6 @@ interface CircleV2SourceExecutionIntent {
   readonly operationId: string;
   readonly limits: CircleV2SourcePreparationLimits;
   readonly claimedValidationHash: string;
-  readonly minFinalityThreshold: 1000 | 2000;
 }
 interface CircleV2SourceSubmission {
   readonly journal: NonEvmSourceJournal;
@@ -275,6 +275,7 @@ async function submitCircleV2BaseSourceBurnLive(intent: CircleV2SourceExecutionI
   if (bridgeAddress(input.payer) !== payer || input.recipientWallet !== intent.solanaWalletOwner ||
     input.recipientSetup !== intent.recipientSetup) blocked("recipient_or_payer");
   const draft = await inspectCircleV2PreflightedDraft(input, ports.preflight);
+  const burnTerms = circleV2BurnTermsFromQuote(input.quoteResponse);
   if (draft.recipientAta !== intent.solanaRecipientAta) blocked("recipient_ata");
   const p = await prepareCircleV2BaseSourceReadOnly(draft, ports.preflight, ports.readBase, intent.limits, now);
   if (Date.parse(p.expiresAt) - now() < BRIDGE_MIN_REMAINING_MS) blocked("expiry_margin");
@@ -299,7 +300,7 @@ async function submitCircleV2BaseSourceBurnLive(intent: CircleV2SourceExecutionI
   const binding = bindCircleV2SourcePreparationToJournal({ preparation: p, route: ROUTE, payer,
     draftIntegrityDigest: draft.integrityDigest, preparationDigest: p.preparationDigest,
     profileHash: intent.profileHash, operationId: intent.operationId, createdAt: new Date(now()).toISOString(),
-    admission: { claimedValidationHash: intent.claimedValidationHash, note: "live_source_execution", minFinalityThreshold: intent.minFinalityThreshold } });
+    admission: { claimedValidationHash: intent.claimedValidationHash, note: "live_source_execution", minFinalityThreshold: burnTerms.minFinalityThreshold } });
   if (ports.admitLive === undefined) blocked("live_admission_missing");
   const admission = await ports.admitLive(afterConsent);
   if (admission.kind !== "circle_v2_live_transport_v1" || admission.circleOrigin !== "https://iris-api.circle.com" ||
