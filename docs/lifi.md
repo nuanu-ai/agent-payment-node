@@ -65,10 +65,16 @@ and custom chain ID are pinned to
 ([facet source](https://github.com/lifinance/contracts/blob/6a670100f9d011e39fbf2fe973493de0a50cf970/src/Facets/NEARIntentsFacet.sol),
 [chain constants](https://github.com/lifinance/contracts/blob/6a670100f9d011e39fbf2fe973493de0a50cf970/src/Helpers/LiFiData.sol)).
 This is byte-level source inspection of a synthetic quote. The destination
-USDT token is quote metadata, not a field in the facet's signed payload. The
-offline parser does not verify the backend signature, live Diamond deployment,
-deadline freshness, deposit address provenance, TRON settlement, refund path,
-or recovery. It always reports `executionAdmitted: false` and
+USDT token is quote metadata, not a field in the facet's signed payload.
+`verifyNearBaseTronSignatureOffline` additionally reconstructs the facet's
+EIP-712 digest and recovers the calldata signature against a caller-supplied
+backend signer, Diamond, Base chain ID and trusted observation time. The facet
+keeps its backend signer as an immutable constructor value without a public
+getter, so the caller must independently establish the current installed facet
+and its signer. A recovered address from the saved synthetic quote alone does
+not establish that authority. The offline proof does not verify live Diamond
+deployment, deposit address provenance, quote consumption, TRON settlement,
+refund path or recovery. Both inspectors report `executionAdmitted: false` and
 `bridgeCompletion: false`; `bridge routes`, `prepare` and `approve` still refuse
 the lane.
 
