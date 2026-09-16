@@ -309,3 +309,28 @@ test("v2 reservation binds protocol input hash through submission", async t => {
   await assert.rejects(repo.committingSubmission(j.profileHash, j.operationId, j.integrityHash, at(3)),
     { code: "APN_STATE_CORRUPT" });
 });
+
+test("v2 protocol hash survives source observation, reorg, and restart without granting authority", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const repo = new NonEvmSourceJournalRepository(tmp.root);
+  let j = await repo.stageV2(bindingV2);
+  j = await repo.signingStarted(j.profileHash, j.operationId, j.integrityHash, at(1)) as typeof j;
+  j = await repo.seal(j.profileHash, j.operationId, j.integrityHash, await signed(7), "7", at(2)) as typeof j;
+  j = await repo.committingSubmission(j.profileHash, j.operationId, j.integrityHash, at(3)) as typeof j;
+  j = await repo.observePending(j.profileHash, j.operationId, j.integrityHash, at(4)) as typeof j;
+  j = await repo.observeSafeSource(j.profileHash, j.operationId, j.integrityHash, {
+    provenance: "synthetic_untrusted", transactionHash: j.transactionHash!, status: "success",
+    blockNumberAtomic: "10", blockHash: `0x${"2".repeat(64)}`,
+    safeBlockNumberAtomic: "12", safeBlockHash: `0x${"3".repeat(64)}`, observedAt: at(5),
+  }, at(5)) as typeof j;
+  assert.equal(j.protocolInputHash, bindingV2.protocolInputHash);
+  assert.equal(j.executionAdmitted, false);
+  j = await repo.observeUnknown(j.profileHash, j.operationId, j.integrityHash, "safe_block_reorg", at(6)) as typeof j;
+  const loaded = await new NonEvmSourceJournalRepository(tmp.root).load(j.profileHash, j.operationId);
+  assert.equal(loaded?.schemaVersion, "apn.non-evm-source-journal.v2");
+  if (loaded?.schemaVersion !== "apn.non-evm-source-journal.v2") throw new Error("missing v2");
+  assert.equal(loaded.protocolInputHash, bindingV2.protocolInputHash);
+  assert.equal(loaded.safeSourceProof, null);
+  assert.equal(loaded.submissionAttempts, 1);
+  assert.equal(loaded.executionAdmitted, false);
+});
