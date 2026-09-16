@@ -20,6 +20,7 @@ export interface CircleApprovalRecord {
     readonly transactionHash: Hex | null;
     readonly submissionAttempts: 0 | 1;
     readonly observedAllowanceAtomic: string | null;
+    readonly failureReason?: string;
     readonly integrityHash: string;
 }
 export interface CircleApprovalRpc {
@@ -52,6 +53,7 @@ export declare function publicCircleApproval(record: CircleApprovalRecord): {
     transactionHash: Hex | null;
     submissionAttempts: 0 | 1;
     observedAllowanceAtomic: string | null;
+    failureReason?: string;
     integrityHash: string;
 };
 /** Use APN's canonical Base RPC reader, which verifies receipt membership and safe block ancestry. */
