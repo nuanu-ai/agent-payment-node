@@ -22,8 +22,11 @@ export declare class GaslessExecution {
     private key;
     private at;
     private guard;
-    /** After disclosure, a price spike, rate limit or transport failure is waited out rather than ending in unknown finality. */
-    private patientGuard;
+    /**
+     * A price spike, rate limit or transport failure is waited out while the approved window still leaves room for the
+     * remaining steps. An interrupt, an exhausted window and every definite refusal end the operation at once.
+     */
+    private steady;
     private halt;
     private unknown;
 }

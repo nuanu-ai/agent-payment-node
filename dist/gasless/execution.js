@@ -5,10 +5,12 @@ import { assertGaslessRemaining, gaslessReason, guardGaslessOperation } from "./
 import { validateGaslessMaterial } from "./material-validation.js";
 import { GaslessObservationService } from "./observation.js";
 import { publicGaslessOperation } from "./receipt.js";
-import { gaslessFailure } from "./validation.js";
+import { GASLESS_MIN_REMAINING_MS, gaslessFailure } from "./validation.js";
 import { gaslessSignedFees } from "./wire.js";
-/** Once a bootstrap is disclosed, a transient guard failure is rechecked for up to about 90 s before unknown finality. */
-const DISCLOSED_GUARD_ATTEMPTS = 18, DISCLOSED_GUARD_RETRY_MS = 5_000;
+/** A transient check failure is retried inside the approved window, before a disclosure as well as after one. */
+const GUARD_ATTEMPTS = 18, GUARD_RETRY_MS = 5_000;
+const TRANSIENT_REASONS = new Set(["gasless_rpc_unavailable", "gasless_bundler_fee_drift", "gasless_RPC_HTTP_status",
+    "gasless_RPC_response", "gasless_provider_response", "gasless_mirror_estimate_unavailable"]);
 export class GaslessExecution {
     state;
     rpc;
@@ -115,7 +117,7 @@ export class GaslessExecution {
             return op;
         const material = finalResult.material;
         try {
-            await this.patientGuard(op, gaslessSignedFees(op.intent, material.userOperation));
+            await this.guard(op, gaslessSignedFees(op.intent, material.userOperation));
         }
         catch (error) {
             return await this.halt(op, error);
@@ -139,7 +141,7 @@ export class GaslessExecution {
         if (effect.signingAttempts === 0) {
             let fees;
             try {
-                fees = await this.patientGuard(op);
+                fees = await this.guard(op);
             }
             catch (error) {
                 return { op: await this.halt(op, error), material: null };
@@ -171,21 +173,27 @@ export class GaslessExecution {
         return { op, material };
     }
     /** The same UserOperation signed by a throwaway key must fit the frozen offer before any owner material exists. */
-    async mirror(op, fees) { await this.rpc.mirrorEstimate(op.intent, fees); }
+    async mirror(op, fees) {
+        await this.steady(op, async () => { await this.rpc.mirrorEstimate(op.intent, fees); });
+    }
     key(role) { return role === "bootstrap" ? "bootstrap" : "userOperation"; }
     at() { return new Date(this.now()).toISOString(); }
     async guard(op, signed) {
-        return await guardGaslessOperation(this.state, this.rpc, op, this.now, signed);
+        return await this.steady(op, async () => await guardGaslessOperation(this.state, this.rpc, op, this.now, signed));
     }
-    /** After disclosure, a price spike, rate limit or transport failure is waited out rather than ending in unknown finality. */
-    async patientGuard(op, signed) {
+    /**
+     * A price spike, rate limit or transport failure is waited out while the approved window still leaves room for the
+     * remaining steps. An interrupt, an exhausted window and every definite refusal end the operation at once.
+     */
+    async steady(op, act) {
         for (let attempt = 1;; attempt += 1) {
             try {
-                return await this.guard(op, signed);
+                return await act();
             }
             catch (error) {
-                if (op.bootstrap.disclosureAttempts === 0 || attempt >= DISCLOSED_GUARD_ATTEMPTS || !transient(error) ||
-                    await this.wait.wait(DISCLOSED_GUARD_RETRY_MS) === "interrupted")
+                if (attempt >= GUARD_ATTEMPTS || !transient(error) ||
+                    Date.parse(op.intent.expiresAt) - this.now() <= GASLESS_MIN_REMAINING_MS + GUARD_RETRY_MS ||
+                    await this.wait.wait(GUARD_RETRY_MS) === "interrupted")
                     throw error;
             }
         }
@@ -204,9 +212,10 @@ export class GaslessExecution {
 }
 function transient(error) {
     const reason = gaslessReason(error, "");
-    return reason === "gasless_bundler_fee_drift" || reason === "gasless_RPC_HTTP_status" ||
-        (error instanceof ApnError && (error.code === "APN_RPC_AMBIGUOUS" ||
-            (error.code === "APN_FEE_BUDGET_EXCEEDED" && reason === "gasless_fee_budget")));
+    if (TRANSIENT_REASONS.has(reason))
+        return true;
+    // A quote above the owner cap can fall back inside it; a balance below the transfer cannot.
+    return reason === "gasless_fee_budget" && error instanceof ApnError && error.code === "APN_FEE_BUDGET_EXCEEDED";
 }
 function undisclosed(op) {
     return op.bootstrap.disclosureAttempts === 0 && op.userOperation.disclosureAttempts === 0 &&

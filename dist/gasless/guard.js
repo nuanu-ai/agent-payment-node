@@ -39,6 +39,9 @@ export function gaslessReason(error, fallback) {
             return match[1];
         if (error.code === "APN_PROFILE_DRIFT")
             return "gasless_identity_drift";
+        // A transport failure carries no gasless reason of its own, and must not read as an unknown guard failure.
+        if (error.code === "APN_RPC_AMBIGUOUS")
+            return "gasless_rpc_unavailable";
     }
     return fallback;
 }
