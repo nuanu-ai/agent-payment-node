@@ -2,7 +2,8 @@ import { canonicalJson, hashObject, sha256 } from "../canonical.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { parseBridgeRoutes } from "./routes.js";
 import { ownerSchema, providerBindingSchema } from "./schema.js";
-import { bridgeExact, bridgeFailure, bridgeHash, bridgeIso, bridgeSame, validateBridgeRequest } from "./validation.js";
+import { validateBridgeRequest } from "./asset-registry.js";
+import { bridgeExact, bridgeFailure, bridgeHash, bridgeIso, bridgeSame } from "./validation.js";
 export function newBridgeQuote(input) {
     const body = { schemaVersion: "apn.bridge-quote.v1", ...input, requestHash: hashObject(input.request), responseHash: sha256(input.rawResponse),
         routes: parseBridgeRoutes({ status: 200, body: input.rawResponse }, input.request, input.owner.address).map((r) => r.choice) };

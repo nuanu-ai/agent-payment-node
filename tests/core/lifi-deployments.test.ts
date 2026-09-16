@@ -6,6 +6,7 @@ import { canonicalJson, sha256 } from "../../src/canonical.js";
 import type { EvmChainId } from "../../src/evm-asset.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 import { FEE_FORWARDER, FEE_RECIPIENT } from "../../src/lifi/abi.js";
+import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 import { BridgeRpc } from "../../src/lifi/rpc.js";
 import type { BridgeTool } from "../../src/lifi/model.js";
 
@@ -16,6 +17,8 @@ type Capture = { chainId: EvmChainId; rpcOrigin: string; requests: Entry[];
 const raw = await readFile(resolve("tests/core/lifi-fixtures/deployment-rpc-20260908.json"), "utf8");
 assert.equal(sha256(raw), "a07fc84d38e22270965e4a43c4e42fec426256afdebe4de5a8f7898b160cbe6e");
 const fixture = JSON.parse(raw) as { chains: Capture[]; verification: { fixtureRequestCount: number; allChainsPassed: boolean } };
+/** The capture was recorded for canonical USDC, which is the registry row every replay pins. */
+const usdc = (chainId: EvmChainId) => BRIDGE_ASSET_REGISTRY[chainId].tokens.find((row) => row.symbol === "USDC")!.address;
 function replay(capture: Capture, changed?: Entry) {
   const values = new Map<string, unknown>(), calls: Array<{ method: string; params: readonly unknown[] }> = [];
   for (const entry of capture.requests) {
@@ -45,18 +48,18 @@ test("LI.FI frozen deployment capture preserves the independently observed owner
 for (const chain of fixture.chains) {
   for (const invocation of chain.invocations) {
     test(`LI.FI actual RPC deployment ${chain.chainId}->${invocation.peerChainId} ${invocation.tool} verifies every code/configuration pin`, async () => {
-      const { rpc, calls } = replay(chain); const proof = await rpc.deployment(invocation.tool, invocation.peerChainId);
+      const { rpc, calls } = replay(chain); const proof = await rpc.deployment(invocation.tool, invocation.peerChainId, usdc(chain.chainId));
       assert.equal(proof.block.hash, chain.safeBlock.hash); assert.equal(proof.rpcOrigin, chain.rpcOrigin);
       assert.equal(proof.chainId, chain.chainId); assert.equal(proof.peerChainId, invocation.peerChainId);
       assert.equal(calls.filter((c) => c.method === "eth_getCode").length, invocation.tool === "across" ? (chain.chainId === 8453 ? 9 : 7) : (chain.chainId === 8453 ? 10 : 8));
       assert.ok(calls.filter((c) => ["eth_getCode", "eth_getStorageAt", "eth_call"].includes(c.method)).every((c) => c.params.at(-1) === chain.safeBlock.number));
-      const historical = await rpc.deployment(invocation.tool, invocation.peerChainId, proof.block); assert.deepEqual(historical, proof);
+      const historical = await rpc.deployment(invocation.tool, invocation.peerChainId, usdc(chain.chainId), proof.block); assert.deepEqual(historical, proof);
     });
   }
   test(`LI.FI deployment ${chain.chainId} rejects independently changed code, owner, proxy, facet, token, peer and fee configuration`, async () => {
     const successful = new Map<string, { tool: BridgeTool; peerChainId: EvmChainId }>();
     for (const invocation of chain.invocations) {
-      const { rpc, calls } = replay(chain); await rpc.deployment(invocation.tool, invocation.peerChainId);
+      const { rpc, calls } = replay(chain); await rpc.deployment(invocation.tool, invocation.peerChainId, usdc(chain.chainId));
       for (const call of calls) successful.set(canonicalJson([call.method, call.params]), invocation);
     }
     let checked = 0;
@@ -64,13 +67,13 @@ for (const chain of fixture.chains) {
       const invocation = successful.get(canonicalJson([entry.request.method, entry.request.params])); assert.ok(invocation);
       const changed = structuredClone(entry), value = changed.response.result as string;
       changed.response.result = `${value.slice(0, -1)}${value.endsWith("0") ? "1" : "0"}`;
-      await assert.rejects(replay(chain, changed).rpc.deployment(invocation.tool, invocation.peerChainId), { code: "APN_PROVIDER_PROTOCOL" }); checked++;
+      await assert.rejects(replay(chain, changed).rpc.deployment(invocation.tool, invocation.peerChainId, usdc(chain.chainId)), { code: "APN_PROVIDER_PROTOCOL" }); checked++;
     }
     assert.ok(checked >= 33);
     const owner = structuredClone(chain.requests.find((e) => e.request.method === "eth_call" &&
       (e.request.params[0] as { to: string; data: string }).to === FEE_FORWARDER && (e.request.params[0] as { data: string }).data === "0x8da5cb5b")!);
     owner.response.result = `0x${"0".repeat(24)}${FEE_RECIPIENT.slice(2).toLowerCase()}`;
-    await assert.rejects(replay(chain, owner).rpc.deployment("across", chain.invocations[0]!.peerChainId), { code: "APN_PROVIDER_PROTOCOL" });
+    await assert.rejects(replay(chain, owner).rpc.deployment("across", chain.invocations[0]!.peerChainId, usdc(chain.chainId)), { code: "APN_PROVIDER_PROTOCOL" });
   });
   test(`LI.FI deployment ${chain.chainId} refuses a changed chain or safe block after reading pins`, async () => {
     for (const failure of ["chain", "block"]) {
@@ -82,7 +85,7 @@ for (const chain of fixture.chains) {
         if (failure === "block" && method === "eth_getBlockByNumber" && params[0] === chain.safeBlock.number) return { ...(value as object), hash: `0x${"ff".repeat(32)}` };
         return value;
       };
-      await assert.rejects(new BridgeRpc(chain.chainId, chain.rpcOrigin, call).deployment("across", peer));
+      await assert.rejects(new BridgeRpc(chain.chainId, chain.rpcOrigin, call).deployment("across", peer, usdc(chain.chainId)));
     }
   });
 }
