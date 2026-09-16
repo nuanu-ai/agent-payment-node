@@ -37,6 +37,11 @@ export declare class SolanaLocalAdapter implements DirectRailPort {
     inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, _expectedRawPayloadHash?: string, send?: RailSendBinding | null): Promise<RailInspection>;
     assertValidityExpired(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, send?: RailSendBinding | null): Promise<void>;
     private currentAccount;
+    /**
+     * Only a reference that can still be signed into has to be alive. Before the send guard runs there is no such
+     * reference: nothing can be sealed without a binding, and the guard acquires a fresh window of its own. Requiring
+     * the frozen one here would put the owner's reading time back inside the sending window, which is the whole bug.
+     */
     private validBlock;
 }
 export declare function readSolanaBalance(rpc: SolanaRpcPort, account: ChainAccount, asset: ChainAsset, now: Date): Promise<ChainBalance>;

@@ -48,6 +48,7 @@ export class SolanaTestRpc implements SolanaRpcPort {
   genesis = SOLANA_GENESIS; finalized = true; absentHistory = false; submissionTimeout = false;
   blockHeight = 100n; fee = 5000n; rent = 2039280n; native = 5_000_000_000n; token = 9_000_000n;
   lastValidBlockHeight = 200n;
+  frozenFeeUnavailable = false;
   /** Set to model a validator that hands back a different recent blockhash after preparation. */
   reboundBlockhash: string | undefined;
   /** Simulation control: transport losses to serve first, then either an error or a clean run. */
@@ -70,7 +71,10 @@ export class SolanaTestRpc implements SolanaRpcPort {
         if (this.simulateMalformed) return { context: { slot: 300n }, value: { logs: [], unitsConsumed: this.simulateUnits } };
         return { context: { slot: 300n }, value: { err: this.simulateError, logs: [], unitsConsumed: this.simulateUnits, accounts: null, returnData: null } };
       }
-      case "getFeeForMessage": return { context: { slot: 300n }, value: this.fee };
+      // A node answers null for a message whose blockhash it has already forgotten, which is what an owner
+      // who read the screen for two minutes leaves behind. The fresh reference the send guard takes prices fine.
+      case "getFeeForMessage":
+        return { context: { slot: 300n }, value: this.frozenFeeUnavailable && this.blockhashCalls <= 1 ? null : this.fee };
       case "getBlockHeight": return this.blockHeight;
       case "getMinimumBalanceForRentExemption": return this.rent;
       case "sendTransaction": {
