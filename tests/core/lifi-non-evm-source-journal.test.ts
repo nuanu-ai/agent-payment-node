@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { privateKeyToAccount } from "viem/accounts";
 import { parseTransaction, serializeTransaction } from "viem";
 import { hashObject, sha256 } from "../../src/canonical.js";
 import { BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES } from "../../src/lifi/circle-v2-source-receipt.js";
 import { NonEvmSourceJournalRepository, validateNonEvmSourceJournal,
-  type NonEvmSourceBinding } from "../../src/lifi/non-evm-source-journal.js";
+  type NonEvmSourceBinding, type NonEvmSourceBindingV2 } from "../../src/lifi/non-evm-source-journal.js";
 import { temporaryState } from "./helpers.js";
 
 const account = privateKeyToAccount(`0x${"11".repeat(32)}`);
@@ -22,6 +22,8 @@ const binding: NonEvmSourceBinding = {
     maxFeePerGasAtomic: "1000000000", maxPriorityFeePerGasAtomic: "1000000", accessList: [] },
   admissionProof: { kind: "synthetic_untrusted", claimedValidationHash: "d".repeat(64), note: "offline fixture only" },
 };
+const bindingV2: NonEvmSourceBindingV2 = { ...binding,
+  schemaVersion: "apn.non-evm-source-journal.v2", protocolInputHash: "1".repeat(64) };
 async function signed(nonce: number, input: `0x${string}` = data, gas = 100000n, maxFeePerGas = 1000000000n) {
   return account.signTransaction({ chainId: 8453, to: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES,
     data: input, value: 0n, nonce, gas, maxFeePerGas,
@@ -205,4 +207,130 @@ test("seal rejects a high-s malleated EIP-1559 signature", async t => {
   await assert.rejects(repo.seal(j.profileHash, j.operationId, j.integrityHash, altered, "7", at(2)),
     { code: "APN_STATE_CORRUPT" });
   assert.equal((await repo.load(j.profileHash, j.operationId))?.phase, "signing_started");
+});
+
+test("v1 reload is byte identical and version staging does not rewrite records", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const repo = new NonEvmSourceJournalRepository(tmp.root);
+  const j = await repo.stage(binding);
+  const file = join(tmp.root, "non-evm-source-journals", j.profileHash, `${j.operationId}.json`);
+  const before = await readFile(file);
+  assert.equal((await new NonEvmSourceJournalRepository(tmp.root).load(j.profileHash, j.operationId))?.schemaVersion,
+    "apn.non-evm-source-journal.v1");
+  assert.deepEqual(await readFile(file), before);
+  await assert.rejects(repo.stageV2(bindingV2), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(repo.stage(bindingV2), { code: "APN_STATE_CORRUPT" });
+  assert.deepEqual(await readFile(file), before);
+});
+
+test("v2 protocol hash survives restart and transitions; tampering and malformed hashes fail", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const repo = new NonEvmSourceJournalRepository(tmp.root);
+  let j = await repo.stageV2(bindingV2);
+  assert.equal(j.protocolInputHash, bindingV2.protocolInputHash);
+  assert.equal(j.executionAdmitted, false);
+  await assert.rejects(repo.stage(binding), { code: "APN_STATE_CORRUPT" });
+  for (const protocolInputHash of ["A".repeat(64), `0x${"1".repeat(64)}`, "1".repeat(63)]) {
+    await assert.rejects(repo.stageV2({ ...bindingV2, operationId: "f".repeat(64), protocolInputHash }),
+      { code: "APN_STATE_CORRUPT" });
+  }
+  await assert.rejects(repo.stageV2({ ...bindingV2, protocolInputHash: "2".repeat(64) }),
+    { code: "APN_STATE_CORRUPT" });
+  j = await repo.signingStarted(j.profileHash, j.operationId, j.integrityHash, at(1)) as typeof j;
+  j = await repo.seal(j.profileHash, j.operationId, j.integrityHash, await signed(7), "7", at(2)) as typeof j;
+  j = await repo.committingSubmission(j.profileHash, j.operationId, j.integrityHash, at(3)) as typeof j;
+  j = await repo.observeUnknown(j.profileHash, j.operationId, j.integrityHash, "unknown", at(4)) as typeof j;
+  const loaded = await new NonEvmSourceJournalRepository(tmp.root).load(j.profileHash, j.operationId);
+  assert.equal(loaded?.schemaVersion, "apn.non-evm-source-journal.v2");
+  if (loaded?.schemaVersion !== "apn.non-evm-source-journal.v2") throw new Error("missing v2");
+  assert.equal(loaded.protocolInputHash, bindingV2.protocolInputHash);
+  const file = join(tmp.root, "non-evm-source-journals", j.profileHash, `${j.operationId}.json`);
+  const raw = JSON.parse(await readFile(file, "utf8"));
+  raw.protocolInputHash = "2".repeat(64);
+  await writeFile(file, `${JSON.stringify(raw)}\n`);
+  await assert.rejects(repo.load(j.profileHash, j.operationId), { code: "APN_STATE_CORRUPT" });
+});
+
+test("v1 and v2 share sender nonce reservation under concurrent seals", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const a = new NonEvmSourceJournalRepository(tmp.root), b = new NonEvmSourceJournalRepository(tmp.root);
+  let one = await a.stage(binding), two = await b.stageV2({ ...bindingV2,
+    operationId: "e".repeat(64), draftIntegrityHash: "f".repeat(64) });
+  one = await a.signingStarted(one.profileHash, one.operationId, one.integrityHash, at(1));
+  two = await b.signingStarted(two.profileHash, two.operationId, two.integrityHash, at(1)) as typeof two;
+  const raw = await signed(7);
+  const results = await Promise.allSettled([
+    a.seal(one.profileHash, one.operationId, one.integrityHash, raw, "7", at(2)),
+    b.seal(two.profileHash, two.operationId, two.integrityHash, raw, "7", at(2)),
+  ]);
+  assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
+  assert.equal(results.filter(r => r.status === "rejected").length, 1);
+  const loser = results.find(r => r.status === "rejected") as PromiseRejectedResult;
+  assert.equal((loser.reason as { code: string }).code, "APN_OPERATION_BLOCKED");
+});
+
+test("v2 interrupted seal retains reservation identity for recovery", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  class Interrupted extends NonEvmSourceJournalRepository {
+    protected override async writeJson(path: string, value: unknown): Promise<void> {
+      if (path.startsWith("non-evm-source-journals/") &&
+        (value as { phase?: string }).phase === "sealed") throw new Error("simulated crash after reservation");
+      await super.writeJson(path, value);
+    }
+  }
+  const a = new Interrupted(tmp.root), b = new NonEvmSourceJournalRepository(tmp.root);
+  let one = await a.stageV2(bindingV2), two = await b.stage({ ...binding,
+    operationId: "e".repeat(64), draftIntegrityHash: "f".repeat(64) });
+  one = await a.signingStarted(one.profileHash, one.operationId, one.integrityHash, at(1)) as typeof one;
+  two = await b.signingStarted(two.profileHash, two.operationId, two.integrityHash, at(1));
+  const raw = await signed(7);
+  await assert.rejects(a.seal(one.profileHash, one.operationId, one.integrityHash, raw, "7", at(2)), /simulated crash/);
+  await assert.rejects(b.seal(two.profileHash, two.operationId, two.integrityHash, raw, "7", at(2)),
+    { code: "APN_OPERATION_BLOCKED" });
+  const recovered = await b.seal(one.profileHash, one.operationId, one.integrityHash, raw, "7", at(2));
+  assert.equal(recovered.phase, "sealed");
+  assert.equal(recovered.schemaVersion, "apn.non-evm-source-journal.v2");
+});
+
+test("v2 reservation binds protocol input hash through submission", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const repo = new NonEvmSourceJournalRepository(tmp.root);
+  let j = await repo.stageV2(bindingV2);
+  j = await repo.signingStarted(j.profileHash, j.operationId, j.integrityHash, at(1)) as typeof j;
+  j = await repo.seal(j.profileHash, j.operationId, j.integrityHash, await signed(7), "7", at(2)) as typeof j;
+  const dir = join(tmp.root, "non-evm-source-reservations", j.profileHash);
+  const names = await readdir(dir);
+  assert.equal(names.length, 1);
+  const file = join(dir, names[0]!);
+  const reservation = JSON.parse(await readFile(file, "utf8"));
+  assert.equal(reservation.protocolInputHash, bindingV2.protocolInputHash);
+  reservation.protocolInputHash = "2".repeat(64);
+  await writeFile(file, `${JSON.stringify(reservation)}\n`);
+  await assert.rejects(repo.committingSubmission(j.profileHash, j.operationId, j.integrityHash, at(3)),
+    { code: "APN_STATE_CORRUPT" });
+});
+
+test("v2 protocol hash survives source observation, reorg, and restart without granting authority", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const repo = new NonEvmSourceJournalRepository(tmp.root);
+  let j = await repo.stageV2(bindingV2);
+  j = await repo.signingStarted(j.profileHash, j.operationId, j.integrityHash, at(1)) as typeof j;
+  j = await repo.seal(j.profileHash, j.operationId, j.integrityHash, await signed(7), "7", at(2)) as typeof j;
+  j = await repo.committingSubmission(j.profileHash, j.operationId, j.integrityHash, at(3)) as typeof j;
+  j = await repo.observePending(j.profileHash, j.operationId, j.integrityHash, at(4)) as typeof j;
+  j = await repo.observeSafeSource(j.profileHash, j.operationId, j.integrityHash, {
+    provenance: "synthetic_untrusted", transactionHash: j.transactionHash!, status: "success",
+    blockNumberAtomic: "10", blockHash: `0x${"2".repeat(64)}`,
+    safeBlockNumberAtomic: "12", safeBlockHash: `0x${"3".repeat(64)}`, observedAt: at(5),
+  }, at(5)) as typeof j;
+  assert.equal(j.protocolInputHash, bindingV2.protocolInputHash);
+  assert.equal(j.executionAdmitted, false);
+  j = await repo.observeUnknown(j.profileHash, j.operationId, j.integrityHash, "safe_block_reorg", at(6)) as typeof j;
+  const loaded = await new NonEvmSourceJournalRepository(tmp.root).load(j.profileHash, j.operationId);
+  assert.equal(loaded?.schemaVersion, "apn.non-evm-source-journal.v2");
+  if (loaded?.schemaVersion !== "apn.non-evm-source-journal.v2") throw new Error("missing v2");
+  assert.equal(loaded.protocolInputHash, bindingV2.protocolInputHash);
+  assert.equal(loaded.safeSourceProof, null);
+  assert.equal(loaded.submissionAttempts, 1);
+  assert.equal(loaded.executionAdmitted, false);
 });

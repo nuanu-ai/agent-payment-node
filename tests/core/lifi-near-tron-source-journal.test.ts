@@ -7,6 +7,8 @@ import { bindNearTronSourcePreparationToJournal } from "../../src/lifi/near-tron
 import { inspectNearBaseTronQuoteOffline } from "../../src/lifi/near-tron-offline.js";
 import { freezeNonEvmBridgeOperation } from "../../src/lifi/non-evm-operation.js";
 import type { NearTronSourcePreparation } from "../../src/lifi/near-tron-source-preparation.js";
+import { NonEvmSourceJournalRepository } from "../../src/lifi/non-evm-source-journal.js";
+import { temporaryState } from "./helpers.js";
 
 const saved = JSON.parse(readFileSync(resolve("tests/core/lifi-fixtures/base-tron-near-synthetic-20260916.json"), "utf8"));
 const profileHash = "a".repeat(64), operationId = "b".repeat(64);
@@ -71,6 +73,19 @@ test("pure projection maps the exact envelope and gives a stable separate protoc
   assert.deepEqual(Object.keys(first.binding).sort(), ["profileHash", "operationId", "draftIntegrityHash", "route",
     "createdAt", "sourceCall", "maxSourceNativeDebitWei", "admissionProof"].sort());
   assert.ok(Object.isFrozen(first) && Object.isFrozen(first.binding) && Object.isFrozen(first.binding.sourceCall));
+});
+test("NEAR projection stages its exact protocol hash in v2", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const projected = bindNearTronSourcePreparationToJournal(fixture());
+  const repo = new NonEvmSourceJournalRepository(tmp.root);
+  const j = await repo.stageV2({ ...projected.binding,
+    schemaVersion: "apn.non-evm-source-journal.v2", protocolInputHash: projected.protocolInputHash });
+  assert.equal(j.protocolInputHash, projected.protocolInputHash);
+  assert.equal(j.executionAdmitted, false);
+  const loaded = await new NonEvmSourceJournalRepository(tmp.root).load(j.profileHash, j.operationId);
+  assert.equal(loaded?.schemaVersion, "apn.non-evm-source-journal.v2");
+  if (loaded?.schemaVersion !== "apn.non-evm-source-journal.v2") throw new Error("missing v2");
+  assert.equal(loaded.protocolInputHash, projected.protocolInputHash);
 });
 
 test("drift in preparation, quote, recipient, envelope and synthetic context fails or changes binding hash", () => {
