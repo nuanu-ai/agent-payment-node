@@ -10,6 +10,8 @@ export interface CircleV2SolanaDestinationInput {
     /** Caller-authenticated Circle-attested message; this parser does not verify attester signatures. */
     readonly attestedMessageHex: string;
     readonly nonceHex: string;
+    /** Optional exact Iris attestation bytes to bind to the receive instruction. Signature authenticity is not checked. */
+    readonly expectedAttestationHex?: string;
 }
 /** A matched receive instruction and ATA delta are a candidate, not an event-backed mint receipt. */
 export declare function inspectCircleV2SolanaDestinationOffline(input: CircleV2SolanaDestinationInput): Promise<{

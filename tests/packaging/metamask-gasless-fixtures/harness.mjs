@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 export const approvalCode = (action, ...binding) => createHash("sha256").update(["apn.approval-code.v1", action, ...binding].join("\n"), "utf8").digest("hex").slice(0, 6);
-import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, readdir, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, readdir, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -144,10 +144,10 @@ export async function reinstall(s) {
   const result = await run("tar", ["-xzf", s.archive, "-C", root], { timeoutMs: 30000 });
   assert.equal(result.code, 0, result.stderr);
   const packageRoot = join(root, "package");
-  // Copy the installed exact dependency closure, while replacing every shipped
+  // Reuse the installed exact dependency closure while replacing every shipped
   // asset from the same immutable archive. The first installation was npm ci.
-  const copy = await run("cp", ["-R", join(s.packageRoot, "node_modules"), join(packageRoot, "node_modules")], { timeoutMs: 120000 });
-  assert.equal(copy.code, 0, copy.stderr); s.update({ packageRoot }); return packageRoot;
+  await symlink(join(s.packageRoot, "node_modules"), join(packageRoot, "node_modules"), "dir");
+  s.update({ packageRoot }); return packageRoot;
 }
 
 function safeOutput(output, fixture, refresh) {

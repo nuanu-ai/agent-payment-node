@@ -52,6 +52,20 @@ export declare class BridgeService {
                 variant: string;
                 decoder_implemented: boolean;
             }[];
+            selected_direct_lane: {
+                from_chain: string;
+                from_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+                to_chain: "solana-mainnet";
+                to_token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+                provider: "Circle";
+                protocol: "CCTP V2";
+                delivery: "Forwarding Service";
+                fee_quote: "signed_upfront_separate_from_burned_principal";
+                selection: string;
+                provider_route_state: "selected_design_unverified_for_execution";
+                executable: false;
+                missing_proof: string[];
+            };
             candidate_lanes: ({
                 from_chain: string;
                 from_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
