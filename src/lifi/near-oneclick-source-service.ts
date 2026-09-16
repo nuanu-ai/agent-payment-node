@@ -59,8 +59,9 @@ export function legacyStatusQuoteMatchesRecord(value: unknown, record: OneClickS
   } catch { return false; }
 }
 export function oneClickStatusQuoteMatchesRecord(value: unknown, record: OneClickSourceRecord): boolean {
-  try { if (quoteIdentity(value) === record.quoteHash) return true; } catch { return false; }
-  return legacyStatusQuoteMatchesRecord(value, record);
+  if (record.schemaVersion === "apn.oneclick-source.v1") return legacyStatusQuoteMatchesRecord(value, record);
+  if (record.schemaVersion !== "apn.oneclick-source.v2") return false;
+  try { return quoteIdentity(value) === record.quoteHash; } catch { return false; }
 }
 export function assertOneClickPostApproval(initial: Readonly<{ nonce: bigint; gas: bigint; fee: bigint; tip: bigint }>,
   fresh: Readonly<{ nonce: bigint; gas: bigint; fee: bigint; tip: bigint; nativeDebit: bigint }>,

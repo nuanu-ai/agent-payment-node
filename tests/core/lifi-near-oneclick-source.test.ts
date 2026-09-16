@@ -83,14 +83,19 @@ test("provider status binds the live quote shape despite a different outer corre
   const actualEnvelope = { correlationId: "quote-correlation", ...stable };
   const statusEnvelope = { correlationId: "status-correlation", quoteResponse: stable, status: "PENDING_DEPOSIT" };
   const inspected = inspectOneClickSourceQuote(actualEnvelope, request, 1000000n, 2000000n, now);
-  const record = { quoteHash: inspected.quoteHash, payer: request.refundTo, refundTo: request.refundTo,
+  const record = { schemaVersion: "apn.oneclick-source.v2" as const, quoteHash: inspected.quoteHash, payer: request.refundTo, refundTo: request.refundTo,
     recipient: request.recipient, depositAddress: response.quote.depositAddress,
     quoteRequestDeadline: request.deadline, quoteDeadline: response.quote.deadline,
     amountInAtomic: request.amount, quotedAmountOutAtomic: response.quote.amountOut,
     minAmountOutAtomic: response.quote.minAmountOut } as unknown as OneClickSourceRecord;
   assert.equal(oneClickStatusQuoteMatchesRecord(statusEnvelope.quoteResponse, record), true);
-  const oldRecord = { ...record, quoteHash: "0".repeat(64) };
+  const oldRecord = { ...record, schemaVersion: "apn.oneclick-source.v1" as const, quoteHash: "0".repeat(64) };
   assert.equal(oneClickStatusQuoteMatchesRecord(statusEnvelope.quoteResponse, oldRecord), true);
+  for (const [kind, changed] of [
+    ["signature", { signature: "b".repeat(96) }],
+    ["appFees", { quoteRequest: { ...liveRequest, appFees: [{ recipient: "other", fee: 999999 }] } }],
+    ["withdrawFee", { quote: { ...liveQuote, withdrawFee: "999999" } }],
+  ] as const) assert.equal(oneClickStatusQuoteMatchesRecord({ ...stable, ...changed }, record), false, kind);
   for (const [kind, changed] of [
     ["recipient", { quoteRequest: { ...liveRequest, recipient: "TWrong" } }],
     ["origin", { quoteRequest: { ...liveRequest, originAsset: "nep141:eth-other" } }],
