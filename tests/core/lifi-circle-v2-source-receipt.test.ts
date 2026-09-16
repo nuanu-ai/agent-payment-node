@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { encodeAbiParameters, encodeEventTopics, getAddress, keccak256, parseAbi, type Hex } from "viem";
-import { BASE_CCTP_V2_MESSAGE_TRANSMITTER, BASE_CCTP_V2_TOKEN_MESSENGER, BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES, decodeCircleV2BaseSourceReceiptOffline, type CircleV2BurnIntent } from "../../src/lifi/circle-v2-source-receipt.js";
+import { BASE_CCTP_V2_MESSAGE_TRANSMITTER, BASE_CCTP_V2_TOKEN_MESSENGER, BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES, circleV2BurnTermsFromQuote, decodeCircleV2BaseSourceReceiptOffline, type CircleV2BurnIntent } from "../../src/lifi/circle-v2-source-receipt.js";
 import { BRIDGE_ZERO_WORD } from "../../src/lifi/validation.js";
 
 const sender = getAddress("0x000000000000000000000000000000000000dEaD");
@@ -16,12 +16,12 @@ const burnAbi = parseAbi(["event DepositForBurn(address indexed burnToken,uint25
 const sentAbi = parseAbi(["event MessageSent(bytes message)"]);
 const word = (address: string) => `0x${"0".repeat(24)}${address.slice(2).toLowerCase()}` as Hex;
 const n = (value: bigint, width: number) => value.toString(16).padStart(width * 2, "0");
-function message(overrides: { amount?: bigint; ata?: Hex; headerSender?: Hex; bodySender?: Hex; nonce?: Hex } = {}): Hex {
+function message(overrides: { amount?: bigint; ata?: Hex; headerSender?: Hex; bodySender?: Hex; nonce?: Hex; maxFee?: bigint; finality?: bigint; hook?: Hex } = {}): Hex {
   return (`0x${n(1n,4)}${n(6n,4)}${n(5n,4)}${(overrides.nonce ?? BRIDGE_ZERO_WORD).slice(2)}` +
     `${(overrides.headerSender ?? word(BASE_CCTP_V2_TOKEN_MESSENGER)).slice(2)}${solanaMessenger.slice(2)}${BRIDGE_ZERO_WORD.slice(2)}` +
-    `${n(1000n,4)}${n(0n,4)}${n(1n,4)}${word(usdc).slice(2)}${(overrides.ata ?? ata).slice(2)}` +
+    `${n(overrides.finality ?? 1000n,4)}${n(0n,4)}${n(1n,4)}${word(usdc).slice(2)}${(overrides.ata ?? ata).slice(2)}` +
     `${n(overrides.amount ?? 100000000n,32)}${(overrides.bodySender ?? word(BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES)).slice(2)}` +
-    `${n(500000n,32)}${n(0n,32)}${n(0n,32)}`) as Hex;
+    `${n(overrides.maxFee ?? 500000n,32)}${n(0n,32)}${n(0n,32)}${(overrides.hook ?? "0x").slice(2)}`) as Hex;
 }
 function fixture() {
   const tx = { chainId: 8453, hash, from: sender, to: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES };
@@ -46,6 +46,28 @@ test("authentic V2 event layout binds one source burn and message without claimi
   assert.equal(result.executionAdmitted, false);
   assert.equal(result.bridgeCompletion, false);
   assert.equal("nonce" in result, false);
+});
+test("standard FORWARD quote has zero CCTP maxFee and finalized threshold, separate from wrapper fee", () => {
+  const terms = circleV2BurnTermsFromQuote({ items: [{ type: "FORWARD", amount: "134620" }], feeTotalAmount: "134620" });
+  assert.deepEqual(terms, { maxFeeAtomic: "0", minFinalityThreshold: 2000 });
+  const f = fixture();
+  const hook = "0x636374702d666f72776172640000000000000000000000000000000000000000" as Hex;
+  f.receipt.logs[0]!.data = encodeAbiParameters([{ type: "bytes" }], [message({ maxFee: 0n, finality: 2000n, hook })]);
+  f.receipt.logs[1]!.topics = encodeEventTopics({ abi: burnAbi, eventName: "DepositForBurn", args: {
+    burnToken: usdc, depositor: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES, minFinalityThreshold: 2000 } });
+  f.receipt.logs[1]!.data = encodeAbiParameters(burnAbi[0].inputs.filter(i => !("indexed" in i)),
+    [100000000n, ata, 5, solanaMessenger, BRIDGE_ZERO_WORD, 0n, hook]);
+  const standard = { ...intent, ...terms, hookData: hook };
+  assert.equal(decodeCircleV2BaseSourceReceiptOffline(standard, f.tx, f.receipt).maxFeeAtomic, "0");
+  assert.throws(() => decodeCircleV2BaseSourceReceiptOffline(intent, f.tx, f.receipt), /circle_v2_source_/u);
+});
+test("live standard quote rejects unsupported fee items and malformed fee totals", () => {
+  for (const q of [
+    { items: [{ type: "PROTOCOL", amount: "2" }], feeTotalAmount: "2" },
+    { items: [{ type: "FORWARD", amount: "10" }, { type: "PROTOCOL", amount: "2" }], feeTotalAmount: "12" },
+    { items: [{ type: "FORWARD", amount: "10" }, { type: "PRE_FINALITY", amount: "2" }], feeTotalAmount: "12" },
+    { items: [{ type: "FORWARD", amount: "10" }], feeTotalAmount: "11" },
+  ]) assert.throws(() => circleV2BurnTermsFromQuote(q));
 });
 test("rejects missing, duplicate, wrong-emitter, reversed and failed events", () => {
   rejects(f => { f.receipt.logs.pop(); });

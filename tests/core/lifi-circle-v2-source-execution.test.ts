@@ -40,24 +40,25 @@ const blockHash = `0x${"a".repeat(64)}`;
 const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
 const quote = () => ({ signedQuote: "0x01020304", issuedAt: Math.floor(Date.now() / 1000),
   expiry: { mode: "BLOCK_NUMBER", expiresAtBlock: 110 }, feeTotalAmount: "20000", feeToken: usdc, nonce: "0",
-  items: [{ type: "FORWARD", amount: "18000", args: [wrapper, "5", usdc, `0x${"0".repeat(64)}`, hook], argsHash: `0x${"1".repeat(64)}` },
-    { type: "PROTOCOL", amount: "2000", args: [], argsHash: `0x${"2".repeat(64)}` }] });
+  items: [{ type: "FORWARD", amount: "20000", args: [wrapper, "5", usdc, `0x${"0".repeat(64)}`, hook], argsHash: `0x${"1".repeat(64)}` }] });
 const validation = () => ({ signedQuote: "0x01020304", feeTotalAmount: "20000", feeToken: usdc, nonce: "0",
   claimable: true, failedChecks: [], expiry: { mode: "BLOCK_NUMBER", expired: false, secondsRemaining: 60, expiresAtBlock: 110 },
-  items: [{ type: "FORWARD", argsMatch: true }, { type: "PROTOCOL", argsMatch: true }] });
+  items: [{ type: "FORWARD", argsMatch: true }] });
 const request = { profile: "imported", expectedPayer: payer, recipientOwner: wallet, recipientSetup: "existing_ata" as const,
   amountAtomic: "1000000", maxSourceFeeAtomic: "25000", maxAllowanceAtomic: "1020000", maxGasLimitAtomic: "130000",
   maxFeePerGasWei: "3000000000", maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "300000000000000",
   idempotencyKey: "circle-one-shot-test" };
-async function liveHarness(t: import("node:test").TestContext, ambiguous: boolean) {
+async function liveHarness(t: import("node:test").TestContext, ambiguous: boolean, unsupportedQuote = false) {
   const tmp = await temporaryState(); t.after(tmp.cleanup);
   const state = new StateStore(tmp.root), wrapping = { async load() { return Buffer.alloc(32, 7); }, async create() { return Buffer.alloc(32, 7); } };
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("imported", key, payer);
   let sends = 0, approvals = 0;
   t.mock.method(TtyCircleV2SourceApproval.prototype, "approve", async () => { approvals++; });
   t.mock.method(BridgeHttps.prototype, "request", async (endpoint: string, _verb: string, body: string | null) => {
-    if (endpoint.endsWith("/v2/quote/burn/usdc/6/5")) return { status: 200, body: JSON.stringify(quote()) };
-    if (endpoint.endsWith("/v2/quote/validate/usdc/6")) return { status: 200, body: JSON.stringify(validation()) };
+    if (endpoint.endsWith("/v2/quote/burn/usdc/6/5")) return { status: 200, body: JSON.stringify(unsupportedQuote ? {
+      ...quote(), items: [...quote().items, { type: "PROTOCOL", amount: "0", args: [], argsHash: `0x${"2".repeat(64)}` }] } : quote()) };
+    if (endpoint.endsWith("/v2/quote/validate/usdc/6")) return { status: 200, body: JSON.stringify(unsupportedQuote ? {
+      ...validation(), items: [...validation().items, { type: "PROTOCOL", argsMatch: true }] } : validation()) };
     const rpc = JSON.parse(body!); const { method, params, id } = rpc;
     if (method === "eth_sendRawTransaction") {
       sends++;
@@ -89,4 +90,10 @@ for (const ambiguous of [false, true]) test(`concrete Circle effect makes one du
   assert.equal(h.sends(), 1); assert.equal(h.approvals(), 1);
   await assert.rejects(h.service.submit(request));
   assert.equal(h.sends(), 1);
+});
+test("an unsupported second quote fee item cannot reach consent or send", async t => {
+  const h = await liveHarness(t, false, true);
+  await assert.rejects(h.service.submit(request));
+  assert.equal(h.approvals(), 0);
+  assert.equal(h.sends(), 0);
 });
