@@ -1,6 +1,6 @@
 # Solana mainnet direct transfers
 
-This APN 0.5.19 package includes local SOL and canonical USDC transfers on
+This APN 0.5.20 package includes local SOL and canonical USDC transfers on
 Solana mainnet. Package availability, clean installation and live mainnet
 payment acceptance require separate evidence.
 
