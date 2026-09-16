@@ -29,12 +29,15 @@ export interface CircleV2SolanaDestinationInput {
   /** Caller-authenticated Circle-attested message; this parser does not verify attester signatures. */
   readonly attestedMessageHex: string;
   readonly nonceHex: string;
+  /** Optional exact Iris attestation bytes to bind to the receive instruction. Signature authenticity is not checked. */
+  readonly expectedAttestationHex?: string;
 }
 
 /** A matched receive instruction and ATA delta are a candidate, not an event-backed mint receipt. */
 export async function inspectCircleV2SolanaDestinationOffline(input: CircleV2SolanaDestinationInput) {
   const message = bytes(input.attestedMessageHex);
   const nonce = bytes(input.nonceHex);
+  const attestation = input.expectedAttestationHex === undefined ? undefined : bytes(input.expectedAttestationHex);
   if (message.length < 148 || nonce.length !== 32 || !same(message.subarray(12, 44), nonce)) fail();
   const read32 = (offset: number) => Buffer.from(message).readUInt32BE(offset);
   if (read32(4) !== 6 || read32(8) !== 5 || read32(144) < 2000 ||
@@ -73,6 +76,7 @@ export async function inspectCircleV2SolanaDestinationOffline(input: CircleV2Sol
     if (size !== message.length || raw.length < 12 + size + 4 || !same(raw.subarray(12, 12 + size), message)) continue;
     const attestationSize = Buffer.from(raw).readUInt32LE(12 + size);
     if (attestationSize === 0 || raw.length !== 16 + size + attestationSize ||
+        (attestation !== undefined && !same(raw.subarray(16 + size), attestation)) ||
         accounts.length < 7 || accounts[4] !== usedNonce || accounts[5] !== CIRCLE_V2_TOKEN_MESSENGER) fail();
     matches++;
   }
