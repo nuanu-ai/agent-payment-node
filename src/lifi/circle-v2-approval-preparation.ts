@@ -6,7 +6,6 @@ import { BRIDGE_MAX_GAS, BRIDGE_MIN_REMAINING_MS, BRIDGE_TTL_MS, bridgeAddress, 
 
 const TOKEN = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const SPENDER = "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408";
-const MAX_APPROVAL = 1_000_000n; // 1 USDC: an absolute ceiling in addition to the caller's cap and live balance.
 const UINT256_MAX = (1n << 256n) - 1n;
 const abi = parseAbi(["function approve(address spender,uint256 value) returns (bool)"]);
 function fail(reason: string): never { return bridgeFailure("APN_PROVIDER_PROTOCOL", `circle_v2_approval_${reason}`); }
@@ -72,7 +71,7 @@ export async function prepareCircleV2BaseUsdcApprovalReadOnly(input: Readonly<{
 now: () => number = Date.now): Promise<CircleV2ApprovalPreparation> {
   if (input.chainId !== 8453 || bridgeAddress(input.token) !== TOKEN || bridgeAddress(input.spender) !== SPENDER) fail("target");
   const payer = bridgeAddress(input.payer), cap = bridgeUint(input.approvalCapAtomic, true);
-  if (cap > MAX_APPROVAL || cap === UINT256_MAX) fail("unbounded_cap");
+  if (cap === UINT256_MAX) fail("unbounded_cap");
   const data = encodeFunctionData({ abi, functionName: "approve", args: [SPENDER, cap] });
   let state: CircleV2ApprovalState;
   try { state = await readBase({ chainId: 8453, payer, token: TOKEN, spender: SPENDER, data }); }

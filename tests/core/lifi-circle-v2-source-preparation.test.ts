@@ -98,6 +98,7 @@ test("accepts a bounded approval above debit, but rejects allowance beyond the f
   const approved = await prepareCircleV2BaseSourceReadOnly(draft, harness(), bounded,
     { ...limits, maxAllowanceAtomic: "1025000" }, () => fixedNow);
   assert.equal(approved.requiredUsdcDebitAtomic, "1020000");
+  assert.equal(approved.maxAllowanceAtomic, "1025000");
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), bounded,
     { ...limits, maxAllowanceAtomic: "1024999" }), { code: "APN_PROVIDER_PROTOCOL" });
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), bounded,

@@ -54,6 +54,7 @@ export interface CircleV2SourcePreparation {
   readonly recipient: { readonly wallet: string; readonly ata: string; readonly setup: "existing_ata" | "create_ata" };
   readonly principalAtomic: string;
   readonly requiredUsdcDebitAtomic: string;
+  readonly maxAllowanceAtomic: string;
   readonly sourceRefundAddress: string;
   readonly sourceBlock: { readonly number: string; readonly hash: string };
   readonly transaction: { readonly type: "eip1559"; readonly chainId: 8453; readonly from: string; readonly to: string; readonly data: string; readonly valueAtomic: "0"; readonly nonceAtomic: string; readonly gasLimitAtomic: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string };
@@ -118,7 +119,8 @@ export async function prepareCircleV2BaseSourceReadOnly(draft: CircleV2Preflight
     quote: { signedQuote: bridgeHex(response.signedQuote, 16 * 1024), feeToken: bridgeAddress(response.feeToken),
       feeTotalAtomic: fee.toString(), expiry: structuredClone(expiry) },
     recipient: { wallet: copy.recipientWallet, ata: copy.recipientAta, setup: copy.recipientSetup },
-    principalAtomic: principal.toString(), requiredUsdcDebitAtomic: requiredDebit.toString(), sourceRefundAddress: bridgeAddress(tx.refundAddress),
+    principalAtomic: principal.toString(), requiredUsdcDebitAtomic: requiredDebit.toString(), maxAllowanceAtomic: maxAllowance.toString(),
+    sourceRefundAddress: bridgeAddress(tx.refundAddress),
     sourceBlock: { number: preflight.blockNumber, hash: preflight.blockHash },
     transaction: { type: "eip1559" as const, chainId: 8453 as const, from: payer, to: bridgeAddress(tx.to), data: bridgeHex(tx.data),
       valueAtomic: "0" as const, nonceAtomic: latest.toString(), gasLimitAtomic: gas.toString(), maxFeePerGasWei: maxFee.toString(),
