@@ -13,8 +13,8 @@ import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_ZERO_ADDRESS, bridgeA
 const SELECTOR = "0x80c65808";
 const MAYAN_CIRCLE_SELECTOR = "0x2072197f";
 const MAYAN_CIRCLE = getAddress("0x875d6d37ec55c8cf220b9e5080717549d8aa8eca");
-/** Opaque uint64 in the captured synthetic quote; this is a fixture pin, not a semantic fee claim. */
-const CAPTURED_CIRCLE_ARG2 = 1_647_869n;
+/** Mayan redeemFee in the captured synthetic quote; the value is a fixture pin. */
+const CAPTURED_REDEEM_FEE = 1_647_869n;
 const NON_EVM_RECEIVER = getAddress("0x11f111f111f111f111f111f111f111f111f111f1");
 const SOURCE_TOKEN = getAddress(BASE_SOLANA_USDC_CANDIDATE.fromToken);
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -22,7 +22,7 @@ const BRIDGE_DATA = "(bytes32 transactionId,string bridge,string integrator,addr
 const SWAP_DATA = "(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[]";
 const MAYAN_DATA = "(bytes32 nonEVMReceiver,address mayanProtocol,bytes protocolData,address swapProtocol,bytes swapData,address middleToken,uint256 minMiddleAmount,address refundRecipient,uint256 mayanAmountIn)";
 const MAYAN_ABI = parseAbi([`function swapAndStartBridgeTokensViaMayan(${BRIDGE_DATA} bridgeData,${SWAP_DATA} swapData,${MAYAN_DATA} mayanData) payable`]);
-const CIRCLE_ABI = parseAbi(["function bridgeWithFee(address tokenIn,uint256 amountIn,uint64 arg2,uint64 arg3,bytes32 recipient,uint32 destinationDomain,uint8 arg6,bytes arg7)"]);
+const CIRCLE_ABI = parseAbi(["function bridgeWithFee(address tokenIn,uint256 amountIn,uint64 redeemFee,uint64 gasDrop,bytes32 recipient,uint32 destinationDomain,uint8 payloadType,bytes customPayload)"]);
 
 type BridgeData = Readonly<{ transactionId: Hex; bridge: string; integrator: string; referrer: Address; sendingAssetId: Address; receiver: Address; minAmount: bigint; destinationChainId: bigint; hasSourceSwaps: boolean; hasDestinationCall: boolean }>;
 type SwapData = Readonly<{ callTo: Address; approveTo: Address; sendingAssetId: Address; receivingAssetId: Address; fromAmount: bigint; callData: Hex; requiresDeposit: boolean }>;
@@ -49,13 +49,14 @@ export interface MayanOfflineDecode {
   readonly transactionTarget: Address;
   readonly transactionId: Hex;
   readonly sourceAmountAtomic: string;
-  readonly feeAmountAtomic: string;
+  /** LI.FI FeeForwarder fee, taken from the source amount. */
+  readonly lifiFeeAmountAtomic: string;
   readonly bridgeAmountAtomic: string;
+  /** Mayan redemption fee parameter in bridgeWithFee; separate from the LI.FI fee. */
+  readonly mayanRedeemFeeAtomic: string;
   /** API estimate only. Not an onchain destination guarantee in this call. */
   readonly offchainToAmountMinAtomic: string;
   readonly mayanProtocol: Address;
-  /** Unverified Mayan protocol scalar. No fee or output semantics are claimed. */
-  readonly mayanProtocolArg2: string;
   readonly mayanDestinationDomain: number;
   readonly refundRecipient: Address;
   readonly calldataSha256: string;
@@ -155,14 +156,14 @@ export function decodeMayanBaseSolanaQuoteOffline(quoteValue: unknown, binding: 
     mayan.swapProtocol !== BRIDGE_ZERO_ADDRESS || mayan.swapData !== "0x" || mayan.middleToken !== BRIDGE_ZERO_ADDRESS ||
     mayan.minMiddleAmount !== 0n || mayan.refundRecipient !== sender || mayan.mayanAmountIn !== bridge.minAmount ||
     mayan.protocolData.slice(0, 10) !== MAYAN_CIRCLE_SELECTOR) fail("mayan_data");
-  let protocolArg2: bigint, destinationDomain: number;
+  let redeemFee: bigint, destinationDomain: number;
   try {
     const decoded = decodeFunctionData({ abi: CIRCLE_ABI, data: mayan.protocolData });
     if (decoded.functionName !== "bridgeWithFee" || !canonical(CIRCLE_ABI, decoded.functionName, decoded.args, mayan.protocolData)) fail("mayan_protocol_noncanonical");
-    const [token, amount, arg2, arg3, recipient, domain, arg6, arg7] = decoded.args as unknown as readonly [Address, bigint, bigint, bigint, Hex, number, number, Hex];
+    const [token, amount, decodedRedeemFee, gasDrop, recipient, domain, payloadType, customPayload] = decoded.args as unknown as readonly [Address, bigint, bigint, bigint, Hex, number, number, Hex];
     if (token !== SOURCE_TOKEN || amount !== bridge.minAmount || recipient.toLowerCase() !== mayan.nonEVMReceiver.toLowerCase() ||
-      domain !== 5 || arg6 !== 1 || arg7 !== "0x" || arg3 !== 0n || arg2 !== CAPTURED_CIRCLE_ARG2) fail("mayan_protocol");
-    protocolArg2 = arg2; destinationDomain = domain;
+      domain !== 5 || payloadType !== 1 || customPayload !== "0x" || gasDrop !== 0n || decodedRedeemFee !== CAPTURED_REDEEM_FEE) fail("mayan_protocol");
+    redeemFee = decodedRedeemFee; destinationDomain = domain;
   } catch (error) {
     if (error instanceof Error && error.name === "ApnError") throw error;
     return fail("mayan_protocol_abi");
@@ -194,8 +195,8 @@ export function decodeMayanBaseSolanaQuoteOffline(quoteValue: unknown, binding: 
     kind: "offline_mayan_mctp_source_inspection", bridgeCompletion: false, sourceChainId: 8453, destinationChainId: 1151111081099710,
     sourceToken: SOURCE_TOKEN, destinationToken: BASE_SOLANA_USDC_CANDIDATE.toToken, sender, solanaRecipient: binding.solanaRecipient,
     approvalSpender: BRIDGE_DIAMOND, transactionTarget: BRIDGE_DIAMOND, transactionId: bridge.transactionId,
-    sourceAmountAtomic: sourceAmount.toString(), feeAmountAtomic: fee.toString(), bridgeAmountAtomic: bridge.minAmount.toString(),
-    offchainToAmountMinAtomic: minimumOutput.toString(), mayanProtocol: MAYAN_CIRCLE, mayanProtocolArg2: protocolArg2.toString(),
+    sourceAmountAtomic: sourceAmount.toString(), lifiFeeAmountAtomic: fee.toString(), bridgeAmountAtomic: bridge.minAmount.toString(),
+    mayanRedeemFeeAtomic: redeemFee.toString(), offchainToAmountMinAtomic: minimumOutput.toString(), mayanProtocol: MAYAN_CIRCLE,
     mayanDestinationDomain: destinationDomain, refundRecipient: mayan.refundRecipient, calldataSha256: sha256(Buffer.from(data.slice(2), "hex")),
   };
 }

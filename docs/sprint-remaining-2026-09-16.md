@@ -120,6 +120,20 @@ pre-send guard, foreground approval, single submit, source proof, destination
 delivery proof and bounded recovery/no-resend. Bind the correct chain/address
 forms, native fee/rent/resource caps, token identity and operation lock.
 
+For the **first executable Base canonical USDC → Solana canonical USDC** lane,
+target direct Circle CCTP V2 with Forwarding Service and a signed upfront fee
+quote. The source must pay the quoted fee separately from the burned principal
+so the full burned amount mints on Solana. Bind the signed quote and expiry,
+fee token and total debit, Solana USDC ATA and any quoted ATA setup cost, source
+burn/message, destination mint and recovery before execution admission.
+[Circle's upfront-fee flow](https://developers.circle.com/cctp/concepts/how-upfront-fees-work)
+and [Forwarding Service](https://developers.circle.com/cctp/concepts/forwarding-service)
+are the source contracts for this choice. The existing LI.FI Mayan MCTP quote,
+source receipt and provider status parsers remain discovery/offline evidence:
+the captured call has no onchain destination `minOut` or deadline. It is not
+selected for execution. TRON USDT through NEAR Intents is a separate candidate
+with its own source, destination and refund proof requirements.
+
 **Depends on:** an admitted provider/route contract for each destination,
 canonical destination event/receipt evidence, and test fixtures for timeout,
 partial delivery, reorg and lost response. **Accept when:** deterministic and

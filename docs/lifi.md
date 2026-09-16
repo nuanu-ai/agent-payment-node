@@ -34,6 +34,20 @@ The identifiers follow LI.FI's [Solana provider documentation](https://docs.li.f
 and [token reference](https://docs.li.fi/mcp-server/tools); inventory must still
 be refreshed to learn current provider connectivity.
 
+**Execution direction for the first Base USDC → Solana USDC lane:** target
+direct Circle CCTP V2 with the Forwarding Service and a signed upfront fee
+quote. Circle collects the quoted fee on Base with the burn and mints the full
+burned amount to the Solana recipient; APN must bind the quote, fee token and
+expiry, source debit and burn, Solana USDC associated token account (ATA),
+destination mint/delivery, and no-resend recovery before admitting execution.
+For Solana, `mintRecipient` is the recipient's USDC ATA, and ATA creation needs
+the corresponding forwarding hook and quoted recipient setup cost. This is a
+technical target, not an implemented or accepted transfer. The separate TRON
+USDT / NEAR Intents discovery lane below has no CCTP V2 implication.
+[Circle upfront fees](https://developers.circle.com/cctp/concepts/how-upfront-fees-work)
+and [Forwarding Service](https://developers.circle.com/cctp/concepts/forwarding-service)
+define the fee and destination mechanics.
+
 Offline capabilities also identify **Base canonical USDC → TRON canonical USDT**
 as a discovery-only candidate through LI.FI tool `near` (NEAR Intents). The LI.FI TRON
 chain ID is `728126428` (`TVM`), and the destination contract is
@@ -393,7 +407,7 @@ kernel's proof contract; its creation and rent payer need separate admission.
 
 `src/lifi/mayan-offline.ts` inspects **one captured synthetic LI.FI quote shape**
 for Base canonical USDC to Solana canonical USDC through `mayanMCTP`. Its
-opaque protocol argument is pinned to that capture; other valid Mayan quotes
+Mayan redemption fee value is pinned to that capture; other valid Mayan quotes
 may be rejected. This is not general Mayan route acceptance. It is a pure
 decoder and is not connected to route admission, preparation, approval,
 execution, status or completion. Its result always says `bridgeCompletion:
@@ -416,14 +430,23 @@ decoded calldata. Its pinned MayanCircle address
 and destination domain are observed from the synthetic quote, not an
 independent deployment proof. Changes to either must be reviewed explicitly.
 
+The captured 100 USDC source amount includes a **250,000 atomic USDC LI.FI
+FeeForwarder fee**, leaving 99,750,000 atomic USDC for Mayan. The nested
+`bridgeWithFee` carries a separate **1,647,869 atomic USDC `redeemFee`** and
+zero `gasDrop`; the fee names and argument order follow [Mayan SDK commit
+`c4c98031`](https://github.com/mayan-finance/swap-sdk/blob/c4c98031aaad9264d17630d7b4de0cb18688cf78/src/evm/evmMctp.ts#L36-L113).
+The decoder reports `lifiFeeAmountAtomic` and `mayanRedeemFeeAtomic` separately.
+Neither fee is an onchain destination output floor, and this synthetic fixture
+does not establish current fee pricing.
+
 The API's `estimate.toAmountMin` is an offchain estimate. The decoded source
 call does not expose an onchain destination minimum or a quote expiry. The
-Mayan protocol's other scalar parameters have not been independently verified
-against Mayan's ABI; the observed opaque uint64 is pinned to this fixture and
-is not an execution guard. A future executable
-lane needs current deployment and bytecode proof, complete Mayan protocol
-semantics, destination and refund proof, fresh quote timing, and a separate
-admission review before this candidate can join the executable registry.
+captured `redeemFee` is a fixture guard, not a general fee cap. Mayan MCTP
+remains a discovery and offline observation candidate and is not selected for
+the first executable Base-to-Solana lane. Any later Mayan execution proposal
+needs current deployment and bytecode proof, complete protocol semantics,
+destination and refund proof, an enforceable output/timing contract, and a
+separate admission review.
 
 `src/lifi/mayan-source-receipt.ts` adds a pure, offline source receipt parser for
 that same frozen quote shape. It checks the original Base transaction's chain,
