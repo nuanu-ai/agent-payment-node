@@ -15,8 +15,12 @@ const message = `0x${"0".repeat(8)}${"0".repeat(7)}6${"0".repeat(7)}5${"0".repea
 function fixture() {
   return { quote, binding, sourceTransactionHash, cctpMessageHash: keccak256(message as `0x${string}`), cctpNonce: "9",
     circleMessages: { messages: [{ message, eventNonce: "9", attestation: `0x${"a".repeat(130)}` }] },
-    lifiStatuses: [{ transactionId: quote.transactionId, sending: { txHash: sourceTransactionHash },
-      receiving: { txHash: receiving }, tool: "mayanMCTP", status: "DONE", substatus: "COMPLETED" }] };
+    lifiStatuses: [{ transactionId: quote.transactionId, fromAddress: binding.sender, toAddress: binding.solanaRecipient,
+      sending: { txHash: sourceTransactionHash, chainId: 8453, amount: "100000000",
+        token: { address: quote.action.fromToken.address, chainId: 8453, symbol: "USDC", decimals: 6 } },
+      receiving: { txHash: receiving, chainId: 1151111081099710, amount: "98102131",
+        token: { address: quote.action.toToken.address, chainId: 1151111081099710, symbol: "USDC", decimals: 6 } },
+      tool: "mayanMCTP", status: "DONE", substatus: "COMPLETED" }] };
 }
 function reject(mutate: (value: ReturnType<typeof fixture>) => void): void {
   const input = fixture(); mutate(input);
@@ -50,4 +54,18 @@ test("rejects LI.FI partial, refunded, pending, conflicting, or ambiguous status
   reject(i => { i.lifiStatuses[0]!.receiving.txHash = "not-a-solana-signature"; });
   reject(i => { i.lifiStatuses.push(i.lifiStatuses[0]!); });
   reject(i => { i.lifiStatuses[0]!.tool = "other"; });
+});
+
+test("rejects LI.FI chain, recipient, asset, and amount contradictions or omissions", () => {
+  reject(i => { i.lifiStatuses[0]!.sending.chainId = 1; });
+  reject(i => { i.lifiStatuses[0]!.receiving.chainId = 1; });
+  reject(i => { i.lifiStatuses[0]!.toAddress = "11111111111111111111111111111111"; });
+  reject(i => { (i.lifiStatuses[0]! as { fromAddress: string }).fromAddress = "0x0000000000000000000000000000000000000001"; });
+  reject(i => { i.lifiStatuses[0]!.sending.token.address = "0x0000000000000000000000000000000000000001"; });
+  reject(i => { i.lifiStatuses[0]!.receiving.token.address = "So11111111111111111111111111111111111111112"; });
+  reject(i => { i.lifiStatuses[0]!.receiving.token.chainId = 1; });
+  reject(i => { i.lifiStatuses[0]!.receiving.token.decimals = 9; });
+  reject(i => { i.lifiStatuses[0]!.sending.amount = "99750000"; });
+  reject(i => { i.lifiStatuses[0]!.receiving.amount = "97619722"; });
+  reject(i => { delete (i.lifiStatuses[0]!.receiving as { token?: unknown }).token; });
 });
