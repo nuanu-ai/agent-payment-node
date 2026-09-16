@@ -1,6 +1,6 @@
 /** Source-effect journal. V1/V2 synthetic proof grants no live effect authority.
- * V3 records the concrete Circle transport admission and exact source envelope.
- * A journal transition alone never broadcasts a transaction.
+ * V3 records a caller-supplied Circle transport claim and exact source envelope.
+ * Stored claims are not origin authentication; only the concrete service may sign or send.
  */
 import { hashObject, sha256 } from "../canonical.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
@@ -229,7 +229,7 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
             corrupt();
         return this.stageBuilt(build(binding, "v2"));
     }
-    /** Only the concrete live Circle adapter may supply this versioned admission record. */
+    /** Records structural live-admission claims. This repository cannot authenticate network origin or authorize a source effect. */
     async stageLiveCircle(binding) {
         if (binding.admissionProof.kind !== "circle_v2_live_transport_v1")
             blocked();

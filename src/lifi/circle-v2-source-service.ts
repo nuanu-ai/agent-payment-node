@@ -12,6 +12,7 @@ import { canonicalProfile } from "../wallet-policy.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { BridgeHttps } from "./https.js";
 import { NonEvmSourceJournalRepository } from "./non-evm-source-journal.js";
+import { TtyCircleV2SourceApproval } from "./circle-v2-source-tty.js";
 import { inspectCircleV2PreflightedDraft, type CircleV2DraftInput } from "./circle-v2-draft.js";
 import { prepareCircleV2BaseSourceReadOnly, type CircleV2BaseStateReader, type CircleV2SourcePreparationLimits } from "./circle-v2-source-preparation.js";
 import { bindCircleV2SourcePreparationToJournal } from "./circle-v2-source-journal.js";
@@ -68,8 +69,7 @@ export interface CircleV2SourceApprovalPort { approve(preparation: CircleV2Sourc
 /** Production adapters use one pinned HTTPS Circle origin and one explicitly configured Base RPC origin. */
 export class CircleV2SourceService {
   constructor(private readonly state: StateStore, private readonly wrapping: WrappingSecretPort,
-    private readonly environment: Readonly<Record<string, string | undefined>>,
-    private readonly approval: CircleV2SourceApprovalPort) {}
+    private readonly environment: Readonly<Record<string, string | undefined>>) {}
 
   async submit(request: CircleV2SourceSubmitRequest): Promise<CircleV2SourceResult> {
     const profile = canonicalProfile(request.profile), payer = bridgeAddress(request.expectedPayer);
@@ -134,7 +134,7 @@ export class CircleV2SourceService {
         signer: { kind: "imported_evm_signer", address: payer,
           signTransaction: tx => privateKeyToAccount(loaded.secret.privateKey).signTransaction(tx) },
         sendRawTransaction: raw => rpc.send(raw),
-        approve: p => this.approval.approve(p),
+        approve: p => new TtyCircleV2SourceApproval().approve(p),
         journal: new NonEvmSourceJournalRepository(this.state.root),
         admitLive: async p => {
           if (validationHash === undefined) fail("validation_missing");

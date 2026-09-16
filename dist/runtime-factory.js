@@ -34,7 +34,6 @@ import { LifiProvider } from "./lifi/provider.js";
 import { bridgeRpcFactory } from "./lifi/rpc.js";
 import { CircleV2ApprovalExecutor, LocalCircleApprovalSigner, circleApprovalRpcFromBridge } from "./lifi/circle-v2-approval-executor.js";
 import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
-import { TtyCircleV2SourceApproval } from "./lifi/circle-v2-source-tty.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
@@ -116,7 +115,7 @@ export function createApnCore(bound, options = {}) {
             circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state, circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)), new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits, () => options.clock?.now().getTime() ?? Date.now()),
         } : {}),
         ...(bound.request.command === "circle.source.submit" || options.circleSource !== undefined ? {
-            circleSource: options.circleSource ?? new CircleV2SourceService(state, wrappingSecret, process.env, new TtyCircleV2SourceApproval()),
+            circleSource: options.circleSource ?? new CircleV2SourceService(state, wrappingSecret, process.env),
         } : {}),
         facilitatorGasless: options.facilitatorGasless ?? { rpc: () => avalancheFacilitatorRpc(process.env),
             facilitator: new PayAiFacilitator(), signer: new LocalFacilitatorSigner(state, wrappingSecret),

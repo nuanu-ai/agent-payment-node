@@ -34,8 +34,7 @@ export declare class CircleV2SourceService {
     private readonly state;
     private readonly wrapping;
     private readonly environment;
-    private readonly approval;
-    constructor(state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>, approval: CircleV2SourceApprovalPort);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>);
     submit(request: CircleV2SourceSubmitRequest): Promise<CircleV2SourceResult>;
 }
 /** Minimal EIP-1898 Base reader. Every token and native balance read uses the same canonical block hash. */

@@ -604,7 +604,7 @@ export declare class NonEvmSourceJournalRepository extends SecureStateStore {
     stage(binding: NonEvmSourceBinding): Promise<NonEvmSourceJournal>;
     /** Stage a new record with a durable, untrusted protocol input identity. */
     stageV2(binding: NonEvmSourceBindingV2): Promise<NonEvmSourceJournalV2>;
-    /** Only the concrete live Circle adapter may supply this versioned admission record. */
+    /** Records structural live-admission claims. This repository cannot authenticate network origin or authorize a source effect. */
     stageLiveCircle(binding: LiveCircleSourceBinding): Promise<NonEvmSourceJournalV3>;
     private stageBuilt;
     private change;
