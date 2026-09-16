@@ -97,7 +97,8 @@ test("safe Base source receipt is source-only; reorg returns to observe-only", a
   await assert.rejects(repo.observeSafeSource(j.profileHash, j.operationId, j.integrityHash,
     { ...proof, transactionHash: `0x${"3".repeat(64)}` }, at(5)), { code: "APN_STATE_CORRUPT" });
   j = await repo.observeSafeSource(j.profileHash, j.operationId, j.integrityHash, proof, at(5));
-  assert.equal(j.phase, "source_confirmed"); assert.equal(j.executionAdmitted, false);
+  assert.equal(j.phase, "source_observed_untrusted"); assert.equal(j.safeSourceProof?.provenance, "synthetic_untrusted");
+  assert.equal(j.executionAdmitted, false);
   assert.equal("destinationProof" in j, false);
   j = await repo.observeUnknown(j.profileHash, j.operationId, j.integrityHash, "safe_block_reorg", at(6));
   assert.equal(j.phase, "unknown_finality"); assert.equal(j.safeSourceProof, null);
@@ -115,7 +116,8 @@ test("safe source revert remains source-only and cannot be replayed as success",
     blockHash: `0x${"4".repeat(64)}`, safeBlockNumberAtomic: "21",
     safeBlockHash: `0x${"5".repeat(64)}`, observedAt: at(4),
   }, at(4));
-  assert.equal(j.phase, "source_reverted"); assert.equal(j.submissionAttempts, 1);
+  assert.equal(j.phase, "source_observed_untrusted"); assert.equal(j.safeSourceProof?.status, "reverted");
+  assert.equal(j.submissionAttempts, 1);
   await assert.rejects(repo.observeSafeSource(j.profileHash, j.operationId, j.integrityHash,
     { ...j.safeSourceProof!, status: "success" }, at(5)), { code: "APN_OPERATION_BLOCKED" });
 });
