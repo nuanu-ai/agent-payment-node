@@ -52,7 +52,7 @@ export declare class BridgeService {
                 variant: string;
                 decoder_implemented: boolean;
             }[];
-            candidate_lanes: {
+            candidate_lanes: ({
                 from_chain: string;
                 from_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
                 to_lifi_chain_id: 1151111081099710;
@@ -60,7 +60,17 @@ export declare class BridgeService {
                 provider_route_state: "unverified_by_static_capabilities";
                 executable: false;
                 missing_proof: string[];
-            }[];
+                tool?: never;
+            } | {
+                from_chain: string;
+                from_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+                to_lifi_chain_id: 728126428;
+                to_token: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+                tool: "near";
+                provider_route_state: "unverified_by_static_capabilities";
+                executable: false;
+                missing_proof: string[];
+            })[];
             route_executable: string;
             profiles: ({
                 provider: string;
