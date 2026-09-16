@@ -7,8 +7,8 @@ import { mmFail } from "../reasons.js";
 import { mmExact, mmHash, mmIso, mmSame } from "../validation.js";
 import { mmJournalIntent, mmJournalMutable } from "./schema.js";
 
-const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "providerObservation",
-  "cursor", "observation", "settlement", "failure"] as const;
+const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "dispatch",
+  "providerObservation", "cursor", "observation", "settlement", "failure"] as const;
 const TRANSITION_KEYS = ["at", "previousHash", ...MUTABLE_KEYS, "transitionHash"] as const;
 const OPERATION_KEYS = ["schemaVersion", "kind", "profileHash", "operationId", "idempotencyHash", "requestHash",
   "fingerprint", "createdAt", "updatedAt", "terminal", "intent", ...MUTABLE_KEYS, "transitions", "integrityHash"] as const;
@@ -23,12 +23,20 @@ const EDGES: Readonly<Record<MetaMaskGaslessState, readonly MetaMaskGaslessState
 };
 
 function corrupt(): never { return mmFail("mm_gasless_state_corrupt"); }
+/**
+ * `dispatch` was added with the reprice guard. A stored record written without it keeps its exact key set, so its
+ * transition and integrity hashes stay verifiable; the field is then absent rather than defaulted.
+ */
+function keysFor(value: unknown, keys: readonly string[]): readonly string[] {
+  return typeof value === "object" && value !== null && Object.hasOwn(value, "dispatch")
+    ? keys : keys.filter(key => key !== "dispatch");
+}
 function time(value: string): number { return Date.parse(value); }
 function mutable(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(MUTABLE_KEYS.map(key => [key, value[key]]));
 }
 function transition(value: unknown, intent: MetaMaskGaslessOperationRecord["intent"], fingerprint: string): MetaMaskGaslessTransition {
-  const t = mmExact(value, TRANSITION_KEYS), at = mmIso(t.at), previousHash = mmHash(t.previousHash);
+  const t = mmExact(value, keysFor(value, TRANSITION_KEYS)), at = mmIso(t.at), previousHash = mmHash(t.previousHash);
   const transitionHash = mmHash(t.transitionHash), { transitionHash: _hash, ...body } = t;
   if (hashObject(body) !== transitionHash) corrupt();
   const normalized = mmJournalMutable(mutable(t), intent, fingerprint, at);
@@ -40,8 +48,9 @@ function step(previous: MetaMaskGaslessTransition, next: MetaMaskGaslessTransiti
   if (previous.submissionAttempts > next.submissionAttempts) corrupt();
   if (previous.submissionAttempts === 0 && next.submissionAttempts === 1 &&
     (previous.state !== "execution_pending" || next.state !== "dispatch_pending" || next.dispatchStartedAt !== next.at)) corrupt();
-  if (previous.submissionAttempts === 1 &&
-    (next.submissionAttempts !== 1 || previous.dispatchStartedAt !== next.dispatchStartedAt)) corrupt();
+  // The dispatched material is written once, with the marker, and can never be replaced afterwards.
+  if (previous.submissionAttempts === 1 && (next.submissionAttempts !== 1 ||
+    previous.dispatchStartedAt !== next.dispatchStartedAt || !mmSame(previous.dispatch, next.dispatch))) corrupt();
   if (previous.settlement !== null && !mmSame(previous.settlement, next.settlement)) corrupt();
   if (previous.providerObservation !== null && next.providerObservation !== null) {
     if (time(next.providerObservation.observedAt) < time(previous.providerObservation.observedAt) ||
@@ -66,7 +75,7 @@ function step(previous: MetaMaskGaslessTransition, next: MetaMaskGaslessTransiti
 }
 
 function validate(value: unknown): MetaMaskGaslessOperationRecord {
-  const r = mmExact(value, OPERATION_KEYS);
+  const r = mmExact(value, keysFor(value, OPERATION_KEYS));
   if (r.schemaVersion !== MM_OPERATION_VERSION || r.kind !== MM_OPERATION_KIND || typeof r.terminal !== "boolean") corrupt();
   const profileHash = mmHash(r.profileHash), operationId = mmHash(r.operationId), idempotencyHash = mmHash(r.idempotencyHash);
   const requestHash = mmHash(r.requestHash), fingerprint = mmHash(r.fingerprint);
@@ -85,7 +94,7 @@ function validate(value: unknown): MetaMaskGaslessOperationRecord {
     const current = transition(raw, intent, fingerprint), prior = transitions.at(-1);
     if (prior === undefined) {
       const initial: MetaMaskGaslessMutable = { state: "awaiting_approval", approval: null, submissionAttempts: 0,
-        dispatchStartedAt: null, providerObservation: null,
+        dispatchStartedAt: null, dispatch: current.dispatch === undefined ? undefined : null, providerObservation: null,
         cursor: { startBlock: intent.initialSnapshot.safeBlock, nextBlockAtomic: intent.initialSnapshot.safeBlock.numberAtomic,
           previousEndBlock: null }, observation: null, settlement: null, failure: null };
       if (current.previousHash !== MM_ZERO_HASH || current.at !== createdAt || !mmSame(mmMutable(current), initial)) corrupt();

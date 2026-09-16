@@ -1,4 +1,5 @@
 import { hashObject } from "../canonical.js";
+import { isEvmTransactionHash } from "../rail-status-binding.js";
 import { bridgeDestinationProof, bridgeSourceProof, destinationEventFilter } from "./protocol-evidence.js";
 import { approvalIncluded } from "./transaction.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
@@ -104,7 +105,8 @@ export class BridgeObservation {
         if (observation !== null)
             op = await this.save(op, { providerObservation: observation });
         const hint = op.providerObservation?.destinationTransactionHash;
-        if (hint !== null && hint !== undefined) {
+        // Only an EVM hash can address the EVM destination reader; a Solana hint falls through to the scan.
+        if (isEvmTransactionHash(hint)) {
             let proof = null;
             try {
                 proof = await this.destinationCandidate(op, hint);
@@ -116,7 +118,7 @@ export class BridgeObservation {
         return await this.scan(op);
     }
     async residual(op) {
-        const m = op.intent.materialization, account = await this.source.account(m.sender, m.approvalAddress);
+        const m = op.intent.materialization, account = await this.source.account(m.sender, m.approvalAddress, m.request.fromToken);
         if (account.chainId !== m.request.fromChainId || account.rpcOrigin !== op.intent.sourceRpcOrigin ||
             account.owner !== m.sender || account.token !== m.request.fromToken || account.spender !== m.approvalAddress)
             bridgeFailure("APN_RPC_PROTOCOL", "residual_allowance_identity");
@@ -151,7 +153,7 @@ export class BridgeObservation {
             const safe = await this.destination.block("safe"), start = BigInt(cursor.nextBlockAtomic);
             if (BigInt(safe.numberAtomic) >= start) {
                 const end = BigInt(safe.numberAtomic) < start + 1023n ? BigInt(safe.numberAtomic) : start + 1023n;
-                const endBlock = await this.destination.block(end.toString()), filter = destinationEventFilter(op.sourceProof);
+                const endBlock = await this.destination.block(end.toString()), filter = destinationEventFilter(op.sourceProof, op.intent.materialization.request.toToken);
                 const logs = await this.destination.logs({ fromBlockAtomic: start.toString(), toBlockAtomic: end.toString(), ...filter });
                 const unique = [...new Map(logs.map((log) => [log.transactionHash, log])).values()];
                 let unresolvedCandidate = false;
@@ -194,7 +196,7 @@ export class BridgeObservation {
     async historicalDeployment(op, rpc, proof, frozen) {
         if (rpc.origin !== frozen.rpcOrigin || proof.rpcOrigin !== frozen.rpcOrigin || proof.chainId !== frozen.chainId)
             bridgeFailure("APN_RPC_CONFIG", "observation_RPC_identity");
-        const current = await rpc.deployment(op.intent.materialization.tool, frozen.peerChainId, proof.block);
+        const current = await rpc.deployment(op.intent.materialization.tool, frozen.peerChainId, frozen.chainId === op.intent.materialization.request.fromChainId ? op.intent.materialization.request.fromToken : op.intent.materialization.request.toToken, proof.block);
         if (current.contractHash !== frozen.contractHash || current.codeHash !== frozen.codeHash ||
             current.configurationHash !== frozen.configurationHash || !bridgeSame(current.block, proof.block))
             bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_identity");

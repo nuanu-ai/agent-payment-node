@@ -25,12 +25,41 @@ export interface GaslessBlock {
     readonly hash: Hex;
     readonly timestampAtomic: string;
 }
+/** Row data, never a baked literal: `name`/`version` are re-validated against the named registry row. */
 export interface GaslessTokenDomain {
-    readonly name: "USD Coin" | "USDC";
-    readonly version: "2";
+    readonly name: string;
+    readonly version: string;
     readonly chainId: GaslessChainId;
     readonly verifyingContract: Address;
     readonly domainSeparator: Hex;
+}
+/** A row's claim about one token implementation's storage. Never protocol knowledge, so it is proved before any use. */
+export interface GaslessBalanceLayout {
+    /** The token implementation the claim describes; must be the implementation the chain is verified to run. */
+    readonly implementationHash: Hex;
+    /** Solidity mapping base slot of `balanceOf` in that implementation. */
+    readonly mappingSlotAtomic: string;
+}
+/**
+ * One admitted asset on one chain. `decimals`, `domain`, the code hashes and `paymaster` are all asserted against the
+ * chain before every effect; `symbol` is display-only; `balanceLayout` is proved before any state override uses it.
+ */
+export interface GaslessAsset {
+    readonly chainId: GaslessChainId;
+    readonly token: Address;
+    readonly symbol: string;
+    readonly decimals: number;
+    readonly domain: GaslessTokenDomain;
+    readonly paymaster: Address;
+    readonly wrappedNativeToken: Address;
+    readonly implementation: Address;
+    readonly implementationHash: Hex;
+    /** Null when the row makes no layout claim, which fails every path that would need one. */
+    readonly balanceLayout: GaslessBalanceLayout | null;
+    readonly code: readonly {
+        readonly address: Address;
+        readonly codeHash: Hex;
+    }[];
 }
 export interface GaslessDeployment {
     readonly chainId: GaslessChainId;
@@ -43,6 +72,8 @@ export interface GaslessDeployment {
     readonly paymaster: Address;
     readonly entryPoint: Address;
     readonly delegate: Address;
+    /** Every asset this chain admits. The first entry is the row's default `token`. */
+    readonly assets: readonly GaslessAsset[];
     readonly code: readonly {
         readonly address: Address;
         readonly codeHash: Hex;

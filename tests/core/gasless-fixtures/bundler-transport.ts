@@ -5,8 +5,8 @@ import { ApnCore } from "../../../src/core.js";
 import { sha256 } from "../../../src/canonical.js";
 import type { GaslessTransport } from "../../../src/gasless/https.js";
 import type { GaslessIntent } from "../../../src/gasless/model.js";
-import { gaslessDeployment } from "../../../src/gasless/registry.js";
-import { GaslessRpc } from "../../../src/gasless/rpc.js";
+import { gaslessAsset, gaslessDeployment } from "../../../src/gasless/registry.js";
+import { GaslessRpc, gaslessBalanceSlot } from "../../../src/gasless/rpc.js";
 import { gaslessUserOperationHash } from "../../../src/gasless/wire.js";
 import { gaslessFixture } from "../gasless-helpers.js";
 
@@ -17,7 +17,8 @@ const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
 
 /** Entire production RPC path; all network replies and wallet secrets are fixtures. */
 export async function bundledGaslessFixture(root: string) {
-  const s = await gaslessFixture(root), row = gaslessDeployment(8453);
+  const s = await gaslessFixture(root), row = gaslessDeployment(8453), asset = gaslessAsset(8453, row.token);
+  const balanceLayoutSlot = gaslessBalanceSlot(s.account.address, asset.balanceLayout!.mappingSlotAtomic);
   const captured = JSON.parse(await readFile(resolve("tests/core/gasless-fixtures/deployment-base.json"), "utf8")) as Json;
   const additional = JSON.parse(await readFile(resolve("tests/core/gasless-fixtures/bundler-runtime-code.json"), "utf8")) as Json;
   const runtimes = [captured.token.proxyRuntime, captured.token.implementationRuntime,
@@ -32,7 +33,7 @@ export async function bundledGaslessFixture(root: string) {
   const calls: Array<{ method: string; bundler: boolean; afterApproval: boolean }> = [];
   const estimates: unknown[][] = [];
   let approved = false, limit = 20, intent: GaslessIntent | undefined;
-  let fault: "" | "chain" | "entrypoint" | "balance" | "allowance" | "nonce" | "fees" = "";
+  let fault: "" | "chain" | "entrypoint" | "balance" | "allowance" | "nonce" | "fees" | "decimals" | "layout" = "";
   let batchReply: (rows: Json[]) => unknown = rows => rows;
   let feeQuote: unknown;
   const transport: GaslessTransport = { request: async (endpoint, method, body) => {
@@ -68,10 +69,14 @@ export async function bundledGaslessFixture(root: string) {
     }
     if (method === "eth_getStorageAt") {
       const read = row.reads.find(r => r.kind === "storage" && r.address === params[0] && r.data === params[1]);
-      assert.ok(read); return read.expected;
+      if (read) return read.expected;
+      // The mirror estimate measures the row's balance-layout claim before overriding it.
+      assert.equal(params[0], asset.token); assert.equal(params[1], balanceLayoutSlot);
+      return word(fault === "layout" ? 1n : fault === "balance" ? 0n : 100_000_000n);
     }
     if (method === "eth_call") {
       const call = params[0] as Json, data = call.data as string;
+      if (data.startsWith("0x313ce567")) return word(fault === "decimals" ? 18n : BigInt(asset.decimals));
       if (data.startsWith("0x70a08231")) return word(fault === "balance" ? 0n : 100_000_000n);
       if (data.startsWith("0xdd62ed3e")) return word(fault === "allowance" ? 1n : 0n);
       if (data.startsWith("0x7ecebe00")) return word(fault === "nonce" ? 8n : 7n);

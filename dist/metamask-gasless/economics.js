@@ -46,6 +46,17 @@ export function mmAssertStableQuote(request, quote, reason = "mm_gasless_quote_i
     if (mmUint(quote.netAtomic, true, reason) + mmUint(quote.feeAtomic, false, reason) !== mmUint(request.grossAtomic, true, reason))
         mmFail(reason);
 }
+/**
+ * The owner approves a maximum, not one exact price. A quote taken after that approval is admissible when its fee
+ * stays inside the effective cap, the recipient still clears the floor and the gross still splits exactly.
+ */
+export function mmRepriceWithinCap(value, request, binding, reason = "mm_gasless_quote_invalid") {
+    const candidate = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash"], reason);
+    const netAtomic = typeof candidate.netAtomic === "string" ? candidate.netAtomic : mmFail(reason);
+    const quote = mmQuote(candidate, request, binding, netAtomic, reason);
+    mmAssertStableQuote(request, quote, reason);
+    return quote;
+}
 export function mmPolicyHash(profileHash, binding, request) {
     return hashObject({ purpose: "apn.metamask-gasless.policy.v1", profileHash, binding,
         chainId: request.chainId, token: mmRegistry(request.chainId).row.token, recipient: request.recipient,

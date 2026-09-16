@@ -2,7 +2,18 @@ import { hashObject } from "../canonical.js";
 import { validateEconomics } from "../transfer-policy.js";
 import { bridgeDeployment } from "./deployments.js";
 import { approvalData } from "./transaction.js";
-import { BRIDGE_MAX_GAS, BRIDGE_MIN_REMAINING_MS, bridgeFailure, bridgeUint } from "./validation.js";
+import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_MIN_REMAINING_MS, bridgeFailure, bridgeHeadroomWei, bridgeUint } from "./validation.js";
+/**
+ * Raises one quoted EIP-1559 price pair to the maximum the owner approves. The returned prices are what the
+ * envelope freezes, what custody signs, what bounds the debit on chain and what the approval screen shows; the
+ * quoted pair is kept beside them so the disclosure can state both the quote and the stated headroom.
+ */
+export function bridgeApprovedPrices(fees) {
+    return { maxFeePerGasAtomic: bridgeHeadroomWei(fees.maxFeePerGasAtomic),
+        maxPriorityFeePerGasAtomic: bridgeHeadroomWei(fees.maxPriorityFeePerGasAtomic),
+        feeCeiling: { policy: BRIDGE_FEE_HEADROOM_POLICY, headroomBps: BRIDGE_FEE_HEADROOM_BPS,
+            quotedMaxFeePerGasAtomic: fees.maxFeePerGasAtomic, quotedMaxPriorityFeePerGasAtomic: fees.maxPriorityFeePerGasAtomic } };
+}
 export async function freezeBridgeEnvelopes(m, account, rpc) {
     const amount = BigInt(m.request.amountAtomic), allowance = BigInt(account.allowanceAtomic);
     if (allowance !== 0n && allowance !== amount)
@@ -10,25 +21,28 @@ export async function freezeBridgeEnvelopes(m, account, rpc) {
     if (account.pendingNonceAtomic !== account.latestNonceAtomic)
         bridgeFailure("APN_OPERATION_BLOCKED", "pending_source_nonce");
     if (BigInt(account.balanceAtomic) < amount)
-        bridgeFailure("APN_INSUFFICIENT_ASSET", "source_USDC_balance");
+        bridgeFailure("APN_INSUFFICIENT_ASSET", "source_asset_balance");
     const effects = [];
     if (allowance === 0n) {
         const transaction = { chainId: m.request.fromChainId, from: m.sender, to: m.request.fromToken,
             data: approvalData(m.approvalAddress, m.request.amountAtomic), valueAtomic: "0", gasLimitAtomic: "0" };
-        const fees = await rpc.estimate(transaction);
-        const economics = validateEconomics(account.latestNonceAtomic, fees);
+        const fees = await rpc.estimate(transaction), approved = bridgeApprovedPrices(fees);
+        const economics = validateEconomics(account.latestNonceAtomic, { ...fees, ...approved });
         if (BigInt(economics.gasLimitAtomic) > BRIDGE_MAX_GAS)
             bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "approval_gas_ceiling");
-        const body = { role: "approval", ...transaction, economics, feeQuote: await rpc.feeQuote({ economics }), provisionalGas: false };
+        const body = { role: "approval", ...transaction, economics, feeQuote: await rpc.feeQuote({ economics }),
+            provisionalGas: false, feeCeiling: approved.feeCeiling };
         const { gasLimitAtomic: _gas, ...envelope } = body;
         effects.push({ ...envelope, envelopeHash: hashObject(envelope) });
     }
     const fees = allowance === 0n ? { ...await rpc.prices(), gasLimitAtomic: m.transaction.gasLimitAtomic } : await rpc.estimate(m.transaction);
     if (bridgeUint(fees.gasLimitAtomic, true) > BigInt(m.transaction.gasLimitAtomic))
         bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_estimate_over_ceiling");
-    const economics = validateEconomics((BigInt(account.latestNonceAtomic) + BigInt(effects.length)).toString(), { ...fees, gasLimitAtomic: m.transaction.gasLimitAtomic });
+    const approved = bridgeApprovedPrices(fees);
+    const economics = validateEconomics((BigInt(account.latestNonceAtomic) + BigInt(effects.length)).toString(), { ...fees, ...approved, gasLimitAtomic: m.transaction.gasLimitAtomic });
     const { gasLimitAtomic: _gas, ...transaction } = m.transaction;
-    const body = { role: "bridge", ...transaction, economics, feeQuote: await rpc.feeQuote({ economics }), provisionalGas: allowance === 0n };
+    const body = { role: "bridge", ...transaction, economics, feeQuote: await rpc.feeQuote({ economics }),
+        provisionalGas: allowance === 0n, feeCeiling: approved.feeCeiling };
     effects.push({ ...body, envelopeHash: hashObject(body) });
     const total = effects.reduce((sum, e) => sum + BigInt(e.feeQuote.totalQuoteWei) + BigInt(e.valueAtomic), 0n);
     if (total > BigInt(m.request.maxNativeDebitWei))
@@ -40,7 +54,7 @@ export async function freezeBridgeEnvelopes(m, account, rpc) {
 export function bridgeExpiry(m, decoded, account, preparedAt, now) {
     let expires = BigInt(Date.parse(preparedAt)) + 300000n;
     if (decoded.protocol.kind === "across") {
-        const contract = bridgeDeployment(m.request.fromChainId, m.request.toChainId, m.tool), p = decoded.protocol;
+        const contract = bridgeDeployment(m.request.fromChainId, m.request.toChainId, m.tool, m.request.fromToken), p = decoded.protocol;
         if (contract.quoteTimeBufferAtomic === null || contract.fillDeadlineBufferAtomic === null)
             bridgeFailure("APN_PROVIDER_PROTOCOL", "across_time_contract");
         assertProtocolTime(m, decoded, account);
@@ -55,7 +69,7 @@ export function bridgeExpiry(m, decoded, account, preparedAt, now) {
 function assertProtocolTime(m, decoded, account) {
     if (decoded.protocol.kind !== "across")
         return;
-    const p = decoded.protocol, contract = bridgeDeployment(m.request.fromChainId, m.request.toChainId, m.tool), now = BigInt(account.block.timestampAtomic);
+    const p = decoded.protocol, contract = bridgeDeployment(m.request.fromChainId, m.request.toChainId, m.tool, m.request.fromToken), now = BigInt(account.block.timestampAtomic);
     if (contract.quoteTimeBufferAtomic === null || contract.fillDeadlineBufferAtomic === null ||
         BigInt(p.quoteTimestamp) > now || now - BigInt(p.quoteTimestamp) > BigInt(contract.quoteTimeBufferAtomic) ||
         now >= BigInt(p.fillDeadline) || BigInt(p.fillDeadline) > now + BigInt(contract.fillDeadlineBufferAtomic))
@@ -73,21 +87,23 @@ export async function guardBridgeEffect(op, role, source, destination, now) {
     if (source.origin !== i.sourceRpcOrigin || destination.origin !== i.destinationRpcOrigin || source.chainId !== m.request.fromChainId ||
         destination.chainId !== m.request.toChainId)
         bridgeFailure("APN_RPC_CONFIG", "bridge_frozen_RPC_origin");
-    const [sourceDeployment, destinationDeployment] = await Promise.all([source.deployment(m.tool, m.request.toChainId), destination.deployment(m.tool, m.request.fromChainId)]);
+    const [sourceDeployment, destinationDeployment] = await Promise.all([source.deployment(m.tool, m.request.toChainId, m.request.fromToken), destination.deployment(m.tool, m.request.fromChainId, m.request.toToken)]);
     for (const [frozen, current] of [[i.sourceDeployment, sourceDeployment], [i.destinationDeployment, destinationDeployment]]) {
         if (current.contractHash !== frozen.contractHash || current.codeHash !== frozen.codeHash || current.configurationHash !== frozen.configurationHash)
             bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_drift");
     }
-    const account = await source.account(m.sender, m.approvalAddress), envelope = effect.envelope, c = envelope.economics;
+    const account = await source.account(m.sender, m.approvalAddress, m.request.fromToken), envelope = effect.envelope, c = envelope.economics;
     assertProtocolTime(m, i.decoded, account);
     if (account.latestNonceAtomic !== c.nonceAtomic || account.pendingNonceAtomic !== c.nonceAtomic)
         bridgeFailure("APN_OPERATION_BLOCKED", "bridge_nonce_changed");
     if (account.allowanceAtomic !== (role === "approval" ? "0" : m.request.amountAtomic))
         bridgeFailure("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "bridge_exact_allowance_changed");
     if (BigInt(account.balanceAtomic) < BigInt(m.request.amountAtomic))
-        bridgeFailure("APN_INSUFFICIENT_ASSET", "source_USDC_balance");
+        bridgeFailure("APN_INSUFFICIENT_ASSET", "source_asset_balance");
     const estimate = await source.estimate({ chainId: envelope.chainId, from: envelope.from, to: envelope.to, data: envelope.data,
         valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic });
+    // `c` is the owner-approved maximum: the preparation quote raised by the stated headroom. A fresh estimate inside
+    // that maximum proceeds on the signed envelope; only an estimate above the approved maximum ends the operation.
     if (bridgeUint(estimate.gasLimitAtomic, true) > BigInt(c.gasLimitAtomic) || BigInt(estimate.maxFeePerGasAtomic) > BigInt(c.maxFeePerGasAtomic) ||
         BigInt(estimate.maxPriorityFeePerGasAtomic) > BigInt(c.maxPriorityFeePerGasAtomic))
         bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "fresh_execution_estimate_over_cap");

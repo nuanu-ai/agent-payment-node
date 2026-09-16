@@ -1,6 +1,7 @@
 import type { EvmChainId } from "../evm-asset.js";
 import type { EvmFeeQuote } from "../evm-ports.js";
 import type { Address, Economics, Hex } from "../model.js";
+import type { RailStatusIdentifier } from "../rail-status-binding.js";
 export type BridgeTool = "across" | "stargateV2";
 export interface BridgeRouteRequest {
     readonly fromChainId: EvmChainId;
@@ -30,6 +31,7 @@ export interface BridgeProviderBinding {
 export interface BridgeFee {
     readonly name: string;
     readonly chainId: EvmChainId;
+    /** `"native"` is the chain's first-class native coin, never the provider's zero-address wire sentinel. */
     readonly asset: Address | "native";
     readonly amountAtomic: string;
     readonly included: boolean;
@@ -216,6 +218,13 @@ export interface BridgeDestinationProof {
     readonly relayerCredit: Hex | null;
     readonly repaymentChainIdAtomic: string | null;
 }
+/** The stated headroom the owner approves: `economics` is `quoted * (1 + headroomBps/10_000)`, rounded up. */
+export interface BridgeFeeCeiling {
+    readonly policy: "apn.bridge-fee-headroom.v1";
+    readonly headroomBps: number;
+    readonly quotedMaxFeePerGasAtomic: string;
+    readonly quotedMaxPriorityFeePerGasAtomic: string;
+}
 export interface BridgeEnvelope {
     readonly role: "approval" | "bridge";
     readonly chainId: EvmChainId;
@@ -226,6 +235,7 @@ export interface BridgeEnvelope {
     readonly economics: Economics;
     readonly feeQuote: EvmFeeQuote;
     readonly provisionalGas: boolean;
+    readonly feeCeiling: BridgeFeeCeiling;
     readonly envelopeHash: string;
 }
 export interface BridgeTransactionProof {
@@ -290,7 +300,8 @@ export interface BridgeResidualAllowance {
 }
 export interface BridgeProviderObservation {
     readonly status: "not_found" | "pending" | "completed_observed" | "partial_observed" | "refund_observed" | "failed_observed" | "unknown";
-    readonly destinationTransactionHash: Hex | null;
+    /** The destination transaction in its own rail's form: an EVM 32-byte hash or a base58 Solana signature. */
+    readonly destinationTransactionHash: RailStatusIdentifier | null;
     readonly observedAt: string;
     readonly responseHash: string | null;
 }

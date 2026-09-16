@@ -9,6 +9,8 @@ import { SOLANA_GENESIS, SOLANA_USDC } from "../../src/chain-policy.js";
 import { sha256 } from "../../src/canonical.js";
 import type { RailApprovalPort, RailPreparedTransfer } from "../../src/direct-rail-ports.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
+import type { WaitPort } from "../../src/ports.js";
+import { ApnError } from "../../src/errors.js";
 import { StateStore } from "../../src/state.js";
 import { associatedUsdc } from "../../src/solana/accounts.js";
 import { SolanaLocalAdapter } from "../../src/solana/local-adapter.js";
@@ -24,8 +26,18 @@ export class SolanaWrapping implements WrappingSecretPort {
 export class SolanaApproval implements RailApprovalPort {
   calls: Parameters<RailApprovalPort["approve"]>[0][] = [];
   refuse = false;
+  /** Stands in for the time the owner spends reading the screen. */
+  onApprove: (() => void) | undefined;
   async approve(input: Parameters<RailApprovalPort["approve"]>[0]): Promise<void> {
-    this.calls.push(input); if (this.refuse) throw new Error("synthetic approval refusal");
+    this.calls.push(input); this.onApprove?.(); if (this.refuse) throw new Error("synthetic approval refusal");
+  }
+}
+export class SolanaWait implements WaitPort {
+  readonly waits: number[] = [];
+  interrupt = false;
+  nowMs(): number { return 0; }
+  async wait(milliseconds: number): Promise<"elapsed" | "interrupted"> {
+    this.waits.push(milliseconds); return this.interrupt ? "interrupted" : "elapsed";
   }
 }
 export class SolanaTestRpc implements SolanaRpcPort {
@@ -35,7 +47,14 @@ export class SolanaTestRpc implements SolanaRpcPort {
   sender = ""; sourceAta = ""; destinationAta = "";
   genesis = SOLANA_GENESIS; finalized = true; absentHistory = false; submissionTimeout = false;
   blockHeight = 100n; fee = 5000n; rent = 2039280n; native = 5_000_000_000n; token = 9_000_000n;
-  destinationExists = false; corruptMint = false; corruptTokenOwner = false;
+  lastValidBlockHeight = 200n;
+  frozenFeeUnavailable = false;
+  /** Set to model a validator that hands back a different recent blockhash after preparation. */
+  reboundBlockhash: string | undefined;
+  /** Simulation control: transport losses to serve first, then either an error or a clean run. */
+  simulateTransportLosses = 0; simulateError: unknown = null; simulateUnits = 450n; simulateCalls = 0;
+  destinationExists = false; corruptMint = false; corruptTokenOwner = false; simulateMalformed = false;
+  private blockhashCalls = 0;
   failed = false; corruptEffect = false; corruptSignature = false;
   prepared?: RailPreparedTransfer;
   async bind(sender: string): Promise<void> { this.sender = sender; this.sourceAta = await associatedUsdc(sender); this.destinationAta = await associatedUsdc(SOL_RECIPIENT); }
@@ -44,8 +63,18 @@ export class SolanaTestRpc implements SolanaRpcPort {
     switch (method) {
       case "getGenesisHash": return this.genesis;
       case "getMultipleAccounts": return { context: { slot: 300n }, value: (params[0] as string[]).map((key) => this.account(key)) };
-      case "getLatestBlockhash": return { context: { slot: 300n }, value: { blockhash: SOL_BLOCKHASH, lastValidBlockHeight: 200n } };
-      case "getFeeForMessage": return { context: { slot: 300n }, value: this.fee };
+      case "getLatestBlockhash": return { context: { slot: 300n },
+        value: { blockhash: this.blockhashCalls++ > 0 ? this.reboundBlockhash ?? SOL_BLOCKHASH : SOL_BLOCKHASH, lastValidBlockHeight: this.lastValidBlockHeight } };
+      case "simulateTransaction": {
+        this.simulateCalls++;
+        if (this.simulateTransportLosses-- > 0) throw new ApnError("APN_RPC_PROTOCOL", "synthetic simulation transport loss");
+        if (this.simulateMalformed) return { context: { slot: 300n }, value: { logs: [], unitsConsumed: this.simulateUnits } };
+        return { context: { slot: 300n }, value: { err: this.simulateError, logs: [], unitsConsumed: this.simulateUnits, accounts: null, returnData: null } };
+      }
+      // A node answers null for a message whose blockhash it has already forgotten, which is what an owner
+      // who read the screen for two minutes leaves behind. The fresh reference the send guard takes prices fine.
+      case "getFeeForMessage":
+        return { context: { slot: 300n }, value: this.frozenFeeUnavailable && this.blockhashCalls <= 1 ? null : this.fee };
       case "getBlockHeight": return this.blockHeight;
       case "getMinimumBalanceForRentExemption": return this.rent;
       case "sendTransaction": {
@@ -105,13 +134,16 @@ export class SolanaTestRpc implements SolanaRpcPort {
     }
     return { slot: 320n, meta: { err: this.error(), fee: this.fee, preBalances, postBalances, preTokenBalances, postTokenBalances },
       transaction: { signatures: [this.corruptSignature ? "2".repeat(88) : getSignatureFromTransaction(wire)],
-        message: { accountKeys, recentBlockhash: SOL_BLOCKHASH, instructions } } };
+        message: { accountKeys, recentBlockhash: message.lifetimeToken, instructions } } };
   }
 }
 function info(owner: string, data: Buffer, lamports: bigint) { return { owner, data: [data.toString("base64"), "base64"], executable: false, lamports, rentEpoch: 0n, space: BigInt(data.length) }; }
 
-export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc; wrapping?: SolanaWrapping; approval?: SolanaApproval; admit?: boolean; abandonApproval?: OperationAbandonApprovalPort } = {}) {
-  const now = new Date("2026-09-08T10:00:00.000Z"); const clock = { now: () => new Date(now) };
+export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc; wrapping?: SolanaWrapping; approval?: SolanaApproval; admit?: boolean; abandonApproval?: OperationAbandonApprovalPort; wait?: SolanaWait } = {}) {
+  const now = new Date("2026-09-08T10:00:00.000Z"); let offset = 0;
+  const clock = { now: () => new Date(now.getTime() + offset) };
+  const advance = (milliseconds: number): void => { offset += milliseconds; };
+  const wait = options.wait ?? new SolanaWait();
   const wrapping = options.wrapping ?? new SolanaWrapping(); const storage = new ChainAccountStore(root, wrapping);
   const account = await storage.ensureLocal({ profile: "solana-test", rail: "solana", create: async () => {
     const seed = Buffer.alloc(32, 47); const signer = await createKeyPairSignerFromPrivateKeyBytes(seed); return { seed, address: signer.address };
@@ -119,7 +151,7 @@ export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc
   const rpc = options.rpc ?? new SolanaTestRpc(); await rpc.bind(account.address);
   const adapter = new SolanaLocalAdapter(storage, rpc, clock.now); const approval = options.approval ?? new SolanaApproval();
   const core = new ApnCore({ state: new StateStore(root), chainAccounts: storage, directRails: [adapter], railApproval: approval,
-    chainPolicyApproval: { approve: async () => {} }, clock, ...(options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {}) });
+    chainPolicyApproval: { approve: async () => {} }, clock, wait, ...(options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {}) });
   if (options.admit !== false) for (const asset of ["sol", "usdc"] as const) {
     const admitted = await core.execute({ command: "policy.admit-solana", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "0.003" });
     assert.equal(admitted.ok, true, admitted.error?.message);
@@ -132,5 +164,5 @@ export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc
     rpc.prepared = (await core.rails.records.findOperation(id))!.prepared;
     return id;
   };
-  return { core, storage, wrapping, adapter, approval, account, rpc, now, prepare };
+  return { core, storage, wrapping, adapter, approval, account, rpc, now, prepare, advance, wait };
 }

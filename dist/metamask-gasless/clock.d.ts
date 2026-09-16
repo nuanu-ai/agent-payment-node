@@ -8,7 +8,11 @@ export declare class MetaMaskGaslessClock {
     constructor(clock: ClockPort);
     check(op?: MetaMaskGaslessOperationRecord, observations?: readonly string[]): number;
     fresh(observedAt: string, op?: MetaMaskGaslessOperationRecord): number;
-    beforeDispatch(op: MetaMaskGaslessOperationRecord, observedAt: string): number;
+    /**
+     * The dispatch clock runs on the observation taken at the guard, never on the frozen prepare snapshot: a snapshot
+     * carried forward is identity and designation evidence, never a claim that the chain read is still current.
+     */
+    beforeDispatchAtCurrent(op: MetaMaskGaslessOperationRecord, observedAt: string): number;
     beforeApproval(op: MetaMaskGaslessOperationRecord): number;
     /** Forensic ordering for a pre-effect failure, never a new authorization sample. */
     failureAt(op: MetaMaskGaslessOperationRecord): string;

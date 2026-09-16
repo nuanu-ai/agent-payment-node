@@ -1,6 +1,8 @@
 import { canonicalJson, sha256 } from "../canonical.js";
 import { BridgeHttps } from "./https.js";
-import { BRIDGE_CHAINS, BRIDGE_USDC, bridgeHex, bridgeJson, bridgeRecord, validateBridgeRequest } from "./validation.js";
+import { railStatusIdentifier } from "../rail-status-binding.js";
+import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgePeerToken, validateBridgeRequest } from "./asset-registry.js";
+import { bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
 const ORIGIN = "https://li.quest/v1";
 export const LIFI_ROUTE_RESPONSE_BYTES = 512 * 1024;
 export const LIFI_INVENTORY_RESPONSE_BYTES = 4 * 1024 * 1024;
@@ -12,15 +14,15 @@ export class LifiProvider {
         this.now = now;
     }
     async inventory() {
-        const pairs = BRIDGE_CHAINS.flatMap((from) => BRIDGE_CHAINS.filter((to) => to !== from).map((to) => ({ from, to })));
+        const pairs = BRIDGE_CHAINS.flatMap((from) => BRIDGE_ASSET_REGISTRY[from].tokens.flatMap((asset) => asset.peers.map((to) => ({ from, to, fromToken: asset.address, toToken: bridgePeerToken(asset, to).address }))));
         const [chains, tokens, tools, connections] = await Promise.all([
             this.get("/chains", { chainTypes: "EVM" }, LIFI_INVENTORY_RESPONSE_BYTES),
             this.get("/tokens", { chains: BRIDGE_CHAINS.join(",") }, LIFI_INVENTORY_RESPONSE_BYTES),
             this.get("/tools", { chains: BRIDGE_CHAINS.map(String) }, LIFI_INVENTORY_RESPONSE_BYTES),
-            Promise.all(pairs.map(async ({ from, to }) => {
-                const response = await this.get("/connections", { fromChain: String(from), toChain: String(to), fromToken: BRIDGE_USDC[from],
-                    toToken: BRIDGE_USDC[to], allowSwitchChain: "false", allowDestinationCall: "false" }, LIFI_INVENTORY_RESPONSE_BYTES);
-                return { fromChainId: from, toChainId: to, status: response.status, responseHash: sha256(response.body),
+            Promise.all(pairs.map(async ({ from, to, fromToken, toToken }) => {
+                const response = await this.get("/connections", { fromChain: String(from), toChain: String(to), fromToken,
+                    toToken, allowSwitchChain: "false", allowDestinationCall: "false" }, LIFI_INVENTORY_RESPONSE_BYTES);
+                return { fromChainId: from, toChainId: to, fromToken, toToken, status: response.status, responseHash: sha256(response.body),
                     response: bridgeJson(response.body, LIFI_INVENTORY_RESPONSE_BYTES) };
             })),
         ]);
@@ -85,12 +87,22 @@ export function normalizeLifiStatus(response, observedAt) {
         if (r.receiving !== undefined && r.receiving !== null) {
             const receiving = bridgeRecord(r.receiving);
             if (receiving.txHash !== undefined)
-                destinationTransactionHash = bridgeHex(receiving.txHash, 32, 32);
+                destinationTransactionHash = bridgeStatusIdentifier(receiving.txHash);
         }
         return { status, destinationTransactionHash, responseHash, observedAt };
     }
     catch {
         return { status: response.status === 404 ? "not_found" : "unknown", destinationTransactionHash: null, responseHash, observedAt };
     }
+}
+/**
+ * The provider names the destination transaction in its own rail's form. An EVM hash must still be
+ * a 32-byte hash; a Solana signature is accepted as itself. Anything else is refused, never widened.
+ */
+function bridgeStatusIdentifier(value) {
+    const identifier = railStatusIdentifier(value);
+    if (identifier === null)
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "rail_status_identity");
+    return identifier;
 }
 //# sourceMappingURL=provider.js.map

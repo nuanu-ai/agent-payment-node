@@ -1,25 +1,35 @@
 import { metaMaskGaslessApprovalPhrase, metaMaskGaslessApprovalSummary } from "./approval.js";
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
 import { MetaMaskGaslessClock } from "./clock.js";
-import { mmPolicyHash, mmQuote } from "./economics.js";
+import { mmDispatchIntent } from "./dispatch.js";
+import { mmPolicyHash, mmRepriceWithinCap } from "./economics.js";
 import { mmAssertSameBinding } from "./identity.js";
 import { assertMetaMaskGaslessDispatchCapacity } from "./journal/transitions.js";
+import { MM_MIN_REMAINING_MS } from "./model.js";
 import { MetaMaskGaslessObservationService, metaMaskGaslessProviderObservation } from "./observation.js";
 import { metaMaskGaslessOwner } from "./owner.js";
+import { metaMaskGaslessQuote } from "./quotation.js";
 import { mmClassify, mmFail, mmFailure } from "./reasons.js";
+import { mmValidateUnsigned } from "./unsigned.js";
 import { mmSame } from "./validation.js";
+/** A transient check failure is waited out inside the window the owner approved, never past it. */
+const MM_GUARD_ATTEMPTS = 18, MM_GUARD_RETRY_MS = 5_000;
+const MM_TRANSIENT_REASONS = new Set(["mm_gasless_provider_unavailable",
+    "mm_gasless_rpc_unavailable", "mm_gasless_state_busy", "mm_gasless_quote_unstable"]);
 export class MetaMaskGaslessExecution {
     state;
     rpcFor;
     provider;
     save;
+    wait;
     clock;
     observation;
-    constructor(state, rpcFor, provider, clock, save) {
+    constructor(state, rpcFor, provider, clock, save, wait) {
         this.state = state;
         this.rpcFor = rpcFor;
         this.provider = provider;
         this.save = save;
+        this.wait = wait;
         this.clock = new MetaMaskGaslessClock(clock);
         this.observation = new MetaMaskGaslessObservationService(state, rpcFor, provider, this.clock, save);
     }
@@ -82,18 +92,18 @@ export class MetaMaskGaslessExecution {
         let markerWriteStarted = false;
         try {
             const result = await this.state.withLocks(["provider-session:metamask-agent-wallet"], async () => {
-                const observedAt = await this.guard(op);
+                const guarded = await this.steady(op, async () => await this.guard(op));
                 assertMetaMaskGaslessDispatchCapacity(op);
-                const at = new Date(this.clock.beforeDispatch(op, observedAt)).toISOString();
+                const at = new Date(this.clock.beforeDispatchAtCurrent(op, guarded.observedAt)).toISOString();
                 // Persistence must finish before starting any relay-capable helper.
                 markerWriteStarted = true;
                 op = await this.save(op, { state: "dispatch_pending", submissionAttempts: 1,
-                    dispatchStartedAt: at, failure: null }, at);
+                    dispatchStartedAt: at, dispatch: guarded.dispatch, failure: null }, at);
                 try {
                     const now = this.clock.check(op);
                     if (now >= Date.parse(op.intent.expiresAt))
                         mmFail("mm_gasless_expired");
-                    const value = await this.provider.submit(op.intent);
+                    const value = await this.provider.submit(mmDispatchIntent(op));
                     this.clock.check(op);
                     const hint = metaMaskGaslessProviderObservation(value, op);
                     this.clock.check(op, [hint.observedAt]);
@@ -123,6 +133,11 @@ export class MetaMaskGaslessExecution {
         }
         return await this.observation.run(op, submitted);
     }
+    /**
+     * Every check between the owner's approval and the dispatch marker, re-taken now. The prepared snapshot is
+     * identity and designation evidence; the dispatch clock runs on the read taken here. The owner approved a
+     * maximum, so a fresh quote inside that maximum is priced at execution and its delegation re-derived.
+     */
     async guard(op) {
         this.clock.beforeApproval(op);
         const owner = await metaMaskGaslessOwner(this.state, op.intent.profile, op.intent.binding);
@@ -136,28 +151,60 @@ export class MetaMaskGaslessExecution {
         if (rpc.chainId !== op.intent.request.chainId || rpc.endpointHash !== op.intent.initialSnapshot.endpointHash ||
             rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin)
             mmFail("mm_gasless_rpc_binding");
-        const snapshot = await rpc.snapshot({ owner: binding.address, delegationHash: op.intent.delegationHash,
+        let current = await this.chainState(op, rpc, op.intent.delegationHash);
+        const fresh = mmRepriceWithinCap(await metaMaskGaslessQuote(this.provider, binding, op.intent.request, rpc.rpcUrl, this.clock), op.intent.request, binding);
+        this.clock.check(op);
+        let dispatch = null;
+        if (!mmSame(fresh, op.intent.quote)) {
+            dispatch = { quote: fresh, ...await this.redelegate(op, binding, fresh) };
+            // The permission counter is keyed by the delegation, so the repriced one is proven unconsumed in its own right.
+            current = await this.chainState(op, rpc, dispatch.delegationHash);
+        }
+        this.clock.beforeDispatchAtCurrent(op, current.observedAt);
+        return { observedAt: current.observedAt, dispatch };
+    }
+    /** The provider builds the unsigned delegation over the repriced batch; APN verifies it independently. */
+    async redelegate(op, binding, quote) {
+        const input = { owner: binding.address, chainId: op.intent.request.chainId, executions: quote.executions };
+        const unsigned = mmValidateUnsigned(await this.provider.buildUnsigned(input), input);
+        this.clock.check(op);
+        return unsigned;
+    }
+    async chainState(op, rpc, delegationHash) {
+        const snapshot = await rpc.snapshot({ owner: op.intent.binding.address, delegationHash,
             grossAtomic: op.intent.request.grossAtomic });
         this.clock.check(op);
         const current = validateMetaMaskGaslessSnapshot(snapshot, { chainId: op.intent.request.chainId,
             endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: op.intent.request.grossAtomic });
-        this.clock.beforeDispatch(op, current.observedAt);
+        this.clock.beforeDispatchAtCurrent(op, current.observedAt);
         for (const key of ["safeState", "headState"]) {
             if (current[key].ownerCodeHash !== op.intent.initialSnapshot[key].ownerCodeHash ||
                 current[key].designation !== op.intent.initialSnapshot[key].designation)
                 mmFail("mm_gasless_rpc_binding");
         }
-        const value = await this.provider.quote({ binding, chainId: op.intent.request.chainId, token: op.intent.token,
-            recipient: op.intent.request.recipient, netAtomic: op.intent.quote.netAtomic, rpcUrl: rpc.rpcUrl });
-        this.clock.check(op);
-        const quote = mmQuote(value, op.intent.request, binding, op.intent.quote.netAtomic);
-        if (!mmSame(quote, op.intent.quote))
-            mmFail("mm_gasless_quote_invalid");
-        this.clock.beforeDispatch(op, current.observedAt);
-        return current.observedAt;
+        return current;
+    }
+    /**
+     * A rate limit, a transport failure or a price move above the owner's maximum is waited out while the approved
+     * window still leaves room for the dispatch itself. An interrupt, an exhausted window and every definite
+     * refusal end the operation at once, and nothing here can run once the marker write has started.
+     */
+    async steady(op, act) {
+        for (let attempt = 1;; attempt += 1) {
+            try {
+                return await act();
+            }
+            catch (error) {
+                if (attempt >= MM_GUARD_ATTEMPTS || !transient(error) ||
+                    Date.parse(op.intent.expiresAt) - this.clock.check(op) <= MM_MIN_REMAINING_MS + MM_GUARD_RETRY_MS ||
+                    await this.wait.wait(MM_GUARD_RETRY_MS) === "interrupted")
+                    throw error;
+            }
+        }
     }
     async halt(op, error) {
-        const failure = mmClassify(error, "mm_gasless_internal");
+        // A check that could not complete names the guard; the unknown token stays reserved for an unclassified failure.
+        const failure = mmClassify(error, "mm_gasless_guard_unavailable");
         if (["mm_gasless_state_corrupt", "mm_gasless_state_security", "mm_gasless_state_busy"].includes(failure.reason))
             throw error;
         try {
@@ -170,5 +217,10 @@ export class MetaMaskGaslessExecution {
             throw saveError;
         }
     }
+}
+function transient(error) {
+    const reason = mmClassify(error, "mm_gasless_guard_unavailable").reason;
+    // A quote above the owner's maximum can fall back inside it; a balance below the transfer cannot.
+    return MM_TRANSIENT_REASONS.has(reason) || reason === "mm_gasless_fee_cap";
 }
 //# sourceMappingURL=execution.js.map

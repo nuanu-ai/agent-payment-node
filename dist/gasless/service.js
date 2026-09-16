@@ -8,7 +8,7 @@ import { GaslessObservationService } from "./observation.js";
 import { gaslessObservationRpcEnv } from "./observation-source.js";
 import { GaslessPreparation } from "./prepare.js";
 import { publicGaslessOperation } from "./receipt.js";
-import { gaslessDeployment } from "./registry.js";
+import { gaslessAsset, gaslessDeployment, gaslessIntentAsset } from "./registry.js";
 import { snapshotSchema } from "./schema.js";
 import { transitionGasless } from "./transitions.js";
 import { gaslessFailure } from "./validation.js";
@@ -23,12 +23,13 @@ export class GaslessService {
     }
     async balance(profile, chainId) {
         const row = gaslessDeployment(chainId), { owner } = await gaslessOwner(this.context.state, profile);
+        const asset = gaslessAsset(chainId, row.token);
         const rpc = this.dependencies().rpcFor(chainId);
         const snapshot = await rpc.snapshot(owner.address);
         if (!snapshotSchema.safeParse(snapshot).success || snapshot.chainId !== chainId || snapshot.owner !== owner.address ||
             snapshot.token !== row.token)
             gaslessFailure("APN_RPC_PROTOCOL", "gasless_balance_binding");
-        return { profile: owner.profile, provider: "local", chain_id: chainId, token: row.token, symbol: "USDC", decimals: 6,
+        return { profile: owner.profile, provider: "local", chain_id: chainId, token: row.token, symbol: asset.symbol, decimals: asset.decimals,
             address: owner.address, balance_atomic: snapshot.balanceAtomic, native_balance_wei: snapshot.nativeBalanceWei,
             paymaster_allowance_atomic: snapshot.allowanceAtomic, delegation: snapshot.delegation,
             block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read" };
@@ -44,8 +45,9 @@ export class GaslessService {
             if (op.terminal || op.state !== "awaiting_approval")
                 return publicGaslessOperation(op);
             const approval = this.dependencies().approval;
+            const unit = gaslessIntentAsset(op.intent).symbol;
             if (approval === undefined)
-                throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve this USDC fee transfer in a foreground terminal.", {
+                throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", `Approve this ${unit} fee transfer in a foreground terminal.`, {
                     nextActions: [`apn gasless transfer approve --operation ${op.operationId}`],
                 });
             return publicGaslessOperation(await this.execution(op).approve(op, approval));

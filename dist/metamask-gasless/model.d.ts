@@ -147,6 +147,13 @@ export interface MetaMaskGaslessIntent extends MetaMaskGaslessUnsignedResult {
     readonly expiresAt: string;
     readonly policyHash: string;
 }
+/**
+ * The exact batch and delegation actually dispatched, when the provider's price at the guard differed from the
+ * prepared one. Written once, in the same durable transition as the dispatch marker, and never afterwards.
+ */
+export interface MetaMaskGaslessDispatch extends MetaMaskGaslessUnsignedResult {
+    readonly quote: MetaMaskGaslessQuote;
+}
 export interface MetaMaskGaslessApproval {
     readonly fingerprint: string;
     readonly approvedAt: string;
@@ -210,6 +217,8 @@ export interface MetaMaskGaslessMutable {
     readonly approval: MetaMaskGaslessApproval | null;
     readonly submissionAttempts: 0 | 1;
     readonly dispatchStartedAt: string | null;
+    /** Absent in records written before the reprice guard existed; those carry the prepared material only. */
+    readonly dispatch?: MetaMaskGaslessDispatch | null | undefined;
     readonly providerObservation: MetaMaskGaslessProviderObservation | null;
     readonly cursor: MetaMaskGaslessCursor;
     readonly observation: MetaMaskGaslessObservation | null;

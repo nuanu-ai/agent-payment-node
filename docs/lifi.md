@@ -1,10 +1,10 @@
-# LI.FI EVM cross-chain USDC
+# LI.FI EVM cross-chain assets
 
-This APN 0.5.19 package includes local-wallet route selection and execution for
-canonical USDC between Ethereum, Base and Arbitrum One. It implements Across V4
-and Stargate V2 Taxi through the LI.FI API. Package availability, source tests
-and installed-package tests are separate from real mainnet acceptance, which
-remains **0/3**, and named human acceptance remains open.
+This APN 0.5.20 package includes local-wallet route selection and execution for
+the admitted assets between Ethereum, Base and Arbitrum One. It implements
+Across V4 and Stargate V2 Taxi through the LI.FI API. Package availability,
+source tests and installed-package tests are separate from real mainnet
+acceptance, which remains **0/3**, and named human acceptance remains open.
 
 | Profile | Custody and execution | Bridge availability |
 | --- | --- | --- |
@@ -36,11 +36,47 @@ fields with response hashes.
 Configure each selected chain explicitly. The generic EVM `--rpc-url` option is
 not a fallback for bridge operations.
 
-| Chain | RPC environment variable | Canonical USDC, six decimals |
+### Admitted chains and native coins
+
+| Chain | RPC environment variable | Native coin |
 | --- | --- | --- |
-| `eip155:1` | `APN_ETHEREUM_RPC_URL` | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |
-| `eip155:8453` | `APN_BASE_RPC_URL` | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| `eip155:42161` | `APN_ARBITRUM_RPC_URL` | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` |
+| `eip155:1` Ethereum | `APN_ETHEREUM_RPC_URL` | ETH, 18 decimals |
+| `eip155:8453` Base | `APN_BASE_RPC_URL` | ETH, 18 decimals |
+| `eip155:42161` Arbitrum One | `APN_ARBITRUM_RPC_URL` | ETH, 18 decimals |
+
+A native coin is a first-class registry row, not a token with a sentinel
+address. It pays gas and Stargate's LayerZero messaging fee, and APN translates
+the provider's zero-address wire sentinel into that row at the parse boundary.
+The zero address is refused as a bridgeable asset, and a native **principal** is
+not admitted at all: the LI.FI fee forwarder call, the allowance model and the
+exact three-`Transfer`-log delivery proof are all ERC-20 shaped.
+
+### Admitted token rows
+
+| Chain | Token | Decimals | Address | Upgradeability pinned | Tools | Peers |
+| --- | --- | --- | --- | --- | --- | --- |
+| `eip155:1` | USDC | 6 | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | legacy proxy: implementation and admin slots | Across, Stargate pool 1 | Base, Arbitrum |
+| `eip155:8453` | USDC | 6 | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | legacy proxy: implementation and admin slots | Across, Stargate pool 1 | Ethereum, Arbitrum |
+| `eip155:42161` | USDC | 6 | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` | legacy proxy: implementation and admin slots | Across, Stargate pool 1 | Ethereum, Base |
+| `eip155:1` | WBTC | 8 | `0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599` | immutable: code hash only | Across | Arbitrum |
+| `eip155:42161` | WBTC | 8 | `0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f` | beacon proxy: EIP-1967 beacon slot, beacon code, `implementation()` | Across | Ethereum |
+
+Both sides of a route must be admitted rows with the same pair key, the same
+decimals, and each other in their peer sets. Peer sets are asymmetric on
+purpose: Base admits no canonical WBTC, so no WBTC direction touches Base.
+
+### Assets refused rather than approximated
+
+| Asset | Why it is refused |
+| --- | --- |
+| Native ETH principal | fee forwarder, allowance and `Transfer`-log evidence are ERC-20 shaped |
+| WETH on any admitted chain | LI.FI itself filters the route: Across does not send WETH to EOAs, so delivery would be native ETH with no `Transfer` log to prove |
+| USDT (Ethereum) | the Tether contract carries an owner-settable `basisPointsRate` transfer fee; a storage-only change is invisible to a code-hash pin and breaks the exact three-`Transfer` proof |
+| DAI, cbBTC on these lanes | LI.FI returns no Across route for them between these chains |
+| Any Stargate pool other than `assetId 1` | the pool has not been reviewed the way USDC was |
+| Any fee-on-transfer or rebasing token | the exact-amount `Transfer` proof cannot hold |
+| A proxy with no stable implementation, admin or beacon slot | there is nothing to pin an upgrade against |
+| A fourth EVM chain | `EvmChainId` in `src/evm-asset.ts` is workspace-wide and touches every rail, receipt schema and conflict domain; that is a separate change |
 
 RPC URLs must use public HTTPS without URL credentials, query parameters or
 fragments. APN verifies the exact chain ID, pins resolved public addresses and
@@ -59,7 +95,7 @@ apn bridge routes --profile existing-local \
   --from-token 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
   --to-token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
   --amount 10 --to <recipient> --min-output 9.9 \
-  --max-native-debit-wei 10000000000000000 \
+  --max-native-debit-wei 20000000000000000 \
   --max-route-fee 0.1 --slippage-bps 50
 
 apn bridge prepare --profile existing-local \
@@ -77,24 +113,26 @@ An idempotency replay returns the original operation before any new provider,
 wallet or network dependency. A conflicting key is rejected across all money
 operation kinds and profiles.
 
-APN accepts one source bridge call, canonical USDC and no destination contract
-call. The finite decoders require the reviewed LI.FI Diamond and FeeForwarder,
+APN accepts one source bridge call, one admitted asset pair and no destination
+contract call. The finite decoders require the reviewed LI.FI Diamond and FeeForwarder,
 the `lifi-api` integrator, zero referrer and exact fee distribution. Across
 requires an empty message and no exclusivity. Stargate requires Taxi with empty
 compose message, options and `oftCmd`. Arbitrary calldata, swaps, Permit2,
 typed-data requests, approval resets and provider-added effects are rejected.
-Contract bytecode, Diamond selectors, token implementations and decimals,
-protocol configuration and reciprocal Stargate peers are checked against the
-reviewed pins on both chains. An upgrade or unknown deployment fails closed.
+Contract bytecode, Diamond selectors, the registry row's upgradeability
+evidence and exact `decimals()`, protocol configuration and reciprocal Stargate
+peers are checked against the reviewed pins on both chains. An upgrade or
+unknown deployment fails closed.
 
 ## Fees and foreground approval
 
-`--amount`, `--min-output` and `--max-route-fee` are decimal USDC strings with
-at most six fractional digits. `--max-native-debit-wei` is an integer native-ETH
-budget on the source chain. APN uses integer arithmetic and rejects exponent
-notation, signs, whitespace, excess precision and uint256 overflow.
+`--amount`, `--min-output` and `--max-route-fee` are decimal strings at the
+selected asset's own precision, taken from its registry row: six fractional
+digits for USDC, eight for WBTC. `--max-native-debit-wei` is an integer
+native-coin budget on the source chain. APN uses integer arithmetic and rejects
+exponent notation, signs, whitespace, excess precision and uint256 overflow.
 
-The USDC loss bound is source principal minus the materialized minimum output;
+The token loss bound is source principal minus the materialized minimum output;
 it includes fees and slippage and must fit `--max-route-fee`. Included token fees
 are counted once. Stargate's native messaging fee must equal transaction value
 and one declared additional native fee. Approval gas is a separate paid effect.
@@ -113,13 +151,38 @@ bridge and refuses to exceed those frozen caps. Waiting for safe approval is
 not required before sending the bridge, but safe approval is required before
 successful completion.
 
+### Stated fee headroom
+
+A bridge is priced at preparation and signed later, so the frozen EIP-1559
+prices are deliberately **not** the quote. Each envelope freezes the quoted
+`maxFeePerGas` and `maxPriorityFeePerGas` raised by exactly
+`BRIDGE_FEE_HEADROOM_BPS`, currently **5000 basis points (+50%)**, rounded up,
+under the policy identity `apn.bridge-fee-headroom.v1`. That raised pair is the
+**owner-approved maximum**: it is what the envelope freezes, what custody signs,
+what bounds the debit on chain, and what `--max-native-debit-wei` is checked
+against. Because the maximum includes the headroom, the native budget you
+approve must cover the worst case, not the quote.
+
+Before each first send APN re-estimates and refuses
+`fresh_execution_estimate_over_cap` only when the current gas limit,
+`maxFeePerGas` or `maxPriorityFeePerGas` exceeds that approved maximum. A price
+that rises within the headroom no longer ends the operation. APN never reprices
+a consented envelope: the fingerprint, the signature and the on-chain cap are
+all the maximum the owner approved, and the headroom is stored per envelope as
+`feeCeiling` with the quote it was derived from, re-derived and re-checked on
+every durable read. There is no other multiplier anywhere in the rail, and
+there is still no paymaster equivalent of the token fee cap.
+
 ```sh
 apn bridge approve --operation <operation-id>
 ```
 
-The foreground terminal shows both chains, assets, sender, recipient, principal,
-minimum output, declared and implicit fees, native budget, separate effect
-nonces and gas ceilings, RPC origins, policy, fingerprint and expiry. Approval
+The foreground terminal shows both chains, the admitted asset rows with their
+symbols, decimals and upgradeability, each chain's native coin, sender,
+recipient, principal, minimum output, declared and implicit fees, native budget,
+separate effect nonces and gas ceilings, the stated fee headroom with both the
+quoted and the approved maximum execution fee, RPC origins, policy, fingerprint
+and expiry. Approval
 requires the six-character approval code bound to the full fingerprint within 60 seconds
 or the earlier operation expiry. APN checks the same intent again after consent.
 The transaction materialization lasts at most 300 seconds, shortened by Across
@@ -163,15 +226,30 @@ observed residual allowance.
 proof checks the reconstructed signature and frozen transaction, block
 membership, receipt, token movements, LI.FI and protocol events and fees.
 Across delivery matches the full relay tuple, origin/deposit ID, effective
-recipient/output and a canonical USDC transfer. Across repayment credit is
+recipient/output and a transfer of the admitted destination token. Across repayment credit is
 preserved as its complete bytes32 value with its repayment chain; it need not
 be an EVM address or equal the token payer. Slow fills require zero repayment
 credit/chain and a transfer from the destination SpokePool reserves. Stargate delivery matches
-nonzero GUID, source endpoint, receiver and amount with a canonical USDC
-transfer, including a later successful retry of a cached delivery.
+nonzero GUID, source endpoint, receiver and amount with a transfer of the
+admitted destination token, including a later successful retry of a cached
+delivery.
 
 LI.FI status supplies a hint, not completion authority. `PENDING`, not-found,
 completed, partial, refunded, failed and unknown observations remain distinct.
+The hint names the destination transaction in its own rail's form: an EVM
+32-byte hash, lowercased exactly as before, or a canonical base58 Solana
+signature of exactly 64 bytes. No other string is a transaction identity, and a
+Solana signature can never address the EVM destination reader, so a
+Solana-destination hint falls through to the exact event scan. Until 0.5.18 the
+hint was forced through the EVM hex reader, which threw on a base58 signature
+and silently collapsed the whole observation to `unknown` with a null hint.
+
+A bridge takes the lock of the chain it signs on: every EVM source keeps the
+`evm:<chain id>:<address>` domain it has always taken, while a source on LI.FI's
+Solana chain id `1151111081099710` takes the same `solana:<genesis>:<address>`
+domain a direct Solana transfer takes. One money operation per profile therefore
+holds across both, and an EVM bridge and a Solana transfer never collide. An
+account that is not its chain's own address form is refused rather than mapped.
 Unproved partial/refund/failure observations stay unresolved. A bounded exact
 event scan checks at most 1024 blocks and 128 logs per resume and validates its
 canonical cursor before advancing. Reorgs discard provisional inclusion while
@@ -208,14 +286,22 @@ fee recipient `0xc06ebbefd94032b85424d51906e2a335efae264b`. The owner pin follow
 the independent safe-block observations on all three chains; fee distribution
 still binds the recipient. The original capture retains the mismatch, and
 tests require the corrected owner while rejecting either identity changing.
-Synthetic journeys exercise both protocols in the three
-required directions and recovery without real payment submission.
+The registry's WBTC rows were read from mainnet at a safe block: Ethereum WBTC
+has no proxy slot set, and Arbitrum's bridged WBTC resolves through its EIP-1967
+beacon slot to beacon `0xE72ba9418b5f2Ce0A6a40501Fe77c6839Aa37333` and
+implementation `0x3f770Ac673856F105b586bb393d122721265aD46`. Route availability
+for every admitted pair was confirmed with unauthenticated LI.FI `/v1/quote`
+calls, which are rate limited to 75 per two hours per IP. Synthetic journeys
+exercise both protocols in the three required directions, a WBTC route on a
+second chain, the fee-headroom boundary on both sides, and recovery without
+real payment submission.
 
 | Required real mainnet acceptance | Status |
 | --- | --- |
 | Ethereum to Base canonical USDC | OPEN |
 | Base to Arbitrum canonical USDC | OPEN |
 | Arbitrum to Ethereum canonical USDC | OPEN |
+| Arbitrum to Ethereum WBTC | OPEN |
 | Named human receiving acceptance | OPEN |
 
 The three live rows need fresh action-time quotes, at least two selectable

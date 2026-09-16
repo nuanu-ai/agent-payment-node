@@ -142,14 +142,15 @@ test("MM provider MFA remains visible through restart and completes by observati
 test("MM pre-effect expiry, refusal, clock rollback and state drift fail without submission", async () => {
   const root = await sandbox();
   try {
-    for (const mode of ["expired", "refused", "rollback", "throw-rollback", "counter", "fee-change"] as const) {
+    for (const mode of ["expired", "refused", "rollback", "throw-rollback", "counter", "fee-above-ceiling"] as const) {
       const f = await mmFixture(join(root, mode)), { id } = await f.prepare();
       if (mode === "expired") f.now.setTime(f.now.getTime() + 300_000);
       if (mode === "refused") f.approval.accepted = false;
       if (mode === "rollback" || mode === "throw-rollback") f.approval.hook = () => f.now.setTime(f.now.getTime() - 1);
       if (mode === "throw-rollback") f.approval.error = new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "TTY unavailable");
       if (mode === "counter") f.rpc.state = { ...f.rpc.state, counterAtomic: "1" };
-      if (mode === "fee-change") f.provider.fees = ["40000"];
+      // A fee inside the owner's ceiling is now repriced and dispatched; only a fee above it still refuses.
+      if (mode === "fee-above-ceiling") f.provider.fees = ["50001"];
       const result = await f.core.execute({ command: "gasless.transfer.approve", operationId: id });
       assert.equal(result.ok, true, JSON.stringify(result.error));
       const saved = await f.record(id); assert.equal(saved.state, "failed_before_effect", mode);

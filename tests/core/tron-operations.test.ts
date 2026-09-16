@@ -86,7 +86,7 @@ test("TRON missing uncommitted effect ends safely, while a sealed expired transa
   assert.equal(((await s.core.execute({ command: "operation.resume", operationId: id })).operation as { state: string }).state, "failed_before_effect");
   const next = await s.prepare("trx", "tron-sealed-expiry-0002"); const nextRecord = (await s.core.rails.records.findOperation(next))!;
   const signing = transitionRail(nextRecord, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect" }); await s.core.rails.records.persist(signing);
-  const effect = await s.adapter.sign({ account: signing.account, operationId: next, fingerprint: signing.fingerprint, prepared: signing.prepared });
+  const effect = await s.adapter.sign({ account: signing.account, operationId: next, fingerprint: signing.fingerprint, prepared: signing.prepared, send: null });
   s.now.setTime(s.now.getTime() + 121_000);
   const result = await s.core.execute({ command: "operation.resume", operationId: next }); assert.equal((result.operation as { state: string }).state, "failed_before_effect"); assert.equal(s.rpc.submissions.length, 0);
   assert.deepEqual(await s.storage.effect(s.account, next, signing.fingerprint), effect);

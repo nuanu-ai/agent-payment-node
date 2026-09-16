@@ -1,3 +1,4 @@
+import { mmDispatchIntent } from "./dispatch.js";
 import { mmPrivateHash } from "./identity.js";
 import { assertMetaMaskGaslessObservationCapacity } from "./journal/transitions.js";
 import { metaMaskGaslessOwner } from "./owner.js";
@@ -44,7 +45,7 @@ export class MetaMaskGaslessObservationService {
                     (rpc.endpointHash !== op.intent.initialSnapshot.endpointHash || rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin))) {
                     mmFail("mm_gasless_rpc_binding");
                 }
-                chain = await rpc.observe(op.intent, op.cursor, providerObservation);
+                chain = await rpc.observe(mmDispatchIntent(op), op.cursor, providerObservation);
                 chain = { ...chain, observation: { ...chain.observation, ...this.source() } };
                 this.clock.check(op, [chain.observation.observedAt,
                     ...(chain.settlement === null ? [] : [chain.settlement.observedAt])]);
@@ -91,7 +92,7 @@ export class MetaMaskGaslessObservationService {
             this.clock.check(op);
             const hint = await this.state.withLocks(["provider-session:metamask-agent-wallet"], async () => {
                 this.clock.check(op);
-                const value = await this.provider.observe(op.intent);
+                const value = await this.provider.observe(mmDispatchIntent(op));
                 this.clock.check(op);
                 return metaMaskGaslessProviderObservation(value, op);
             });

@@ -8,8 +8,8 @@ import { mmFail } from "../reasons.js";
 import { mmExact, mmHash, mmIso, mmSame } from "../validation.js";
 import { validateMetaMaskGaslessContinuity, validateMetaMaskGaslessOperation } from "./validation.js";
 
-const PATCH_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "providerObservation",
-  "cursor", "observation", "settlement", "failure"] as const;
+const PATCH_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "dispatch",
+  "providerObservation", "cursor", "observation", "settlement", "failure"] as const;
 
 function capacity(): never { return mmFail("mm_gasless_record_capacity"); }
 function corrupt(): never { return mmFail("mm_gasless_state_corrupt"); }
@@ -29,7 +29,7 @@ export function newMetaMaskGaslessOperation(identityInput: MetaMaskGaslessOperat
     idempotencyHash, requestHash, createdAt: mmIso(intent.preparedAt), intent };
   const fingerprint = hashObject(mmImmutable(immutable));
   const mutable: MetaMaskGaslessMutable = { state: "awaiting_approval", approval: null, submissionAttempts: 0,
-    dispatchStartedAt: null, providerObservation: null,
+    dispatchStartedAt: null, dispatch: null, providerObservation: null,
     cursor: { startBlock: intent.initialSnapshot.safeBlock, nextBlockAtomic: intent.initialSnapshot.safeBlock.numberAtomic,
       previousEndBlock: null }, observation: null, settlement: null, failure: null };
   const entry = { ...mutable, at: immutable.createdAt, previousHash: MM_ZERO_HASH };

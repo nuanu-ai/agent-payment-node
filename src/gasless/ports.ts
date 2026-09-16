@@ -44,7 +44,10 @@ export interface GaslessRpcPort extends GaslessObservationPort {
   assertChain(): Promise<void>;
   /** Verifies endpoints, protocol and fresh fees; an approved offer is checked without alteration. */
   snapshot(owner: Address, approvedGas?: GaslessGas): Promise<GaslessSnapshot>;
-  /** Estimates the offer's exact UserOperation shape at `fees`, signed by a throwaway key under a USDC balance override. */
+  /**
+   * Estimates the offer's exact UserOperation shape at `fees`, signed by a throwaway key under a fee-token balance
+   * override whose storage layout the adapter proves against the chain before using it.
+   */
   mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate>;
   /** v4 intents need the `fees` their guard chose before disclosure; earlier intents use their frozen fees. */
   estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate>;

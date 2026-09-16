@@ -14,7 +14,9 @@ export declare function gaslessFailure(code: ErrorCode, reason: string): never;
 export declare function gaslessRecord(value: unknown, code?: ErrorCode): Record<string, unknown>;
 export declare function gaslessExact(value: unknown, keys: readonly string[], code?: ErrorCode): Record<string, unknown>;
 export declare function gaslessUint(value: unknown, positive?: boolean, code?: ErrorCode): bigint;
-export declare function gaslessDecimal(value: unknown, positive?: boolean): string;
+export declare const GASLESS_MAX_DECIMALS = 36;
+/** Scales one operator amount by the admitting registry row's `decimals`; never by a baked scale. */
+export declare function gaslessDecimal(value: unknown, decimals: number, positive?: boolean): string;
 export declare function gaslessAddress(value: unknown, code?: ErrorCode): Address;
 export declare function gaslessHex(value: unknown, maximum?: number, bytes?: number, code?: ErrorCode): Hex;
 export declare function gaslessHash(value: unknown, code?: ErrorCode): string;

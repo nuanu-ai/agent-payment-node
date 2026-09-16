@@ -1,4 +1,5 @@
 import { hashObject } from "../../canonical.js";
+import { mmDispatchIntent } from "../dispatch.js";
 import { mmPrivateHash } from "../identity.js";
 import { MM_RECEIPT_VERSION, type MetaMaskGaslessOperationRecord, type MetaMaskGaslessPublicOperation,
   type MetaMaskGaslessReceipt } from "../operation-model.js";
@@ -36,7 +37,9 @@ export function metaMaskGaslessProofClass(operation: MetaMaskGaslessOperationRec
 }
 
 export function publicMetaMaskGaslessOperation(operation: MetaMaskGaslessOperationRecord): MetaMaskGaslessPublicOperation {
-  const op = validateMetaMaskGaslessOperation(operation), intent = op.intent, settlement = op.settlement;
+  const op = validateMetaMaskGaslessOperation(operation), settlement = op.settlement;
+  // The prepared intent stays immutable; the price, batch and delegation reported are the ones dispatched.
+  const intent = mmDispatchIntent(op);
   const transactionHash = settlement?.txHash ?? op.observation?.candidateTxHash ?? null;
   return {
     schema_version: op.schemaVersion, kind: op.kind, operation_id: op.operationId, profile: intent.profile,
