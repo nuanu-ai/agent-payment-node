@@ -28,7 +28,8 @@ const rpcObservedSafe = z.strictObject({ provenance: z.literal("rpc_observed_unt
   safeBlockHash: wordSchema, observedAt: isoSchema, rpcOrigin: z.string().url(),
   logsHash: hashSchema, receiptHash: hashSchema, protocolInputDigest: hashSchema,
   protocolProofHash: hashSchema.nullable(), executionAdmitted: z.literal(false), bridgeCompletion: z.literal(false) });
-const sourceProof = z.union([safe, rpcObservedSafe]);
+const rpcObservedNearSafe = rpcObservedSafe.omit({ provenance: true }).extend({ provenance: z.literal("rpc_observed_untrusted_near_tron_base_source_v1") });
+const sourceProof = z.union([safe, rpcObservedSafe, rpcObservedNearSafe]);
 const phase = z.enum(["staged_untrusted", "signing_started", "sealed", "submitting", "submitted_pending",
   "unknown_finality", "source_observed_untrusted", "source_confirmed", "source_reverted"]);
 const signedHex = z.string().regex(/^0x(?:[a-f0-9]{2})*$/u).max(32_770);
@@ -45,6 +46,7 @@ export type NonEvmSourceJournal = z.infer<typeof schema>;
 export type NonEvmSourceBinding = Pick<NonEvmSourceJournal, "profileHash" | "operationId" | "draftIntegrityHash" | "route" | "sourceCall" | "maxSourceNativeDebitWei" | "admissionProof" | "createdAt">;
 export type SafeSourceObservation = z.infer<typeof safe>;
 export type RpcObservedCircleSourceObservation = z.infer<typeof rpcObservedSafe>;
+export type RpcObservedNearTronSourceObservation = z.infer<typeof rpcObservedNearSafe>;
 type Phase = z.infer<typeof phase>;
 type Snapshot = z.infer<typeof snapshot>;
 function corrupt(): never { return bridgeFailure("APN_STATE_CORRUPT", "non_evm_source_journal"); }
@@ -110,6 +112,9 @@ export function validateNonEvmSourceJournal(value: unknown): NonEvmSourceJournal
       BigInt(e.safeSourceProof.safeBlockNumberAtomic) < BigInt(e.safeSourceProof.blockNumberAtomic))) corrupt();
     if (e.safeSourceProof?.provenance === "rpc_observed_untrusted_circle_v2_base_source_v1" &&
       (j.route !== "base_usdc_to_solana_usdc_circle_cctp_v2" || e.phase !== "source_observed_untrusted" ||
+        (e.safeSourceProof.status === "success") !== (e.safeSourceProof.protocolProofHash !== null))) corrupt();
+    if (e.safeSourceProof?.provenance === "rpc_observed_untrusted_near_tron_base_source_v1" &&
+      (j.route !== "base_usdc_to_tron_usdt_lifi_near_intents" || e.phase !== "source_observed_untrusted" ||
         (e.safeSourceProof.status === "success") !== (e.safeSourceProof.protocolProofHash !== null))) corrupt();
     prior = e;
   }
@@ -223,7 +228,7 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
   }
   /** Stores a claimed safe observation for offline state testing; neither phase nor provenance grants trust. */
   async observeSafeSource(profileHash: string, operationId: string, expectedHash: string,
-    observation: SafeSourceObservation | RpcObservedCircleSourceObservation, at: string): Promise<NonEvmSourceJournal> {
+    observation: SafeSourceObservation | RpcObservedCircleSourceObservation | RpcObservedNearTronSourceObservation, at: string): Promise<NonEvmSourceJournal> {
     if (!safe.safeParse(observation).success) blocked();
     return this.change(profileHash, operationId, expectedHash, j => advance(j,
       { ...snapshotOf(j), phase: "source_observed_untrusted",
@@ -235,6 +240,18 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
     if (!rpcObservedSafe.safeParse(observation).success) blocked();
     return this.change(profileHash, operationId, expectedHash, async j => {
       if (j.route !== "base_usdc_to_solana_usdc_circle_cctp_v2" || j.transactionHash === null ||
+        j.transactionHash !== observation.transactionHash || j.submissionAttempts !== 1) blocked();
+      await this.assertReservation(j);
+      return advance(j, { ...snapshotOf(j), phase: "source_observed_untrusted",
+        safeSourceProof: observation, reason: null }, at);
+    });
+  }
+  /** The caller and structural RPC port cannot assert authenticated source finality. */
+  async recordRpcObservedNearTronSource(profileHash: string, operationId: string, expectedHash: string,
+    observation: RpcObservedNearTronSourceObservation, at: string): Promise<NonEvmSourceJournal> {
+    if (!rpcObservedNearSafe.safeParse(observation).success) blocked();
+    return this.change(profileHash, operationId, expectedHash, async j => {
+      if (j.route !== "base_usdc_to_tron_usdt_lifi_near_intents" || j.transactionHash === null ||
         j.transactionHash !== observation.transactionHash || j.submissionAttempts !== 1) blocked();
       await this.assertReservation(j);
       return advance(j, { ...snapshotOf(j), phase: "source_observed_untrusted",
