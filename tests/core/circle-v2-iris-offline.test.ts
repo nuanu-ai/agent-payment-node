@@ -22,7 +22,7 @@ function fixture() {
     decodedMessage: { sourceDomain: "6", destinationDomain: "5", nonce: BigInt(nonce).toString(),
       sender: `0x${"11".repeat(20)}`, recipient, destinationCaller: zero, messageBody: body,
       decodedMessageBody: { burnToken: `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`,
-        mintRecipient: ata, amount: "1000000", messageSender: `0x${"11".repeat(20)}` } } }] };
+        mintRecipient: ata, amount: "1000000", messageSender: `0x${"11".repeat(20)}`, hookData: "0x" } } }] };
 }
 function mutate(fn: (raw: ReturnType<typeof fixture>) => void): void {
   const raw = fixture(); fn(raw); assert.throws(() => inspectCircleV2IrisOffline(raw, expected), { code: "APN_PROVIDER_PROTOCOL" });
@@ -38,6 +38,14 @@ test("decodes one schema-shaped V2 burn as an unauthenticated hint", () => {
   assert.equal(hint.expirationBlock, "99999999");
   assert.equal(hint.attestationAuthenticated, false);
   assert.equal(hint.bridgeCompletion, false);
+});
+test("accepts uppercase decoded hook hex with identical bytes", () => {
+  const raw = fixture();
+  raw.messages[0]!.message += "aBcD";
+  raw.messages[0]!.decodedMessage.messageBody += "aBcD";
+  raw.messages[0]!.decodedMessage.decodedMessageBody.hookData = "0xABCD";
+  const hint = inspectCircleV2IrisOffline(raw, { ...expected, hookData: "0xabcd" });
+  assert.equal(hint.hookData, "0xabcd");
 });
 test("rejects ambiguous or mismatched Iris envelope", () => {
   mutate(raw => { raw.messages.push(structuredClone(raw.messages[0]!)); });

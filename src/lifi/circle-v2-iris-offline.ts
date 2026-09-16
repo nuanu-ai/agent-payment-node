@@ -28,6 +28,7 @@ export interface CircleV2IrisHint {
   readonly message: string;
   readonly attestation: string;
   readonly nonce: string;
+  /** Shape-checked Iris API metadata; not an onchain-verified V2 message nonce. */
   readonly eventNonce: string;
   readonly sender: string;
   readonly recipient: string;
@@ -132,7 +133,8 @@ export function inspectCircleV2IrisOffline(response: unknown, expected: CircleV2
     decodedBody.maxFee !== undefined && !sameDecimal(decodedBody.maxFee, maxFee) ||
     decodedBody.feeExecuted !== undefined && !sameDecimal(decodedBody.feeExecuted, feeExecuted) ||
     decodedBody.expirationBlock !== undefined && !sameDecimal(decodedBody.expirationBlock, expirationBlock) ||
-    decodedBody.hookData !== undefined && decodedBody.hookData !== hookData) fail("decoded_message_binding");
+    decodedBody.hookData !== undefined &&
+      (decodedBody.hookData === "0x" ? "0x" : hex(decodedBody.hookData)) !== hookData) fail("decoded_message_binding");
   return { kind: "offline_circle_cctp_v2_iris_hint", sourceTransactionHash, message, attestation,
     nonce: nonceWord, eventNonce, sender, recipient, mintRecipient, amountAtomic: amount.toString(),
     maxFeeAtomic: maxFee.toString(), feeExecutedAtomic: feeExecuted.toString(),
