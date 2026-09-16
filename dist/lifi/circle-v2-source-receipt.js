@@ -75,12 +75,12 @@ export function decodeCircleV2BaseSourceReceiptOffline(intent, transactionValue,
         fail("burn_intent_binding");
     message = bridgeHex(message, 12 * 1024, 376, "APN_RPC_PROTOCOL");
     if (int(part(message, 0, 4)) !== 1n || int(part(message, 4, 4)) !== 6n || int(part(message, 8, 4)) !== 5n ||
-        part(message, 12, 32) !== ZERO || part(message, 44, 32) !== word(BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES) ||
+        part(message, 12, 32) !== ZERO || part(message, 44, 32) !== word(BASE_CCTP_V2_TOKEN_MESSENGER) ||
         part(message, 76, 32) !== SOLANA_TOKEN_MESSENGER_BYTES32 || part(message, 108, 32) !== ZERO ||
         int(part(message, 140, 4)) !== BigInt(intent.minFinalityThreshold) || int(part(message, 144, 4)) !== 0n ||
         int(part(message, 148, 4)) !== 1n || part(message, 152, 32) !== word(BASE_USDC) ||
         part(message, 184, 32).toLowerCase() !== ata || int(part(message, 216, 32)) !== amount ||
-        part(message, 248, 32) !== word(from) || int(part(message, 280, 32)) !== maxFee ||
+        part(message, 248, 32) !== word(BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES) || int(part(message, 280, 32)) !== maxFee ||
         int(part(message, 312, 32)) !== 0n || int(part(message, 344, 32)) !== 0n ||
         part(message, 376, (message.length - 2) / 2 - 376).toLowerCase() !== hook)
         fail("message_burn_binding");

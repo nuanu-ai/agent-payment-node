@@ -16,11 +16,11 @@ const burnAbi = parseAbi(["event DepositForBurn(address indexed burnToken,uint25
 const sentAbi = parseAbi(["event MessageSent(bytes message)"]);
 const word = (address: string) => `0x${"0".repeat(24)}${address.slice(2).toLowerCase()}` as Hex;
 const n = (value: bigint, width: number) => value.toString(16).padStart(width * 2, "0");
-function message(overrides: { amount?: bigint; ata?: Hex; sender?: Hex; nonce?: Hex } = {}): Hex {
+function message(overrides: { amount?: bigint; ata?: Hex; headerSender?: Hex; bodySender?: Hex; nonce?: Hex } = {}): Hex {
   return (`0x${n(1n,4)}${n(6n,4)}${n(5n,4)}${(overrides.nonce ?? BRIDGE_ZERO_WORD).slice(2)}` +
-    `${word(BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES).slice(2)}${solanaMessenger.slice(2)}${BRIDGE_ZERO_WORD.slice(2)}` +
+    `${(overrides.headerSender ?? word(BASE_CCTP_V2_TOKEN_MESSENGER)).slice(2)}${solanaMessenger.slice(2)}${BRIDGE_ZERO_WORD.slice(2)}` +
     `${n(1000n,4)}${n(0n,4)}${n(1n,4)}${word(usdc).slice(2)}${(overrides.ata ?? ata).slice(2)}` +
-    `${n(overrides.amount ?? 100000000n,32)}${(overrides.sender ?? word(sender)).slice(2)}` +
+    `${n(overrides.amount ?? 100000000n,32)}${(overrides.bodySender ?? word(BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES)).slice(2)}` +
     `${n(500000n,32)}${n(0n,32)}${n(0n,32)}`) as Hex;
 }
 function fixture() {
@@ -60,6 +60,8 @@ test("rejects mismatched intent, burn fields, message body and nonzero nonce", (
   rejects(f => { f.receipt.logs[0]!.data = encodeAbiParameters([{ type: "bytes" }], [message({ amount: 99999999n })]); });
   rejects(f => { f.receipt.logs[0]!.data = encodeAbiParameters([{ type: "bytes" }], [message({ ata: BRIDGE_ZERO_WORD })]); });
   rejects(f => { f.receipt.logs[0]!.data = encodeAbiParameters([{ type: "bytes" }], [message({ nonce: `0x${"01".repeat(32)}` })]); });
+  rejects(f => { f.receipt.logs[0]!.data = encodeAbiParameters([{ type: "bytes" }], [message({ headerSender: word(sender) })]); });
+  rejects(f => { f.receipt.logs[0]!.data = encodeAbiParameters([{ type: "bytes" }], [message({ bodySender: word(sender) })]); });
   rejects(f => { f.receipt.logs[0]!.data = "0x1234"; });
   rejects(f => { f.receipt.logs[1]!.data = encodeAbiParameters(burnAbi[0].inputs.filter(i => !("indexed" in i)), [99999999n, ata, 5, solanaMessenger, BRIDGE_ZERO_WORD, 500000n, "0x"]); });
   assert.throws(() => decodeCircleV2BaseSourceReceiptOffline({ ...intent, solanaAtaBytes32: BRIDGE_ZERO_WORD }, fixture().tx, fixture().receipt), /circle_v2_source_/u);

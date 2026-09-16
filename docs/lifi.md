@@ -499,8 +499,9 @@ and [LI.FI status schema](https://docs.li.fi/agents/reference/endpoint-specs).
 `src/lifi/circle-v2-source-receipt.ts` parses one caller-authenticated successful,
 safe Base transaction and receipt for the direct Circle `TokenMessengerWithFees`
 address. It requires exactly one `DepositForBurn` emitted by the underlying Base `TokenMessengerV2`
-with `TokenMessengerWithFees` as depositor, and one
-`MessageSent(bytes)` emitted by Base `MessageTransmitterV2`. It compares the V2
+with `TokenMessengerWithFees` as depositor and burn-body message sender, and one
+`MessageSent(bytes)` emitted by Base `MessageTransmitterV2` with
+`TokenMessengerV2` as the message-header sender. It compares the V2
 message header and burn body to every expected burn field: Base USDC, amount,
 sender, Solana USDC ATA bytes32, domain 5, Solana V2 TokenMessengerMinter,
 zero destination caller, maximum fee, finality threshold, and hook data. The
