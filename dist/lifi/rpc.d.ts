@@ -1,6 +1,7 @@
 import type { EvmChainId } from "../evm-asset.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
+import { BridgeHttps } from "./https.js";
 import type { BridgeBlock, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 import type { BridgeRpcFactory, BridgeRpcPort } from "./ports.js";
 export declare const BRIDGE_RPC_ENV: {
@@ -8,7 +9,10 @@ export declare const BRIDGE_RPC_ENV: {
     readonly 8453: "APN_BASE_RPC_URL";
     readonly 42161: "APN_ARBITRUM_RPC_URL";
 };
-export declare function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>): BridgeRpcFactory;
+export declare function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options?: {
+    readonly transport?: Pick<BridgeHttps, "request">;
+    readonly wait?: (milliseconds: number) => Promise<void>;
+}): BridgeRpcFactory;
 export declare class BridgeRpc implements BridgeRpcPort {
     readonly chainId: EvmChainId;
     readonly origin: string;
