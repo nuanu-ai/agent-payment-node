@@ -600,7 +600,7 @@ export declare class NonEvmSourceJournalRepository extends SecureStateStore {
     private reservationPath;
     private reserve;
     private assertReservation;
-    /** A synthetically supplied proof is permanently untrusted. An adapter must introduce a new versioned admission contract. */
+    /** Legacy synthetic proof remains permanently untrusted for live source execution. */
     stage(binding: NonEvmSourceBinding): Promise<NonEvmSourceJournal>;
     /** Stage a new record with a durable, untrusted protocol input identity. */
     stageV2(binding: NonEvmSourceBindingV2): Promise<NonEvmSourceJournalV2>;
