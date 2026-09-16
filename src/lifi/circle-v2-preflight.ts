@@ -83,9 +83,14 @@ export async function inspectCircleV2Preflight(input: CircleV2PreflightInput, tr
     bridgeHex(await transport({ target: "base", method: "eth_call", params: [{ from: payer, to: source, data, value: `0x${value.toString(16)}` },
       { blockHash: block.hash, requireCanonical: true }] }));
   } catch { return fail("simulation_reverted"); }
-  let after: ReturnType<typeof sourceBlock>;
-  try { after = sourceBlock(await transport({ target: "base", method: "eth_getBlockByNumber", params: ["latest", false] })); }
+  let after: ReturnType<typeof sourceBlock>, pinned: ReturnType<typeof sourceBlock>;
+  try {
+    after = sourceBlock(await transport({ target: "base", method: "eth_getBlockByNumber", params: ["latest", false] }));
+    pinned = sourceBlock(await transport({ target: "base", method: "eth_getBlockByNumber", params: [`0x${block.number.toString(16)}`, false] }));
+  }
   catch { return fail("base_unavailable"); }
-  if (after.number !== block.number || after.hash !== block.hash || after.timestamp !== block.timestamp || !fresh(after.timestamp)) fail("stale_block");
+  if (after.number < block.number || !fresh(after.timestamp) ||
+    (expiry.mode === "BLOCK_NUMBER" && after.number >= integer(expiry.expiresAtBlock)) ||
+    pinned.number !== block.number || pinned.hash !== block.hash || pinned.timestamp !== block.timestamp || !fresh(pinned.timestamp)) fail("stale_block");
   return { kind: "circle_v2_preflight_snapshot", executionAdmitted: false, blockNumber: block.number.toString(), blockHash: block.hash, abiSignature: ABI_SIGNATURE };
 }
