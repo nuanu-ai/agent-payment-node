@@ -41,6 +41,42 @@ test("the time the owner spends reading the screen no longer consumes the sendin
   assert.equal((receipt.receipt as { send_binding: { blockReference: string } }).send_binding.blockReference, REBOUND_BLOCKHASH);
 });
 
+test("a frozen block reference that died while the owner read the screen is replaced, not refused", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("usdc");
+  const frozen = (await s.core.rails.records.findOperation(id))!.prepared.lastValidBlockHeight;
+  assert.equal(frozen, "200");
+  s.rpc.reboundBlockhash = REBOUND_BLOCKHASH;
+  // Mainnet reality: a blockhash lives about a minute, so a careful owner outlives the frozen reference.
+  s.approval.onApprove = () => {
+    s.advance(150_000);
+    s.rpc.blockHeight = 300n; s.rpc.lastValidBlockHeight = 500n;
+  };
+  const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal(approved.ok, true, approved.error?.message);
+  const sent = (await s.core.rails.records.findOperation(id))!;
+  assert.equal(sent.state, "completed");
+  assert.equal(sent.send?.blockReference, REBOUND_BLOCKHASH);
+  assert.equal(sent.send?.lastValidBlockHeight, "500");
+  assert.equal(s.rpc.simulateCalls, 1);
+  assert.equal(lifetime(s.rpc.submissions[0]!), REBOUND_BLOCKHASH);
+});
+
+test("a frozen reference the network has forgotten is repriced by the send guard, not refused", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("usdc");
+  s.rpc.reboundBlockhash = REBOUND_BLOCKHASH;
+  // Two minutes of reading: the node can no longer price the frozen message, and answers null for its fee.
+  s.approval.onApprove = () => { s.advance(120_000); s.rpc.frozenFeeUnavailable = true; };
+  const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal(approved.ok, true, approved.error?.message);
+  const sent = (await s.core.rails.records.findOperation(id))!;
+  assert.equal(sent.state, "completed");
+  assert.equal(sent.send?.blockReference, REBOUND_BLOCKHASH);
+  assert.equal(s.rpc.simulateCalls, 1);
+  assert.equal(lifetime(s.rpc.submissions[0]!), REBOUND_BLOCKHASH);
+});
+
 test("reading past the approval deadline still refuses before anything is signed", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare();

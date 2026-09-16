@@ -75,8 +75,12 @@ export class SolanaLocalAdapter implements DirectRailPort {
     const snapshot = await transferSnapshot(this.rpc, account, prepared.asset, prepared.recipient);
     if (snapshot.createsRecipientAccount && !prepared.createsRecipientAccount) expired();
     const rent = snapshot.createsRecipientAccount ? rpcAtomic(await this.rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }])) : 0n;
-    const fee = await messageFee(this.rpc, message.messageBase64);
-    if (fee > atomic(prepared.economics.networkFeeMaximumAtomic) || rent > atomic(prepared.economics.recipientRentAtomic)) expired();
+    // A reference the network has already forgotten cannot be priced at all: getFeeForMessage answers null for it.
+    // Before the send guard runs, that says nothing about this transfer, because the guard prices the reference it
+    // acquires and nothing can be sealed without its binding. Pricing the frozen message here would put the owner's
+    // reading time back inside the sending window.
+    if (send !== null && await messageFee(this.rpc, message.messageBase64) > atomic(prepared.economics.networkFeeMaximumAtomic)) expired();
+    if (rent > atomic(prepared.economics.recipientRentAtomic)) expired();
     requireSolanaFunds(snapshot.native, snapshot.token, atomic(prepared.amountAtomic), atomic(prepared.economics.maximumNativeDebitAtomic), prepared.asset.kind === "native");
   }
   /**
@@ -153,7 +157,13 @@ export class SolanaLocalAdapter implements DirectRailPort {
     const stored = await this.account(account.profile);
     if (stored === null || canonicalJson(stored) !== canonicalJson(account)) mismatch();
   }
+  /**
+   * Only a reference that can still be signed into has to be alive. Before the send guard runs there is no such
+   * reference: nothing can be sealed without a binding, and the guard acquires a fresh window of its own. Requiring
+   * the frozen one here would put the owner's reading time back inside the sending window, which is the whole bug.
+   */
   private async validBlock(prepared: RailPreparedTransfer, send: RailSendBinding | null): Promise<void> {
+    if (send === null) return;
     const lastValidBlockHeight = railSendLifetime(prepared, send).lastValidBlockHeight;
     if (lastValidBlockHeight === null || rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }])) > atomic(lastValidBlockHeight)) expired();
   }
