@@ -31,6 +31,56 @@ function tron(value) { try {
 catch {
     return fail("tron_recipient");
 } }
+function quoteIdentity(value) {
+    const response = bridgeRecord(value);
+    if (typeof response.timestamp !== "string" || !Number.isFinite(Date.parse(response.timestamp)) ||
+        typeof response.signature !== "string" || response.signature.length < 16)
+        fail("quote_identity");
+    return hashObject({ timestamp: response.timestamp, signature: response.signature,
+        quoteRequest: response.quoteRequest, quote: response.quote });
+}
+/** Existing v1 records hashed the whole quote envelope, including an ephemeral correlationId.
+ * Rebind their provider status to every field that can change the source or destination effect.
+ */
+export function legacyStatusQuoteMatchesRecord(value, record) {
+    try {
+        const outer = bridgeRecord(value), request = bridgeRecord(outer.quoteRequest), quote = bridgeRecord(outer.quote);
+        return typeof outer.timestamp === "string" && Number.isFinite(Date.parse(outer.timestamp)) &&
+            typeof outer.signature === "string" && outer.signature.length >= 16 &&
+            request.dry === false && request.swapType === "EXACT_INPUT" && request.slippageTolerance === 100 &&
+            request.originAsset === BASE_USDC && request.depositType === "ORIGIN_CHAIN" &&
+            request.destinationAsset === TRON_USDT && request.refundType === "ORIGIN_CHAIN" &&
+            request.recipientType === "DESTINATION_CHAIN" && request.amount === record.amountInAtomic &&
+            bridgeAddress(request.refundTo) === record.refundTo && request.recipient === record.recipient &&
+            request.deadline === record.quoteRequestDeadline &&
+            bridgeAddress(quote.depositAddress) === record.depositAddress &&
+            (quote.depositMemo === null || quote.depositMemo === undefined || quote.depositMemo === "") &&
+            bridgeUint(quote.amountIn) === BigInt(record.amountInAtomic) &&
+            bridgeUint(quote.minAmountIn) <= BigInt(record.amountInAtomic) &&
+            bridgeUint(quote.amountOut) === BigInt(record.quotedAmountOutAtomic) &&
+            bridgeUint(quote.minAmountOut) === BigInt(record.minAmountOutAtomic) &&
+            Date.parse(String(quote.deadline)) === Date.parse(record.quoteDeadline);
+    }
+    catch {
+        return false;
+    }
+}
+export function oneClickStatusQuoteMatchesRecord(value, record) {
+    try {
+        if (quoteIdentity(value) === record.quoteHash)
+            return true;
+    }
+    catch {
+        return false;
+    }
+    return legacyStatusQuoteMatchesRecord(value, record);
+}
+export function assertOneClickPostApproval(initial, fresh, maxNativeDebit, effectiveDeadlineMs, nowMs) {
+    if (fresh.nonce !== initial.nonce || fresh.gas > initial.gas || fresh.fee > initial.fee ||
+        fresh.tip > initial.tip || fresh.nativeDebit > maxNativeDebit ||
+        nowMs > effectiveDeadlineMs - 30_000)
+        fail("post_approval_drift");
+}
 export function inspectOneClickSourceQuote(response, request, minOutput, maxLoss, now) {
     const outer = bridgeRecord(response), echo = bridgeRecord(outer.quoteRequest), quote = bridgeRecord(outer.quote);
     for (const [key, value] of Object.entries(request))
@@ -53,7 +103,7 @@ export function inspectOneClickSourceQuote(response, request, minOutput, maxLoss
         fail("deposit_memo");
     if (deposit === getAddress("0x0000000000000000000000000000000000000000") || deposit === USDC)
         fail("deposit_address");
-    return { deposit, amountIn, amountOut, minimum, quoteHash: hashObject(response),
+    return { deposit, amountIn, amountOut, minimum, quoteHash: quoteIdentity(response),
         quoteDeadline: new Date(responseDeadline).toISOString(), effectiveDeadline: new Date(effectiveDeadline).toISOString() };
 }
 export class OneClickSourceService {
@@ -158,13 +208,10 @@ export class OneClickSourceService {
                 amountInAtomic: q.amountIn.toString(), minAmountOutAtomic: q.minimum.toString(),
                 quotedAmountOutAtomic: q.amountOut.toString(), sourceBlockHash: initial.blockHash,
                 sourceCall: { to: USDC, data, nonce: initial.nonce.toString(), gas: initial.gas.toString(),
-                    maxFeePerGas: initial.fee.toString(), maxPriorityFeePerGas: initial.tip.toString(), maxNativeDebitWei: initial.nativeDebit.toString() } });
+                    maxFeePerGas: initial.fee.toString(), maxPriorityFeePerGas: initial.tip.toString(), maxNativeDebitWei: maxNative.toString() } });
             await new TtyOneClickSourceApproval().approve(record);
             const fresh = await readBase();
-            if (fresh.nonce !== initial.nonce || fresh.gas > initial.gas || fresh.fee > initial.fee ||
-                fresh.tip > initial.tip || fresh.nativeDebit > initial.nativeDebit ||
-                now() > Date.parse(record.effectiveDeadline) - 30_000)
-                fail("post_approval_drift");
+            assertOneClickPostApproval(initial, fresh, maxNative, Date.parse(record.effectiveDeadline), now());
             if (now() > Date.parse(record.effectiveDeadline) - 15_000)
                 fail("quote_expired_before_sign");
             record = await journal.advance(operationId, record.integrityHash, "signing_started");
@@ -209,7 +256,7 @@ export class OneClickSourceService {
         if (response.status === 200) {
             try {
                 const body = bridgeRecord(JSON.parse(response.body));
-                if (hashObject(body.quoteResponse) !== record.quoteHash)
+                if (!oneClickStatusQuoteMatchesRecord(body.quoteResponse, record))
                     fail("status_quote_binding");
                 providerStatus = body.status;
             }
