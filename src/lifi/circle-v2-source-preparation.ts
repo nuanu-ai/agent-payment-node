@@ -34,6 +34,8 @@ export interface CircleV2BaseState {
 /** The implementation must only read Base state and pin token reads and gas estimate to the fresh preflight block. */
 export type CircleV2BaseStateReader = (query: Readonly<{ payer: string; token: string; spender: string; to: string; data: string; valueAtomic: string; draftBlockNumber: string; freshBlockNumber: string; freshBlockHash: string }>) => Promise<CircleV2BaseState>;
 export interface CircleV2SourcePreparationLimits {
+  /** Explicitly frozen maximum token approval for this source intent. */
+  readonly maxAllowanceAtomic: string;
   readonly maxGasLimitAtomic: string;
   readonly maxFeePerGasWei: string;
   readonly maxPriorityFeePerGasWei: string;
@@ -88,8 +90,11 @@ export async function prepareCircleV2BaseSourceReadOnly(draft: CircleV2Preflight
     quantity(state.blockNumber) !== newNumber || bridgeHex(state.blockHash, 32, 32) !== bridgeHex(preflight.blockHash, 32, 32)) fail("base_identity");
   const latest = quantity(state.latestNonceAtomic), pending = quantity(state.pendingNonceAtomic);
   if (latest !== pending) fail("pending_nonce");
-  if (quantity(state.usdcBalanceAtomic) < requiredDebit) fail("usdc_balance");
-  if (quantity(state.usdcAllowanceAtomic) !== requiredDebit) fail("exact_allowance");
+  const balance = quantity(state.usdcBalanceAtomic), allowance = quantity(state.usdcAllowanceAtomic);
+  const maxAllowance = quantity(limits.maxAllowanceAtomic);
+  if (balance < requiredDebit) fail("usdc_balance");
+  if (maxAllowance < requiredDebit || maxAllowance > balance || maxAllowance === (1n << 256n) - 1n ||
+    allowance < requiredDebit || allowance > maxAllowance || allowance === (1n << 256n) - 1n) fail("bounded_allowance");
   const gas = quantity(state.gasLimitAtomic), maxFee = quantity(state.maxFeePerGasWei), priority = quantity(state.maxPriorityFeePerGasWei);
   if (gas === 0n || gas > BRIDGE_MAX_GAS || gas > quantity(limits.maxGasLimitAtomic) || maxFee === 0n || priority > maxFee ||
     maxFee > quantity(limits.maxFeePerGasWei) || priority > quantity(limits.maxPriorityFeePerGasWei)) fail("gas_or_fee_cap");
