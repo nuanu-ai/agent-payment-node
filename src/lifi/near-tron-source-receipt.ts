@@ -40,6 +40,8 @@ export interface NearTronSourceDepositCandidate {
   readonly quoteId: Hex; readonly depositAddress: Address; readonly sourceToken: Address;
   readonly bridgeAmountAtomic: string; readonly facetMinimumOutputAtomic: string;
   readonly tronRecipient: string; readonly facetNonEvmReceiver: Hex;
+  readonly quotedDestinationToken: string; readonly minimumOutputAtomic: string;
+  readonly refundTo: Address;
 }
 function fail(reason: string): never { return bridgeFailure("APN_RPC_PROTOCOL", `near_tron_receipt_${reason}`); }
 function one<T>(logs: readonly BridgeLog[], address: Address, topic: Hex, name: string): T {
@@ -94,5 +96,7 @@ export function inspectNearBaseTronSourceReceiptOffline(
     blockNumberAtomic: receipt.blockNumberAtomic, blockHash, logsHash: sha256(canonicalJson(receipt.logs)),
     transactionId: raw.transactionId, quoteId: quote.quoteId, depositAddress: quote.depositAddress, sourceToken: quote.sourceToken,
     bridgeAmountAtomic: quote.bridgeAmountAtomic, facetMinimumOutputAtomic: quote.facetMinimumOutputAtomic,
-    tronRecipient: quote.quotedTronRecipient, facetNonEvmReceiver: quote.facetNonEvmReceiver };
+    tronRecipient: quote.quotedTronRecipient, facetNonEvmReceiver: quote.facetNonEvmReceiver,
+    quotedDestinationToken: quote.quotedDestinationToken, minimumOutputAtomic: quote.offchainMinimumOutputAtomic,
+    refundTo: binding.sender };
 }
