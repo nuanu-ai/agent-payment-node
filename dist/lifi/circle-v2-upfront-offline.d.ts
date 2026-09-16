@@ -1,5 +1,6 @@
 export interface CircleV2UpfrontInput {
     /** Saved POST /v2/quote/burn/usdc/6/5 request and response. No request is made here. */
+    readonly quoteEndpoint: string;
     readonly quoteRequest: unknown;
     readonly quoteResponse: unknown;
     readonly transaction: unknown;
