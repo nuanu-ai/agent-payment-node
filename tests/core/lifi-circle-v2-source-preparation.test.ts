@@ -48,7 +48,7 @@ function harness(change?: (response: any) => void, options?: { reorg?: boolean; 
 }
 
 const fixedNow = Date.now();
-const limits: CircleV2SourcePreparationLimits = { maxGasLimitAtomic: "100000", maxFeePerGasWei: "2000000000",
+const limits: CircleV2SourcePreparationLimits = { maxAllowanceAtomic: "1020000", maxGasLimitAtomic: "100000", maxFeePerGasWei: "2000000000",
   maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60000 };
 function state(change?: (value: CircleV2BaseState) => void): (query: any) => Promise<CircleV2BaseState> {
   return async query => {
@@ -91,6 +91,17 @@ test("rejects endpoint outage, payer, nonce, allowance, balance, fee and gas dri
     (v: any) => { v.maxFeePerGasWei = "2000000001"; }, (v: any) => { v.blockHash = `0x${"b".repeat(64)}`; },
     (v: any) => { v.draftBlockHash = `0x${"b".repeat(64)}`; },
   ]) await assert.rejects(prepared(change), { code: "APN_PROVIDER_PROTOCOL" });
+});
+test("accepts a bounded approval above debit, but rejects allowance beyond the frozen cap", async () => {
+  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
+  const bounded = state(v => { (v as any).usdcBalanceAtomic = "1030000"; (v as any).usdcAllowanceAtomic = "1025000"; });
+  const approved = await prepareCircleV2BaseSourceReadOnly(draft, harness(), bounded,
+    { ...limits, maxAllowanceAtomic: "1025000" }, () => fixedNow);
+  assert.equal(approved.requiredUsdcDebitAtomic, "1020000");
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), bounded,
+    { ...limits, maxAllowanceAtomic: "1024999" }), { code: "APN_PROVIDER_PROTOCOL" });
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), bounded,
+    { ...limits, maxAllowanceAtomic: ((1n << 256n) - 1n).toString() }), { code: "APN_PROVIDER_PROTOCOL" });
 });
 test("rejects changed signed quote, expiry, fee, recipient setup and calldata in draft", async () => {
   for (const change of [
