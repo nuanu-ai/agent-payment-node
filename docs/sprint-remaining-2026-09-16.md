@@ -36,11 +36,13 @@ installation are separate gates.
 `69c0974`).** One clean serial run passed `npm test` (1,447/1,447), cask
 syntax (13 scripts), packaging behavior (58/58), supply chain (6/6), and
 native `cargo fmt --check`, offline locked tests (29 unit and 4 integration),
-and clippy. The first packaging failure was a 120-second timeout while its
-reinstall fixture recursively copied the installed `node_modules` tree; the
-fixture now links the exact first `npm ci` dependency closure. A subsequent
-package identity failure exposed stale tracked `dist` bytes on merged main;
-the generated output was synchronized with TypeScript source before this run.
+and clippy. The aggregate record is [PR #97](https://github.com/nuanu-ai/agent-payment-node/pull/97);
+later source PRs add focused changes and CI only, not a replacement aggregate
+run. The first packaging failure was a 120-second timeout while its reinstall
+fixture recursively copied the installed `node_modules` tree; the fixture now
+links the exact first `npm ci` dependency closure. A subsequent package
+identity failure exposed stale tracked `dist` bytes on merged main; the
+generated output was synchronized with TypeScript source before this run.
 
 The installed historical I745 test used a separately verified, neutral copy
 of the retained archive (SHA256 `1883f117a84552e720319d2770ea9439fad30d8eb6f1bd3212f344854b0ce267`),
@@ -49,8 +51,9 @@ pinned lockfile. The reinstall fixture tests shipped archive bytes and recovery
 with the first installed closure; it does not prove a second independent
 dependency resolution. This source gate adds no release, installed, or live
 payment acceptance proof; those remain separately recorded below. Exact
-commands, log locations, and fixture hashes are in the local P0.1 aggregate
-evidence artifact.
+commands, log locations, and fixture hashes are in the external evidence
+artifact (outside this repository; local path):
+`/Users/tony/Work/Projects/nuanu-ai-lab/artifacts/apn-p01-aggregate-gate-20260916.md`.
 
 ### P0.2 Verify the installed v0.5.21 no-money path
 
@@ -100,8 +103,8 @@ inspection; do not use live state.
 
 ### P0.3 Correct the Polygon row
 
-Mark **Local gasless / Polygon live acceptance** historically complete on
-`v0.5.18`.
+**Status: COMPLETE historically for Local gasless / Polygon live acceptance
+on `v0.5.18`.**
 The local slice records completed owner acceptance with delivery, sender debit,
 fee and transaction evidence (`current-state.md:11-14`), and its handoff says
 the 0.2 USDC transfer completed and the rehearsal passed again
@@ -158,6 +161,13 @@ pre-send guard, foreground approval, single submit, source proof, destination
 delivery proof and bounded recovery/no-resend. Bind the correct chain/address
 forms, native fee/rent/resource caps, token identity and operation lock.
 
+The final source/offline additions are [PR #98](https://github.com/nuanu-ai/agent-payment-node/pull/98)
+(Circle preparation), [PR #99](https://github.com/nuanu-ai/agent-payment-node/pull/99)
+(NEAR/TRON preparation), [PR #100](https://github.com/nuanu-ai/agent-payment-node/pull/100)
+(pure Circle journal binding), [PR #101](https://github.com/nuanu-ai/agent-payment-node/pull/101)
+(NEAR/TRON journal binding), and [PR #102](https://github.com/nuanu-ai/agent-payment-node/pull/102)
+(durable v2 protocol hash). Both lanes remain source/offline/untrusted.
+
 For the **first Base canonical USDC → Solana canonical USDC** lane, the
 selected design is direct Circle CCTP V2 with Forwarding Service and a signed
 upfront fee quote ([PR #77](https://github.com/nuanu-ai/agent-payment-node/pull/77),
@@ -168,12 +178,13 @@ observation work ([PR #88](https://github.com/nuanu-ai/agent-payment-node/pull/8
 [PR #90](https://github.com/nuanu-ai/agent-payment-node/pull/90),
 [PR #91](https://github.com/nuanu-ai/agent-payment-node/pull/91),
 [PR #93](https://github.com/nuanu-ai/agent-payment-node/pull/93)) remains
-read-only/untrusted: Iris API access is unavailable for execution, so no route
-is executable, no approved live transfer matrix exists, and no authenticated
-Solana destination proof exists. Bind the signed quote and expiry, fee token
-and total debit, Solana USDC ATA and any quoted ATA setup cost, source
-burn/message, destination mint and recovery before any future execution
-admission.
+source/offline/untrusted. Circle Iris API TCP/443 was refused from the current
+host on 2026-09-16. There is no signer/send, CLI admission, live destination,
+real transfer or release; the live recipient/amount/fee/loss/recovery matrix
+remains pending, and no authenticated Solana destination proof exists. Bind
+the signed quote and expiry, fee token and total debit, Solana USDC ATA and any
+quoted ATA setup cost, source burn/message, destination mint and recovery
+before any future execution admission.
 [Circle's upfront-fee flow](https://developers.circle.com/cctp/concepts/how-upfront-fees-work)
 and [Forwarding Service](https://developers.circle.com/cctp/concepts/forwarding-service)
 are the source contracts for this choice. The existing LI.FI Mayan MCTP quote,
@@ -184,10 +195,11 @@ USDT** lane, the selected candidate is LI.FI 1Click/NEAR Intents. The read-only
 preflight and structural source reconciliation
 ([PR #86](https://github.com/nuanu-ai/agent-payment-node/pull/86),
 [PR #94](https://github.com/nuanu-ai/agent-payment-node/pull/94)) remain
-untrusted source/offline evidence with execution off: no signing or sending,
-no live TRON destination, and no authenticated destination or refund proof.
-The candidate still needs its own source, destination and refund proof
-requirements.
+untrusted source/offline evidence with execution off. There is no
+signer/send, CLI admission, live destination, real transfer or release; the
+live recipient/amount/fee/loss/recovery matrix remains pending, with no
+authenticated destination or refund proof. The candidate still needs its own
+source, destination and refund proof requirements.
 
 **Depends on:** an admitted provider/route contract for each destination,
 canonical destination event/receipt evidence, and test fixtures for timeout,
@@ -198,8 +210,9 @@ and a separately authorized live packet proves delivery on both chains.
 ### Card 2 — future dated multi-chain asset allowlist
 
 This is future policy scope; no implementation is requested in this update. The
-allowlist covers direct, gasless and bridge rails. Swaps are a separately
-admitted rail under Card 3 and must not be implied by token-list admission.
+future allowlist covers direct, gasless and bridge rails, while swaps remain a
+separately admitted rail under Card 3. Together they remain the fourth,
+unimplemented workstream and must not be implied by token-list admission.
 Publish a dated, contract-pinned top-10 token list and an explicit matrix for
 Ethereum, Base, Arbitrum, Optimism, Polygon PoS, BNB Chain, Avalanche C-Chain,
 Unichain, Linea, Monad and Sei, plus TRON and Solana. The matrix names each
@@ -253,13 +266,15 @@ owner packet.
 
 ## Immediate sequence
 
-1. Finish P0.1 aggregate-gate diagnosis and the clean green run.
-2. Finish P0.2 exact-installed legacy journal and pre-send/no-money proof.
-3. Publish the corrected status matrix, with Polygon source/release complete
-   and all unproven live rows open.
+1. Retain P0.1 as complete only at gated commit `a655c1c`; later focused PRs do
+   not replace its aggregate proof.
+2. Retain P0.2 installed no-money proof and Polygon's historical acceptance as
+   complete; all other live rows remain open.
+3. Keep the Base→Solana Circle and Base→TRON NEAR lanes source/offline/untrusted
+   until the pending live recipient/amount/fee/loss/recovery matrices and
+   destination evidence are admitted.
 4. Hand the owner the live acceptance packet above.
-5. Keep Card 2's allowlist and Card 3's swap path as future, separately
-   admitted work with no implementation in this update; take Card 4 only if
-   capacity remains.
+5. Keep Card 2's allowlist and Card 3's swap path as the fourth, separately
+   admitted unimplemented workstream; take Card 4 only if capacity remains.
 
 No Tect artifact, claim, program state or dated plan is changed by this file.
