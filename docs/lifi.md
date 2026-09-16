@@ -493,3 +493,26 @@ prove onchain Solana delivery, or admit execution. The source hash and message
 correlation must first come from a separately verified source receipt. The
 parser uses only fields shown in [Circle's V1 message response](https://developers.circle.com/cctp/migration-from-v1-to-v2)
 and [LI.FI status schema](https://docs.li.fi/agents/reference/endpoint-specs).
+
+## Offline direct Circle CCTP V2 source receipt candidate
+
+`src/lifi/circle-v2-source-receipt.ts` parses one caller-authenticated successful,
+safe Base transaction and receipt for the direct Circle `TokenMessengerWithFees`
+address. It requires exactly one `DepositForBurn` emitted by the underlying Base `TokenMessengerV2`
+with `TokenMessengerWithFees` as depositor and burn-body message sender, and one
+`MessageSent(bytes)` emitted by Base `MessageTransmitterV2` with
+`TokenMessengerV2` as the message-header sender. It compares the V2
+message header and burn body to every expected burn field: Base USDC, amount,
+sender, Solana USDC ATA bytes32, domain 5, Solana V2 TokenMessengerMinter,
+zero destination caller, maximum fee, finality threshold, and hook data. The
+V2 source message contains a zero nonce placeholder; the parser does not expose
+or infer an attested nonce. Duplicate or ambiguous events fail closed. Its
+result is source evidence only (`executionAdmitted: false`,
+`bridgeCompletion: false`) and does not authenticate the caller's RPC evidence,
+verify a Circle attestation, prove a destination mint, or admit execution.
+The event ABI and packed message format follow Circle's
+[TokenMessengerV2](https://github.com/circlefin/evm-cctp-contracts/blob/master/src/v2/TokenMessengerV2.sol),
+[MessageTransmitterV2](https://github.com/circlefin/evm-cctp-contracts/blob/master/src/v2/MessageTransmitterV2.sol),
+[technical guide](https://developers.circle.com/cctp/references/technical-guide),
+[contract addresses](https://developers.circle.com/cctp/references/contract-addresses),
+and [Solana programs](https://developers.circle.com/cctp/references/solana-programs).
