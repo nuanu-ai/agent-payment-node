@@ -1,18 +1,25 @@
 import { hashObject, sha256 } from "../canonical.js";
 import { assertGaslessSnapshot, gaslessFee, gaslessFeeCapCovers, validateGaslessStoredOffer } from "./economics.js";
-import { gaslessDeployment, gaslessProtocolHash } from "./registry.js";
+import { gaslessDeployment, gaslessIntentAsset, gaslessProtocolHash } from "./registry.js";
 import { intentSchema } from "./schema.js";
-import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, gaslessFailure, gaslessSame, gaslessUint, validateGaslessRequest } from "./validation.js";
+import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, gaslessFailure, gaslessUint, validateGaslessRequest } from "./validation.js";
 import { gaslessEnvelopeBinding, validateGaslessBatch } from "./wire.js";
 export function validateGaslessIntent(value) {
     if (!intentSchema.safeParse(value).success)
         gaslessFailure("APN_STATE_CORRUPT", "gasless_intent_shape");
     const i = value, r = validateGaslessRequest(i.request, "APN_STATE_CORRUPT"), s = i.initialSnapshot;
     const row = gaslessDeployment(r.chainId);
+    // The stored asset is resolved back to its registry row: token, permit domain and sponsoring paymaster must match it.
+    try {
+        gaslessIntentAsset(i);
+    }
+    catch {
+        gaslessFailure("APN_STATE_CORRUPT", "gasless_intent_binding");
+    }
     if (i.profile !== i.owner.profile || i.owner.profileHash !== sha256(`profile\0${i.profile}`) ||
         i.providerBinding.accountBindingHash !== i.owner.walletBindingHash || s.owner !== i.owner.address ||
-        s.chainId !== r.chainId || s.token !== i.token || i.token !== row.token || i.paymaster !== row.paymaster ||
-        i.entryPoint !== row.entryPoint || i.delegate !== row.delegate || !gaslessSame(i.tokenDomain, row.tokenDomain) ||
+        s.chainId !== r.chainId || s.token !== i.token ||
+        i.entryPoint !== row.entryPoint || i.delegate !== row.delegate ||
         s.protocolHash !== gaslessProtocolHash(row) || i.expiresAt <= i.preparedAt ||
         Date.parse(i.expiresAt) - Date.parse(i.preparedAt) !== GASLESS_TTL_MS ||
         i.policyHash !== hashObject({ identity: "apn.gasless.foreground-approval.v1", request: r }) ||

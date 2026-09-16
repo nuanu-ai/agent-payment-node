@@ -21,7 +21,9 @@ export const providerBindingSchema = z.strictObject({ providerId: z.literal("loc
   capabilityHash: hashSchema, revision: z.number().int().positive().safe() });
 export const requestSchema = z.strictObject({ chainId: chainSchema, recipient: addressSchema,
   grossAtomic: uintSchema, maxFeeAtomic: uintSchema, minReceivedAtomic: uintSchema });
-export const tokenDomainSchema = z.strictObject({ name: z.enum(["USD Coin", "USDC"]), version: z.literal("2"),
+// Shape only: `validateGaslessIntent` re-validates the whole domain against the registry row the intent names,
+// so a stored record can never carry a token name or permit-domain version the row does not admit.
+export const tokenDomainSchema = z.strictObject({ name: z.string().min(1).max(64), version: z.string().min(1).max(16),
   chainId: chainSchema, verifyingContract: addressSchema, domainSeparator: wordSchema });
 export const gasSchema = z.strictObject({ verificationGasLimit: uintSchema, callGasLimit: uintSchema,
   paymasterVerificationGasLimit: uintSchema, paymasterPostOpGasLimit: uintSchema, preVerificationGas: uintSchema,
