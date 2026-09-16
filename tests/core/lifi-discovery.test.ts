@@ -58,17 +58,16 @@ test("LI.FI offline capability and MCP approval handoff do not inspect invalid s
   const result = await runCli(["bridge", "capabilities", "--profile", "unbound"], {}, options);
   assert.equal(result.ok, true, result.error?.message); const data = result.data as any;
   assert.equal(data.profile_binding_inspected, false); assert.equal(data.profiles.length, 4); assert.equal(data.mainnet_acceptance.passed, 0);
-  assert.deepEqual(data.candidate_lanes, [{ from_chain: "eip155:8453", from_token: BASE_SOLANA_USDC_CANDIDATE.fromToken,
+  assert.deepEqual(data.selected_direct_lane, { from_chain: "eip155:8453", from_token: BASE_SOLANA_USDC_CANDIDATE.fromToken,
     to_chain: "solana-mainnet", to_token: BASE_SOLANA_USDC_CANDIDATE.toToken,
     provider: "Circle", protocol: "CCTP V2", delivery: "Forwarding Service",
     fee_quote: "signed_upfront_separate_from_burned_principal", selection: "first_executable_lane_design",
     provider_route_state: "selected_design_unverified_for_execution", executable: false,
-    missing_proof: ["signed_quote_and_expiry", "fee_token_total_debit_and_ATA_setup", "source_burn_message_and_destination_mint", "recovery_contract"] },
-    { from_chain: "eip155:8453", from_token: BASE_SOLANA_USDC_CANDIDATE.fromToken,
+    missing_proof: ["signed_quote_and_expiry", "fee_token_total_debit_and_ATA_setup", "source_burn_message_and_destination_mint", "recovery_contract"] });
+  assert.deepEqual(data.candidate_lanes, [{ from_chain: "eip155:8453", from_token: BASE_SOLANA_USDC_CANDIDATE.fromToken,
     to_lifi_chain_id: BASE_SOLANA_USDC_CANDIDATE.toChainId, to_token: BASE_SOLANA_USDC_CANDIDATE.toToken,
-    provider: "LI.FI", tool: "mayanMCTP", selection: "exploratory_only",
     provider_route_state: "unverified_by_static_capabilities", executable: false,
-    missing_proof: ["onchain_destination_minimum_and_deadline", "solana_destination_delivery_and_finality", "fee_and_recovery_contract"] },
+    missing_proof: ["selected_route_and_source_call", "solana_destination_delivery_and_finality", "fee_and_recovery_contract"] },
     { from_chain: "eip155:8453", from_token: BASE_TRON_USDT_CANDIDATE.fromToken,
       to_lifi_chain_id: BASE_TRON_USDT_CANDIDATE.toChainId, to_token: BASE_TRON_USDT_CANDIDATE.toToken,
       tool: "near", provider_route_state: "unverified_by_static_capabilities", executable: false,
@@ -91,9 +90,10 @@ test("LI.FI routes and prepare have CLI/MCP parity and prepare replay survives m
   const cliInventory = await runCli(["bridge", "inventory"], {}, options);
   const mcpInventory = (await client.callTool({ name: "apn_bridge_inventory", arguments: {} })).structuredContent as unknown as OutputEnvelope;
   assert.equal(cliInventory.ok, true, cliInventory.error?.message); assert.deepEqual(cliInventory.data, mcpInventory.data);
-  assert.equal((cliInventory.data as any).capability.candidate_lanes[0].provider, "Circle");
-  assert.equal((cliInventory.data as any).capability.candidate_lanes[0].executable, false);
-  assert.equal((cliInventory.data as any).capability.candidate_lanes[1].selection, "exploratory_only");
+  assert.equal((cliInventory.data as any).capability.selected_direct_lane.provider, "Circle");
+  assert.equal((cliInventory.data as any).capability.selected_direct_lane.executable, false);
+  assert.equal((cliInventory.data as any).capability.candidate_lanes[0].to_lifi_chain_id, BASE_SOLANA_USDC_CANDIDATE.toChainId);
+  assert.equal((cliInventory.data as any).capability.candidate_lanes[1].tool, "near");
   const cli = await runCli(argv(["bridge", "routes"], routeArgs), {}, options);
   const mcp = (await client.callTool({ name: "apn_bridge_routes", arguments: routeArgs })).structuredContent as unknown as OutputEnvelope;
   assert.equal(cli.ok, true, cli.error?.message); assert.equal(mcp.ok, true, mcp.error?.message); assert.deepEqual(cli.data, mcp.data);

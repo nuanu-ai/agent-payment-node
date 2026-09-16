@@ -19,9 +19,11 @@ support. Solana and TRON bridge directions, Stargate Bus, Polymer and other
 bridge tools remain outside this execution profile. Direct Solana/TRON rails
 and gasless payment profiles have separate acceptance requirements.
 
-Offline capabilities list direct Circle CCTP V2 with Forwarding and a signed
-upfront fee quote as the selected first-lane design, still non-executable.
-The separate LI.FI Mayan MCTP candidate is exploratory only, using LI.FI
+Offline capabilities expose direct Circle CCTP V2 with Forwarding and a signed
+upfront fee quote in `selected_direct_lane` as the first-lane design, still
+non-executable. The existing `candidate_lanes` array keeps its LI.FI Solana
+and TRON rows and indexes. Captured LI.FI Mayan MCTP evidence is exploratory
+only; the LI.FI Solana inventory candidate uses LI.FI
 Solana chain ID `1151111081099710` and the Solana USDC mint
 `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Inventory makes one
 additional anonymous `/connections` read for that exact pair. A returned

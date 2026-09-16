@@ -12,14 +12,12 @@ export const BASE_SOLANA_CIRCLE_V2_CANDIDATE = {
   executable: false,
 } as const;
 
-/** LI.FI inventory and captured Mayan evidence remain exploratory only. */
+/** LI.FI inventory candidate; the separate captured Mayan evidence remains exploratory only. */
 export const BASE_SOLANA_USDC_CANDIDATE = {
   fromChainId: 8453,
   toChainId: 1151111081099710,
   fromToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   toToken: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-  provider: "LI.FI",
-  tool: "mayanMCTP",
   providerRouteState: "unverified_by_static_capabilities",
   executable: false,
 } as const;
