@@ -1,6 +1,7 @@
 import { sha256 } from "../canonical.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS } from "./asset-registry.js";
+import { BASE_SOLANA_USDC_CANDIDATE } from "./discovery-candidates.js";
 import type { LifiResponse } from "./ports.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
 
@@ -18,6 +19,10 @@ export function bridgeCapabilities(profile?: string) {
     }),
     tools: [{ tool: "across", variant: "Across V4, empty message, no exclusivity", decoder_implemented: true },
       { tool: "stargateV2", variant: "Stargate V2 Taxi, empty compose/options", decoder_implemented: true }],
+    candidate_lanes: [{ from_chain: "eip155:8453", from_token: BASE_SOLANA_USDC_CANDIDATE.fromToken,
+      to_lifi_chain_id: BASE_SOLANA_USDC_CANDIDATE.toChainId, to_token: BASE_SOLANA_USDC_CANDIDATE.toToken,
+      provider_route_state: BASE_SOLANA_USDC_CANDIDATE.providerRouteState, executable: BASE_SOLANA_USDC_CANDIDATE.executable,
+      missing_proof: ["selected_route_and_source_call", "solana_destination_delivery_and_finality", "fee_and_recovery_contract"] }],
     route_executable: "requires_current_route_materialization_and_chain_checks",
     profiles: [
       { provider: "local", custody: "local_software", execution_owner: "apn", retry_owner: "apn_observation_only_after_first_send",
@@ -52,6 +57,8 @@ export function bridgeInventory(responses: Readonly<Record<"chains" | "tokens" |
   return { schema_version: "apn.bridge-inventory.v1", provider: "LI.FI", origin: "https://li.quest/v1", observed: projected,
     capability: bridgeCapabilities(), mainnet_acceptance: "open" };
 }
+/** Validate a candidate response at its actual depth inside connections.pairs[].response. */
+export function validateBridgeInventoryCandidate(response: unknown): void { inventoryValue(response, 3); }
 // Inventory is untrusted informational data. Omit URLs, descriptions and unknown fields from public output.
 const SAFE_FIELDS = new Set(["chains", "tokens", "bridges", "exchanges", "connections", "pairs", "status", "responseHash", "response", "fromChainId", "toChainId", "fromToken", "toToken", "fromTokens", "toTokens", "id", "key", "name", "symbol", "decimals", "chainId", "chainType", "address"]);
 function inventoryValue(value: unknown, depth: number): unknown {

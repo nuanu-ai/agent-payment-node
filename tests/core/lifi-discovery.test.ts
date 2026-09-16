@@ -6,17 +6,18 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { renderHelp } from "../../src/command-catalog.js";
 import { runCli } from "../../src/cli.js";
-import { hashObject } from "../../src/canonical.js";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { BRIDGE_COMMANDS } from "../../src/lifi/command-catalog.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
-import { LifiProvider, normalizeLifiStatus, type LifiTransport } from "../../src/lifi/provider.js";
+import { LIFI_INVENTORY_RESPONSE_BYTES, LifiProvider, normalizeLifiStatus, type LifiTransport } from "../../src/lifi/provider.js";
 import { validateBridgeQuote } from "../../src/lifi/quote-repository.js";
 import { bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { bridgeInventory } from "../../src/lifi/catalog.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
+import { BASE_SOLANA_USDC_CANDIDATE } from "../../src/lifi/discovery-candidates.js";
 
 const BRIDGE_USDC = { 1: BRIDGE_ASSET_REGISTRY[1].tokens[0]!.address, 8453: BRIDGE_ASSET_REGISTRY[8453].tokens[0]!.address,
   42161: BRIDGE_ASSET_REGISTRY[42161].tokens[0]!.address } as const;
@@ -43,7 +44,8 @@ test("LI.FI all five CLI and MCP commands bind identically, without a generic RP
   assert.deepEqual(projectMcpTools().filter((t) => t.name.startsWith("apn_bridge_")).map((t) => t.name),
     ["apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare", "apn_bridge_approve"]);
   for (const changed of [{ amount: "1e2" }, { min_output: "0" }, { slippage_bps: "1001" }, { to_chain: "eip155:1" },
-    { from_token: LIFI_RECIPIENT }, { max_route_fee: "0.0000001" }, { from_chain: "eip155:10" }]) {
+    { from_token: LIFI_RECIPIENT }, { max_route_fee: "0.0000001" }, { from_chain: "eip155:10" },
+    { to_chain: String(BASE_SOLANA_USDC_CANDIDATE.toChainId), to_token: BASE_SOLANA_USDC_CANDIDATE.toToken }]) {
     assert.throws(() => bindArgv(argv(["bridge", "routes"], { ...routeArgs, ...changed })), { code: "APN_INVALID_INPUT" });
   }
 });
@@ -55,6 +57,10 @@ test("LI.FI offline capability and MCP approval handoff do not inspect invalid s
   const result = await runCli(["bridge", "capabilities", "--profile", "unbound"], {}, options);
   assert.equal(result.ok, true, result.error?.message); const data = result.data as any;
   assert.equal(data.profile_binding_inspected, false); assert.equal(data.profiles.length, 4); assert.equal(data.mainnet_acceptance.passed, 0);
+  assert.deepEqual(data.candidate_lanes, [{ from_chain: "eip155:8453", from_token: BASE_SOLANA_USDC_CANDIDATE.fromToken,
+    to_lifi_chain_id: BASE_SOLANA_USDC_CANDIDATE.toChainId, to_token: BASE_SOLANA_USDC_CANDIDATE.toToken,
+    provider_route_state: "unverified_by_static_capabilities", executable: false,
+    missing_proof: ["selected_route_and_source_call", "solana_destination_delivery_and_finality", "fee_and_recovery_contract"] }]);
   const server = createMcpServer(options), client = new Client({ name: "bridge-contract", version: "1" });
   const [a, b] = InMemoryTransport.createLinkedPair(); await Promise.all([server.connect(a), client.connect(b)]); t.after(async () => { await client.close(); await server.close(); });
   const capability = await client.callTool({ name: "apn_bridge_capabilities", arguments: { profile: "unbound" } });
@@ -114,9 +120,26 @@ test("LI.FI public provider API contract uses fixed endpoints, finite tools, one
   const admittedPairs = ([1, 8453, 42161] as const).reduce((sum, id) =>
     sum + BRIDGE_ASSET_REGISTRY[id].tokens.reduce((rows, asset) => rows + asset.peers.length, 0), 0);
   assert.equal(admittedPairs, 8);
-  await provider.inventory(); assert.equal(calls.length, 3 + admittedPairs);
+  const responses = await provider.inventory(); assert.equal(calls.length, 3 + admittedPairs + 1);
+  const pairs = JSON.parse(responses.connections.body).pairs as Array<Record<string, unknown>>;
+  assert.equal(pairs.length, admittedPairs + 1);
+  assert.deepEqual(pairs.at(-1), { fromChainId: BASE_SOLANA_USDC_CANDIDATE.fromChainId,
+    toChainId: BASE_SOLANA_USDC_CANDIDATE.toChainId, fromToken: BASE_SOLANA_USDC_CANDIDATE.fromToken,
+    toToken: BASE_SOLANA_USDC_CANDIDATE.toToken, status: 200,
+    responseHash: pairs.at(-1)!.responseHash, response: {} });
+  const publicInventory = bridgeInventory(responses) as any;
+  assert.equal(publicInventory.observed.connections.executable_capability, false);
+  assert.deepEqual(publicInventory.observed.connections.provider_inventory.pairs.at(-1), pairs.at(-1));
   assert.deepEqual(new URL(calls.find((c) => c[0].includes("/tools?"))![0]).searchParams.getAll("chains"), ["1", "8453", "42161"]);
-  assert.equal(calls.filter((c) => c[0].includes("/connections?")).length, admittedPairs);
+  const connectionCalls = calls.filter((c) => c[0].includes("/connections?"));
+  assert.equal(connectionCalls.length, admittedPairs + 1);
+  const candidate = connectionCalls.map((c) => new URL(c[0])).find((url) => url.searchParams.get("toChain") === String(BASE_SOLANA_USDC_CANDIDATE.toChainId));
+  assert.ok(candidate);
+  assert.equal(candidate.searchParams.get("fromChain"), String(BASE_SOLANA_USDC_CANDIDATE.fromChainId));
+  assert.equal(candidate.searchParams.get("fromToken"), BASE_SOLANA_USDC_CANDIDATE.fromToken);
+  assert.equal(candidate.searchParams.get("toToken"), BASE_SOLANA_USDC_CANDIDATE.toToken);
+  assert.equal(candidate.searchParams.get("allowSwitchChain"), "false");
+  assert.equal(candidate.searchParams.get("allowDestinationCall"), "false");
   const request = { fromChainId: 1 as const, toChainId: 8453 as const, fromToken: BRIDGE_USDC[1], toToken: BRIDGE_USDC[8453], recipient: LIFI_RECIPIENT,
     amountAtomic: "10000000", minOutputAtomic: "9000000", maxNativeDebitWei: routeArgs.max_native_debit_wei, maxRouteFeeAtomic: "1000000", slippageBps: 50 };
   await provider.routes(request, LIFI_SYNTHETIC_SENDER); const last = calls.at(-1)!; assert.equal(last[0], "https://li.quest/v1/advanced/routes");
@@ -135,5 +158,64 @@ test("LI.FI public provider API contract uses fixed endpoints, finite tools, one
     status: 200, body: JSON.stringify({ chains: [{ id: 1, name: "Ethereum", rpcUrls: ["https://credential.example"], description: "SECRET_PROVIDER_TEXT" }] }),
   }])) as any);
   assert.doesNotMatch(JSON.stringify(inventory), /SECRET_PROVIDER_TEXT|credential/u); assert.equal(inventory.observed.chains!.executable_capability, false);
+  assert.equal(inventory.observed.connections!.executable_capability, false);
   await assert.rejects(new BridgeHttps().request("https://li.quest/v1/advanced/routes", "POST", "x".repeat(256 * 1024 + 1), 512 * 1024, "APN_HTTP_CONFIG"), { code: "APN_PROVIDER_UNAVAILABLE" });
+});
+
+test("a failed discovery-only Solana probe remains unavailable while admitted EVM inventory succeeds", async (t) => {
+  for (const failure of ["transport", "malformed", "non-200", "combined-size", "deep", "large-array"] as const) await t.test(failure, async () => {
+    const provider = new LifiProvider({ async request(endpoint) {
+      const candidate = endpoint.includes("/connections?") && new URL(endpoint).searchParams.get("toChain") === String(BASE_SOLANA_USDC_CANDIDATE.toChainId);
+      if (candidate && failure === "transport") throw new Error("candidate transport unavailable");
+      if (candidate && failure === "malformed") return { status: 200, body: "not JSON" };
+      if (candidate && failure === "non-200") return { status: 503, body: "{}" };
+      if (candidate && failure === "combined-size") return { status: 200, body: JSON.stringify({ name: "x".repeat(LIFI_INVENTORY_RESPONSE_BYTES - 256) }) };
+      if (candidate && failure === "large-array") return { status: 200, body: JSON.stringify({ pairs: Array(20_001).fill(0) }) };
+      if (candidate && failure === "deep") {
+        let value: Record<string, unknown> = { status: "PENDING" };
+        for (let index = 0; index < 6; index += 1) value = { response: value };
+        return { status: 200, body: JSON.stringify(value) };
+      }
+      return { status: 200, body: "{}" };
+    } });
+    const responses = await provider.inventory();
+    const pairs = JSON.parse(responses.connections.body).pairs as Array<Record<string, unknown>>;
+    assert.equal(pairs.length, 9);
+    assert.ok(pairs.slice(0, -1).every((pair) => pair.status === 200 && pair.responseHash !== null));
+    assert.deepEqual(pairs.at(-1), { fromChainId: BASE_SOLANA_USDC_CANDIDATE.fromChainId,
+      toChainId: BASE_SOLANA_USDC_CANDIDATE.toChainId, fromToken: BASE_SOLANA_USDC_CANDIDATE.fromToken,
+      toToken: BASE_SOLANA_USDC_CANDIDATE.toToken, status: "unavailable", responseHash: null, response: null });
+    const publicInventory = bridgeInventory(responses) as any;
+    assert.deepEqual(publicInventory.observed.connections.provider_inventory.pairs.at(-1), pairs.at(-1));
+    assert.equal(publicInventory.observed.connections.executable_capability, false);
+  });
+  const admittedFailure = new LifiProvider({ async request(endpoint) {
+    if (endpoint.includes("/connections?") && new URL(endpoint).searchParams.get("toChain") === "8453") throw new Error("admitted lane unavailable");
+    return { status: 200, body: "{}" };
+  } });
+  await assert.rejects(admittedFailure.inventory(), /admitted lane unavailable/u);
+});
+
+test("an optional unavailable marker is omitted when admitted-only inventory fits but the marker exceeds the bound", async () => {
+  let filler = "";
+  const provider = new LifiProvider({ async request(endpoint) {
+    if (!endpoint.includes("/connections?")) return { status: 200, body: "{}" };
+    const query = new URL(endpoint).searchParams;
+    if (query.get("toChain") === String(BASE_SOLANA_USDC_CANDIDATE.toChainId)) throw new Error("candidate unavailable");
+    return { status: 200, body: query.get("fromChain") === "1" && query.get("toChain") === "8453"
+      && query.get("fromToken") === BRIDGE_USDC[1] ? JSON.stringify({ name: filler }) : "{}" };
+  } });
+  const baseline = JSON.parse((await provider.inventory()).connections.body).pairs as Array<Record<string, unknown>>;
+  assert.equal(baseline.length, 9);
+  const admitted = baseline.slice(0, -1);
+  const admittedBytes = Buffer.byteLength(canonicalJson({ pairs: admitted }));
+  const markerBytes = Buffer.byteLength(canonicalJson({ pairs: baseline })) - admittedBytes;
+  filler = "x".repeat(LIFI_INVENTORY_RESPONSE_BYTES - admittedBytes - Math.floor(markerBytes / 2));
+  const responses = await provider.inventory();
+  const bodyBytes = Buffer.byteLength(responses.connections.body);
+  const pairs = JSON.parse(responses.connections.body).pairs as Array<Record<string, unknown>>;
+  assert.equal(pairs.length, 8);
+  assert.ok(bodyBytes <= LIFI_INVENTORY_RESPONSE_BYTES);
+  assert.ok(bodyBytes + markerBytes > LIFI_INVENTORY_RESPONSE_BYTES);
+  assert.equal((bridgeInventory(responses) as any).observed.connections.executable_capability, false);
 });

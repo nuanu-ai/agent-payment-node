@@ -25,6 +25,15 @@ export declare function bridgeCapabilities(profile?: string): {
         variant: string;
         decoder_implemented: boolean;
     }[];
+    candidate_lanes: {
+        from_chain: string;
+        from_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+        to_lifi_chain_id: 1151111081099710;
+        to_token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+        provider_route_state: "unverified_by_static_capabilities";
+        executable: false;
+        missing_proof: string[];
+    }[];
     route_executable: string;
     profiles: ({
         provider: string;
@@ -111,6 +120,15 @@ export declare function bridgeInventory(responses: Readonly<Record<"chains" | "t
             variant: string;
             decoder_implemented: boolean;
         }[];
+        candidate_lanes: {
+            from_chain: string;
+            from_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+            to_lifi_chain_id: 1151111081099710;
+            to_token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+            provider_route_state: "unverified_by_static_capabilities";
+            executable: false;
+            missing_proof: string[];
+        }[];
         route_executable: string;
         profiles: ({
             provider: string;
@@ -162,3 +180,5 @@ export declare function bridgeInventory(responses: Readonly<Record<"chains" | "t
     };
     mainnet_acceptance: string;
 };
+/** Validate a candidate response at its actual depth inside connections.pairs[].response. */
+export declare function validateBridgeInventoryCandidate(response: unknown): void;
