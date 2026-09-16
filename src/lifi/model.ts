@@ -1,6 +1,7 @@
 import type { EvmChainId } from "../evm-asset.js";
 import type { EvmFeeQuote } from "../evm-ports.js";
 import type { Address, Economics, Hex } from "../model.js";
+import type { RailStatusIdentifier } from "../rail-status-binding.js";
 
 export type BridgeTool = "across" | "stargateV2";
 export interface BridgeRouteRequest {
@@ -283,7 +284,8 @@ export interface BridgeResidualAllowance {
 }
 export interface BridgeProviderObservation {
   readonly status: "not_found" | "pending" | "completed_observed" | "partial_observed" | "refund_observed" | "failed_observed" | "unknown";
-  readonly destinationTransactionHash: Hex | null;
+  /** The destination transaction in its own rail's form: an EVM 32-byte hash or a base58 Solana signature. */
+  readonly destinationTransactionHash: RailStatusIdentifier | null;
   readonly observedAt: string;
   readonly responseHash: string | null;
 }

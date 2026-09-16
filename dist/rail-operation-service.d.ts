@@ -23,6 +23,12 @@ export declare class RailOperationService {
     private locked;
     private required;
     private adapter;
+    /**
+     * The send guard re-acquires a validity window and simulates, so a lost read must be re-run
+     * rather than reported as a refusal. Only a transport loss is retried, only while the owner's
+     * approved window still leaves room to send, and every attempt re-acquires a fresh window.
+     */
+    private patientBind;
     private revalidate;
     private firstLocalSubmit;
     private submit;

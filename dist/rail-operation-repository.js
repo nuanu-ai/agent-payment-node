@@ -106,14 +106,17 @@ export class RailOperationRepository extends SecureStateStore {
 function validateReceiptShape(value, operation) {
     if (!isPlainRecord(value))
         corrupt();
-    const expectedKeys = Object.keys(railReceipt(operation)).sort();
-    if (canonicalJson(Object.keys(value).sort()) !== canonicalJson(expectedKeys) || value.schema_version !== "apn.rail-receipt.v1" || value.operation_id !== operation.operationId || value.fingerprint !== operation.fingerprint)
+    const index = operation.transitions.findIndex((entry) => entry.state === value.state && entry.at === value.updated_at);
+    if (index < 0)
+        corrupt();
+    // The stored receipt belongs to its own transition, so its shape is that transition's shape.
+    const expected = railHistoricalReceipt(operation, index);
+    if (canonicalJson(Object.keys(value).sort()) !== canonicalJson(Object.keys(expected).sort()) || value.schema_version !== "apn.rail-receipt.v1" || value.operation_id !== operation.operationId || value.fingerprint !== operation.fingerprint)
         corrupt();
     const { receipt_hash, ...body } = value;
     if (hashObject(body) !== receipt_hash)
         corrupt();
-    const index = operation.transitions.findIndex((entry) => entry.state === value.state && entry.at === value.updated_at);
-    if (index < 0 || canonicalJson(value) !== canonicalJson(railHistoricalReceipt(operation, index)))
+    if (canonicalJson(value) !== canonicalJson(expected))
         corrupt();
 }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "The direct-rail store or receipt binding is invalid."); }

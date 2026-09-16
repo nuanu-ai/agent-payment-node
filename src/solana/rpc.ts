@@ -7,7 +7,7 @@ import { ApnError } from "../errors.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { solanaHttpsFetch } from "./https.js";
 
-export type SolanaMethod = "getGenesisHash" | "getMultipleAccounts" | "getAccountInfo" | "getLatestBlockhash" | "getBlockHeight" | "getFeeForMessage" | "getMinimumBalanceForRentExemption" | "sendTransaction" | "getSignatureStatuses" | "getTransaction" | "getBlock";
+export type SolanaMethod = "getGenesisHash" | "getMultipleAccounts" | "getAccountInfo" | "getLatestBlockhash" | "getBlockHeight" | "getFeeForMessage" | "getMinimumBalanceForRentExemption" | "simulateTransaction" | "sendTransaction" | "getSignatureStatuses" | "getTransaction" | "getBlock";
 export interface SolanaRpcPort {
   readonly originHash: string;
   call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;

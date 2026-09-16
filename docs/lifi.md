@@ -172,6 +172,20 @@ transfer, including a later successful retry of a cached delivery.
 
 LI.FI status supplies a hint, not completion authority. `PENDING`, not-found,
 completed, partial, refunded, failed and unknown observations remain distinct.
+The hint names the destination transaction in its own rail's form: an EVM
+32-byte hash, lowercased exactly as before, or a canonical base58 Solana
+signature of exactly 64 bytes. No other string is a transaction identity, and a
+Solana signature can never address the EVM destination reader, so a
+Solana-destination hint falls through to the exact event scan. Until 0.5.18 the
+hint was forced through the EVM hex reader, which threw on a base58 signature
+and silently collapsed the whole observation to `unknown` with a null hint.
+
+A bridge takes the lock of the chain it signs on: every EVM source keeps the
+`evm:<chain id>:<address>` domain it has always taken, while a source on LI.FI's
+Solana chain id `1151111081099710` takes the same `solana:<genesis>:<address>`
+domain a direct Solana transfer takes. One money operation per profile therefore
+holds across both, and an EVM bridge and a Solana transfer never collide. An
+account that is not its chain's own address form is refused rather than mapped.
 Unproved partial/refund/failure observations stay unresolved. A bounded exact
 event scan checks at most 1024 blocks and 128 logs per resume and validates its
 canonical cursor before advancing. Reorgs discard provisional inclusion while

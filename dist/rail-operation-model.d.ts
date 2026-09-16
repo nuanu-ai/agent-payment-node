@@ -1,4 +1,4 @@
-import type { ChainAccount, RailFinalEvidence, RailPreparedTransfer } from "./direct-rail-ports.js";
+import type { ChainAccount, RailFinalEvidence, RailPreparedTransfer, RailSendBinding } from "./direct-rail-ports.js";
 export type RailState = "awaiting_approval" | "signing_started" | "signed_not_submitted" | "submitting" | "submitted_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert" | "abandoned_unknown";
 interface RailTransition {
     readonly state: RailState;
@@ -25,6 +25,12 @@ interface RailIntent {
 }
 export interface RailOperationRecord extends RailIntent {
     readonly fingerprint: string;
+    /**
+     * Written exactly once, with the `signing_started` transition, by rails whose send guard
+     * re-acquires a validity window. Outside the fingerprint, so re-acquiring it never restates the
+     * intent the owner approved. Omitted entirely on every record that never re-bound.
+     */
+    readonly send?: RailSendBinding;
     readonly state: RailState;
     readonly terminal: boolean;
     readonly reason: string;
@@ -47,6 +53,7 @@ export declare function transitionRail(operation: RailOperationRecord, input: {
     readonly transactionId?: string;
     readonly rawPayloadHash?: string;
     readonly evidence?: RailFinalEvidence;
+    readonly send?: RailSendBinding;
 }): RailOperationRecord;
 export declare function validateRailContinuity(previous: RailOperationRecord, next: RailOperationRecord): void;
 export declare function validateRailOperation(value: unknown): RailOperationRecord;
@@ -54,6 +61,16 @@ export declare function validateRailPrepared(value: unknown, account: ChainAccou
 export declare function validateRailEvidence(value: unknown, prepared: RailPreparedTransfer, transactionId: string, success: boolean): asserts value is RailFinalEvidence;
 export declare function validateRailTransactionId(value: unknown, rail: ChainAccount["rail"]): asserts value is string;
 export declare function publicRailOperation(operation: RailOperationRecord): {
+    state: RailState;
+    terminal: boolean;
+    proof_class: string;
+    reason: string;
+    transaction_id: string | null;
+    evidence: RailFinalEvidence | null;
+    created_at: string;
+    updated_at: string;
+    next_actions: readonly string[];
+    send_binding?: RailSendBinding;
     kind: "rail_transfer";
     schema_version: "apn.rail-operation.v1";
     operation_id: string;
@@ -81,6 +98,12 @@ export declare function publicRailOperation(operation: RailOperationRecord): {
         createsRecipientAccount: boolean;
         resources?: import("./tron/model.js").TronResourceSnapshot;
     };
+};
+export declare function railNextActions(operation: RailOperationRecord): readonly string[];
+export declare function railReceipt(operation: RailOperationRecord): {
+    receipt_hash: string;
+    schema_version: "apn.rail-receipt.v1";
+    operation_binding_hash: string;
     state: RailState;
     terminal: boolean;
     proof_class: string;
@@ -90,12 +113,7 @@ export declare function publicRailOperation(operation: RailOperationRecord): {
     created_at: string;
     updated_at: string;
     next_actions: readonly string[];
-};
-export declare function railNextActions(operation: RailOperationRecord): readonly string[];
-export declare function railReceipt(operation: RailOperationRecord): {
-    receipt_hash: string;
-    schema_version: "apn.rail-receipt.v1";
-    operation_binding_hash: string;
+    send_binding?: RailSendBinding;
     kind: "rail_transfer";
     operation_id: string;
     profile: string;
@@ -122,15 +140,6 @@ export declare function railReceipt(operation: RailOperationRecord): {
         createsRecipientAccount: boolean;
         resources?: import("./tron/model.js").TronResourceSnapshot;
     };
-    state: RailState;
-    terminal: boolean;
-    proof_class: string;
-    reason: string;
-    transaction_id: string | null;
-    evidence: RailFinalEvidence | null;
-    created_at: string;
-    updated_at: string;
-    next_actions: readonly string[];
 };
 export declare function railHistoricalReceipt(operation: RailOperationRecord, transitionIndex: number): RailReceipt;
 export {};
