@@ -21,7 +21,7 @@ async function fixture(): Promise<CircleV2PreflightInput> {
   return { payer, quoteEndpoint: "https://iris-api.circle.com/v2/quote/burn/usdc/6/5",
     quoteRequest: { amount: "1000000", feeToken: usdc, requests: [{ type: "FORWARD", params: { hookData: hook } }] },
     quoteResponse: { signedQuote: quote, issuedAt: 1000, expiry: { mode: "BLOCK_NUMBER", expiresAtBlock: 100 }, feeTotalAmount: "20000", feeToken: usdc, nonce: "0",
-      items: [{ type: "FORWARD", amount: "18000", args: [hook], argsHash: `0x${"1".repeat(64)}` },
+      items: [{ type: "FORWARD", amount: "18000", args: [wrapper, "5", usdc, zero, hook], argsHash: `0x${"1".repeat(64)}` },
         { type: "PROTOCOL", amount: "2000", args: [], argsHash: `0x${"2".repeat(64)}` }] },
     transaction: { to: wrapper, chainId: 8453, valueAtomic: "0", refundAddress: refund, data },
     recipientWallet: wallet, amountAtomic: "1000000", maxSourceFeeAtomic: "25000", recipientSetup: "existing_ata" };
@@ -37,7 +37,7 @@ function harness(change?: (response: Record<string, any>, request: any) => void,
       if (options?.unavailable) throw Error("503");
       const response: Record<string, any> = { signedQuote: quote, feeTotalAmount: "20000", feeToken: usdc, nonce: "0", claimable: true, failedChecks: [],
         expiry: { mode: "BLOCK_NUMBER", expired: false, secondsRemaining: 60, expiresAtBlock: 100 },
-        items: [{ type: "FORWARD", argsMatch: true, amount: "18000", args: [hook], argsHash: `0x${"1".repeat(64)}` },
+        items: [{ type: "FORWARD", argsMatch: true, amount: "18000", args: [wrapper, "5", usdc, zero, hook], argsHash: `0x${"1".repeat(64)}` },
           { type: "PROTOCOL", argsMatch: true, amount: "2000", args: [], argsHash: `0x${"2".repeat(64)}` }] };
       change?.(response, request);
       return response;
@@ -70,6 +70,15 @@ test("validates exact frozen call and simulates it from payer at one Base block"
 test("accepts the SDK's sparse claimable item response", async () => {
   const { transport } = harness(v => { v.items = [{ type: "FORWARD", argsMatch: true }, { type: "PROTOCOL", argsMatch: true }]; });
   assert.equal((await inspectCircleV2Preflight(await fixture(), transport)).executionAdmitted, false);
+});
+test("accepts a live-shaped FORWARD-only quote and validation", async () => {
+  const input = await fixture();
+  const quoted = input.quoteResponse as { feeTotalAmount: string; items: { amount: string }[] };
+  quoted.items = [{ ...quoted.items[0]!, amount: "20000" }];
+  const { transport } = harness(v => {
+    v.items = [{ ...v.items[0], amount: "20000" }];
+  });
+  assert.equal((await inspectCircleV2Preflight(input, transport)).executionAdmitted, false);
 });
 test("fails closed on Circle rejection or mismatched signed fields, items, and arguments", async () => {
   for (const change of [
