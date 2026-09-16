@@ -7,6 +7,8 @@ import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 
 export type CommandRequest =
+  | { readonly command: "oneclick.source.submit"; readonly profile: string; readonly expectedPayer: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxQuotedLossAtomic: string; readonly maxGasLimitAtomic: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string; readonly maxNativeDebitWei: string; readonly idempotencyKey: string }
+  | { readonly command: "oneclick.source.status"; readonly operationId: string }
   | { readonly command: "circle.approval.prepare"; readonly profile: string; readonly approvalCapAtomic: string;
       readonly maxGasLimitAtomic: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string;
       readonly maxNativeDebitWei: string }
