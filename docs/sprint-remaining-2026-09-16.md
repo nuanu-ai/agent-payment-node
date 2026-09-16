@@ -32,6 +32,10 @@ installation are separate gates.
 
 ### P0.1 Stabilize the aggregate test gate
 
+**Status: IN PROGRESS; do not claim the aggregate gate green yet.** PR #94
+reports a clean 1,443-test core suite and PR checks, but that is not the full
+aggregate gate below.
+
 **Next packet:** reproduce the reported aggregate-gate flake using the normal
 serial commands (`npm test`, the packaging behavior/supply-chain gates and the
 legacy native contract gate as applicable). Save the first failure and the
@@ -46,7 +50,8 @@ tested, and the full required aggregate gate passes once from a clean state.
 
 ### P0.2 Verify the installed v0.5.21 no-money path
 
-**Release proof: COMPLETE.** The official GitHub release is published; its
+**Status: COMPLETE for installed no-money proof; live/payment gates remain
+open.** The official GitHub release is published; its
 manifest binds commit `94fabe3` to package `v0.5.21`. The downloaded manifest
 SHA256 is
 `2f445c02411e8ec1d8532c5ae3d33fd628ef25ca7f414a700eeba76c0dd0c6e5`, and the
@@ -77,7 +82,8 @@ operation hash stayed
 after the checks. No signing or network request (including broadcast, RPC or
 provider submission) occurred, and no money moved. This is recorded in the
 local P0.2 audit artifact
-(`evidence.md:1-13`, captured 2026-09-16; outside this repository).
+(`artifacts/apn-p02-installed-no-money-20260916/evidence.md:3-13`, captured
+2026-09-16; outside this repository).
 
 **Depends on:** a verified v0.5.21 artifact and a disposable copy of legacy
 state. **Accept when:** installed bytes, legacy journal compatibility and
@@ -90,7 +96,8 @@ inspection; do not use live state.
 
 ### P0.3 Correct the Polygon row
 
-Mark **Local gasless / Polygon live acceptance** complete on `v0.5.18`.
+Mark **Local gasless / Polygon live acceptance** historically complete on
+`v0.5.18`.
 The local slice records completed owner acceptance with delivery, sender debit,
 fee and transaction evidence (`current-state.md:11-14`), and its handoff says
 the 0.2 USDC transfer completed and the rehearsal passed again
@@ -99,15 +106,15 @@ calibrated Polygon offers and mirror estimate. Do not carry the old unchecked
 row into this plan.
 
 The installed `v0.5.21` legacy-journal and pre-send no-money check is recorded
-in P0.2. It did not trigger a fresh money transfer and is not new live
+in P0.2. It did not trigger a fresh money transfer and is not a new Polygon
 acceptance.
 
 ## Current acceptance matrix
 
 | Row | Status | Evidence and next gate |
 | --- | --- | --- |
-| Local gasless / Polygon live acceptance | **COMPLETE on `v0.5.18`** | The existing owner proof records operation `106876bde0c4a8052fd34aefc277fe71add01c93e789fa9cac8809eee35f35e3`, 200000 atomic USDC delivered, sender debit 214536, fee 14536 and transaction `0x9b2ae9a8c04e727768d932e917df142c7456f38c0fccf335ab5c046233ea197e` (local Tect audit record, `current-state.md:11-14`; outside this repository). The execution handoff separately confirms the 0.2 USDC transfer and repeated Polygon rehearsal (local Tect audit record, `handoff.md:20`; outside this repository). |
-| Installed `v0.5.21` legacy journal and pre-send path | **COMPLETE for no-money installed proof** | P0.2 proves release and installed code-byte parity, `23` operations plus `23` receipts, terminal status/receipt/resume recovery with the 46-file journal byte manifest unchanged, and a synthetic `awaiting_approval` pre-send guard whose operation hash remained unchanged through status/resume and refusal checks (local P0.2 audit artifact, `evidence.md:1-13`, captured 2026-09-16; outside this repository). The installed release still retains the older status classification; the source correction is unreleased. No approved nonterminal effect or fresh prepare was exercised, and no signing, send, provider submission, live bridge or live acceptance occurred. |
+| Local gasless / Polygon live acceptance | **COMPLETE historically on `v0.5.18`** | The existing owner proof records operation `106876bde0c4a8052fd34aefc277fe71add01c93e789fa9cac8809eee35f35e3`, 200000 atomic USDC delivered, sender debit 214536, fee 14536 and transaction `0x9b2ae9a8c04e727768d932e917df142c7456f38c0fccf335ab5c046233ea197e` (local Tect audit record, `current-state.md:11-14`; outside this repository). The execution handoff separately confirms the 0.2 USDC transfer and repeated Polygon rehearsal (local Tect audit record, `handoff.md:20`; outside this repository). |
+| Installed `v0.5.21` legacy journal and pre-send path | **COMPLETE for no-money installed proof** | P0.2 proves release and installed code-byte parity, `23` operations plus `23` receipts, terminal status/receipt/resume recovery with the 46-file journal byte manifest unchanged, and a synthetic `awaiting_approval` pre-send guard whose operation hash remained unchanged through status/resume and refusal checks (local P0.2 audit artifact, `artifacts/apn-p02-installed-no-money-20260916/evidence.md:3-13`, captured 2026-09-16; outside this repository). The installed release still retains the older status classification; the source correction is unreleased. No approved nonterminal effect or fresh prepare was exercised, and no signing, send, provider submission, live bridge or live acceptance occurred. |
 | Every other owner-only live acceptance row below | **OPEN** | No source, release, installed or historical operation evidence closes a live row. Keep Ethereum, Avalanche, MetaMask Agent, Smart Account, Coinbase, Solana, TRON, LI.FI and Direct EVM rows open until their fresh owner-approved evidence is recorded. |
 
 ## Owner-only live acceptance packet
@@ -138,27 +145,45 @@ unfinished or refused row remains `OPEN` with its reason and next action.
 Follow this order. Each card requires source tests, installed/no-money proof
 where it changes the package contract, and a separate live acceptance record.
 
-### Card 1 — Solana and TRON bridge directions
+### Card 1 — Solana and TRON bridge directions (source/offline only)
 
-Implement bridge directions into Solana and TRON; the current bridge surface is
-EVM-only. Carry the full contract through route/quote, immutable prepare,
+The current bridge surface is EVM-only. The two selected directions below are
+source/offline evidence; execution remains off. Carry the full contract through
+route/quote, immutable prepare,
 pre-send guard, foreground approval, single submit, source proof, destination
 delivery proof and bounded recovery/no-resend. Bind the correct chain/address
 forms, native fee/rent/resource caps, token identity and operation lock.
 
-For the **first executable Base canonical USDC → Solana canonical USDC** lane,
-target direct Circle CCTP V2 with Forwarding Service and a signed upfront fee
-quote. The source must pay the quoted fee separately from the burned principal
-so the full burned amount mints on Solana. Bind the signed quote and expiry,
-fee token and total debit, Solana USDC ATA and any quoted ATA setup cost, source
-burn/message, destination mint and recovery before execution admission.
+For the **first Base canonical USDC → Solana canonical USDC** lane, the
+selected design is direct Circle CCTP V2 with Forwarding Service and a signed
+upfront fee quote ([PR #77](https://github.com/nuanu-ai/agent-payment-node/pull/77),
+[PR #85](https://github.com/nuanu-ai/agent-payment-node/pull/85)). The source
+must pay the quoted fee separately from the burned principal so the full burned
+amount mints on Solana. The merged preflight, draft, journal and source
+observation work ([PR #88](https://github.com/nuanu-ai/agent-payment-node/pull/88),
+[PR #90](https://github.com/nuanu-ai/agent-payment-node/pull/90),
+[PR #91](https://github.com/nuanu-ai/agent-payment-node/pull/91),
+[PR #93](https://github.com/nuanu-ai/agent-payment-node/pull/93)) remains
+read-only/untrusted: Iris API access is unavailable for execution, so no route
+is executable, no approved live transfer matrix exists, and no authenticated
+Solana destination proof exists. Bind the signed quote and expiry, fee token
+and total debit, Solana USDC ATA and any quoted ATA setup cost, source
+burn/message, destination mint and recovery before any future execution
+admission.
 [Circle's upfront-fee flow](https://developers.circle.com/cctp/concepts/how-upfront-fees-work)
 and [Forwarding Service](https://developers.circle.com/cctp/concepts/forwarding-service)
 are the source contracts for this choice. The existing LI.FI Mayan MCTP quote,
 source receipt and provider status parsers remain discovery/offline evidence:
 the captured call has no onchain destination `minOut` or deadline. It is not
-selected for execution. TRON USDT through NEAR Intents is a separate candidate
-with its own source, destination and refund proof requirements.
+selected for execution. For the **second Base canonical USDC → TRON canonical
+USDT** lane, the selected candidate is LI.FI 1Click/NEAR Intents. The read-only
+preflight and structural source reconciliation
+([PR #86](https://github.com/nuanu-ai/agent-payment-node/pull/86),
+[PR #94](https://github.com/nuanu-ai/agent-payment-node/pull/94)) remain
+untrusted source/offline evidence with execution off: no signing or sending,
+no live TRON destination, and no authenticated destination or refund proof.
+The candidate still needs its own source, destination and refund proof
+requirements.
 
 **Depends on:** an admitted provider/route contract for each destination,
 canonical destination event/receipt evidence, and test fixtures for timeout,
@@ -166,8 +191,11 @@ partial delivery, reorg and lost response. **Accept when:** deterministic and
 installed tests cover every boundary, CLI and MCP expose the same contract,
 and a separately authorized live packet proves delivery on both chains.
 
-### Card 2 — dated multi-chain asset allowlist
+### Card 2 — future dated multi-chain asset allowlist
 
+This is future policy scope; no implementation is requested in this update. The
+allowlist covers direct, gasless and bridge rails. Swaps are a separately
+admitted rail under Card 3 and must not be implied by token-list admission.
 Publish a dated, contract-pinned top-10 token list and an explicit matrix for
 Ethereum, Base, Arbitrum, Optimism, Polygon PoS, BNB Chain, Avalanche C-Chain,
 Unichain, Linea, Monad and Sei, plus TRON and Solana. The matrix names each
@@ -175,7 +203,8 @@ network's native coin (the required set includes ETH, POL, BNB, AVAX, TRX and
 SOL) and gives an owner max-per-transfer and daily limit for every admitted
 asset.
 
-Define admission separately for direct, gasless, x402 and bridge rails. Every
+Define admission separately for direct, gasless, x402 and bridge rails, with
+swaps admitted separately under Card 3. Every
 top-10 token must have a gasless path, including a non-Circle paymaster where
 Circle accepts only USDC; do not reduce scope to provider-supported rows. Add
 batched balance reads (EVM Multicall and one Solana token-account request),
@@ -191,10 +220,11 @@ batch/cache/retry behavior and CLI/MCP parity; owner live evidence covers a
 native transfer and a non-USDC token transfer on every named EVM network and on
 TRON and Solana.
 
-### Card 3 — guarded swaps
+### Card 3 — future separately admitted guarded swaps (no implementation now)
 
-Add Uniswap (Ethereum), SunSwap (TRON) and Jupiter (Solana). The protocol/API
-or SDK constructs the transaction; APN validates and signs it. Show simulated
+Keep Uniswap (Ethereum), SunSwap (TRON) and Jupiter (Solana) as a future,
+separately admitted path. The protocol/API or SDK constructs the transaction;
+APN validates and signs it. Show simulated
 input/output and slippage before approval; enforce limit and approval caps;
 persist submission before sending; and make status/resume durable and
 observation-only after a possible send. Expose the same operation through CLI
@@ -224,6 +254,8 @@ owner packet.
 3. Publish the corrected status matrix, with Polygon source/release complete
    and all unproven live rows open.
 4. Hand the owner the live acceptance packet above.
-5. Start Card 1, then Card 2 and Card 3; take Card 4 only if capacity remains.
+5. Keep Card 2's allowlist and Card 3's swap path as future, separately
+   admitted work with no implementation in this update; take Card 4 only if
+   capacity remains.
 
 No Tect artifact, claim, program state or dated plan is changed by this file.
