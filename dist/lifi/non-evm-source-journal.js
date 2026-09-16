@@ -1,7 +1,6 @@
-/** Isolated source-effect journal. Admission proof is synthetic and never grants execution authority.
- * The draft freezes calldata but has no nonce or EIP-1559 fee envelope. Those values are
- * frozen here under a synthetic, untrusted binding; its draft checksum does not validate them.
- * No route, custody, transport, or CLI imports this module.
+/** Source-effect journal. V1/V2 synthetic proof grants no live effect authority.
+ * V3 records the concrete Circle transport admission and exact source envelope.
+ * A journal transition alone never broadcasts a transaction.
  */
 import { hashObject, sha256 } from "../canonical.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
@@ -220,7 +219,7 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
         if (prior === null || hashObject(prior) !== hashObject({ ...identity, integrityHash: hashObject(identity) }))
             corrupt();
     }
-    /** A synthetically supplied proof is permanently untrusted. An adapter must introduce a new versioned admission contract. */
+    /** Legacy synthetic proof remains permanently untrusted for live source execution. */
     async stage(binding) {
         return this.stageBuilt(build(binding, "v1"));
     }
