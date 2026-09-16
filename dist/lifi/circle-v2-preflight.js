@@ -17,6 +17,11 @@ function integer(value) {
     return BigInt(value);
 }
 function sameHex(a, b) { return bridgeHex(a, 16 * 1024) === bridgeHex(b, 16 * 1024); }
+function sameQuoteArg(a, b) {
+    if (typeof a === "string" && typeof b === "string" && /^(?:0|[1-9][0-9]*)$/u.test(a) && /^(?:0|[1-9][0-9]*)$/u.test(b))
+        return a === b;
+    return sameHex(a, b);
+}
 function sourceBlock(value) {
     const block = bridgeRecord(value);
     return { number: quantity(block.number), hash: bridgeHex(block.hash, 32, 32), timestamp: quantity(block.timestamp) };
@@ -85,7 +90,7 @@ export async function inspectCircleV2Preflight(input, transport) {
             fail("item_binding");
         const actualArgs = actual.args, expectedArgs = expected.args;
         if (actualArgs !== undefined && (!Array.isArray(actualArgs) || !Array.isArray(expectedArgs) ||
-            actualArgs.length !== expectedArgs.length || actualArgs.some((arg, index) => !sameHex(arg, expectedArgs[index]))))
+            actualArgs.length !== expectedArgs.length || actualArgs.some((arg, index) => !sameQuoteArg(arg, expectedArgs[index]))))
             fail("item_args");
     }
     let block;
