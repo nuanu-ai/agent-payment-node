@@ -83,8 +83,11 @@ export async function respond(path, url, method, headers, body) {
     assert.equal(operation.submissionAttempts, 1); assert.equal(operation.state, "dispatch_pending");
     assert.equal(operation.intent.requestId, request.requestId);
     const effect = await makeSignedEffect(f.packageRoot, f, request, { type: f.initialDesignation === "empty" ? 4 : 2 });
-    assert.equal(effect.delegationHash, operation.intent.delegationHash);
-    assert.equal(effect.signingDigest, operation.intent.signingDigest);
+    const dispatched = operation.dispatch ?? operation.intent;
+    assert.equal(effect.delegationHash, dispatched.delegationHash);
+    assert.equal(effect.signingDigest, dispatched.signingDigest);
+    assert.equal(effect.deliveredAtomic, (operation.dispatch?.quote ?? operation.intent.quote).netAtomic);
+    assert.equal(effect.feeAtomic, (operation.dispatch?.quote ?? operation.intent.quote).feeAtomic);
     writeFixture(path, { ...f, postCount: 1, effect, phase: f.afterPostPhase ?? "success" });
     trace(path, { kind: "provider-post", requestIdHash: sha(request.requestId), marker: operation.state,
       delegationHash: effect.delegationHash });
