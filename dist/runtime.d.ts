@@ -11,6 +11,7 @@ import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from ".
 import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
 import type { CircleV2ApprovalExecutor } from "./lifi/circle-v2-approval-executor.js";
+import type { OneClickSourceService } from "./lifi/near-oneclick-source-service.js";
 import type { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
@@ -25,6 +26,7 @@ export interface CoreDependencies {
     readonly bridge?: BridgeDependencies;
     readonly circleApproval?: CircleV2ApprovalExecutor;
     readonly circleSource?: CircleV2SourceService;
+    readonly oneClickSource?: OneClickSourceService;
     readonly directRails?: readonly DirectRailPort[];
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;
@@ -59,6 +61,7 @@ export declare class RuntimeContext {
     readonly bridge?: BridgeDependencies;
     readonly circleApproval?: CircleV2ApprovalExecutor;
     readonly circleSource?: CircleV2SourceService;
+    readonly oneClickSource?: OneClickSourceService;
     readonly directRails: readonly DirectRailPort[];
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;

@@ -559,6 +559,8 @@ apn circle approval prepare --profile <profile> --cap-atomic <USDC atomic> --max
 apn circle approval execute --operation <approval-id>
 apn circle approval status --operation <approval-id>
 apn circle source submit --profile <profile> --expected-payer <base-address> --recipient-owner <solana-address> --recipient-setup <existing_ata|create_ata> --amount-atomic <uint> --max-source-fee-atomic <uint> --max-allowance-atomic <uint> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>
+apn oneclick source submit --profile <profile> --expected-payer <base-address> --recipient <tron-address> --amount-atomic <USDC atomic> --min-output-atomic <USDT atomic> --max-quoted-loss-atomic <USDC atomic> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>
+apn oneclick source status --operation <operation-id>
 apn gasless capabilities [--profile <profile>]
 apn gasless balance --profile <profile> --chain <chain-id>
 apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --idempotency-key <key>

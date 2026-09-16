@@ -33,6 +33,7 @@ import { LocalBridgeCustody } from "./lifi/custody.js";
 import { LifiProvider } from "./lifi/provider.js";
 import { bridgeRpcFactory } from "./lifi/rpc.js";
 import { CircleV2ApprovalExecutor, LocalCircleApprovalSigner, circleApprovalRpcFromBridge } from "./lifi/circle-v2-approval-executor.js";
+import { OneClickSourceService } from "./lifi/near-oneclick-source-service.js";
 import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
@@ -113,6 +114,9 @@ export function createApnCore(bound, options = {}) {
         state,
         ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
             circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state, circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)), new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits, () => options.clock?.now().getTime() ?? Date.now()),
+        } : {}),
+        ...(bound.request.command.startsWith("oneclick.source.") || options.oneClickSource !== undefined ? {
+            oneClickSource: options.oneClickSource ?? new OneClickSourceService(state, wrappingSecret, process.env),
         } : {}),
         ...(bound.request.command === "circle.source.submit" || options.circleSource !== undefined ? {
             circleSource: options.circleSource ?? new CircleV2SourceService(state, wrappingSecret, process.env),
