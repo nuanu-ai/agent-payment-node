@@ -65,7 +65,8 @@ export interface CircleV2SourceApprovalPort { approve(preparation: CircleV2Sourc
 export class CircleV2SourceService {
   constructor(private readonly state: StateStore, private readonly wrapping: WrappingSecretPort,
     private readonly environment: Readonly<Record<string, string | undefined>>,
-    private readonly approval: CircleV2SourceApprovalPort) {}
+    private readonly approval: CircleV2SourceApprovalPort,
+    private readonly transport: BridgeHttps = new BridgeHttps()) {}
 
   async submit(request: CircleV2SourceSubmitRequest): Promise<CircleV2SourceResult> {
     const profile = canonicalProfile(request.profile), payer = bridgeAddress(request.expectedPayer);
@@ -77,7 +78,7 @@ export class CircleV2SourceService {
     const operationId = hash(`circle-v2-base-source\0${profileHash}\0${request.idempotencyKey}`);
     const rpcUrl = this.environment.APN_BASE_RPC_URL;
     if (rpcUrl === undefined) return fail("base_rpc_missing");
-    const rpc = new CircleBaseJsonRpc(rpcUrl);
+    const rpc = new CircleBaseJsonRpc(rpcUrl, this.transport);
     const walletStore = new EncryptedWalletStore(this.state, this.wrapping);
     await this.state.initialize();
     // No wallet.ensure or import is called here; an operator must import the exact payer profile separately.
@@ -96,9 +97,8 @@ export class CircleV2SourceService {
       `${HOOK.slice(0, 50)}000000000000002101${Buffer.from(ownerBytes).toString("hex")}`;
     const quoteRequest = { amount: amount.toString(), feeToken: USDC,
       requests: [{ type: "FORWARD", params: { hookData: hook } }] };
-    const transport = new BridgeHttps();
     const circlePost = async (path: string, body: unknown): Promise<unknown> => {
-      const response = await transport.request(`${CIRCLE}${path}`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
+      const response = await this.transport.request(`${CIRCLE}${path}`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
       if (response.status !== 200) fail("circle_http_status");
       try { return JSON.parse(response.body) as unknown; } catch { return fail("circle_json"); }
     };
