@@ -55,6 +55,9 @@ export async function verifyNearBaseTronSignatureOffline(value: unknown, binding
   const decoded = decodeFunctionData({ abi: ABI, data: tx.data as Hex });
   const [bridge, , near] = decoded.args;
   if (now > near.deadline) fail("expired");
+  // Solady's ECDSA.recover takes the 65-byte signature's v as 27/28;
+  // viem also accepts 0/1, which would falsely pass this offline proof.
+  if (near.signature.slice(-2).toLowerCase() !== "1b" && near.signature.slice(-2).toLowerCase() !== "1c") fail("recovery_byte");
   const typed = {
     domain: { name: "LI.FI NEAR Intents Facet", version: "1", chainId: context.chainId, verifyingContract: diamond },
     types: TYPES,

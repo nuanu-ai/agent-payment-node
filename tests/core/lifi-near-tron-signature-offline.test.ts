@@ -57,4 +57,12 @@ test("wrong signer, domain and elapsed deadline fail closed", async () => {
   args[2].signature = `0x${"11".repeat(65)}`;
   tampered.transactionRequest.data = encodeFunctionData({ abi, functionName: "swapAndStartBridgeTokensViaNEARIntents", args: args as never });
   await assert.rejects(verifyNearBaseTronSignatureOffline(tampered, binding, context), { code: "APN_PROVIDER_PROTOCOL" });
+  for (const recoveryByte of ["00", "01"]) {
+    const changed = structuredClone(quote);
+    const call = decodeFunctionData({ abi, data: changed.transactionRequest.data });
+    const fields = structuredClone(call.args) as unknown as any[];
+    fields[2].signature = `${fields[2].signature.slice(0, -2)}${recoveryByte}`;
+    changed.transactionRequest.data = encodeFunctionData({ abi, functionName: "swapAndStartBridgeTokensViaNEARIntents", args: fields as never });
+    await assert.rejects(verifyNearBaseTronSignatureOffline(changed, binding, context), { code: "APN_PROVIDER_PROTOCOL" });
+  }
 });
