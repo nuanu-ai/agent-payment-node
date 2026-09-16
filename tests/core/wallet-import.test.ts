@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -22,7 +22,7 @@ async function fixture(t: TestContext) {
   const keyFile = join(directory, "key.env");
   await writeFile(keyFile, `TEST_EVM_KEY='${KEY}'\n`, { mode: 0o600 });
   t.after(async () => await rm(directory, { recursive: true, force: true }));
-  const args = (profile = "imported", expectedAddress = ADDRESS, path = keyFile) => [
+  const args = (profile = "imported", expectedAddress: string = ADDRESS, path = keyFile) => [
     "wallet", "import", "--profile", profile, "--key-file", path,
     "--key-name", "TEST_EVM_KEY", "--expected-address", expectedAddress,
   ];
@@ -66,6 +66,27 @@ test("wallet import rejects unsafe file, bad key, mismatched address, and occupi
   assert.equal((await f.run()).ok, true);
   assert.equal((await f.run(f.args("second"))).ok, false, "address collision must fail");
   assert.equal((await f.run()).ok, false, "profile collision must fail");
+});
+
+test("wallet import rejects oversized, linked, duplicated, and non-checksummed input without exposing key", async (t) => {
+  const f = await fixture(t);
+  const assertRejected = async () => {
+    const result = await f.run();
+    assert.equal(result.ok, false);
+    assert.equal(JSON.stringify(result).includes(KEY), false);
+  };
+  await writeFile(f.keyFile, `TEST_EVM_KEY=${KEY}\n${"#".repeat(64 * 1024)}\n`, { mode: 0o600 });
+  await assertRejected();
+  await writeFile(f.keyFile, `TEST_EVM_KEY=${KEY}\nTEST_EVM_KEY=${KEY}\n`, { mode: 0o600 });
+  await assertRejected();
+  await writeFile(f.keyFile, `TEST_EVM_KEY=${KEY}\n`, { mode: 0o600 });
+  const secondLink = join(f.root, "../key-hardlink.env");
+  await link(f.keyFile, secondLink);
+  await assertRejected();
+  await rm(secondLink);
+  const result = await f.run(f.args("imported", ADDRESS.toLowerCase()));
+  assert.equal(result.ok, false);
+  assert.equal(JSON.stringify(result).includes(KEY), false);
 });
 
 test("wallet import fails closed on Keychain error and partial envelope write", async (t) => {
