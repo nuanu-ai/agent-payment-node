@@ -17,8 +17,11 @@ async function fixture() {
   return {
     signature, recipient, minimumOutputAtomic: "900000", providerOutcome: "completed" as const,
     signatureStatuses: { context: { slot: 321n }, value: [{ slot: 320n, confirmationStatus: "finalized", confirmations: null, err: null }] },
-    transaction: { slot: 320n, meta: { err: null, preTokenBalances: [balance("100000")], postTokenBalances: [balance("1100000")] },
-      transaction: { signatures: [signature], message: { accountKeys: [{ pubkey: other }, { pubkey: ata }] } } },
+    transaction: { slot: 320n, version: "legacy" as "legacy" | 0,
+      meta: { err: null, preTokenBalances: [balance("100000")], postTokenBalances: [balance("1100000")],
+        loadedAddresses: { writable: [] as string[], readonly: [] as string[] } },
+      transaction: { signatures: [signature], message: { accountKeys: [other, ata],
+        addressTableLookups: undefined as undefined | { accountKey: string; writableIndexes: number[]; readonlyIndexes: number[] }[] } } },
   };
 }
 
@@ -51,7 +54,21 @@ test("refuses absent, duplicate, wrong mint, owner, ATA, or token program balanc
   await refused((i) => { i.transaction.meta.postTokenBalances[0]!.mint = other; });
   await refused((i) => { i.transaction.meta.postTokenBalances[0]!.owner = other; });
   await refused((i) => { (i.transaction.meta.postTokenBalances[0]! as { programId: string }).programId = other; });
-  await refused((i) => { i.transaction.transaction.message.accountKeys[1]!.pubkey = other; });
+  await refused((i) => { i.transaction.transaction.message.accountKeys[1] = other; });
+});
+
+test("resolves v0 writable ALT addresses after static keys and rejects missing loaded addresses", async () => {
+  const v = await fixture();
+  const ata = v.transaction.transaction.message.accountKeys.pop()!;
+  v.transaction.version = 0;
+  v.transaction.transaction.message.addressTableLookups = [{ accountKey: other, writableIndexes: [0], readonlyIndexes: [] }];
+  v.transaction.meta.loadedAddresses.writable = [ata];
+  assert.equal((await parseSolanaDestinationCandidate(v)).tokenAccount, ata);
+  v.transaction.meta.loadedAddresses.writable = [];
+  await assert.rejects(parseSolanaDestinationCandidate(v), { code: "APN_RPC_PROTOCOL" });
+  v.transaction.meta.loadedAddresses.writable = [ata];
+  v.transaction.transaction.message.addressTableLookups[0]!.writableIndexes[0] = 256;
+  await assert.rejects(parseSolanaDestinationCandidate(v), { code: "APN_RPC_PROTOCOL" });
 });
 
 test("refuses no delivery, output below minimum, and every non-completed provider outcome", async () => {
