@@ -63,7 +63,7 @@ export function correlateNearTronProviderStatusOffline(
   const details = record(near.swapDetails);
   if (near.status !== "SUCCESS" || !eq(quote.depositAddress, source.depositAddress) ||
     quoteRequest.originAsset !== NEAR_BASE_USDC || quoteRequest.destinationAsset !== NEAR_TRON_USDT ||
-    quoteRequest.swapType !== "EXACT_INPUT" || quoteRequest.depositType !== "ORIGIN_CHAIN" ||
+    (quoteRequest.swapType !== "EXACT_INPUT" && quoteRequest.swapType !== "FLEX_INPUT") || quoteRequest.depositType !== "ORIGIN_CHAIN" ||
     quoteRequest.depositMode !== "SIMPLE" ||
     quoteRequest.recipientType !== "DESTINATION_CHAIN" || quoteRequest.refundType !== "ORIGIN_CHAIN" ||
     positive(quoteRequest.amount) !== positive(source.bridgeAmountAtomic) ||
@@ -71,6 +71,9 @@ export function correlateNearTronProviderStatusOffline(
     quoteRequest.recipient !== source.tronRecipient || !eq(quoteRequest.refundTo, source.refundTo) ||
     positive(quote.minAmountOut) !== positive(source.minimumOutputAtomic) ||
     positive(quote.amountIn) !== positive(source.bridgeAmountAtomic) ||
+    // FLEX_INPUT can execute a partial deposit. Require its quoted floor to fit
+    // the source amount; actual input and output remain bound below.
+    quoteRequest.swapType === "FLEX_INPUT" && positive(quote.minAmountIn) > positive(source.bridgeAmountAtomic) ||
     oneHash(details.originChainTxHashes) !== hash(source.transactionHash) ||
     oneHash(details.destinationChainTxHashes) !== destinationHash ||
     positive(details.amountIn) !== positive(source.bridgeAmountAtomic) ||
