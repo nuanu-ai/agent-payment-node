@@ -418,3 +418,30 @@ is not an execution guard. A future executable
 lane needs current deployment and bytecode proof, complete Mayan protocol
 semantics, destination and refund proof, fresh quote timing, and a separate
 admission review before this candidate can join the executable registry.
+
+`src/lifi/mayan-source-receipt.ts` adds a pure, offline source receipt parser for
+that same frozen quote shape. It checks the original Base transaction's chain,
+hash, sender, Diamond target, zero value and exact quoted input, a successful
+receipt with the same transaction hash, one Diamond `LiFiTransferStarted`, one
+`BridgeToNonEVMChainBytes32` matching the quoted transaction ID and receiver,
+and exactly one `MessageSent` from Circle's canonical Base CCTP V1
+MessageTransmitter. It decodes the [CCTP V1 message
+layout](https://developers.circle.com/cctp/v1/message-format), checks domains
+6 to 5, V1 versions, canonical Base TokenMessenger sender, Circle's Solana V1
+TokenMessengerMinter recipient, canonical Base USDC
+burn token, MayanCircle message sender, and a positive burn amount no greater
+than the bridge principal. The [Circle V1 deployment
+table](https://developers.circle.com/cctp/v1/evm-smart-contracts) pins the Base
+MessageTransmitter and TokenMessenger addresses. The [pinned LI.FI
+facet](https://github.com/lifinance/contracts/blob/4b4b8138a6f12e8c32ad72040fae5f1a763e3fc6/src/Facets/MayanFacet.sol)
+forwards the Mayan call and emits the two source events. [Mayan's MCTP
+description](https://docs.mayan.finance/) identifies Circle CCTP as the value
+transfer layer.
+
+The parser returns a source message hash, nonce, burn amount/token and CCTP
+mint recipient with `bridgeCompletion: false`. The CCTP mint recipient can be a
+Mayan program; it is not claimed to be the user's final Solana recipient.
+This is correlation within one source receipt, not destination delivery or
+finality proof. The caller must supply an authenticated transaction and receipt;
+the parser performs no RPC call, signature reconstruction, attestation lookup,
+or execution.
