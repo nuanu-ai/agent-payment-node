@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { getAddress } from "viem";
+import { ApnError } from "../../src/errors.js";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { ApnCore } from "../../src/core.js";
 import { hashObject } from "../../src/canonical.js";
@@ -47,6 +48,8 @@ export class GaslessTestRpc implements GaslessRpcPort {
   mirrorResult: "fit" | "misfit" | "unavailable" = "fit";
   /** Approved-fee snapshots that report bundler fee drift before passing again. */
   drift = 0; approvedFees: GaslessFees[] = []; estimateFees: (GaslessFees | undefined)[] = [];
+  /** Transport failures and unavailable mirror estimates that clear after the given number of calls. */
+  transport = 0; mirrorUnavailable = 0;
   constructor(readonly chainId: GaslessChainId, owner: Address, delegation: "empty" | "expected", readonly now: Date) {
     this.rpcOrigin = `https://rpc-${chainId}.example`; this.rpcEndpointHash = hashObject(this.rpcOrigin);
     const row = gaslessDeployment(chainId);
@@ -61,6 +64,7 @@ export class GaslessTestRpc implements GaslessRpcPort {
   async assertChain() { this.calls.push("assertChain"); }
   async snapshot(owner: Address, approvedGas?: GaslessGas) {
     this.calls.push("snapshot"); assert.equal(owner, this.current.owner);
+    if (this.transport > 0) { this.transport -= 1; throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable."); }
     if (approvedGas !== undefined) {
       this.approvedFees.push({ maxFeePerGas: approvedGas.maxFeePerGas, maxPriorityFeePerGas: approvedGas.maxPriorityFeePerGas });
       if (this.drift > 0) { this.drift -= 1; gaslessFailure("APN_OPERATION_BLOCKED", "gasless_bundler_fee_drift"); }
@@ -69,6 +73,7 @@ export class GaslessTestRpc implements GaslessRpcPort {
   }
   async mirrorEstimate(intent: GaslessIntent, _fees?: GaslessFees) {
     this.calls.push("mirror_estimate");
+    if (this.mirrorUnavailable > 0) { this.mirrorUnavailable -= 1; gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_mirror_estimate_unavailable"); }
     if (this.mirrorResult === "unavailable") gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_mirror_estimate_unavailable");
     if (this.mirrorResult === "misfit") gaslessFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_mirror_estimate_bounds");
     return this.fixtureEstimate(intent, "mirror");

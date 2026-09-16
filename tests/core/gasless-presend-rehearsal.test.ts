@@ -210,7 +210,9 @@ test("a fresh quote above the owner's cap after approval ends before the bootstr
   assert.equal(response.ok, true, response.error?.message);
   const stored = await s.record(id);
   assert.equal(stored.state, "failed_before_effect"); assert.equal(stored.failure, "gasless_fee_budget");
-  assert.equal(stored.bootstrap.signingAttempts, 0); assert.equal(s.wrapping.loads, 0); assert.deepEqual(s.wait.waits, []);
+  assert.equal(stored.bootstrap.signingAttempts, 0); assert.equal(s.wrapping.loads, 0);
+  // A quote above the cap can fall back inside it, so 0.5.19 retries it to the end of the window before giving up.
+  assert.equal(s.wait.waits.length, 17);
   assert.equal(s.rpc.calls.filter((c) => c === "estimate").length, 0); assert.equal(s.rpc.sends.length, 0);
   await new OperationService(s.state).assertProfileAvailable(stored.profileHash);
 });
