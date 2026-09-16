@@ -94,6 +94,8 @@ function bindParsedCatalog(parsed) {
                     recipient: solanaAddress(value(options, "--to")), amount: value(options, "--amount"), maximumFee: value(options, "--max-fee-sol"), idempotencyKey: value(options, "--idempotency-key") } };
         }
         case "wallet ensure": return { request: { command: "wallet.ensure", profile: value(options, "--profile") } };
+        case "wallet import": return { request: { command: "wallet.import", profile: value(options, "--profile"),
+                keyFile: value(options, "--key-file"), keyName: value(options, "--key-name"), expectedAddress: value(options, "--expected-address") } };
         case "wallet connect": return {
             request: {
                 command: "wallet.connect",

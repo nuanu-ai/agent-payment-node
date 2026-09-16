@@ -9,6 +9,7 @@ export declare class LocalWalletNative implements NativePort {
     constructor(state: StateStore, wrappingSecret: WrappingSecretPort, approval?: TransferApprovalPort);
     request(request: NativeRequest): Promise<unknown>;
     private ensureWallet;
+    private importWallet;
     private describeWallet;
     private approveAndSign;
     private getEffect;

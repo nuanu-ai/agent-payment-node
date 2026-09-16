@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readdir, realpath, rename, stat, unlink, } from "node:fs/promises";
+import { lstat, link, mkdir, open, readdir, realpath, rename, stat, unlink, } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
 import { canonicalJson, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -263,7 +263,7 @@ export class SecureStateStore {
             await handle.close();
         }
     }
-    async writeJson(relativePath, value) {
+    async writeJson(relativePath, value, createOnly = false) {
         const target = this.resolveRelative(relativePath);
         const parent = dirname(target);
         const serialized = `${canonicalJson(value)}\n`;
@@ -281,6 +281,8 @@ export class SecureStateStore {
             if (!isCode(error, "ENOENT"))
                 throw error;
         }
+        if (createOnly && targetBefore !== null)
+            stateSecurity("State target is already occupied.");
         const temporary = join(parent, `.${sha256(target).slice(0, 12)}.${randomBytes(12).toString("hex")}.tmp`);
         const handle = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, FILE_MODE);
         let writeFailure;
@@ -319,7 +321,20 @@ export class SecureStateStore {
                         throw error;
                 }
             }
-            await rename(temporary, target);
+            if (createOnly) {
+                try {
+                    await link(temporary, target);
+                }
+                catch (error) {
+                    if (isCode(error, "EEXIST"))
+                        stateSecurity("State target is already occupied.");
+                    throw error;
+                }
+                await unlink(temporary);
+            }
+            else {
+                await rename(temporary, target);
+            }
             const directory = await open(parent, constants.O_RDONLY);
             try {
                 await directory.sync();

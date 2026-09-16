@@ -45,6 +45,8 @@ export class StateStore extends SecureStateStore {
         await this.ensureDirectory(join("wallets", wallet.profileHash));
         await this.writeJson(join("wallets", wallet.profileHash, "wallet.json"), wallet);
     }
+    async writeNewWallet(wallet) { await this.ensureDirectory(join("wallets", wallet.profileHash)); await this.writeJson(join("wallets", wallet.profileHash, "wallet.json"), wallet, true); }
+    async walletImportEntries() { return await this.readDirectory("wallets"); }
     async loadProviderProfile(profileHash) {
         stateIdentifier(profileHash, "profile hash");
         const value = await this.readJson(join("profiles", profileHash, "profile.json"));
@@ -55,11 +57,13 @@ export class StateStore extends SecureStateStore {
             stateCorrupt("Provider profile path does not match its identity.");
         return profile;
     }
+    async profileImportEntries() { return await this.readDirectory("profiles"); }
     async writeProviderProfile(profile) {
         validateProviderProfile(profile);
         await this.ensureDirectory(join("profiles", profile.profile_hash));
         await this.writeJson(join("profiles", profile.profile_hash, "profile.json"), profile);
     }
+    async writeNewProviderProfile(profile) { validateProviderProfile(profile); await this.ensureDirectory(join("profiles", profile.profile_hash)); await this.writeJson(join("profiles", profile.profile_hash, "profile.json"), profile, true); }
     async removeProviderProfile(profileHash) {
         stateIdentifier(profileHash, "profile hash");
         await this.removeFile(join("profiles", profileHash, "profile.json"));
@@ -70,6 +74,7 @@ export class StateStore extends SecureStateStore {
     async writeEncryptedWalletEnvelope(profile, envelope) {
         await this.writeJson(join("wallets", `${profile}.json`), envelope);
     }
+    async writeNewEncryptedWalletEnvelope(profile, envelope) { await this.writeJson(join("wallets", `${profile}.json`), envelope, true); }
     async loadEncryptedPolicyEnvelope(profile) {
         return await this.readJson(join("policies", `${profile}.json`));
     }

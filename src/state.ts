@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { constants, type Dirent, type Stats } from "node:fs";
 import {
   type FileHandle,
   lstat,
@@ -83,6 +83,8 @@ export class StateStore extends SecureStateStore {
     await this.ensureDirectory(join("wallets", wallet.profileHash));
     await this.writeJson(join("wallets", wallet.profileHash, "wallet.json"), wallet);
   }
+  async writeNewWallet(wallet: WalletRecord): Promise<void> { await this.ensureDirectory(join("wallets", wallet.profileHash)); await this.writeJson(join("wallets", wallet.profileHash, "wallet.json"), wallet, true); }
+  async walletImportEntries(): Promise<readonly Dirent[]> { return await this.readDirectory("wallets"); }
   async loadProviderProfile(profileHash: string): Promise<ProviderProfileRecord | null> {
     stateIdentifier(profileHash, "profile hash");
     const value = await this.readJson(join("profiles", profileHash, "profile.json"));
@@ -91,12 +93,14 @@ export class StateStore extends SecureStateStore {
     if (profile.profile_hash !== profileHash) stateCorrupt("Provider profile path does not match its identity.");
     return profile;
   }
+  async profileImportEntries(): Promise<readonly Dirent[]> { return await this.readDirectory("profiles"); }
 
   async writeProviderProfile(profile: ProviderProfileRecord): Promise<void> {
     validateProviderProfile(profile);
     await this.ensureDirectory(join("profiles", profile.profile_hash));
     await this.writeJson(join("profiles", profile.profile_hash, "profile.json"), profile);
   }
+  async writeNewProviderProfile(profile: ProviderProfileRecord): Promise<void> { validateProviderProfile(profile); await this.ensureDirectory(join("profiles", profile.profile_hash)); await this.writeJson(join("profiles", profile.profile_hash, "profile.json"), profile, true); }
   async removeProviderProfile(profileHash: string): Promise<void> {
     stateIdentifier(profileHash, "profile hash");
     await this.removeFile(join("profiles", profileHash, "profile.json"));
@@ -108,6 +112,7 @@ export class StateStore extends SecureStateStore {
   async writeEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void> {
     await this.writeJson(join("wallets", `${profile}.json`), envelope);
   }
+  async writeNewEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void> { await this.writeJson(join("wallets", `${profile}.json`), envelope, true); }
   async loadEncryptedPolicyEnvelope(profile: string): Promise<unknown | null> {
     return await this.readJson(join("policies", `${profile}.json`));
   }

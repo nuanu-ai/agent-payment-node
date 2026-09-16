@@ -46,6 +46,9 @@ export class WalletService {
         throw new ApnError("APN_PROFILE_DRIFT", "The APN profile is already bound to a different wallet provider.");
       }
       const stored = await this.context.state.loadWallet(profileHash);
+      if (stored === null && await this.context.state.loadEncryptedWalletEnvelope(profile) !== null) {
+        throw new ApnError("APN_PROFILE_DRIFT", "Encrypted wallet profile has incomplete public metadata; automatic repair is disabled.");
+      }
       const native = this.context.requireNative();
       const result = stored === null
         ? parseWalletEnsure(await native.request(this.context.nativeRequest("wallet.ensure", { profile })), profile)
@@ -68,6 +71,28 @@ export class WalletService {
       });
       await this.context.state.writeWallet(wallet);
       await this.materializeLocalProfile(wallet, providerProfile);
+      return publicWallet(wallet, "ready");
+    });
+  }
+
+  async importNew(profileInput: string, keyFile: string, keyName: string, expectedAddress: string): Promise<unknown> {
+    const profile = canonicalProfile(profileInput);
+    await this.context.ready();
+    const profileHash = this.context.state.profileHash(profile);
+    return await this.context.state.withLocks([`profile:${profileHash}`, "wallet-import-global"], async () => {
+      await assertWalletLifecycleAvailable(this.context, profileHash);
+      const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
+      const provider = await this.context.state.loadProviderProfile(profileHash);
+      if (artifacts.stored !== null || artifacts.encrypted !== null || provider !== null) {
+        throw new ApnError("APN_PROFILE_DRIFT", "Wallet profile is already occupied; import cannot overwrite it.");
+      }
+      const result = parseWalletEnsure(await this.context.requireNative().request(
+        this.context.nativeRequest("wallet.import", { profile, keyFile, keyName, expectedAddress })), profile);
+      if (!result.found) throw new ApnError("APN_NATIVE_PROTOCOL", "Native wallet import returned no identity.");
+      const wallet = sealWallet({ schemaVersion: STATE_VERSION, profile, profileHash,
+        address: result.address, createdAt: result.createdAt, bindingHash: result.bindingHash });
+      await this.context.state.writeNewWallet(wallet);
+      await this.context.state.writeNewProviderProfile(projectLegacyLocalProfile(wallet));
       return publicWallet(wallet, "ready");
     });
   }
@@ -117,7 +142,7 @@ export class WalletService {
           address: result.address,
           bindingHash: result.bindingHash,
           proof_class: "encrypted_apn_home_status",
-          next_actions: ["apn wallet ensure"],
+          next_actions: [],
         };
       }
       if (!result.found) throw new ApnError("APN_WALLET_MISMATCH", "Native key material is missing for public wallet metadata.");

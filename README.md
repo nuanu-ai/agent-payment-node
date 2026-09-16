@@ -221,6 +221,14 @@ spending-authority claim.
 address, manually, with a small amount of Base ETH and Base USDC. APN never
 prints or exports the private key.
 
+`wallet import` accepts an existing EVM signing key only through an owner-owned,
+mode `0600` regular `.env` file. Supply its variable name and the exact
+checksummed address through `--key-name` and `--expected-address`; never place
+the key itself on the command line. The target profile must be new, and an
+address already bound to a local profile is rejected. A failed or interrupted
+write leaves any created artifacts occupied; APN will not overwrite or
+automatically repair them on retry.
+
 Before unattended x402, the wallet owner must configure explicit limits. APN
 does not compile or substitute monetary defaults:
 
@@ -507,6 +515,7 @@ apn mcp serve
 apn mcp config
 apn doctor keychain
 apn wallet ensure [--profile <profile>]
+apn wallet import --profile <profile> --key-file <absolute-path> --key-name <env-name> --expected-address <checksummed-address>
 apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>]
 apn wallet permission list --profile <profile>
 apn wallet permission sync --profile <profile> --expected-revision <positive-integer>
