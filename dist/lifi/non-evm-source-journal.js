@@ -36,11 +36,13 @@ const snapshot = z.strictObject({ phase, signedTransaction: signedHex.nullable()
     nonceAtomic: uintSchema.nullable(), submissionAttempts: z.union([z.literal(0), z.literal(1)]),
     safeSourceProof: sourceProof.nullable(), reason: z.string().max(128).nullable() });
 const entry = z.strictObject({ ...snapshot.shape, at: isoSchema, previousHash: hashSchema, transitionHash: hashSchema });
-const schema = z.strictObject({ schemaVersion: z.literal("apn.non-evm-source-journal.v1"),
+const schemaV1 = z.strictObject({ schemaVersion: z.literal("apn.non-evm-source-journal.v1"),
     kind: z.literal("non_evm_source_journal"), executionAdmitted: z.literal(false),
     profileHash: hashSchema, operationId: hashSchema, draftIntegrityHash: hashSchema,
     route: pair, sourceCall: call, maxSourceNativeDebitWei: uintSchema, admissionProof: proof, createdAt: isoSchema,
     ...snapshot.shape, transitions: z.array(entry).min(1).max(32), integrityHash: hashSchema });
+const schemaV2 = schemaV1.extend({ schemaVersion: z.literal("apn.non-evm-source-journal.v2"), protocolInputHash: hashSchema });
+const schema = z.discriminatedUnion("schemaVersion", [schemaV1, schemaV2]);
 function corrupt() { return bridgeFailure("APN_STATE_CORRUPT", "non_evm_source_journal"); }
 function blocked() { return bridgeFailure("APN_OPERATION_BLOCKED", "non_evm_source_transition_blocked"); }
 function snapshotOf(j) {
@@ -136,11 +138,13 @@ export function validateNonEvmSourceJournal(value) {
         corrupt();
     return j;
 }
-function build(binding) {
+function build(binding, version) {
+    if (version === "v1" && ("schemaVersion" in binding || "protocolInputHash" in binding))
+        corrupt();
     const initial = { phase: "staged_untrusted", signedTransaction: null, transactionHash: null,
         nonceAtomic: null, submissionAttempts: 0, safeSourceProof: null, reason: null };
     const first = { ...initial, at: binding.createdAt, previousHash: binding.draftIntegrityHash };
-    const value = { schemaVersion: "apn.non-evm-source-journal.v1", kind: "non_evm_source_journal",
+    const value = { schemaVersion: `apn.non-evm-source-journal.${version}`, kind: "non_evm_source_journal",
         executionAdmitted: false, ...binding, ...initial,
         transitions: [{ ...first, transitionHash: hashObject(first) }] };
     return validateNonEvmSourceJournal({ ...value, integrityHash: hashObject(value) });
@@ -180,7 +184,8 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
         const path = this.reservationPath(j), prior = await this.readJson(path);
         const identity = { profileHash: j.profileHash, operationId: j.operationId,
             draftIntegrityHash: j.draftIntegrityHash, sender: j.sourceCall.from,
-            nonceAtomic: j.sourceCall.nonceAtomic, transactionHash };
+            nonceAtomic: j.sourceCall.nonceAtomic, transactionHash,
+            ...(j.schemaVersion === "apn.non-evm-source-journal.v2" ? { protocolInputHash: j.protocolInputHash } : {}) };
         const record = { ...identity, integrityHash: hashObject(identity) };
         if (prior !== null) {
             if (hashObject(prior) !== hashObject(record))
@@ -196,18 +201,29 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
         const prior = await this.readJson(this.reservationPath(j));
         const identity = { profileHash: j.profileHash, operationId: j.operationId,
             draftIntegrityHash: j.draftIntegrityHash, sender: j.sourceCall.from,
-            nonceAtomic: j.sourceCall.nonceAtomic, transactionHash: j.transactionHash };
+            nonceAtomic: j.sourceCall.nonceAtomic, transactionHash: j.transactionHash,
+            ...(j.schemaVersion === "apn.non-evm-source-journal.v2" ? { protocolInputHash: j.protocolInputHash } : {}) };
         if (prior === null || hashObject(prior) !== hashObject({ ...identity, integrityHash: hashObject(identity) }))
             corrupt();
     }
     /** A synthetically supplied proof is permanently untrusted. An adapter must introduce a new versioned admission contract. */
     async stage(binding) {
-        const j = build(binding);
+        return this.stageBuilt(build(binding, "v1"));
+    }
+    /** Stage a new record with a durable, untrusted protocol input identity. */
+    async stageV2(binding) {
+        if (binding.schemaVersion !== "apn.non-evm-source-journal.v2")
+            corrupt();
+        return this.stageBuilt(build(binding, "v2"));
+    }
+    async stageBuilt(j) {
         await this.initialize();
         return this.withLocks([`profile:${j.profileHash}`, `operation:${j.operationId}`], async () => {
             const prior = await this.load(j.profileHash, j.operationId);
             if (prior !== null) {
-                if (prior.draftIntegrityHash !== j.draftIntegrityHash || prior.route !== j.route ||
+                if (prior.schemaVersion !== j.schemaVersion ||
+                    (prior.schemaVersion === "apn.non-evm-source-journal.v2" && j.schemaVersion === "apn.non-evm-source-journal.v2" && prior.protocolInputHash !== j.protocolInputHash) ||
+                    prior.draftIntegrityHash !== j.draftIntegrityHash || prior.route !== j.route ||
                     hashObject(prior.sourceCall) !== hashObject(j.sourceCall) ||
                     hashObject(prior.admissionProof) !== hashObject(j.admissionProof) || prior.createdAt !== j.createdAt ||
                     prior.maxSourceNativeDebitWei !== j.maxSourceNativeDebitWei)

@@ -30,7 +30,7 @@ export const CIRCLE_COMMANDS: readonly CommandDefinition[] = [
     summary: "Observe a saved approval without any resend.", options: [operation],
     effect: { class: "network_read", summary: "Reads the exact saved Base transaction and fresh allowance." },
     approval: { class: "none", when: "Observation only." }, output, states, recovery: [], examples: ["apn circle approval status --operation <approval-id>"] },
-  { path: ["circle", "source", "submit"], synopsis: "apn circle source submit --profile <profile> --expected-payer <address> --recipient-owner <address> --recipient-setup <existing_ata|create_ata> --amount-atomic <uint> --max-source-fee-atomic <uint> --max-allowance-atomic <uint> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>",
+  { path: ["circle", "source", "submit"], synopsis: "apn circle source submit --profile <profile> --expected-payer <base-address> --recipient-owner <solana-address> --recipient-setup <existing_ata|create_ata> --amount-atomic <uint> --max-source-fee-atomic <uint> --max-allowance-atomic <uint> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>",
     summary: "Prepare, confirm and submit one bounded Circle V2 Base USDC source transfer.",
     options: [profile, option("--expected-payer", "address"), option("--recipient-owner", "string"),
       option("--recipient-setup", "string"), option("--amount-atomic", "atomic_usdc"),

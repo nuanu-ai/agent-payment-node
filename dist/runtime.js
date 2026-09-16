@@ -9,6 +9,8 @@ export class RuntimeContext {
     metaMaskGasless;
     gasless;
     bridge;
+    circleApproval;
+    circleSource;
     directRails;
     chainAccounts;
     railApproval;
@@ -47,6 +49,10 @@ export class RuntimeContext {
             this.gasless = dependencies.gasless;
         if (dependencies.bridge !== undefined)
             this.bridge = dependencies.bridge;
+        if (dependencies.circleApproval !== undefined)
+            this.circleApproval = dependencies.circleApproval;
+        if (dependencies.circleSource !== undefined)
+            this.circleSource = dependencies.circleSource;
         this.directRails = dependencies.directRails ?? [];
         if (dependencies.chainAccounts !== undefined)
             this.chainAccounts = dependencies.chainAccounts;
