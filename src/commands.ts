@@ -29,6 +29,7 @@ export type CommandRequest =
   | { readonly command: "version" }
   | { readonly command: "doctor.keychain" }
   | { readonly command: "wallet.ensure"; readonly profile: string }
+  | { readonly command: "wallet.import"; readonly profile: string; readonly keyFile: string; readonly keyName: string; readonly expectedAddress: string }
   | {
     readonly command: "wallet.connect";
     readonly profile: string;

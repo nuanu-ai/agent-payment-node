@@ -41,7 +41,8 @@ export declare class EncryptedWalletStore {
         readonly identity: WalletIdentity;
         readonly secret: WalletSecretState;
     }>;
-    save(identity: WalletIdentity, secret: WalletSecretState, wrappingInput?: Buffer): Promise<void>;
+    importNew(profileInput: string, privateKeyInput: string, expectedAddress: string): Promise<WalletIdentity>;
+    save(identity: WalletIdentity, secret: WalletSecretState, wrappingInput?: Buffer, createOnly?: boolean): Promise<void>;
     clear(secret: WalletSecretState): void;
     private requiredWrappingSecret;
 }

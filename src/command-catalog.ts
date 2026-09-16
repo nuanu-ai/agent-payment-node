@@ -145,7 +145,6 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["operation"], summary: "Read, recover or explicitly abandon eligible durable operations.", kind: "group" },
   { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ] as const;
-
 const BASE_COMMANDS: readonly CommandDefinition[] = [
   ...EVM_COMMANDS,
   command(["--version"], "apn --version", "Report installed APN and CLI contract versions.", [], "none", "Reads immutable build metadata only.", "none", "Never.", completedStates, [], ["apn --version"]),
@@ -153,6 +152,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   command(["mcp", "config"], "apn mcp config", "Print the provider-neutral APN MCP launch descriptor.", [], "none", "Returns immutable launch metadata without reading or changing client configuration.", "none", "Never.", completedStates, [], ["apn mcp config"], "text"),
   command(["doctor", "keychain"], "apn doctor keychain", "Check whether the ordinary login Keychain command path is usable.", [], "local_read", "Reads Keychain availability without creating wallet material.", "none", "Never.", completedStates, [], ["apn doctor keychain"]),
   command(["wallet", "ensure"], "apn wallet ensure [--profile <profile>]", "Create or reuse one encrypted disposable wallet.", [profileOptional], "local_write", "May create ~/.apn state and one Keychain wrapping secret.", "none", "Wallet creation itself is non-interactive.", completedStates, [], ["apn wallet ensure --profile default"]),
+  command(["wallet", "import"], "apn wallet import --profile <profile> --key-file <absolute-path> --key-name <env-name> --expected-address <checksummed-address>", "Import a private key from an owner-only file into a new encrypted local wallet profile.", [profileRequired, option("--key-file", "string", true, noDefault, ["absolute_owner_only_regular_file_mode_0600"], "operator_input"), option("--key-name", "string", true, noDefault, ["environment_variable_name"], "public"), option("--expected-address", "address", true, noDefault, ["exact_checksum_match"], "public")], "local_write", "Creates a new encrypted wallet envelope and public profile metadata without overwriting existing state.", "none", "The operator supplies the private key file path and expected public address.", completedStates, [], ["apn wallet import --profile test-payer --key-file /secure/evm.env --key-name EVM_SIGNER --expected-address <checksummed-address>"]),
   command(
     ["wallet", "connect"],
     "apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>]",

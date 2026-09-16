@@ -1,4 +1,7 @@
 import { validX402Tuple } from "./x402-network.js";
+import { constants } from "node:fs";
+import { lstat, open } from "node:fs/promises";
+import { join, normalize, parse, resolve, sep } from "node:path";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
@@ -34,6 +37,7 @@ export class LocalWalletNative {
         return await this.state.withLocks([`custody:${profileHash}`], async () => {
             switch (request.operation) {
                 case "wallet.ensure": return await this.ensureWallet(profile);
+                case "wallet.import": return await this.importWallet(profile, request.payload);
                 case "wallet.describe": return await this.describeWallet(profile);
                 case "directTransfer.approveAndSign": return await this.approveAndSign(request.payload);
                 case "effectMaterial.get": return await this.getEffect(request.payload);
@@ -49,6 +53,60 @@ export class LocalWalletNative {
         }
         finally {
             this.wallets.clear(loaded.secret);
+        }
+    }
+    async importWallet(profile, payload) {
+        const keyFile = payload.keyFile;
+        const keyName = payload.keyName;
+        const expectedAddress = payload.expectedAddress;
+        if (typeof keyFile !== "string" || !keyFile.startsWith("/") || typeof keyName !== "string" ||
+            !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(keyName) || typeof expectedAddress !== "string") {
+            throw new ApnError("APN_INVALID_INPUT", "Wallet import requires an absolute key file, key name, and expected address.");
+        }
+        if (normalize(keyFile) !== keyFile || resolve(keyFile) !== keyFile) {
+            throw new ApnError("APN_STATE_SECURITY", "Wallet key file path must be canonical.");
+        }
+        let component = parse(keyFile).root;
+        for (const part of keyFile.slice(component.length).split(sep).filter(Boolean)) {
+            component = join(component, part);
+            if ((await lstat(component)).isSymbolicLink()) {
+                throw new ApnError("APN_STATE_SECURITY", "Wallet key file path traverses a symbolic link.");
+            }
+        }
+        const handle = await open(keyFile, constants.O_RDONLY | constants.O_NOFOLLOW);
+        let bytes = Buffer.alloc(0);
+        try {
+            const before = await handle.stat();
+            if (!before.isFile() || before.uid !== process.geteuid?.() || (before.mode & 0o777) !== 0o600 ||
+                before.nlink !== 1 || before.size > 64 * 1024) {
+                throw new ApnError("APN_STATE_SECURITY", "Wallet key file must be an owner-only regular file of bounded size.");
+            }
+            bytes = Buffer.alloc(before.size + 1);
+            let read = 0;
+            while (read < bytes.length) {
+                const result = await handle.read(bytes, read, bytes.length - read, read);
+                if (result.bytesRead === 0)
+                    break;
+                read += result.bytesRead;
+            }
+            const after = await handle.stat();
+            if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size ||
+                before.mtimeMs !== after.mtimeMs || read !== before.size) {
+                throw new ApnError("APN_STATE_SECURITY", "Wallet key file changed during import.");
+            }
+            const lines = bytes.subarray(0, read).toString("utf8").split(/\r?\n/u);
+            const matches = lines.map((line) => line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s#]*))\s*(?:#.*)?$/u))
+                .filter((match) => match?.[1] === keyName);
+            if (matches.length !== 1)
+                throw new ApnError("APN_INVALID_INPUT", "Wallet key name must occur exactly once in the key file.");
+            const match = matches[0];
+            const privateKey = match[2] ?? match[3] ?? match[4] ?? "";
+            const identity = await this.wallets.importNew(profile, privateKey, expectedAddress);
+            return publicIdentity(identity);
+        }
+        finally {
+            bytes.fill(0);
+            await handle.close();
         }
     }
     async describeWallet(profile) {

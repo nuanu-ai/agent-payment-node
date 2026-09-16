@@ -1,3 +1,4 @@
+import { type Dirent } from "node:fs";
 import { type ProviderProfileRecord } from "./provider-profile.js";
 import type { OperationRecord, ReceiptRecord, WalletRecord } from "./model.js";
 import { SecureStateStore } from "./secure-state-store.js";
@@ -10,11 +11,16 @@ export declare class StateStore extends SecureStateStore {
         readonly encrypted: unknown | null;
     }>;
     writeWallet(wallet: WalletRecord): Promise<void>;
+    writeNewWallet(wallet: WalletRecord): Promise<void>;
+    walletImportEntries(): Promise<readonly Dirent[]>;
     loadProviderProfile(profileHash: string): Promise<ProviderProfileRecord | null>;
+    profileImportEntries(): Promise<readonly Dirent[]>;
     writeProviderProfile(profile: ProviderProfileRecord): Promise<void>;
+    writeNewProviderProfile(profile: ProviderProfileRecord): Promise<void>;
     removeProviderProfile(profileHash: string): Promise<void>;
     loadEncryptedWalletEnvelope(profile: string): Promise<unknown | null>;
     writeEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void>;
+    writeNewEncryptedWalletEnvelope(profile: string, envelope: unknown): Promise<void>;
     loadEncryptedPolicyEnvelope(profile: string): Promise<unknown | null>;
     writeEncryptedPolicyEnvelope(profile: string, envelope: unknown): Promise<void>;
     loadOperation(profileHash: string, operationId: string): Promise<OperationRecord | null>;

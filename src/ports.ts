@@ -23,6 +23,7 @@ export interface NativeRequest {
   readonly operation:
     | "wallet.describe"
     | "wallet.ensure"
+    | "wallet.import"
     | "directTransfer.approveAndSign"
     | "effectMaterial.get"
     | "x402Exact.approveAndAuthorize"
