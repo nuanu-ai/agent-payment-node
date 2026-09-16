@@ -71,7 +71,9 @@ export function bindCircleV2SourcePreparationToJournal(input: CircleV2SourceJour
     bridgeHex(mintRecipient, 32, 32) !== `0x${Buffer.from(ataBytes(p.recipient.ata)).toString("hex")}` ||
     encodeFunctionData({ abi: ABI, functionName: decoded.functionName, args: decoded.args as never }).toLowerCase() !== data) fail("protocol_identity");
   const fee = bridgeUint(p.quote.feeTotalAtomic), principal = bridgeUint(p.principalAtomic, true);
+  const maxAllowance = bridgeUint(p.maxAllowanceAtomic, true);
   if (fee >= principal || principal + fee !== bridgeUint(p.requiredUsdcDebitAtomic) ||
+    maxAllowance < principal + fee || maxAllowance === (1n << 256n) - 1n ||
     bridgeUint(p.maximumNativeDebitWei) !== bridgeUint(tx.gasLimitAtomic, true) * bridgeUint(tx.maxFeePerGasWei, true) ||
     bridgeUint(tx.maxPriorityFeePerGasWei) > bridgeUint(tx.maxFeePerGasWei)) fail("amount_or_fees");
   const gas = bridgeUint(tx.gasLimitAtomic, true), maxFee = bridgeUint(tx.maxFeePerGasWei, true);
@@ -91,6 +93,7 @@ export function bindCircleV2SourcePreparationToJournal(input: CircleV2SourceJour
   const protocolInputHash = hashObject({ version: "circle_v2_source_journal_binding_v1", preparationDigest,
     draftIntegrityHash, quoteHash: p.quoteHash, signedQuote, quoteExpiry: p.quote.expiry,
     recipient: p.recipient, principalAtomic: p.principalAtomic, requiredUsdcDebitAtomic: p.requiredUsdcDebitAtomic,
+    maxAllowanceAtomic: maxAllowance.toString(),
     sourceRefundAddress: refund, hookData: bridgeHex(hookData), minFinalityThreshold: input.admission.minFinalityThreshold,
     sourceBlock: p.sourceBlock, preparedAt: p.preparedAt, expiresAt: p.expiresAt, sourceCall: binding.sourceCall });
   return Object.freeze({ binding: Object.freeze({ ...binding, sourceCall: Object.freeze(binding.sourceCall),

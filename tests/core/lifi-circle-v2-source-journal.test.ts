@@ -29,7 +29,7 @@ async function fixture(): Promise<CircleV2SourcePreparation> {
     quoteAuthenticityVerified: false as const, baseStateSourceVerified: false as const, blockers: ["untrusted"],
     draftIntegrityDigest: `sha256:${"a".repeat(64)}`, quoteHash: `sha256:${"b".repeat(64)}`,
     quote: { signedQuote: "0x01020304", feeToken: token, feeTotalAtomic: "20000", expiry: { mode: "BLOCK_NUMBER", expiresAtBlock: 100 } },
-    recipient: { wallet, ata, setup: "existing_ata" as const }, principalAtomic: "1000000", requiredUsdcDebitAtomic: "1020000",
+    recipient: { wallet, ata, setup: "existing_ata" as const }, principalAtomic: "1000000", requiredUsdcDebitAtomic: "1020000", maxAllowanceAtomic: "1020000",
     sourceRefundAddress: refund, sourceBlock: { number: "99", hash: `0x${"c".repeat(64)}` },
     transaction: { type: "eip1559" as const, chainId: 8453 as const, from: payer, to: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES,
       data, valueAtomic: "0" as const, nonceAtomic: "7", gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000",
@@ -118,6 +118,8 @@ test("rejects re-digested call identity, native value, uint256 overflow and empt
     (v: any) => { v.maximumNativeDebitWei = "1"; },
     (v: any) => { v.transaction.nonceAtomic = (1n << 256n).toString(); },
     (v: any) => { v.transaction.gasLimitAtomic = (1n << 256n).toString(); },
+    (v: any) => { v.maxAllowanceAtomic = "1019999"; },
+    (v: any) => { v.maxAllowanceAtomic = ((1n << 256n) - 1n).toString(); },
   ]) { const changed = mutate(p, change, true); assert.throws(() => bindCircleV2SourcePreparationToJournal(input(changed))); }
   for (const change of [
     (args: any[]) => { args[0] = 1_000_001n; },
