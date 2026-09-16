@@ -1,16 +1,15 @@
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { EVM_COMMANDS } from "./evm-command-catalog.js";
 import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";
+import { CIRCLE_COMMANDS } from "./lifi/circle-command-catalog.js";
 import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";
 import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";
 import { networkCommandVariants } from "./network-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
 import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
-
 export { renderHelp, renderReadmeCommandReference };
 export { assertCompatibleManifestEvolution, validateCommandManifest };
 export * from "./command-catalog-parser.js";
-
 export type ScalarType =
   | "string"
   | "base64"
@@ -28,7 +27,6 @@ export type ScalarType =
   | "provider_request_id"
   | "idempotency_key"
   | "integer_seconds";
-
 export type EffectClass =
   | "none"
   | "local_read"
@@ -38,13 +36,11 @@ export type EffectClass =
   | "payment_prepare"
   | "payment_submit"
   | "recovery";
-
 export type ApprovalClass =
   | "none"
   | "foreground_tty"
   | "prior_profile_policy"
   | "prior_operation_authorization";
-
 export interface CommandOption {
   readonly name: `--${string}`;
   readonly type: ScalarType;
@@ -132,6 +128,9 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["gasless"], summary: "Transfer USDC with gas paid from the total USDC budget.", kind: "group" },
   { path: ["gasless", "transfer"], summary: "Prepare and approve a USDC fee transfer.", kind: "group" },
   { path: ["bridge"], summary: "Discover, prepare and recover finite LI.FI cross-chain routes.", kind: "group" },
+  { path: ["circle"], summary: "Bounded Circle V2 Base to Solana USDC operations.", kind: "group" },
+  { path: ["circle", "approval"], summary: "Prepare and execute an exact Base USDC allowance.", kind: "group" },
+  { path: ["circle", "source"], summary: "Submit one Base CCTP V2 source transfer.", kind: "group" },
   { path: ["policy"], summary: "Explicit human admission of mainnet chain assets.", kind: "group" },
   { path: ["mcp"], summary: "Serve and discover the local APN MCP transport.", kind: "group" },
   { path: ["doctor"], summary: "Inspect local APN prerequisites.", kind: "group" },
@@ -423,7 +422,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Inspect one durable terminal receipt.", [operationRequired], "local_write", "May initialize local state and repair saved operation or receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ] as const;
 
-export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...BRIDGE_COMMANDS, ...GASLESS_COMMANDS];
+export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...GASLESS_COMMANDS];
 
 export const COMMAND_MANIFEST = {
   schema_version: "apn.command-manifest.v1",
