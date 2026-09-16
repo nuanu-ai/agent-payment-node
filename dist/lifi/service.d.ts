@@ -29,9 +29,23 @@ export declare class BridgeService {
         capability: {
             chains: {
                 chain: string;
-                token: `0x${string}`;
-                decimals: number;
-                symbol: string;
+                name: string;
+                native_coin: {
+                    symbol: string;
+                    coin_key: string;
+                    decimals: 18;
+                    bridgeable_principal: boolean;
+                    role: string;
+                };
+                tokens: {
+                    token: `0x${string}`;
+                    symbol: string;
+                    coin_key: string;
+                    decimals: number;
+                    upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                    tools: string[];
+                    peers: string[];
+                }[];
             }[];
             tools: {
                 tool: string;
@@ -59,15 +73,23 @@ export declare class BridgeService {
                 prerequisites: string[];
             })[];
             rpc_environment: {
-                "eip155:1": string;
-                "eip155:8453": string;
-                "eip155:42161": string;
+                [k: string]: string;
             };
-            inventory_only: {
+            inventory_only: ({
                 tool: string;
                 reason: string;
-            }[];
+                asset?: never;
+            } | {
+                asset: string;
+                reason: string;
+                tool?: never;
+            })[];
             fee_control: string;
+            fee_headroom: {
+                policy: "apn.bridge-fee-headroom.v1";
+                headroom_bps: number;
+                statement: string;
+            };
             mainnet_acceptance: {
                 complete: boolean;
                 passed: number;
@@ -129,6 +151,33 @@ export declare class BridgeService {
             lifi_transaction_id: `0x${string}`;
             included_step_identities: readonly string[];
         };
+        asset: {
+            from: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            to: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            native_principal_admitted: boolean;
+        };
         transfer: {
             sender: `0x${string}`;
             quoted_output_atomic: string;
@@ -151,6 +200,13 @@ export declare class BridgeService {
         fees: {
             declared: readonly import("./model.js").BridgeFee[];
             implicit_protocol_token_fee_atomic: string;
+            fee_headroom: {
+                policy: "apn.bridge-fee-headroom.v1";
+                headroom_bps: number;
+                approved_maximum_execution_fee_wei: string;
+                quoted_execution_fee_wei: string;
+                statement: string;
+            };
             token_loss_bound_atomic: string;
             native_debit_cap_wei: string;
             total_native_fee_enforced_onchain: boolean;
@@ -177,6 +233,7 @@ export declare class BridgeService {
             economics: import("../model.js").Economics;
             fee_quote: import("../evm-ports.js").EvmFeeQuote;
             gas_ceiling_provisional_at_consent: boolean;
+            fee_ceiling: import("./model.js").BridgeFeeCeiling;
             included_proof: import("./model.js").BridgeTransactionProof | null;
             safe_proof: import("./model.js").BridgeTransactionProof | null;
         }[];
@@ -233,6 +290,33 @@ export declare class BridgeService {
             lifi_transaction_id: `0x${string}`;
             included_step_identities: readonly string[];
         };
+        asset: {
+            from: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            to: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            native_principal_admitted: boolean;
+        };
         transfer: {
             sender: `0x${string}`;
             quoted_output_atomic: string;
@@ -255,6 +339,13 @@ export declare class BridgeService {
         fees: {
             declared: readonly import("./model.js").BridgeFee[];
             implicit_protocol_token_fee_atomic: string;
+            fee_headroom: {
+                policy: "apn.bridge-fee-headroom.v1";
+                headroom_bps: number;
+                approved_maximum_execution_fee_wei: string;
+                quoted_execution_fee_wei: string;
+                statement: string;
+            };
             token_loss_bound_atomic: string;
             native_debit_cap_wei: string;
             total_native_fee_enforced_onchain: boolean;
@@ -281,6 +372,7 @@ export declare class BridgeService {
             economics: import("../model.js").Economics;
             fee_quote: import("../evm-ports.js").EvmFeeQuote;
             gas_ceiling_provisional_at_consent: boolean;
+            fee_ceiling: import("./model.js").BridgeFeeCeiling;
             included_proof: import("./model.js").BridgeTransactionProof | null;
             safe_proof: import("./model.js").BridgeTransactionProof | null;
         }[];
@@ -337,6 +429,33 @@ export declare class BridgeService {
             lifi_transaction_id: `0x${string}`;
             included_step_identities: readonly string[];
         };
+        asset: {
+            from: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            to: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            native_principal_admitted: boolean;
+        };
         transfer: {
             sender: `0x${string}`;
             quoted_output_atomic: string;
@@ -359,6 +478,13 @@ export declare class BridgeService {
         fees: {
             declared: readonly import("./model.js").BridgeFee[];
             implicit_protocol_token_fee_atomic: string;
+            fee_headroom: {
+                policy: "apn.bridge-fee-headroom.v1";
+                headroom_bps: number;
+                approved_maximum_execution_fee_wei: string;
+                quoted_execution_fee_wei: string;
+                statement: string;
+            };
             token_loss_bound_atomic: string;
             native_debit_cap_wei: string;
             total_native_fee_enforced_onchain: boolean;
@@ -385,6 +511,7 @@ export declare class BridgeService {
             economics: import("../model.js").Economics;
             fee_quote: import("../evm-ports.js").EvmFeeQuote;
             gas_ceiling_provisional_at_consent: boolean;
+            fee_ceiling: import("./model.js").BridgeFeeCeiling;
             included_proof: import("./model.js").BridgeTransactionProof | null;
             safe_proof: import("./model.js").BridgeTransactionProof | null;
         }[];
@@ -441,6 +568,33 @@ export declare class BridgeService {
             lifi_transaction_id: `0x${string}`;
             included_step_identities: readonly string[];
         };
+        asset: {
+            from: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            to: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            native_principal_admitted: boolean;
+        };
         transfer: {
             sender: `0x${string}`;
             quoted_output_atomic: string;
@@ -463,6 +617,13 @@ export declare class BridgeService {
         fees: {
             declared: readonly import("./model.js").BridgeFee[];
             implicit_protocol_token_fee_atomic: string;
+            fee_headroom: {
+                policy: "apn.bridge-fee-headroom.v1";
+                headroom_bps: number;
+                approved_maximum_execution_fee_wei: string;
+                quoted_execution_fee_wei: string;
+                statement: string;
+            };
             token_loss_bound_atomic: string;
             native_debit_cap_wei: string;
             total_native_fee_enforced_onchain: boolean;
@@ -489,6 +650,7 @@ export declare class BridgeService {
             economics: import("../model.js").Economics;
             fee_quote: import("../evm-ports.js").EvmFeeQuote;
             gas_ceiling_provisional_at_consent: boolean;
+            fee_ceiling: import("./model.js").BridgeFeeCeiling;
             included_proof: import("./model.js").BridgeTransactionProof | null;
             safe_proof: import("./model.js").BridgeTransactionProof | null;
         }[];
@@ -547,6 +709,33 @@ export declare class BridgeService {
             lifi_transaction_id: `0x${string}`;
             included_step_identities: readonly string[];
         };
+        asset: {
+            from: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            to: {
+                chain: string;
+                token: `0x${string}`;
+                symbol: string;
+                coin_key: string;
+                decimals: number;
+                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                native_coin: {
+                    symbol: string;
+                    decimals: 18;
+                };
+            };
+            native_principal_admitted: boolean;
+        };
         transfer: {
             sender: `0x${string}`;
             quoted_output_atomic: string;
@@ -569,6 +758,13 @@ export declare class BridgeService {
         fees: {
             declared: readonly import("./model.js").BridgeFee[];
             implicit_protocol_token_fee_atomic: string;
+            fee_headroom: {
+                policy: "apn.bridge-fee-headroom.v1";
+                headroom_bps: number;
+                approved_maximum_execution_fee_wei: string;
+                quoted_execution_fee_wei: string;
+                statement: string;
+            };
             token_loss_bound_atomic: string;
             native_debit_cap_wei: string;
             total_native_fee_enforced_onchain: boolean;
@@ -595,6 +791,7 @@ export declare class BridgeService {
             economics: import("../model.js").Economics;
             fee_quote: import("../evm-ports.js").EvmFeeQuote;
             gas_ceiling_provisional_at_consent: boolean;
+            fee_ceiling: import("./model.js").BridgeFeeCeiling;
             included_proof: import("./model.js").BridgeTransactionProof | null;
             safe_proof: import("./model.js").BridgeTransactionProof | null;
         }[];

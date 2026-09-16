@@ -24,8 +24,8 @@ export interface BridgeRpcPort {
   readonly origin: string;
   assertChain(): Promise<void>;
   block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
-  deployment(tool: BridgeTool, peerChainId: EvmChainId, block?: BridgeBlock): Promise<BridgeDeploymentIdentity>;
-  account(owner: Address, spender: Address): Promise<BridgeAccountSnapshot>;
+  deployment(tool: BridgeTool, peerChainId: EvmChainId, token: Address, block?: BridgeBlock): Promise<BridgeDeploymentIdentity>;
+  account(owner: Address, spender: Address, token: Address): Promise<BridgeAccountSnapshot>;
   prices(): Promise<Pick<FeeEstimate, "maxFeePerGasAtomic" | "maxPriorityFeePerGasAtomic">>;
   estimate(transaction: BridgeTransaction): Promise<FeeEstimate>;
   feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<EvmFeeQuote>;

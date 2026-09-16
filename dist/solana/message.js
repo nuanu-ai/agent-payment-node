@@ -6,12 +6,16 @@ import { SOLANA_USDC } from "../chain-policy.js";
 import { ApnError } from "../errors.js";
 import { associatedUsdc } from "./accounts.js";
 import { solanaAddress, solanaSignature } from "./rpc.js";
-export async function solanaMessage(input) {
+/** `send` supersedes the preparation-time lifetime once the send guard has re-acquired one. */
+export async function solanaMessage(input, send = null) {
     const sender = createNoopSigner(address(solanaAddress(input.sender)));
     const instructions = await solanaTransferInstructions(input);
-    if (input.lastValidBlockHeight === null)
+    const lifetime = send === null
+        ? { blockReference: input.blockReference, lastValidBlockHeight: input.lastValidBlockHeight }
+        : { blockReference: send.blockReference, lastValidBlockHeight: send.lastValidBlockHeight };
+    if (lifetime.lastValidBlockHeight === null)
         invalid();
-    const message = appendTransactionMessageInstructions(instructions, setTransactionMessageLifetimeUsingBlockhash({ blockhash: blockhash(input.blockReference), lastValidBlockHeight: BigInt(input.lastValidBlockHeight) }, setTransactionMessageFeePayerSigner(sender, createTransactionMessage({ version: 0 }))));
+    const message = appendTransactionMessageInstructions(instructions, setTransactionMessageLifetimeUsingBlockhash({ blockhash: blockhash(lifetime.blockReference), lastValidBlockHeight: BigInt(lifetime.lastValidBlockHeight) }, setTransactionMessageFeePayerSigner(sender, createTransactionMessage({ version: 0 }))));
     const transaction = compileTransaction(message);
     return { transaction, unsignedPayload: getBase64EncodedWireTransaction(transaction), messageBase64: Buffer.from(transaction.messageBytes).toString("base64") };
 }
@@ -38,14 +42,21 @@ export async function solanaTransferInstructions(input, rentPayer = input.sender
         invalid();
     return instructions;
 }
-export async function validateSolanaMessage(prepared) {
-    const expected = await solanaMessage(prepared);
-    if (expected.unsignedPayload !== prepared.unsignedPayload)
+/**
+ * Without a send binding the bytes must equal the frozen payload exactly. With one, every field but
+ * the re-acquired lifetime must still equal it, which is proven by rebuilding from the same frozen
+ * record and only substituting the lifetime the send guard recorded.
+ */
+export async function validateSolanaMessage(prepared, send = null) {
+    const expected = await solanaMessage(prepared, send);
+    if (send === null && expected.unsignedPayload !== prepared.unsignedPayload)
+        invalid();
+    if (send !== null && (await solanaMessage(prepared)).unsignedPayload !== prepared.unsignedPayload)
         invalid();
     return expected;
 }
-export async function validateSolanaEffect(prepared, effect) {
-    const expected = await validateSolanaMessage(prepared);
+export async function validateSolanaEffect(prepared, effect, send = null) {
+    const expected = await validateSolanaMessage(prepared, send);
     if (sha256(effect.rawPayload) !== effect.rawPayloadHash || effect.rawPayload.length > 2048)
         invalid();
     const bytes = Buffer.from(effect.rawPayload, "base64");

@@ -2,6 +2,8 @@ import { z } from "zod";
 export declare const hashSchema: z.ZodString;
 export declare const hexSchema: z.ZodString;
 export declare const wordSchema: z.ZodString;
+/** The EVM word is unchanged; a base58 Solana signature is admitted beside it, nothing else. */
+export declare const railStatusSchema: z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>;
 export declare const uintSchema: z.ZodString;
 export declare const addressSchema: z.ZodString;
 export declare const isoSchema: z.ZodString;
@@ -158,6 +160,12 @@ export declare const feeQuoteSchema: z.ZodObject<{
     totalQuoteWei: z.ZodString;
     totalFeeEnforcedOnchain: z.ZodLiteral<false>;
 }, z.core.$strict>;
+export declare const feeCeilingSchema: z.ZodObject<{
+    policy: z.ZodLiteral<"apn.bridge-fee-headroom.v1">;
+    headroomBps: z.ZodNumber;
+    quotedMaxFeePerGasAtomic: z.ZodString;
+    quotedMaxPriorityFeePerGasAtomic: z.ZodString;
+}, z.core.$strict>;
 export declare const envelopeSchema: z.ZodObject<{
     role: z.ZodEnum<{
         bridge: "bridge";
@@ -189,6 +197,12 @@ export declare const envelopeSchema: z.ZodObject<{
         totalFeeEnforcedOnchain: z.ZodLiteral<false>;
     }, z.core.$strict>;
     provisionalGas: z.ZodBoolean;
+    feeCeiling: z.ZodObject<{
+        policy: z.ZodLiteral<"apn.bridge-fee-headroom.v1">;
+        headroomBps: z.ZodNumber;
+        quotedMaxFeePerGasAtomic: z.ZodString;
+        quotedMaxPriorityFeePerGasAtomic: z.ZodString;
+    }, z.core.$strict>;
     envelopeHash: z.ZodString;
 }, z.core.$strict>;
 export declare const txProofSchema: z.ZodObject<{
@@ -331,7 +345,7 @@ export declare const providerObservationSchema: z.ZodObject<{
         refund_observed: "refund_observed";
         failed_observed: "failed_observed";
     }>;
-    destinationTransactionHash: z.ZodNullable<z.ZodString>;
+    destinationTransactionHash: z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>>;
     observedAt: z.ZodString;
     responseHash: z.ZodNullable<z.ZodString>;
 }, z.core.$strict>;
@@ -408,6 +422,12 @@ export declare const effectSchema: z.ZodObject<{
             totalFeeEnforcedOnchain: z.ZodLiteral<false>;
         }, z.core.$strict>;
         provisionalGas: z.ZodBoolean;
+        feeCeiling: z.ZodObject<{
+            policy: z.ZodLiteral<"apn.bridge-fee-headroom.v1">;
+            headroomBps: z.ZodNumber;
+            quotedMaxFeePerGasAtomic: z.ZodString;
+            quotedMaxPriorityFeePerGasAtomic: z.ZodString;
+        }, z.core.$strict>;
         envelopeHash: z.ZodString;
     }, z.core.$strict>;
     role: z.ZodEnum<{
@@ -758,7 +778,7 @@ export declare const transitionSchema: z.ZodObject<{
             refund_observed: "refund_observed";
             failed_observed: "failed_observed";
         }>;
-        destinationTransactionHash: z.ZodNullable<z.ZodString>;
+        destinationTransactionHash: z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>>;
         observedAt: z.ZodString;
         responseHash: z.ZodNullable<z.ZodString>;
     }, z.core.$strict>>;
@@ -831,6 +851,12 @@ export declare const operationSchema: z.ZodObject<{
                 totalFeeEnforcedOnchain: z.ZodLiteral<false>;
             }, z.core.$strict>;
             provisionalGas: z.ZodBoolean;
+            feeCeiling: z.ZodObject<{
+                policy: z.ZodLiteral<"apn.bridge-fee-headroom.v1">;
+                headroomBps: z.ZodNumber;
+                quotedMaxFeePerGasAtomic: z.ZodString;
+                quotedMaxPriorityFeePerGasAtomic: z.ZodString;
+            }, z.core.$strict>;
             envelopeHash: z.ZodString;
         }, z.core.$strict>;
         role: z.ZodEnum<{
@@ -1307,7 +1333,7 @@ export declare const operationSchema: z.ZodObject<{
                 refund_observed: "refund_observed";
                 failed_observed: "failed_observed";
             }>;
-            destinationTransactionHash: z.ZodNullable<z.ZodString>;
+            destinationTransactionHash: z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>>;
             observedAt: z.ZodString;
             responseHash: z.ZodNullable<z.ZodString>;
         }, z.core.$strict>>;
@@ -1430,7 +1456,7 @@ export declare const operationSchema: z.ZodObject<{
             refund_observed: "refund_observed";
             failed_observed: "failed_observed";
         }>;
-        destinationTransactionHash: z.ZodNullable<z.ZodString>;
+        destinationTransactionHash: z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>]>>;
         observedAt: z.ZodString;
         responseHash: z.ZodNullable<z.ZodString>;
     }, z.core.$strict>>;

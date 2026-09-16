@@ -3,17 +3,19 @@ import { hashObject } from "../../canonical.js";
 import type {
   MetaMaskGaslessApproval,
   MetaMaskGaslessBlock,
+  MetaMaskGaslessDispatch,
   MetaMaskGaslessChainState,
   MetaMaskGaslessCursor,
   MetaMaskGaslessIntent,
   MetaMaskGaslessMutable,
   MetaMaskGaslessObservation,
   MetaMaskGaslessProviderObservation,
+  MetaMaskGaslessQuote,
   MetaMaskGaslessSettlement,
   MetaMaskGaslessState,
 } from "../model.js";
 import { MM_MIN_REMAINING_MS, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
-import { mmAssertIntentEconomics } from "../economics.js";
+import { mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
 import { mmBinding, mmPrivateHash } from "../identity.js";
 import { mmRegistry } from "../registry.js";
 import { MM_REASON_CODES, mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
@@ -24,8 +26,8 @@ const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const EMPTY_CODE_HASH = "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
 const STATES: readonly MetaMaskGaslessState[] = ["awaiting_approval", "execution_pending", "dispatch_pending",
   "submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "failed_before_effect", "abandoned_unknown"];
-const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "providerObservation",
-  "cursor", "observation", "settlement", "failure"] as const;
+const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "dispatch",
+  "providerObservation", "cursor", "observation", "settlement", "failure"] as const;
 
 function corrupt(): never { return mmFail("mm_gasless_state_corrupt"); }
 function time(value: string): number { return Date.parse(mmIso(value)); }
@@ -107,6 +109,22 @@ function approval(value: unknown, fingerprint: string, expiresAt: string, at: st
     time(mmIso(a.approvedAt)) > time(at) || time(a.approvedAt as string) >= time(expiresAt)) corrupt();
   return a as unknown as MetaMaskGaslessApproval;
 }
+/**
+ * The repriced batch and its re-derived delegation, checked by exactly the rules the prepared material passed:
+ * inside the owner's effective cap, above the recipient's floor, an exact split of the gross, and a delegation
+ * derived from those two executions alone. `undefined` is a record written before this field existed.
+ */
+function dispatchMaterial(value: unknown, intent: MetaMaskGaslessIntent): MetaMaskGaslessDispatch | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const d = mmExact(value, ["quote", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"]);
+  mmHex(d.delegationHash, 32); mmHex(d.signingDigest, 32); mmCanonicalAddress(d.relayTo); mmHex(d.mode, 32);
+  const quote = mmRepriceWithinCap(d.quote, intent.request, intent.binding, "mm_gasless_state_corrupt");
+  mmValidateUnsigned({ unsignedDelegation: d.unsignedDelegation, delegationHash: d.delegationHash,
+    signingDigest: d.signingDigest, relayTo: d.relayTo, mode: d.mode },
+  { owner: intent.binding.address, chainId: intent.request.chainId, executions: quote.executions }, "mm_gasless_state_corrupt");
+  return d as unknown as MetaMaskGaslessDispatch;
+}
 function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, at: string): MetaMaskGaslessProviderObservation | null {
   if (value === null) return null;
   const p = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"]);
@@ -153,7 +171,8 @@ function observationSource(value: unknown): void {
   if (typeof s.environmentName !== "string" || s.environmentName.length > 128 || !/^APN_[A-Z0-9_]+_RPC_URL$/u.test(s.environmentName)) corrupt();
   origin(s.endpointOrigin); mmHash(s.endpointHash);
 }
-function settlement(value: unknown, intent: MetaMaskGaslessIntent, at: string): MetaMaskGaslessSettlement | null {
+function settlement(value: unknown, intent: MetaMaskGaslessIntent, dispatched: MetaMaskGaslessQuote,
+  at: string): MetaMaskGaslessSettlement | null {
   if (value === null) return null;
   const s = mmExact(value, ["observedAt", "txHash", "transactionBlock", "finalityBlock", "outerSender", "transactionProofHash",
     "receiptHash", "protocolHash", "tokenImplementationHash", "deliveredAtomic", "feeAtomic", "debitAtomic", "refundAtomic",
@@ -175,7 +194,7 @@ function settlement(value: unknown, intent: MetaMaskGaslessIntent, at: string): 
   const tokenImplementationHash = hashObject({ token: row.token,
     receipt: { block: transaction, ...tokenState }, finality: { block: finality, ...tokenState } });
   if (s.protocolHash !== protocolHash || s.tokenImplementationHash !== tokenImplementationHash ||
-    s.deliveredAtomic !== intent.quote.netAtomic || s.feeAtomic !== intent.quote.feeAtomic ||
+    s.deliveredAtomic !== dispatched.netAtomic || s.feeAtomic !== dispatched.feeAtomic ||
     s.debitAtomic !== intent.request.grossAtomic || s.refundAtomic !== "0" || s.unusedGrossAtomic !== "0" ||
     s.designation !== "pinned" || s.permission !== "consumed" || s.receiptCounterAtomic !== "1" || s.finalityCounterAtomic !== "1") corrupt();
   return s as unknown as MetaMaskGaslessSettlement;
@@ -197,8 +216,11 @@ export function mmJournalMutable(value: Record<string, unknown>, intent: MetaMas
   if ((m.submissionAttempts === 0) !== (dispatch === null) ||
     (dispatch !== null && (a === null || time(dispatch) > time(at) || time(dispatch) < time(a.approvedAt) ||
       time(dispatch) + MM_MIN_REMAINING_MS > time(intent.expiresAt)))) corrupt();
+  const dispatched = dispatchMaterial(m.dispatch, intent);
+  // A reprice is only ever written in the same durable transition as the dispatch marker.
+  if (dispatched !== null && dispatched !== undefined && m.submissionAttempts !== 1) corrupt();
   const provider = providerObservation(m.providerObservation, intent, at), c = cursor(m.cursor, intent), o = observation(m.observation, at);
-  const settled = settlement(m.settlement, intent, at), failed = failure(m.failure);
+  const settled = settlement(m.settlement, intent, dispatched?.quote ?? intent.quote, at), failed = failure(m.failure);
   const state = m.state as MetaMaskGaslessState, before = m.submissionAttempts === 0;
   const initialCursor = { startBlock: intent.initialSnapshot.safeBlock,
     nextBlockAtomic: intent.initialSnapshot.safeBlock.numberAtomic, previousEndBlock: null };
@@ -219,5 +241,5 @@ export function mmJournalMutable(value: Record<string, unknown>, intent: MetaMas
     o.candidateTxHash !== settled.txHash || !mmSame(o.transactionBlock, settled.transactionBlock) ||
     !mmSame(o.finalityBlock, settled.finalityBlock) || o.observedAt !== settled.observedAt)) corrupt();
   return { state, approval: a, submissionAttempts: m.submissionAttempts as 0 | 1, dispatchStartedAt: dispatch,
-    providerObservation: provider, cursor: c, observation: o, settlement: settled, failure: failed };
+    dispatch: dispatched, providerObservation: provider, cursor: c, observation: o, settlement: settled, failure: failed };
 }

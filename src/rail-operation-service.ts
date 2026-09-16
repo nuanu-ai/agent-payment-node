@@ -1,11 +1,12 @@
 import { canonicalJson, hashObject, sha256 } from "./canonical.js";
 import { chainAsset, chainDecimal } from "./chain-policy.js";
 import { ChainPolicyService } from "./chain-policy-service.js";
-import type { ChainAssetAlias, DirectRailName, DirectRailPort, RailEffectBinding, RailSignedEffect } from "./direct-rail-ports.js";
+import type { ChainAssetAlias, DirectRailName, DirectRailPort, RailEffectBinding, RailSendBinding, RailSignedEffect } from "./direct-rail-ports.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
 import { newRailOperation, publicRailOperation, transitionRail, validateRailPrepared, validateRailTransactionId, type RailOperationRecord, type RailState } from "./rail-operation-model.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
+import { RAIL_PRESEND_ATTEMPTS, RAIL_PRESEND_MIN_REMAINING_MS, RAIL_PRESEND_RETRY_MS, railSendReason, railSendTransient } from "./rail-send-binding.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
@@ -67,7 +68,15 @@ export class RailOperationService {
         throw error;
       }
       if (adapter.execution === "provider_atomic") return await this.submit(operation, adapter, null);
-      operation = await this.move(operation, "signing_started", "foreground_signing_started", "durable_pre_effect");
+      let send: RailSendBinding | undefined;
+      if (adapter.bindSend !== undefined) {
+        try { send = await this.patientBind(operation, adapter.bindSend.bind(adapter)); }
+        catch (error) {
+          await this.move(operation, "failed_before_effect", railSendReason(error, "pre_send_guard_refused"), "durable_pre_effect");
+          throw error;
+        }
+      }
+      operation = await this.move(operation, "signing_started", "foreground_signing_started", "durable_pre_effect", undefined, send);
       let effect: RailSignedEffect;
       try { effect = await adapter.sign(binding(operation)); }
       catch (error) {
@@ -117,13 +126,29 @@ export class RailOperationService {
     return found.record;
   }
   private adapter(operation: RailOperationRecord): DirectRailPort { return this.policies.adapter(operation.account.rail, operation.account.provider); }
+  /**
+   * The send guard re-acquires a validity window and simulates, so a lost read must be re-run
+   * rather than reported as a refusal. Only a transport loss is retried, only while the owner's
+   * approved window still leaves room to send, and every attempt re-acquires a fresh window.
+   */
+  private async patientBind(operation: RailOperationRecord, bind: NonNullable<DirectRailPort["bindSend"]>): Promise<RailSendBinding> {
+    const deadline = Date.parse(operation.prepared.expiresAt) - RAIL_PRESEND_MIN_REMAINING_MS;
+    for (let attempt = 1; ; attempt += 1) {
+      try { return await bind(operation.account, operation.prepared); }
+      catch (error) {
+        if (attempt >= RAIL_PRESEND_ATTEMPTS || !railSendTransient(error) ||
+          this.context.clock.now().getTime() + RAIL_PRESEND_RETRY_MS >= deadline ||
+          await this.context.wait.wait(RAIL_PRESEND_RETRY_MS) === "interrupted") throw error;
+      }
+    }
+  }
   private async revalidate(operation: RailOperationRecord, adapter: DirectRailPort): Promise<void> {
     if (this.context.clock.now().getTime() >= Date.parse(operation.prepared.expiresAt)) throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen direct-rail approval expired.");
     const current = await this.policies.account(operation.profile, operation.account.rail);
     if (canonicalJson(current) !== canonicalJson(operation.account)) throw new ApnError("APN_PROFILE_DRIFT", "The direct-rail account changed.");
     const policy = await this.policies.authorize(current, operation.prepared.asset.alias, operation.prepared.amountAtomic, operation.prepared.maximumFeeAtomic, operation.operationId);
     if (policy.policyHash !== operation.policyHash) throw new ApnError("APN_PROFILE_DRIFT", "The chain policy changed after preparation.");
-    await adapter.revalidate(current, operation.prepared);
+    await adapter.revalidate(current, operation.prepared, operation.send ?? null);
   }
   private async firstLocalSubmit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect): Promise<RailOperationRecord> {
     try { await this.revalidate(operation, adapter); }
@@ -151,7 +176,7 @@ export class RailOperationService {
     let result;
     try {
       if (await adapter.assertNetwork() !== operation.prepared.networkIdentity) throw new Error("network mismatch");
-      result = await adapter.inspect(operation.account, operation.prepared, operation.transactionId, operation.rawPayloadHash ?? undefined);
+      result = await adapter.inspect(operation.account, operation.prepared, operation.transactionId, operation.rawPayloadHash ?? undefined, operation.send ?? null);
     } catch { return operation; }
     if (!("evidence" in result)) return operation;
     const next = transitionRail(operation, { state: result.status, at: this.context.clock.now().toISOString(),
@@ -165,10 +190,12 @@ export class RailOperationService {
       (operation.transactionId !== null && effect.transactionId !== operation.transactionId) ||
       (operation.rawPayloadHash !== null && effect.rawPayloadHash !== operation.rawPayloadHash)) corrupt();
   }
-  private async move(operation: RailOperationRecord, state: RailState, reason: string, proofClass: string, effect: { readonly transactionId: string; readonly rawPayloadHash?: string } | undefined = undefined): Promise<RailOperationRecord> {
-    const next = transitionRail(operation, { state, at: this.context.clock.now().toISOString(), reason, proofClass, ...effect });
+  private async move(operation: RailOperationRecord, state: RailState, reason: string, proofClass: string,
+    effect: { readonly transactionId: string; readonly rawPayloadHash?: string } | undefined = undefined,
+    send: RailSendBinding | undefined = undefined): Promise<RailOperationRecord> {
+    const next = transitionRail(operation, { state, at: this.context.clock.now().toISOString(), reason, proofClass, ...effect, ...(send === undefined ? {} : { send }) });
     await this.records.persist(next); return next;
   }
 }
-function binding(operation: RailOperationRecord): RailEffectBinding { return { account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, prepared: operation.prepared }; }
+function binding(operation: RailOperationRecord): RailEffectBinding { return { account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, prepared: operation.prepared, send: operation.send ?? null }; }
 function corrupt(): never { throw new ApnError("APN_STATE_CORRUPT", "The direct-rail effect or operation binding is invalid."); }

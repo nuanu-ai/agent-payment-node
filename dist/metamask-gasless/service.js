@@ -92,7 +92,7 @@ export class MetaMaskGaslessService {
             const next = advanceMetaMaskGaslessOperation(op, patch, at);
             await this.records.persist(next);
             return next;
-        });
+        }, this.context.wait);
     }
     async locked(input, work) {
         const id = canonicalOperationId(input), first = await this.operations.required(id);

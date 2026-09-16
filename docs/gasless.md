@@ -5,7 +5,7 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-APN 0.5.19 includes this capability. Package availability, mainnet transfer
+APN 0.5.20 includes this capability. Package availability, mainnet transfer
 evidence and receiving human acceptance are tracked separately for each profile
 and network. `apn gasless capabilities` reports the exact adapter and acceptance
 state without reading a wallet,
@@ -438,11 +438,17 @@ finality tag, complete transaction/receipt membership and bounded log queries.
 APN checks protocol and USDC implementation code at preparation and settlement.
 Unichain and Avalanche belong to the local-wallet path above.
 
-For MetaMask, `--amount` is the exact successful sender debit `G`. APN freezes
-the provider's USDC fee `F` and recipient amount `N`, requiring `G = N + F`,
+For MetaMask, `--amount` is the exact successful sender debit `G`. APN quotes the
+provider's USDC fee `F` and recipient amount `N`, requiring `G = N + F`,
 `F <= --max-fee` and `N >= --min-received`. It makes at most three quote attempts
-to reach that equality. Before dispatch, the quote must still match exactly.
-There is no unused amount or refund for a successful MetaMask batch. The
+to reach that equality. What you approve is `--max-fee` and `--min-received`, not
+one exact price: the quote is taken again after your approval, and a fee that has
+moved is accepted while it still stays inside `--max-fee` and still leaves the
+recipient at or above `--min-received`. A repriced batch has its delegation
+re-derived, and that repriced batch and delegation are what the durable dispatch
+marker records and the single provider POST carries. A fee above `--max-fee`
+refuses with `APN_FEE_BUDGET_EXCEEDED / mm_gasless_fee_cap` and dispatches
+nothing. There is no unused amount or refund for a successful MetaMask batch. The
 recipient and fee recipient must both differ from the sender and each other.
 
 ```sh
@@ -454,9 +460,33 @@ apn gasless transfer approve --operation <operation-id>
 ```
 
 Preparation does not sign or submit. Approval displays the exact USDC debit,
-recipient amount, fee and persistent permission, then asks for the six-character
-approval code printed on the same screen. The code is bound to the full operation
-ID and fingerprint.
+recipient amount, quoted fee, fee ceiling, minimum receipt and persistent
+permission, then asks for the six-character approval code printed on the same
+screen. The code is bound to the full operation ID and fingerprint.
+
+Take as long as you need on that screen. Every check between your approval and
+the dispatch marker is taken again at that moment: the provider binding and
+policy, the RPC endpoint identity, the chain state at the pinned safe and head
+blocks, the unconsumed one-use permission counter and the price. The preparation
+snapshot is kept as identity and designation evidence only; it is never read as
+a claim that the chain state is still current, so a long read of the screen no
+longer refuses the transfer. Only the five-minute deadline bounds it, and 15
+seconds of it are reserved for the dispatch itself.
+
+Inside that window a transient failure is waited out rather than ending the
+operation: up to 18 attempts, 5 seconds apart, for a provider or RPC transport
+failure (`mm_gasless_provider_unavailable`, `mm_gasless_rpc_unavailable`), a
+concurrent MetaMask CLI write to its own session files (`mm_gasless_state_busy`),
+a quote that will not converge (`mm_gasless_quote_unstable`) and a fee above
+`--max-fee` that may fall back inside it (`mm_gasless_fee_cap`). Waiting stops as
+soon as the remaining window no longer covers another pause plus the reserve, and
+Ctrl-C ends it at once. A definite refusal is never retried: an expired or
+non-monotonic clock, a changed provider binding or policy, a changed RPC
+endpoint, a changed designation, a consumed permission and a USDC balance below
+`--amount` all end the operation immediately, before any effect. A check that
+could not complete at all is recorded as
+`APN_PROVIDER_UNAVAILABLE / mm_gasless_guard_unavailable`;
+`mm_gasless_internal` now means only that APN could not classify a failure.
 
 The provider signs and executes the two transfers as one exact batch. It may
 install or preserve the pinned EIP-7702 designation on the same wallet address.
@@ -466,8 +496,12 @@ dispatch; a timeout, revert or later expiry does not revoke the permission or
 guarantee that no payment can occur.
 
 APN records a durable dispatch marker before making its single provider POST.
-After that marker, repeated approval or `operation resume` only observes the
-original request and delegation. Lost responses, provider failures and pending
+That marker carries the repriced quote and delegation when the guard repriced,
+so the batch that was dispatched is the batch every later observation, settlement
+proof and receipt is read against; the approved intent itself never changes, so
+the fingerprint you confirmed stays the same. After that marker, repeated
+approval or `operation resume` only observes the dispatched request and
+delegation. Lost responses, provider failures and pending
 MFA remain unresolved. A canonical revert is `failed_effects_pending` and
 retains the profile guard because the permission may still be redeemed later.
 Only independently proved completion or failure before any effect is terminal.
@@ -588,6 +622,10 @@ is incompatible with Smart Account gasless state: its original operation
 lookup cannot discover this family or its guards. Preserve it as historical
 evidence; use the verified current archive for this state. The preflight does
 not change older binaries or migrate existing profiles and operations.
+
+MetaMask Agent operations written before the reprice guard existed carry no
+dispatched-material field. They keep their exact stored key set, transition
+hashes and integrity hash, load unchanged and are read as never repriced.
 
 New local operations freeze wire format v2. First use includes the delegation
 authorization; repeated use sends an ordinary operation for the already

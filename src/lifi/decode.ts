@@ -3,7 +3,8 @@ import { sha256 } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
 import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, STARGATE_SELECTOR, stargateBridgeAbi } from "./abi.js";
 import type { BridgeMaterialization, DecodedBridgeCall } from "./model.js";
-import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_MAX_GAS, BRIDGE_USDC, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint, validateBridgeRequest } from "./validation.js";
+import { validateBridgeRequest } from "./asset-registry.js";
+import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 
 type BridgeData = Readonly<{
   transactionId: Hex; bridge: string; integrator: string; referrer: Address; sendingAssetId: Address;
@@ -122,7 +123,8 @@ function validateFeeRows(m: BridgeMaterialization, forwardedFee: bigint, value: 
   for (const fee of m.feeCosts) {
     const amount = bridgeUint(fee.amountAtomic, false);
     if (fee.included) {
-      if (fee.asset !== BRIDGE_USDC[fee.chainId] || (fee.chainId !== m.request.fromChainId && fee.chainId !== m.request.toChainId)) fail("included_fee_asset");
+      if (fee.chainId !== m.request.fromChainId && fee.chainId !== m.request.toChainId) fail("included_fee_asset");
+      if (fee.asset !== (fee.chainId === m.request.fromChainId ? m.request.fromToken : m.request.toToken)) fail("included_fee_asset");
       included += amount;
       if (fee.name === "LIFI Fixed Fee" && fee.chainId === m.request.fromChainId && fee.asset === m.request.fromToken && amount === forwardedFee) fixed += 1;
     } else {

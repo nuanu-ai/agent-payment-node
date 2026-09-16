@@ -2,7 +2,8 @@ import { hashObject, sha256 } from "../canonical.js";
 import { decodeBridgeCall } from "./decode.js";
 import { BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot } from "./operation-model.js";
 import { operationSchema } from "./schema.js";
-import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_USDC, BRIDGE_ZERO_WORD, bridgeFailure, bridgeSame, bridgeUint, validateBridgeRequest } from "./validation.js";
+import { validateBridgeRequest } from "./asset-registry.js";
+import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHeadroomWei, bridgeSame, bridgeUint } from "./validation.js";
 import { approvalData } from "./transaction.js";
 import { BRIDGE_FEE_RULE_HASH } from "./rpc-fees.js";
 const EDGES = {
@@ -104,7 +105,12 @@ function validateIntent(op) {
         bridgeCorrupt();
 }
 export function validateEnvelope(e) {
-    const { envelopeHash, ...body } = e, c = e.economics, q = e.feeQuote;
+    const { envelopeHash, ...body } = e, c = e.economics, q = e.feeQuote, f = e.feeCeiling;
+    // The approved maximum must be exactly the recorded quote raised by the stated headroom; nothing else is signable.
+    if (f.policy !== BRIDGE_FEE_HEADROOM_POLICY || f.headroomBps !== BRIDGE_FEE_HEADROOM_BPS ||
+        c.maxFeePerGasAtomic !== bridgeHeadroomWei(f.quotedMaxFeePerGasAtomic, "APN_STATE_CORRUPT") ||
+        c.maxPriorityFeePerGasAtomic !== bridgeHeadroomWei(f.quotedMaxPriorityFeePerGasAtomic, "APN_STATE_CORRUPT"))
+        bridgeCorrupt();
     if (envelopeHash !== hashObject(body) || BigInt(c.gasLimitAtomic) < 1n || BigInt(c.gasLimitAtomic) > BRIDGE_MAX_GAS ||
         BigInt(c.maxFeePerGasAtomic) < 1n || BigInt(c.maxPriorityFeePerGasAtomic) > BigInt(c.maxFeePerGasAtomic) ||
         BigInt(c.maximumGasCostAtomic) !== BigInt(c.gasLimitAtomic) * BigInt(c.maxFeePerGasAtomic) ||
@@ -170,7 +176,7 @@ function validateSnapshot(op, s) {
             : p.fillType !== null || p.relayerCredit !== null || p.repaymentChainIdAtomic !== null)
             bridgeCorrupt();
         if (s.sourceProof === null || p.correlationHash !== hashObject(s.sourceProof.correlation) || p.tool !== m.tool ||
-            p.chainId !== m.request.toChainId || p.recipient !== m.request.recipient || p.token !== BRIDGE_USDC[p.chainId] ||
+            p.chainId !== m.request.toChainId || p.recipient !== m.request.recipient || p.token !== m.request.toToken ||
             p.rpcOrigin !== op.intent.destinationRpcOrigin || BigInt(p.safeBlock.numberAtomic) < BigInt(p.blockNumberAtomic) ||
             BigInt(p.amountAtomic) < BigInt(m.request.minOutputAtomic) || p.amountAtomic !== (s.sourceProof.correlation.kind === "across"
             ? s.sourceProof.correlation.outputAmountAtomic : s.sourceProof.correlation.amountReceivedAtomic))

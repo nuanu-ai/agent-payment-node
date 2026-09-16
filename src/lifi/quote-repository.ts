@@ -3,7 +3,8 @@ import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import type { BridgeOwner, BridgeProviderBinding, BridgeRouteRequest } from "./model.js";
 import { parseBridgeRoutes, type BridgeRouteChoice } from "./routes.js";
 import { ownerSchema, providerBindingSchema } from "./schema.js";
-import { bridgeExact, bridgeFailure, bridgeHash, bridgeIso, bridgeSame, validateBridgeRequest } from "./validation.js";
+import { validateBridgeRequest } from "./asset-registry.js";
+import { bridgeExact, bridgeFailure, bridgeHash, bridgeIso, bridgeSame } from "./validation.js";
 
 export interface BridgeQuoteSnapshot {
   readonly schemaVersion: "apn.bridge-quote.v1"; readonly profileHash: string; readonly owner: BridgeOwner;

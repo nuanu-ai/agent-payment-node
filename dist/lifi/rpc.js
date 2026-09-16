@@ -7,7 +7,8 @@ import { bridgeDeployment } from "./deployments.js";
 import { BridgeHttps } from "./https.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
-import { BRIDGE_USDC, BRIDGE_ZERO_WORD, bridgeChain, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
+import { bridgeChain, bridgeTokenRow } from "./asset-registry.js";
+import { BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }];
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "eth_sendRawTransaction"]);
@@ -63,9 +64,9 @@ export class BridgeRpc {
         await this.assertChain();
         return { numberAtomic: b.number, hash: b.hash, timestampAtomic: evmRpcQuantity(b.raw.timestamp).toString() };
     }
-    async deployment(tool, peerChainId, block) {
+    async deployment(tool, peerChainId, token, block) {
         await this.assertChain();
-        const at = block ?? await this.block("safe"), contract = bridgeDeployment(this.chainId, peerChainId, tool), tag = quantity(BigInt(at.numberAtomic));
+        const at = block ?? await this.block("safe"), contract = bridgeDeployment(this.chainId, peerChainId, tool, token), tag = quantity(BigInt(at.numberAtomic));
         const code = [], configuration = [];
         const feeContract = this.chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
         for (const row of [...contract.code, ...feeContract.code]) {
@@ -87,9 +88,10 @@ export class BridgeRpc {
         return { chainId: this.chainId, peerChainId, tool, block: at, rpcOrigin: this.origin,
             contractHash: hashObject({ protocol: contract, feeContract }), codeHash: hashObject(code), configurationHash: hashObject(configuration) };
     }
-    async account(owner, spender) {
+    async account(owner, spender, token) {
         await this.assertChain();
-        const at = await this.block("latest"), tag = quantity(BigInt(at.numberAtomic)), token = BRIDGE_USDC[this.chainId];
+        const at = await this.block("latest"), tag = quantity(BigInt(at.numberAtomic));
+        bridgeTokenRow(this.chainId, token, "APN_RPC_CONFIG");
         const data = encodeFunctionData({ abi: ERC20_READ, functionName: "balanceOf", args: [owner] });
         const allowanceData = encodeFunctionData({ abi: ERC20_READ, functionName: "allowance", args: [owner, spender] });
         const [balance, native, allowance, latest, pending] = await Promise.all([

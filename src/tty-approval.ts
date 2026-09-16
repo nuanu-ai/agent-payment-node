@@ -262,6 +262,10 @@ export class TtyRailApproval implements RailApprovalPort {
       ]),
       `Maximum sender fee${prepared.rail === "solana" ? " and rent" : " and resource"} debit: ${prepared.economics.maximumNativeDebitAtomic} native atomic`,
       `Selected fee/${prepared.rail === "solana" ? "rent" : "resource"} cap: ${prepared.maximumFeeAtomic} native atomic`, `Policy: ${input.policyHash}`,
+      // The expiry bounds this screen, not the send: on Solana the sending window opens after it.
+      ...(prepared.rail === "solana" && account.provider === "local"
+        ? ["Send guard: the block reference is re-acquired after you approve and these exact bytes are simulated before anything is signed"]
+        : []),
       `Fingerprint: ${input.fingerprint}`, `Expires: ${prepared.expiresAt}`,
     ], transferApprovalPhrase(input.fingerprint), prepared.expiresAt, this.options);
   }

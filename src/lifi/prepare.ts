@@ -13,7 +13,8 @@ import type { BridgeRpcFactory, LifiProviderPort } from "./ports.js";
 import { BridgeQuoteRepository, newBridgeQuote } from "./quote-repository.js";
 import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from "./routes.js";
 import { newBridgeOperation } from "./transitions.js";
-import { bridgeFailure, bridgeHash, bridgeOpaque, validateBridgeRequest } from "./validation.js";
+import { validateBridgeRequest } from "./asset-registry.js";
+import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 
 export interface BridgePreparationOptions {
   readonly state: StateStore; readonly records: BridgeOperationRepository; readonly quotes: BridgeQuoteRepository;
@@ -55,8 +56,8 @@ export class BridgePreparation {
       const response = await this.o.provider.materialize(selected.step), preparedAt = new Date(this.o.now()).toISOString();
       const parsed = materializeBridgeRoute(selected, response, quote.request, quote.owner.address), m = parsed.materialization, decoded = decodeBridgeCall(m);
       const [sourceDeployment, destinationDeployment, sourceAccount, destinationStartBlock] = await Promise.all([
-        source.deployment(m.tool, m.request.toChainId), destination.deployment(m.tool, m.request.fromChainId),
-        source.account(m.sender, m.approvalAddress), destination.block("safe"),
+        source.deployment(m.tool, m.request.toChainId, m.request.fromToken), destination.deployment(m.tool, m.request.fromChainId, m.request.toToken),
+        source.account(m.sender, m.approvalAddress, m.request.fromToken), destination.block("safe"),
       ]);
       if (parsed.providerNonceAtomic !== null && parsed.providerNonceAtomic !== (BigInt(sourceAccount.latestNonceAtomic) + (sourceAccount.allowanceAtomic === "0" ? 1n : 0n)).toString()) bridgeFailure("APN_PROVIDER_PROTOCOL", "provider_nonce_conflict");
       const envelopes = await freezeBridgeEnvelopes(m, sourceAccount, source);

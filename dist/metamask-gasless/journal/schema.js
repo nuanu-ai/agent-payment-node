@@ -1,7 +1,7 @@
 import { keccak256 } from "viem";
 import { hashObject } from "../../canonical.js";
 import { MM_MIN_REMAINING_MS, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
-import { mmAssertIntentEconomics } from "../economics.js";
+import { mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
 import { mmBinding, mmPrivateHash } from "../identity.js";
 import { mmRegistry } from "../registry.js";
 import { MM_REASON_CODES, mmFail } from "../reasons.js";
@@ -11,8 +11,8 @@ const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const EMPTY_CODE_HASH = "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
 const STATES = ["awaiting_approval", "execution_pending", "dispatch_pending",
     "submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "failed_before_effect", "abandoned_unknown"];
-const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "providerObservation",
-    "cursor", "observation", "settlement", "failure"];
+const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "dispatch",
+    "providerObservation", "cursor", "observation", "settlement", "failure"];
 function corrupt() { return mmFail("mm_gasless_state_corrupt"); }
 function time(value) { return Date.parse(mmIso(value)); }
 function recordMutable(value) {
@@ -116,6 +116,26 @@ function approval(value, fingerprint, expiresAt, at) {
         corrupt();
     return a;
 }
+/**
+ * The repriced batch and its re-derived delegation, checked by exactly the rules the prepared material passed:
+ * inside the owner's effective cap, above the recipient's floor, an exact split of the gross, and a delegation
+ * derived from those two executions alone. `undefined` is a record written before this field existed.
+ */
+function dispatchMaterial(value, intent) {
+    if (value === undefined)
+        return undefined;
+    if (value === null)
+        return null;
+    const d = mmExact(value, ["quote", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"]);
+    mmHex(d.delegationHash, 32);
+    mmHex(d.signingDigest, 32);
+    mmCanonicalAddress(d.relayTo);
+    mmHex(d.mode, 32);
+    const quote = mmRepriceWithinCap(d.quote, intent.request, intent.binding, "mm_gasless_state_corrupt");
+    mmValidateUnsigned({ unsignedDelegation: d.unsignedDelegation, delegationHash: d.delegationHash,
+        signingDigest: d.signingDigest, relayTo: d.relayTo, mode: d.mode }, { owner: intent.binding.address, chainId: intent.request.chainId, executions: quote.executions }, "mm_gasless_state_corrupt");
+    return d;
+}
 function providerObservation(value, intent, at) {
     if (value === null)
         return null;
@@ -181,7 +201,7 @@ function observationSource(value) {
     origin(s.endpointOrigin);
     mmHash(s.endpointHash);
 }
-function settlement(value, intent, at) {
+function settlement(value, intent, dispatched, at) {
     if (value === null)
         return null;
     const s = mmExact(value, ["observedAt", "txHash", "transactionBlock", "finalityBlock", "outerSender", "transactionProofHash",
@@ -210,7 +230,7 @@ function settlement(value, intent, at) {
     const tokenImplementationHash = hashObject({ token: row.token,
         receipt: { block: transaction, ...tokenState }, finality: { block: finality, ...tokenState } });
     if (s.protocolHash !== protocolHash || s.tokenImplementationHash !== tokenImplementationHash ||
-        s.deliveredAtomic !== intent.quote.netAtomic || s.feeAtomic !== intent.quote.feeAtomic ||
+        s.deliveredAtomic !== dispatched.netAtomic || s.feeAtomic !== dispatched.feeAtomic ||
         s.debitAtomic !== intent.request.grossAtomic || s.refundAtomic !== "0" || s.unusedGrossAtomic !== "0" ||
         s.designation !== "pinned" || s.permission !== "consumed" || s.receiptCounterAtomic !== "1" || s.finalityCounterAtomic !== "1")
         corrupt();
@@ -235,8 +255,12 @@ export function mmJournalMutable(value, intent, fingerprint, atInput) {
         (dispatch !== null && (a === null || time(dispatch) > time(at) || time(dispatch) < time(a.approvedAt) ||
             time(dispatch) + MM_MIN_REMAINING_MS > time(intent.expiresAt))))
         corrupt();
+    const dispatched = dispatchMaterial(m.dispatch, intent);
+    // A reprice is only ever written in the same durable transition as the dispatch marker.
+    if (dispatched !== null && dispatched !== undefined && m.submissionAttempts !== 1)
+        corrupt();
     const provider = providerObservation(m.providerObservation, intent, at), c = cursor(m.cursor, intent), o = observation(m.observation, at);
-    const settled = settlement(m.settlement, intent, at), failed = failure(m.failure);
+    const settled = settlement(m.settlement, intent, dispatched?.quote ?? intent.quote, at), failed = failure(m.failure);
     const state = m.state, before = m.submissionAttempts === 0;
     const initialCursor = { startBlock: intent.initialSnapshot.safeBlock,
         nextBlockAtomic: intent.initialSnapshot.safeBlock.numberAtomic, previousEndBlock: null };
@@ -268,6 +292,6 @@ export function mmJournalMutable(value, intent, fingerprint, atInput) {
         !mmSame(o.finalityBlock, settled.finalityBlock) || o.observedAt !== settled.observedAt))
         corrupt();
     return { state, approval: a, submissionAttempts: m.submissionAttempts, dispatchStartedAt: dispatch,
-        providerObservation: provider, cursor: c, observation: o, settlement: settled, failure: failed };
+        dispatch: dispatched, providerObservation: provider, cursor: c, observation: o, settlement: settled, failure: failed };
 }
 //# sourceMappingURL=schema.js.map
