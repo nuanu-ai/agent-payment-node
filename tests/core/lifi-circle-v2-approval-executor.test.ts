@@ -5,6 +5,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { StateStore, sealWallet } from "../../src/state.js";
 import { CircleV2ApprovalExecutor, type CircleApprovalRecord, type CircleApprovalRpc } from "../../src/lifi/circle-v2-approval-executor.js";
 import { temporaryState } from "./helpers.js";
+import { ApnError } from "../../src/errors.js";
 
 const account = privateKeyToAccount(`0x${"11".repeat(32)}`);
 const token = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -19,7 +20,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile: "test", profileHash: state.profileHash("test"),
     address: account.address, createdAt: "2026-01-01T00:00:00.000Z", bindingHash: "binding" }));
   let sends = 0, signings = 0, allowance = "0", nonce = "7", balance = "434611", ambiguous = false, include = false, wrongLog = false,
-    failAfterSign = false, signed = false;
+    failAfterSign = false, signed = false, signerFailure: Error | null = null;
   let raw: Hex | null = null;
   const rpc: CircleApprovalRpc = {
     chainId: 8453,
@@ -38,6 +39,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const signer = { sign: async (r: CircleApprovalRecord) => {
     signings++;
     signed = true;
+    if (signerFailure !== null) throw signerFailure;
     const e = r.preparation.transaction;
     return await account.signTransaction({ type: "eip1559", chainId: 8453, to: token as Hex,
       data: e.data as Hex, value: 0n, nonce: Number(e.nonceAtomic), gas: BigInt(e.gasLimitAtomic),
@@ -50,7 +52,8 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
     set nonce(v: string) { nonce = v; }, set balance(v: string) { balance = v; },
     set allowance(v: string) { allowance = v; }, set ambiguous(v: boolean) { ambiguous = v; },
     set include(v: boolean) { include = v; }, set wrongLog(v: boolean) { wrongLog = v; },
-    set failAfterSign(v: boolean) { failAfterSign = v; } };
+    set failAfterSign(v: boolean) { failAfterSign = v; },
+    set signerFailure(v: Error | null) { signerFailure = v; } };
 }
 
 test("durable one-send boundary survives restart and ambiguous response", async t => {
@@ -87,9 +90,19 @@ test("post-sign guard outage is durably unsent and cannot be submitted on resume
   assert.equal(result.phase, "failed_before_effect");
   assert.equal(result.submissionAttempts, 0);
   assert.equal(result.transactionHash?.length, 66);
-  assert.equal(result.failureReason, "post_sign_guard:APN_PROVIDER_PROTOCOL:circle_v2_approval_base_unavailable");
+  assert.equal(result.failureReason, "post_sign_guard:APN_PROVIDER_PROTOCOL");
   assert.equal(f.sends, 0);
   assert.equal((await f.make().status(p.id)).phase, "failed_before_effect");
   assert.equal((await f.make().execute(p.id, async () => { throw new Error("must not request consent again"); })).phase, "failed_before_effect");
   assert.equal(f.signings, 1); assert.equal(f.sends, 0);
+});
+test("signing failure records only classified code, never provider message", async t => {
+  const f = await fixture(t), p = await f.prepare();
+  f.signerFailure = new ApnError("APN_PROVIDER_PROTOCOL", "Bridge validation failed: supersecretcanary123.");
+  const result = await f.make().execute(p.id, async () => true);
+  assert.equal(result.phase, "failed_before_effect");
+  assert.equal(result.submissionAttempts, 0);
+  assert.equal(result.failureReason, "signing:APN_PROVIDER_PROTOCOL");
+  assert.equal(JSON.stringify(result).includes("supersecretcanary123"), false);
+  assert.equal(f.sends, 0);
 });

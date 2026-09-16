@@ -283,9 +283,6 @@ export class CircleV2ApprovalExecutor {
   }
 }
 function failureReason(stage: "signing" | "post_sign_guard", error: unknown): string {
-  if (error instanceof ApnError) {
-    const reason = /^Bridge validation failed: ([a-z0-9_]+)\.$/u.exec(error.message)?.[1];
-    return `${stage}:${error.code}${reason === undefined ? "" : `:${reason}`}`;
-  }
+  if (error instanceof ApnError) return `${stage}:${error.code}`;
   return `${stage}:unavailable`;
 }
