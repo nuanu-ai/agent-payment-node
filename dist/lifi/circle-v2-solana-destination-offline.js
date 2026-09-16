@@ -23,6 +23,7 @@ const indexedKey = (keys, raw) => {
 export async function inspectCircleV2SolanaDestinationOffline(input) {
     const message = bytes(input.attestedMessageHex);
     const nonce = bytes(input.nonceHex);
+    const attestation = input.expectedAttestationHex === undefined ? undefined : bytes(input.expectedAttestationHex);
     if (message.length < 148 || nonce.length !== 32 || !same(message.subarray(12, 44), nonce))
         fail();
     const read32 = (offset) => Buffer.from(message).readUInt32BE(offset);
@@ -72,6 +73,7 @@ export async function inspectCircleV2SolanaDestinationOffline(input) {
             continue;
         const attestationSize = Buffer.from(raw).readUInt32LE(12 + size);
         if (attestationSize === 0 || raw.length !== 16 + size + attestationSize ||
+            (attestation !== undefined && !same(raw.subarray(16 + size), attestation)) ||
             accounts.length < 7 || accounts[4] !== usedNonce || accounts[5] !== CIRCLE_V2_TOKEN_MESSENGER)
             fail();
         matches++;
