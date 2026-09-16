@@ -43,6 +43,9 @@ export interface CircleV2SourcePreparationLimits {
 export interface CircleV2SourcePreparation {
   readonly kind: "circle_v2_base_source_preparation";
   readonly executionAdmitted: false;
+  readonly quoteAuthenticityVerified: false;
+  readonly baseStateSourceVerified: false;
+  readonly blockers: readonly string[];
   readonly draftIntegrityDigest: string;
   readonly quoteHash: string;
   readonly quote: { readonly signedQuote: string; readonly feeToken: string; readonly feeTotalAtomic: string; readonly expiry: unknown };
@@ -91,6 +94,7 @@ export async function prepareCircleV2BaseSourceReadOnly(draft: CircleV2Preflight
   if (gas === 0n || gas > BRIDGE_MAX_GAS || gas > quantity(limits.maxGasLimitAtomic) || maxFee === 0n || priority > maxFee ||
     maxFee > quantity(limits.maxFeePerGasWei) || priority > quantity(limits.maxPriorityFeePerGasWei)) fail("gas_or_fee_cap");
   const nativeDebit = gas * maxFee + quantity(tx.valueAtomic);
+  if (nativeDebit > (1n << 256n) - 1n) fail("native_debit_overflow");
   if (nativeDebit > quantity(limits.maxNativeDebitWei) || quantity(state.nativeBalanceWei) < nativeDebit) fail("native_balance_or_cap");
   const current = now();
   if (!Number.isSafeInteger(current) || current < 0 || !Number.isSafeInteger(limits.ttlMs) ||
@@ -101,6 +105,10 @@ export async function prepareCircleV2BaseSourceReadOnly(draft: CircleV2Preflight
   else if (expiry.mode !== "BLOCK_NUMBER" || newNumber >= BigInt(Number(expiry.expiresAtBlock))) fail("quote_expiry");
   if (!Number.isSafeInteger(expiresAt) || expiresAt - current < BRIDGE_MIN_REMAINING_MS) fail("ttl_or_quote_expiry");
   const fields = { kind: "circle_v2_base_source_preparation" as const, executionAdmitted: false as const,
+    quoteAuthenticityVerified: false as const, baseStateSourceVerified: false as const,
+    blockers: ["The Circle quote, validation response, and Base state are supplied through caller-controlled inputs or transports; this artifact does not authenticate their origin",
+      "No signing, source submission, Circle attestation, or Solana mint has occurred",
+      "The expiry timestamp is a local preparation limit; a BLOCK_NUMBER quote can expire sooner and must be checked again before any separately authorized submission"] as const,
     draftIntegrityDigest: integrityDigest, quoteHash: digest({ request: copy.quoteRequest, response: copy.quoteResponse }),
     quote: { signedQuote: bridgeHex(response.signedQuote, 16 * 1024), feeToken: bridgeAddress(response.feeToken),
       feeTotalAtomic: fee.toString(), expiry: structuredClone(expiry) },

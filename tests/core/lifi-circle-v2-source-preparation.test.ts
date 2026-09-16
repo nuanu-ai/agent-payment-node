@@ -68,12 +68,17 @@ test("freezes deterministic read-only EIP-1559 envelope and quote binding", asyn
   const a = await prepared(), b = await prepared();
   assert.equal(a.preparationDigest, b.preparationDigest);
   assert.equal(a.executionAdmitted, false);
+  assert.equal(a.quoteAuthenticityVerified, false);
+  assert.equal(a.baseStateSourceVerified, false);
+  assert.match(a.blockers.join(" "), /caller-controlled inputs or transports/);
+  assert.match(a.blockers.join(" "), /BLOCK_NUMBER quote can expire sooner/);
   assert.equal(a.transaction.nonceAtomic, "7");
   assert.equal(a.requiredUsdcDebitAtomic, "1020000");
   assert.equal(a.maximumNativeDebitWei, "200000000000000");
   assert.equal(a.quote.feeToken, usdc);
   assert.equal(a.recipient.setup, "existing_ata");
   assert.ok(Object.isFrozen(a) && Object.isFrozen(a.transaction) && Object.isFrozen(a.quote));
+  assert.ok(Object.isFrozen(a.blockers));
 });
 test("rejects endpoint outage, payer, nonce, allowance, balance, fee and gas drift", async () => {
   const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
@@ -101,4 +106,14 @@ test("rejects changed signed quote, expiry, fee, recipient setup and calldata in
   const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(undefined, { reorg: true }), state(), limits));
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(), { ...limits, ttlMs: 1000 }));
+});
+test("rejects stale quote and gas prices in wrong units or beyond uint256 native debit", async () => {
+  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(v => { v.expiry.expiresAtBlock = 99; }), state(), limits),
+    { code: "APN_PROVIDER_PROTOCOL" });
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(),
+    { ...limits, maxFeePerGasWei: "2" }), { code: "APN_PROVIDER_PROTOCOL" });
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(v => { (v as any).maxFeePerGasWei = ((1n << 256n) - 1n).toString(); }),
+    { ...limits, maxFeePerGasWei: ((1n << 256n) - 1n).toString(), maxNativeDebitWei: ((1n << 256n) - 1n).toString() }),
+    { code: "APN_PROVIDER_PROTOCOL" });
 });
