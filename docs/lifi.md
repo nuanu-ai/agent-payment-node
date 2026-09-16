@@ -96,6 +96,22 @@ refund path or recovery. Both inspectors report `executionAdmitted: false` and
 `bridgeCompletion: false`; `bridge routes`, `prepare` and `approve` still refuse
 the lane.
 
+`preflightNearBaseTronSourceReadOnly` provides a separate, injected-RPC source
+preflight. The operator must pin the canonical JSON SHA-256 of the entire frozen
+quote, the expected bytecode hash of the **currently installed** NEAR Intents
+facet, and its backend signer. The pinned contract has no public signer getter:
+obtain the signer independently from verified deployment or constructor
+provenance, and refresh the pins after an upgrade. A signer recovered from the
+quote is not sufficient operator provenance. The preflight samples one current
+Base `safe` block, checks the Diamond selector mapping and installed facet code,
+verifies the quote signature and deadline, checks `isQuoteConsumed`, and runs
+`eth_call` with the exact quote calldata, payer, target, and value at that block.
+It rechecks the block hash afterward and fails closed on unavailable RPC,
+stale safe block, changed mapping/code, consumed quote, or simulation revert.
+The returned proof has `executionAdmitted: false` and `bridgeCompletion: false`.
+It does not establish deposit address provenance, destination delivery, or
+refund availability; there is no signing, sending, or route admission hook.
+
 ## Discover and select a route
 
 ```sh
