@@ -1,9 +1,25 @@
-/** Provider inventory candidates are deliberately outside the executable bridge asset registry. */
+/** Selected first-lane design; direct Circle is outside LI.FI inventory and executable admission. */
+export const BASE_SOLANA_CIRCLE_V2_CANDIDATE = {
+  fromChainId: 8453,
+  toChain: "solana-mainnet",
+  fromToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  toToken: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  provider: "Circle",
+  protocol: "CCTP V2",
+  delivery: "Forwarding Service",
+  feeQuote: "signed_upfront_separate_from_burned_principal",
+  providerRouteState: "selected_design_unverified_for_execution",
+  executable: false,
+} as const;
+
+/** LI.FI inventory and captured Mayan evidence remain exploratory only. */
 export const BASE_SOLANA_USDC_CANDIDATE = {
   fromChainId: 8453,
   toChainId: 1151111081099710,
   fromToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   toToken: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  provider: "LI.FI",
+  tool: "mayanMCTP",
   providerRouteState: "unverified_by_static_capabilities",
   executable: false,
 } as const;

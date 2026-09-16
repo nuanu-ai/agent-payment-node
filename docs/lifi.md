@@ -19,9 +19,11 @@ support. Solana and TRON bridge directions, Stargate Bus, Polymer and other
 bridge tools remain outside this execution profile. Direct Solana/TRON rails
 and gasless payment profiles have separate acceptance requirements.
 
-Offline capabilities identify Base USDC → Solana USDC as a discovery-only
-candidate, using LI.FI Solana chain ID `1151111081099710` and the Solana USDC
-mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Inventory makes one
+Offline capabilities list direct Circle CCTP V2 with Forwarding and a signed
+upfront fee quote as the selected first-lane design, still non-executable.
+The separate LI.FI Mayan MCTP candidate is exploratory only, using LI.FI
+Solana chain ID `1151111081099710` and the Solana USDC mint
+`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Inventory makes one
 additional anonymous `/connections` read for that exact pair. A returned
 connection is provider inventory, not an amount-specific route or an APN
 execution capability. `bridge routes`, `prepare` and `approve` still refuse
