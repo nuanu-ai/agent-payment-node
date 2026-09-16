@@ -115,7 +115,7 @@ export async function inspectCircleV2UpfrontOffline(input: CircleV2UpfrontInput)
   if (String(claim.signedQuote).toLowerCase() !== signedQuote || getAddress(claim.refundAddress) !== refundAddress) fail("claim");
   const expectedHook = withSetup ? hookForSetup(wallet) : DEFAULT_HOOK;
   if (String(args[5]).toLowerCase() !== expectedHook ||
-      bridgeRecord(request.requests[0]).hookData !== expectedHook) fail("forward_hook");
+      bridgeRecord(bridgeRecord(request.requests[0]).params).hookData !== expectedHook) fail("forward_hook");
   try {
     if (encodeFunctionData({ abi: ABI, functionName: decoded.functionName, args: args as never }).toLowerCase() !== data) fail("noncanonical_calldata");
   } catch { return fail("noncanonical_calldata"); }

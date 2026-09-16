@@ -22,7 +22,7 @@ async function fixture(setup: "existing_ata" | "create_ata" = "existing_ata") {
   const withSetup = setup === "create_ata";
   const forwardingHook = withSetup ? hook : "0x636374702d666f72776172640000000000000000000000000000000000000000";
   const data = encodeFunctionData({ abi: ABI, functionName: "depositForBurnWithHookAndFees", args: [1_000_000n, 5, recipient as `0x${string}`, usdc, zero as `0x${string}`, forwardingHook as `0x${string}`, { signedQuote, refundAddress }] });
-  return { quoteEndpoint: "https://iris-api.circle.com/v2/quote/burn/usdc/6/5", quoteRequest: { amount: "1000000", feeToken: usdc, requests: [{ type: "FORWARD", hookData: forwardingHook }] },
+  return { quoteEndpoint: "https://iris-api.circle.com/v2/quote/burn/usdc/6/5", quoteRequest: { amount: "1000000", feeToken: usdc, requests: [{ type: "FORWARD", params: { hookData: forwardingHook } }] },
     quoteResponse: { signedQuote, issuedAt: 1000, expiry: { mode: "BLOCK_NUMBER", expiresAtBlock: 100 }, feeTotalAmount: "20000", feeToken: usdc,
       items: [{ type: "FORWARD", amount: "20000", args: [], argsHash: `0x${"1".repeat(64)}` }], nonce: "0" },
     transaction: { to: wrapper, chainId: 8453, valueAtomic: "0", refundAddress, data },
@@ -45,9 +45,10 @@ test("rejects fee, route, recipient, expiry, and setup mutations", async () => {
   await mutate(v => { v.quoteResponse.feeTotalAmount = "25001"; });
   await mutate(v => { v.quoteRequest.amount = "999999"; });
   await mutate(v => { v.quoteEndpoint = "https://iris-api.circle.com/v2/quote/burn/usdc/5/6"; });
-  await mutate(v => { v.quoteRequest.requests[0]!.hookData = "0x"; });
-  await mutate(v => { v.quoteRequest.requests[0]!.hookData = `0x${"1".repeat(64)}`; });
-  await mutate(v => { delete (v.quoteRequest.requests[0] as { hookData?: string }).hookData; });
+  await mutate(v => { v.quoteRequest.requests[0]!.params.hookData = "0x"; });
+  await mutate(v => { v.quoteRequest.requests[0]!.params.hookData = `0x${"1".repeat(64)}`; });
+  await mutate(v => { delete (v.quoteRequest.requests[0]!.params as { hookData?: string }).hookData; });
+  await mutate(v => { (v.quoteRequest.requests[0] as { params?: unknown; hookData?: string }).hookData = v.quoteRequest.requests[0]!.params.hookData; delete (v.quoteRequest.requests[0] as { params?: unknown }).params; });
   const noHook = await fixture();
   noHook.transaction.data = encodeFunctionData({ abi: ABI, functionName: "depositForBurnWithFees", args: [1_000_000n, 5,
     `0x${Buffer.from(getBase58Encoder().encode(await associatedUsdc(wallet))).toString("hex")}`, usdc, zero as `0x${string}`, { signedQuote, refundAddress }] });
@@ -58,6 +59,6 @@ test("rejects fee, route, recipient, expiry, and setup mutations", async () => {
   await mutate(v => { v.transaction.data = `0x00000000${v.transaction.data.slice(10)}`; });
   await mutate(v => { v.recipientWallet = "11111111111111111111111111111111"; });
   const setup = await fixture("create_ata");
-  setup.quoteRequest.requests[0]!.hookData = "0x";
+  setup.quoteRequest.requests[0]!.params.hookData = "0x";
   await assert.rejects(inspectCircleV2UpfrontOffline(setup), { code: "APN_PROVIDER_PROTOCOL" });
 });
