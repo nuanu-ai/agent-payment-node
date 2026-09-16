@@ -21,6 +21,10 @@ function integer(value: unknown): bigint {
   return BigInt(value);
 }
 function sameHex(a: unknown, b: unknown): boolean { return bridgeHex(a, 16 * 1024) === bridgeHex(b, 16 * 1024); }
+function sameQuoteArg(a: unknown, b: unknown): boolean {
+  if (typeof a === "string" && typeof b === "string" && /^(?:0|[1-9][0-9]*)$/u.test(a) && /^(?:0|[1-9][0-9]*)$/u.test(b)) return a === b;
+  return sameHex(a, b);
+}
 function sourceBlock(value: unknown): { number: bigint; hash: string; timestamp: bigint } {
   const block = bridgeRecord(value);
   return { number: quantity(block.number), hash: bridgeHex(block.hash, 32, 32), timestamp: quantity(block.timestamp) };
@@ -67,7 +71,7 @@ export async function inspectCircleV2Preflight(input: CircleV2PreflightInput, tr
     if (actual.computedArgsHash !== undefined && !sameHex(actual.computedArgsHash, expected.argsHash)) fail("item_binding");
     const actualArgs = actual.args, expectedArgs = expected.args;
     if (actualArgs !== undefined && (!Array.isArray(actualArgs) || !Array.isArray(expectedArgs) ||
-      actualArgs.length !== expectedArgs.length || actualArgs.some((arg, index) => !sameHex(arg, expectedArgs[index])))) fail("item_args");
+      actualArgs.length !== expectedArgs.length || actualArgs.some((arg, index) => !sameQuoteArg(arg, expectedArgs[index])))) fail("item_args");
   }
   let block: ReturnType<typeof sourceBlock>;
   try { block = sourceBlock(await transport({ target: "base", method: "eth_getBlockByNumber", params: ["latest", false] })); }

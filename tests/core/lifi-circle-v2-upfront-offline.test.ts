@@ -15,7 +15,7 @@ const wallet = "95eqQDmQG7y8gad3yReqXqzyFoiQ4LYD9iAY1PMtuyRj";
 const refundAddress = "0x000000000000000000000000000000000000dEaD";
 const zero = `0x${"0".repeat(64)}`;
 const signedQuote = "0x01020304";
-async function fixture(setup: "existing_ata" | "create_ata" = "existing_ata") {
+async function fixture(setup: "existing_ata" | "create_ata" = "existing_ata", includeProtocol = true) {
   const ata = await associatedUsdc(wallet);
   const recipient = `0x${Buffer.from(getBase58Encoder().encode(ata)).toString("hex")}`;
   const hook = `0x636374702d666f7277617264000000000000000000000000000000000000002101${Buffer.from(getBase58Encoder().encode(wallet)).toString("hex")}`;
@@ -25,19 +25,21 @@ async function fixture(setup: "existing_ata" | "create_ata" = "existing_ata") {
   return { quoteEndpoint: "https://iris-api.circle.com/v2/quote/burn/usdc/6/5", quoteRequest: { amount: "1000000", feeToken: usdc, requests: [{ type: "FORWARD", params: { hookData: forwardingHook } }] },
     quoteResponse: { signedQuote, issuedAt: 1000, expiry: { mode: "BLOCK_NUMBER", expiresAtBlock: 100 }, feeTotalAmount: "20000", feeToken: usdc,
       items: [
-        { type: "FORWARD", amount: "18000", args: [forwardingHook], argsHash: `0x${"1".repeat(64)}` },
-        { type: "PROTOCOL", amount: "2000", args: [], argsHash: `0x${"2".repeat(64)}` },
+        { type: "FORWARD", amount: includeProtocol ? "18000" : "20000", args: [wrapper, "5", usdc, zero, forwardingHook], argsHash: `0x${"1".repeat(64)}` },
+        ...(includeProtocol ? [{ type: "PROTOCOL", amount: "2000", args: [], argsHash: `0x${"2".repeat(64)}` }] : []),
       ], nonce: "0" },
     transaction: { to: wrapper, chainId: 8453, valueAtomic: "0", refundAddress, data },
     recipientWallet: wallet, amountAtomic: "1000000", maxSourceFeeAtomic: "25000", sourceBlockNumber: "99", recipientSetup: setup };
 }
 test("inspects the opaque quote and canonical default or setup burn calldata without admitting execution", async () => {
   for (const setup of ["existing_ata", "create_ata"] as const) {
-    const result = await inspectCircleV2UpfrontOffline(await fixture(setup));
-    assert.equal(result.executionAdmitted, false);
-    assert.equal(result.recipientSetup, setup);
-    assert.equal(result.quotedFeeAtomic, "20000");
-    assert.ok(result.blockers.some(value => value.includes("authenticity")));
+    for (const includeProtocol of [false, true]) {
+      const result = await inspectCircleV2UpfrontOffline(await fixture(setup, includeProtocol));
+      assert.equal(result.executionAdmitted, false);
+      assert.equal(result.recipientSetup, setup);
+      assert.equal(result.quotedFeeAtomic, "20000");
+      assert.ok(result.blockers.some(value => value.includes("authenticity")));
+    }
   }
 });
 test("rejects fee, route, recipient, expiry, and setup mutations", async () => {
@@ -54,6 +56,10 @@ test("rejects fee, route, recipient, expiry, and setup mutations", async () => {
   await mutate(v => { v.quoteResponse.items[1]!.type = "UNKNOWN"; });
   await mutate(v => { v.quoteResponse.items[1]!.type = "FORWARD"; });
   await mutate(v => { v.quoteResponse.items.reverse(); });
+  await mutate(v => { v.quoteResponse.items[0]!.args[1] = "6"; });
+  await mutate(v => { v.quoteResponse.items[0]!.args[2] = wrapper; });
+  await mutate(v => { v.quoteResponse.items[0]!.args[4] = "0x"; });
+  await mutate(v => { v.quoteResponse.items[0]!.args.push("0x"); });
   await mutate(v => { v.quoteRequest.requests.push({ type: "PRE_FINALITY", params: { hookData: "0x" } }); });
   await mutate(v => { v.quoteRequest.amount = "999999"; });
   await mutate(v => { v.quoteEndpoint = "https://iris-api.circle.com/v2/quote/burn/usdc/5/6"; });
@@ -73,4 +79,10 @@ test("rejects fee, route, recipient, expiry, and setup mutations", async () => {
   const setup = await fixture("create_ata");
   setup.quoteRequest.requests[0]!.params.hookData = "0x";
   await assert.rejects(inspectCircleV2UpfrontOffline(setup), { code: "APN_PROVIDER_PROTOCOL" });
+  const single = await fixture("existing_ata", false);
+  single.quoteResponse.items.push({ ...single.quoteResponse.items[0]! });
+  await assert.rejects(inspectCircleV2UpfrontOffline(single), { code: "APN_PROVIDER_PROTOCOL" });
+  const shortSingle = await fixture("existing_ata", false);
+  shortSingle.quoteResponse.items[0]!.amount = "19999";
+  await assert.rejects(inspectCircleV2UpfrontOffline(shortSingle), { code: "APN_PROVIDER_PROTOCOL" });
 });
