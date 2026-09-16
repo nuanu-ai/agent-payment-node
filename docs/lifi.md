@@ -326,3 +326,21 @@ durable APN receipt. Wallet/provider setup, funding, real transactions and publi
 release are separate actions. Existing direct-transfer and x402 state formats
 remain unchanged; this implementation uses separate bridge stores without a
 migration.
+
+## Base to Solana USDC observation kernel (source only)
+
+`src/lifi/solana-destination-candidate.ts` parses a finalized successful Solana
+`getSignatureStatuses` and `getTransaction` pair into a **candidate** for a
+Base-USDC to Solana-USDC delivery. It requires the exact recipient's existing
+canonical USDC associated token account, the canonical mint and Token Program,
+one unambiguous pre/post balance row, and a positive token increase meeting a
+frozen minimum. Only the exact `completed` LI.FI outcome is accepted as a
+candidate; every other outcome and malformed value is refused.
+
+The candidate always has `sourceMessageCorrelation: "unverified"` and
+`bridgeCompletion: false`. There is no admitted route, prepare, approval,
+submission, completed operation or receipt for this lane. A later protocol
+packet must bind an actual LI.FI source quote and Base CCTP message to a
+specific Solana receive transaction before this candidate can support a bridge
+receipt. A recipient with no USDC associated token account is outside this
+kernel's proof contract; its creation and rent payer need separate admission.
