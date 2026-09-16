@@ -27,6 +27,15 @@ function keysFor(value, keys) {
     return typeof value === "object" && value !== null && Object.hasOwn(value, "dispatch")
         ? keys : keys.filter(key => key !== "dispatch");
 }
+/**
+ * `undefined` is a transition written before the dispatched material existed, and canonical JSON cannot represent it,
+ * so presence is compared before value. Absent and present-and-null stay distinct: only an unchanged field passes.
+ */
+function sameDispatch(previous, next) {
+    if (previous === undefined || next === undefined)
+        return previous === next;
+    return mmSame(previous, next);
+}
 function time(value) { return Date.parse(value); }
 function mutable(value) {
     return Object.fromEntries(MUTABLE_KEYS.map(key => [key, value[key]]));
@@ -51,7 +60,7 @@ function step(previous, next) {
         corrupt();
     // The dispatched material is written once, with the marker, and can never be replaced afterwards.
     if (previous.submissionAttempts === 1 && (next.submissionAttempts !== 1 ||
-        previous.dispatchStartedAt !== next.dispatchStartedAt || !mmSame(previous.dispatch, next.dispatch)))
+        previous.dispatchStartedAt !== next.dispatchStartedAt || !sameDispatch(previous.dispatch, next.dispatch)))
         corrupt();
     if (previous.settlement !== null && !mmSame(previous.settlement, next.settlement))
         corrupt();

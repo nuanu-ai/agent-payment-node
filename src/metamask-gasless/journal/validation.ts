@@ -31,6 +31,14 @@ function keysFor(value: unknown, keys: readonly string[]): readonly string[] {
   return typeof value === "object" && value !== null && Object.hasOwn(value, "dispatch")
     ? keys : keys.filter(key => key !== "dispatch");
 }
+/**
+ * `undefined` is a transition written before the dispatched material existed, and canonical JSON cannot represent it,
+ * so presence is compared before value. Absent and present-and-null stay distinct: only an unchanged field passes.
+ */
+function sameDispatch(previous: unknown, next: unknown): boolean {
+  if (previous === undefined || next === undefined) return previous === next;
+  return mmSame(previous, next);
+}
 function time(value: string): number { return Date.parse(value); }
 function mutable(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(MUTABLE_KEYS.map(key => [key, value[key]]));
@@ -50,7 +58,7 @@ function step(previous: MetaMaskGaslessTransition, next: MetaMaskGaslessTransiti
     (previous.state !== "execution_pending" || next.state !== "dispatch_pending" || next.dispatchStartedAt !== next.at)) corrupt();
   // The dispatched material is written once, with the marker, and can never be replaced afterwards.
   if (previous.submissionAttempts === 1 && (next.submissionAttempts !== 1 ||
-    previous.dispatchStartedAt !== next.dispatchStartedAt || !mmSame(previous.dispatch, next.dispatch))) corrupt();
+    previous.dispatchStartedAt !== next.dispatchStartedAt || !sameDispatch(previous.dispatch, next.dispatch))) corrupt();
   if (previous.settlement !== null && !mmSame(previous.settlement, next.settlement)) corrupt();
   if (previous.providerObservation !== null && next.providerObservation !== null) {
     if (time(next.providerObservation.observedAt) < time(previous.providerObservation.observedAt) ||
