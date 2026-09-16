@@ -1,7 +1,7 @@
 import { sha256 } from "../canonical.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS } from "./asset-registry.js";
-import { BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "./discovery-candidates.js";
+import { BASE_SOLANA_CIRCLE_V2_CANDIDATE, BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "./discovery-candidates.js";
 import type { LifiResponse } from "./ports.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
 
@@ -19,10 +19,18 @@ export function bridgeCapabilities(profile?: string) {
     }),
     tools: [{ tool: "across", variant: "Across V4, empty message, no exclusivity", decoder_implemented: true },
       { tool: "stargateV2", variant: "Stargate V2 Taxi, empty compose/options", decoder_implemented: true }],
-    candidate_lanes: [{ from_chain: "eip155:8453", from_token: BASE_SOLANA_USDC_CANDIDATE.fromToken,
+    candidate_lanes: [{ from_chain: "eip155:8453", from_token: BASE_SOLANA_CIRCLE_V2_CANDIDATE.fromToken,
+      to_chain: BASE_SOLANA_CIRCLE_V2_CANDIDATE.toChain, to_token: BASE_SOLANA_CIRCLE_V2_CANDIDATE.toToken,
+      provider: BASE_SOLANA_CIRCLE_V2_CANDIDATE.provider, protocol: BASE_SOLANA_CIRCLE_V2_CANDIDATE.protocol,
+      delivery: BASE_SOLANA_CIRCLE_V2_CANDIDATE.delivery, fee_quote: BASE_SOLANA_CIRCLE_V2_CANDIDATE.feeQuote,
+      selection: "first_executable_lane_design", provider_route_state: BASE_SOLANA_CIRCLE_V2_CANDIDATE.providerRouteState,
+      executable: BASE_SOLANA_CIRCLE_V2_CANDIDATE.executable,
+      missing_proof: ["signed_quote_and_expiry", "fee_token_total_debit_and_ATA_setup", "source_burn_message_and_destination_mint", "recovery_contract"] },
+      { from_chain: "eip155:8453", from_token: BASE_SOLANA_USDC_CANDIDATE.fromToken,
       to_lifi_chain_id: BASE_SOLANA_USDC_CANDIDATE.toChainId, to_token: BASE_SOLANA_USDC_CANDIDATE.toToken,
+      provider: BASE_SOLANA_USDC_CANDIDATE.provider, tool: BASE_SOLANA_USDC_CANDIDATE.tool, selection: "exploratory_only",
       provider_route_state: BASE_SOLANA_USDC_CANDIDATE.providerRouteState, executable: BASE_SOLANA_USDC_CANDIDATE.executable,
-      missing_proof: ["selected_route_and_source_call", "solana_destination_delivery_and_finality", "fee_and_recovery_contract"] },
+      missing_proof: ["onchain_destination_minimum_and_deadline", "solana_destination_delivery_and_finality", "fee_and_recovery_contract"] },
       { from_chain: "eip155:8453", from_token: BASE_TRON_USDT_CANDIDATE.fromToken,
         to_lifi_chain_id: BASE_TRON_USDT_CANDIDATE.toChainId, to_token: BASE_TRON_USDT_CANDIDATE.toToken,
         tool: BASE_TRON_USDT_CANDIDATE.tool, provider_route_state: BASE_TRON_USDT_CANDIDATE.providerRouteState,
