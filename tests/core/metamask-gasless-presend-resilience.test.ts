@@ -1,3 +1,7 @@
+import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/journal/repository.js";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
+import { join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessRequest } from "../../src/metamask-gasless/model.js";
@@ -15,6 +19,38 @@ const TRANSPORT = () => mmError("mm_gasless_provider_unavailable");
 /** gross 10 USDC, ceiling 0.08, floor 9.90: the owner's maximum leaves room above the prepared fee. */
 const HEADROOM: Omit<MetaMaskGaslessRequest, "chainId"> = { recipient: "0x2222222222222222222222222222222222222222",
   grossAtomic: "10000000", maxFeeAtomic: "80000", minReceivedAtomic: "9900000" };
+
+test("a record written before the dispatched material existed is still read exactly", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root);
+  const { id } = await f.prepare("mm-legacy-record-0001");
+  const path = join(temporary.root, "metamask-gasless-operations", f.state.profileHash(f.profile), `${id}.json`);
+  const stored = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+
+  // Exactly the shape of a record written before the field existed: absent from the record and from every transition,
+  // with the hashes that release would have computed over those bodies.
+  const drop = (value: Record<string, unknown>): Record<string, unknown> => {
+    const { dispatch: _dispatch, ...rest } = value;
+    return rest;
+  };
+  let previousHash = (stored.transitions as Record<string, unknown>[])[0]!.previousHash as string;
+  const transitions = (stored.transitions as Record<string, unknown>[]).map((raw) => {
+    const { transitionHash: _hash, ...body } = drop(raw);
+    const rebuilt = { ...body, previousHash };
+    previousHash = hashObject(rebuilt);
+    return { ...rebuilt, transitionHash: previousHash };
+  });
+  const { integrityHash: _integrity, ...body } = drop(stored);
+  const legacy = { ...body, transitions };
+  await writeFile(path, `${canonicalJson({ ...legacy, integrityHash: hashObject(legacy) })}\n`);
+
+  const records = new MetaMaskGaslessOperationRepository(f.state.root);
+  const loaded = await records.findOperation(id);
+  assert.ok(loaded, "a record without the dispatched material must still load");
+  assert.equal(loaded.dispatch, undefined);
+  // Every money command scans every family for the one-operation guard, so one unreadable record blocks every rail.
+  assert.equal((await records.listAllOperations()).length, 1);
+});
 
 test("a transient provider failure after approval is waited out inside the window and the transfer completes", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);

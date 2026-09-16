@@ -56,7 +56,9 @@ export function validateRailContinuity(previous, next) {
         canonicalJson(next.transitions.slice(0, -1)) !== canonicalJson(previous.transitions))
         corrupt();
     // A send binding is taken once: it may appear, and afterwards it can never be restated.
-    if (previous.send !== undefined && canonicalJson(previous.send) !== canonicalJson(next.send))
+    // The send binding is written once. Canonical JSON cannot represent `undefined`, so presence is compared first:
+    // a record written before the field existed carries it in no transition, and a mixed record is corrupt.
+    if (previous.send !== undefined && (next.send === undefined || canonicalJson(previous.send) !== canonicalJson(next.send)))
         corrupt();
 }
 export function validateRailOperation(value) {
