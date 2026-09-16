@@ -1,9 +1,11 @@
 /** Isolated source-effect journal. Admission proof is synthetic and never grants execution authority.
+ * The draft freezes calldata but has no nonce or EIP-1559 fee envelope. Those values are
+ * frozen here under a synthetic, untrusted binding; its draft checksum does not validate them.
  * No route, custody, transport, or CLI imports this module.
  */
 import { hashObject, sha256 } from "../canonical.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
-import { keccak256, parseTransaction, recoverTransactionAddress } from "viem";
+import { keccak256, parseTransaction, recoverTransactionAddress, serializeTransaction, type TransactionSerialized } from "viem";
 import { z } from "zod";
 import { addressSchema, hashSchema, hexSchema, isoSchema, uintSchema, wordSchema } from "./schema.js";
 import { bridgeFailure, BRIDGE_DIAMOND } from "./validation.js";
@@ -11,7 +13,10 @@ import { BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES } from "./circle-v2-source-recei
 
 const pair = z.enum(["base_usdc_to_solana_usdc_circle_cctp_v2", "base_usdc_to_tron_usdt_lifi_near_intents"]);
 const call = z.strictObject({ chainId: z.literal(8453), from: addressSchema, to: addressSchema,
-  valueAtomic: uintSchema, data: hexSchema, dataSha256: hashSchema });
+  valueAtomic: uintSchema, data: hexSchema, dataSha256: hashSchema,
+  type: z.literal("eip1559"), nonceAtomic: uintSchema, gasLimitAtomic: uintSchema,
+  maxFeePerGasAtomic: uintSchema, maxPriorityFeePerGasAtomic: uintSchema,
+  accessList: z.tuple([]) });
 const proof = z.strictObject({ kind: z.literal("synthetic_untrusted"), claimedValidationHash: hashSchema,
   note: z.string().min(1).max(256) });
 const safe = z.strictObject({ provenance: z.literal("synthetic_untrusted"), transactionHash: wordSchema, status: z.enum(["success", "reverted"]),
@@ -19,17 +24,18 @@ const safe = z.strictObject({ provenance: z.literal("synthetic_untrusted"), tran
   safeBlockHash: wordSchema, observedAt: isoSchema });
 const phase = z.enum(["staged_untrusted", "signing_started", "sealed", "submitting", "submitted_pending",
   "unknown_finality", "source_confirmed", "source_reverted"]);
-const snapshot = z.strictObject({ phase, signedTransaction: hexSchema.nullable(), transactionHash: wordSchema.nullable(),
+const signedHex = z.string().regex(/^0x(?:[a-f0-9]{2})*$/u).max(32_770);
+const snapshot = z.strictObject({ phase, signedTransaction: signedHex.nullable(), transactionHash: wordSchema.nullable(),
   nonceAtomic: uintSchema.nullable(), submissionAttempts: z.union([z.literal(0), z.literal(1)]),
   safeSourceProof: safe.nullable(), reason: z.string().max(128).nullable() });
 const entry = z.strictObject({ ...snapshot.shape, at: isoSchema, previousHash: hashSchema, transitionHash: hashSchema });
 const schema = z.strictObject({ schemaVersion: z.literal("apn.non-evm-source-journal.v1"),
   kind: z.literal("non_evm_source_journal"), executionAdmitted: z.literal(false),
   profileHash: hashSchema, operationId: hashSchema, draftIntegrityHash: hashSchema,
-  route: pair, sourceCall: call, admissionProof: proof, createdAt: isoSchema,
+  route: pair, sourceCall: call, maxSourceNativeDebitWei: uintSchema, admissionProof: proof, createdAt: isoSchema,
   ...snapshot.shape, transitions: z.array(entry).min(1).max(32), integrityHash: hashSchema });
 export type NonEvmSourceJournal = z.infer<typeof schema>;
-export type NonEvmSourceBinding = Pick<NonEvmSourceJournal, "profileHash" | "operationId" | "draftIntegrityHash" | "route" | "sourceCall" | "admissionProof" | "createdAt">;
+export type NonEvmSourceBinding = Pick<NonEvmSourceJournal, "profileHash" | "operationId" | "draftIntegrityHash" | "route" | "sourceCall" | "maxSourceNativeDebitWei" | "admissionProof" | "createdAt">;
 export type SafeSourceObservation = z.infer<typeof safe>;
 type Phase = z.infer<typeof phase>;
 type Snapshot = z.infer<typeof snapshot>;
@@ -50,15 +56,26 @@ const edges: Record<Phase, readonly Phase[]> = {
 function checkSigned(j: NonEvmSourceJournal, raw: `0x${string}`, nonce: string): string {
   let tx: ReturnType<typeof parseTransaction>;
   try { tx = parseTransaction(raw); } catch { corrupt(); }
-  if (tx.chainId !== 8453 || tx.to?.toLowerCase() !== j.sourceCall.to.toLowerCase() || tx.data !== j.sourceCall.data ||
-    (tx.value ?? 0n) !== BigInt(j.sourceCall.valueAtomic) || tx.nonce !== Number(nonce) ||
-    !Number.isSafeInteger(Number(nonce)) || tx.r === undefined || tx.s === undefined || (tx.v === undefined && tx.yParity === undefined)) corrupt();
+  const c = j.sourceCall, s = tx.s === undefined ? 0n : BigInt(tx.s);
+  if (tx.type !== "eip1559" || tx.chainId !== 8453 || tx.to?.toLowerCase() !== c.to.toLowerCase() ||
+    (tx.data ?? "0x") !== c.data || (tx.value ?? 0n).toString() !== c.valueAtomic ||
+    tx.nonce?.toString() !== c.nonceAtomic || nonce !== c.nonceAtomic ||
+    tx.gas?.toString() !== c.gasLimitAtomic || tx.maxFeePerGas?.toString() !== c.maxFeePerGasAtomic ||
+    (tx.maxPriorityFeePerGas ?? 0n).toString() !== c.maxPriorityFeePerGasAtomic ||
+    (tx.accessList ?? []).length !== 0 || tx.r === undefined || tx.s === undefined || s <= 0n ||
+    s > 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n ||
+    (tx.yParity !== 0 && tx.yParity !== 1) ||
+    serializeTransaction(tx, { r: tx.r, s: tx.s, yParity: tx.yParity }) !== raw) corrupt();
   return keccak256(raw);
 }
 export function validateNonEvmSourceJournal(value: unknown): NonEvmSourceJournal {
   const p = schema.safeParse(value); if (!p.success) corrupt();
   const j = p.data, { integrityHash, ...body } = j;
   if (hashObject(body) !== integrityHash || j.sourceCall.dataSha256 !== sha256(Buffer.from(j.sourceCall.data.slice(2), "hex")) ||
+    BigInt(j.sourceCall.gasLimitAtomic) < 1n || BigInt(j.sourceCall.maxFeePerGasAtomic) < 1n ||
+    BigInt(j.sourceCall.maxPriorityFeePerGasAtomic) > BigInt(j.sourceCall.maxFeePerGasAtomic) ||
+    BigInt(j.sourceCall.gasLimitAtomic) * BigInt(j.sourceCall.maxFeePerGasAtomic) +
+      BigInt(j.sourceCall.valueAtomic) > BigInt(j.maxSourceNativeDebitWei) ||
     (j.route === "base_usdc_to_solana_usdc_circle_cctp_v2"
       ? j.sourceCall.to !== BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES || !j.sourceCall.data.startsWith("0xc62fa55e")
       : j.sourceCall.to !== BRIDGE_DIAMOND || !j.sourceCall.data.startsWith("0x3110c7b9"))) corrupt();
@@ -117,6 +134,31 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
     if (j.profileHash !== profileHash || j.operationId !== operationId) corrupt();
     return j;
   }
+  private reservationPath(j: NonEvmSourceJournal): string {
+    const key = sha256(`non-evm-source-reservation\0${j.profileHash}\0${j.sourceCall.from}\0${j.sourceCall.nonceAtomic}`);
+    return `non-evm-source-reservations/${j.profileHash}/${key}.json`;
+  }
+  private async reserve(j: NonEvmSourceJournal, transactionHash: string): Promise<void> {
+    const path = this.reservationPath(j), prior = await this.readJson(path);
+    const identity = { profileHash: j.profileHash, operationId: j.operationId,
+      draftIntegrityHash: j.draftIntegrityHash, sender: j.sourceCall.from,
+      nonceAtomic: j.sourceCall.nonceAtomic, transactionHash };
+    const record = { ...identity, integrityHash: hashObject(identity) };
+    if (prior !== null) {
+      if (hashObject(prior) !== hashObject(record)) blocked();
+      return;
+    }
+    await this.ensureDirectory(`non-evm-source-reservations/${j.profileHash}`);
+    await this.writeJson(path, record);
+  }
+  private async assertReservation(j: NonEvmSourceJournal): Promise<void> {
+    if (j.transactionHash === null) corrupt();
+    const prior = await this.readJson(this.reservationPath(j));
+    const identity = { profileHash: j.profileHash, operationId: j.operationId,
+      draftIntegrityHash: j.draftIntegrityHash, sender: j.sourceCall.from,
+      nonceAtomic: j.sourceCall.nonceAtomic, transactionHash: j.transactionHash };
+    if (prior === null || hashObject(prior) !== hashObject({ ...identity, integrityHash: hashObject(identity) })) corrupt();
+  }
   /** A synthetically supplied proof is permanently untrusted. An adapter must introduce a new versioned admission contract. */
   async stage(binding: NonEvmSourceBinding): Promise<NonEvmSourceJournal> {
     const j = build(binding); await this.initialize();
@@ -124,7 +166,8 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
       const prior = await this.load(j.profileHash, j.operationId);
       if (prior !== null) { if (prior.draftIntegrityHash !== j.draftIntegrityHash || prior.route !== j.route ||
         hashObject(prior.sourceCall) !== hashObject(j.sourceCall) ||
-        hashObject(prior.admissionProof) !== hashObject(j.admissionProof) || prior.createdAt !== j.createdAt) corrupt(); return prior; }
+        hashObject(prior.admissionProof) !== hashObject(j.admissionProof) || prior.createdAt !== j.createdAt ||
+        prior.maxSourceNativeDebitWei !== j.maxSourceNativeDebitWei) corrupt(); return prior; }
       await this.ensureDirectory(`non-evm-source-journals/${j.profileHash}`);
       await this.writeJson(this.path(j.profileHash, j.operationId), j); return j;
     });
@@ -145,15 +188,18 @@ export class NonEvmSourceJournalRepository extends SecureStateStore {
       if (j.phase !== "signing_started" || !uintSchema.safeParse(nonceAtomic).success) blocked();
       const hash = checkSigned(j, raw, nonceAtomic);
       let signer: string;
-      try { signer = await recoverTransactionAddress({ serializedTransaction: raw as Parameters<typeof recoverTransactionAddress>[0]["serializedTransaction"] }); } catch { corrupt(); }
+      try { signer = await recoverTransactionAddress({ serializedTransaction: raw as TransactionSerialized }); } catch { corrupt(); }
       if (signer.toLowerCase() !== j.sourceCall.from.toLowerCase()) corrupt();
+      await this.reserve(j, hash);
       return advance(j, { ...snapshotOf(j), phase: "sealed", signedTransaction: raw, transactionHash: hash, nonceAtomic }, at);
     });
   }
   /** Commit the sole attempt before a future adapter may send. No send or retry method exists here. */
   async committingSubmission(profileHash: string, operationId: string, expectedHash: string, at: string): Promise<NonEvmSourceJournal> {
-    return this.change(profileHash, operationId, expectedHash, j => advance(j,
-      { ...snapshotOf(j), phase: "submitting", submissionAttempts: 1 }, at));
+    return this.change(profileHash, operationId, expectedHash, async j => {
+      await this.assertReservation(j);
+      return advance(j, { ...snapshotOf(j), phase: "submitting", submissionAttempts: 1 }, at);
+    });
   }
   async observePending(profileHash: string, operationId: string, expectedHash: string, at: string): Promise<NonEvmSourceJournal> {
     return this.change(profileHash, operationId, expectedHash, j => advance(j,
