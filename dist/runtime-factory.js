@@ -156,7 +156,7 @@ export function effectiveStateRoot() {
 }
 function needsNative(command) {
     return [
-        "doctor.keychain", "wallet.ensure", "wallet.status", "transfer.approve", "x402.fetch.approve", "operation.resume",
+        "doctor.keychain", "wallet.ensure", "wallet.import", "wallet.status", "transfer.approve", "x402.fetch.approve", "operation.resume",
     ].includes(command);
 }
 function needsPolicy(command) {

@@ -3,6 +3,7 @@ import { constants, type Dirent, type Stats } from "node:fs";
 import {
   type FileHandle,
   lstat,
+  link,
   mkdir,
   open,
   readdir,
@@ -275,7 +276,7 @@ export class SecureStateStore {
     }
   }
 
-  protected async writeJson(relativePath: string, value: unknown): Promise<void> {
+  protected async writeJson(relativePath: string, value: unknown, createOnly = false): Promise<void> {
     const target = this.resolveRelative(relativePath);
     const parent = dirname(target);
     const serialized = `${canonicalJson(value)}\n`;
@@ -290,6 +291,7 @@ export class SecureStateStore {
     } catch (error) {
       if (!isCode(error, "ENOENT")) throw error;
     }
+    if (createOnly && targetBefore !== null) stateSecurity("State target is already occupied.");
     const temporary = join(parent, `.${sha256(target).slice(0, 12)}.${randomBytes(12).toString("hex")}.tmp`);
     const handle = await open(
       temporary,
@@ -327,7 +329,17 @@ export class SecureStateStore {
           if (!isCode(error, "ENOENT")) throw error;
         }
       }
-      await rename(temporary, target);
+      if (createOnly) {
+        try {
+          await link(temporary, target);
+        } catch (error) {
+          if (isCode(error, "EEXIST")) stateSecurity("State target is already occupied.");
+          throw error;
+        }
+        await unlink(temporary);
+      } else {
+        await rename(temporary, target);
+      }
       const directory = await open(parent, constants.O_RDONLY);
       try {
         await directory.sync();
