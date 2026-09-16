@@ -27,7 +27,7 @@ export function bridgeCapabilities(profile?: string) {
         to_lifi_chain_id: BASE_TRON_USDT_CANDIDATE.toChainId, to_token: BASE_TRON_USDT_CANDIDATE.toToken,
         tool: BASE_TRON_USDT_CANDIDATE.tool, provider_route_state: BASE_TRON_USDT_CANDIDATE.providerRouteState,
         executable: BASE_TRON_USDT_CANDIDATE.executable,
-        missing_proof: ["selected_allbridge_route_and_source_call", "tron_solidified_destination_delivery_and_correlation", "fee_refund_and_recovery_contract"] }],
+        missing_proof: ["selected_near_route_and_source_call", "tron_solidified_destination_delivery_and_correlation", "fee_refund_and_recovery_contract"] }],
     route_executable: "requires_current_route_materialization_and_chain_checks",
     profiles: [
       { provider: "local", custody: "local_software", execution_owner: "apn", retry_owner: "apn_observation_only_after_first_send",
