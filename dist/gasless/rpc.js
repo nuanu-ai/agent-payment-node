@@ -6,12 +6,12 @@ import { gaslessMirrorBootstrap } from "./custody.js";
 import { assertGaslessEstimate } from "./economics.js";
 import { GaslessHttps } from "./https.js";
 import { observeGasless } from "./rpc-observe.js";
-import { rpcAddress, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, recheckBlock } from "./rpc-codec.js";
+import { rpcAddress, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord, recheckBlock } from "./rpc-codec.js";
 import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "./rpc-state.js";
 import { bundlerGasPrices } from "./rpc-gas-prices.js";
-import { gaslessDeployment, gaslessProtocolHash } from "./registry.js";
+import { gaslessDeployment, gaslessIntentAsset, gaslessProtocolHash } from "./registry.js";
 import { GASLESS_ESTIMATE_SIGNATURE, verifyGaslessBootstrap, verifyGaslessUserOperation } from "./signature.js";
-import { assertGaslessExecutionChain, gaslessChain, gaslessFailure, gaslessSame } from "./validation.js";
+import { assertGaslessExecutionChain, gaslessChain, gaslessFailure } from "./validation.js";
 import { gaslessUserOperation, gaslessUserOperationHash, validateGaslessWire } from "./wire.js";
 const RPC_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode",
     "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_maxPriorityFeePerGas",
@@ -140,13 +140,13 @@ export class GaslessRpc {
     }
     async mirrorEstimate(intent, fees) {
         assertGaslessExecutionChain(this.chainId);
-        this.assertIntent(intent);
+        const asset = this.assertIntent(intent);
+        // Proved before any use: the row's balance-layout claim must reproduce the owner's own snapshot balance on chain.
+        const slot = await this.provenBalanceSlot(asset, intent);
         // One bounded request: the guard snapshot before it already proved both endpoint chains and EntryPoint support.
         const mirror = await gaslessMirrorBootstrap(intent);
         const wire = gaslessUserOperation(mirror.intent, mirror, GASLESS_ESTIMATE_SIGNATURE, fees);
-        // FiatToken v2.2 keeps balances in the mapping at storage slot 9; the pinned implementation hash fixes that layout.
-        const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [mirror.intent.owner.address, 9n]));
-        const override = { [intent.token]: { stateDiff: { [slot]: numberToHex(BigInt(intent.request.grossAtomic), { size: 32 }) } } };
+        const override = { [intent.token]: { stateDiff: { [gaslessBalanceSlot(mirror.intent.owner.address, slot)]: numberToHex(BigInt(intent.request.grossAtomic), { size: 32 }) } } };
         let raw;
         try {
             raw = rpcRecord(await this.bundlerCall("eth_estimateUserOperationGas", [wire, intent.entryPoint, override]));
@@ -212,18 +212,44 @@ export class GaslessRpc {
         return await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin, deployment: this.deployment,
             rpc: this.rpcCall, bundler: this.bundlerCall }, intent, identity, cursor);
     }
+    /** Returns the admitted asset the intent names, so no caller has to re-derive it from a literal. */
     assertIntent(intent) {
         if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId ||
             intent.initialSnapshot.rpcOrigin !== this.rpcOrigin || intent.initialSnapshot.rpcEndpointHash !== this.rpcEndpointHash ||
             intent.initialSnapshot.bundlerOrigin !== this.bundlerOrigin || intent.initialSnapshot.bundlerEndpointHash !== this.bundlerEndpointHash) {
             gaslessFailure("APN_RPC_CONFIG", "gasless_endpoint_identity");
         }
-        if (intent.token !== this.deployment.token || intent.paymaster !== this.deployment.paymaster ||
-            intent.entryPoint !== this.deployment.entryPoint || intent.delegate !== this.deployment.delegate ||
-            intent.initialSnapshot.protocolHash !== gaslessProtocolHash(this.deployment) ||
-            !gaslessSame(intent.tokenDomain, this.deployment.tokenDomain)) {
+        const asset = gaslessIntentAsset(intent);
+        if (intent.entryPoint !== this.deployment.entryPoint || intent.delegate !== this.deployment.delegate ||
+            intent.initialSnapshot.protocolHash !== gaslessProtocolHash(this.deployment)) {
             gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_protocol_identity");
         }
+        return asset;
+    }
+    /**
+     * The row's `balanceLayout` is a claim about one token implementation's storage, never protocol knowledge, so it is
+     * proved twice before it is trusted. First the claim must name the implementation this chain is verified to run, so
+     * a layout description can never outlive the code it describes. Then it is measured: the owner's balance word at the
+     * claimed slot must equal the balance the frozen snapshot already read through `balanceOf` at that exact block.
+     * A row with no claim, a claim for another implementation, a zero witness balance or any disagreement fails closed
+     * rather than fabricating a balance at an unverified slot.
+     */
+    async provenBalanceSlot(asset, intent) {
+        const layout = asset.balanceLayout;
+        if (layout === null)
+            gaslessFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "gasless_balance_layout_unknown");
+        if (layout.implementationHash !== asset.implementationHash) {
+            gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_balance_layout_stale");
+        }
+        const witness = BigInt(intent.initialSnapshot.balanceAtomic);
+        if (witness === 0n)
+            gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_balance_layout_unproven");
+        const observed = rpcWord(await this.rpcCall("eth_getStorageAt", [asset.token,
+            gaslessBalanceSlot(intent.owner.address, layout.mappingSlotAtomic),
+            { blockHash: intent.initialSnapshot.block.hash, requireCanonical: true }]));
+        if (observed !== witness)
+            gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_balance_layout_mismatch");
+        return layout.mappingSlotAtomic;
     }
     async call(which, method, params, transport) {
         const methods = which === "rpc" ? RPC_METHODS : BUNDLER_METHODS;
@@ -249,6 +275,10 @@ export class GaslessRpc {
             gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_provider_response");
         return record.result;
     }
+}
+/** Storage key of a Solidity `mapping(address => uint256)` entry at the given base slot. */
+export function gaslessBalanceSlot(holder, base) {
+    return keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [holder, BigInt(base)]));
 }
 function endpoint(value) {
     const parsed = parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "Gasless RPC endpoint", 2048);
