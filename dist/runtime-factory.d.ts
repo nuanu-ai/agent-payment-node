@@ -15,6 +15,8 @@ import { type SmartAccountConsentPort } from "./metamask-smart-account-consent.j
 import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
 import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
+import type { CircleV2ApprovalExecutor as CircleApprovalService } from "./lifi/circle-v2-approval-executor.js";
+import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 import { type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
@@ -26,6 +28,8 @@ export interface RuntimeFactoryOptions {
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
     readonly gasless?: GaslessDependencies;
     readonly bridge?: BridgeDependencies;
+    readonly circleApproval?: CircleApprovalService;
+    readonly circleSource?: CircleV2SourceService;
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly directRails?: readonly DirectRailPort[];
     readonly railApproval?: RailApprovalPort;

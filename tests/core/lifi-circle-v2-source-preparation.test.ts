@@ -40,7 +40,7 @@ function harness(change?: (response: any) => void, options?: { reorg?: boolean; 
     if (request.method === "eth_getBlockByNumber") {
       const after = reads++ > 0;
       return { number: "0x63", hash: after && options?.reorg ? `0x${"b".repeat(64)}` : hash,
-        timestamp: options?.stale ? "0x1" : `0x${Math.floor(Date.now() / 1000).toString(16)}` };
+        timestamp: options?.stale ? "0x1" : `0x${Math.floor(fixedNow / 1000).toString(16)}` };
     }
     if (options?.revert) throw Error("revert");
     return "0x";

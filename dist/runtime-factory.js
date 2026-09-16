@@ -32,6 +32,9 @@ import { TronRpc } from "./tron/rpc.js";
 import { LocalBridgeCustody } from "./lifi/custody.js";
 import { LifiProvider } from "./lifi/provider.js";
 import { bridgeRpcFactory } from "./lifi/rpc.js";
+import { CircleV2ApprovalExecutor, LocalCircleApprovalSigner, circleApprovalRpcFromBridge } from "./lifi/circle-v2-approval-executor.js";
+import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
+import { TtyCircleV2SourceApproval } from "./lifi/circle-v2-source-tty.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
@@ -49,6 +52,12 @@ import { TtyFacilitatorApproval } from "./facilitator-gasless/tty.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
+    const approvalLimits = bound.request.command === "circle.approval.prepare" ? {
+        maxGasLimitAtomic: bound.request.maxGasLimitAtomic, maxFeePerGasWei: bound.request.maxFeePerGasWei,
+        maxPriorityFeePerGasWei: bound.request.maxPriorityFeePerGasWei, maxNativeDebitWei: bound.request.maxNativeDebitWei,
+        ttlMs: 60_000,
+    } : { maxGasLimitAtomic: "100000", maxFeePerGasWei: "2000000000",
+        maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60_000 };
     const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
     const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL);
     const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL);
@@ -103,6 +112,12 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     return new ApnCore({
         state,
+        ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
+            circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state, circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)), new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits, () => options.clock?.now().getTime() ?? Date.now()),
+        } : {}),
+        ...(bound.request.command === "circle.source.submit" || options.circleSource !== undefined ? {
+            circleSource: options.circleSource ?? new CircleV2SourceService(state, wrappingSecret, process.env, new TtyCircleV2SourceApproval()),
+        } : {}),
         facilitatorGasless: options.facilitatorGasless ?? { rpc: () => avalancheFacilitatorRpc(process.env),
             facilitator: new PayAiFacilitator(), signer: new LocalFacilitatorSigner(state, wrappingSecret),
             ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyFacilitatorApproval() } : {}) },
