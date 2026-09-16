@@ -60,6 +60,32 @@ test("LI.FI stable materialization identities and every alternate execution exte
   assert.equal(s.wrapping.loads, 0); assert.equal(s.source.submissions.length, 0);
 });
 
+test("LI.FI quote-only included action metadata may disappear during materialization without unpinning effects", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root), original = s.provider.steps[0]!;
+  const discovery = lifiRoute(original);
+  for (const sub of discovery.steps[0].includedSteps) Object.assign(sub.action, {
+    jitoBundle: false, integratorId: "lifi-api", integratorFees: { feePercent: 0.0025, sourceAmount: { c: [10000000] } },
+  });
+  const selected = parseBridgeRoutes({ status: 200, body: JSON.stringify({ routes: [discovery] }) }, s.request, LIFI_SYNTHETIC_SENDER)[0]!;
+  assert.doesNotThrow(() => materializeBridgeRoute(selected, { status: 200, body: JSON.stringify(original) }, s.request, LIFI_SYNTHETIC_SENDER));
+  for (const edit of [
+    (step: any) => { step.includedSteps[1].action.toAddress = LIFI_SYNTHETIC_SENDER; },
+    (step: any) => { step.includedSteps[1].action.fromAmount = "1"; },
+    (step: any) => { step.includedSteps[1].tool = "stargateV2"; },
+  ]) {
+    const changed = structuredClone(original); edit(changed);
+    assert.throws(() => materializeBridgeRoute(selected, { status: 200, body: JSON.stringify(changed) }, s.request, LIFI_SYNTHETIC_SENDER), { code: "APN_PROVIDER_PROTOCOL" });
+  }
+  for (const edit of [
+    (step: any) => { step.includedSteps[0].action.jitoBundle = true; },
+    (step: any) => { step.includedSteps[0].action.integratorId = "other"; },
+    (step: any) => { step.includedSteps[0].action.destinationCall = {}; },
+  ]) {
+    const changed = structuredClone(discovery); edit(changed.steps[0]);
+    assert.throws(() => parseBridgeRoutes({ status: 200, body: JSON.stringify({ routes: [changed] }) }, s.request, LIFI_SYNTHETIC_SENDER), { code: "APN_PROVIDER_PROTOCOL" });
+  }
+});
+
 test("LI.FI route fee, minimum output and native messaging accounting enforce exact boundaries", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   for (const step of s.provider.steps) {
