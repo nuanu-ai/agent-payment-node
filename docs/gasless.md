@@ -5,7 +5,7 @@ canonical USDC with the fee included in the amount. The sender needs no native
 gas balance. The selected profile determines the supported networks, fee
 calculation and recovery rules described below.
 
-APN 0.5.19 includes this capability. Package availability, mainnet transfer
+APN 0.5.20 includes this capability. Package availability, mainnet transfer
 evidence and receiving human acceptance are tracked separately for each profile
 and network. `apn gasless capabilities` reports the exact adapter and acceptance
 state without reading a wallet,
