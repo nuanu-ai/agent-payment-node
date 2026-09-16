@@ -1,5 +1,6 @@
 /** One-shot, durable Base USDC allowance effect. This does not execute a Circle transfer. */
 import { hashObject } from "../canonical.js";
+import { ApnError } from "../errors.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { encodeFunctionData, getAddress, keccak256, parseAbi, parseTransaction, recoverTransactionAddress, serializeTransaction } from "viem";
@@ -222,8 +223,8 @@ export class CircleV2ApprovalExecutor {
             try {
                 raw = await this.signer.sign(r);
             }
-            catch {
-                return await this.unknown(r);
+            catch (error) {
+                return await this.unknown(r, failureReason("signing", error));
             }
             const hash = await verifySigned(raw, r);
             r = update(r, { phase: "sealed", rawTransaction: raw, transactionHash: hash });
@@ -231,8 +232,8 @@ export class CircleV2ApprovalExecutor {
             try {
                 await this.fresh(r);
             }
-            catch {
-                return await this.unknown(r);
+            catch (error) {
+                return await this.unknown(r, failureReason("post_sign_guard", error));
             }
             r = update(r, { phase: "submitting", submissionAttempts: 1 });
             await this.journal.save(r);
@@ -276,8 +277,10 @@ export class CircleV2ApprovalExecutor {
             next.transaction.from !== p.transaction.from || next.transaction.data !== p.transaction.data)
             bridgeFailure("APN_REPREPARE_REQUIRED", "circle_approval_fresh_bounds");
     }
-    async unknown(r) {
-        r = update(r, { phase: "unknown_finality" });
+    async unknown(r, reason = "observation_unavailable") {
+        // The durable submission marker is written before send. Without it APN has not called send.
+        r = update(r, { phase: r.submissionAttempts === 0 ? "failed_before_effect" : "unknown_finality",
+            failureReason: reason });
         await this.journal.save(r);
         return r;
     }
@@ -285,7 +288,7 @@ export class CircleV2ApprovalExecutor {
         if (r.phase === "completed" || r.phase === "confirmed_revert" || r.phase === "failed_before_effect" || r.phase === "prepared")
             return r;
         if (r.submissionAttempts === 0 || r.transactionHash === null || r.rawTransaction === null)
-            return await this.unknown(r);
+            return await this.unknown(r, "no_submission_marker");
         try {
             if (await verifySigned(r.rawTransaction, r) !== r.transactionHash)
                 throw new Error("signed hash");
@@ -317,5 +320,12 @@ export class CircleV2ApprovalExecutor {
             return await this.unknown(r);
         }
     }
+}
+function failureReason(stage, error) {
+    if (error instanceof ApnError) {
+        const reason = /^Bridge validation failed: ([a-z0-9_]+)\.$/u.exec(error.message)?.[1];
+        return `${stage}:${error.code}${reason === undefined ? "" : `:${reason}`}`;
+    }
+    return `${stage}:unavailable`;
 }
 //# sourceMappingURL=circle-v2-approval-executor.js.map
