@@ -22,10 +22,12 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   let raw: Hex | null = null;
   const rpc: CircleApprovalRpc = {
     chainId: 8453,
+    origin: "https://base.example",
     read: async () => ({ chainId: 8453, payer: account.address, token, spender, blockNumber: "12345",
       blockHash: `0x${"a".repeat(64)}`, latestNonceAtomic: nonce, pendingNonceAtomic: nonce,
       usdcBalanceAtomic: balance, usdcAllowanceAtomic: allowance, nativeBalanceWei: "200000000000000",
-      gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000" }),
+      gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000",
+      totalNativeDebitWei: "200000000000000" }),
     send: async sent => { sends++; raw = sent; if (ambiguous) throw new Error("lost response"); return keccak256(sent); },
     observe: async hash => include && raw !== null ? { status: "success", safe: true,
       receipt: { chainId: 8453, transactionHash: hash, blockNumberAtomic: "12345", blockHash: `0x${"a".repeat(64)}` as Hex,

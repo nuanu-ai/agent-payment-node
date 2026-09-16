@@ -16,7 +16,8 @@ function reader(change?: (state: CircleV2ApprovalState) => void) {
     const state: CircleV2ApprovalState = { chainId: 8453, payer, token, spender,
       blockNumber: "12345", blockHash: `0x${"a".repeat(64)}`, latestNonceAtomic: "7", pendingNonceAtomic: "7",
       usdcBalanceAtomic: "434611", usdcAllowanceAtomic: "0", nativeBalanceWei: "200000000000000",
-      gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000" };
+      gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000",
+      totalNativeDebitWei: "200000000000000" };
     change?.(state);
     return state;
   };
@@ -44,6 +45,8 @@ test("rejects wrong target, unbounded cap, nonce, balance, gas, and fee drift", 
     (v: any) => { v.usdcAllowanceAtomic = "430001"; }, (v: any) => { v.gasLimitAtomic = "100001"; },
     (v: any) => { v.maxFeePerGasWei = "2000000001"; },
     (v: any) => { v.nativeBalanceWei = "199999999999999"; },
+    (v: any) => { v.totalNativeDebitWei = "200000000000001"; },
+    (v: any) => { v.totalNativeDebitWei = "199999999999999"; },
   ]) await assert.rejects(prepareCircleV2BaseUsdcApprovalReadOnly(input, reader(change), limits), { code: "APN_PROVIDER_PROTOCOL" });
   await assert.rejects(prepareCircleV2BaseUsdcApprovalReadOnly(input, reader(), { ...limits, maxFeePerGasWei: "2" }),
     { code: "APN_PROVIDER_PROTOCOL" });

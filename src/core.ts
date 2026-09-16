@@ -108,7 +108,11 @@ export class ApnCore {
           : await executor.status(request.operationId);
         return dataOutcome(publicCircleApproval(record), record.phase === "completed" ? "circle_approval_safe_receipt_and_allowance" : "circle_approval_journal_state");
       }
-      case "circle.source.submit": throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle source runtime is unavailable.");
+      case "circle.source.submit": {
+        const service = this.context.circleSource;
+        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle source runtime is unavailable.");
+        return dataOutcome(await service.submit(request), "circle_base_source_submission_only");
+      }
       case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
       case "gasless.balance": {
         const provider = await this.gaslessProvider(request.profile);
