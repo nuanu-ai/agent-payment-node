@@ -115,7 +115,7 @@ export async function inspectCircleV2UpfrontOffline(input) {
         fail("claim");
     const expectedHook = withSetup ? hookForSetup(wallet) : DEFAULT_HOOK;
     if (String(args[5]).toLowerCase() !== expectedHook ||
-        bridgeRecord(request.requests[0]).hookData !== expectedHook)
+        bridgeRecord(bridgeRecord(request.requests[0]).params).hookData !== expectedHook)
         fail("forward_hook");
     try {
         if (encodeFunctionData({ abi: ABI, functionName: decoded.functionName, args: args }).toLowerCase() !== data)
