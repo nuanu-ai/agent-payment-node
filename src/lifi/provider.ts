@@ -5,7 +5,7 @@ import type { BridgeProviderObservation, BridgeRouteRequest } from "./model.js";
 import type { LifiProviderPort, LifiResponse } from "./ports.js";
 import { railStatusIdentifier, type RailStatusIdentifier } from "../rail-status-binding.js";
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgePeerToken, validateBridgeRequest } from "./asset-registry.js";
-import { BASE_SOLANA_USDC_CANDIDATE } from "./discovery-candidates.js";
+import { BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "./discovery-candidates.js";
 import { validateBridgeInventoryCandidate } from "./catalog.js";
 import { bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
 
@@ -48,9 +48,68 @@ export class LifiProvider implements LifiProviderPort {
     } catch {
       candidateConnection = { ...candidateIdentity, status: "unavailable", responseHash: null, response: null };
     }
-    let body = canonicalJson({ pairs: [...connections, candidateConnection] });
-    // A full admitted inventory may leave no room even for the optional unavailable marker.
-    if (candidateConnection.status === "unavailable" && Buffer.byteLength(body, "utf8") > LIFI_INVENTORY_RESPONSE_BYTES) {
+    const optionalPairs: Record<string, unknown>[] = [candidateConnection];
+    const tron = BASE_TRON_USDT_CANDIDATE;
+    const tronIdentity = { fromChainId: tron.fromChainId, toChainId: tron.toChainId,
+      fromToken: tron.fromToken, toToken: tron.toToken, tool: tron.tool };
+    let tronConnection: Record<string, unknown>;
+    try {
+      const [tronChains, tronTokens, tronTools, tronPair] = await Promise.all([
+        this.get("/chains", { chainTypes: "TVM" }, LIFI_INVENTORY_RESPONSE_BYTES),
+        this.get("/tokens", { chains: String(tron.toChainId) }, LIFI_INVENTORY_RESPONSE_BYTES),
+        this.get("/tools", { chains: [String(tron.fromChainId), String(tron.toChainId)] }, LIFI_INVENTORY_RESPONSE_BYTES),
+        this.get("/connections", { fromChain: String(tron.fromChainId), toChain: String(tron.toChainId),
+          fromToken: tron.fromToken, toToken: tron.toToken, allowBridges: tron.tool,
+          allowSwitchChain: "false", allowDestinationCall: "false" }, LIFI_INVENTORY_RESPONSE_BYTES),
+      ]);
+      for (const result of [tronChains, tronTokens, tronTools, tronPair])
+        if (result.status !== 200) throw new Error("TRON candidate inventory unavailable.");
+      const chainRows = bridgeRecord(bridgeJson(tronChains.body, LIFI_INVENTORY_RESPONSE_BYTES)).chains;
+      const tokenRows = bridgeRecord(bridgeRecord(bridgeJson(tronTokens.body, LIFI_INVENTORY_RESPONSE_BYTES)).tokens)[String(tron.toChainId)];
+      const toolRows = bridgeRecord(bridgeJson(tronTools.body, LIFI_INVENTORY_RESPONSE_BYTES)).bridges;
+      const pairBody = bridgeRecord(bridgeJson(tronPair.body, LIFI_INVENTORY_RESPONSE_BYTES));
+      validateBridgeInventoryCandidate(pairBody);
+      if (!Array.isArray(chainRows) || !chainRows.some((entry) => {
+        const row = bridgeRecord(entry);
+        return row.id === tron.toChainId && row.key === "trn" && row.chainType === "TVM" && row.mainnet === true;
+      }) || !Array.isArray(tokenRows) || !tokenRows.some((entry) => {
+        const row = bridgeRecord(entry);
+        return row.chainId === tron.toChainId && row.address === tron.toToken && row.symbol === "USDT" && row.decimals === 6;
+      }) || !Array.isArray(toolRows) || !toolRows.some((entry) => {
+        const row = bridgeRecord(entry);
+        return row.key === tron.tool && Array.isArray(row.supportedChains) && row.supportedChains.some((supported) => {
+          const pair = bridgeRecord(supported);
+          return pair.fromChainId === tron.fromChainId && pair.toChainId === tron.toChainId;
+        });
+      }) || !Array.isArray(pairBody.connections) || !pairBody.connections.some((entry) => {
+        const row = bridgeRecord(entry);
+        return row.fromChainId === tron.fromChainId && row.toChainId === tron.toChainId &&
+          Array.isArray(row.fromTokens) && row.fromTokens.some((token) => {
+            const asset = bridgeRecord(token); return asset.address === tron.fromToken && asset.chainId === tron.fromChainId;
+          }) && Array.isArray(row.toTokens) && row.toTokens.some((token) => {
+            const asset = bridgeRecord(token); return asset.address === tron.toToken && asset.chainId === tron.toChainId;
+          });
+      })) throw new Error("TRON candidate identity unavailable.");
+      tronConnection = { ...tronIdentity, status: 200, responseHash: sha256(canonicalJson([tronChains.body, tronTokens.body, tronTools.body, tronPair.body])), response: pairBody };
+    } catch {
+      tronConnection = { ...tronIdentity, status: "unavailable", responseHash: null, response: null };
+    }
+    optionalPairs.push(tronConnection);
+    let body = canonicalJson({ pairs: [...connections, ...optionalPairs] });
+    if (Buffer.byteLength(body, "utf8") > LIFI_INVENTORY_RESPONSE_BYTES && tronConnection.status === 200) {
+      optionalPairs[1] = { ...tronIdentity, status: "unavailable", responseHash: null, response: null };
+      body = canonicalJson({ pairs: [...connections, ...optionalPairs] });
+    }
+    if (Buffer.byteLength(body, "utf8") > LIFI_INVENTORY_RESPONSE_BYTES) {
+      optionalPairs.pop();
+      body = canonicalJson({ pairs: [...connections, ...optionalPairs] });
+    }
+    // A full admitted inventory may leave no room for either optional candidate.
+    if (Buffer.byteLength(body, "utf8") > LIFI_INVENTORY_RESPONSE_BYTES && candidateConnection.status === 200) {
+      optionalPairs[0] = { ...candidateIdentity, status: "unavailable", responseHash: null, response: null };
+      body = canonicalJson({ pairs: [...connections, ...optionalPairs] });
+    }
+    if (Buffer.byteLength(body, "utf8") > LIFI_INVENTORY_RESPONSE_BYTES) {
       body = canonicalJson({ pairs: connections });
     }
     bridgeJson(body, LIFI_INVENTORY_RESPONSE_BYTES);
