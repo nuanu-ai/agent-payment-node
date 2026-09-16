@@ -20,17 +20,22 @@ const request = { profile: "imported", expectedPayer: payer, recipient, amountAt
   maxFeePerGasWei: "3000000000", maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "300000000000000",
   idempotencyKey: "oneclick-once-test" };
 
-async function harness(t: import("node:test").TestContext, sendAmbiguous = false, allowConsent = true, onApprove?: () => void) {
+async function harness(t: import("node:test").TestContext, sendAmbiguous = false, allowConsent = true,
+  onApprove?: () => void, providerDeadlineMs = 86_400_000, consentAdvanceMs = 0) {
   const tmp = await temporaryState(); t.after(tmp.cleanup);
+  let clockNow = Date.now();
+  t.mock.method(Date, "now", () => clockNow);
   const state = new StateStore(tmp.root), wrapping = { async load() { return Buffer.alloc(32, 7); }, async create() { return Buffer.alloc(32, 7); } };
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("imported", key, payer);
   let sends = 0, approvals = 0, nonce = 7n, actualQuote: unknown, transactionHash: string | null = null, badLog = false, badMembership = false;
-  if (allowConsent) t.mock.method(TtyOneClickSourceApproval.prototype, "approve", async () => { approvals++; onApprove?.(); });
+  if (allowConsent) t.mock.method(TtyOneClickSourceApproval.prototype, "approve", async () => {
+    approvals++; onApprove?.(); clockNow += consentAdvanceMs;
+  });
   t.mock.method(BridgeHttps.prototype, "request", async (endpoint: string, verb: string, body: string | null) => {
     if (endpoint === "https://1click.chaindefuser.com/v0/quote") {
       const quoteRequest = JSON.parse(body!);
       const quote = { amountIn: "3000000", minAmountIn: "2800000", amountOut: "1264167", minAmountOut: "1251525",
-        deadline: new Date(Date.now() + 86_400_000).toISOString(), ...(quoteRequest.dry ? {} : { depositAddress: deposit, depositMemo: null }) };
+        deadline: new Date(Date.now() + providerDeadlineMs).toISOString(), ...(quoteRequest.dry ? {} : { depositAddress: deposit, depositMemo: null }) };
       const response = { quoteRequest, quote };
       if (!quoteRequest.dry) actualQuote = response;
       return { status: 201, body: JSON.stringify(response) };
@@ -78,6 +83,12 @@ for (const ambiguous of [false, true]) test(`concrete 1Click service makes one $
 test("post-consent nonce drift fails before signing or sending", async t => {
   const h = await harness(t, false, true, () => h.changeNonce());
   await assert.rejects(h.service.submit(request), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(h.sends(), 0);
+});
+test("earlier provider deadline expires during consent before signing or send", async t => {
+  const h = await harness(t, false, true, undefined, 70_000, 45_000);
+  await assert.rejects(h.service.submit(request), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(h.approvals(), 1);
   assert.equal(h.sends(), 0);
 });
 test("forged constructor approval argument cannot bypass concrete TTY consent", async t => {

@@ -38,10 +38,13 @@ export function inspectOneClickSourceQuote(response: unknown, request: Record<st
     deadline - now < 45_000 || deadline - now > 180_000) fail("quote_amount_or_deadline");
   const responseDeadline = Date.parse(String(quote.deadline));
   if (!Number.isFinite(responseDeadline) || responseDeadline <= now) fail("quote_response_deadline");
+  const effectiveDeadline = Math.min(deadline, responseDeadline);
+  if (effectiveDeadline - now < 45_000) fail("quote_effective_deadline");
   const deposit = bridgeAddress(quote.depositAddress);
   if (quote.depositMemo !== undefined && quote.depositMemo !== null && quote.depositMemo !== "") fail("deposit_memo");
   if (deposit === getAddress("0x0000000000000000000000000000000000000000") || deposit === USDC) fail("deposit_address");
-  return { deposit, amountIn, amountOut, minimum, quoteHash: hashObject(response) };
+  return { deposit, amountIn, amountOut, minimum, quoteHash: hashObject(response),
+    quoteDeadline: new Date(responseDeadline).toISOString(), effectiveDeadline: new Date(effectiveDeadline).toISOString() };
 }
 export interface OneClickSubmitRequest {
   readonly profile: string; readonly expectedPayer: string; readonly recipient: string; readonly amountAtomic: string;
@@ -116,12 +119,13 @@ export class OneClickSourceService {
         const nativeDebit = gas * fee + word(l1) + word(operator);
         if (nativeDebit > maxNative || quantity(nativeBalance) < nativeDebit) fail("native_balance_or_cap");
         const check = bridgeRecord(await rpc.call("eth_getBlockByNumber", [hex(blockNumber), false]));
-        if (bridgeHex(check.hash, 32, 32) !== blockHash || now() > Date.parse(actualRequest.deadline) - 45_000) fail("block_or_quote_expired");
+        if (bridgeHex(check.hash, 32, 32) !== blockHash || now() > Date.parse(q.effectiveDeadline) - 45_000) fail("block_or_quote_expired");
         return { blockHash, nonce, gas, fee, tip, nativeDebit };
       };
       const initial = await readBase();
       let record = await journal.stage({ operationId, profileHash, payer, recipient, refundTo: payer,
         depositAddress: q.deposit, quoteHash: q.quoteHash, quoteRequestDeadline: actualRequest.deadline,
+        quoteDeadline: q.quoteDeadline, effectiveDeadline: q.effectiveDeadline,
         amountInAtomic: q.amountIn.toString(), minAmountOutAtomic: q.minimum.toString(),
         quotedAmountOutAtomic: q.amountOut.toString(), sourceBlockHash: initial.blockHash,
         sourceCall: { to: USDC, data, nonce: initial.nonce.toString(), gas: initial.gas.toString(),
@@ -130,13 +134,14 @@ export class OneClickSourceService {
       const fresh = await readBase();
       if (fresh.nonce !== initial.nonce || fresh.gas > initial.gas || fresh.fee > initial.fee ||
         fresh.tip > initial.tip || fresh.nativeDebit > initial.nativeDebit ||
-        now() > Date.parse(record.quoteRequestDeadline) - 30_000) fail("post_approval_drift");
+        now() > Date.parse(record.effectiveDeadline) - 30_000) fail("post_approval_drift");
+      if (now() > Date.parse(record.effectiveDeadline) - 15_000) fail("quote_expired_before_sign");
       record = await journal.advance(operationId, record.integrityHash, "signing_started");
       const raw = await privateKeyToAccount(loaded.secret.privateKey).signTransaction({ type: "eip1559", chainId: 8453,
         to: USDC, data, value: 0n, nonce: Number(initial.nonce), gas: initial.gas,
         maxFeePerGas: initial.fee, maxPriorityFeePerGas: initial.tip, accessList: [] });
       record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) });
-      if (now() > Date.parse(record.quoteRequestDeadline) - 15_000) fail("quote_expired_before_send");
+      if (now() > Date.parse(record.effectiveDeadline) - 15_000) fail("quote_expired_before_send");
       record = await journal.advance(operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
       try {
         const returned = await rpc.send(raw);
@@ -211,7 +216,7 @@ export class OneClickSourceService {
 export class TtyOneClickSourceApproval {
   async approve(record: OneClickSourceRecord): Promise<void> {
   if (!stdin.isTTY || !stderr.isTTY) fail("foreground_tty_required");
-  stderr.write(`1Click Base USDC to TRON USDT\nPayer: ${record.payer}\nRecipient: ${record.recipient}\nDeposit: ${record.depositAddress}\nAmount: ${record.amountInAtomic} atomic USDC\nMinimum: ${record.minAmountOutAtomic} atomic USDT\nQuote deadline: ${record.quoteRequestDeadline}\nMaximum Base debit: ${record.sourceCall.maxNativeDebitWei} wei\n`);
+  stderr.write(`1Click Base USDC to TRON USDT\nPayer: ${record.payer}\nRecipient: ${record.recipient}\nDeposit: ${record.depositAddress}\nAmount: ${record.amountInAtomic} atomic USDC\nMinimum: ${record.minAmountOutAtomic} atomic USDT\nEffective deposit deadline: ${record.effectiveDeadline}\nMaximum Base debit: ${record.sourceCall.maxNativeDebitWei} wei\n`);
   const rl = createInterface({ input: stdin, output: stderr });
   try { if ((await rl.question(`Type ${record.operationId} to sign and submit once: `)).trim() !== record.operationId) fail("approval_denied"); }
   finally { rl.close(); }

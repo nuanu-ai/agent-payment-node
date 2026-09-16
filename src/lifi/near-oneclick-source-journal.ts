@@ -13,6 +13,8 @@ export interface OneClickSourceRecord {
   readonly depositAddress: string;
   readonly quoteHash: string;
   readonly quoteRequestDeadline: string;
+  readonly quoteDeadline: string;
+  readonly effectiveDeadline: string;
   readonly amountInAtomic: string;
   readonly minAmountOutAtomic: string;
   readonly quotedAmountOutAtomic: string;
@@ -41,6 +43,8 @@ function validate(value: unknown): OneClickSourceRecord {
     !/^[a-f0-9]{64}$/u.test(r.operationId) || !/^[a-f0-9]{64}$/u.test(r.profileHash) ||
     !/^0x[a-fA-F0-9]{64}$/u.test(r.sourceBlockHash) ||
     !/^0x[a-fA-F0-9]{40}$/u.test(r.depositAddress) || r.sourceCall.to !== USDC ||
+    !Number.isFinite(Date.parse(r.quoteRequestDeadline)) || !Number.isFinite(Date.parse(r.quoteDeadline)) ||
+    r.effectiveDeadline !== new Date(Math.min(Date.parse(r.quoteRequestDeadline), Date.parse(r.quoteDeadline))).toISOString() ||
     r.sourceCall.data !== encodeFunctionData({ abi: TRANSFER, functionName: "transfer",
       args: [getAddress(r.depositAddress), BigInt(r.amountInAtomic)] }) ||
     r.destinationStatus !== null || r.submissionAttempts > 1) fail();

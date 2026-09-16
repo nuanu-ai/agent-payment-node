@@ -16,10 +16,16 @@ test("1Click direct quote binds exact Base amount, recipient, minimum and short 
   const result = inspectOneClickSourceQuote(response, request, 1000000n, 2000000n, now);
   assert.equal(result.amountIn, 3000000n); assert.equal(result.minimum, 1251525n);
   assert.equal(result.deposit, "0x76b4c56085ED136a8744D52bE956396624a730E8");
+  assert.equal(result.effectiveDeadline, request.deadline);
   assert.throws(() => inspectOneClickSourceQuote({ ...response, quoteRequest: { ...request, recipient: "TWrong" } }, request, 1000000n, 2000000n, now));
   assert.throws(() => inspectOneClickSourceQuote({ ...response, quote: { ...response.quote, minAmountOut: "999999" } }, request, 1000000n, 2000000n, now));
   assert.throws(() => inspectOneClickSourceQuote({ ...response, quote: { ...response.quote, depositMemo: "123" } }, request, 1000000n, 2000000n, now));
   assert.throws(() => inspectOneClickSourceQuote(response, request, 1000000n, 2000000n, now + 150000));
+  const earlier = { ...response, quote: { ...response.quote, deadline: "2026-09-17T00:01:10.000Z" } };
+  assert.equal(inspectOneClickSourceQuote(earlier, request, 1000000n, 2000000n, now).effectiveDeadline,
+    "2026-09-17T00:01:10.000Z");
+  assert.throws(() => inspectOneClickSourceQuote({ ...response, quote: { ...response.quote,
+    deadline: "2026-09-17T00:00:40.000Z" } }, request, 1000000n, 2000000n, now));
 });
 test("1Click command binding carries explicit limits", () => {
   const bound = bindOneClickCommand("oneclick source submit", { "--profile": "evm-live-buyer",
@@ -46,7 +52,8 @@ test("durable 1Click journal seals exact ERC20 transfer and permits one submissi
     const repo = new OneClickSourceJournal(temp.root);
     let record = await repo.stage({ operationId: "a".repeat(64), profileHash: "b".repeat(64), payer: account.address,
       recipient: request.recipient, refundTo: account.address, depositAddress: deposit, quoteHash: "c".repeat(64),
-      quoteRequestDeadline: request.deadline, amountInAtomic: "3000000", minAmountOutAtomic: "1251525",
+      quoteRequestDeadline: request.deadline, quoteDeadline: response.quote.deadline,
+      effectiveDeadline: request.deadline, amountInAtomic: "3000000", minAmountOutAtomic: "1251525",
       quotedAmountOutAtomic: "1264167", sourceBlockHash: `0x${"d".repeat(64)}`,
       sourceCall: { to: token, data, nonce: "7", gas: "100000", maxFeePerGas: "2000000000",
         maxPriorityFeePerGas: "100000000", maxNativeDebitWei: "200000000000000" } });

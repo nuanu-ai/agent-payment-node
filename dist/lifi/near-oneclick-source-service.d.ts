@@ -7,6 +7,8 @@ export declare function inspectOneClickSourceQuote(response: unknown, request: R
     amountOut: bigint;
     minimum: bigint;
     quoteHash: string;
+    quoteDeadline: string;
+    effectiveDeadline: string;
 };
 export interface OneClickSubmitRequest {
     readonly profile: string;
