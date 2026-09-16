@@ -51,6 +51,27 @@ provider evidence, not APN execution admission. The [LI.FI API reference](https:
 distinguishes connections from routes, and the [NEAR Intents facet](https://github.com/lifinance/contracts/blob/main/docs/NEARIntentsFacet.md)
 requires separate source, destination and refund proof.
 
+The saved synthetic 100 USDC quote can now be inspected offline with
+`inspectNearBaseTronQuoteOffline`. Its canonical Base transaction calls the
+LI.FI Diamond at `0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE` with
+`swapAndStartBridgeTokensViaNEARIntents` (`0x3110c7b9`), forwards a 0.25 USDC
+LI.FI fee, and passes 99.75 USDC to the NEAR Intents deposit. The quote's TRON
+recipient decodes to a 20-byte account payload matching the facet's
+`nonEVMReceiver` bytes32. The API's TRON chain ID `728126428` and the facet's
+custom ID `1885080386571452` are deliberately checked as distinct values.
+The ABI, receiver convention, transfer to the deposit address, signed fields,
+and custom chain ID are pinned to
+[LI.FI contracts commit `6a670100`](https://github.com/lifinance/contracts/tree/6a670100f9d011e39fbf2fe973493de0a50cf970)
+([facet source](https://github.com/lifinance/contracts/blob/6a670100f9d011e39fbf2fe973493de0a50cf970/src/Facets/NEARIntentsFacet.sol),
+[chain constants](https://github.com/lifinance/contracts/blob/6a670100f9d011e39fbf2fe973493de0a50cf970/src/Helpers/LiFiData.sol)).
+This is byte-level source inspection of a synthetic quote. The destination
+USDT token is quote metadata, not a field in the facet's signed payload. The
+offline parser does not verify the backend signature, live Diamond deployment,
+deadline freshness, deposit address provenance, TRON settlement, refund path,
+or recovery. It always reports `executionAdmitted: false` and
+`bridgeCompletion: false`; `bridge routes`, `prepare` and `approve` still refuse
+the lane.
+
 ## Discover and select a route
 
 ```sh
