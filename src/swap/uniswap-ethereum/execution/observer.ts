@@ -4,7 +4,7 @@ import type { EvmRpcCall } from "../../../evm-ports.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmTokenBalance, recheckEvmBlock } from "../../../evm-rpc-codec.js";
 import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../../model.js";
 import { validateUniswapReceipt, type UniswapReceiptEvidence } from "../../uniswap-receipt.js";
-import { UNISWAP_USDC } from "../../uniswap-pin.js";
+import { UNISWAP_ROUTER, UNISWAP_USDC } from "../../uniswap-pin.js";
 import { validateUniswapExecutionBinding } from "./binding.js";
 import type { UniswapExecutionBinding, UniswapReceiptObserverPort } from "./types.js";
 
@@ -29,9 +29,13 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
     const tx = evmRpcRecord(rawTx), receipt = evmRpcRecord(rawReceipt);
     const txHash = evmRpcHex(tx.hash, 32), receiptHash = evmRpcHex(receipt.transactionHash, 32);
     if (txHash !== transactionHash || receiptHash !== transactionHash) blocked("Uniswap transaction hash evidence conflicts.", "uniswap_transaction_conflict");
+    this.assertTransactionEnvelope(tx, binding);
     const txBlock = evmRpcQuantity(tx.blockNumber), receiptBlock = evmRpcQuantity(receipt.blockNumber),
       txBlockHash = evmRpcHex(tx.blockHash, 32), receiptBlockHash = evmRpcHex(receipt.blockHash, 32);
     if (txBlock !== receiptBlock || txBlockHash !== receiptBlockHash) blocked("Uniswap transaction and receipt block identities conflict.", "uniswap_reorg_conflict");
+    if (evmRpcAddress(receipt.from) !== operation.quote.account || evmRpcAddress(receipt.to) !== UNISWAP_ROUTER) {
+      blocked("Uniswap receipt sender or router conflicts with the bound transaction.", "uniswap_receipt_conflict");
+    }
     const block = await evmRpcBlock(this.call, `0x${txBlock.toString(16)}`);
     if (block.hash !== txBlockHash) blocked("Uniswap receipt block is no longer canonical.", "uniswap_reorg_conflict");
     const [safeHead, finalizedHead] = await Promise.all([evmRpcBlock(this.call, "safe"), evmRpcBlock(this.call, "finalized")]);
@@ -43,11 +47,16 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
       evmTokenBalance(this.call, UNISWAP_USDC, operation.quote.recipient as `0x${string}`, beforeTag),
       evmTokenBalance(this.call, UNISWAP_USDC, operation.quote.recipient as `0x${string}`, afterTag),
     ]);
-    await recheckEvmBlock(this.call, block); await this.assertChain();
+    await recheckEvmBlock(this.call, block); await recheckEvmBlock(this.call, safeHead); await recheckEvmBlock(this.call, finalizedHead);
+    await this.assertChain();
     const logsRaw = receipt.logs;
     if (!Array.isArray(logsRaw) || logsRaw.length > 4096) blocked("Uniswap receipt logs are malformed.", "uniswap_receipt_conflict");
     const logs = logsRaw.map((item): UniswapReceiptEvidence["receipt"]["logs"][number] => {
       const log = evmRpcRecord(item); if (!Array.isArray(log.topics) || log.topics.length > 4) blocked("Uniswap receipt log is malformed.", "uniswap_receipt_conflict");
+      if (evmRpcHex(log.transactionHash, 32) !== transactionHash || evmRpcHex(log.blockHash, 32) !== receiptBlockHash ||
+          evmRpcQuantity(log.blockNumber) !== receiptBlock || log.removed !== false) {
+        blocked("Uniswap receipt log identity conflicts with its transaction or block.", "uniswap_receipt_conflict");
+      }
       return { address: evmRpcAddress(log.address), topics: log.topics.map((topic) => evmRpcHex(topic, 32)), data: evmRpcHex(log.data) };
     });
     const status = evmRpcQuantity(receipt.status);
@@ -65,6 +74,19 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
 
   private async balance(address: string, tag: Hex): Promise<bigint> { return evmRpcQuantity(await this.call("eth_getBalance", [address, tag])); }
   private async assertChain(): Promise<void> { if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap observer requires exact Ethereum chain 1 RPC."); }
+  private assertTransactionEnvelope(tx: Record<string, unknown>, binding: UniswapExecutionBinding): void {
+    const envelope = binding.envelope, legacy = envelope.gasPrice !== undefined;
+    if (evmRpcQuantity(tx.chainId) !== 1n || evmRpcQuantity(tx.nonce).toString() !== binding.nonce ||
+        evmRpcQuantity(tx.gas).toString() !== envelope.gasLimit || evmRpcQuantity(tx.type) !== (legacy ? 0n : 2n)) {
+      blocked("Uniswap mined transaction chain, nonce, gas, or type conflicts with the signed binding.", "uniswap_transaction_conflict");
+    }
+    if (legacy) {
+      if (evmRpcQuantity(tx.gasPrice).toString() !== envelope.gasPrice) blocked("Uniswap mined legacy fee conflicts with the signed binding.", "uniswap_transaction_conflict");
+    } else if (evmRpcQuantity(tx.maxFeePerGas).toString() !== envelope.maxFeePerGas ||
+        evmRpcQuantity(tx.maxPriorityFeePerGas).toString() !== envelope.maxPriorityFeePerGas) {
+      blocked("Uniswap mined EIP-1559 fees conflict with the signed binding.", "uniswap_transaction_conflict");
+    }
+  }
 }
 
 function instant(value: Date): string { if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new ApnError("APN_RPC_PROTOCOL", "Uniswap observation time is invalid."); return value.toISOString(); }

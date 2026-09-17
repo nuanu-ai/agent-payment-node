@@ -23,6 +23,10 @@ export interface UniswapExecutionFreshness {
   readonly gasLimit: string;
   readonly maxFeePerGas: string;
   readonly maxPriorityFeePerGas: string;
+  readonly simulationBlockNumber: string;
+  readonly simulationBlockHash: Hex;
+  readonly headBlockNumber: string;
+  readonly headBlockHash: Hex;
   readonly checkedAt: string;
 }
 
@@ -44,6 +48,15 @@ export interface UniswapExecutionApprovalRequest {
   readonly maxFeePerGas: string;
   readonly maxPriorityFeePerGas: string;
   readonly maximumGasCostAtomic: string;
+  readonly chainId: 1;
+  readonly router: string;
+  readonly envelopeHash: string;
+  readonly nonce: string;
+  readonly executionHeadNumber: string;
+  readonly executionHeadHash: Hex;
+  readonly policyDigest: string;
+  readonly mechanismDigest: string;
+  readonly protocolRegistryDigest: string;
   readonly expiresAt: string;
   readonly approvalHash: string;
 }
@@ -65,6 +78,9 @@ export interface UniswapExecutionBinding {
   readonly envelope: UniswapTransactionEnvelope;
   readonly envelopeHash: string;
   readonly nonce: string;
+  readonly executionHeadNumber: string;
+  readonly executionHeadHash: Hex;
+  readonly freshnessCheckedAt: string;
   readonly deadline: number;
   readonly quoteHash: string;
   readonly simulationRequestHash: string;

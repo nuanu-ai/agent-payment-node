@@ -20,7 +20,7 @@ import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { temporaryState } from "./helpers.js";
 import { EncryptedUniswapExecutionEffectStore, LocalUniswapEthereumSigner, UniswapEthereumExecutionAdapter,
   UniswapEthereumReceiptObserver, UniswapSingleSendAdapter, createUniswapApprovalRequest, createUniswapExecutionBinding,
-  newUniswapExecutionEffect, validateFreshness, verifySignedUniswapTransaction,
+  newUniswapExecutionEffect, validateEffect, validateFreshness, verifySignedUniswapTransaction,
   type UniswapExecutionBinding, type UniswapExecutionEffect, type UniswapExecutionFreshness,
   type UniswapOwnerAdmission } from "../../src/swap/uniswap-ethereum/execution/index.js";
 
@@ -39,7 +39,9 @@ function calldata(minimum = minimumOutput) {
 function envelope() { return { from: ACCOUNT, to: UNISWAP_ROUTER, data: calldata(), value: inputAmount, gasLimit: "150000", chainId: 1,
   maxFeePerGas: "2000000000", maxPriorityFeePerGas: "100000000" } as const; }
 function fresh(patch: Partial<UniswapExecutionFreshness> = {}): UniswapExecutionFreshness { return { chainId: 1, account: ACCOUNT,
-  nonce: "7", gasLimit: "150000", maxFeePerGas: "2000000000", maxPriorityFeePerGas: "100000000", checkedAt: now.toISOString(), ...patch }; }
+  nonce: "7", gasLimit: "150000", maxFeePerGas: "2000000000", maxPriorityFeePerGas: "100000000",
+  simulationBlockNumber: "100", simulationBlockHash: `0x${H("d")}`, headBlockNumber: "101", headBlockHash: `0x${H("e")}`,
+  checkedAt: now.toISOString(), ...patch }; }
 
 class MemoryWrapping implements WrappingSecretPort {
   readonly value = Buffer.alloc(32, 7);
@@ -84,7 +86,7 @@ async function fixture(root: string) {
 
 async function marked(f: Awaited<ReturnType<typeof fixture>>) {
   const reserved = await f.core.reserve(f.operation, f.policy, now);
-  const operation = await f.core.markSubmitting(reserved, now), approval = createUniswapApprovalRequest(f.operation, f.e);
+  const operation = await f.core.markSubmitting(reserved, now), approval = createUniswapApprovalRequest(f.operation, f.e, fresh(), now);
   const binding = createUniswapExecutionBinding({ operation, envelope: f.e, freshness: fresh(), admission: f.admission, approvalHash: approval.approvalHash });
   return { operation, binding };
 }
@@ -92,7 +94,7 @@ async function marked(f: Awaited<ReturnType<typeof fixture>>) {
 test("exact binding rejects envelope, nonce, gas, fee, deadline and signed sender drift", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root), m = await marked(f);
   for (const drift of [{ gasLimit: "150001" }, { maxFeePerGas: "2000000001" }, { maxPriorityFeePerGas: "100000001" },
-    { checkedAt: new Date(deadline * 1000).toISOString() }]) assert.throws(() => validateFreshness(f.operation, f.e, fresh(drift)), { code: "APN_OPERATION_BLOCKED" });
+    { checkedAt: new Date(deadline * 1000).toISOString() }]) assert.throws(() => validateFreshness(f.operation, f.e, fresh(drift), now), { code: "APN_OPERATION_BLOCKED" });
   const exact = await privateKeyToAccount(KEY).signTransaction({ type: "eip1559", chainId: 1, to: f.e.to, data: f.e.data, value: BigInt(f.e.value),
     nonce: 7, gas: 150000n, maxFeePerGas: 2000000000n, maxPriorityFeePerGas: 100000000n, accessList: [] });
   assert.match(await verifySignedUniswapTransaction(exact, m.binding, m.operation), /^0x[a-f0-9]{64}$/u);
@@ -106,10 +108,29 @@ test("exact binding rejects envelope, nonce, gas, fee, deadline and signed sende
   await assert.rejects(verifySignedUniswapTransaction(wrongSender, m.binding, m.operation), { code: "APN_OPERATION_BLOCKED" });
 });
 
+test("execution boundaries reject excess, prototype, uint, stale-head, stale-time and path-substitution input", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root), m = await marked(f);
+  assert.throws(() => createUniswapApprovalRequest(f.operation, { ...f.e, extra: true } as any, fresh(), now));
+  const inherited = Object.create(f.e) as typeof f.e;
+  assert.throws(() => createUniswapApprovalRequest(f.operation, inherited, fresh(), now), { code: "APN_INVALID_INPUT" });
+  for (const drift of [
+    { nonce: (BigInt(Number.MAX_SAFE_INTEGER) + 1n).toString() },
+    { headBlockNumber: "200" },
+    { headBlockHash: `0x${H("A")}` },
+    { checkedAt: new Date(now.getTime() - 30_001).toISOString() },
+    { maxPriorityFeePerGas: "2000000001" },
+  ]) assert.throws(() => validateFreshness(f.operation, f.e, fresh(drift as any), now));
+  const effects = new EncryptedUniswapExecutionEffectStore(f.state, f.wrapping);
+  await assert.rejects(effects.load({ ...m.operation, ownerProfileHash: H("9") } as any, m.binding), { code: "APN_STATE_CORRUPT" });
+});
+
 test("encrypted signer/effect survives restart, authenticates tamper, and never journals raw or private material", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root), m = await marked(f);
   const effects = new EncryptedUniswapExecutionEffectStore(f.state, f.wrapping), signer = new LocalUniswapEthereumSigner(f.state, f.wrapping, effects);
   const effect = await signer.sign(m.operation, m.binding, f.admission, now); assert.equal(effect.phase, "sealed");
+  await assert.rejects(validateEffect({ ...effect, unexpected: true }, m.operation, m.binding), { code: "APN_STATE_CORRUPT" });
+  const inherited = Object.create(effect) as UniswapExecutionEffect;
+  await assert.rejects(validateEffect(inherited, m.operation, m.binding), { code: "APN_STATE_CORRUPT" });
   const restarted = new EncryptedUniswapExecutionEffectStore(new StateStore(temporary.root), f.wrapping);
   assert.equal((await restarted.load(m.operation, m.binding))?.transactionHash, effect.transactionHash);
   const path = join(temporary.root, "uniswap-execution-effects", m.operation.ownerProfileHash, `${m.operation.operationId}.json`);
@@ -117,6 +138,17 @@ test("encrypted signer/effect survives restart, authenticates tamper, and never 
   const envelopeFile = JSON.parse(text); envelopeFile.cipher.ciphertext = `${envelopeFile.cipher.ciphertext.slice(0, -4)}AAAA`;
   await writeFile(path, `${JSON.stringify(envelopeFile)}\n`);
   await assert.rejects(restarted.load(m.operation, m.binding), { code: "APN_STATE_CORRUPT" });
+});
+
+test("concurrent send calls cross exactly one durable send boundary", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root), m = await marked(f);
+  const effects = new EncryptedUniswapExecutionEffectStore(f.state, f.wrapping), signer = new LocalUniswapEthereumSigner(f.state, f.wrapping, effects);
+  const effect = await signer.sign(m.operation, m.binding, f.admission, now); let sends = 0;
+  const sender = new UniswapSingleSendAdapter(effects, async () => { sends++; await new Promise(resolve => setImmediate(resolve)); return effect.transactionHash; });
+  const outcomes = await Promise.allSettled([sender.sendOnce(m.operation, m.binding, now), sender.sendOnce(m.operation, m.binding, now)]);
+  assert.equal(sends, 1); assert.equal(outcomes.filter(outcome => outcome.status === "fulfilled").length, 1);
+  assert.equal(outcomes.filter(outcome => outcome.status === "rejected").length, 1);
+  assert.equal((await effects.load(m.operation, m.binding))?.phase, "send_accepted");
 });
 
 test("marker is durable before signing and sending; lost send response becomes possible-send and can never resend", async (t) => {
@@ -137,15 +169,20 @@ test("observer requires marker and proves exact finalized receipt, reorg, finali
     nonce: 7, gas: 150000n, maxFeePerGas: 2000000000n, maxPriorityFeePerGas: 100000000n, accessList: [] });
   const hash = await verifySignedUniswapTransaction(raw, m.binding, m.operation), blockHash = `0x${H("e")}` as const;
   const recipientTopic = `0x${RECIPIENT.slice(2).toLowerCase().padStart(64, "0")}`, transfer = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-  const options = { finalized: 110, blockHash, output: BigInt(minimumOutput) };
+  const options = { finalized: 110, blockHash, output: BigInt(minimumOutput), nonce: "0x7", removed: false };
   const rpc = (override: Partial<typeof options> = {}) => { const o = { ...options, ...override }; return async (method: string, params: readonly unknown[]) => {
     if (method === "eth_chainId") return "0x1";
     if (method === "eth_getTransactionByHash") return { hash, from: ACCOUNT, to: UNISWAP_ROUTER, input: f.e.data,
-      value: `0x${BigInt(inputAmount).toString(16)}`, blockNumber: "0x64", blockHash };
-    if (method === "eth_getTransactionReceipt") return { transactionHash: hash, status: "0x1", blockNumber: "0x64", blockHash,
-      logs: [{ address: UNISWAP_USDC, topics: [transfer, `0x${H("0")}`, recipientTopic], data: `0x${o.output.toString(16).padStart(64, "0")}` }] };
+      value: `0x${BigInt(inputAmount).toString(16)}`, chainId: "0x1", nonce: o.nonce, gas: "0x249f0", type: "0x2",
+      maxFeePerGas: "0x77359400", maxPriorityFeePerGas: "0x5f5e100", blockNumber: "0x64", blockHash };
+    if (method === "eth_getTransactionReceipt") return { transactionHash: hash, from: ACCOUNT, to: UNISWAP_ROUTER,
+      status: "0x1", blockNumber: "0x64", blockHash,
+      logs: [{ address: UNISWAP_USDC, transactionHash: hash, blockNumber: "0x64", blockHash, removed: o.removed,
+        topics: [transfer, `0x${H("0")}`, recipientTopic], data: `0x${o.output.toString(16).padStart(64, "0")}` }] };
     if (method === "eth_getBlockByNumber") { const tag = params[0]; if (tag === "safe") return { number: "0x6f", hash: `0x${H("f")}` };
       if (tag === "finalized") return { number: `0x${o.finalized.toString(16)}`, hash: `0x${H("a")}` };
+      if (tag === "0x6f") return { number: "0x6f", hash: `0x${H("f")}` };
+      if (tag === `0x${o.finalized.toString(16)}`) return { number: `0x${o.finalized.toString(16)}`, hash: `0x${H("a")}` };
       return { number: "0x64", hash: o.blockHash }; }
     if (method === "eth_getBalance") return params[1] === "0x63" ? "0x38d7ea4c68000" : "0x0";
     if (method === "eth_call") return params[1] === "0x63" ? `0x${"0".repeat(64)}` : `0x${o.output.toString(16).padStart(64, "0")}`;
@@ -156,12 +193,14 @@ test("observer requires marker and proves exact finalized receipt, reorg, finali
   assert.equal(await new UniswapEthereumReceiptObserver(rpc({ finalized: 99 })).observe(m.operation, m.binding, hash), null);
   await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ blockHash: `0x${H("9")}` })).observe(m.operation, m.binding, hash), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ output: 1n })).observe(m.operation, m.binding, hash), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ nonce: "0x8" })).observe(m.operation, m.binding, hash), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ removed: true })).observe(m.operation, m.binding, hash), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(observer.observe({ ...f.operation, submissionMarker: null } as any, m.binding, hash));
 });
 
 test("orchestrator requires injected admission/registry, binds approval, reserves shared cap, and resumes observe-only", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root), events: string[] = [];
-  const approval = createUniswapApprovalRequest(f.operation, f.e), effect = { transactionHash: `0x${H("8")}` } as UniswapExecutionEffect;
+  const approval = createUniswapApprovalRequest(f.operation, f.e, fresh(), now), effect = { transactionHash: `0x${H("8")}` } as UniswapExecutionEffect;
   const make = (approvalHash = approval.approvalHash, admissionError = false) => new UniswapEthereumExecutionAdapter(f.core, f.protocols,
     { assert: async () => { events.push("admission"); if (admissionError) throw new Error("missing"); return f.admission; } },
     { inspect: async () => { events.push("guard"); return fresh(); } },
@@ -180,4 +219,32 @@ test("orchestrator requires injected admission/registry, binds approval, reserve
     rail: "direct", amountAtomic: "1", idempotencyKey: "cross-rail-uniswap", now }), { code: "APN_OPERATION_BLOCKED" });
   const sendsBefore = events.filter(e => e === "send").length; await make("request").resume({ operation: result.operation, binding: result.binding, now });
   assert.equal(events.filter(e => e === "send").length, sendsBefore);
+});
+
+test("approval drift cannot reserve and sender hash substitution is quarantined as unknown", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
+  let guardCalls = 0;
+  const drift = new UniswapEthereumExecutionAdapter(f.core, f.protocols, { assert: async () => f.admission },
+    { inspect: async () => (++guardCalls === 1 ? fresh() : fresh({ nonce: "8" })) },
+    { confirm: async request => ({ approved: true, approvalHash: request.approvalHash }) },
+    { sign: async () => { throw new Error("must not sign"); } }, { sendOnce: async () => { throw new Error("must not send"); } },
+    { observe: async () => null }, { load: async () => null, seal: async (_operation, _binding, value) => value,
+      markSendStarted: async () => { throw new Error(); }, markSendOutcome: async () => { throw new Error(); } });
+  await assert.rejects(drift.approveAndExecute({ operation: f.operation, envelope: f.e, assetPolicy: f.policy, now }),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await f.usage.usage({ account: ACCOUNT, chain: UNISWAP_CHAIN,
+    asset: { kind: "native", identifier: null } }, now)).amountAtomic, "0");
+
+  const temporary2 = await temporaryState(); t.after(temporary2.cleanup); const g = await fixture(temporary2.root);
+  const signedHash = `0x${H("8")}` as const, substitutedHash = `0x${H("9")}` as const; let observed: string | null = null;
+  const adapter = new UniswapEthereumExecutionAdapter(g.core, g.protocols, { assert: async () => g.admission },
+    { inspect: async () => fresh() }, { confirm: async request => ({ approved: true, approvalHash: request.approvalHash }) },
+    { sign: async () => ({ transactionHash: signedHash }) as UniswapExecutionEffect },
+    { sendOnce: async () => ({ kind: "submitted", transactionHash: substitutedHash }) },
+    { observe: async (_operation, _binding, transactionHash) => { observed = transactionHash; return null; } },
+    { load: async () => null, seal: async (_operation, _binding, value) => value, markSendStarted: async () => { throw new Error(); },
+      markSendOutcome: async () => { throw new Error(); } });
+  const result = await adapter.approveAndExecute({ operation: g.operation, envelope: g.e, assetPolicy: g.policy, now });
+  assert.equal(result.operation.state, "unknown_finality"); assert.equal(result.operation.usageLease?.state, "unknown_finality");
+  assert.equal(result.transactionHash, signedHash); assert.equal(observed, signedHash);
 });

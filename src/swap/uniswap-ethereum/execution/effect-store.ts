@@ -136,7 +136,8 @@ function parseEnvelope(value: unknown, operation: SwapOperationRecord, binding: 
     "submissionMarkerHash", "transactionHash", "kdf", "cipher"]) || value.schemaVersion !== ENVELOPE_VERSION ||
       value.operationId !== operation.operationId || value.profileHash !== operation.ownerProfileHash || value.bindingHash !== binding.bindingHash ||
       value.envelopeHash !== binding.envelopeHash || value.submissionMarkerHash !== binding.submissionMarkerHash ||
-      typeof value.transactionHash !== "string" || !isPlainRecord(value.kdf) || !exactKeys(value.kdf, ["name", "salt"]) ||
+      typeof value.transactionHash !== "string" || !/^0x[a-f0-9]{64}$/u.test(value.transactionHash) ||
+      !isPlainRecord(value.kdf) || !exactKeys(value.kdf, ["name", "salt"]) ||
       value.kdf.name !== "HKDF-SHA-256" || !isPlainRecord(value.cipher) || !exactKeys(value.cipher, ["name", "nonce", "ciphertext", "tag"]) ||
       value.cipher.name !== "AES-256-GCM") corrupt("Uniswap execution effect envelope is invalid.");
   return value as unknown as Envelope;
