@@ -75,7 +75,9 @@ test("runtime validation rejects operation, policy and expiry substitution befor
   const forged: any = structuredClone(op); forged.quote.routeHash = H("f");
   await assert.rejects(service.reserve(forged, policy, new Date("2026-09-18T00:01:01.000Z")), { code: "APN_STATE_CORRUPT" });
   const substituted = sealAssetPolicyRegistry({ schemaVersion: policy.schemaVersion, registryVersion: "swap-owner.2",
-    publishedAt: policy.publishedAt, effectiveDate: policy.effectiveDate, effectiveAt: policy.effectiveAt, expiresAt: policy.expiresAt,
+    publishedAt: policy.publishedAt, effectiveDate: policy.effectiveDate,
+    ...(policy.effectiveAt === undefined ? {} : { effectiveAt: policy.effectiveAt }),
+    ...(policy.expiresAt === undefined ? {} : { expiresAt: policy.expiresAt }),
     chains: policy.chains });
   await assert.rejects(service.reserve(op, substituted, new Date("2026-09-18T00:01:01.000Z")), { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await usage.usage({ account: ACCOUNT, chain: "eip155:1", asset: { kind: "native", identifier: null } },
