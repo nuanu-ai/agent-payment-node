@@ -31,19 +31,28 @@ export class UniswapEthereumExecutionAdapter {
     if (operation.state !== "awaiting_approval") blocked("Uniswap operation is not awaiting foreground approval.", "uniswap_approval_state");
     assertInjectedProtocol(operation, this.protocolRegistry);
     const admission = await this.admission.assert(operation);
-    const approvalRequest = createUniswapApprovalRequest(operation, input.envelope);
+    const displayedFreshness = await this.guard.inspect(operation, input.envelope);
+    validateFreshness(operation, input.envelope, displayedFreshness, input.now);
+    const approvalRequest = createUniswapApprovalRequest(operation, input.envelope, displayedFreshness, input.now);
     const answer = await this.approval.confirm(approvalRequest);
     if (!answer.approved) return { operation: await this.core.failBeforeEffect(operation, input.now, approvalRequest.approvalHash), binding: null, transactionHash: null };
     if (answer.approvalHash !== approvalRequest.approvalHash) blocked("Foreground approval does not bind the displayed Uniswap intent.", "uniswap_approval_tamper");
-    const freshness = await this.guard.inspect(operation, input.envelope); validateFreshness(operation, input.envelope, freshness);
+    const freshness = await this.guard.inspect(operation, input.envelope); validateFreshness(operation, input.envelope, freshness, input.now);
+    if (createUniswapApprovalRequest(operation, input.envelope, freshness, input.now).approvalHash !== approvalRequest.approvalHash) {
+      blocked("Uniswap execution state changed after foreground approval.", "uniswap_approval_drift");
+    }
     operation = await this.core.reserve(operation, input.assetPolicy, input.now);
     operation = await this.core.markSubmitting(operation, input.now);
     const binding = createUniswapExecutionBinding({ operation, envelope: input.envelope, freshness, admission, approvalHash: answer.approvalHash });
     let transactionHash: `0x${string}` | null = null;
     try { transactionHash = (await this.signer.sign(operation, binding, admission, input.now)).transactionHash; }
     catch { operation = await this.core.recordPossibleSend(operation, "unknown_finality", input.now); return { operation, binding, transactionHash }; }
-    const sent = await this.sender.sendOnce(operation, binding, input.now); transactionHash = sent.transactionHash;
-    operation = await this.core.recordPossibleSend(operation, sent.kind === "submitted" ? "submitted" : "unknown_finality", input.now);
+    let sent: Awaited<ReturnType<UniswapSingleSendPort["sendOnce"]>>;
+    try { sent = await this.sender.sendOnce(operation, binding, input.now); }
+    catch { operation = await this.core.recordPossibleSend(operation, "unknown_finality", input.now);
+      return await this.observeOnly(operation, binding, transactionHash, input.now); }
+    const exact = sent.transactionHash === transactionHash;
+    operation = await this.core.recordPossibleSend(operation, exact && sent.kind === "submitted" ? "submitted" : "unknown_finality", input.now);
     return await this.observeOnly(operation, binding, transactionHash, input.now);
   }
 
@@ -51,7 +60,10 @@ export class UniswapEthereumExecutionAdapter {
     readonly now: Date }): Promise<UniswapExecutionResult> {
     let operation = validateSwapOperation(input.operation);
     if (operation.submissionMarker === null) blocked("Uniswap resume is available only after the submission marker.", "uniswap_resume_before_marker");
-    if (operation.state === "finalized" || operation.state === "failed_before_effect") return { operation, binding: input.binding, transactionHash: operation.receiptProof?.transactionHash as `0x${string}` | null };
+    if (operation.state === "finalized" || operation.state === "failed_before_effect") {
+      const binding = input.binding === null ? null : validateUniswapExecutionBinding(input.binding, operation);
+      return { operation, binding, transactionHash: operation.receiptProof?.transactionHash as `0x${string}` | null };
+    }
     if (input.binding === null) {
       if (operation.state === "submitting") operation = await this.core.recordPossibleSend(operation, "unknown_finality", input.now);
       return { operation, binding: null, transactionHash: null };
