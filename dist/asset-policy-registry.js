@@ -18,7 +18,8 @@ export function sealAssetPolicyRegistry(value) {
 }
 export function validateAssetPolicyRegistry(value) {
     if (!isPlainRecord(value) || !exactKeys(value, [
-        "schemaVersion", "registryVersion", "publishedAt", "effectiveDate", "chains", "policyDigest",
+        "schemaVersion", "registryVersion", "publishedAt", "effectiveDate", ...(value.effectiveAt === undefined ? [] : ["effectiveAt"]),
+        ...(value.expiresAt === undefined ? [] : ["expiresAt"]), "chains", "policyDigest",
     ]))
         invalid("The asset policy registry schema is invalid.");
     const { policyDigest, ...body } = value;
@@ -36,6 +37,15 @@ export function evaluateAssetPolicy(registryValue, input) {
     const asOfDate = calendarDate(input.asOfDate, "Policy evaluation date");
     if (asOfDate < registry.effectiveDate)
         denied("The asset policy registry is not effective on the requested date.");
+    if (registry.effectiveAt !== undefined || registry.expiresAt !== undefined) {
+        if (input.asOf === undefined || !isIsoInstant(input.asOf) || input.asOf.slice(0, 10) !== asOfDate) {
+            invalid("Policy evaluation requires an exact instant matching the requested UTC date.");
+        }
+        if (registry.effectiveAt !== undefined && input.asOf < registry.effectiveAt)
+            denied("The asset policy registry is not yet effective.");
+        if (registry.expiresAt !== undefined && input.asOf >= registry.expiresAt)
+            denied("The asset policy registry has expired.");
+    }
     const rail = policyRail(input.rail);
     const chain = registry.chains.find((row) => row.chain === input.chain);
     if (chain === undefined)
@@ -72,7 +82,7 @@ export function evaluateAssetPolicy(registryValue, input) {
 }
 function validateEvaluationInput(value) {
     if (!isPlainRecord(value) || !exactKeys(value, [
-        "chain", "asset", "rail", "amountAtomic", "dailyUsageAtomic", "asOfDate",
+        "chain", "asset", "rail", "amountAtomic", "dailyUsageAtomic", "asOfDate", ...(value.asOf === undefined ? [] : ["asOf"]),
     ]) || typeof value.chain !== "string" || !isPlainRecord(value.asset) ||
         !exactKeys(value.asset, ["kind", "identifier"]) ||
         (value.asset.kind !== "native" && value.asset.kind !== "token") ||
@@ -81,13 +91,21 @@ function validateEvaluationInput(value) {
     }
 }
 function validateRegistryBody(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "registryVersion", "publishedAt", "effectiveDate", "chains"]) ||
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "registryVersion", "publishedAt", "effectiveDate",
+        ...(value.effectiveAt === undefined ? [] : ["effectiveAt"]), ...(value.expiresAt === undefined ? [] : ["expiresAt"]), "chains"]) ||
         value.schemaVersion !== ASSET_POLICY_REGISTRY_SCHEMA ||
         typeof value.registryVersion !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value.registryVersion) ||
         typeof value.publishedAt !== "string" || !isIsoInstant(value.publishedAt)) {
         invalid("The asset policy registry metadata is invalid.");
     }
-    calendarDate(value.effectiveDate, "Registry effective date");
+    const effectiveDate = calendarDate(value.effectiveDate, "Registry effective date");
+    if (value.effectiveAt !== undefined && (typeof value.effectiveAt !== "string" || !isIsoInstant(value.effectiveAt) ||
+        value.effectiveAt.slice(0, 10) !== effectiveDate))
+        invalid("Registry effective instant is invalid.");
+    if (value.expiresAt !== undefined && (typeof value.expiresAt !== "string" || !isIsoInstant(value.expiresAt) ||
+        (value.effectiveAt === undefined ? value.expiresAt.slice(0, 10) <= effectiveDate : value.expiresAt <= value.effectiveAt))) {
+        invalid("Registry expiry instant is invalid.");
+    }
     if (!Array.isArray(value.chains) || value.chains.length === 0 || value.chains.length > MAX_CHAINS) {
         invalid("The asset policy registry must contain a bounded, non-empty chain list.");
     }
@@ -108,21 +126,17 @@ function validateChain(value) {
         invalid("An asset policy chain row is invalid.");
     }
     const identities = new Set();
-    let nativeCount = 0;
     for (const asset of value.assets) {
         validateAsset(value.family, asset);
         const identity = asset.kind === "native" ? "native" : `token:${asset.identifier}`;
         if (identities.has(identity))
             invalid("An asset policy chain contains a duplicate asset identity.");
         identities.add(identity);
-        if (asset.kind === "native")
-            nativeCount += 1;
     }
-    if (nativeCount !== 1)
-        invalid("Each asset policy chain must contain exactly one native asset row.");
 }
 function validateAsset(family, value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", "caps"]) ||
+    if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", "caps",
+        ...(value.mechanismPins === undefined ? [] : ["mechanismPins"])]) ||
         (value.kind !== "native" && value.kind !== "token") ||
         typeof value.symbol !== "string" || !/^[A-Z0-9][A-Z0-9._-]{0,15}$/u.test(value.symbol) ||
         typeof value.decimals !== "number" || !Number.isSafeInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) {
@@ -137,6 +151,19 @@ function validateAsset(family, value) {
     }
     validateRails(value.rails);
     validateCaps(value.caps);
+    if (value.mechanismPins !== undefined)
+        validateMechanismPins(value.mechanismPins);
+}
+function validateMechanismPins(value) {
+    if (!isPlainRecord(value) || Object.keys(value).some((key) => !["gasless", "x402", "bridge"].includes(key))) {
+        invalid("Asset mechanism pins are invalid.");
+    }
+    for (const pin of Object.values(value)) {
+        if (!isPlainRecord(pin) || !exactKeys(pin, ["provider", "reference"]) || typeof pin.provider !== "string" ||
+            typeof pin.reference !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(pin.provider) ||
+            !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(pin.reference))
+            invalid("Asset mechanism pins are invalid.");
+    }
 }
 function validateRails(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["direct", "gasless", "x402", "bridge", "swap"]) ||

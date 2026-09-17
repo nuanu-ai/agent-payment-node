@@ -37,8 +37,10 @@ import { saFail } from "./smart-account-gasless/reasons.js";
 import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { facilitatorFail } from "./facilitator-gasless/failure.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
+import { executeAllowlistPolicyCommand } from "./allowlist-policy-overlay.js";
 export { ASSET_POLICY_REGISTRY_SCHEMA, assetPolicyDigest, evaluateAssetPolicy, sealAssetPolicyRegistry, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
 export { ALLOWLIST_DATASET_PATH, ALLOWLIST_DATASET_SCHEMA, ALLOWLIST_DATASET_SHA256, ALLOWLIST_DATASET_VERSION, ALLOWLIST_INVENTORY_SCHEMA, assertAllowlistExecutionConfigured, compileAllowlistInventory, loadAllowlistInventory, resolveAllowlistAsset, } from "./allowlist-inventory.js";
+export { ALLOWLIST_POLICY_OVERLAY_SCHEMA, ALLOWLIST_POLICY_RECORD_SCHEMA, AllowlistPolicyStore, compileAllowlistPolicyOverlay, executeAllowlistPolicyCommand, validateAllowlistPolicyRecord, } from "./allowlist-policy-overlay.js";
 export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, AssetUsageLedger, validateAssetUsageReservation, } from "./asset-usage-ledger.js";
 export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
 export { DIRECT_ASSET_USAGE_LEASE_SCHEMA, DirectAssetUsageAdapter, validateDirectAssetUsageLease, } from "./direct-asset-usage.js";
@@ -91,6 +93,8 @@ export class ApnCore {
                 dataset: loadAllowlistInventory().dataset,
                 asset: resolveAllowlistAsset(request),
             }, "exact_candidate_identity");
+            case "allowlist.policy.status": return dataOutcome(await executeAllowlistPolicyCommand(request, this.context.state.root, this.context.clock.now()), "staged_allowlist_policy_status");
+            case "allowlist.policy.prepare": return dataOutcome(await executeAllowlistPolicyCommand(request, this.context.state.root, this.context.clock.now()), "staged_unadmitted_allowlist_policy");
             case "circle.approval.prepare": {
                 await this.context.ready();
                 const owner = (await bridgeOwner(this.context.state, request.profile)).owner;

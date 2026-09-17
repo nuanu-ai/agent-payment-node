@@ -20,6 +20,8 @@ import { RECIPIENT, TestNative, TestRpc, exactReceipt, temporaryState } from "./
 const TOOL_NAMES = [
   "apn_allowlist_inventory",
   "apn_allowlist_resolve",
+  "apn_allowlist_policy_prepare",
+  "apn_allowlist_policy_status",
   "apn_version",
   "apn_doctor_keychain",
   "apn_wallet_ensure",
@@ -112,6 +114,8 @@ test("official MCP client proves production stdio descriptor, the exact tool set
     }), [
       { name: "apn_allowlist_inventory", properties: [], required: [], defaults: {} },
       { name: "apn_allowlist_resolve", properties: ["chain", "kind", "identifier"], required: ["chain", "kind"], defaults: {} },
+      { name: "apn_allowlist_policy_prepare", properties: ["profile", "account", "overlay_version", "chain", "kind", "identifier", "rail", "max_per_transfer_atomic", "daily_limit_atomic", "effective_at", "expires_at", "mechanism_provider", "mechanism_reference", "expected_revision"], required: ["profile", "account", "overlay_version", "chain", "kind", "rail", "max_per_transfer_atomic", "daily_limit_atomic", "effective_at"], defaults: {} },
+      { name: "apn_allowlist_policy_status", properties: ["profile"], required: ["profile"], defaults: {} },
       { name: "apn_version", properties: [], required: [], defaults: {} },
       { name: "apn_doctor_keychain", properties: [], required: [], defaults: {} },
       { name: "apn_wallet_ensure", properties: ["profile"], required: [], defaults: { profile: "default" } },
