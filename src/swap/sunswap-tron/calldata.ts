@@ -1,4 +1,5 @@
 import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeFunctionData, parseAbi, type Address, type Hex } from "viem";
+import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { tronAddress, tronHex } from "../../tron/codec.js";
 import { SUNSWAP_NATIVE_TRX, SUNSWAP_USDT, SUNSWAP_V4_UNIVERSAL_ROUTER, loadSunSwapPinCatalog } from "./catalog.js";
@@ -6,6 +7,7 @@ import { SUNSWAP_NATIVE_TRX, SUNSWAP_USDT, SUNSWAP_V4_UNIVERSAL_ROUTER, loadSunS
 const ABI = parseAbi(["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"]);
 const V2_EXACT_IN = [{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "address[]" }, { type: "bool" }] as const;
 const COMMAND = "0x08" as const;
+const MAX_UINT256 = (1n << 256n) - 1n;
 
 export interface SunSwapCalldataIntent {
   readonly owner: string; readonly recipient: string; readonly inputAmountAtomic: string;
@@ -38,17 +40,21 @@ export function decodeSunSwapCalldata(calldata: string, callValueAtomic: string,
         fromAbi(path[1]!) !== SUNSWAP_USDT || encodeSunSwapCalldata(intent).toLowerCase() !== calldata) blocked();
     return { ...intent, router: SUNSWAP_V4_UNIVERSAL_ROUTER, sourceAsset: SUNSWAP_NATIVE_TRX, destinationAsset: SUNSWAP_USDT,
       command: COMMAND, callValueAtomic: intent.inputAmountAtomic };
-  } catch (error) { if (error instanceof ApnError) throw error; return blocked(); }
+  } catch { return blocked(); }
 }
 
 function validateIntent(input: SunSwapCalldataIntent): SunSwapCalldataIntent {
   loadSunSwapPinCatalog();
+  if (!isPlainRecord(input) || !exactKeys(input, ["owner", "recipient", "inputAmountAtomic", "minimumOutputAtomic", "deadlineSeconds"])) invalid();
   if (tronAddress(input.owner) !== input.owner || tronAddress(input.recipient) !== input.recipient) invalid();
   const amount = atomic(input.inputAmountAtomic), minimum = atomic(input.minimumOutputAtomic), deadline = atomic(input.deadlineSeconds);
   if (amount === "0" || minimum === "0" || deadline === "0") invalid();
   return { owner: input.owner, recipient: input.recipient, inputAmountAtomic: amount, minimumOutputAtomic: minimum, deadlineSeconds: deadline };
 }
-function atomic(value: unknown): string { if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,77})$/u.test(value)) invalid(); return BigInt(value).toString(); }
+function atomic(value: unknown): string {
+  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,77})$/u.test(value) || BigInt(value) > MAX_UINT256) invalid();
+  return value;
+}
 function toAbi(address: string): Address { return `0x${tronHex(address).slice(2)}` as Address; }
 function fromAbi(address: Address): string { return tronAddress(`41${address.slice(2)}`); }
 function invalid(): never { throw new ApnError("APN_INVALID_INPUT", "SunSwap calldata intent is invalid."); }
