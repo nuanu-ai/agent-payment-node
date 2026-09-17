@@ -8,7 +8,12 @@ import { validateSwapQuote, type SwapQuoteSnapshot } from "./quote.js";
 export const SWAP_OPERATION_SCHEMA = "apn.swap-operation.v1" as const;
 export type SwapOperationState = "quoted" | "prepared" | "awaiting_approval" | "reserved" | "submitting" |
   "submitted" | "unknown_finality" | "finalized" | "failed_before_effect";
-export interface SwapSubmissionMarker { readonly markerHash: string; readonly markedAt: string; readonly unsignedTransactionPayloadHash: string }
+export interface SwapSubmissionMarker {
+  readonly markerHash: string;
+  readonly markedAt: string;
+  readonly operationIntegrityHash: string;
+  readonly unsignedTransactionPayloadHash: string;
+}
 export interface SwapReceiptProof { readonly receiptHash: string; readonly transactionHash: string; readonly observedAt: string; readonly finalized: boolean }
 export interface SwapOperationRecord {
   readonly schemaVersion: typeof SWAP_OPERATION_SCHEMA;
@@ -22,6 +27,8 @@ export interface SwapOperationRecord {
   readonly quote: SwapQuoteSnapshot;
   readonly policyDigest: string;
   readonly policyVersion: string;
+  readonly protocolRegistryDigest: string;
+  readonly protocolRegistryVersion: string;
   readonly mechanismDigest: string;
   readonly usageLease: AssetUsageReservation | null;
   readonly approvalCapAtomic: string;
@@ -43,7 +50,8 @@ export function newSwapOperation(input: NewSwapOperation): SwapOperationRecord {
   const body = { schemaVersion: SWAP_OPERATION_SCHEMA, operationId: hash(input.operationId, "input"),
     idempotencyHash: hash(input.idempotencyHash, "input"), ownerProfileHash: quote.profileHash, state: "quoted" as const,
     revision: 1, createdAt: at, updatedAt: at, quote, policyDigest: hash(input.policyDigest, "input"),
-    policyVersion: version(input.policyVersion, "input"), mechanismDigest: hash(input.mechanismDigest, "input"),
+    policyVersion: version(input.policyVersion, "input"), protocolRegistryDigest: hash(input.protocolRegistryDigest, "input"),
+    protocolRegistryVersion: version(input.protocolRegistryVersion, "input"), mechanismDigest: hash(input.mechanismDigest, "input"),
     usageLease: null, approvalCapAtomic: approval(input.approvalCapAtomic, quote.inputAmountAtomic, "input"),
     submissionMarker: null, receiptProof: null, failureProofHash: null, previousIntegrityHash: null };
   return validateSwapOperation({ ...body, integrityHash: digest(body) });
@@ -51,13 +59,15 @@ export function newSwapOperation(input: NewSwapOperation): SwapOperationRecord {
 
 export function validateSwapOperation(value: unknown): SwapOperationRecord {
   if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "idempotencyHash", "ownerProfileHash", "state",
-    "revision", "createdAt", "updatedAt", "quote", "policyDigest", "policyVersion", "mechanismDigest", "usageLease",
+    "revision", "createdAt", "updatedAt", "quote", "policyDigest", "policyVersion", "protocolRegistryDigest",
+    "protocolRegistryVersion", "mechanismDigest", "usageLease",
     "approvalCapAtomic", "submissionMarker", "receiptProof", "failureProofHash", "previousIntegrityHash", "integrityHash"]) ||
       value.schemaVersion !== SWAP_OPERATION_SCHEMA || !STATES.includes(value.state as SwapOperationState) ||
       typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 1) corrupt("Swap operation schema is invalid.");
   const quote = validateSwapQuote(value.quote);
   hash(value.operationId, "stored"); hash(value.idempotencyHash, "stored"); hash(value.ownerProfileHash, "stored");
-  hash(value.policyDigest, "stored"); hash(value.mechanismDigest, "stored"); version(value.policyVersion, "stored");
+  hash(value.policyDigest, "stored"); hash(value.protocolRegistryDigest, "stored"); hash(value.mechanismDigest, "stored");
+  version(value.policyVersion, "stored"); version(value.protocolRegistryVersion, "stored");
   const createdAt = date(value.createdAt, "stored"), updatedAt = date(value.updatedAt, "stored");
   if (updatedAt < createdAt || value.ownerProfileHash !== quote.profileHash) corrupt("Swap operation owner binding is invalid.");
   approval(value.approvalCapAtomic, quote.inputAmountAtomic, "stored");
@@ -81,22 +91,46 @@ function validateStateBindings(op: SwapOperationRecord): void {
   const exposed = ["submitting", "submitted", "unknown_finality", "finalized"].includes(op.state);
   if (exposed !== (op.submissionMarker !== null)) corrupt("Swap submission marker phase is invalid.");
   if (op.submissionMarker !== null) {
-    if (!isPlainRecord(op.submissionMarker) || !exactKeys(op.submissionMarker, ["markerHash", "markedAt", "unsignedTransactionPayloadHash"]) ||
+    if (!isPlainRecord(op.submissionMarker) || !exactKeys(op.submissionMarker, ["markerHash", "markedAt", "operationIntegrityHash", "unsignedTransactionPayloadHash"]) ||
         hash(op.submissionMarker.markerHash, "stored") !== op.submissionMarker.markerHash || date(op.submissionMarker.markedAt, "stored") === "" ||
+        hash(op.submissionMarker.operationIntegrityHash, "stored") !== op.submissionMarker.operationIntegrityHash ||
+        op.submissionMarker.markedAt < op.createdAt || op.submissionMarker.markedAt > op.updatedAt ||
         op.submissionMarker.unsignedTransactionPayloadHash !== op.quote.unsignedTransactionPayloadHash) corrupt("Swap submission marker is invalid.");
+    const markerBody = { operationId: op.operationId, operationIntegrityHash: op.submissionMarker.operationIntegrityHash,
+      unsignedTransactionPayloadHash: op.submissionMarker.unsignedTransactionPayloadHash, markedAt: op.submissionMarker.markedAt };
+    if (op.submissionMarker.markerHash !== domainHash("apn.swap-submission-marker.v1", canonicalJson(markerBody))) {
+      corrupt("Swap submission marker integrity validation failed.");
+    }
   }
-  if (op.receiptProof !== null) receipt(op.receiptProof);
+  const expectedLeaseState = op.state === "reserved" || op.state === "submitting" ? "reserved" : op.state;
+  if (op.usageLease !== null && reserved && op.usageLease.state !== expectedLeaseState) {
+    corrupt("Swap usage lease state is inconsistent with the operation phase.");
+  }
+  if (op.receiptProof !== null) {
+    if (op.submissionMarker === null) corrupt("Swap receipt proof phase is invalid.");
+    validateSwapReceiptProof(op.receiptProof, op.quote.sourceAsset.chain, op.submissionMarker.markedAt, op.updatedAt, "stored");
+  }
+  if (op.receiptProof !== null && !["submitted", "unknown_finality", "finalized"].includes(op.state)) corrupt("Swap receipt proof phase is invalid.");
   if (op.state === "finalized" && (op.receiptProof === null || !op.receiptProof.finalized)) corrupt("Finalized swap lacks final receipt proof.");
   if (op.failureProofHash !== null) hash(op.failureProofHash, "stored");
   if ((op.state === "failed_before_effect") !== (op.failureProofHash !== null)) corrupt("Swap failure proof phase is invalid.");
   if (op.state === "failed_before_effect" && (op.submissionMarker !== null ||
       (op.usageLease !== null && op.usageLease.state !== "failed_before_effect"))) corrupt("Pre-effect failure lease is not released.");
 }
-function receipt(value: unknown): void {
+export function validateSwapReceiptProof(value: unknown, chain: string, earliestAt: string, latestAt: string,
+  mode: "input" | "stored" = "input"): SwapReceiptProof {
+  const fail = (message: string): never => failure(mode, message);
   if (!isPlainRecord(value) || !exactKeys(value, ["receiptHash", "transactionHash", "observedAt", "finalized"]) ||
       typeof value.finalized !== "boolean" || typeof value.transactionHash !== "string" || value.transactionHash.length < 8 ||
-      value.transactionHash.length > 256) corrupt("Swap receipt proof is invalid.");
-  hash(value.receiptHash, "stored"); date(value.observedAt, "stored");
+      value.transactionHash.length > 256) fail("Swap receipt proof is invalid.");
+  const record = value as Record<string, unknown>;
+  hash(record.receiptHash, mode); const observedAt = date(record.observedAt, mode);
+  if (observedAt < earliestAt || observedAt > latestAt) fail("Swap receipt proof time binding is invalid.");
+  const transactionHash = record.transactionHash as string;
+  if (/^eip155:/u.test(chain) && !/^0x[a-fA-F0-9]{64}$/u.test(transactionHash)) fail("Swap EVM transaction hash is invalid.");
+  if (/^tron:/u.test(chain) && !/^[a-fA-F0-9]{64}$/u.test(transactionHash)) fail("Swap TRON transaction hash is invalid.");
+  if (/^solana:/u.test(chain) && !/^[1-9A-HJ-NP-Za-km-z]{64,128}$/u.test(transactionHash)) fail("Swap Solana transaction signature is invalid.");
+  return value as unknown as SwapReceiptProof;
 }
 function approval(value: unknown, input: string, mode: "input" | "stored"): string {
   try { if (typeof value !== "string") throw new Error(); const amount = parseAtomic(value); const maximum = BigInt(input);
