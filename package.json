@@ -20,6 +20,7 @@
     "bin/apn.js",
     "dist/**",
     "data/allowlist/2026-09-17/dataset.json",
+    "data/swap/uniswap-ethereum-2026-09-17.json",
     "native/BUILD.md",
     "npm-shrinkwrap.json",
     "README.md",
@@ -28,7 +29,8 @@
     "docs/tron.md",
     "docs/lifi.md",
     "docs/gasless.md",
-    "docs/evm-assets.md"
+    "docs/evm-assets.md",
+    "docs/uniswap.md"
   ],
   "scripts": {
     "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",

@@ -18,7 +18,9 @@ import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js"
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
+import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 export interface CoreDependencies {
+    readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -54,6 +56,7 @@ export interface CoreDependencies {
     readonly operationAbandonApproval?: OperationAbandonApprovalPort;
 }
 export declare class RuntimeContext {
+    readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;

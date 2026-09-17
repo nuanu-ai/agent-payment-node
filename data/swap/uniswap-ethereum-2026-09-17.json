@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "apn.uniswap-official-pin-catalog.v1",
+  "catalogVersion": "uniswap-ethereum-native-usdc.2026-09-17",
+  "mechanismPin": {
+    "schemaVersion": "apn.swap-mechanism-pin.v1",
+    "protocolFamily": "uniswap_ethereum",
+    "networkFamily": "evm",
+    "chain": "eip155:1",
+    "protocolVersion": "2.2.0",
+    "constructorKind": "builder_api",
+    "constructorIdentity": "https://trade-api.gateway.uniswap.org/v1",
+    "constructorVersion": "1.0.0",
+    "routerProgramIdentity": "0x0542093271A31f6FC1DADB232bd59eeb27de780F",
+    "auxiliaryContractProgramIdentities": [
+      "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+    ],
+    "quoteSchemaVersion": "uniswap-trading-quote.1",
+    "transactionSchemaVersion": "uniswap-trading-swap.1",
+    "validationPolicyIdentity": "apn.uniswap.ethereum-native-usdc",
+    "validationPolicyVersion": "1.0.0"
+  },
+  "api": {
+    "baseUrl": "https://trade-api.gateway.uniswap.org/v1",
+    "paths": [
+      "/check_approval",
+      "/quote",
+      "/swap"
+    ],
+    "universalRouterVersionHeader": "2.2.0"
+  },
+  "pair": {
+    "chainId": 1,
+    "chain": "eip155:1",
+    "type": "EXACT_INPUT",
+    "nativeInput": "0x0000000000000000000000000000000000000000",
+    "outputToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "permitAmount": "EXACT",
+    "tokenApprovalApplicable": false
+  },
+  "sdkReleases": {
+    "@uniswap/universal-router-sdk": {
+      "version": "5.11.1",
+      "gitHead": "57f126ee4ae5d435938569ad22c489e4a0262ca2",
+      "integrity": "sha512-QvwVkV8uD7orMp0Hc/HuvOqoeCAPLJqb4MVjBHybG5IhRU5Ztj/zfrYO6QGH18sYVP30K1SaGVhyHQinAymExA=="
+    },
+    "@uniswap/router-sdk": {
+      "version": "2.11.1",
+      "gitHead": "57f126ee4ae5d435938569ad22c489e4a0262ca2",
+      "integrity": "sha512-hzBPnrrD08D75KjQ1ixzFzGmEN8FEtdSWqio5Hp3vSgVFwWAG/RGagVxUf4bw3syjxe2wPVdiXpIrv0XMA/2tQ=="
+    },
+    "@uniswap/v3-sdk": {
+      "version": "3.31.1",
+      "gitHead": "57f126ee4ae5d435938569ad22c489e4a0262ca2",
+      "integrity": "sha512-LbLAOxufQF3QgHskUre4ALN+6sTPF5X/YnCw1Az6RXSoIR0jC27n6U6/C9HwM/St62stjpXqLrpetmzCiERKfg=="
+    },
+    "@uniswap/sdk-core": {
+      "version": "7.19.0",
+      "gitHead": "57f126ee4ae5d435938569ad22c489e4a0262ca2",
+      "integrity": "sha512-h+WsmaPYyoi7S4Q/SzqdG1tEnVx79KhgXXN3d51SUyvTS03CSHPj9+yymlgrx2hrUQvue9S4lW752w1fzXPn3w=="
+    }
+  },
+  "officialSources": [
+    {
+      "url": "https://developers.uniswap.org/docs/api-reference/check_approval",
+      "commit": null,
+      "sha256": "765ac7b6995f0230cf09d5290fedaee4fdb33380fffab78292c7070c231c05ef"
+    },
+    {
+      "url": "https://developers.uniswap.org/docs/api-reference/aggregator_quote",
+      "commit": null,
+      "sha256": "259cd3b812ab3eed3d65d49970b503f0e7d82f4d43231931062386bde1c6b172"
+    },
+    {
+      "url": "https://developers.uniswap.org/docs/api-reference/create_swap_transaction",
+      "commit": null,
+      "sha256": "7f3b7df39857a464afc03ac1efe8344e065d32a097af267955997571754e6db7"
+    },
+    {
+      "url": "https://github.com/Uniswap/universal-router/blob/2.2.0/contracts/libraries/Commands.sol",
+      "commit": "020e1b786ad9a6bad924874752167934734ad1e1",
+      "sha256": "688122afcc28bd7b03c489de8e26212277ad923f0e87016541129862c5ead0b3"
+    },
+    {
+      "url": "https://github.com/Uniswap/universal-router/blob/2.2.0/contracts/UniversalRouter.sol",
+      "commit": "020e1b786ad9a6bad924874752167934734ad1e1",
+      "sha256": "68b206fe26d0323103202562ff29087b84e4cf1acc3650e254fa4ecefd749251"
+    },
+    {
+      "url": "https://github.com/Uniswap/sdks/blob/ce522044434cfa8b70921b0848c8bb67cbfbac96/sdks/universal-router-sdk/src/utils/constants.ts",
+      "commit": "ce522044434cfa8b70921b0848c8bb67cbfbac96",
+      "sha256": "8fe3fab44bd1e8fa49780811de40b2c87a16f4d6636b4e3faf5fec2bafd2bd3a"
+    }
+  ],
+  "catalogDigest": "89a5ed81c7aa818190b76652799c6fa57cfa5ce05c95b7484fd1c0325ddb42ab"
+}

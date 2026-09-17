@@ -27,8 +27,10 @@ import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js"
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
+import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 
 export interface CoreDependencies {
+  readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -65,6 +67,7 @@ export interface CoreDependencies {
 }
 
 export class RuntimeContext {
+  readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -102,6 +105,7 @@ export class RuntimeContext {
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
+    if (dependencies.uniswap !== undefined) this.uniswap = dependencies.uniswap;
     if (dependencies.facilitatorGasless !== undefined) this.facilitatorGasless = dependencies.facilitatorGasless;
     if (dependencies.smartAccountGasless !== undefined) this.smartAccountGasless = dependencies.smartAccountGasless;
     if (dependencies.metaMaskGasless !== undefined) this.metaMaskGasless = dependencies.metaMaskGasless;

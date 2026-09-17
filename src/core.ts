@@ -39,7 +39,7 @@ import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { facilitatorFail } from "./facilitator-gasless/failure.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
 import { executeAllowlistPolicyCommand } from "./allowlist-policy-overlay.js";
-
+import { executeUniswapCommand } from "./swap/uniswap-command-service.js";
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
 export {
@@ -154,7 +154,6 @@ export class ApnCore {
   readonly smartAccountGasless: SmartAccountGaslessService;
   readonly facilitatorGasless: FacilitatorGaslessService;
   readonly operationAbandon: OperationAbandonService;
-
   constructor(dependencies: CoreDependencies) {
     this.context = new RuntimeContext(dependencies);
     this.wallet = new WalletService(this.context);
@@ -175,7 +174,6 @@ export class ApnCore {
     this.operationAbandon = new OperationAbandonService(this.context, this.rails, this.gasless, this.metaMaskGasless,
       this.facilitatorGasless);
   }
-
   async execute(request: CommandRequest): Promise<OutputEnvelope> {
     const requestId = this.context.ids.next();
     try {
@@ -184,9 +182,10 @@ export class ApnCore {
       return failureEnvelope(request.command, requestId, error);
     }
   }
-
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
+      case "swap.uniswap.inventory": case "swap.uniswap.quote": case "swap.uniswap.prepare": case "swap.uniswap.status":
+      case "swap.uniswap.approve": case "swap.uniswap.execute": return await executeUniswapCommand(request, this.context);
       case "allowlist.inventory": return dataOutcome(loadAllowlistInventory(), "frozen_candidate_inventory");
       case "allowlist.resolve": return dataOutcome({
         dataset: loadAllowlistInventory().dataset,
