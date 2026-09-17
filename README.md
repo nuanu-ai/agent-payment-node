@@ -567,6 +567,8 @@ apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <addres
 apn gasless transfer approve --operation <operation-id>
 apn allowlist inventory
 apn allowlist resolve --chain <exact-network-identity> --kind <native|token> [--identifier <exact-token-identifier>]
+apn allowlist policy prepare --profile <profile> --account <canonical-account> --overlay-version <version> --chain <network> --kind <native|token> [--identifier <token>] --rail <rail> --max-per-transfer-atomic <atomic> --daily-limit-atomic <atomic> --effective-at <ISO-instant> [--expires-at <ISO-instant>] [--mechanism-provider <provider> --mechanism-reference <reference>] [--expected-revision <revision>]
+apn allowlist policy status --profile <profile>
 ```
 <!-- END APN COMMAND CATALOG -->
 

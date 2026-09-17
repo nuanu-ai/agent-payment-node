@@ -4,6 +4,8 @@ import { ApnError } from "./errors.js";
 const SELECTED_PATHS = [
     "allowlist inventory",
     "allowlist resolve",
+    "allowlist policy prepare",
+    "allowlist policy status",
     "--version",
     "doctor keychain",
     "wallet ensure",
