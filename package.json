@@ -21,6 +21,7 @@
     "dist/**",
     "data/allowlist/2026-09-17/dataset.json",
     "data/swap/uniswap-ethereum-2026-09-17.json",
+    "data/swap/jupiter-solana-abi-blocker-2026-09-17.json",
     "native/BUILD.md",
     "npm-shrinkwrap.json",
     "README.md",
