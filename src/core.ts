@@ -111,6 +111,15 @@ export type {
   PortfolioCachePolicy,
   PortfolioNetworkBalance,
 } from "./asset-portfolio-reader.js";
+export {
+  DIRECT_ASSET_USAGE_LEASE_SCHEMA,
+  DirectAssetUsageAdapter,
+  validateDirectAssetUsageLease,
+} from "./direct-asset-usage.js";
+export type {
+  DirectAssetUsageInput,
+  DirectAssetUsageLease,
+} from "./direct-asset-usage.js";
 
 export class ApnCore {
   readonly context: RuntimeContext;
