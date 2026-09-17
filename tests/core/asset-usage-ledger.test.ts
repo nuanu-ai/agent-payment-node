@@ -15,6 +15,11 @@ const identity: AssetUsageIdentity = {
 };
 const nativeCaps = { maximumPerTransferAtomic: "1000000000000000000", dailyLimitAtomic: "3000000000000000000" };
 const allRails = { direct: true, gasless: true, x402: true, bridge: true, swap: true } as const;
+const swapMechanism = { schemaVersion: "apn.swap-mechanism-pin.v1" as const, protocolFamily: "uniswap_ethereum" as const,
+  networkFamily: "evm" as const, chain: "eip155:1", protocolVersion: "2.2.0", constructorKind: "sdk" as const,
+  constructorIdentity: "test.sdk", constructorVersion: "1.0.0", routerProgramIdentity: "0x1111111111111111111111111111111111111111",
+  auxiliaryContractProgramIdentities: ["0x2222222222222222222222222222222222222222"], quoteSchemaVersion: "1.0.0", transactionSchemaVersion: "1.0.0",
+  validationPolicyIdentity: "test.validation", validationPolicyVersion: "1.0.0" };
 
 function registry(version = "2026-09-17.ledger.1", dailyLimitAtomic = "100"): ReturnType<typeof sealAssetPolicyRegistry> {
   const value: UnsignedAssetPolicyRegistry = {
@@ -24,9 +29,10 @@ function registry(version = "2026-09-17.ledger.1", dailyLimitAtomic = "100"): Re
     effectiveDate: "2026-09-17",
     chains: [{
       chain: "eip155:1", family: "evm", name: "Ethereum", assets: [
-        { kind: "native", identifier: null, symbol: "ETH", decimals: 18, rails: allRails, caps: nativeCaps },
+        { kind: "native", identifier: null, symbol: "ETH", decimals: 18, rails: allRails, caps: nativeCaps,
+          mechanismPins: { swap: swapMechanism } },
         { kind: "token", identifier: EVM_USDC, symbol: "USDC", decimals: 6, rails: allRails,
-          caps: { maximumPerTransferAtomic: dailyLimitAtomic, dailyLimitAtomic } },
+          caps: { maximumPerTransferAtomic: dailyLimitAtomic, dailyLimitAtomic }, mechanismPins: { swap: swapMechanism } },
       ],
     }],
   };
@@ -85,6 +91,8 @@ test("an exposed reservation cannot claim pre-effect failure and remains charged
   const held = await reserve(ledger, "submitted-no-release", "100", "gasless");
   await ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
     state: "submitted", now: new Date("2026-09-17T10:01:00.000Z") });
+  await ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "unknown_finality", now: new Date("2026-09-17T10:01:30.000Z") });
   await assert.rejects(ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
     state: "failed_before_effect", now: new Date("2026-09-17T10:02:00.000Z"), outcomeDigest: "e".repeat(64) }),
   { code: "APN_OPERATION_BLOCKED" });
