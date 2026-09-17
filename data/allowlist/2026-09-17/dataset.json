@@ -1,0 +1,1034 @@
+{
+  "schemaVersion": "apn.asset-policy-candidate-dataset.v1",
+  "datasetVersion": "2026-09-17.market-cap-top-10.1",
+  "retrievedAt": "2026-09-17T04:26:15.333Z",
+  "selection": {
+    "source": "CoinGecko /coins/markets",
+    "requestUrl": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&sparkline=false&price_change_percentage=24h&locale=en&precision=full",
+    "responsePath": "raw/coingecko/coins-markets.json",
+    "responseSha256": "c090dd1ef8d192dca5a059a3e787a8f592ec1dd664c2a77c3504329834caf2e1",
+    "ranking": "global circulating market capitalization descending",
+    "candidateCount": 10,
+    "includeRehypothecated": false,
+    "platformMetadataRequestUrl": "https://api.coingecko.com/api/v3/coins/list?include_platform=true",
+    "platformMetadataResponsePath": "raw/coingecko/coins-list.json",
+    "platformMetadataResponseSha256": "161624a1dd3b3ea24f4563f4b5faf9c48db7a7b5b5406ca500750713af7d9cd6",
+    "platformMetadataExtractPath": "raw/coingecko/top10-platforms.json",
+    "candidateSemantics": "The ranked candidate set is exactly the frozen CoinGecko top 10; no native additions alter or extend those ten ranks.",
+    "chainProjectionSemantics": "Each named target network has one native gas-asset row. top_10 means that native asset is one of the ranked ten; native_additional is required network inventory only and is not an added market-ranked candidate."
+  },
+  "assetPolicyRegistryCompatibility": {
+    "targetSchemaVersion": "apn.asset-policy-registry.v1",
+    "referenceCommit": "b3c1ece87e3fba65bb9a55b9f92b14d74cbd2354",
+    "status": "blocked_owner_caps_missing",
+    "explanation": "Rows preserve exact chain, family, kind, identifier, symbol, decimals, and rail field names. Every rail is false. Caps are null because owner caps were not supplied; this dataset must not be sealed or published as an asset policy registry."
+  },
+  "rankedCandidates": [
+    {
+      "rank": 1,
+      "coinGeckoId": "bitcoin",
+      "symbol": "BTC",
+      "name": "Bitcoin",
+      "marketCapUsd": 1529573921090,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {}
+      },
+      "disposition": "refused_no_target_native_or_verified_issuer_deployment",
+      "nativeChains": [],
+      "verifiedDeployments": []
+    },
+    {
+      "rank": 2,
+      "coinGeckoId": "ethereum",
+      "symbol": "ETH",
+      "name": "Ethereum",
+      "marketCapUsd": 295974252742,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {}
+      },
+      "disposition": "eligible_identity_only_rails_disabled",
+      "nativeChains": [
+        "eip155:1",
+        "eip155:8453",
+        "eip155:42161",
+        "eip155:10",
+        "eip155:130",
+        "eip155:59144"
+      ],
+      "verifiedDeployments": []
+    },
+    {
+      "rank": 3,
+      "coinGeckoId": "tether",
+      "symbol": "USDT",
+      "name": "Tether",
+      "marketCapUsd": 183299477025,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {
+          "ethereum": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+          "klay-token": "0xd077a400968890eacc75cdc901f0356c943e4fdb",
+          "tezos": "KT1XnTn74bUtxHfDtBmm2bGZAQfhPbvKWR8o",
+          "tron": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+          "solana": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+          "near-protocol": "usdt.tether-token.near",
+          "kava": "0x919c1c267bc06a7039e03fcc2ef738525769109c",
+          "celo": "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e",
+          "the-open-network": "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
+          "aptos": "0x357b0b74bc833e95a115ad22604854d6b0fca151cecd94111770e5d6ffc9dc2b",
+          "avalanche": "0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7"
+        }
+      },
+      "disposition": "eligible_identity_only_rails_disabled",
+      "nativeChains": [],
+      "verifiedDeployments": [
+        {
+          "chain": "eip155:1",
+          "identifier": "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+        },
+        {
+          "chain": "eip155:43114",
+          "identifier": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7"
+        },
+        {
+          "chain": "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc",
+          "identifier": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+        },
+        {
+          "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+          "identifier": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+        }
+      ]
+    },
+    {
+      "rank": 4,
+      "coinGeckoId": "binancecoin",
+      "symbol": "BNB",
+      "name": "BNB",
+      "marketCapUsd": 96241349986,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {
+          "ethereum": "0xb8c77482e45f1f44de1745f52c74426c631bdd52"
+        }
+      },
+      "disposition": "eligible_identity_only_rails_disabled",
+      "nativeChains": [
+        "eip155:56"
+      ],
+      "verifiedDeployments": []
+    },
+    {
+      "rank": 5,
+      "coinGeckoId": "ripple",
+      "symbol": "XRP",
+      "name": "XRP",
+      "marketCapUsd": 81386919553,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {}
+      },
+      "disposition": "refused_no_target_native_or_verified_issuer_deployment",
+      "nativeChains": [],
+      "verifiedDeployments": []
+    },
+    {
+      "rank": 6,
+      "coinGeckoId": "usd-coin",
+      "symbol": "USDC",
+      "name": "USDC",
+      "marketCapUsd": 73677989441,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {
+          "ethereum": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "monad": "0x754704bc059f8c67012fed69bc8a327a5aafb603",
+          "polkadot": "1337",
+          "sui": "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
+          "xrp": "5553444300000000000000000000000000000000.rGm7WCVp9gb4jZHWTEtGUr4dd74z2XuWhE",
+          "sonic": "0x29219dd400f2bf60e5a23d13be72b486d4038894",
+          "arc": "0x3600000000000000000000000000000000000000",
+          "hedera-hashgraph": "0.0.456858",
+          "ink": "0x2d270e6886d130d724215a266106e6832161eaed",
+          "unichain": "0x078d782b760474a361dda0af3839290b0ef57ad6",
+          "xdc-network": "0xfa2958cb79b0491cc627c1557f441ef849ca8eb1",
+          "plume-network": "0x222365ef19f7947e5484218551b56bb3965aa7af",
+          "hyperevm": "0xb88339cb7199b77e23db6e890353e22632ba630f",
+          "sei-v2": "0xe15fc38f6d8c56af07bbcbe3baf5708a2bf42392",
+          "near-protocol": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+          "base": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "algorand": "31566704",
+          "tron": "TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8",
+          "pharos": "0xc879c018db60520f4355c26ed1a6d572cdac1815",
+          "celo": "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
+          "cronos": "0x3d7f2c478aafdb65542bcb44bceec05849999d2d",
+          "world-chain": "0x79a02482a880bce3f13e09da970dc34db4cd24d1",
+          "polygon-pos": "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+          "arbitrum-one": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+          "solana": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "starknet": "0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb",
+          "optimistic-ethereum": "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+          "aptos": "0xbae207659db88bea0cbead6da0ed00aac12edcdda169e591cd41c94180b46f3b",
+          "avalanche": "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+          "injective": "0xa00c59ff5a080d2b954d0c75e46e22a0c371235a",
+          "stellar": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+          "morph-l2": "0xcfb1186f4e93d60e60a8bdd997427d1f33bc372b",
+          "x-layer": "0xb6ceceab302e2e4948951ee7843fc24e92933061",
+          "hyperliquid": "0x6d1e7cde53ba9467b783cb7c530ce054",
+          "plasma": "0x2d661c89d812261039af9764eceaaee884f5f67f",
+          "zksync": "0x1d17cbcf0d6d143135ae902365d2e5e2a16538d4"
+        }
+      },
+      "disposition": "eligible_identity_only_rails_disabled",
+      "nativeChains": [],
+      "verifiedDeployments": [
+        {
+          "chain": "eip155:1",
+          "identifier": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        },
+        {
+          "chain": "eip155:8453",
+          "identifier": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+        },
+        {
+          "chain": "eip155:42161",
+          "identifier": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+        },
+        {
+          "chain": "eip155:10",
+          "identifier": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+        },
+        {
+          "chain": "eip155:137",
+          "identifier": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+        },
+        {
+          "chain": "eip155:43114",
+          "identifier": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"
+        },
+        {
+          "chain": "eip155:130",
+          "identifier": "0x078D782b760474a361dDA0AF3839290b0EF57AD6"
+        },
+        {
+          "chain": "eip155:59144",
+          "identifier": "0x176211869cA2b568f2A7D4EE941E073a821EE1ff"
+        },
+        {
+          "chain": "eip155:143",
+          "identifier": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603"
+        },
+        {
+          "chain": "eip155:1329",
+          "identifier": "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392"
+        },
+        {
+          "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+          "identifier": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        }
+      ]
+    },
+    {
+      "rank": 7,
+      "coinGeckoId": "solana",
+      "symbol": "SOL",
+      "name": "Solana",
+      "marketCapUsd": 58254798848,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {}
+      },
+      "disposition": "eligible_identity_only_rails_disabled",
+      "nativeChains": [
+        "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d"
+      ],
+      "verifiedDeployments": []
+    },
+    {
+      "rank": 8,
+      "coinGeckoId": "tron",
+      "symbol": "TRX",
+      "name": "TRON",
+      "marketCapUsd": 31863072941,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {}
+      },
+      "disposition": "eligible_identity_only_rails_disabled",
+      "nativeChains": [
+        "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc"
+      ],
+      "verifiedDeployments": []
+    },
+    {
+      "rank": 9,
+      "coinGeckoId": "figure-heloc",
+      "symbol": "FIGR_HELOC",
+      "name": "Figure Heloc",
+      "marketCapUsd": 23267095686,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {
+          "provenance": "scope1qrm5d0wjzamyywvjuws6774ljmrqu8kh9x"
+        }
+      },
+      "disposition": "refused_no_target_native_or_verified_issuer_deployment",
+      "nativeChains": [],
+      "verifiedDeployments": []
+    },
+    {
+      "rank": 10,
+      "coinGeckoId": "zcash",
+      "symbol": "ZEC",
+      "name": "Zcash",
+      "marketCapUsd": 22911361149,
+      "lastUpdated": "2026-09-17T04:24:10.000Z",
+      "platformMetadata": {
+        "status": "frozen",
+        "sourcePath": "raw/coingecko/coins-list.json",
+        "extractPath": "raw/coingecko/top10-platforms.json",
+        "platforms": {}
+      },
+      "disposition": "refused_no_target_native_or_verified_issuer_deployment",
+      "nativeChains": [],
+      "verifiedDeployments": []
+    }
+  ],
+  "chains": [
+    {
+      "chain": "eip155:1",
+      "family": "evm",
+      "name": "Ethereum",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "ETH",
+        "decimals": 18,
+        "selectionClass": "top_10",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://ethereum.org/en/developers/docs/networks/",
+          "chainIdentityResponse": "raw/rpc/ethereum-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/ethereum-usdc-request.json",
+            "decimalsResponse": "raw/token-state/ethereum-usdc-response.json"
+          }
+        },
+        {
+          "kind": "token",
+          "identifier": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+          "symbol": "USDT",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://tether.to/en/supported-protocols/",
+            "decimalsRequest": "raw/token-state/ethereum-usdt-request.json",
+            "decimalsResponse": "raw/token-state/ethereum-usdt-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "eip155:8453",
+      "family": "evm",
+      "name": "Base",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "ETH",
+        "decimals": 18,
+        "selectionClass": "top_10",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://docs.base.org/base-chain/api-reference/rpc-overview",
+          "chainIdentityResponse": "raw/rpc/base-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/base-usdc-request.json",
+            "decimalsResponse": "raw/token-state/base-usdc-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "eip155:42161",
+      "family": "evm",
+      "name": "Arbitrum One",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "ETH",
+        "decimals": 18,
+        "selectionClass": "top_10",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://docs.arbitrum.io/build-decentralized-apps/reference/node-providers",
+          "chainIdentityResponse": "raw/rpc/arbitrum-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/arbitrum-usdc-request.json",
+            "decimalsResponse": "raw/token-state/arbitrum-usdc-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "eip155:10",
+      "family": "evm",
+      "name": "OP Mainnet",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "ETH",
+        "decimals": 18,
+        "selectionClass": "top_10",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://docs.optimism.io/operators/chain-operators/configuration/base-config",
+          "chainIdentityResponse": "raw/rpc/optimism-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/optimism-usdc-request.json",
+            "decimalsResponse": "raw/token-state/optimism-usdc-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "eip155:137",
+      "family": "evm",
+      "name": "Polygon PoS",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "POL",
+        "decimals": 18,
+        "selectionClass": "native_additional",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://docs.polygon.technology/pos/reference/rpc-endpoints/",
+          "chainIdentityResponse": "raw/rpc/polygon-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/polygon-usdc-request.json",
+            "decimalsResponse": "raw/token-state/polygon-usdc-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "eip155:56",
+      "family": "evm",
+      "name": "BNB Smart Chain",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "BNB",
+        "decimals": 18,
+        "selectionClass": "top_10",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://docs.bnbchain.org/bnb-smart-chain/developers/network-config/",
+          "chainIdentityResponse": "raw/rpc/bnb-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": []
+    },
+    {
+      "chain": "eip155:43114",
+      "family": "evm",
+      "name": "Avalanche C-Chain",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "AVAX",
+        "decimals": 18,
+        "selectionClass": "native_additional",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://build.avax.network/docs/tooling/rpcs",
+          "chainIdentityResponse": "raw/rpc/avalanche-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/avalanche-usdc-request.json",
+            "decimalsResponse": "raw/token-state/avalanche-usdc-response.json"
+          }
+        },
+        {
+          "kind": "token",
+          "identifier": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+          "symbol": "USDT",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://tether.to/en/supported-protocols/",
+            "decimalsRequest": "raw/token-state/avalanche-usdt-request.json",
+            "decimalsResponse": "raw/token-state/avalanche-usdt-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "eip155:130",
+      "family": "evm",
+      "name": "Unichain",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "ETH",
+        "decimals": 18,
+        "selectionClass": "top_10",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://docs.unichain.org/docs/technical-information/network-information",
+          "chainIdentityResponse": "raw/rpc/unichain-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0x078D782b760474a361dDA0AF3839290b0EF57AD6",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/unichain-usdc-request.json",
+            "decimalsResponse": "raw/token-state/unichain-usdc-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "eip155:59144",
+      "family": "evm",
+      "name": "Linea",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "ETH",
+        "decimals": 18,
+        "selectionClass": "top_10",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://docs.linea.build/get-started/how-to/connect-to-linea",
+          "chainIdentityResponse": "raw/rpc/linea-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0x176211869cA2b568f2A7D4EE941E073a821EE1ff",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/linea-usdc-request.json",
+            "decimalsResponse": "raw/token-state/linea-usdc-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "eip155:143",
+      "family": "evm",
+      "name": "Monad",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "MON",
+        "decimals": 18,
+        "selectionClass": "native_additional",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://docs.monad.xyz/developer-essentials/network-information",
+          "chainIdentityResponse": "raw/rpc/monad-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/monad-usdc-request.json",
+            "decimalsResponse": "raw/token-state/monad-usdc-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "eip155:1329",
+      "family": "evm",
+      "name": "Sei EVM",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "SEI",
+        "decimals": 18,
+        "selectionClass": "native_additional",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://docs.sei.io/evm/evm-rpc",
+          "chainIdentityResponse": "raw/rpc/sei-chain-id.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "ERC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/sei-usdc-request.json",
+            "decimalsResponse": "raw/token-state/sei-usdc-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc",
+      "family": "tron",
+      "name": "TRON",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "TRX",
+        "decimals": 6,
+        "selectionClass": "top_10",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://developers.tron.network/docs/networks",
+          "chainIdentityResponse": "raw/rpc/tron-genesis.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+          "symbol": "USDT",
+          "decimals": 6,
+          "tokenStandard": "TRC-20",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://tether.to/en/supported-protocols/",
+            "decimalsRequest": "raw/token-state/tron-usdt-request.json",
+            "decimalsResponse": "raw/token-state/tron-usdt-response.json"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+      "family": "solana",
+      "name": "Solana",
+      "native": {
+        "kind": "native",
+        "identifier": null,
+        "symbol": "SOL",
+        "decimals": 9,
+        "selectionClass": "top_10",
+        "rails": {
+          "direct": false,
+          "gasless": false,
+          "x402": false,
+          "bridge": false,
+          "swap": false
+        },
+        "caps": null,
+        "evidence": {
+          "networkDocumentationUrl": "https://solana.com/docs/references/clusters",
+          "chainIdentityResponse": "raw/rpc/solana-genesis.json"
+        }
+      },
+      "verifiedTokenDeployments": [
+        {
+          "kind": "token",
+          "identifier": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "symbol": "USDC",
+          "decimals": 6,
+          "tokenStandard": "SPL Token",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+            "decimalsRequest": "raw/token-state/solana-usdc-request.json",
+            "decimalsResponse": "raw/token-state/solana-usdc-response.json"
+          }
+        },
+        {
+          "kind": "token",
+          "identifier": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+          "symbol": "USDT",
+          "decimals": 6,
+          "tokenStandard": "SPL Token",
+          "eligibility": "issuer_native",
+          "rails": {
+            "direct": false,
+            "gasless": false,
+            "x402": false,
+            "bridge": false,
+            "swap": false
+          },
+          "caps": null,
+          "evidence": {
+            "issuerRegistryUrl": "https://tether.to/en/supported-protocols/",
+            "decimalsRequest": "raw/token-state/solana-usdt-request.json",
+            "decimalsResponse": "raw/token-state/solana-usdt-response.json"
+          }
+        }
+      ]
+    }
+  ],
+  "explicitRefusals": [
+    {
+      "asset": "BTC",
+      "reason": "No target network is Bitcoin; wrapped BTC contracts are third-party representations and were not substituted."
+    },
+    {
+      "asset": "XRP",
+      "reason": "No target network is XRPL; same-symbol or wrapped contracts were not substituted."
+    },
+    {
+      "asset": "FIGR_HELOC",
+      "reason": "CoinGecko platform metadata identifies a Provenance scope, which is outside the target networks; no issuer-native or canonical-bridge target deployment was verified."
+    },
+    {
+      "asset": "ZEC",
+      "reason": "No target network is Zcash; wrapped contracts were not substituted."
+    },
+    {
+      "asset": "USDC",
+      "chain": "eip155:56",
+      "reason": "Circle's primary USDC registry does not list BNB Smart Chain mainnet."
+    },
+    {
+      "asset": "USDT",
+      "chain": "eip155:56",
+      "reason": "Tether's BNB Smart Chain section lists XAUT but no USD₮ address; same-symbol third-party contracts are refused."
+    },
+    {
+      "asset": "USDC",
+      "chain": "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc",
+      "reason": "Circle's primary USDC registry does not list TRON mainnet; the CoinGecko platform address is not substituted."
+    }
+  ],
+  "sourceNotes": [
+    {
+      "source": "Circle USDC Contract Addresses",
+      "url": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+      "retrieval": "Verified through the primary Circle documentation via web retrieval; direct curl from the execution host was unavailable."
+    },
+    {
+      "source": "Circle USDC decimal specification",
+      "url": "https://developers.circle.com/xreserve/concepts/usdc-backed-stablecoin-specification",
+      "retrieval": "Primary Circle documentation states native USDC uses 6 decimals; each included deployment was independently read from chain state."
+    },
+    {
+      "source": "Tether Supported Protocols",
+      "url": "https://tether.to/en/supported-protocols/",
+      "snapshotPath": "raw/primary/tether-supported-protocols.html"
+    },
+    {
+      "source": "Chain state",
+      "retrieval": "Read-only JSON-RPC responses freeze EVM chain IDs, Solana genesis hash, TRON genesis block ID, and token decimals. No transaction was created or submitted."
+    }
+  ]
+}
