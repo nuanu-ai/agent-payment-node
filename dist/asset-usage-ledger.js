@@ -68,6 +68,9 @@ export class AssetUsageLedger extends SecureStateStore {
         const reservationId = digest(input.reservationId, "Reservation id");
         const policyDigest = digest(input.policyDigest, "Policy digest");
         const at = instant(input.now);
+        const expectedCurrentStates = input.expectedCurrentStates === undefined
+            ? undefined
+            : expectedStates(input.expectedCurrentStates);
         await this.ready();
         return await this.withLocks([this.bucketLock(identity)], async () => {
             const value = await this.readJson(this.recordPath(identity, reservationId));
@@ -76,6 +79,9 @@ export class AssetUsageLedger extends SecureStateStore {
             const current = validateAssetUsageReservation(value);
             if (current.policyDigest !== policyDigest || canonicalJson(exactIdentity(current)) !== canonicalJson(identity)) {
                 throw blocked("The usage reservation binding does not match the requested transition.");
+            }
+            if (expectedCurrentStates !== undefined && !expectedCurrentStates.includes(current.state)) {
+                throw blocked("The usage reservation is no longer in an expected source state.");
             }
             if (at < current.updatedAt)
                 throw blocked("The usage reservation transition cannot move backward in time.");
@@ -196,6 +202,13 @@ function validateBody(value) {
     else if (value.effectAt !== null || value.outcomeDigest !== null) {
         corrupt("A nonterminal usage reservation contains terminal outcome data.");
     }
+}
+function expectedStates(value) {
+    const allowed = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect"];
+    if (!Array.isArray(value) || value.length === 0 || value.some((state) => !allowed.includes(state))) {
+        throw invalid("Expected usage reservation source states are invalid.");
+    }
+    return [...new Set(value)];
 }
 function seal(body) {
     return validateAssetUsageReservation({ ...body, reservationDigest: domainHash(RESERVATION_DIGEST_DOMAIN, canonicalJson(body)) });
