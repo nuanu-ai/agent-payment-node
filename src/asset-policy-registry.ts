@@ -35,6 +35,10 @@ export interface AssetPolicyRow {
   readonly decimals: number;
   readonly rails: AssetRailAdmission;
   readonly caps: AssetAtomicCaps;
+  readonly mechanismPins?: Readonly<Partial<Record<"gasless" | "x402" | "bridge", Readonly<{
+    provider: string;
+    reference: string;
+  }>>>>;
 }
 
 export interface AssetPolicyChain {
@@ -50,6 +54,9 @@ export interface AssetPolicyRegistry {
   readonly registryVersion: string;
   readonly publishedAt: string;
   readonly effectiveDate: string;
+  /** Optional exact instant boundary used by compiled allowlist overlays. */
+  readonly effectiveAt?: string;
+  readonly expiresAt?: string;
   readonly chains: readonly AssetPolicyChain[];
   readonly policyDigest: string;
 }
@@ -65,6 +72,8 @@ export interface AssetPolicyEvaluationInput {
   readonly dailyUsageAtomic: string;
   /** Explicit UTC policy date keeps evaluation deterministic and testable. */
   readonly asOfDate: string;
+  /** Required when the registry carries exact instant boundaries. */
+  readonly asOf?: string;
 }
 
 export interface AssetPolicyAdmission {
@@ -92,7 +101,8 @@ export function sealAssetPolicyRegistry(value: UnsignedAssetPolicyRegistry): Ass
 
 export function validateAssetPolicyRegistry(value: unknown): AssetPolicyRegistry {
   if (!isPlainRecord(value) || !exactKeys(value, [
-    "schemaVersion", "registryVersion", "publishedAt", "effectiveDate", "chains", "policyDigest",
+    "schemaVersion", "registryVersion", "publishedAt", "effectiveDate", ...(value.effectiveAt === undefined ? [] : ["effectiveAt"]),
+    ...(value.expiresAt === undefined ? [] : ["expiresAt"]), "chains", "policyDigest",
   ])) invalid("The asset policy registry schema is invalid.");
   const { policyDigest, ...body } = value;
   validateRegistryBody(body);
@@ -109,6 +119,13 @@ export function evaluateAssetPolicy(registryValue: unknown, input: AssetPolicyEv
   validateEvaluationInput(input);
   const asOfDate = calendarDate(input.asOfDate, "Policy evaluation date");
   if (asOfDate < registry.effectiveDate) denied("The asset policy registry is not effective on the requested date.");
+  if (registry.effectiveAt !== undefined || registry.expiresAt !== undefined) {
+    if (input.asOf === undefined || !isIsoInstant(input.asOf) || input.asOf.slice(0, 10) !== asOfDate) {
+      invalid("Policy evaluation requires an exact instant matching the requested UTC date.");
+    }
+    if (registry.effectiveAt !== undefined && input.asOf < registry.effectiveAt) denied("The asset policy registry is not yet effective.");
+    if (registry.expiresAt !== undefined && input.asOf >= registry.expiresAt) denied("The asset policy registry has expired.");
+  }
   const rail = policyRail(input.rail);
   const chain = registry.chains.find((row) => row.chain === input.chain);
   if (chain === undefined) denied("The network is not listed in the asset policy registry.");
@@ -141,7 +158,7 @@ export function evaluateAssetPolicy(registryValue: unknown, input: AssetPolicyEv
 
 function validateEvaluationInput(value: unknown): asserts value is AssetPolicyEvaluationInput {
   if (!isPlainRecord(value) || !exactKeys(value, [
-    "chain", "asset", "rail", "amountAtomic", "dailyUsageAtomic", "asOfDate",
+    "chain", "asset", "rail", "amountAtomic", "dailyUsageAtomic", "asOfDate", ...(value.asOf === undefined ? [] : ["asOf"]),
   ]) || typeof value.chain !== "string" || !isPlainRecord(value.asset) ||
       !exactKeys(value.asset, ["kind", "identifier"]) ||
       (value.asset.kind !== "native" && value.asset.kind !== "token") ||
@@ -151,13 +168,20 @@ function validateEvaluationInput(value: unknown): asserts value is AssetPolicyEv
 }
 
 function validateRegistryBody(value: unknown): asserts value is UnsignedAssetPolicyRegistry {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "registryVersion", "publishedAt", "effectiveDate", "chains"]) ||
+  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "registryVersion", "publishedAt", "effectiveDate",
+    ...(value.effectiveAt === undefined ? [] : ["effectiveAt"]), ...(value.expiresAt === undefined ? [] : ["expiresAt"]), "chains"]) ||
       value.schemaVersion !== ASSET_POLICY_REGISTRY_SCHEMA ||
       typeof value.registryVersion !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value.registryVersion) ||
       typeof value.publishedAt !== "string" || !isIsoInstant(value.publishedAt)) {
     invalid("The asset policy registry metadata is invalid.");
   }
-  calendarDate(value.effectiveDate, "Registry effective date");
+  const effectiveDate = calendarDate(value.effectiveDate, "Registry effective date");
+  if (value.effectiveAt !== undefined && (typeof value.effectiveAt !== "string" || !isIsoInstant(value.effectiveAt) ||
+      value.effectiveAt.slice(0, 10) !== effectiveDate)) invalid("Registry effective instant is invalid.");
+  if (value.expiresAt !== undefined && (typeof value.expiresAt !== "string" || !isIsoInstant(value.expiresAt) ||
+      (value.effectiveAt === undefined ? value.expiresAt.slice(0, 10) <= effectiveDate : value.expiresAt <= value.effectiveAt))) {
+    invalid("Registry expiry instant is invalid.");
+  }
   if (!Array.isArray(value.chains) || value.chains.length === 0 || value.chains.length > MAX_CHAINS) {
     invalid("The asset policy registry must contain a bounded, non-empty chain list.");
   }
@@ -178,19 +202,17 @@ function validateChain(value: unknown): asserts value is AssetPolicyChain {
     invalid("An asset policy chain row is invalid.");
   }
   const identities = new Set<string>();
-  let nativeCount = 0;
   for (const asset of value.assets) {
     validateAsset(value.family, asset);
     const identity = asset.kind === "native" ? "native" : `token:${asset.identifier}`;
     if (identities.has(identity)) invalid("An asset policy chain contains a duplicate asset identity.");
     identities.add(identity);
-    if (asset.kind === "native") nativeCount += 1;
   }
-  if (nativeCount !== 1) invalid("Each asset policy chain must contain exactly one native asset row.");
 }
 
 function validateAsset(family: AssetPolicyChainFamily, value: unknown): asserts value is AssetPolicyRow {
-  if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", "caps"]) ||
+  if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", "caps",
+    ...(value.mechanismPins === undefined ? [] : ["mechanismPins"])]) ||
       (value.kind !== "native" && value.kind !== "token") ||
       typeof value.symbol !== "string" || !/^[A-Z0-9][A-Z0-9._-]{0,15}$/u.test(value.symbol) ||
       typeof value.decimals !== "number" || !Number.isSafeInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) {
@@ -203,6 +225,18 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown): asserts 
   }
   validateRails(value.rails);
   validateCaps(value.caps);
+  if (value.mechanismPins !== undefined) validateMechanismPins(value.mechanismPins);
+}
+
+function validateMechanismPins(value: unknown): void {
+  if (!isPlainRecord(value) || Object.keys(value).some((key) => !["gasless", "x402", "bridge"].includes(key))) {
+    invalid("Asset mechanism pins are invalid.");
+  }
+  for (const pin of Object.values(value)) {
+    if (!isPlainRecord(pin) || !exactKeys(pin, ["provider", "reference"]) || typeof pin.provider !== "string" ||
+        typeof pin.reference !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(pin.provider) ||
+        !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(pin.reference)) invalid("Asset mechanism pins are invalid.");
+  }
 }
 
 function validateRails(value: unknown): asserts value is AssetRailAdmission {

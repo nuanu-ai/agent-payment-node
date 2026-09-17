@@ -19,6 +19,8 @@ export type { CoreDependencies } from "./runtime.js";
 export { ASSET_POLICY_REGISTRY_SCHEMA, assetPolicyDigest, evaluateAssetPolicy, sealAssetPolicyRegistry, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
 export { ALLOWLIST_DATASET_PATH, ALLOWLIST_DATASET_SCHEMA, ALLOWLIST_DATASET_SHA256, ALLOWLIST_DATASET_VERSION, ALLOWLIST_INVENTORY_SCHEMA, assertAllowlistExecutionConfigured, compileAllowlistInventory, loadAllowlistInventory, resolveAllowlistAsset, } from "./allowlist-inventory.js";
 export type { AllowlistInventory, CandidateAsset, CandidateDeployment, CandidateFamily, CandidateKind, CandidateNetwork, CandidateRail, CandidateRails, } from "./allowlist-inventory.js";
+export { ALLOWLIST_POLICY_OVERLAY_SCHEMA, ALLOWLIST_POLICY_RECORD_SCHEMA, AllowlistPolicyStore, compileAllowlistPolicyOverlay, executeAllowlistPolicyCommand, validateAllowlistPolicyRecord, } from "./allowlist-policy-overlay.js";
+export type { AllowlistMechanismPin, AllowlistPolicyAdmissionInput, AllowlistPolicyOverlay, AllowlistPolicyOverlayInput, AllowlistPolicyRecord, PrepareAllowlistPolicyInput, } from "./allowlist-policy-overlay.js";
 export type { AssetAtomicCaps, AssetPolicyAdmission, AssetPolicyChain, AssetPolicyChainFamily, AssetPolicyEvaluationInput, AssetPolicyRail, AssetPolicyRegistry, AssetPolicyRow, AssetRailAdmission, UnsignedAssetPolicyRegistry, } from "./asset-policy-registry.js";
 export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, AssetUsageLedger, validateAssetUsageReservation, } from "./asset-usage-ledger.js";
 export type { AssetUsageIdentity, AssetUsageReservation, AssetUsageReserveInput, AssetUsageSnapshot, AssetUsageState, AssetUsageTransitionInput, } from "./asset-usage-ledger.js";

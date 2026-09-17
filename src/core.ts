@@ -38,6 +38,7 @@ import { saFail } from "./smart-account-gasless/reasons.js";
 import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { facilitatorFail } from "./facilitator-gasless/failure.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
+import { executeAllowlistPolicyCommand } from "./allowlist-policy-overlay.js";
 
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
@@ -69,6 +70,22 @@ export type {
   CandidateRail,
   CandidateRails,
 } from "./allowlist-inventory.js";
+export {
+  ALLOWLIST_POLICY_OVERLAY_SCHEMA,
+  ALLOWLIST_POLICY_RECORD_SCHEMA,
+  AllowlistPolicyStore,
+  compileAllowlistPolicyOverlay,
+  executeAllowlistPolicyCommand,
+  validateAllowlistPolicyRecord,
+} from "./allowlist-policy-overlay.js";
+export type {
+  AllowlistMechanismPin,
+  AllowlistPolicyAdmissionInput,
+  AllowlistPolicyOverlay,
+  AllowlistPolicyOverlayInput,
+  AllowlistPolicyRecord,
+  PrepareAllowlistPolicyInput,
+} from "./allowlist-policy-overlay.js";
 export type {
   AssetAtomicCaps,
   AssetPolicyAdmission,
@@ -175,6 +192,10 @@ export class ApnCore {
         dataset: loadAllowlistInventory().dataset,
         asset: resolveAllowlistAsset(request),
       }, "exact_candidate_identity");
+      case "allowlist.policy.status": return dataOutcome(await executeAllowlistPolicyCommand(request,
+        this.context.state.root, this.context.clock.now()), "staged_allowlist_policy_status");
+      case "allowlist.policy.prepare": return dataOutcome(await executeAllowlistPolicyCommand(request,
+        this.context.state.root, this.context.clock.now()), "staged_unadmitted_allowlist_policy");
       case "circle.approval.prepare": {
         await this.context.ready();
         const owner = (await bridgeOwner(this.context.state, request.profile)).owner;

@@ -20,6 +20,10 @@ export interface AssetPolicyRow {
     readonly decimals: number;
     readonly rails: AssetRailAdmission;
     readonly caps: AssetAtomicCaps;
+    readonly mechanismPins?: Readonly<Partial<Record<"gasless" | "x402" | "bridge", Readonly<{
+        provider: string;
+        reference: string;
+    }>>>>;
 }
 export interface AssetPolicyChain {
     /** Exact network identity: eip155 chain ID, Solana genesis hash, or TRON genesis block ID. */
@@ -33,6 +37,9 @@ export interface AssetPolicyRegistry {
     readonly registryVersion: string;
     readonly publishedAt: string;
     readonly effectiveDate: string;
+    /** Optional exact instant boundary used by compiled allowlist overlays. */
+    readonly effectiveAt?: string;
+    readonly expiresAt?: string;
     readonly chains: readonly AssetPolicyChain[];
     readonly policyDigest: string;
 }
@@ -52,6 +59,8 @@ export interface AssetPolicyEvaluationInput {
     readonly dailyUsageAtomic: string;
     /** Explicit UTC policy date keeps evaluation deterministic and testable. */
     readonly asOfDate: string;
+    /** Required when the registry carries exact instant boundaries. */
+    readonly asOf?: string;
 }
 export interface AssetPolicyAdmission {
     readonly admitted: true;
