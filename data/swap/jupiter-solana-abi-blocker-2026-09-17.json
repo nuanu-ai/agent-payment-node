@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "apn.jupiter-solana-abi-blocker.v1",
+  "reviewedAt": "2026-09-17",
+  "programId": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  "pair": {
+    "inputMint": "So11111111111111111111111111111111111111112",
+    "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "swapMode": "ExactIn"
+  },
+  "officialSources": [
+    {
+      "url": "https://github.com/jup-ag/docs/blob/f1928ec36ddb6b708f0e9c30be0efdef3cc16b29/openapi-spec/swap/v2/swap.yaml",
+      "commit": "f1928ec36ddb6b708f0e9c30be0efdef3cc16b29",
+      "sha256": "0d1c0c2bbd07aa05e3de30cb017128d7bc67bdf6f132b45dd24646edeb290329"
+    },
+    {
+      "url": "https://github.com/jup-ag/docs/blob/f1928ec36ddb6b708f0e9c30be0efdef3cc16b29/swap/build/index.mdx",
+      "commit": "f1928ec36ddb6b708f0e9c30be0efdef3cc16b29",
+      "sha256": "f084c33268310a3467eac59f4a68ae875f3f4aa4d829ee4aebaf61307cdc8995"
+    },
+    {
+      "url": "https://github.com/jup-ag/instruction-parser/blob/e6f77951377847c579112e6a16d8c17c5c092485/src/idl/jupiter.ts",
+      "commit": "e6f77951377847c579112e6a16d8c17c5c092485",
+      "sha256": "3f3bac24cd8a588be906a52173432f3e21b779d814814c25fc8ed6d4fa9e392b"
+    },
+    {
+      "url": "https://github.com/jup-ag/jupiter-amm-implementation/blob/cc068c9d1df0060c62f9a8a4fc37ea13ea7b9b39/idls/jupiter_aggregator_v6.json",
+      "commit": "cc068c9d1df0060c62f9a8a4fc37ea13ea7b9b39",
+      "sha256": "100b41d7caad93818cf440e8ae97bde43e6dad1ca732de45762adf43013cf9d6"
+    },
+    {
+      "url": "https://github.com/jup-ag/jupiter-amm-implementation/blob/cc068c9d1df0060c62f9a8a4fc37ea13ea7b9b39/jupiter-core/src/swap_transaction/build_swap_instruction.rs",
+      "commit": "cc068c9d1df0060c62f9a8a4fc37ea13ea7b9b39",
+      "sha256": "b911709e2f0d5b451838f4ac1ff4b61822eb9a3f77ce73e46dbaa9faa2ae77e5"
+    }
+  ],
+  "verifiedInterface": {
+    "exactInInstructions": [
+      {
+        "name": "route",
+        "discriminatorHex": "e517cb977ae3ad2a",
+        "arguments": ["route_plan", "in_amount", "quoted_out_amount", "slippage_bps", "platform_fee_bps"],
+        "fixedAccounts": [
+          "token_program:readonly",
+          "user_transfer_authority:readonly_signer",
+          "user_source_token_account:writable",
+          "user_destination_token_account:writable",
+          "destination_token_account:writable_optional",
+          "destination_mint:readonly",
+          "platform_fee_account:writable_optional",
+          "event_authority:readonly:D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf",
+          "program:readonly"
+        ]
+      },
+      {
+        "name": "shared_accounts_route",
+        "discriminatorHex": "c1209b3341d69c81",
+        "arguments": ["id", "route_plan", "in_amount", "quoted_out_amount", "slippage_bps", "platform_fee_bps"],
+        "fixedAccounts": [
+          "token_program:readonly",
+          "program_authority:readonly",
+          "user_transfer_authority:readonly_signer",
+          "source_token_account:writable",
+          "program_source_token_account:writable",
+          "program_destination_token_account:writable",
+          "destination_token_account:writable",
+          "source_mint:readonly",
+          "destination_mint:readonly",
+          "platform_fee_account:writable_optional",
+          "token_2022_program:readonly_optional",
+          "event_authority:readonly:D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf",
+          "program:readonly"
+        ]
+      }
+    ],
+    "buildResponseKind": "raw_instructions",
+    "assembledTransactionReturned": false
+  },
+  "blockers": [
+    {
+      "code": "NO_OFFICIAL_EXACT_BUILD_FIXTURE",
+      "detail": "The pinned V2 OpenAPI and build guide define response shapes and construction examples but publish no exact SOL-to-USDC /build response fixture with instruction bytes and account metas."
+    },
+    {
+      "code": "ROUTE_PLAN_DOES_NOT_BIND_QUOTED_AMM_KEY",
+      "detail": "The JUP6 RoutePlanStep encodes a Swap enum, percent, input_index, and output_index; it does not encode the quoted routePlan swapInfo.ammKey or label."
+    },
+    {
+      "code": "REMAINING_ACCOUNT_ABI_IS_ROUTE_DEPENDENT",
+      "detail": "The IDL covers fixed route accounts only. Inner DEX program, pool, vault, oracle, and token accounts are dynamic remaining accounts assembled by AMM adapters and are not described by the JUP6 IDL."
+    },
+    {
+      "code": "NO_PINNED_ONCHAIN_ARTIFACT_PROVENANCE",
+      "detail": "No official source found in this review pins a deployed JUP6 executable-data digest or a reproducible-build attestation to the reviewed IDL and builder source."
+    },
+    {
+      "code": "LOCAL_BUILD_CODEC_IS_NOT_V2_BUILD_SHAPE",
+      "detail": "The local decoder expects an assembled swapTransaction plus request and fee fields, while official V2 /build returns raw instruction groups and blockhashWithMetadata."
+    }
+  ],
+  "decision": {
+    "signable": false,
+    "reason": "A finite decoder cannot bind every route-dependent account and quoted AMM identity from the reviewed official artifacts without guessing. Keep JUP6 signing fail closed."
+  },
+  "evidenceDigest": "41f74b2c2588a44c153b85eba13b519af5f5dbfadd96d03f7f6214e8684c88cd"
+}
