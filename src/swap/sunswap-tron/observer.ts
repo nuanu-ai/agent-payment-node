@@ -53,6 +53,7 @@ export async function observeSunSwapFinality(rpc: SunSwapObservationRpcPort,
     solidifiedHeadNumber: value.solidifiedHeadNumber, outputAmountAtomic: value.outputAmountAtomic, feeSun: value.feeSun,
     finalized: value.finalized });
   if (canonicalJson(proof(full)) !== canonicalJson(proof(finalized))) conflict();
+  if (full.receiptHash !== finalized.receiptHash) conflict();
   return finalized;
 }
 
