@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { lstat } from "node:fs/promises";
 import test from "node:test";
 import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { COMMANDS } from "../../src/command-catalog.js";
@@ -112,12 +113,14 @@ test("quote uses only an explicit read-only builder while all state-changing sur
 
 test("status performs only a durable read and returns a stable missing-operation classification", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
+  await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
   const core = new ApnCore({ state: new StateStore(temporary.root), sunswap: { quote: async () => { throw new Error("quote canary"); } },
     jupiter: { quote: async () => { throw new Error("quote canary"); } } });
   for (const command of ["swap.uniswap.status", "swap.sunswap.status", "swap.jupiter.status"] as const) {
     const result = await core.execute({ command, operationId: H("c") });
     assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_NOT_FOUND");
   }
+  await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
 });
 
 function sample(option: string, chain: string): string {
