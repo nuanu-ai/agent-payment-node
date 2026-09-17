@@ -4,6 +4,7 @@ import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.j
 import { ONECLICK_COMMANDS } from "./lifi/near-oneclick-command-catalog.js";
 import { CIRCLE_COMMANDS } from "./lifi/circle-command-catalog.js";
 import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";
+import { ALLOWLIST_COMMANDS, ALLOWLIST_COMMAND_GROUPS } from "./allowlist-command-catalog.js";
 import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";
 import { networkCommandVariants } from "./network-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
@@ -58,7 +59,7 @@ const httpOptions = [
     option("--body-base64", "base64", false, noDefault, ["maximum_65536_decoded_bytes", "empty_is_present_zero_bytes", "omission_is_absent"], "operator_input"),
 ];
 const httpSynopsis = " [--method <method>] [--headers-json <json>] [--body-base64 <base64>]";
-export const COMMAND_GROUPS = [
+export const COMMAND_GROUPS = [...ALLOWLIST_COMMAND_GROUPS,
     { path: ["gasless"], summary: "Transfer USDC with gas paid from the total USDC budget.", kind: "group" },
     { path: ["gasless", "transfer"], summary: "Prepare and approve a USDC fee transfer.", kind: "group" },
     { path: ["bridge"], summary: "Discover, prepare and recover finite LI.FI cross-chain routes.", kind: "group" },
@@ -196,7 +197,7 @@ const BASE_COMMANDS = [
     ], ["apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <idempotency-key> --rpc-url <https-base-rpc-url>"]),
     command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Inspect one durable terminal receipt.", [operationRequired], "local_write", "May initialize local state and repair saved operation or receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ];
-export const COMMANDS = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...ONECLICK_COMMANDS, ...GASLESS_COMMANDS];
+export const COMMANDS = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...ONECLICK_COMMANDS, ...GASLESS_COMMANDS, ...ALLOWLIST_COMMANDS];
 export const COMMAND_MANIFEST = {
     schema_version: "apn.command-manifest.v1",
     product: "agent-payment-node",
