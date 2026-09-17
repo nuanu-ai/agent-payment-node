@@ -1,5 +1,5 @@
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
-import { canonicalJson, domainHash } from "../../canonical.js";
+import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canonical.js";
 import { canonicalAddress, canonicalBase64, invalid, sha256Bytes } from "./catalog.js";
 import type { SolanaAccountDescriptor, SolanaAccountResolverPort, SolanaAddressTableDescriptor } from "./ports.js";
 
@@ -9,6 +9,7 @@ export interface JupiterV0Envelope {
   readonly transactionBase64: string; readonly transactionHash: string; readonly messageHash: string; readonly blockhash: string;
   readonly signerCount: number; readonly feePayer: string; readonly accounts: readonly SolanaAccountBinding[];
   readonly addressTables: readonly SolanaAddressTableDescriptor[]; readonly lookupBindingDigest: string;
+  readonly loadedWritable: readonly string[]; readonly loadedReadonly: readonly string[];
   readonly instructions: readonly SolanaInstructionEnvelope[];
 }
 
@@ -28,7 +29,7 @@ export async function parseJupiterV0Envelope(transactionBase64: string, resolver
   if (lookups.length > 8 || new Set(lookups.map((lookup) => lookup.lookupTableAddress)).size !== lookups.length) invalid("Jupiter address table lookup set is invalid.");
   const requestedTables = lookups.map((lookup) => String(lookup.lookupTableAddress));
   const tables = await resolver.resolveAddressTables(requestedTables);
-  if (tables.length !== requestedTables.length) invalid("Jupiter address table resolution is incomplete.");
+  if (!Array.isArray(tables) || tables.length !== requestedTables.length) invalid("Jupiter address table resolution is incomplete.");
   const byTable = new Map(tables.map((table) => [table.address, validateTable(table)]));
   const loadedWritable: string[] = [], loadedReadonly: string[] = [];
   const lookupBinding: unknown[] = [];
@@ -43,7 +44,7 @@ export async function parseJupiterV0Envelope(transactionBase64: string, resolver
   const allAddresses = [...staticAddresses, ...loadedWritable, ...loadedReadonly];
   if (allAddresses.length > 256 || new Set(allAddresses).size !== allAddresses.length) invalid("Jupiter transaction account list is invalid.");
   const descriptors = await resolver.resolveAccounts(allAddresses);
-  if (descriptors.length !== allAddresses.length) invalid("Jupiter account resolution is incomplete.");
+  if (!Array.isArray(descriptors) || descriptors.length !== allAddresses.length) invalid("Jupiter account resolution is incomplete.");
   const descriptorMap = new Map(descriptors.map((descriptor) => [descriptor.address, validateDescriptor(descriptor)]));
   if (descriptorMap.size !== allAddresses.length) invalid("Jupiter account resolution contains duplicates.");
   const staticCount = staticAddresses.length; const signerCount = message.header.numSignerAccounts;
@@ -63,16 +64,20 @@ export async function parseJupiterV0Envelope(transactionBase64: string, resolver
   });
   if (instructions.length === 0 || instructions.length > 64) invalid("Jupiter instruction count is invalid.");
   return Object.freeze({ transactionBase64, transactionHash: sha256Bytes(bytes), messageHash: sha256Bytes(new Uint8Array(wire.messageBytes)), blockhash: String(message.lifetimeToken),
-    signerCount, feePayer: staticAddresses[0]!, accounts, addressTables: requestedTables.map((key) => byTable.get(key)!),
+    signerCount, feePayer: staticAddresses[0]!, accounts: Object.freeze(accounts), addressTables: Object.freeze(requestedTables.map((key) => byTable.get(key)!)),
+    loadedWritable: Object.freeze([...loadedWritable]), loadedReadonly: Object.freeze([...loadedReadonly]),
     lookupBindingDigest: domainHash("apn.jupiter-alt-binding.v1", canonicalJson(lookupBinding)), instructions });
 }
 
 function validateDescriptor(value: SolanaAccountDescriptor): SolanaAccountDescriptor {
+  if (!isPlainRecord(value) || !exactKeys(value, ["address", "owner", "executable", "dataHash"])) invalid("Jupiter account descriptor shape is invalid.");
   canonicalAddress(value.address); canonicalAddress(value.owner);
   if (typeof value.executable !== "boolean" || !/^[a-f0-9]{64}$/u.test(value.dataHash)) invalid("Jupiter account descriptor is invalid."); return Object.freeze({ ...value });
 }
 function validateTable(value: SolanaAddressTableDescriptor): SolanaAddressTableDescriptor {
-  validateDescriptor(value); if (value.executable || !Array.isArray(value.addresses) || value.addresses.length > 256) invalid("Jupiter address table descriptor is invalid.");
+  if (!isPlainRecord(value) || !exactKeys(value, ["address", "owner", "executable", "dataHash", "addresses"])) invalid("Jupiter address table descriptor shape is invalid.");
+  canonicalAddress(value.address); canonicalAddress(value.owner);
+  if (typeof value.executable !== "boolean" || !/^[a-f0-9]{64}$/u.test(value.dataHash) || value.executable || !Array.isArray(value.addresses) || value.addresses.length > 256) invalid("Jupiter address table descriptor is invalid.");
   value.addresses.forEach(canonicalAddress); if (new Set(value.addresses).size !== value.addresses.length) invalid("Jupiter address table contains duplicate addresses.");
   return Object.freeze({ ...value, addresses: Object.freeze([...value.addresses]) });
 }
