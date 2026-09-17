@@ -6,6 +6,9 @@ import { UNISWAP_CHAIN_ID, UNISWAP_NATIVE, UNISWAP_ROUTER, UNISWAP_USDC } from "
 const REQUEST_ID = /^[A-Za-z0-9._:-]{1,256}$/u, HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
 const MAX_UINT256 = (1n << 256n) - 1n;
 export function createUniswapQuoteRequest(input) {
+    if (!isPlainRecord(input) || !exactKeys(input, ["amountAtomic", "swapper", "recipient", "slippageBps", "ownerSlippageCapBps"])) {
+        invalid("Uniswap quote request is invalid.");
+    }
     const amount = uint(input.amountAtomic, true), swapper = address(input.swapper), recipient = address(input.recipient);
     if (!Number.isSafeInteger(input.slippageBps) || input.slippageBps < 0 || input.slippageBps > 10_000 ||
         !Number.isSafeInteger(input.ownerSlippageCapBps) || input.ownerSlippageCapBps < 0 || input.ownerSlippageCapBps > 10_000 ||
@@ -57,7 +60,10 @@ export function decodeUniswapSwapResponse(value, input) {
         uint(swap.maxPriorityFeePerGas, false) > uint(input.maxPriorityFeePerGas, false) ||
         uint(swap.maxPriorityFeePerGas, false) > uint(swap.maxFeePerGas, true))
         malformed("EIP-1559 gas cap");
-    uint(value.gasFee, false);
+    const gasLimit = BigInt(uint(swap.gasLimit, true));
+    const effectiveGasPrice = BigInt(uint(keys.includes("gasPrice") ? swap.gasPrice : swap.maxFeePerGas, true));
+    if (uint(value.gasFee, false) !== (gasLimit * effectiveGasPrice).toString())
+        malformed("gas fee binding");
     return value;
 }
 export function uniswapRawDigest(value) { return sha256(canonicalJson(value)); }
