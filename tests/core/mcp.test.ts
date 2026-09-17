@@ -18,6 +18,8 @@ import type { ProfilePolicyApprovalIntent, ProfilePolicyApprovalPort } from "../
 import { RECIPIENT, TestNative, TestRpc, exactReceipt, temporaryState } from "./helpers.js";
 
 const TOOL_NAMES = [
+  "apn_allowlist_inventory",
+  "apn_allowlist_resolve",
   "apn_version",
   "apn_doctor_keychain",
   "apn_wallet_ensure",
@@ -108,6 +110,8 @@ test("official MCP client proves production stdio descriptor, the exact tool set
           .map(([field, schema]) => [field, schema.default])),
       };
     }), [
+      { name: "apn_allowlist_inventory", properties: [], required: [], defaults: {} },
+      { name: "apn_allowlist_resolve", properties: ["chain", "kind", "identifier"], required: ["chain", "kind"], defaults: {} },
       { name: "apn_version", properties: [], required: [], defaults: {} },
       { name: "apn_doctor_keychain", properties: [], required: [], defaults: {} },
       { name: "apn_wallet_ensure", properties: ["profile"], required: [], defaults: { profile: "default" } },

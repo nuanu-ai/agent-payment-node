@@ -8,6 +8,8 @@ import { mcpFieldName } from "./command-binder.js";
 import { ApnError } from "./errors.js";
 
 const SELECTED_PATHS = [
+  "allowlist inventory",
+  "allowlist resolve",
   "--version",
   "doctor keychain",
   "wallet ensure",
