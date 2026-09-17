@@ -114,6 +114,9 @@ test("durable policy versions are owner-only, create-only, stale-write guarded a
   const second = await store.prepare({ ...overlay(), overlayVersion: "owner.2", expectedRevision: 1,
     now: new Date("2026-09-17T12:01:00.000Z") });
   assert.equal(second.revision, 2);
+  await assert.rejects(store.prepare({ ...overlay(), account: "0x0000000000000000000000000000000000000001",
+    overlayVersion: "owner.3", expectedRevision: 2, now: new Date("2026-09-17T12:02:00.000Z") }),
+  { code: "APN_PROFILE_DRIFT" });
   const root = join(temporary.root, "allowlist-policies");
   const profileDirectories = await readdir(root); const profile = join(root, profileDirectories[0]!);
   assert.equal((await lstat(root)).mode & 0o777, 0o700); assert.equal((await lstat(profile)).mode & 0o777, 0o700);
@@ -122,6 +125,24 @@ test("durable policy versions are owner-only, create-only, stale-write guarded a
   const stored = JSON.parse(await readFile(path, "utf8")); stored.overlay.account = "0x0000000000000000000000000000000000000001";
   await writeFile(path, `${JSON.stringify(stored)}\n`); await chmod(path, 0o600);
   await assert.rejects(store.status("card2-test"), { code: "APN_STATE_CORRUPT" });
+});
+
+test("status serializes with writes for the same policy profile", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const store = new AllowlistPolicyStore(temporary.root);
+  const first = await store.prepare({ ...overlay(), now: new Date("2026-09-17T12:00:00.000Z") });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let acquired!: () => void;
+  const acquiredPromise = new Promise<void>((resolve) => { acquired = resolve; });
+  const lock = store.withLocks([`profile:${first.overlay.profileHash}`], async () => { acquired(); await held; });
+  await acquiredPromise;
+  let settled = false;
+  const status = store.status("card2-test").then((value) => { settled = true; return value; });
+  await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  assert.equal(settled, false);
+  release(); await lock;
+  assert.equal((await status)?.recordDigest, first.recordDigest);
 });
 
 test("CLI and MCP prepare/status are identical, no policy exists by default, and neither surface activates it", async (t) => {

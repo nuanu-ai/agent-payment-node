@@ -96,6 +96,9 @@ export class AllowlistPolicyStore extends SecureStateStore {
             else if (expectedRevision === undefined || expectedRevision !== current.revision) {
                 conflict("Allowlist policy expected revision does not match durable state.");
             }
+            else if (current.overlay.account !== compiled.overlay.account) {
+                throw new ApnError("APN_PROFILE_DRIFT", "The allowlist policy profile is already bound to a different owner account.");
+            }
             const revision = (current?.revision ?? 0) + 1;
             const body = { schemaVersion: ALLOWLIST_POLICY_RECORD_SCHEMA, revision, status: "staged_unadmitted",
                 preparedAt, overlay: compiled.overlay, registry: compiled.registry };
@@ -110,7 +113,8 @@ export class AllowlistPolicyStore extends SecureStateStore {
         if (!PROFILE.test(profile))
             invalid("Allowlist policy profile is invalid.", "invalid_profile");
         await this.ready();
-        return await this.latest(domainHash(ALLOWLIST_POLICY_OVERLAY_SCHEMA, `profile\0${profile}`));
+        const profileHash = domainHash(ALLOWLIST_POLICY_OVERLAY_SCHEMA, `profile\0${profile}`);
+        return await this.withLocks([`profile:${profileHash}`], async () => await this.latest(profileHash));
     }
     async latest(profileHash) {
         const entries = await this.readDirectory(`allowlist-policies/${profileHash}`);
