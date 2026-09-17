@@ -17,3 +17,8 @@ mechanism. `approve` and `execute` return
 transaction envelope but does not claim a verified JUP6 instruction and
 account ABI. APN therefore installs no signer, sender, or observer. `status`
 only reads an existing guarded swap operation from local durable state.
+
+The pinned official-source review is bundled at
+`data/swap/jupiter-solana-abi-blocker-2026-09-17.json`. It records the verified
+exact-input instruction discriminators and fixed accounts, plus the unresolved
+route-dependent remaining-account, build-fixture, and deployed-artifact gaps.
