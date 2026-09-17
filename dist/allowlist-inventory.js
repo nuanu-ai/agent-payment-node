@@ -15,7 +15,12 @@ let cached;
 export function loadAllowlistInventory() {
     if (cached !== undefined)
         return cached;
-    const bytes = datasetBytes();
+    cached = compileAllowlistInventory(datasetBytes());
+    return cached;
+}
+/** Compile only the exact byte sequence bound to this release. Parsed objects are never accepted with a caller-supplied digest. */
+export function compileAllowlistInventory(input) {
+    const bytes = typeof input === "string" ? Buffer.from(input, "utf8") : input;
     const digest = sha256(bytes);
     if (digest !== ALLOWLIST_DATASET_SHA256)
         shippedDatasetInvalid("The frozen allowlist dataset digest does not match the release constant.");
@@ -26,10 +31,9 @@ export function loadAllowlistInventory() {
     catch {
         return shippedDatasetInvalid("The frozen allowlist dataset is not valid JSON.");
     }
-    cached = compileAllowlistInventory(value, digest);
-    return cached;
+    return compileVerifiedAllowlistInventory(value, digest);
 }
-export function compileAllowlistInventory(value, datasetSha256) {
+function compileVerifiedAllowlistInventory(value, datasetSha256) {
     if (!/^[a-f0-9]{64}$/u.test(datasetSha256))
         shippedDatasetInvalid("The allowlist dataset digest is invalid.");
     const dataset = record(value, "The allowlist candidate dataset is invalid.");

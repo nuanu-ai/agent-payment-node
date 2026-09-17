@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import {
   ALLOWLIST_DATASET_SHA256,
   ALLOWLIST_DATASET_VERSION,
   assertAllowlistExecutionConfigured,
+  compileAllowlistInventory,
   loadAllowlistInventory,
   resolveAllowlistAsset,
 } from "../../src/allowlist-inventory.js";
@@ -17,6 +19,21 @@ const ETHEREUM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const SOLANA = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TRON = "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc";
+const DATASET_BYTES = readFileSync(new URL("../../../data/allowlist/2026-09-17/dataset.json", import.meta.url));
+
+test("runtime compilation binds the parsed inventory to the exact shipped bytes", () => {
+  assert.equal(compileAllowlistInventory(DATASET_BYTES).inventorySha256, loadAllowlistInventory().inventorySha256);
+  const tampered = Buffer.from(DATASET_BYTES);
+  const offset = tampered.indexOf(Buffer.from("Ethereum", "utf8"));
+  assert.notEqual(offset, -1);
+  tampered[offset + 5] = "X".charCodeAt(0);
+  for (const candidate of [tampered, Buffer.from("{", "utf8")]) {
+    assert.throws(() => compileAllowlistInventory(candidate), (error: unknown) => {
+      const value = error as { code?: string; details?: { reason?: string } };
+      return value.code === "APN_INTERNAL" && value.details?.reason === "allowlist_dataset_invalid";
+    });
+  }
+});
 
 test("frozen dataset compiles to a deterministic strict inventory with no admitted rails or caps", () => {
   const inventory = loadAllowlistInventory();
@@ -47,10 +64,14 @@ test("resolver selects only exact native and deployment identities across all fa
 test("unknown chains, symbols, noncanonical addresses and native-token confusion have stable refusals", () => {
   const cases = [
     [{ chain: "eip155:999999", kind: "native" }, "APN_ALLOWLIST_UNKNOWN_CHAIN", "unknown_chain"],
+    [{ chain: "ethereum", kind: "native" }, "APN_ALLOWLIST_UNKNOWN_CHAIN", "unknown_chain"],
+    [{ chain: "eip155:01", kind: "native" }, "APN_ALLOWLIST_UNKNOWN_CHAIN", "unknown_chain"],
     [{ chain: "eip155:1", kind: "token", identifier: "USDC" }, "APN_ALLOWLIST_IDENTITY_INVALID", "invalid_token_identifier"],
+    [{ chain: "eip155:1", kind: "token", identifier: "native" }, "APN_ALLOWLIST_IDENTITY_INVALID", "invalid_token_identifier"],
     [{ chain: "eip155:1", kind: "token", identifier: ETHEREUM_USDC.toLowerCase() }, "APN_ALLOWLIST_IDENTITY_INVALID", "invalid_token_identifier"],
     [{ chain: "eip155:1", kind: "native", identifier: ETHEREUM_USDC }, "APN_ALLOWLIST_IDENTITY_INVALID", "native_token_confusion"],
     [{ chain: "eip155:1", kind: "token", identifier: "0x0000000000000000000000000000000000000001" }, "APN_ALLOWLIST_ASSET_NOT_FOUND", "unknown_token_deployment"],
+    [{ chain: "eip155:56", kind: "token", identifier: ETHEREUM_USDC }, "APN_ALLOWLIST_ASSET_NOT_FOUND", "unknown_token_deployment"],
   ] as const;
   for (const [input, code, reason] of cases) {
     assert.throws(() => resolveAllowlistAsset(input as never), (error: unknown) => {

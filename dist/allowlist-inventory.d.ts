@@ -84,7 +84,8 @@ export interface AllowlistInventory {
     readonly inventorySha256: string;
 }
 export declare function loadAllowlistInventory(): AllowlistInventory;
-export declare function compileAllowlistInventory(value: unknown, datasetSha256: string): AllowlistInventory;
+/** Compile only the exact byte sequence bound to this release. Parsed objects are never accepted with a caller-supplied digest. */
+export declare function compileAllowlistInventory(input: string | Buffer): AllowlistInventory;
 export declare function resolveAllowlistAsset(input: {
     readonly chain: string;
     readonly kind: CandidateKind;
