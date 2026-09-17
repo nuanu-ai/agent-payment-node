@@ -28,6 +28,7 @@ export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
 export type { AssetPortfolio, BalanceObservation, BalanceProvenance, BatchBalanceAsset, BatchBalanceAvailable, BatchBalanceRequest, BatchBalanceResult, BatchBalanceUnavailable, FamilyBalanceBatchPort, PortfolioAccount, PortfolioAssetBalance, PortfolioCachePolicy, PortfolioNetworkBalance, } from "./asset-portfolio-reader.js";
 export { DIRECT_ASSET_USAGE_LEASE_SCHEMA, DirectAssetUsageAdapter, validateDirectAssetUsageLease, } from "./direct-asset-usage.js";
 export type { DirectAssetUsageInput, DirectAssetUsageLease, } from "./direct-asset-usage.js";
+export * from "./swap/index.js";
 export declare class ApnCore {
     readonly context: RuntimeContext;
     readonly wallet: WalletService;

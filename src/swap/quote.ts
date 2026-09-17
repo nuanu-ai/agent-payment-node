@@ -12,7 +12,9 @@ const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const MAX_UINT256 = (1n << 256n) - 1n;
 
 export interface SwapAssetIdentity { readonly chain: string; readonly kind: CandidateKind; readonly identifier: string | null }
-export interface SwapSimulationProof { readonly requestHash: string; readonly resultHash: string; readonly success: true }
+export interface SwapSimulationProof { readonly requestHash: string; readonly resultHash: string; readonly success: true;
+  readonly blockNumber: string; readonly blockHash: string; readonly headBlockNumber: string; readonly maxHeadDrift: number;
+  readonly gasEstimate: string }
 export interface SwapQuoteSnapshot {
   readonly schemaVersion: typeof SWAP_QUOTE_SCHEMA;
   readonly profile: string;
@@ -74,9 +76,19 @@ export function validateSwapQuote(value: unknown, mode: "input" | "stored" = "st
     if (typeof record[key] !== "string" || !DIGEST.test(record[key] as string)) fail("Swap quote hash binding is invalid.");
   }
   const simulation = record.simulation;
-  if (!isPlainRecord(simulation) || !exactKeys(simulation, ["requestHash", "resultHash", "success"]) ||
+  if (!isPlainRecord(simulation) || !exactKeys(simulation, ["requestHash", "resultHash", "success", "blockNumber", "blockHash",
+    "headBlockNumber", "maxHeadDrift", "gasEstimate"]) ||
       simulation.success !== true || typeof simulation.requestHash !== "string" || !DIGEST.test(simulation.requestHash) ||
-      typeof simulation.resultHash !== "string" || !DIGEST.test(simulation.resultHash)) fail("A successful bound simulation is required.");
+      typeof simulation.resultHash !== "string" || !DIGEST.test(simulation.resultHash) ||
+      typeof simulation.blockHash !== "string" || !/^0x[a-f0-9]{64}$/u.test(simulation.blockHash) ||
+      typeof simulation.maxHeadDrift !== "number" || !Number.isSafeInteger(simulation.maxHeadDrift) || simulation.maxHeadDrift < 0 ||
+      simulation.maxHeadDrift > 256) fail("A successful bound simulation is required.");
+  const proof = simulation as Record<string, unknown>;
+  const simulationBlock = atomic(proof.blockNumber, false, mode), simulationHead = atomic(proof.headBlockNumber, false, mode);
+  atomic(proof.gasEstimate, true, mode);
+  if (simulationHead < simulationBlock || simulationHead - simulationBlock > BigInt(proof.maxHeadDrift as number)) {
+    fail("Swap simulation reference exceeds its exact head drift bound.");
+  }
   const quote = value as unknown as SwapQuoteSnapshot;
   const { quoteHash, ...body } = quote;
   if (quote.profileHash !== domainHash(SWAP_QUOTE_SCHEMA, `profile\0${quote.profile}`) ||

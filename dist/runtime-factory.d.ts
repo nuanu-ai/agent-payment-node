@@ -23,7 +23,9 @@ import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js"
 import { type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
+import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 export interface RuntimeFactoryOptions {
+    readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
