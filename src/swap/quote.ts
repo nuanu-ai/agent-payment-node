@@ -37,6 +37,11 @@ export interface SwapQuoteSnapshot {
 export type SwapQuoteInput = Omit<SwapQuoteSnapshot, "schemaVersion" | "profileHash" | "quoteHash">;
 
 export function createSwapQuote(input: SwapQuoteInput): SwapQuoteSnapshot {
+  if (!isPlainRecord(input) || !exactKeys(input, ["profile", "account", "recipient", "sourceAsset", "destinationAsset",
+    "inputAmountAtomic", "expectedOutputAtomic", "minimumOutputAtomic", "slippageBps", "effectiveAt", "expiresAt",
+    "providerResponseHash", "routeHash", "unsignedTransactionPayloadHash", "simulation"])) {
+    failure("input", "Swap quote input schema is invalid.");
+  }
   const body = { schemaVersion: SWAP_QUOTE_SCHEMA, ...input,
     profileHash: domainHash(SWAP_QUOTE_SCHEMA, `profile\0${input.profile}`) } as const;
   return validateSwapQuote({ ...body, quoteHash: domainHash(SWAP_QUOTE_SCHEMA, canonicalJson(body)) }, "input");
@@ -62,6 +67,9 @@ export function validateSwapQuote(value: unknown, mode: "input" | "stored" = "st
   const input = atomic(record.inputAmountAtomic, true, mode), expected = atomic(record.expectedOutputAtomic, true, mode);
   const minimum = atomic(record.minimumOutputAtomic, true, mode);
   if (minimum > expected) fail("Swap minimum output exceeds expected output.");
+  const minimumAllowed = (expected * BigInt(10_000 - (record.slippageBps as number)) + 9_999n) / 10_000n;
+  if (minimum < minimumAllowed) fail("Swap minimum output exceeds the declared slippage bound.");
+  if (canonicalJson(sourceAsset) === canonicalJson(destinationAsset)) fail("Swap source and destination assets must be distinct.");
   for (const key of ["profileHash", "providerResponseHash", "routeHash", "unsignedTransactionPayloadHash", "quoteHash"] as const) {
     if (typeof record[key] !== "string" || !DIGEST.test(record[key] as string)) fail("Swap quote hash binding is invalid.");
   }

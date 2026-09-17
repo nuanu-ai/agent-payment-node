@@ -17,8 +17,8 @@ const nativeCaps = { maximumPerTransferAtomic: "1000000000000000000", dailyLimit
 const allRails = { direct: true, gasless: true, x402: true, bridge: true, swap: true } as const;
 const swapMechanism = { schemaVersion: "apn.swap-mechanism-pin.v1" as const, protocolFamily: "uniswap_ethereum" as const,
   networkFamily: "evm" as const, chain: "eip155:1", protocolVersion: "2.2.0", constructorKind: "sdk" as const,
-  constructorIdentity: "test.sdk", constructorVersion: "1.0.0", routerProgramIdentity: "test:router:1",
-  auxiliaryContractProgramIdentities: ["test:permit2:1"], quoteSchemaVersion: "1.0.0", transactionSchemaVersion: "1.0.0",
+  constructorIdentity: "test.sdk", constructorVersion: "1.0.0", routerProgramIdentity: "0x1111111111111111111111111111111111111111",
+  auxiliaryContractProgramIdentities: ["0x2222222222222222222222222222222222222222"], quoteSchemaVersion: "1.0.0", transactionSchemaVersion: "1.0.0",
   validationPolicyIdentity: "test.validation", validationPolicyVersion: "1.0.0" };
 
 function registry(version = "2026-09-17.ledger.1", dailyLimitAtomic = "100"): ReturnType<typeof sealAssetPolicyRegistry> {

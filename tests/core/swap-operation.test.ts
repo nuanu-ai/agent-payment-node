@@ -14,15 +14,16 @@ const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", H = (letter: string) 
 const inventory = loadAllowlistInventory();
 const pin: SwapMechanismPin = { schemaVersion: SWAP_MECHANISM_PIN_SCHEMA, protocolFamily: "uniswap_ethereum", networkFamily: "evm",
   chain: "eip155:1", protocolVersion: "2.2.0", constructorKind: "sdk", constructorIdentity: "owner.sdk", constructorVersion: "1.0.0",
-  routerProgramIdentity: "owner:router:1", auxiliaryContractProgramIdentities: ["owner:permit2:1"], quoteSchemaVersion: "1.0.0",
+  routerProgramIdentity: "0x1111111111111111111111111111111111111111", auxiliaryContractProgramIdentities: ["0x2222222222222222222222222222222222222222"], quoteSchemaVersion: "1.0.0",
   transactionSchemaVersion: "1.0.0", validationPolicyIdentity: "owner.validation", validationPolicyVersion: "1.0.0" };
 const overlay: AllowlistPolicyOverlayInput = { overlayVersion: "swap-owner.1", profile: "swap-op", account: ACCOUNT,
   datasetVersion: inventory.dataset.version, datasetSha256: inventory.dataset.sha256, inventorySha256: inventory.inventorySha256,
   effectiveAt: "2026-09-18T00:00:00.000Z", expiresAt: "2026-09-19T00:00:00.000Z", admissions: [{ chain: "eip155:1",
-    kind: "native", rail: "swap", maximumPerTransferAtomic: "100", dailyLimitAtomic: "100", mechanism: pin }] };
+    kind: "native", rail: "swap", maximumPerTransferAtomic: "100", dailyLimitAtomic: "100", mechanism: pin }, { chain: "eip155:1",
+    kind: "token", identifier: USDC, rail: "swap", maximumPerTransferAtomic: "100", dailyLimitAtomic: "100", mechanism: pin }] };
 const quote: SwapQuoteInput = { profile: "swap-op", account: ACCOUNT, recipient: RECIPIENT,
   sourceAsset: { chain: "eip155:1", kind: "native", identifier: null }, destinationAsset: { chain: "eip155:1", kind: "token", identifier: USDC },
-  inputAmountAtomic: "100", expectedOutputAtomic: "95", minimumOutputAtomic: "90", slippageBps: 100,
+  inputAmountAtomic: "100", expectedOutputAtomic: "100", minimumOutputAtomic: "99", slippageBps: 100,
   effectiveAt: "2026-09-18T00:00:00.000Z", expiresAt: "2026-09-18T00:05:00.000Z", providerResponseHash: H("a"),
   routeHash: H("b"), unsignedTransactionPayloadHash: H("c"), simulation: { requestHash: H("d"), resultHash: H("e"), success: true } };
 
@@ -69,6 +70,19 @@ test("shared ledger aggregates swap with other rails and releases only proven pr
     rail: "direct", amountAtomic: "100", idempotencyKey: "cross-rail-after-release", now: new Date("2026-09-18T00:01:04.000Z") })).amountAtomic, "100");
 });
 
+test("runtime validation rejects operation, policy and expiry substitution before a ledger effect", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const { service, usage, policy, op } = await fixture(temporary.root);
+  const forged: any = structuredClone(op); forged.quote.routeHash = H("f");
+  await assert.rejects(service.reserve(forged, policy, new Date("2026-09-18T00:01:01.000Z")), { code: "APN_STATE_CORRUPT" });
+  const substituted = sealAssetPolicyRegistry({ schemaVersion: policy.schemaVersion, registryVersion: "swap-owner.2",
+    publishedAt: policy.publishedAt, effectiveDate: policy.effectiveDate, effectiveAt: policy.effectiveAt, expiresAt: policy.expiresAt,
+    chains: policy.chains });
+  await assert.rejects(service.reserve(op, substituted, new Date("2026-09-18T00:01:01.000Z")), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await usage.usage({ account: ACCOUNT, chain: "eip155:1", asset: { kind: "native", identifier: null } },
+    new Date("2026-09-18T00:01:02.000Z"))).amountAtomic, "0");
+  await assert.rejects(service.reserve(op, policy, new Date("2026-09-18T00:05:00.000Z")), { code: "APN_OPERATION_BLOCKED" });
+});
+
 test("submission marker is durable before send and restart/lost response is observation-only with no release or resend", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const { service, operations, policy, op } = await fixture(temporary.root);
   const reserved = await service.reserve(op, policy, new Date("2026-09-18T00:01:01.000Z"));
@@ -76,6 +90,11 @@ test("submission marker is durable before send and restart/lost response is obse
   assert.equal(service.resumeDirective(submitting), "observe_only");
   const restarted = new SwapOperationRepository(temporary.root), loaded = await restarted.load(submitting.ownerProfileHash, submitting.operationId);
   assert.equal(loaded?.submissionMarker?.markerHash, submitting.submissionMarker?.markerHash);
+  await assert.rejects(service.recordPossibleSend(submitting, "unknown_finality", new Date("2026-09-18T00:01:03.000Z"),
+    { receiptHash: H("7"), transactionHash: "invalid", observedAt: "2026-09-18T00:01:03.000Z", finalized: false }),
+  { code: "APN_INVALID_INPUT" });
+  assert.equal((await service.usage.load({ account: ACCOUNT, chain: "eip155:1", asset: { kind: "native", identifier: null } },
+    submitting.usageLease!.reservationId))?.state, "reserved");
   await assert.rejects(service.failBeforeEffect(submitting, new Date("2026-09-18T00:01:03.000Z"), H("f")), { code: "APN_OPERATION_BLOCKED" });
   const unknown = await service.recordPossibleSend(submitting, "unknown_finality", new Date("2026-09-18T00:01:04.000Z"));
   assert.equal(unknown.state, "unknown_finality"); assert.equal(service.resumeDirective(unknown), "observe_only");

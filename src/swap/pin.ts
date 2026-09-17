@@ -1,5 +1,8 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { getAddress } from "viem";
+import { address as solanaAddress } from "@solana/kit";
+import { tronAddress } from "../tron/codec.js";
 
 export const SWAP_MECHANISM_PIN_SCHEMA = "apn.swap-mechanism-pin.v1" as const;
 export type SwapProtocolFamily = "uniswap_ethereum" | "sunswap_tron" | "jupiter_solana";
@@ -45,16 +48,21 @@ export function validateSwapMechanismPin(value: unknown): SwapMechanismPin {
       typeof value.transactionSchemaVersion !== "string" || typeof value.validationPolicyIdentity !== "string" ||
       typeof value.validationPolicyVersion !== "string" || !Array.isArray(value.auxiliaryContractProgramIdentities) ||
       value.auxiliaryContractProgramIdentities.length > 16 || !TEXT.test(value.constructorIdentity) ||
-      !TEXT.test(value.routerProgramIdentity) || !VERSION.test(value.protocolVersion) ||
+      !VERSION.test(value.protocolVersion) ||
       !VERSION.test(value.constructorVersion) || !VERSION.test(value.quoteSchemaVersion) ||
       !VERSION.test(value.transactionSchemaVersion) || !TEXT.test(value.validationPolicyIdentity) ||
       !VERSION.test(value.validationPolicyVersion) || value.auxiliaryContractProgramIdentities.some((item) =>
-        typeof item !== "string" || !TEXT.test(item)) ||
+        typeof item !== "string") ||
       new Set([value.routerProgramIdentity, ...value.auxiliaryContractProgramIdentities]).size !==
         value.auxiliaryContractProgramIdentities.length + 1) invalid("Swap mechanism pin is malformed, duplicate, or unversioned.");
   const expected = EXPECTED[value.protocolFamily];
   if (value.networkFamily !== expected.family || value.chain !== expected.chain) {
     invalid("Swap protocol family does not match its exact network family and chain.");
+  }
+  const family = value.networkFamily as SwapNetworkFamily;
+  const programs = [value.routerProgramIdentity as string, ...(value.auxiliaryContractProgramIdentities as string[])];
+  if (programs.some((identity) => canonicalProgramIdentity(family, identity) !== identity)) {
+    invalid("Swap router and auxiliary program identities must be canonical for the pinned network family.");
   }
   return value as unknown as SwapMechanismPin;
 }
@@ -64,3 +72,15 @@ export function swapMechanismDigest(value: unknown): string {
 }
 
 function invalid(message: string): never { throw new ApnError("APN_INVALID_INPUT", message); }
+
+function canonicalProgramIdentity(family: SwapNetworkFamily, value: string): string {
+  try {
+    if (family === "evm") {
+      const result = getAddress(value);
+      if (result === "0x0000000000000000000000000000000000000000") throw new Error();
+      return result;
+    }
+    if (family === "solana") return solanaAddress(value);
+    return tronAddress(value);
+  } catch { return invalid("Swap router or auxiliary program identity is invalid for its network family."); }
+}

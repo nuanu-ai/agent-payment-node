@@ -64,7 +64,9 @@ export class SwapOperationRepository extends SecureStateStore {
 function sameImmutable(left: SwapOperationRecord, right: SwapOperationRecord): boolean {
   const select = (value: SwapOperationRecord) => ({ operationId: value.operationId, idempotencyHash: value.idempotencyHash,
     ownerProfileHash: value.ownerProfileHash, quote: value.quote, policyDigest: value.policyDigest,
-    policyVersion: value.policyVersion, mechanismDigest: value.mechanismDigest, approvalCapAtomic: value.approvalCapAtomic });
+    policyVersion: value.policyVersion, protocolRegistryDigest: value.protocolRegistryDigest,
+    protocolRegistryVersion: value.protocolRegistryVersion, mechanismDigest: value.mechanismDigest,
+    approvalCapAtomic: value.approvalCapAtomic });
   return canonicalJson(select(left)) === canonicalJson(select(right));
 }
 function blocked(message: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message); }

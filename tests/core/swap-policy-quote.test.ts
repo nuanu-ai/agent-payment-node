@@ -16,7 +16,7 @@ const inventory = loadAllowlistInventory();
 function pin(overrides: Partial<SwapMechanismPin> = {}): SwapMechanismPin {
   return { schemaVersion: SWAP_MECHANISM_PIN_SCHEMA, protocolFamily: "uniswap_ethereum", networkFamily: "evm",
     chain: "eip155:1", protocolVersion: "2.2.0", constructorKind: "builder_api", constructorIdentity: "owner.api",
-    constructorVersion: "1.0.0", routerProgramIdentity: "owner:router:1", auxiliaryContractProgramIdentities: ["owner:permit2:1"],
+    constructorVersion: "1.0.0", routerProgramIdentity: "0x1111111111111111111111111111111111111111", auxiliaryContractProgramIdentities: ["0x2222222222222222222222222222222222222222"],
     quoteSchemaVersion: "1.0.0", transactionSchemaVersion: "1.0.0", validationPolicyIdentity: "owner.validation",
     validationPolicyVersion: "1.0.0", ...overrides };
 }
@@ -25,13 +25,14 @@ function overlay(mechanism: SwapMechanismPin = pin()): AllowlistPolicyOverlayInp
     datasetVersion: inventory.dataset.version, datasetSha256: inventory.dataset.sha256, inventorySha256: inventory.inventorySha256,
     effectiveAt: "2026-09-18T00:00:00.000Z", expiresAt: "2026-09-19T00:00:00.000Z", admissions: [{
       chain: "eip155:1", kind: "native", rail: "swap", maximumPerTransferAtomic: "100", dailyLimitAtomic: "150", mechanism,
-    }] };
+    }, { chain: "eip155:1", kind: "token", identifier: USDC, rail: "swap", maximumPerTransferAtomic: "100",
+      dailyLimitAtomic: "150", mechanism }] };
 }
 function quote(overrides: Partial<SwapQuoteInput> = {}): SwapQuoteInput {
   return { profile: "swap-test", account: ACCOUNT, recipient: RECIPIENT,
     sourceAsset: { chain: "eip155:1", kind: "native", identifier: null },
     destinationAsset: { chain: "eip155:1", kind: "token", identifier: USDC }, inputAmountAtomic: "100",
-    expectedOutputAtomic: "95", minimumOutputAtomic: "90", slippageBps: 100,
+    expectedOutputAtomic: "100", minimumOutputAtomic: "99", slippageBps: 100,
     effectiveAt: "2026-09-18T00:00:00.000Z", expiresAt: "2026-09-18T00:05:00.000Z",
     providerResponseHash: H("a"), routeHash: H("b"), unsignedTransactionPayloadHash: H("c"),
     simulation: { requestHash: H("d"), resultHash: H("e"), success: true }, ...overrides };
@@ -58,12 +59,12 @@ test("protocol registry deterministically binds owner pins and rejects mismatche
   assert.deepEqual(validateSwapProtocolRegistry(structuredClone(registry)), registry);
   const badPins = [
     pin({ chain: "eip155:8453" }), pin({ networkFamily: "solana" }), pin({ protocolVersion: "latest" }),
-    { ...pin(), unexpected: "field" }, { ...pin(), auxiliaryContractProgramIdentities: ["owner:router:1"] },
+    { ...pin(), unexpected: "field" }, { ...pin(), auxiliaryContractProgramIdentities: ["0x1111111111111111111111111111111111111111"] },
   ];
   for (const value of badPins) assert.throws(() => compileSwapProtocolRegistry({ registryVersion: "owner.1", pins: [value] }),
     { code: "APN_INVALID_INPUT" });
   assert.throws(() => compileSwapProtocolRegistry({ registryVersion: "owner.1", pins: [pin(), pin()] }), { code: "APN_INVALID_INPUT" });
-  const tampered: any = structuredClone(registry); tampered.records[0].pin.routerProgramIdentity = "owner:router:2";
+  const tampered: any = structuredClone(registry); tampered.records[0].pin.routerProgramIdentity = "0x3333333333333333333333333333333333333333";
   assert.throws(() => validateSwapProtocolRegistry(tampered), { code: "APN_STATE_CORRUPT" });
   const proto = Object.create({ polluted: true }); Object.assign(proto, pin());
   assert.throws(() => compileSwapProtocolRegistry({ registryVersion: "owner.1", pins: [proto] }), { code: "APN_INVALID_INPUT" });
@@ -84,4 +85,6 @@ test("quote snapshot binds owner, exact assets, route, transaction, simulation, 
   assert.throws(() => validateSwapQuote(excess), { code: "APN_STATE_CORRUPT" });
   const proto = Object.create({ polluted: true }); Object.assign(proto, createSwapQuote(quote()));
   assert.throws(() => validateSwapQuote(proto), { code: "APN_STATE_CORRUPT" });
+  const inputProto = Object.create({ polluted: true }); Object.assign(inputProto, quote());
+  assert.throws(() => createSwapQuote(inputProto), { code: "APN_INVALID_INPUT" });
 });
