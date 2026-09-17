@@ -30,7 +30,7 @@ export class SwapOperationRepository extends SecureStateStore {
   }
 
   async loadAny(operationId: string): Promise<SwapOperationRecord | null> {
-    stateIdentifier(operationId, "swap operation id"); await this.ready();
+    stateIdentifier(operationId, "swap operation id");
     const profiles = await this.readDirectory("swap-operations"); let found: SwapOperationRecord | null = null;
     for (const profile of profiles) {
       if (!profile.isDirectory() || profile.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(profile.name)) corrupt();
