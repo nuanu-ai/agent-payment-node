@@ -31,6 +31,7 @@ test("frozen SunSwap catalog binds exact official identities, sources and digest
   for (const mutate of [
     (v: any) => { v.router = RECIPIENT; }, (v: any) => { v.chainId = 1; },
     (v: any) => { v.quoteUrl = "https://example.com"; }, (v: any) => { v.sources[0].sha256 = "0".repeat(64); },
+    (v: any) => { v.extra = undefined; },
   ]) { const value: any = structuredClone(SUNSWAP_PIN_CATALOG); mutate(value); assert.throws(() => loadSunSwapPinCatalog(value), { code: "APN_STATE_CORRUPT" }); }
 });
 
@@ -38,7 +39,8 @@ test("quote codec binds the native TRX to USDT route and bounded GET", async () 
   const url = sunSwapQuoteUrl({ inputAmountAtomic: "1000000" });
   assert.equal(url.origin + url.pathname, "https://open.sun.io/apiv2/quote/swap/routingInV2");
   assert.equal(url.searchParams.get("fromTokenAddr"), "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb");
-  const routes = decodeSunSwapQuote(quoteResponse()); assert.equal(routes[0]!.amountOutAtomic, "345678"); assert.match(routes[0]!.routeHash, /^[a-f0-9]{64}$/u);
+  const routes = decodeSunSwapQuote(quoteResponse(), "1000000"); assert.equal(routes[0]!.amountOutAtomic, "345678"); assert.match(routes[0]!.routeHash, /^[a-f0-9]{64}$/u);
+  assert.equal(routes[0]!.inputAmountAtomic, "1000000");
   assert.deepEqual(validateSunSwapQuoteRoute(structuredClone(routes[0]!)), routes[0]); assert.deepEqual(assertSunSwapDirectRoute(routes[0], "300000"), routes[0]);
   const routeTamper: any = structuredClone(routes[0]!); routeTamper.roadForName[0] = "WTRX";
   assert.throws(() => validateSunSwapQuoteRoute(routeTamper), { code: "APN_PROVIDER_PROTOCOL" });
@@ -54,9 +56,20 @@ test("quote codec binds the native TRX to USDT route and bounded GET", async () 
   assert.equal((await adapter.quote({ inputAmountAtomic: "1000000" }))[0]!.amountOutAtomic, "345678"); assert.equal(called, true);
   for (const mutate of [
     (v: any) => { v.data[0].roadForAddr[0] = SUNSWAP_USDT; }, (v: any) => { v.data[0].amount = "0.1234567"; },
+    (v: any) => { v.data[0].roadForAddr[1] = `${SUNSWAP_USDT.slice(0, -1)}a`; },
     (v: any) => { v.data[0].pool = []; }, (v: any) => { v.data[0].extra = true; }, (v: any) => { v.code = 1; },
-  ]) { const value: any = quoteResponse(); mutate(value); assert.throws(() => decodeSunSwapQuote(value), { code: "APN_PROVIDER_PROTOCOL" }); }
+    (v: any) => { v.data[0].inUsd = "01.0"; }, (v: any) => { v.extra = true; },
+  ]) { const value: any = quoteResponse(); mutate(value); assert.throws(() => decodeSunSwapQuote(value, "1000000"), { code: "APN_PROVIDER_PROTOCOL" }); }
+  const sparse: any = quoteResponse(); sparse.data = new Array(1);
+  assert.throws(() => decodeSunSwapQuote(sparse, "1000000"), { code: "APN_PROVIDER_PROTOCOL" });
+  const wrongPoolResponse: any = quoteResponse(); wrongPoolResponse.data[0].pool[0] = "V2";
+  assert.throws(() => assertSunSwapDirectRoute(decodeSunSwapQuote(wrongPoolResponse, "1000000")[0], "300000"), { code: "APN_OPERATION_BLOCKED" });
   assert.throws(() => sunSwapQuoteUrl({ inputAmountAtomic: "01" }), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => sunSwapQuoteUrl({ inputAmountAtomic: (1n << 256n).toString() }), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => createSunSwapQuoteSnapshot({ profile: "sunswap", account: OWNER, recipient: RECIPIENT, inputAmountAtomic: "2000000",
+    minimumOutputAtomic: "300000", slippageBps: 2000, effectiveAt: "2026-09-17T00:00:00.000Z", expiresAt: "2026-09-17T00:05:00.000Z",
+    providerResponseHash: "a".repeat(64), unsignedTransactionPayloadHash: "b".repeat(64), route: routes[0]!,
+    simulation: { requestHash: "c".repeat(64), resultHash: "d".repeat(64), success: true } }), { code: "APN_OPERATION_BLOCKED" });
 });
 
 test("router decoder proves calldata value recipient deadline path and rejects all other commands", () => {
@@ -66,6 +79,9 @@ test("router decoder proves calldata value recipient deadline path and rejects a
   assert.throws(() => decodeSunSwapCalldata(calldata, "1000000", { ...intent, recipient: OWNER }), { code: "APN_OPERATION_BLOCKED" });
   assert.throws(() => decodeSunSwapCalldata(calldata, "1000000", { ...intent, deadlineSeconds: "1789613101" }), { code: "APN_OPERATION_BLOCKED" });
   assert.throws(() => decodeSunSwapCalldata(calldata, "1000000", { ...intent, minimumOutputAtomic: "300001" }), { code: "APN_OPERATION_BLOCKED" });
+  assert.throws(() => encodeSunSwapCalldata({ ...intent, extra: true } as any), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => encodeSunSwapCalldata({ ...intent, inputAmountAtomic: (1n << 256n).toString() }), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => encodeSunSwapCalldata({ ...intent, owner: `${OWNER.slice(0, -1)}a` }), { code: "APN_INVALID_INPUT" });
   const abi = parseAbi(["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"]);
   const parsed = decodeFunctionData({ abi, data: calldata }); const [, inputs, deadline] = parsed.args;
   for (const command of ["0x02", "0x03", "0x0a", "0x12", "0x21"]) {
@@ -83,9 +99,14 @@ test("unsigned TriggerSmartContract is exact and energy fee bounds fail closed",
   assert.deepEqual(validateSunSwapUnsignedTransaction(structuredClone(tx), frozen), tx);
   const tampered: any = structuredClone(tx); tampered.raw_data.contract[0].parameter.value.call_value++;
   assert.throws(() => validateSunSwapUnsignedTransaction(tampered, frozen), { code: "APN_WALLET_MISMATCH" });
+  const excess: any = structuredClone(tx); excess.extra = undefined;
+  assert.throws(() => validateSunSwapUnsignedTransaction(excess, frozen), { code: "APN_WALLET_MISMATCH" });
   assert.throws(() => buildSunSwapUnsignedTransaction({ ...frozen, feeLimitSun: "9999999" }), { code: "APN_FEE_BUDGET_EXCEEDED" });
   assert.throws(() => buildSunSwapUnsignedTransaction({ ...frozen, feeLimitSun: "100000001" }), { code: "APN_FEE_BUDGET_EXCEEDED" });
   assert.throws(() => buildSunSwapUnsignedTransaction({ ...frozen, expirationMs: "1789614000000" }), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => buildSunSwapUnsignedTransaction({ ...frozen, deadlineSeconds: "1789612700",
+    calldata: encodeSunSwapCalldata({ ...intent, deadlineSeconds: "1789612700" }) }), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => buildSunSwapUnsignedTransaction({ ...frozen, extra: true } as any), { code: "APN_INVALID_INPUT" });
 });
 
 class FakeRpc implements TronRpcPort {
@@ -102,16 +123,20 @@ test("simulation requires bound triggerconstantcontract and estimateenergy proof
   assert.deepEqual(rpc.calls, ["wallet/triggerconstantcontract", "wallet/estimateenergy"]);
   await assert.rejects(simulateSunSwapTransaction(new FakeRpc(() => { throw new Error("offline"); }), tx, frozen), { code: "APN_RPC_PROTOCOL" });
   await assert.rejects(simulateSunSwapTransaction(new FakeRpc(() => ({ result: { result: false }, transaction: { txID: tx.txID, raw_data_hex: tx.raw_data_hex } })), tx, frozen), { code: "APN_OPERATION_BLOCKED" });
-  await assert.rejects(simulateSunSwapTransaction(new FakeRpc((method) => ({ result: { result: true }, transaction: { txID: "f".repeat(64), raw_data_hex: tx.raw_data_hex },
-    ...(method === "wallet/estimateenergy" ? { energy_required: "50000" } : { energy_used: "50000" }) })), tx, frozen), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(simulateSunSwapTransaction(new FakeRpc((method) => ({ result: { result: true },
+    ...(method === "wallet/estimateenergy" ? { energy_required: "50000" } : { energy_used: "unsafe" }) })), tx, frozen), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(simulateSunSwapTransaction(new FakeRpc((method) => ({ result: { result: true }, transaction: { txID: tx.txID, raw_data_hex: tx.raw_data_hex },
     ...(method === "wallet/estimateenergy" ? { energy_required: "100001" } : { energy_used: "50000" }) })), tx, frozen), { code: "APN_FEE_BUDGET_EXCEEDED" });
+  await assert.rejects(simulateSunSwapTransaction(new FakeRpc((method) => ({ result: { result: true },
+    ...(method === "wallet/estimateenergy" ? { energy_required: "50000" } : { energy_used: "100001" }) })), tx, frozen), { code: "APN_FEE_BUDGET_EXCEEDED" });
+  const drifted: any = structuredClone(tx); drifted.raw_data.fee_limit--;
+  await assert.rejects(simulateSunSwapTransaction(rpc, drifted, frozen), { code: "APN_WALLET_MISMATCH" });
 });
 
 function receiptFixture(txID: string, raw: string, output = "300001", solid = "124") {
   const topic = tronHex(RECIPIENT).slice(2).padStart(64, "0");
   const transaction = { txID, raw_data_hex: raw, ret: [{ contractRet: "SUCCESS" }] };
-  const info = { id: txID, blockNumber: "123", fee: "12345", receipt: { result: "SUCCESS" }, log: [{ address: tronHex(SUNSWAP_USDT),
+  const info = { id: txID, blockNumber: "123", fee: "12345", receipt: { result: "SUCCESS" }, log: [{ address: tronHex(SUNSWAP_USDT).slice(2),
     topics: ["ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", "0".repeat(64), topic], data: BigInt(output).toString(16).padStart(64, "0") }] };
   return { transaction, info, solid };
 }
@@ -129,6 +154,7 @@ test("walletsolidity receipt proves solidification and canonical USDT minimum ou
     (v: any) => { v.info.log[0].topics[2] = "0".repeat(64); }, (v: any) => { v.info.log[0].address = tronHex(OWNER); },
     (v: any) => { v.info.receipt.result = "FAILED"; }, (v: any) => { v.info.fee = "100001"; },
     (v: any) => { v.solid = "122"; }, (v: any) => { v.transaction.raw_data_hex = "00"; },
+    (v: any) => { v.info.log[0].address = v.info.log[0].address.toUpperCase(); },
   ]) { const value: any = receiptFixture(tx.txID, tx.raw_data_hex); mutate(value);
     assert.throws(() => validateSunSwapReceipt(value.transaction, value.info, value.solid, expected), { code: "APN_RPC_PROTOCOL" }); }
 });

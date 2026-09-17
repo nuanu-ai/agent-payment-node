@@ -1,5 +1,5 @@
 import { utils } from "tronweb";
-import { canonicalJson, sha256 } from "../../canonical.js";
+import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { tronAddress, tronHash, tronHex } from "../../tron/codec.js";
 import { decodeSunSwapCalldata, type SunSwapCalldataIntent } from "./calldata.js";
@@ -23,10 +23,15 @@ export interface SunSwapUnsignedTransaction {
 }
 
 export function buildSunSwapUnsignedTransaction(input: SunSwapUnsignedIntent): SunSwapUnsignedTransaction {
+  if (!isPlainRecord(input) || !exactKeys(input, ["owner", "recipient", "inputAmountAtomic", "minimumOutputAtomic", "deadlineSeconds",
+    "maximumEnergy", "energyPriceSun", "maximumFeeLimitSun", "calldata", "callValueAtomic", "referenceBlockId", "timestampMs",
+    "expirationMs", "feeLimitSun"])) invalid();
   validateEnergyBounds(input); tronHash(input.referenceBlockId);
-  decodeSunSwapCalldata(input.calldata, input.callValueAtomic, input);
+  decodeSunSwapCalldata(input.calldata, input.callValueAtomic, { owner: input.owner, recipient: input.recipient,
+    inputAmountAtomic: input.inputAmountAtomic, minimumOutputAtomic: input.minimumOutputAtomic, deadlineSeconds: input.deadlineSeconds });
   const timestamp = safe(input.timestampMs), expiration = safe(input.expirationMs), feeLimit = safe(input.feeLimitSun), callValue = safe(input.callValueAtomic);
-  if (expiration <= timestamp || expiration - timestamp > 600_000) invalid();
+  const deadlineMs = positive(input.deadlineSeconds) * 1_000n;
+  if (expiration <= timestamp || expiration - timestamp > 600_000 || deadlineMs < BigInt(timestamp) || deadlineMs > BigInt(expiration)) invalid();
   const raw_data = {
     contract: [{ type: "TriggerSmartContract" as const, parameter: { type_url: "type.googleapis.com/protocol.TriggerSmartContract" as const,
       value: { owner_address: tronHex(input.owner), contract_address: tronHex(SUNSWAP_V4_UNIVERSAL_ROUTER), data: input.calldata.slice(2), call_value: callValue } } }] as const,
@@ -42,7 +47,9 @@ export function buildSunSwapUnsignedTransaction(input: SunSwapUnsignedIntent): S
 
 export function validateSunSwapUnsignedTransaction(value: unknown, intent: SunSwapUnsignedIntent): SunSwapUnsignedTransaction {
   const expected = buildSunSwapUnsignedTransaction(intent);
-  if (canonicalJson(value) !== canonicalJson(expected)) throw new ApnError("APN_WALLET_MISMATCH", "Unsigned SunSwap TriggerSmartContract drifted from the frozen intent.");
+  if (!sameShape(value, expected) || canonicalJson(value) !== canonicalJson(expected)) {
+    throw new ApnError("APN_WALLET_MISMATCH", "Unsigned SunSwap TriggerSmartContract drifted from the frozen intent.");
+  }
   return expected;
 }
 
@@ -54,3 +61,16 @@ export function sunSwapUnsignedPayloadHash(transaction: SunSwapUnsignedTransacti
 function positive(value: string): bigint { if (!/^[1-9][0-9]{0,77}$/u.test(value)) invalid(); return BigInt(value); }
 function safe(value: string): number { const number = positive(value); if (number > BigInt(Number.MAX_SAFE_INTEGER)) invalid(); return Number(number); }
 function invalid(): never { throw new ApnError("APN_INVALID_INPUT", "SunSwap unsigned transaction or resource bounds are invalid."); }
+function sameShape(value: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(value) || value.length !== expected.length) return false;
+    for (let index = 0; index < expected.length; index++) if (!Object.hasOwn(value, index) || !sameShape(value[index], expected[index])) return false;
+    return true;
+  }
+  if (expected !== null && typeof expected === "object") {
+    if (!isPlainRecord(value)) return false;
+    const keys = Object.keys(expected); if (!exactKeys(value, keys)) return false;
+    return keys.every((key) => sameShape(value[key], (expected as Record<string, unknown>)[key]));
+  }
+  return typeof value === typeof expected;
+}
