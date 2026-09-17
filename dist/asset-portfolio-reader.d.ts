@@ -84,10 +84,10 @@ export interface FamilyBalanceBatchPort {
     read(request: BatchBalanceRequest): Promise<BatchBalanceResult>;
 }
 export declare class AssetPortfolioReader {
-    private readonly ports;
     private readonly now;
     private readonly wait;
     private readonly cache;
+    private readonly ports;
     constructor(ports: Readonly<{
         evm: FamilyBalanceBatchPort;
         solana: FamilyBalanceBatchPort;
