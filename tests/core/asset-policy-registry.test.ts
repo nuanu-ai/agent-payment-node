@@ -139,4 +139,13 @@ test("digest tampering, native-token confusion and non-canonical evaluation inpu
     chain: "eip155:1", asset: { kind: "token", identifier: "0x0000000000000000000000000000000000000000" }, rail: "direct",
     amountAtomic: "1", dailyUsageAtomic: "0", asOfDate: "2026-09-18",
   }), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => evaluateAssetPolicy(registry, {
+    chain: "eip155:1", asset: { kind: "native", identifier: EVM_USDC }, rail: "direct",
+    amountAtomic: "1", dailyUsageAtomic: "0", asOfDate: "2026-09-18",
+  } as any), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => evaluateAssetPolicy(registry, {
+    chain: "eip155:1", asset: { kind: "native", identifier: null, alias: "ETH" }, rail: "direct",
+    amountAtomic: "1", dailyUsageAtomic: "0", asOfDate: "2026-09-18",
+  } as any), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => evaluateAssetPolicy(registry, null as any), { code: "APN_INVALID_INPUT" });
 });

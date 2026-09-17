@@ -32,6 +32,7 @@ export function validateAssetPolicyRegistry(value) {
 /** Shared fail-closed evaluator for future CLI and MCP admission surfaces. */
 export function evaluateAssetPolicy(registryValue, input) {
     const registry = validateAssetPolicyRegistry(registryValue);
+    validateEvaluationInput(input);
     const asOfDate = calendarDate(input.asOfDate, "Policy evaluation date");
     if (asOfDate < registry.effectiveDate)
         denied("The asset policy registry is not effective on the requested date.");
@@ -68,6 +69,16 @@ export function evaluateAssetPolicy(registryValue, input) {
         dailyUsageAtomic: usage.toString(),
         dailyRemainingAtomic: (dailyLimit - usage - amount).toString(),
     };
+}
+function validateEvaluationInput(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, [
+        "chain", "asset", "rail", "amountAtomic", "dailyUsageAtomic", "asOfDate",
+    ]) || typeof value.chain !== "string" || !isPlainRecord(value.asset) ||
+        !exactKeys(value.asset, ["kind", "identifier"]) ||
+        (value.asset.kind !== "native" && value.asset.kind !== "token") ||
+        (value.asset.kind === "native" ? value.asset.identifier !== null : typeof value.asset.identifier !== "string")) {
+        invalid("The asset policy evaluation input schema is invalid.");
+    }
 }
 function validateRegistryBody(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "registryVersion", "publishedAt", "effectiveDate", "chains"]) ||
