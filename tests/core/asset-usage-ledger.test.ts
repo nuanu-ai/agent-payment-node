@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
-import { AssetUsageLedger, type AssetUsageIdentity } from "../../src/asset-usage-ledger.js";
+import { AssetUsageLedger, ASSET_USAGE_WINDOW, type AssetUsageIdentity } from "../../src/core.js";
 import { temporaryState } from "./helpers.js";
 
 const EVM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -79,6 +79,18 @@ test("pre-effect terminal failure releases its reservation and terminal retries 
   assert.equal((await reserve(ledger, "replacement-after-fail", "100", "direct")).amountAtomic, "100");
 });
 
+test("an exposed reservation cannot claim pre-effect failure and remains charged", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root);
+  const held = await reserve(ledger, "submitted-no-release", "100", "gasless");
+  await ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "submitted", now: new Date("2026-09-17T10:01:00.000Z") });
+  await assert.rejects(ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "failed_before_effect", now: new Date("2026-09-17T10:02:00.000Z"), outcomeDigest: "e".repeat(64) }),
+  { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await ledger.usage(identity, new Date("2026-09-20T10:00:00.000Z"))).amountAtomic, "100");
+});
+
 test("concurrent duplicate reservation is idempotent and concurrent distinct reservations cannot race past the cap", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const first = new AssetUsageLedger(temporary.root);
@@ -112,6 +124,44 @@ test("reservations and unresolved usage survive a new store instance", async (t)
     { code: "APN_OPERATION_BLOCKED" });
 });
 
+test("transition time is monotonic so a late finality update cannot backdate usage out of the current window", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root);
+  const record = await reserve(ledger, "monotonic-transition-1", "100", "direct", new Date("2026-09-17T10:00:00.000Z"));
+  await ledger.transition({ ...identity, reservationId: record.reservationId, policyDigest: record.policyDigest,
+    state: "submitted", now: new Date("2026-09-19T10:00:00.000Z") });
+  await assert.rejects(ledger.transition({ ...identity, reservationId: record.reservationId, policyDigest: record.policyDigest,
+    state: "finalized", now: new Date("2026-09-17T11:00:00.000Z"), outcomeDigest: "d".repeat(64) }),
+  { code: "APN_OPERATION_BLOCKED" });
+  const usage = await ledger.usage(identity, new Date("2026-09-19T11:00:00.000Z"));
+  assert.equal(usage.windowPolicy, ASSET_USAGE_WINDOW);
+  assert.equal(usage.amountAtomic, "100");
+  await assert.rejects(reserve(ledger, "monotonic-no-bypass", "1", "gasless", new Date("2026-09-19T11:00:00.000Z")),
+    { code: "APN_OPERATION_BLOCKED" });
+});
+
+test("a future-dated terminal update cannot open an earlier daily window for a new reservation", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root);
+  const record = await reserve(ledger, "future-terminal-guard", "100", "direct", new Date("2026-09-17T10:00:00.000Z"));
+  await ledger.transition({ ...identity, reservationId: record.reservationId, policyDigest: record.policyDigest,
+    state: "finalized", now: new Date("2026-09-19T10:00:00.000Z"), outcomeDigest: "f".repeat(64) });
+  await assert.rejects(reserve(ledger, "future-window-bypass", "100", "bridge", new Date("2026-09-18T10:00:00.000Z")),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await reserve(ledger, "after-future-window", "100", "bridge", new Date("2026-09-20T10:00:00.000Z"))).amountAtomic,
+    "100");
+});
+
+test("public usage identity rejects token aliases instead of reading a second bucket", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root);
+  await reserve(ledger, "canonical-token-bucket", "10", "direct");
+  await assert.rejects(ledger.usage({ ...identity, asset: { kind: "token", identifier: EVM_USDC.toLowerCase() } },
+    new Date("2026-09-17T11:00:00.000Z")), { code: "APN_INVALID_INPUT" });
+  await assert.rejects(ledger.usage({ ...identity, chain: `eip155:${1n << 256n}` },
+    new Date("2026-09-17T11:00:00.000Z")), { code: "APN_INVALID_INPUT" });
+});
+
 test("policy rebinding, asset confusion, altered state and invalid terminal claims fail closed", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const ledger = new AssetUsageLedger(temporary.root);
@@ -129,6 +179,9 @@ test("policy rebinding, asset confusion, altered state and invalid terminal clai
   const buckets = await readdir(join(temporary.root, "asset-usage"));
   const files = await readdir(join(temporary.root, "asset-usage", buckets[0]!));
   const path = join(temporary.root, "asset-usage", buckets[0]!, files[0]!);
+  assert.equal((await lstat(join(temporary.root, "asset-usage"))).mode & 0o777, 0o700);
+  assert.equal((await lstat(join(temporary.root, "asset-usage", buckets[0]!))).mode & 0o777, 0o700);
+  assert.equal((await lstat(path)).mode & 0o777, 0o600);
   const stored = JSON.parse(await readFile(path, "utf8")); stored.amountAtomic = "11";
   await writeFile(path, `${JSON.stringify(stored)}\n`, { mode: 0o600 });
   await assert.rejects(ledger.load(identity, record.reservationId), { code: "APN_STATE_CORRUPT" });

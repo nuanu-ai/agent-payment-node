@@ -101,6 +101,7 @@ export class AssetUsageLedger extends SecureStateStore {
         assertReplay(existing, initial.policyDigest, initial.registryVersion, input.rail, initial.amountAtomic, idempotencyHash);
         return existing;
       }
+      assertBucketWindow(reservations, at);
       const usage = sumUsage(reservations, input.now);
       evaluateAssetPolicy(registry, {
         chain: identity.chain, asset: identity.asset, rail: input.rail,
@@ -140,6 +141,7 @@ export class AssetUsageLedger extends SecureStateStore {
       if (current.policyDigest !== policyDigest || canonicalJson(exactIdentity(current)) !== canonicalJson(identity)) {
         throw blocked("The usage reservation binding does not match the requested transition.");
       }
+      if (at < current.updatedAt) throw blocked("The usage reservation transition cannot move backward in time.");
       const terminal = input.state === "finalized" || input.state === "failed_before_effect";
       const outcomeDigest = terminal ? digest(input.outcomeDigest, "Outcome digest") : null;
       if (current.state === input.state) {
@@ -278,6 +280,13 @@ function assertReplay(record: AssetUsageReservation, policyDigest: string, regis
   }
 }
 
+function assertBucketWindow(records: readonly AssetUsageReservation[], at: string): void {
+  const day = at.slice(0, 10);
+  if (records.some((record) => record.updatedAt.slice(0, 10) > day)) {
+    throw blocked("The usage reservation window cannot move backward in time.");
+  }
+}
+
 function assertTransition(from: AssetUsageState, to: Exclude<AssetUsageState, "reserved">): void {
   const allowed: Readonly<Record<AssetUsageState, readonly AssetUsageState[]>> = {
     reserved: ["submitted", "unknown_finality", "finalized", "failed_before_effect"],
@@ -286,7 +295,7 @@ function assertTransition(from: AssetUsageState, to: Exclude<AssetUsageState, "r
     finalized: [],
     failed_before_effect: [],
   };
-  if (!allowed[from].includes(to)) corrupt("The usage reservation transition is invalid.");
+  if (!allowed[from].includes(to)) throw blocked("The usage reservation transition is invalid.");
 }
 
 function validateIdentity(value: AssetUsageIdentity, stored = false): AssetUsageIdentity {
@@ -297,7 +306,10 @@ function validateIdentity(value: AssetUsageIdentity, stored = false): AssetUsage
       (value.asset.kind === "native" ? value.asset.identifier !== null : typeof value.asset.identifier !== "string" || value.asset.identifier.length === 0 || value.asset.identifier.length > 128)) {
     failure(stored, "The usage asset identity is invalid.");
   }
-  return { account, chain: value.chain, asset: value.asset };
+  const asset = value.asset.kind === "native"
+    ? { kind: "native" as const, identifier: null }
+    : { kind: "token" as const, identifier: canonicalToken(value.chain, value.asset.identifier, stored) };
+  return { account, chain: value.chain, asset };
 }
 
 function exactIdentity(value: AssetUsageIdentity): AssetUsageIdentity { return { account: value.account, chain: value.chain, asset: value.asset }; }
@@ -307,6 +319,28 @@ function exactAsset(value: { readonly kind: "native" | "token"; readonly identif
 function withoutDigest(value: AssetUsageReservation): ReservationBody { const { reservationDigest: _digest, ...body } = value; return body; }
 function canonicalAccount(chain: string, value: unknown, stored: boolean): string {
   if (typeof value !== "string") return failure(stored, "The usage account identity is invalid.");
+  try {
+    const evm = /^eip155:([1-9][0-9]{0,77})$/u.exec(chain);
+    if (evm !== null && BigInt(evm[1]!) <= MAX_UINT256) {
+      const canonical = getAddress(value);
+      if (canonical === "0x0000000000000000000000000000000000000000" || canonical !== value) throw new Error();
+      return canonical;
+    }
+    const solana = /^solana:([1-9A-HJ-NP-Za-km-z]{32,44})$/u.exec(chain);
+    if (solana !== null && solanaAddress(solana[1]!) === solana[1]) {
+      const canonical = solanaAddress(value);
+      if (canonical !== value) throw new Error();
+      return canonical;
+    }
+    if (/^tron:[a-f0-9]{64}$/u.test(chain)) {
+      const canonical = tronAddress(value);
+      if (canonical !== value) throw new Error();
+      return canonical;
+    }
+  } catch {}
+  return failure(stored, "The usage account or network identity is not canonical.");
+}
+function canonicalToken(chain: string, value: string, stored: boolean): string {
   try {
     if (/^eip155:[1-9][0-9]{0,77}$/u.test(chain)) {
       const canonical = getAddress(value);
@@ -324,7 +358,7 @@ function canonicalAccount(chain: string, value: unknown, stored: boolean): strin
       return canonical;
     }
   } catch {}
-  return failure(stored, "The usage account or network identity is not canonical.");
+  return failure(stored, "The usage token identity is not canonical for the network.");
 }
 function idempotency(value: unknown): string {
   if (typeof value !== "string" || value.length < 8 || value.length > 256 || /[^\x21-\x7e]/u.test(value)) throw invalid("The usage idempotency key is invalid.");
