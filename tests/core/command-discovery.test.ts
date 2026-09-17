@@ -33,7 +33,7 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "wallet balance-asset",
   "pay transfer prepare-asset",
@@ -83,6 +83,8 @@ const EXPECTED_COMMANDS = [
   "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
   "allowlist inventory", "allowlist resolve", "allowlist policy prepare", "allowlist policy status",
   "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare", "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
+  "swap tron sunswap inventory", "swap tron sunswap quote", "swap tron sunswap prepare", "swap tron sunswap status", "swap tron sunswap approve", "swap tron sunswap execute",
+  "swap solana jupiter inventory", "swap solana jupiter quote", "swap solana jupiter prepare", "swap solana jupiter status", "swap solana jupiter approve", "swap solana jupiter execute",
 ];
 
 test("one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields", () => {

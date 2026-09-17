@@ -24,8 +24,12 @@ import { type OperationAbandonApprovalPort } from "./operation-abandon-approval.
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
+import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
+import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 export interface RuntimeFactoryOptions {
     readonly uniswap?: UniswapGuardedSwapBuilder;
+    readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
+    readonly jupiter?: JupiterReadOnlyQuoteBuilder;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;

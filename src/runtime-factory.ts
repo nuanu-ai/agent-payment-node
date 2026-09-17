@@ -90,9 +90,13 @@ import { avalancheFacilitatorRpc } from "./facilitator-gasless/rpc.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import { TtyFacilitatorApproval } from "./facilitator-gasless/tty.js";
 import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
+import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
+import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 
 export interface RuntimeFactoryOptions {
   readonly uniswap?: UniswapGuardedSwapBuilder;
+  readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
+  readonly jupiter?: JupiterReadOnlyQuoteBuilder;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -231,6 +235,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   return new ApnCore({
     state,
     ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
+    ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
+    ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
     ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
       circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state,
         circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)),

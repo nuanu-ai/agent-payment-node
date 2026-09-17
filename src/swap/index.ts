@@ -14,3 +14,4 @@ export * from "./uniswap-simulation.js";
 export * from "./uniswap-service.js";
 export * from "./uniswap-receipt.js";
 export * from "./sunswap-tron/index.js";
+export * from "./jupiter-solana/index.js";

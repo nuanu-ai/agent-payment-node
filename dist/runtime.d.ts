@@ -19,8 +19,12 @@ import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/se
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
+import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
+import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 export interface CoreDependencies {
     readonly uniswap?: UniswapGuardedSwapBuilder;
+    readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
+    readonly jupiter?: JupiterReadOnlyQuoteBuilder;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -57,6 +61,8 @@ export interface CoreDependencies {
 }
 export declare class RuntimeContext {
     readonly uniswap?: UniswapGuardedSwapBuilder;
+    readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
+    readonly jupiter?: JupiterReadOnlyQuoteBuilder;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;

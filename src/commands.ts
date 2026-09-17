@@ -13,6 +13,16 @@ export type CommandRequest =
       readonly maxGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string }
   | { readonly command: "swap.uniswap.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
   | { readonly command: "swap.uniswap.status" | "swap.uniswap.approve" | "swap.uniswap.execute"; readonly operationId: string }
+  | { readonly command: "swap.sunswap.inventory" }
+  | { readonly command: "swap.sunswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
+      readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number }
+  | { readonly command: "swap.sunswap.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
+  | { readonly command: "swap.sunswap.status" | "swap.sunswap.approve" | "swap.sunswap.execute"; readonly operationId: string }
+  | { readonly command: "swap.jupiter.inventory" }
+  | { readonly command: "swap.jupiter.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
+      readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number }
+  | { readonly command: "swap.jupiter.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
+  | { readonly command: "swap.jupiter.status" | "swap.jupiter.approve" | "swap.jupiter.execute"; readonly operationId: string }
   | { readonly command: "allowlist.inventory" }
   | { readonly command: "allowlist.resolve"; readonly chain: string; readonly kind: "native" | "token"; readonly identifier?: string }
   | { readonly command: "allowlist.policy.status"; readonly profile: string }

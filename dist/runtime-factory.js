@@ -113,6 +113,8 @@ export function createApnCore(bound, options = {}) {
     return new ApnCore({
         state,
         ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
+        ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
+        ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
         ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
             circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state, circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)), new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits, () => options.clock?.now().getTime() ?? Date.now()),
         } : {}),

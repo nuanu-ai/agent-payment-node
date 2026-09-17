@@ -30,7 +30,9 @@
     "docs/lifi.md",
     "docs/gasless.md",
     "docs/evm-assets.md",
-    "docs/uniswap.md"
+    "docs/uniswap.md",
+    "docs/sunswap.md",
+    "docs/jupiter.md"
   ],
   "scripts": {
     "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",
