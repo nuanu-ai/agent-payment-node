@@ -89,7 +89,7 @@ export class AssetUsageLedger extends SecureStateStore {
     const at = instant(input.now);
     const initial = evaluateAssetPolicy(registry, {
       chain: input.chain, asset: input.asset, rail: input.rail,
-      amountAtomic: input.amountAtomic, dailyUsageAtomic: "0", asOfDate: at.slice(0, 10),
+      amountAtomic: input.amountAtomic, dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at,
     });
     const account = canonicalAccount(initial.chain, input.account, false);
     const idempotencyHash = idempotency(input.idempotencyKey);
@@ -107,7 +107,7 @@ export class AssetUsageLedger extends SecureStateStore {
       const usage = sumUsage(reservations, input.now);
       evaluateAssetPolicy(registry, {
         chain: identity.chain, asset: identity.asset, rail: input.rail,
-        amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10),
+        amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at,
       });
       const body: ReservationBody = {
         schemaVersion: ASSET_USAGE_RESERVATION_SCHEMA,

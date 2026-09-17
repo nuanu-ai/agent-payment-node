@@ -13,6 +13,25 @@ export type CommandRequest = {
     readonly kind: "native" | "token";
     readonly identifier?: string;
 } | {
+    readonly command: "allowlist.policy.status";
+    readonly profile: string;
+} | {
+    readonly command: "allowlist.policy.prepare";
+    readonly profile: string;
+    readonly account: string;
+    readonly overlayVersion: string;
+    readonly chain: string;
+    readonly kind: "native" | "token";
+    readonly identifier?: string;
+    readonly rail: "direct" | "gasless" | "x402" | "bridge" | "swap";
+    readonly maximumPerTransferAtomic: string;
+    readonly dailyLimitAtomic: string;
+    readonly effectiveAt: string;
+    readonly expiresAt?: string;
+    readonly mechanismProvider?: string;
+    readonly mechanismReference?: string;
+    readonly expectedRevision?: number;
+} | {
     readonly command: "oneclick.source.submit";
     readonly profile: string;
     readonly expectedPayer: string;
