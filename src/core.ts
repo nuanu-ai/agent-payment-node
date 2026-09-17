@@ -59,6 +59,20 @@ export type {
   AssetRailAdmission,
   UnsignedAssetPolicyRegistry,
 } from "./asset-policy-registry.js";
+export {
+  ASSET_USAGE_RESERVATION_SCHEMA,
+  ASSET_USAGE_WINDOW,
+  AssetUsageLedger,
+  validateAssetUsageReservation,
+} from "./asset-usage-ledger.js";
+export type {
+  AssetUsageIdentity,
+  AssetUsageReservation,
+  AssetUsageReserveInput,
+  AssetUsageSnapshot,
+  AssetUsageState,
+  AssetUsageTransitionInput,
+} from "./asset-usage-ledger.js";
 
 export class ApnCore {
   readonly context: RuntimeContext;
