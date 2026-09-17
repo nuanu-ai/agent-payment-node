@@ -73,6 +73,22 @@ export type {
   AssetUsageState,
   AssetUsageTransitionInput,
 } from "./asset-usage-ledger.js";
+export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
+export type {
+  AssetPortfolio,
+  BalanceObservation,
+  BalanceProvenance,
+  BatchBalanceAsset,
+  BatchBalanceAvailable,
+  BatchBalanceRequest,
+  BatchBalanceResult,
+  BatchBalanceUnavailable,
+  FamilyBalanceBatchPort,
+  PortfolioAccount,
+  PortfolioAssetBalance,
+  PortfolioCachePolicy,
+  PortfolioNetworkBalance,
+} from "./asset-portfolio-reader.js";
 
 export class ApnCore {
   readonly context: RuntimeContext;
