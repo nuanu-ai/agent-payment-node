@@ -36,7 +36,9 @@ import { saRequest } from "./smart-account-gasless/schema.js";
 import { saFail } from "./smart-account-gasless/reasons.js";
 import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { facilitatorFail } from "./facilitator-gasless/failure.js";
+import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
 export { ASSET_POLICY_REGISTRY_SCHEMA, assetPolicyDigest, evaluateAssetPolicy, sealAssetPolicyRegistry, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
+export { ALLOWLIST_DATASET_PATH, ALLOWLIST_DATASET_SCHEMA, ALLOWLIST_DATASET_SHA256, ALLOWLIST_DATASET_VERSION, ALLOWLIST_INVENTORY_SCHEMA, assertAllowlistExecutionConfigured, compileAllowlistInventory, loadAllowlistInventory, resolveAllowlistAsset, } from "./allowlist-inventory.js";
 export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, AssetUsageLedger, validateAssetUsageReservation, } from "./asset-usage-ledger.js";
 export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
 export class ApnCore {
@@ -83,6 +85,11 @@ export class ApnCore {
     }
     async dispatch(request) {
         switch (request.command) {
+            case "allowlist.inventory": return dataOutcome(loadAllowlistInventory(), "frozen_candidate_inventory");
+            case "allowlist.resolve": return dataOutcome({
+                dataset: loadAllowlistInventory().dataset,
+                asset: resolveAllowlistAsset(request),
+            }, "exact_candidate_identity");
             case "circle.approval.prepare": {
                 await this.context.ready();
                 const owner = (await bridgeOwner(this.context.state, request.profile)).owner;

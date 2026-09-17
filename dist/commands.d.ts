@@ -6,6 +6,13 @@ import type { ChainProvider } from "./direct-rail-ports.js";
 import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
+    readonly command: "allowlist.inventory";
+} | {
+    readonly command: "allowlist.resolve";
+    readonly chain: string;
+    readonly kind: "native" | "token";
+    readonly identifier?: string;
+} | {
     readonly command: "oneclick.source.submit";
     readonly profile: string;
     readonly expectedPayer: string;

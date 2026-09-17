@@ -33,7 +33,7 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "wallet balance-asset",
   "pay transfer prepare-asset",
@@ -81,6 +81,7 @@ const EXPECTED_COMMANDS = [
   "circle approval prepare", "circle approval execute", "circle approval status", "circle source submit",
   "oneclick source submit", "oneclick source status",
   "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
+  "allowlist inventory", "allowlist resolve",
 ];
 
 test("one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields", () => {
