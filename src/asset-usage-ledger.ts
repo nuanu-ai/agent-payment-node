@@ -307,7 +307,7 @@ function assertTransition(from: AssetUsageState, to: Exclude<AssetUsageState, "r
   const allowed: Readonly<Record<AssetUsageState, readonly AssetUsageState[]>> = {
     reserved: ["submitted", "unknown_finality", "finalized", "failed_before_effect"],
     submitted: ["unknown_finality", "finalized"],
-    unknown_finality: ["finalized", "failed_before_effect"],
+    unknown_finality: ["finalized"],
     finalized: [],
     failed_before_effect: [],
   };

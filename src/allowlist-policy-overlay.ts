@@ -20,6 +20,7 @@ import {
 import { parseAtomic } from "./money.js";
 import { SecureStateStore, stateCorrupt } from "./secure-state-store.js";
 import { tronAddress } from "./tron/codec.js";
+import { validateSwapMechanismPin, type SwapMechanismPin } from "./swap/pin.js";
 
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA = "apn.allowlist-policy-overlay.v1" as const;
 export const ALLOWLIST_POLICY_RECORD_SCHEMA = "apn.allowlist-policy-record.v1" as const;
@@ -34,6 +35,8 @@ export interface AllowlistMechanismPin {
   readonly reference: string;
 }
 
+export type AllowlistAdmissionMechanismPin = AllowlistMechanismPin | SwapMechanismPin;
+
 export interface AllowlistPolicyAdmissionInput {
   readonly chain: string;
   readonly kind: CandidateKind;
@@ -41,7 +44,7 @@ export interface AllowlistPolicyAdmissionInput {
   readonly rail: CandidateRail;
   readonly maximumPerTransferAtomic: string;
   readonly dailyLimitAtomic: string;
-  readonly mechanism?: AllowlistMechanismPin;
+  readonly mechanism?: AllowlistAdmissionMechanismPin;
 }
 
 export interface AllowlistPolicyOverlayInput {
@@ -92,7 +95,7 @@ export function compileAllowlistPolicyOverlay(
   for (const admission of overlay.admissions) {
     const asset = resolveAllowlistAsset(admission, inventory);
     const rails = { direct: admission.rail === "direct", gasless: admission.rail === "gasless",
-      x402: admission.rail === "x402", bridge: admission.rail === "bridge", swap: false } satisfies AssetRailAdmission;
+      x402: admission.rail === "x402", bridge: admission.rail === "bridge", swap: admission.rail === "swap" } satisfies AssetRailAdmission;
     const row = {
       kind: asset.kind,
       identifier: asset.identifier,
@@ -272,11 +275,10 @@ function admission(value: unknown): AllowlistPolicyAdmissionInput {
       (value.rail !== "direct" && value.rail !== "gasless" && value.rail !== "x402" && value.rail !== "bridge" && value.rail !== "swap")) {
     invalid("Allowlist admission row is invalid.", "invalid_admission");
   }
-  if (value.rail === "swap") invalid("Swap admission belongs to Card3 and is unavailable here.", "swap_not_supported");
   const maximum = positiveAtomic(value.maximumPerTransferAtomic, "maximum_per_transfer");
   const daily = positiveAtomic(value.dailyLimitAtomic, "daily_limit");
   if (BigInt(maximum) > BigInt(daily)) invalid("Per-transfer cap cannot exceed daily cap.", "cap_order");
-  const mechanism = mechanismPin(value.mechanism);
+  const mechanism = value.rail === "swap" ? swapMechanismPin(value.mechanism) : mechanismPin(value.mechanism);
   if (value.rail !== "direct" && mechanism === undefined) {
     invalid("The selected rail requires a nonempty pinned provider mechanism.", "mechanism_required");
   }
@@ -295,6 +297,12 @@ function mechanismPin(value: unknown): AllowlistMechanismPin | undefined {
     invalid("Pinned mechanism metadata is invalid.", "invalid_mechanism");
   }
   return value as unknown as AllowlistMechanismPin;
+}
+
+function swapMechanismPin(value: unknown): SwapMechanismPin | undefined {
+  if (value === undefined) return undefined;
+  try { return validateSwapMechanismPin(value); }
+  catch { return invalid("Pinned swap mechanism metadata is invalid.", "invalid_swap_mechanism"); }
 }
 
 function overlayBody(value: unknown): AllowlistPolicyOverlayInput {

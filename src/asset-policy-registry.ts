@@ -4,6 +4,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 import { tronAddress } from "./tron/codec.js";
+import { validateSwapMechanismPin, type SwapMechanismPin } from "./swap/pin.js";
 
 export const ASSET_POLICY_REGISTRY_SCHEMA = "apn.asset-policy-registry.v1" as const;
 const POLICY_DIGEST_DOMAIN = ASSET_POLICY_REGISTRY_SCHEMA;
@@ -35,10 +36,12 @@ export interface AssetPolicyRow {
   readonly decimals: number;
   readonly rails: AssetRailAdmission;
   readonly caps: AssetAtomicCaps;
-  readonly mechanismPins?: Readonly<Partial<Record<"gasless" | "x402" | "bridge", Readonly<{
-    provider: string;
-    reference: string;
-  }>>>>;
+  readonly mechanismPins?: Readonly<Partial<{
+    gasless: Readonly<{ provider: string; reference: string }>;
+    x402: Readonly<{ provider: string; reference: string }>;
+    bridge: Readonly<{ provider: string; reference: string }>;
+    swap: SwapMechanismPin;
+  }>>;
 }
 
 export interface AssetPolicyChain {
@@ -226,13 +229,18 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown): asserts 
   validateRails(value.rails);
   validateCaps(value.caps);
   if (value.mechanismPins !== undefined) validateMechanismPins(value.mechanismPins);
+  const mechanismPins = value.mechanismPins as Record<string, unknown> | undefined;
+  const swapPin = mechanismPins?.swap;
+  if (value.rails.swap !== (swapPin !== undefined)) invalid("Swap admission requires exactly one immutable swap mechanism pin.");
+  if (mechanismPins !== undefined && "direct" in mechanismPins) invalid("Direct admission cannot carry mechanism metadata.");
 }
 
 function validateMechanismPins(value: unknown): void {
-  if (!isPlainRecord(value) || Object.keys(value).some((key) => !["gasless", "x402", "bridge"].includes(key))) {
+  if (!isPlainRecord(value) || Object.keys(value).some((key) => !["gasless", "x402", "bridge", "swap"].includes(key))) {
     invalid("Asset mechanism pins are invalid.");
   }
-  for (const pin of Object.values(value)) {
+  for (const [rail, pin] of Object.entries(value)) {
+    if (rail === "swap") { validateSwapMechanismPin(pin); continue; }
     if (!isPlainRecord(pin) || !exactKeys(pin, ["provider", "reference"]) || typeof pin.provider !== "string" ||
         typeof pin.reference !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(pin.provider) ||
         !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(pin.reference)) invalid("Asset mechanism pins are invalid.");
