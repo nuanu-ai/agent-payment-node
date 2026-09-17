@@ -38,12 +38,14 @@ import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { facilitatorFail } from "./facilitator-gasless/failure.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
 import { executeAllowlistPolicyCommand } from "./allowlist-policy-overlay.js";
+import { executeUniswapCommand } from "./swap/uniswap-command-service.js";
 export { ASSET_POLICY_REGISTRY_SCHEMA, assetPolicyDigest, evaluateAssetPolicy, sealAssetPolicyRegistry, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
 export { ALLOWLIST_DATASET_PATH, ALLOWLIST_DATASET_SCHEMA, ALLOWLIST_DATASET_SHA256, ALLOWLIST_DATASET_VERSION, ALLOWLIST_INVENTORY_SCHEMA, assertAllowlistExecutionConfigured, compileAllowlistInventory, loadAllowlistInventory, resolveAllowlistAsset, } from "./allowlist-inventory.js";
 export { ALLOWLIST_POLICY_OVERLAY_SCHEMA, ALLOWLIST_POLICY_RECORD_SCHEMA, AllowlistPolicyStore, compileAllowlistPolicyOverlay, executeAllowlistPolicyCommand, validateAllowlistPolicyRecord, } from "./allowlist-policy-overlay.js";
 export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, AssetUsageLedger, validateAssetUsageReservation, } from "./asset-usage-ledger.js";
 export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
 export { DIRECT_ASSET_USAGE_LEASE_SCHEMA, DirectAssetUsageAdapter, validateDirectAssetUsageLease, } from "./direct-asset-usage.js";
+export * from "./swap/index.js";
 export class ApnCore {
     context;
     wallet;
@@ -88,6 +90,12 @@ export class ApnCore {
     }
     async dispatch(request) {
         switch (request.command) {
+            case "swap.uniswap.inventory":
+            case "swap.uniswap.quote":
+            case "swap.uniswap.prepare":
+            case "swap.uniswap.status":
+            case "swap.uniswap.approve":
+            case "swap.uniswap.execute": return await executeUniswapCommand(request, this.context);
             case "allowlist.inventory": return dataOutcome(loadAllowlistInventory(), "frozen_candidate_inventory");
             case "allowlist.resolve": return dataOutcome({
                 dataset: loadAllowlistInventory().dataset,

@@ -7,6 +7,12 @@ import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 
 export type CommandRequest =
+  | { readonly command: "swap.uniswap.inventory" }
+  | { readonly command: "swap.uniswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
+      readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly deadline: number;
+      readonly maxGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string }
+  | { readonly command: "swap.uniswap.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
+  | { readonly command: "swap.uniswap.status" | "swap.uniswap.approve" | "swap.uniswap.execute"; readonly operationId: string }
   | { readonly command: "allowlist.inventory" }
   | { readonly command: "allowlist.resolve"; readonly chain: string; readonly kind: "native" | "token"; readonly identifier?: string }
   | { readonly command: "allowlist.policy.status"; readonly profile: string }

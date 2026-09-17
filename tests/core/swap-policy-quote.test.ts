@@ -35,7 +35,8 @@ function quote(overrides: Partial<SwapQuoteInput> = {}): SwapQuoteInput {
     expectedOutputAtomic: "100", minimumOutputAtomic: "99", slippageBps: 100,
     effectiveAt: "2026-09-18T00:00:00.000Z", expiresAt: "2026-09-18T00:05:00.000Z",
     providerResponseHash: H("a"), routeHash: H("b"), unsignedTransactionPayloadHash: H("c"),
-    simulation: { requestHash: H("d"), resultHash: H("e"), success: true }, ...overrides };
+    simulation: { requestHash: H("d"), resultHash: H("e"), success: true, blockNumber: "100", blockHash: `0x${H("1")}`,
+      headBlockNumber: "101", maxHeadDrift: 2, gasEstimate: "100000" }, ...overrides };
 }
 
 test("swap overlay requires an exact immutable pin and stays independently dormant by default", () => {

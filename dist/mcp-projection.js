@@ -2,6 +2,8 @@ import { COMMAND_MANIFEST, validateCommandManifest, } from "./command-catalog.js
 import { mcpFieldName } from "./command-binder.js";
 import { ApnError } from "./errors.js";
 const SELECTED_PATHS = [
+    "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare",
+    "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
     "allowlist inventory",
     "allowlist resolve",
     "allowlist policy prepare",
