@@ -14,6 +14,8 @@ import type { TronMethod, TronRpcPort } from "../../src/tron/rpc.js";
 const OWNER = "TVjuTE3V5bMVdpfNhid8kD2v35T2k1u1Br";
 const RECIPIENT = "TTJxU3P8rHycAyFY4kVtGNfmnMH4ezcuM9";
 const HASH = "000000000000007b" + "1".repeat(48);
+const SIMULATION = { requestHash: "c".repeat(64), resultHash: "d".repeat(64), success: true as const,
+  blockNumber: "123", blockHash: `0x${HASH}`, headBlockNumber: "123", maxHeadDrift: 0, gasEstimate: "50000" };
 const intent: SunSwapCalldataIntent = { owner: OWNER, recipient: RECIPIENT, inputAmountAtomic: "1000000", minimumOutputAtomic: "300000", deadlineSeconds: "1789613100" };
 const unsignedIntent = (): SunSwapUnsignedIntent => ({ ...intent, calldata: encodeSunSwapCalldata(intent), callValueAtomic: "1000000",
   referenceBlockId: HASH, timestampMs: "1789612800000", expirationMs: "1789613100000", feeLimitSun: "100000000",
@@ -48,7 +50,7 @@ test("quote codec binds the native TRX to USDT route and bounded GET", async () 
   const snapshot = createSunSwapQuoteSnapshot({ profile: "sunswap", account: OWNER, recipient: RECIPIENT, inputAmountAtomic: "1000000",
     minimumOutputAtomic: "300000", slippageBps: 2000, effectiveAt: "2026-09-17T00:00:00.000Z", expiresAt: "2026-09-17T00:05:00.000Z",
     providerResponseHash: "a".repeat(64), unsignedTransactionPayloadHash: "b".repeat(64), route: routes[0]!,
-    simulation: { requestHash: "c".repeat(64), resultHash: "d".repeat(64), success: true } });
+    simulation: SIMULATION });
   assert.equal(snapshot.sourceAsset.kind, "native"); assert.equal(snapshot.destinationAsset.identifier, SUNSWAP_USDT); assert.equal(snapshot.routeHash, routes[0]!.routeHash);
   let called = false;
   const adapter = new SunSwapQuoteAdapter(async (request, init) => { called = true; assert.equal(init?.method, "GET");
@@ -69,7 +71,7 @@ test("quote codec binds the native TRX to USDT route and bounded GET", async () 
   assert.throws(() => createSunSwapQuoteSnapshot({ profile: "sunswap", account: OWNER, recipient: RECIPIENT, inputAmountAtomic: "2000000",
     minimumOutputAtomic: "300000", slippageBps: 2000, effectiveAt: "2026-09-17T00:00:00.000Z", expiresAt: "2026-09-17T00:05:00.000Z",
     providerResponseHash: "a".repeat(64), unsignedTransactionPayloadHash: "b".repeat(64), route: routes[0]!,
-    simulation: { requestHash: "c".repeat(64), resultHash: "d".repeat(64), success: true } }), { code: "APN_OPERATION_BLOCKED" });
+    simulation: SIMULATION }), { code: "APN_OPERATION_BLOCKED" });
 });
 
 test("router decoder proves calldata value recipient deadline path and rejects all other commands", () => {
@@ -114,21 +116,31 @@ class FakeRpc implements TronRpcPort {
   constructor(readonly handler: (method: TronMethod) => unknown | Promise<unknown>) {}
   async call(method: TronMethod): Promise<unknown> { this.calls.push(method); return await this.handler(method); }
 }
+function simulationBlock(id = HASH) { return { blockID: id, block_header: { raw_data: {
+  number: BigInt(`0x${id.slice(0, 16)}`).toString(), timestamp: "1789612800000" } } }; }
+function simulatedRpc(handler: (method: TronMethod) => unknown, secondBlockId = HASH): FakeRpc {
+  let blocks = 0;
+  return new FakeRpc((method) => method === "wallet/getnowblock" ? simulationBlock(blocks++ === 0 ? HASH : secondBlockId) : handler(method));
+}
 
 test("simulation requires bound triggerconstantcontract and estimateenergy proofs", async () => {
   const frozen = unsignedIntent(), tx = buildSunSwapUnsignedTransaction(frozen);
-  const rpc = new FakeRpc((method) => ({ result: { result: true }, transaction: { txID: tx.txID, raw_data_hex: tx.raw_data_hex },
+  const rpc = simulatedRpc((method) => ({ result: { result: true }, transaction: { txID: tx.txID, raw_data_hex: tx.raw_data_hex },
     ...(method === "wallet/estimateenergy" ? { energy_required: "50000" } : { energy_used: "49000" }) }));
   const proof = await simulateSunSwapTransaction(rpc, tx, frozen); assert.equal(proof.energyRequired, "50000");
-  assert.deepEqual(rpc.calls, ["wallet/triggerconstantcontract", "wallet/estimateenergy"]);
+  assert.equal(proof.blockHash, `0x${HASH}`); assert.equal(proof.gasEstimate, "50000");
+  assert.deepEqual(rpc.calls, ["wallet/getnowblock", "wallet/triggerconstantcontract", "wallet/estimateenergy", "wallet/getnowblock"]);
   await assert.rejects(simulateSunSwapTransaction(new FakeRpc(() => { throw new Error("offline"); }), tx, frozen), { code: "APN_RPC_PROTOCOL" });
-  await assert.rejects(simulateSunSwapTransaction(new FakeRpc(() => ({ result: { result: false }, transaction: { txID: tx.txID, raw_data_hex: tx.raw_data_hex } })), tx, frozen), { code: "APN_OPERATION_BLOCKED" });
-  await assert.rejects(simulateSunSwapTransaction(new FakeRpc((method) => ({ result: { result: true },
+  await assert.rejects(simulateSunSwapTransaction(simulatedRpc(() => ({ result: { result: false }, transaction: { txID: tx.txID, raw_data_hex: tx.raw_data_hex } })), tx, frozen), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(simulateSunSwapTransaction(simulatedRpc((method) => ({ result: { result: true },
     ...(method === "wallet/estimateenergy" ? { energy_required: "50000" } : { energy_used: "unsafe" }) })), tx, frozen), { code: "APN_OPERATION_BLOCKED" });
-  await assert.rejects(simulateSunSwapTransaction(new FakeRpc((method) => ({ result: { result: true }, transaction: { txID: tx.txID, raw_data_hex: tx.raw_data_hex },
+  await assert.rejects(simulateSunSwapTransaction(simulatedRpc((method) => ({ result: { result: true }, transaction: { txID: tx.txID, raw_data_hex: tx.raw_data_hex },
     ...(method === "wallet/estimateenergy" ? { energy_required: "100001" } : { energy_used: "50000" }) })), tx, frozen), { code: "APN_FEE_BUDGET_EXCEEDED" });
-  await assert.rejects(simulateSunSwapTransaction(new FakeRpc((method) => ({ result: { result: true },
+  await assert.rejects(simulateSunSwapTransaction(simulatedRpc((method) => ({ result: { result: true },
     ...(method === "wallet/estimateenergy" ? { energy_required: "50000" } : { energy_used: "100001" }) })), tx, frozen), { code: "APN_FEE_BUDGET_EXCEEDED" });
+  await assert.rejects(simulateSunSwapTransaction(simulatedRpc((method) => ({ result: { result: true },
+    ...(method === "wallet/estimateenergy" ? { energy_required: "50000" } : { energy_used: "49000" }) }),
+    "000000000000007c" + "2".repeat(48)), tx, frozen), { code: "APN_OPERATION_BLOCKED" });
   const drifted: any = structuredClone(tx); drifted.raw_data.fee_limit--;
   await assert.rejects(simulateSunSwapTransaction(rpc, drifted, frozen), { code: "APN_WALLET_MISMATCH" });
 });

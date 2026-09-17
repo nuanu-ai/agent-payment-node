@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { tronAddress } from "../../tron/codec.js";
-import { createSwapQuote, type SwapQuoteSnapshot } from "../quote.js";
+import { createSwapQuote, type SwapQuoteSnapshot, type SwapSimulationProof } from "../quote.js";
 import { SUNSWAP_NATIVE_TRX, SUNSWAP_QUOTE_URL, SUNSWAP_USDT, loadSunSwapPinCatalog } from "./catalog.js";
 
 export interface SunSwapQuoteRoute {
@@ -23,7 +23,7 @@ export interface SunSwapQuoteSnapshotInput {
   readonly profile: string; readonly account: string; readonly recipient: string; readonly inputAmountAtomic: string;
   readonly minimumOutputAtomic: string; readonly slippageBps: number; readonly effectiveAt: string; readonly expiresAt: string;
   readonly providerResponseHash: string; readonly unsignedTransactionPayloadHash: string; readonly route: SunSwapQuoteRoute;
-  readonly simulation: { readonly requestHash: string; readonly resultHash: string; readonly success: true };
+  readonly simulation: SwapSimulationProof;
 }
 
 export function sunSwapQuoteUrl(input: SunSwapQuoteRequest): URL {
@@ -90,7 +90,8 @@ export function assertSunSwapDirectRoute(value: unknown, minimumOutputAtomic: st
 export function createSunSwapQuoteSnapshot(input: SunSwapQuoteSnapshotInput): SwapQuoteSnapshot {
   if (!isPlainRecord(input) || !exactKeys(input, ["profile", "account", "recipient", "inputAmountAtomic", "minimumOutputAtomic", "slippageBps",
     "effectiveAt", "expiresAt", "providerResponseHash", "unsignedTransactionPayloadHash", "route", "simulation"]) ||
-      !isPlainRecord(input.simulation) || !exactKeys(input.simulation, ["requestHash", "resultHash", "success"])) failInput();
+      !isPlainRecord(input.simulation) || !exactKeys(input.simulation, ["requestHash", "resultHash", "success", "blockNumber", "blockHash",
+        "headBlockNumber", "maxHeadDrift", "gasEstimate"])) failInput();
   const route = assertSunSwapDirectRoute(input.route, input.minimumOutputAtomic);
   if (route.inputAmountAtomic !== input.inputAmountAtomic) throw new ApnError("APN_OPERATION_BLOCKED", "The quote route input amount does not match the frozen swap input.");
   return createSwapQuote({ profile: input.profile, account: input.account, recipient: input.recipient,
@@ -100,7 +101,7 @@ export function createSunSwapQuoteSnapshot(input: SunSwapQuoteSnapshotInput): Sw
     slippageBps: input.slippageBps, effectiveAt: input.effectiveAt, expiresAt: input.expiresAt,
     providerResponseHash: input.providerResponseHash, routeHash: route.routeHash,
     unsignedTransactionPayloadHash: input.unsignedTransactionPayloadHash,
-    simulation: { requestHash: input.simulation.requestHash, resultHash: input.simulation.resultHash, success: true } });
+    simulation: input.simulation });
 }
 
 export class SunSwapQuoteAdapter {
