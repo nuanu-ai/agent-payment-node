@@ -4,6 +4,10 @@ import { ApnError } from "./errors.js";
 const SELECTED_PATHS = [
     "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare",
     "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
+    "swap tron sunswap inventory", "swap tron sunswap quote", "swap tron sunswap prepare",
+    "swap tron sunswap status", "swap tron sunswap approve", "swap tron sunswap execute",
+    "swap solana jupiter inventory", "swap solana jupiter quote", "swap solana jupiter prepare",
+    "swap solana jupiter status", "swap solana jupiter approve", "swap solana jupiter execute",
     "allowlist inventory",
     "allowlist resolve",
     "allowlist policy prepare",
