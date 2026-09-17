@@ -6,6 +6,7 @@ import { ApnError } from "../../errors.js";
 import { tronAddress } from "../../tron/codec.js";
 import type { SwapChainSignerPort, SwapChainSenderPort } from "../ports.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
+import { SwapOperationRepository } from "../repository.js";
 import { SUNSWAP_TRON_CHAIN, SUNSWAP_USDT } from "./catalog.js";
 import type { SunSwapSimulationProof } from "./simulation.js";
 import {
@@ -37,6 +38,7 @@ export class SunSwapProtectedExecutionAdapter implements SwapChainSignerPort, Sw
   constructor(
     private readonly storage: ChainWalletStoragePort,
     private readonly rpc: SunSwapBroadcastRpcPort,
+    private readonly operations: SwapOperationRepository,
     operation: SwapOperationRecord,
     private readonly binding: SunSwapExecutionBinding,
   ) {
@@ -66,6 +68,10 @@ export class SunSwapProtectedExecutionAdapter implements SwapChainSignerPort, Sw
 
   async sendOnce(signedMaterialHandle: string, submissionMarkerHash: string): Promise<{ readonly transactionHash: string }> {
     if (signedMaterialHandle !== this.fingerprint || !/^[a-f0-9]{64}$/u.test(submissionMarkerHash)) mismatch();
+    const durable = await this.operations.load(this.operation.ownerProfileHash, this.operation.operationId);
+    if (durable === null || durable.state !== "submitting" || durable.submissionMarker?.markerHash !== submissionMarkerHash ||
+        immutableOperationHash(durable) !== immutableOperationHash(this.operation) ||
+        validateSunSwapExecutionBinding(durable, this.binding) !== this.fingerprint) mismatch();
     const effect = await this.effect();
     if (effect === null) mismatch();
     const transaction = validateSunSwapEffect(effect, this.binding.transaction, this.binding.intent.owner,
@@ -114,6 +120,8 @@ export function validateSunSwapExecutionBinding(operationValue: unknown, binding
       simulation.blockNumber !== operation.quote.simulation.blockNumber || simulation.blockHash !== operation.quote.simulation.blockHash ||
       simulation.headBlockNumber !== operation.quote.simulation.headBlockNumber || simulation.maxHeadDrift !== operation.quote.simulation.maxHeadDrift ||
       simulation.gasEstimate !== operation.quote.simulation.gasEstimate || simulation.energyRequired !== operation.quote.simulation.gasEstimate ||
+      simulation.blockHash !== `0x${binding.intent.referenceBlockId}` || simulation.blockNumber !== simulation.headBlockNumber ||
+      simulation.maxHeadDrift !== 0 ||
       simulation.feeLimitSun !== binding.intent.feeLimitSun || BigInt(simulation.energyRequired) > BigInt(binding.intent.maximumEnergy) ||
       BigInt(simulation.energyRequired) * BigInt(binding.intent.energyPriceSun) > BigInt(binding.intent.feeLimitSun)) mismatch();
   const body = { operationId: operation.operationId, ownerProfileHash: operation.ownerProfileHash,

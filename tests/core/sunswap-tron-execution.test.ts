@@ -48,13 +48,13 @@ function route() {
     impact: "-0.001", fee: "0.003" }] }, "1000000")[0]!;
 }
 
-async function fixture(root: string) {
+async function fixture(root: string, options: { readonly referenceBlockId?: string; readonly simulationBlockHash?: string } = {}) {
   const wrapping = new Wrapping();
   const storage = new ChainAccountStore(root, wrapping);
   const account = await storage.ensureLocal({ profile: "sunswap", rail: "tron",
     create: async () => ({ address: OWNER, seed: Buffer.from(SEED) }) });
   const intent = { owner: OWNER, recipient: RECIPIENT, inputAmountAtomic: "1000000", minimumOutputAtomic: "300000",
-    deadlineSeconds: "1789603500", calldata: "", callValueAtomic: "1000000", referenceBlockId: HASH,
+    deadlineSeconds: "1789603500", calldata: "", callValueAtomic: "1000000", referenceBlockId: options.referenceBlockId ?? HASH,
     timestampMs: "1789603200000", expirationMs: "1789603500000", feeLimitSun: "100000000",
     maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" };
   intent.calldata = encodeSunSwapCalldata({ owner: intent.owner, recipient: intent.recipient,
@@ -62,7 +62,7 @@ async function fixture(root: string) {
     deadlineSeconds: intent.deadlineSeconds });
   const transaction = buildSunSwapUnsignedTransaction(intent);
   const simulation = { requestHash: "c".repeat(64), resultHash: "d".repeat(64), success: true as const,
-    energyRequired: "50000", feeLimitSun: intent.feeLimitSun, blockNumber: "123", blockHash: `0x${HASH}`,
+    energyRequired: "50000", feeLimitSun: intent.feeLimitSun, blockNumber: "123", blockHash: `0x${options.simulationBlockHash ?? HASH}`,
     headBlockNumber: "123", maxHeadDrift: 0, gasEstimate: "50000" };
   const quote = createSunSwapQuoteSnapshot({ profile: "sunswap", account: OWNER, recipient: RECIPIENT,
     inputAmountAtomic: "1000000", minimumOutputAtomic: "300000", slippageBps: 2000,
@@ -112,7 +112,7 @@ function receiptFixture(binding: SunSwapExecutionBinding, output = "300001", sol
   return { transaction, info, head: { block_header: { raw_data: { number: solid } } } };
 }
 class ObservationRpc implements SunSwapObservationRpcPort {
-  conflict = false; missing = false; calls: SunSwapObservationMethod[] = [];
+  conflict = false; historyConflict = false; missing = false; calls: SunSwapObservationMethod[] = [];
   constructor(readonly fixture: ReturnType<typeof receiptFixture>) {}
   async call(method: SunSwapObservationMethod): Promise<unknown> {
     this.calls.push(method); if (this.missing && method === "wallet/gettransactionbyid") return {};
@@ -120,6 +120,9 @@ class ObservationRpc implements SunSwapObservationRpcPort {
     if (method.endsWith("gettransactionbyid")) return this.fixture.transaction;
     if (this.conflict && method === "walletsolidity/gettransactioninfobyid") {
       return { ...this.fixture.info, fee: "12346" };
+    }
+    if (this.historyConflict && method === "walletsolidity/gettransactioninfobyid") {
+      return { ...this.fixture.info, providerSpecificHistory: true };
     }
     return this.fixture.info;
   }
@@ -129,11 +132,13 @@ test("protected signer binds exact owner/tx/TAPOS/expiry/fee/simulation and surv
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   const reserved = await f.service.reserve(f.operation, f.policy, NOW);
   const rpc = new Broadcast(f.binding.transaction.txID);
-  const adapter = new SunSwapProtectedExecutionAdapter(f.storage, rpc, f.operation, f.binding);
+  const adapter = new SunSwapProtectedExecutionAdapter(f.storage, rpc, f.operations, f.operation, f.binding);
   const handle = await adapter.sign(reserved); assert.match(handle.signedMaterialHandle, /^[a-f0-9]{64}$/u);
+  await assert.rejects(adapter.sendOnce(handle.signedMaterialHandle, "a".repeat(64)), { code: "APN_WALLET_MISMATCH" });
+  assert.equal(rpc.calls, 0);
   const publicBytes = await readFile(join(temp.root, "swap-operations", reserved.ownerProfileHash, `${reserved.operationId}.json`), "utf8");
   assert.equal(publicBytes.includes("signature"), false); assert.equal(publicBytes.includes(SEED.toString("hex")), false);
-  const restarted = new SunSwapProtectedExecutionAdapter(new ChainAccountStore(temp.root, f.wrapping), rpc, f.operation, f.binding);
+  const restarted = new SunSwapProtectedExecutionAdapter(new ChainAccountStore(temp.root, f.wrapping), rpc, f.operations, f.operation, f.binding);
   assert.deepEqual(await restarted.recover(), handle);
   const signed = await f.storage.effect(f.account, reserved.operationId, handle.signedMaterialHandle); assert.ok(signed);
   const parsed: any = JSON.parse(signed.rawPayload); parsed.signature.push(parsed.signature[0]);
@@ -155,7 +160,7 @@ test("executor persists marker before one ambiguous broadcast and restart is obs
   const broadcast = new Broadcast(f.binding.transaction.txID); broadcast.ambiguous = true;
   broadcast.before = async () => { const saved = await f.operations.load(f.operation.ownerProfileHash, f.operation.operationId);
     assert.equal(saved?.state, "submitting"); assert.ok(saved?.submissionMarker); };
-  const protectedAdapter = new SunSwapProtectedExecutionAdapter(f.storage, broadcast, f.operation, f.binding);
+  const protectedAdapter = new SunSwapProtectedExecutionAdapter(f.storage, broadcast, f.operations, f.operation, f.binding);
   const observer: SwapChainObserverPort = { observe: async () => { throw new Error("missing"); } };
   const deps = { service: f.service, policy: f.policy, protocolRegistry: f.protocols,
     ownerAdmission: { admit: async () => ({ admitted: true as const, accountIdentityHash: f.account.identityHash }) },
@@ -165,7 +170,7 @@ test("executor persists marker before one ambiguous broadcast and restart is obs
   const unknown = await new SunSwapGuardedExecutor(deps, f.binding).execute(f.operation, NOW);
   assert.equal(unknown.state, "unknown_finality"); assert.equal(unknown.usageLease?.state, "unknown_finality"); assert.equal(broadcast.calls, 1);
   const noResend = new Broadcast(f.binding.transaction.txID);
-  const restartedAdapter = new SunSwapProtectedExecutionAdapter(new ChainAccountStore(temp.root, f.wrapping), noResend, f.operation, f.binding);
+  const restartedAdapter = new SunSwapProtectedExecutionAdapter(new ChainAccountStore(temp.root, f.wrapping), noResend, f.operations, f.operation, f.binding);
   const restartedService = new GuardedSwapService(new SwapOperationRepository(temp.root), new AssetUsageLedger(temp.root));
   const resumed = await new SunSwapGuardedExecutor({ ...deps, service: restartedService, signer: restartedAdapter, sender: restartedAdapter }, f.binding)
     .resume(unknown, new Date("2026-09-17T00:01:01.000Z"));
@@ -181,7 +186,34 @@ test("observer requires matching full and solidified router transaction, output 
   assert.deepEqual(rpc.calls, ["wallet/gettransactionbyid", "wallet/gettransactioninfobyid", "walletsolidity/gettransactionbyid",
     "walletsolidity/gettransactioninfobyid", "walletsolidity/getnowblock"]);
   rpc.conflict = true; await assert.rejects(observeSunSwapFinality(rpc, expected), { code: "APN_RPC_PROTOCOL" });
-  rpc.conflict = false; rpc.missing = true; await assert.rejects(observeSunSwapFinality(rpc, expected), { code: "APN_RPC_PROTOCOL" });
+  rpc.conflict = false; rpc.historyConflict = true;
+  await assert.rejects(observeSunSwapFinality(rpc, expected), { code: "APN_RPC_PROTOCOL" });
+  rpc.historyConflict = false; rpc.missing = true;
+  await assert.rejects(observeSunSwapFinality(rpc, expected), { code: "APN_RPC_PROTOCOL" });
+});
+
+test("execution rejects a stale signing window, stale approval, and simulation/TAPOS substitution", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  let signs = 0;
+  const base = { service: f.service, policy: f.policy, protocolRegistry: f.protocols,
+    ownerAdmission: { admit: async () => ({ admitted: true as const, accountIdentityHash: f.account.identityHash }) },
+    resourceFeeCap: { maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" },
+    signer: { sign: async () => { signs++; return { signedMaterialHandle: "f".repeat(64) }; } },
+    sender: { sendOnce: async () => ({ transactionHash: f.binding.transaction.txID }) },
+    observer: { observe: async () => null } };
+  const staleApproval = new SunSwapGuardedExecutor({ ...base, approval: { approve: async (input: SunSwapForegroundApprovalInput) =>
+    sealSunSwapForegroundApproval(input, new Date(NOW.getTime() - 1)) } }, f.binding);
+  await assert.rejects(staleApproval.execute(f.operation, NOW), { code: "APN_OPERATION_BLOCKED" });
+  const staleWindow = new SunSwapGuardedExecutor({ ...base, approval: { approve: async (input: SunSwapForegroundApprovalInput) => approval(input) } }, f.binding);
+  await assert.rejects(staleWindow.execute(f.operation, new Date("2026-09-17T00:05:00.000Z")), { code: "APN_OPERATION_BLOCKED" });
+  const reserved = await f.service.reserve(f.operation, f.policy, NOW);
+  const released = await staleWindow.execute(reserved, new Date("2026-09-17T00:05:00.000Z"));
+  assert.equal(released.state, "failed_before_effect"); assert.equal(released.usageLease?.state, "failed_before_effect");
+  assert.equal(signs, 0);
+
+  const other = await temporaryState(); t.after(other.cleanup);
+  const substituted = await fixture(other.root, { referenceBlockId: `000000000000007b${"2".repeat(48)}`, simulationBlockHash: HASH });
+  assert.throws(() => validateSunSwapExecutionBinding(substituted.operation, substituted.binding), { code: "APN_WALLET_MISMATCH" });
 });
 
 test("explicit admission, cross-rail cap, fee cap and exact foreground approval fail before signing", async (t) => {
@@ -207,7 +239,7 @@ test("explicit admission, cross-rail cap, fee cap and exact foreground approval 
 test("successful execution finalizes exact solidified receipt with no token approval", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   const broadcast = new Broadcast(f.binding.transaction.txID);
-  const protectedAdapter = new SunSwapProtectedExecutionAdapter(f.storage, broadcast, f.operation, f.binding);
+  const protectedAdapter = new SunSwapProtectedExecutionAdapter(f.storage, broadcast, f.operations, f.operation, f.binding);
   const observer = new SunSwapSolidifiedObserver(new ObservationRpc(receiptFixture(f.binding)), f.operation, f.binding,
     "100000000", () => NOW);
   const executor = new SunSwapGuardedExecutor({ service: f.service, policy: f.policy, protocolRegistry: f.protocols,

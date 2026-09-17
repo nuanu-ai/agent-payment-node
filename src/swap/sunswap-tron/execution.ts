@@ -50,13 +50,21 @@ export class SunSwapGuardedExecutor {
     if (operation.state === "finalized" || operation.state === "failed_before_effect") return operation;
     if (operation.submissionMarker !== null) return await this.observeOnly(operation, now);
     if (operation.state !== "awaiting_approval" && operation.state !== "reserved") blocked("SunSwap is not ready for owner approval or signing.");
+    if (!executionWindowLive(this.binding, now)) {
+      if (operation.state === "reserved") {
+        return await this.dependencies.service.failBeforeEffect(operation, now,
+          domainHash("apn.sunswap-tron-pre-effect-failure.v1", canonicalJson({ operationId: operation.operationId,
+            txID: this.binding.transaction.txID, reason: "expired_signing_window" })));
+      }
+      blocked("The frozen SunSwap TAPOS, expiration or router deadline is not live for signing.");
+    }
     if (operation.state === "awaiting_approval") {
       const admissionInput = ownerInput(operation, this.binding);
       const admission = await this.dependencies.ownerAdmission.admit(admissionInput);
       if (!isPlainRecord(admission) || !exactKeys(admission, ["admitted", "accountIdentityHash"]) || admission.admitted !== true ||
           admission.accountIdentityHash !== this.binding.account.identityHash) blocked("The exact local TRON owner is not admitted for SunSwap execution.");
       const approvalInput = foregroundInput(operation, this.binding);
-      validateSunSwapForegroundApproval(await this.dependencies.approval.approve(approvalInput), approvalInput, now);
+      validateSunSwapForegroundApproval(await this.dependencies.approval.approve(approvalInput), approvalInput, operation.updatedAt, now);
       operation = await this.dependencies.service.reserve(operation, this.dependencies.policy, now);
     }
     const signed = await this.dependencies.signer.sign(operation);
@@ -120,12 +128,14 @@ export function sealSunSwapForegroundApproval(input: SunSwapForegroundApprovalIn
   return { ...input, approvedAt: at, approvalHash: domainHash("apn.sunswap-tron-foreground-approval.v1", canonicalJson({ ...input, approvedAt: at })) };
 }
 
-export function validateSunSwapForegroundApproval(value: unknown, expected: SunSwapForegroundApprovalInput, now: Date): SunSwapForegroundApproval {
+export function validateSunSwapForegroundApproval(value: unknown, expected: SunSwapForegroundApprovalInput,
+  earliestAt: string, now: Date): SunSwapForegroundApproval {
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) invalid();
+  if (typeof earliestAt !== "string" || !Number.isFinite(Date.parse(earliestAt)) || new Date(earliestAt).toISOString() !== earliestAt) invalid();
   if (!isPlainRecord(value) || !exactKeys(value, [...Object.keys(expected), "approvedAt", "approvalHash"]) ||
       canonicalJson(Object.fromEntries(Object.keys(expected).map((key) => [key, value[key]]))) !== canonicalJson(expected) ||
       typeof value.approvedAt !== "string" || !Number.isFinite(Date.parse(value.approvedAt)) ||
-      new Date(value.approvedAt).toISOString() !== value.approvedAt || value.approvedAt > now.toISOString() ||
+      new Date(value.approvedAt).toISOString() !== value.approvedAt || value.approvedAt < earliestAt || value.approvedAt > now.toISOString() ||
       typeof value.approvalHash !== "string" || value.approvalHash !== domainHash("apn.sunswap-tron-foreground-approval.v1",
         canonicalJson({ ...expected, approvedAt: value.approvedAt }))) blocked("SunSwap foreground approval does not bind the exact frozen economics and deadline.");
   return value as unknown as SunSwapForegroundApproval;
@@ -144,6 +154,12 @@ function foregroundInput(operation: SwapOperationRecord, binding: SunSwapExecuti
 function ownerInput(operation: SwapOperationRecord, binding: SunSwapExecutionBinding): SunSwapOwnerAdmissionInput {
   return { profile: operation.quote.profile, account: operation.quote.account, accountIdentityHash: binding.account.identityHash,
     operationId: operation.operationId, ownerProfileHash: operation.ownerProfileHash, chain: operation.quote.sourceAsset.chain };
+}
+function executionWindowLive(binding: SunSwapExecutionBinding, now: Date): boolean {
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) invalid();
+  const instant = BigInt(now.getTime());
+  return BigInt(binding.intent.timestampMs) <= instant && BigInt(binding.intent.expirationMs) > instant &&
+    BigInt(binding.intent.deadlineSeconds) * 1_000n > instant;
 }
 function invalid(): never { throw new ApnError("APN_INVALID_INPUT", "SunSwap foreground approval time is invalid."); }
 function blocked(message: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message); }
