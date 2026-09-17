@@ -3,8 +3,8 @@ import { ApnError } from "../../errors.js";
 import { associatedUsdc } from "../../solana/accounts.js";
 import type { JupiterBuildResponse, JupiterQuoteResponse } from "./codec.js";
 import {
-  ADDRESS_LOOKUP_TABLE_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, atomic, COMPUTE_BUDGET_PROGRAM, invalid,
-  JUPITER_V6_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM, validateProgramSnapshot, type JupiterProgramSnapshot,
+  ADDRESS_LOOKUP_TABLE_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, atomic, canonicalAddress, COMPUTE_BUDGET_PROGRAM, invalid,
+  JUPITER_V6_PROGRAM, SOLANA_USDC_MINT, SYSTEM_PROGRAM, TOKEN_PROGRAM, validateProgramSnapshot, type JupiterProgramSnapshot,
 } from "./catalog.js";
 import type { JupiterV0Envelope, SolanaInstructionEnvelope } from "./transaction.js";
 
@@ -14,6 +14,7 @@ export interface JupiterGuardPolicy {
   readonly lastValidBlockHeight: string; readonly maximumComputeUnits: number; readonly maximumComputeUnitPriceMicroLamports: string;
   readonly maximumPriorityFeeLamports: string; readonly maximumTipLamports: string; readonly allowedTipAccounts: readonly string[];
   readonly maximumPlatformFeeAtomic: string; readonly maximumReferralFeeAtomic: string; readonly maximumRentLamports: string;
+  readonly exactInputLamports: string; readonly minimumOutputAtomic: string; readonly maximumSlippageBps: number;
   readonly maximumWrappedSolSpendLamports: string;
 }
 export interface JupiterGuardRefusal { readonly signable: false; readonly code: "JUPITER_V6_INSTRUCTION_UNVERIFIED"; readonly bindingHash: string; readonly reason: string }
@@ -36,14 +37,26 @@ export async function guardJupiterTransaction(envelope: JupiterV0Envelope, quote
   atomic(policy.lastValidBlockHeight); atomic(policy.maximumComputeUnitPriceMicroLamports, true); atomic(policy.maximumPriorityFeeLamports, true);
   atomic(policy.maximumTipLamports, true); atomic(policy.maximumPlatformFeeAtomic, true); atomic(policy.maximumReferralFeeAtomic, true);
   atomic(policy.maximumRentLamports, true); const maximumSpend = atomic(policy.maximumWrappedSolSpendLamports);
-  if (maximumSpend < atomic(quote.inAmount)) invalid("Jupiter wrapped SOL spend cap is below exact input.");
+  const exactInput = atomic(policy.exactInputLamports); const minimumOutput = atomic(policy.minimumOutputAtomic);
+  if (atomic(quote.inAmount) !== exactInput || atomic(quote.otherAmountThreshold) < minimumOutput || quote.slippageBps > policy.maximumSlippageBps) {
+    invalid("Jupiter quote changed the exact input, minimum output, or slippage bound.");
+  }
+  if (maximumSpend < exactInput) invalid("Jupiter wrapped SOL spend cap is below exact input.");
   if (!Number.isSafeInteger(policy.maximumComputeUnits) || policy.maximumComputeUnits < 1 || policy.maximumComputeUnits > 1_400_000) invalid("Jupiter compute unit cap is invalid.");
+  if (!Number.isSafeInteger(policy.maximumSlippageBps) || policy.maximumSlippageBps < 0 || policy.maximumSlippageBps > 10_000) invalid("Jupiter slippage cap is invalid.");
+  if (!Array.isArray(policy.allowedTipAccounts) || policy.allowedTipAccounts.length > 16 ||
+      new Set(policy.allowedTipAccounts).size !== policy.allowedTipAccounts.length) invalid("Jupiter tip account allowlist is invalid.");
+  policy.allowedTipAccounts.forEach(canonicalTipAddress);
   if (await associatedUsdc(policy.recipient) !== policy.recipientTokenAccount) invalid("Jupiter recipient ATA derivation changed.");
   const accountMap = new Map(envelope.accounts.map((account) => [account.address, account]));
   const recipient = accountMap.get(policy.recipientTokenAccount);
   if (recipient === undefined || !recipient.writable || recipient.executable || recipient.signer) invalid("Jupiter recipient token account binding is invalid.");
   for (const table of envelope.addressTables) if (table.owner !== ADDRESS_LOOKUP_TABLE_PROGRAM) invalid("Jupiter lookup table owner is invalid.");
   const routes = new Set(snapshot.entries.map((entry) => entry.programId));
+  const routeLabels = new Map(snapshot.entries.map((entry) => [entry.programId, entry.label]));
+  for (const leg of quote.routePlan) {
+    if (routeLabels.get(leg.swapInfo.ammKey) !== leg.swapInfo.label) invalid("Jupiter quote route is absent from the frozen program-label snapshot.");
+  }
   const allowed = new Set([JUPITER_V6_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, ...routes]);
   let unitLimit: bigint | null = null, unitPrice: bigint | null = null, sawJupiter = false, tip = 0n;
   for (const instruction of envelope.instructions) {
@@ -71,6 +84,7 @@ export async function guardJupiterTransaction(envelope: JupiterV0Envelope, quote
     lastValidBlockHeight: policy.lastValidBlockHeight, rfqExpiresAt: build.rfqExpiresAt, taker: policy.taker, recipient: policy.recipient,
     recipientTokenAccount: policy.recipientTokenAccount,
     inputMint: quote.inputMint, outputMint: quote.outputMint, inputAmount: quote.inAmount, minimumOutput: quote.otherAmountThreshold,
+    policyMinimumOutput: policy.minimumOutputAtomic, maximumSlippageBps: policy.maximumSlippageBps,
     computeUnitLimit: unitLimit.toString(), computeUnitPriceMicroLamports: price.toString(), priorityFeeLamports: priority.toString(),
     tipLamports: tip.toString(), programSnapshotDigest: snapshot.digest,
     maximumPlatformFeeAtomic: policy.maximumPlatformFeeAtomic, maximumReferralFeeAtomic: policy.maximumReferralFeeAtomic,
@@ -94,8 +108,11 @@ function systemTip(instruction: SolanaInstructionEnvelope, policy: JupiterGuardP
 }
 function validateAtaCreate(instruction: SolanaInstructionEnvelope, policy: JupiterGuardPolicy): void {
   const data = Buffer.from(instruction.data);
-  if (!(data.length === 1 && data[0] === 1) || instruction.accounts.length < 4 || instruction.accounts[0]?.address !== policy.taker ||
-      instruction.accounts[1]?.address !== policy.recipientTokenAccount) invalid("Jupiter associated token instruction is not a bound idempotent create.");
+  if (!(data.length === 1 && data[0] === 1) || instruction.accounts.length !== 6 || instruction.accounts[0]?.address !== policy.taker ||
+      !instruction.accounts[0]?.signer || !instruction.accounts[0]?.writable || instruction.accounts[1]?.address !== policy.recipientTokenAccount ||
+      !instruction.accounts[1]?.writable || instruction.accounts[2]?.address !== policy.recipient ||
+      instruction.accounts[3]?.address !== SOLANA_USDC_MINT || instruction.accounts[4]?.address !== SYSTEM_PROGRAM ||
+      instruction.accounts[5]?.address !== TOKEN_PROGRAM) invalid("Jupiter associated token instruction is not a bound idempotent create.");
 }
 function validateTokenCleanup(instruction: SolanaInstructionEnvelope, policy: JupiterGuardPolicy): void {
   const data = Buffer.from(instruction.data); const opcode = data[0];
@@ -105,4 +122,8 @@ function validateTokenCleanup(instruction: SolanaInstructionEnvelope, policy: Ju
 }
 export function assertJupiterSignable(value: JupiterGuardRefusal): never {
   throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", value.reason, { nextActions: ["Install a reviewed official JUP6 instruction/account codec before enabling signing."] });
+}
+function canonicalTipAddress(value: string): void {
+  if (typeof value !== "string") invalid("Jupiter tip account allowlist is invalid.");
+  canonicalAddress(value);
 }

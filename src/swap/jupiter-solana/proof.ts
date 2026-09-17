@@ -1,7 +1,8 @@
+import { getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { associatedUsdc } from "../../solana/accounts.js";
-import { atomic, canonicalAddress, invalid, SOLANA_USDC_MINT } from "./catalog.js";
+import { atomic, canonicalAddress, invalid, sha256Bytes, SOLANA_USDC_MINT } from "./catalog.js";
 import type { SolanaProofReaderPort } from "./ports.js";
 import type { JupiterV0Envelope } from "./transaction.js";
 
@@ -25,8 +26,7 @@ export async function proveJupiterSimulation(reader: SolanaProofReaderPort, enve
 
 export interface JupiterReceiptExpectation {
   readonly signature: string; readonly taker: string; readonly recipient: string; readonly recipientTokenAccount: string; readonly minimumOutputAtomic: string;
-  readonly maximumTotalNativeSpendLamports: string; readonly maximumNetworkFeeLamports: string; readonly expectedLoadedWritable: readonly string[];
-  readonly expectedLoadedReadonly: readonly string[];
+  readonly maximumTotalNativeSpendLamports: string; readonly maximumNetworkFeeLamports: string;
 }
 export interface JupiterFinalizedReceipt { readonly signature: string; readonly slot: string; readonly feeLamports: string; readonly nativeSpendLamports: string; readonly recipientOutputAtomic: string; readonly receiptHash: string }
 
@@ -47,20 +47,25 @@ export async function validateFinalizedJupiterReceipt(reader: SolanaProofReaderP
   if (status.confirmationStatus !== "finalized" || status.confirmations !== null || status.err !== null) invalid("Jupiter signature is not finalized successfully.");
   const slot = integer(status.slot);
   if (integer(statusContext.slot) < slot) invalid("Jupiter status context is older than the finalized transaction.");
-  const transactionParams = [expected.signature, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }] as const;
+  const transactionParams = [expected.signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }] as const;
   const response = record(await reader.call("getTransaction", transactionParams), "Jupiter finalized transaction");
   if (integer(response.slot) !== slot || response.version !== 0) invalid("Jupiter finalized transaction slot or version changed.");
-  const meta = record(response.meta, "Jupiter transaction meta"); const transaction = record(response.transaction, "Jupiter transaction");
+  const meta = record(response.meta, "Jupiter transaction meta");
   if (meta.err !== null) invalid("Jupiter finalized transaction failed.");
-  const signatures = array(transaction.signatures, 8); if (signatures[0] !== expected.signature) invalid("Jupiter finalized transaction signature changed.");
-  const message = record(transaction.message, "Jupiter transaction message");
-  if (message.recentBlockhash !== envelope.blockhash) invalid("Jupiter finalized transaction blockhash changed.");
+  const encoded = array(response.transaction, 2);
+  if (encoded.length !== 2 || encoded[1] !== "base64" || typeof encoded[0] !== "string") invalid("Jupiter finalized transaction encoding changed.");
+  const transactionBytes = Buffer.from(encoded[0], "base64"); let wire: ReturnType<ReturnType<typeof getTransactionDecoder>["decode"]>;
+  try { wire = getTransactionDecoder().decode(transactionBytes); } catch { return invalid("Jupiter finalized transaction cannot be decoded."); }
+  if (Object.keys(wire.signatures)[0] !== expected.taker || getSignatureFromTransaction(wire) !== expected.signature ||
+      sha256Bytes(new Uint8Array(wire.messageBytes)) !== envelope.messageHash) {
+    invalid("Jupiter finalized transaction signer or message changed.");
+  }
   const loaded = record(meta.loadedAddresses, "Jupiter loaded addresses");
   const loadedWritable = addressArray(loaded.writable); const loadedReadonly = addressArray(loaded.readonly);
-  if (canonicalJson(loadedWritable) !== canonicalJson(expected.expectedLoadedWritable) || canonicalJson(loadedReadonly) !== canonicalJson(expected.expectedLoadedReadonly)) {
+  if (canonicalJson(loadedWritable) !== canonicalJson(envelope.loadedWritable) || canonicalJson(loadedReadonly) !== canonicalJson(envelope.loadedReadonly)) {
     invalid("Jupiter finalized loaded addresses changed.");
   }
-  const accountKeys = array(message.accountKeys, 256).map((entry) => typeof entry === "string" ? canonicalAddress(entry) : canonicalAddress(String(record(entry, "Jupiter account key").pubkey)));
+  const accountKeys = envelope.accounts.map((account) => account.address);
   if (new Set(accountKeys).size !== accountKeys.length || accountKeys[0] !== expected.taker) invalid("Jupiter finalized account keys are invalid.");
   const preBalances = atomicArray(meta.preBalances, accountKeys.length); const postBalances = atomicArray(meta.postBalances, accountKeys.length);
   const takerIndex = accountKeys.indexOf(expected.taker); if (takerIndex < 0) invalid("Jupiter taker is absent from finalized balances.");

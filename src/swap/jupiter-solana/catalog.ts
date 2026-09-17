@@ -16,7 +16,7 @@ export const ADDRESS_LOOKUP_TABLE_PROGRAM = "AddressLookupTab1e11111111111111111
 
 export const JUPITER_V2_SOURCE = Object.freeze({
   apiBase: JUPITER_SWAP_API_V2,
-  programLabelsSource: "https://lite-api.jup.ag/swap/v1/program-id-to-label",
+  programLabelsSource: "https://api.jup.ag/swap/v2/program-id-to-label",
   schemaDigest: domainHash(JUPITER_SOLANA_SCHEMA, canonicalJson({
     swapMode: "ExactIn", pair: [WRAPPED_SOL_MINT, SOLANA_USDC_MINT], transactionVersion: 0,
     responseBindings: Object.freeze(["requestId", "transaction", "lastValidBlockHeight"]),
@@ -26,7 +26,7 @@ export const JUPITER_V2_SOURCE = Object.freeze({
 export interface JupiterRouteProgram { readonly programId: string; readonly label: string }
 export interface JupiterProgramSnapshot {
   readonly schemaVersion: typeof JUPITER_SOLANA_SCHEMA;
-  readonly sourceUrl: "https://lite-api.jup.ag/swap/v1/program-id-to-label";
+  readonly sourceUrl: "https://api.jup.ag/swap/v2/program-id-to-label";
   readonly entries: readonly JupiterRouteProgram[];
   readonly digest: string;
 }
@@ -46,17 +46,17 @@ export function createProgramSnapshot(entries: readonly JupiterRouteProgram[]): 
   });
   normalized.sort((a, b) => a.programId.localeCompare(b.programId));
   if (new Set(normalized.map((entry) => entry.programId)).size !== normalized.length) invalid("Jupiter program snapshot contains duplicate programs.");
-  const body = { schemaVersion: JUPITER_SOLANA_SCHEMA, sourceUrl: "https://lite-api.jup.ag/swap/v1/program-id-to-label" as const, entries: Object.freeze(normalized) };
+  const body = { schemaVersion: JUPITER_SOLANA_SCHEMA, sourceUrl: "https://api.jup.ag/swap/v2/program-id-to-label" as const, entries: Object.freeze(normalized) };
   return Object.freeze({ ...body, digest: domainHash("apn.jupiter-program-snapshot.v1", canonicalJson(body)) });
 }
 
 export function validateProgramSnapshot(value: unknown): JupiterProgramSnapshot {
   if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "sourceUrl", "entries", "digest"]) ||
-      value.schemaVersion !== JUPITER_SOLANA_SCHEMA || value.sourceUrl !== "https://lite-api.jup.ag/swap/v1/program-id-to-label" ||
+      value.schemaVersion !== JUPITER_SOLANA_SCHEMA || value.sourceUrl !== "https://api.jup.ag/swap/v2/program-id-to-label" ||
       !Array.isArray(value.entries) || typeof value.digest !== "string" || !/^[a-f0-9]{64}$/u.test(value.digest)) corrupt("Jupiter program snapshot is invalid.");
   const expected = createProgramSnapshot(value.entries as JupiterRouteProgram[]);
   if (canonicalJson(expected) !== canonicalJson(value)) corrupt("Jupiter program snapshot digest or ordering is invalid.");
-  return value as unknown as JupiterProgramSnapshot;
+  return expected;
 }
 
 export function canonicalAddress(value: string): string {
