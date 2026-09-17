@@ -143,7 +143,8 @@ export class AssetUsageLedger extends SecureStateStore {
       const value = await this.readJson(this.recordPath(identity, reservationId));
       if (value === null) throw blocked("The usage reservation does not exist.");
       const current = validateAssetUsageReservation(value);
-      if (current.policyDigest !== policyDigest || canonicalJson(exactIdentity(current)) !== canonicalJson(identity)) {
+      if (current.reservationId !== reservationId || current.policyDigest !== policyDigest ||
+          canonicalJson(exactIdentity(current)) !== canonicalJson(identity)) {
         throw blocked("The usage reservation binding does not match the requested transition.");
       }
       if (expectedCurrentStates !== undefined && !expectedCurrentStates.includes(current.state)) {
@@ -188,7 +189,12 @@ export class AssetUsageLedger extends SecureStateStore {
     await this.ready();
     return await this.withLocks([this.bucketLock(identity)], async () => {
       const value = await this.readJson(this.recordPath(identity, reservationId));
-      return value === null ? null : validateAssetUsageReservation(value);
+      if (value === null) return null;
+      const record = validateAssetUsageReservation(value);
+      if (record.reservationId !== reservationId || canonicalJson(exactIdentity(record)) !== canonicalJson(identity)) {
+        corrupt("A usage reservation path binding is invalid.");
+      }
+      return record;
     });
   }
 
@@ -307,7 +313,7 @@ function assertTransition(from: AssetUsageState, to: Exclude<AssetUsageState, "r
   const allowed: Readonly<Record<AssetUsageState, readonly AssetUsageState[]>> = {
     reserved: ["submitted", "unknown_finality", "finalized", "failed_before_effect"],
     submitted: ["unknown_finality", "finalized"],
-    unknown_finality: ["finalized", "failed_before_effect"],
+    unknown_finality: ["finalized"],
     finalized: [],
     failed_before_effect: [],
   };
