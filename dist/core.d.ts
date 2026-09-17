@@ -16,6 +16,8 @@ import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
 import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
+export { ASSET_POLICY_REGISTRY_SCHEMA, assetPolicyDigest, evaluateAssetPolicy, sealAssetPolicyRegistry, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
+export type { AssetAtomicCaps, AssetPolicyAdmission, AssetPolicyChain, AssetPolicyChainFamily, AssetPolicyEvaluationInput, AssetPolicyRail, AssetPolicyRegistry, AssetPolicyRow, AssetRailAdmission, UnsignedAssetPolicyRegistry, } from "./asset-policy-registry.js";
 export declare class ApnCore {
     readonly context: RuntimeContext;
     readonly wallet: WalletService;
