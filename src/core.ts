@@ -40,6 +40,25 @@ import { facilitatorFail } from "./facilitator-gasless/failure.js";
 
 export type { CommandRequest, OutputEnvelope } from "./commands.js";
 export type { CoreDependencies } from "./runtime.js";
+export {
+  ASSET_POLICY_REGISTRY_SCHEMA,
+  assetPolicyDigest,
+  evaluateAssetPolicy,
+  sealAssetPolicyRegistry,
+  validateAssetPolicyRegistry,
+} from "./asset-policy-registry.js";
+export type {
+  AssetAtomicCaps,
+  AssetPolicyAdmission,
+  AssetPolicyChain,
+  AssetPolicyChainFamily,
+  AssetPolicyEvaluationInput,
+  AssetPolicyRail,
+  AssetPolicyRegistry,
+  AssetPolicyRow,
+  AssetRailAdmission,
+  UnsignedAssetPolicyRegistry,
+} from "./asset-policy-registry.js";
 
 export class ApnCore {
   readonly context: RuntimeContext;

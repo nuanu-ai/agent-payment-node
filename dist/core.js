@@ -36,6 +36,7 @@ import { saRequest } from "./smart-account-gasless/schema.js";
 import { saFail } from "./smart-account-gasless/reasons.js";
 import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { facilitatorFail } from "./facilitator-gasless/failure.js";
+export { ASSET_POLICY_REGISTRY_SCHEMA, assetPolicyDigest, evaluateAssetPolicy, sealAssetPolicyRegistry, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
 export class ApnCore {
     context;
     wallet;
