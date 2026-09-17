@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
-import type { TronRpcPort } from "../../tron/rpc.js";
+import { tronBlock, type TronRpcPort } from "../../tron/rpc.js";
 import type { SwapSimulationProof } from "../quote.js";
 import { validateSunSwapUnsignedTransaction, type SunSwapUnsignedIntent, type SunSwapUnsignedTransaction } from "./transaction.js";
 
@@ -12,19 +12,26 @@ export async function simulateSunSwapTransaction(rpc: TronRpcPort, transaction: 
   const value = transaction.raw_data.contract[0].parameter.value;
   const body = { owner_address: value.owner_address, contract_address: value.contract_address, function_selector: "execute(bytes,bytes[],uint256)",
     parameter: value.data.slice(8), call_value: value.call_value, fee_limit: transaction.raw_data.fee_limit, visible: false };
-  let constant: unknown, estimate: unknown;
+  let constant: unknown, estimate: unknown, block: ReturnType<typeof tronBlock>, head: ReturnType<typeof tronBlock>;
   try {
+    block = tronBlock(await rpc.call("wallet/getnowblock", {}));
     constant = await rpc.call("wallet/triggerconstantcontract", body);
     estimate = await rpc.call("wallet/estimateenergy", body);
+    head = tronBlock(await rpc.call("wallet/getnowblock", {}));
   } catch { return unavailable(); }
+  if (head.id !== block.id || head.number !== block.number) revert();
   const constantEnergy = response(constant, "energy_used"), estimatedEnergy = response(estimate, "energy_required");
   const energy = constantEnergy > estimatedEnergy ? constantEnergy : estimatedEnergy;
   if (energy > BigInt(intent.maximumEnergy) || energy * BigInt(intent.energyPriceSun) > BigInt(intent.feeLimitSun)) {
     throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "SunSwap simulation exceeds the frozen energy or fee_limit bound.");
   }
-  const requestHash = domainHash("apn.sunswap-tron-simulation-request.v1", canonicalJson({ originHash: rpc.originHash, body, txID: transaction.txID }));
-  const resultHash = domainHash("apn.sunswap-tron-simulation-result.v1", canonicalJson({ constant, estimate, energyRequired: energy.toString() }));
-  return { requestHash, resultHash, success: true, energyRequired: energy.toString(), feeLimitSun: intent.feeLimitSun };
+  const blockHash = `0x${block.id}` as const, blockNumber = block.number.toString();
+  const requestHash = domainHash("apn.sunswap-tron-simulation-request.v1", canonicalJson({ originHash: rpc.originHash, body,
+    txID: transaction.txID, blockNumber, blockHash }));
+  const resultHash = domainHash("apn.sunswap-tron-simulation-result.v1", canonicalJson({ constant, estimate,
+    energyRequired: energy.toString(), blockNumber, blockHash }));
+  return { requestHash, resultHash, success: true, energyRequired: energy.toString(), feeLimitSun: intent.feeLimitSun,
+    blockNumber, blockHash, headBlockNumber: blockNumber, maxHeadDrift: 0, gasEstimate: energy.toString() };
 }
 
 function response(value: unknown, field: "energy_used" | "energy_required"): bigint {
