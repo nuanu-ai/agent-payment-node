@@ -52,6 +52,14 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path[0] === "circle")
         return { request: bindCircleCommand(parsed.command.path.join(" "), options) };
     switch (parsed.command.path.join(" ")) {
+        case "allowlist inventory": return { request: { command: "allowlist.inventory" } };
+        case "allowlist resolve": {
+            const kind = value(options, "--kind");
+            if (kind !== "native" && kind !== "token")
+                throw new ApnError("APN_ALLOWLIST_IDENTITY_INVALID", "Asset kind must be exactly native or token.", { reason: "invalid_kind" });
+            return { request: { command: "allowlist.resolve", chain: value(options, "--chain"), kind,
+                    ...(options["--identifier"] === undefined ? {} : { identifier: options["--identifier"] }) } };
+        }
         case "--version": return { request: { command: "version" } };
         case "doctor keychain": return { request: { command: "doctor.keychain" } };
         case "wallet ensure-tron": {

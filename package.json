@@ -19,6 +19,7 @@
   "files": [
     "bin/apn.js",
     "dist/**",
+    "data/allowlist/2026-09-17/dataset.json",
     "native/BUILD.md",
     "npm-shrinkwrap.json",
     "README.md",

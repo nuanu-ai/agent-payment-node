@@ -565,6 +565,8 @@ apn gasless capabilities [--profile <profile>]
 apn gasless balance --profile <profile> --chain <chain-id>
 apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --idempotency-key <key>
 apn gasless transfer approve --operation <operation-id>
+apn allowlist inventory
+apn allowlist resolve --chain <exact-network-identity> --kind <native|token> [--identifier <exact-token-identifier>]
 ```
 <!-- END APN COMMAND CATALOG -->
 
