@@ -12,6 +12,8 @@ import { bindCircleCommand } from "./lifi/circle-command-catalog.js";
 import { bindGaslessCommand } from "./gasless/command-catalog.js";
 import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { bindUniswapCommand } from "./swap/uniswap-command-catalog.js";
+import { bindSunSwapCommand } from "./swap/sunswap-tron/command-catalog.js";
+import { bindJupiterCommand } from "./swap/jupiter-solana/command-catalog.js";
 export function bindArgv(argv) {
     return bindParsedCatalog(parseCatalogArgv(argv));
 }
@@ -44,8 +46,16 @@ export function mcpFieldName(optionName) {
 }
 function bindParsedCatalog(parsed) {
     const options = parsed.values;
-    if (parsed.command.path[0] === "swap")
-        return { request: bindUniswapCommand(parsed.command.path.join(" "), options) };
+    if (parsed.command.path[0] === "swap") {
+        const path = parsed.command.path.join(" ");
+        if (path.startsWith("swap ethereum uniswap "))
+            return { request: bindUniswapCommand(path, options) };
+        if (path.startsWith("swap tron sunswap "))
+            return { request: bindSunSwapCommand(path, options) };
+        if (path.startsWith("swap solana jupiter "))
+            return { request: bindJupiterCommand(path, options) };
+        throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported guarded swap command.");
+    }
     if (parsed.command.path[0] === "gasless")
         return { request: bindGaslessCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "bridge")

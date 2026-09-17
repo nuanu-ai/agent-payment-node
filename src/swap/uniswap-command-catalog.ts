@@ -1,6 +1,8 @@
 import type { CommandDefinition, CommandGroup, CommandOption } from "../command-catalog.js";
 import type { CommandRequest } from "../commands.js";
+import { exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { getAddress } from "viem";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
   ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
@@ -37,15 +39,32 @@ function command(name: string, options: readonly CommandOption[], summary: strin
 }
 export function bindUniswapCommand(path: string, o: Readonly<Record<string, string>>): CommandRequest {
   const action = path.slice("swap ethereum uniswap ".length);
-  if (action === "inventory") return { command: "swap.uniswap.inventory" };
-  if (action === "status") return { command: "swap.uniswap.status", operationId: hash(o["--operation"]) };
-  if (action === "approve") return { command: "swap.uniswap.approve", operationId: hash(o["--operation"]) };
-  if (action === "execute") return { command: "swap.uniswap.execute", operationId: hash(o["--operation"]) };
-  if (action === "prepare") return { command: "swap.uniswap.prepare", profile: o["--profile"]!, quoteHash: hash(o["--quote"]), idempotencyKey: o["--idempotency-key"]! };
-  return { command: "swap.uniswap.quote", profile: o["--profile"]!, account: o["--account"]!, recipient: o["--to"]!, amountAtomic: o["--amount"]!,
-    slippageBps: safeInteger(o["--slippage-bps"]), ownerSlippageCapBps: safeInteger(o["--owner-slippage-cap-bps"]),
+  if (!isPlainRecord(o)) invalid("Uniswap options must be a plain object.");
+  if (action === "inventory") { exact(o, []); return { command: "swap.uniswap.inventory" }; }
+  if (action === "status" || action === "approve" || action === "execute") {
+    exact(o, ["--operation"]); return { command: `swap.uniswap.${action}`, operationId: hash(o["--operation"]) };
+  }
+  if (action === "prepare") {
+    exact(o, ["--profile", "--quote", "--idempotency-key"]);
+    return { command: "swap.uniswap.prepare", profile: o["--profile"]!, quoteHash: hash(o["--quote"]), idempotencyKey: o["--idempotency-key"]! };
+  }
+  if (action !== "quote") invalid("Unsupported Uniswap action.");
+  exact(o, ["--profile", "--account", "--to", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--deadline",
+    "--max-gas-limit", "--max-fee-per-gas", "--max-priority-fee-per-gas"]);
+  const slippageBps = safeInteger(o["--slippage-bps"]), ownerSlippageCapBps = safeInteger(o["--owner-slippage-cap-bps"]);
+  if (slippageBps > ownerSlippageCapBps || ownerSlippageCapBps > 10_000) invalid("Uniswap slippage exceeds the owner cap.");
+  return { command: "swap.uniswap.quote", profile: o["--profile"]!, account: evmAddress(o["--account"]), recipient: evmAddress(o["--to"]), amountAtomic: o["--amount"]!,
+    slippageBps, ownerSlippageCapBps,
     deadline: safeInteger(o["--deadline"]),
     maxGasLimit: o["--max-gas-limit"]!, maxFeePerGas: o["--max-fee-per-gas"]!, maxPriorityFeePerGas: o["--max-priority-fee-per-gas"]! };
+}
+function exact(value: Record<string, unknown>, keys: readonly string[]): void {
+  if (!exactKeys(value, keys)) invalid("Uniswap options contain an unknown or missing field.");
+}
+function evmAddress(value: string | undefined): string {
+  if (value === undefined) invalid("Uniswap address is required.");
+  try { const canonical = getAddress(value); if (canonical !== value) invalid("Uniswap address must use its canonical checksum."); return canonical; }
+  catch { return invalid("Uniswap address must use its canonical checksum."); }
 }
 function safeInteger(value: string | undefined): number {
   if (value === undefined || !/^(?:0|[1-9][0-9]*)$/u.test(value)) invalid("Uniswap integer option must be canonical.");

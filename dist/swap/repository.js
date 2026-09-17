@@ -31,7 +31,6 @@ export class SwapOperationRepository extends SecureStateStore {
     }
     async loadAny(operationId) {
         stateIdentifier(operationId, "swap operation id");
-        await this.ready();
         const profiles = await this.readDirectory("swap-operations");
         let found = null;
         for (const profile of profiles) {
