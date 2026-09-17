@@ -43,7 +43,8 @@
     "test:source": "npm run test:core",
     "build:test": "tsc -p tsconfig.test.json",
     "integration:assemble-app": "node scripts/assemble-macos-app.mjs",
-    "prepack": "npm run build && npm test"
+    "prepack": "npm run build && npm test",
+    "validate:allowlist-dataset": "node scripts/validate-allowlist-dataset.mjs"
   },
   "dependencies": {
     "@metamask/7715-permission-types": "2.0.0",
