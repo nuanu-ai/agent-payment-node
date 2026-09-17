@@ -21,28 +21,32 @@ class AssetPortfolioCache {
     store(key, value) { this.entries.set(key, structuredClone(value)); }
 }
 export class AssetPortfolioReader {
-    ports;
     now;
     wait;
     cache = new AssetPortfolioCache();
+    ports;
     constructor(ports, now = Date.now, wait = async (milliseconds) => await new Promise((resolve) => setTimeout(resolve, milliseconds))) {
-        this.ports = ports;
         this.now = now;
         this.wait = wait;
+        const pinned = {};
         for (const family of ["evm", "solana", "tron"]) {
-            if (ports[family].family !== family || !source(ports[family].source))
+            const port = ports[family];
+            if (port.family !== family || !source(port.source) || typeof port.read !== "function") {
                 invalid("A portfolio balance port is invalid.");
+            }
+            pinned[family] = { family, source: port.source, read: port.read.bind(port) };
         }
+        this.ports = pinned;
     }
     async read(registryValue, accountsValue, cachePolicyValue) {
-        const registry = validateAssetPolicyRegistry(registryValue);
+        const registry = structuredClone(validateAssetPolicyRegistry(registryValue));
         const accounts = portfolioAccounts(accountsValue, registry.chains);
         const cachePolicy = cachePolicyContract(cachePolicyValue);
         const networks = [];
         let requestCount = 0;
         for (const chain of [...registry.chains].sort((left, right) => left.chain.localeCompare(right.chain))) {
             const account = accounts.get(chain.chain);
-            const key = `${registry.policyDigest}\0${chain.chain}\0${account}`;
+            const key = `${registry.policyDigest}\0${chain.chain}\0${account}\0${cachePolicy.availableTtlMs}\0${cachePolicy.unavailableTtlMs}`;
             const nowMs = this.now();
             const cached = this.cache.lookup(key, nowMs);
             if (cached?.state === "fresh") {
@@ -68,19 +72,51 @@ export class AssetPortfolioReader {
         const request = { mode: mode(chain.family), chain: chain.chain, account,
             assets: assets.map(({ kind, identifier }) => ({ kind, identifier })) };
         for (let attempt = 1;; attempt += 1) {
-            let result;
+            let received;
             try {
-                result = await port.read(request);
+                received = await port.read(structuredClone(request));
             }
             catch {
-                result = { status: "unavailable", reason: "transport", observedAt: new Date(this.now()).toISOString(), block: null, slot: null };
+                received = { status: "unavailable", reason: "transport", observedAt: new Date(this.now()).toISOString(), block: null, slot: null };
             }
+            let cloned;
+            try {
+                cloned = structuredClone(received);
+            }
+            catch {
+                cloned = undefined;
+            }
+            const result = batchResultContract(cloned, new Date(this.now()).toISOString());
             if (result.status !== "unavailable" || result.httpStatus !== 429 || attempt > MAX_RETRIES) {
                 return { attempts: attempt, result };
             }
             await this.wait(attempt === 1 ? 1_000 : 2_000);
         }
     }
+}
+function batchResultContract(value, fallbackObservedAt) {
+    const unavailable = () => ({ status: "unavailable", reason: "protocol",
+        observedAt: fallbackObservedAt, block: null, slot: null });
+    if (!isPlainRecord(value) || (value.status !== "available" && value.status !== "unavailable"))
+        return unavailable();
+    if (value.status === "available") {
+        if (!exactKeys(value, ["status", "observedAt", "block", "slot", "balances"]) ||
+            typeof value.observedAt !== "string" || (value.block !== null && typeof value.block !== "string") ||
+            (value.slot !== null && typeof value.slot !== "string") || !Array.isArray(value.balances))
+            return unavailable();
+        return value;
+    }
+    const keys = Object.hasOwn(value, "httpStatus") ?
+        ["status", "reason", "httpStatus", "observedAt", "block", "slot"] :
+        ["status", "reason", "observedAt", "block", "slot"];
+    if (!exactKeys(value, keys) ||
+        (value.reason !== "rate_limited" && value.reason !== "transport" && value.reason !== "protocol") ||
+        (Object.hasOwn(value, "httpStatus") && (typeof value.httpStatus !== "number" ||
+            !Number.isSafeInteger(value.httpStatus) || value.httpStatus < 100 || value.httpStatus > 599)) ||
+        typeof value.observedAt !== "string" || (value.block !== null && typeof value.block !== "string") ||
+        (value.slot !== null && typeof value.slot !== "string"))
+        return unavailable();
+    return value;
 }
 function portfolioAccounts(value, chains) {
     if (!Array.isArray(value) || value.length !== chains.length)

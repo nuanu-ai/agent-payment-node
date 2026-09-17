@@ -168,3 +168,53 @@ test("malformed available provenance becomes explicit unavailable and never a sy
       provenance: { block: null, slot: null, observedAt: at, source: "fixture:evm", attempts: 1 } });
   }
 });
+
+test("runtime provider envelopes are exact and malformed 429 claims are not retried", async () => {
+  const malformed = new Port("evm", "fixture:evm", () => ({
+    status: "unavailable", reason: "invented", httpStatus: 429, observedAt: at, block: null, slot: null, extra: true,
+  } as unknown as BatchBalanceResult));
+  const result = await new AssetPortfolioReader(ports({ evm: malformed }), () => Date.parse(at), async () => {
+    assert.fail("a malformed provider envelope must not retry");
+  }).read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
+  assert.equal(result.requestCount, 1); assert.equal(malformed.calls.length, 1);
+  assert.ok(result.networks[0]!.balances.every((row) =>
+    row.observation.status === "unavailable" && row.observation.reason === "protocol"));
+});
+
+test("cache policy changes are isolated and cannot reuse a longer prior TTL", async () => {
+  let now = Date.parse(at);
+  const evm = new Port("evm", "fixture:evm", (request) => all(request, "evm"));
+  const reader = new AssetPortfolioReader(ports({ evm }), () => now, async () => {});
+  await reader.read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 10_000, unavailableTtlMs: 0 });
+  now += 1;
+  const result = await reader.read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1, unavailableTtlMs: 0 });
+  assert.equal(result.requestCount, 1); assert.equal(result.networks[0]!.cache.state, "miss"); assert.equal(evm.calls.length, 2);
+});
+
+test("registry and port descriptor mutation cannot escape the validated digest snapshot", async () => {
+  const sealed = registry(["evm"]);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const original = new Port("evm", "fixture:evm", async (request) => { await gate; return all(request, "evm"); });
+  const descriptor = ports({ evm: original });
+  const reader = new AssetPortfolioReader(descriptor, () => Date.parse(at), async () => {});
+  const pending = reader.read(sealed, accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
+  (sealed.chains[0]!.assets[0] as any).symbol = "FAKE";
+  (descriptor as any).evm = new Port("evm", "fixture:replaced", () => { assert.fail("replacement port used"); });
+  release();
+  const result = await pending;
+  assert.equal(result.datasetDigest, sealed.policyDigest);
+  assert.deepEqual(result.networks[0]!.balances.map((row) => row.asset.symbol), ["ETH", "USDC"]);
+  assert.ok(result.networks[0]!.balances.every((row) => row.observation.status === "available"));
+});
+
+test("noncanonical provider identities fail the whole network as protocol data", async () => {
+  const evm = new Port("evm", "fixture:evm", (request) => available("evm", [
+    { ...request.assets[0]!, amountAtomic: "1" },
+    { kind: "token", identifier: EVM_TOKEN.toLowerCase(), amountAtomic: "2" },
+  ]));
+  const result = await new AssetPortfolioReader(ports({ evm }), () => Date.parse(at), async () => {})
+    .read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
+  assert.ok(result.networks[0]!.balances.every((row) =>
+    row.observation.status === "unavailable" && row.observation.reason === "protocol"));
+});

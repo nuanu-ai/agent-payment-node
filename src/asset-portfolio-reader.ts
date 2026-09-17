@@ -127,27 +127,38 @@ class AssetPortfolioCache {
 
 export class AssetPortfolioReader {
   private readonly cache = new AssetPortfolioCache();
-  constructor(private readonly ports: Readonly<{
+  private readonly ports: Readonly<{
+    evm: FamilyBalanceBatchPort;
+    solana: FamilyBalanceBatchPort;
+    tron: FamilyBalanceBatchPort;
+  }>;
+  constructor(ports: Readonly<{
     evm: FamilyBalanceBatchPort;
     solana: FamilyBalanceBatchPort;
     tron: FamilyBalanceBatchPort;
   }>, private readonly now: () => number = Date.now,
   private readonly wait: (milliseconds: number) => Promise<void> = async (milliseconds) =>
     await new Promise<void>((resolve) => setTimeout(resolve, milliseconds))) {
+    const pinned = {} as Record<AssetPolicyChainFamily, FamilyBalanceBatchPort>;
     for (const family of ["evm", "solana", "tron"] as const) {
-      if (ports[family].family !== family || !source(ports[family].source)) invalid("A portfolio balance port is invalid.");
+      const port = ports[family];
+      if (port.family !== family || !source(port.source) || typeof port.read !== "function") {
+        invalid("A portfolio balance port is invalid.");
+      }
+      pinned[family] = { family, source: port.source, read: port.read.bind(port) };
     }
+    this.ports = pinned;
   }
 
   async read(registryValue: unknown, accountsValue: unknown, cachePolicyValue: unknown): Promise<AssetPortfolio> {
-    const registry = validateAssetPolicyRegistry(registryValue);
+    const registry = structuredClone(validateAssetPolicyRegistry(registryValue));
     const accounts = portfolioAccounts(accountsValue, registry.chains);
     const cachePolicy = cachePolicyContract(cachePolicyValue);
     const networks: PortfolioNetworkBalance[] = [];
     let requestCount = 0;
     for (const chain of [...registry.chains].sort((left, right) => left.chain.localeCompare(right.chain))) {
       const account = accounts.get(chain.chain)!;
-      const key = `${registry.policyDigest}\0${chain.chain}\0${account}`;
+      const key = `${registry.policyDigest}\0${chain.chain}\0${account}\0${cachePolicy.availableTtlMs}\0${cachePolicy.unavailableTtlMs}`;
       const nowMs = this.now();
       const cached = this.cache.lookup(key, nowMs);
       if (cached?.state === "fresh") {
@@ -176,17 +187,45 @@ export class AssetPortfolioReader {
     const request: BatchBalanceRequest = { mode: mode(chain.family), chain: chain.chain, account,
       assets: assets.map(({ kind, identifier }) => ({ kind, identifier })) };
     for (let attempt = 1; ; attempt += 1) {
-      let result: BatchBalanceResult;
-      try { result = await port.read(request); }
-      catch {
-        result = { status: "unavailable", reason: "transport", observedAt: new Date(this.now()).toISOString(), block: null, slot: null };
+      let received: unknown;
+      try {
+        received = await port.read(structuredClone(request));
       }
+      catch {
+        received = { status: "unavailable", reason: "transport", observedAt: new Date(this.now()).toISOString(), block: null, slot: null };
+      }
+      let cloned: unknown;
+      try { cloned = structuredClone(received); }
+      catch { cloned = undefined; }
+      const result = batchResultContract(cloned, new Date(this.now()).toISOString());
       if (result.status !== "unavailable" || result.httpStatus !== 429 || attempt > MAX_RETRIES) {
         return { attempts: attempt, result };
       }
       await this.wait(attempt === 1 ? 1_000 : 2_000);
     }
   }
+}
+
+function batchResultContract(value: unknown, fallbackObservedAt: string): BatchBalanceResult {
+  const unavailable = (): BatchBalanceUnavailable => ({ status: "unavailable", reason: "protocol",
+    observedAt: fallbackObservedAt, block: null, slot: null });
+  if (!isPlainRecord(value) || (value.status !== "available" && value.status !== "unavailable")) return unavailable();
+  if (value.status === "available") {
+    if (!exactKeys(value, ["status", "observedAt", "block", "slot", "balances"]) ||
+        typeof value.observedAt !== "string" || (value.block !== null && typeof value.block !== "string") ||
+        (value.slot !== null && typeof value.slot !== "string") || !Array.isArray(value.balances)) return unavailable();
+    return value as unknown as BatchBalanceAvailable;
+  }
+  const keys = Object.hasOwn(value, "httpStatus") ?
+    ["status", "reason", "httpStatus", "observedAt", "block", "slot"] :
+    ["status", "reason", "observedAt", "block", "slot"];
+  if (!exactKeys(value, keys) ||
+      (value.reason !== "rate_limited" && value.reason !== "transport" && value.reason !== "protocol") ||
+      (Object.hasOwn(value, "httpStatus") && (typeof value.httpStatus !== "number" ||
+        !Number.isSafeInteger(value.httpStatus) || value.httpStatus < 100 || value.httpStatus > 599)) ||
+      typeof value.observedAt !== "string" || (value.block !== null && typeof value.block !== "string") ||
+      (value.slot !== null && typeof value.slot !== "string")) return unavailable();
+  return value as unknown as BatchBalanceUnavailable;
 }
 
 function portfolioAccounts(value: unknown, chains: readonly AssetPolicyChain[]): ReadonlyMap<string, string> {
