@@ -14,6 +14,10 @@ recipient binding, and unsupported commands fail closed. The same unsigned
 envelope must pass `eth_call` and `eth_estimateGas` at one rechecked safe block
 within the recorded head drift bound.
 
+The 2.2.0 decoder requires the exact six-field V2/V3 command input, including
+the per-hop minimum-price array introduced by that router version. Its route
+hash binds command family, tokens, V3 fee tiers, and every per-hop floor.
+
 Preparation additionally requires separate owner admission of both exact
 assets and the catalog mechanism under the shared usage ledger. The shipped
 runtime contains no active admission and no Uniswap signer or sender.

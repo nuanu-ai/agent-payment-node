@@ -1,4 +1,4 @@
-import { decodeAbiParameters, decodeFunctionData, getAddress, parseAbi } from "viem";
+import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, getAddress, parseAbi } from "viem";
 import { canonicalJson, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { UNISWAP_USDC } from "./uniswap-pin.js";
@@ -19,16 +19,30 @@ export function decodeUniswapRouterCalldata(data: `0x${string}`, expected: { rea
     if (BigInt(rawDeadline) !== BigInt(expected.deadline) || commands.length !== 6 || inputs.length !== 2) fail();
     const bytes = Buffer.from(commands.slice(2), "hex");
     if (bytes.length !== 2 || bytes[0] !== WRAP_ETH || (bytes[1] !== V3_SWAP_EXACT_IN && bytes[1] !== V2_SWAP_EXACT_IN)) fail();
-    const [wrapRecipient, wrapAmount] = decodeAbiParameters([{ type: "address" }, { type: "uint256" }], inputs[0]!);
+    const wrapTypes = [{ type: "address" }, { type: "uint256" }] as const;
+    const [wrapRecipient, wrapAmount] = decodeAbiParameters(wrapTypes, inputs[0]!);
+    if (encodeAbiParameters(wrapTypes, [wrapRecipient, wrapAmount]).toLowerCase() !== inputs[0]!.toLowerCase()) fail();
     if (getAddress(wrapRecipient) !== ROUTER_RECIPIENT || wrapAmount !== BigInt(expected.inputAmountAtomic)) fail();
     let recipient: string, amountIn: bigint, amountOutMin: bigint, route: unknown;
     if (bytes[1] === V3_SWAP_EXACT_IN) {
-      const values = decodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "bytes" }, { type: "bool" }], inputs[1]!);
-      [recipient, amountIn, amountOutMin] = values; route = v3Path(values[3]); if (values[4] !== false) fail();
+      const types = [{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "bytes" }, { type: "bool" },
+        { type: "uint256[]" }] as const;
+      const values = decodeAbiParameters(types, inputs[1]!);
+      if (encodeAbiParameters(types, values).toLowerCase() !== inputs[1]!.toLowerCase()) fail();
+      const path = v3Path(values[3]);
+      [recipient, amountIn, amountOutMin] = values;
+      if (values[4] !== false || (values[5].length !== 0 && values[5].length !== path.hops.length)) fail();
+      route = { command: "V3_SWAP_EXACT_IN", path, minHopPriceX36: values[5].map(String) };
     } else {
-      const values = decodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "address[]" }, { type: "bool" }], inputs[1]!);
-      [recipient, amountIn, amountOutMin] = values; route = values[3].map(getAddress);
-      if (values[4] !== false || canonicalJson(route) !== canonicalJson([WETH, UNISWAP_USDC])) fail();
+      const types = [{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "address[]" }, { type: "bool" },
+        { type: "uint256[]" }] as const;
+      const values = decodeAbiParameters(types, inputs[1]!);
+      if (encodeAbiParameters(types, values).toLowerCase() !== inputs[1]!.toLowerCase()) fail();
+      const path = values[3].map(getAddress);
+      [recipient, amountIn, amountOutMin] = values;
+      if (values[4] !== false || canonicalJson(path) !== canonicalJson([WETH, UNISWAP_USDC]) ||
+          (values[5].length !== 0 && values[5].length !== path.length - 1)) fail();
+      route = { command: "V2_SWAP_EXACT_IN", path, minHopPriceX36: values[5].map(String) };
     }
     if (getAddress(recipient) !== expected.recipient || amountIn !== BigInt(expected.inputAmountAtomic) ||
         amountOutMin < BigInt(expected.minimumOutputAtomic)) fail();
@@ -38,11 +52,11 @@ export function decodeUniswapRouterCalldata(data: `0x${string}`, expected: { rea
   } catch (error) { if (error instanceof ApnError) throw error; return fail(); }
 }
 
-function v3Path(path: `0x${string}`): readonly string[] {
+function v3Path(path: `0x${string}`): { readonly tokens: readonly string[]; readonly hops: readonly number[] } {
   const hex = path.slice(2); if (hex.length < 86 || (hex.length - 40) % 46 !== 0) fail();
-  const tokens: string[] = [getAddress(`0x${hex.slice(0, 40)}`)]; let offset = 40;
+  const tokens: string[] = [getAddress(`0x${hex.slice(0, 40)}`)], hops: number[] = []; let offset = 40;
   while (offset < hex.length) { const fee = Number.parseInt(hex.slice(offset, offset + 6), 16); if (![100, 500, 3000, 10000].includes(fee)) fail();
-    tokens.push(getAddress(`0x${hex.slice(offset + 6, offset + 46)}`)); offset += 46; }
-  if (tokens[0] !== WETH || tokens.at(-1) !== UNISWAP_USDC || tokens.length > 5) fail(); return tokens;
+    hops.push(fee); tokens.push(getAddress(`0x${hex.slice(offset + 6, offset + 46)}`)); offset += 46; }
+  if (tokens[0] !== WETH || tokens.at(-1) !== UNISWAP_USDC || tokens.length > 5) fail(); return { tokens, hops };
 }
 function fail(): never { throw new ApnError("APN_PROVIDER_PROTOCOL", "Universal Router calldata is unsupported or does not prove the exact guarded swap."); }

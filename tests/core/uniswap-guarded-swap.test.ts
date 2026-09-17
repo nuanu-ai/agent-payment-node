@@ -17,11 +17,11 @@ const ACCOUNT = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1", RECIPIENT = "0x222
 const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", H = (c: string) => c.repeat(64);
 const deadline = 1_790_000_600, input = "1000000000000000", output = "2000000", minimum = "1980000";
 const executeAbi = parseAbi(["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"]);
-function calldata(command = 0x00, recipient = RECIPIENT, amountOutMin = minimum) {
-  const path = `0x${WETH.slice(2)}000bb8${UNISWAP_USDC.slice(2)}` as `0x${string}`;
+function calldata(command = 0x00, recipient = RECIPIENT, amountOutMin = minimum, fee = 3000, minHopPriceX36: readonly bigint[] = []) {
+  const path = `0x${WETH.slice(2)}${fee.toString(16).padStart(6, "0")}${UNISWAP_USDC.slice(2)}` as `0x${string}`;
   const wrap = encodeAbiParameters([{ type: "address" }, { type: "uint256" }], ["0x0000000000000000000000000000000000000002", BigInt(input)]);
-  const swap = encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "bytes" }, { type: "bool" }],
-    [recipient as `0x${string}`, BigInt(input), BigInt(amountOutMin), path, false]);
+  const swap = encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "bytes" }, { type: "bool" },
+    { type: "uint256[]" }], [recipient as `0x${string}`, BigInt(input), BigInt(amountOutMin), path, false, minHopPriceX36]);
   const commands = `0x0b${command.toString(16).padStart(2, "0")}` as `0x${string}`;
   return encodeFunctionData({ abi: executeAbi, functionName: "execute", args: [commands, [wrap, swap], BigInt(deadline)] });
 }
@@ -54,7 +54,8 @@ test("quote and unsigned envelope codecs bind exact chain, account, pair, permit
     const value: any = structuredClone(quoteResponse()); mutate(value); assert.throws(() => decodeUniswapQuoteResponse(value, request), { code: "APN_PROVIDER_PROTOCOL" });
   }
   for (const mutate of [(v: any) => { v.swap.to = WETH; }, (v: any) => { v.swap.from = RECIPIENT; },
-    (v: any) => { v.swap.chainId = 8453; }, (v: any) => { v.swap.value = "1"; }, (v: any) => { v.swap.extra = true; }]) {
+    (v: any) => { v.swap.chainId = 8453; }, (v: any) => { v.swap.value = "1"; }, (v: any) => { v.swap.extra = true; },
+    (v: any) => { v.gasFee = "1"; }]) {
     const value: any = structuredClone(swapResponse()); mutate(value); assert.throws(() => decodeUniswapSwapResponse(value,
       { account: ACCOUNT, amountAtomic: input, maxGasLimit: "150000", maxFeePerGas: "2000000000", maxPriorityFeePerGas: "100000000" }),
     { code: "APN_PROVIDER_PROTOCOL" });
@@ -64,9 +65,21 @@ test("quote and unsigned envelope codecs bind exact chain, account, pair, permit
 test("Universal Router decoder proves recipient, input, output floor and deadline and rejects command extension or subplan", () => {
   const decoded = decodeUniswapRouterCalldata(calldata(), { recipient: RECIPIENT, inputAmountAtomic: input, minimumOutputAtomic: minimum, deadline });
   assert.equal(decoded.command, "V3_SWAP_EXACT_IN"); assert.equal(decoded.minimumOutputAtomic, minimum);
+  const alternateFee = decodeUniswapRouterCalldata(calldata(0x00, RECIPIENT, minimum, 500),
+    { recipient: RECIPIENT, inputAmountAtomic: input, minimumOutputAtomic: minimum, deadline });
+  assert.notEqual(alternateFee.routeHash, decoded.routeHash);
+  const perHop = decodeUniswapRouterCalldata(calldata(0x00, RECIPIENT, minimum, 3000, [1n]),
+    { recipient: RECIPIENT, inputAmountAtomic: input, minimumOutputAtomic: minimum, deadline });
+  assert.notEqual(perHop.routeHash, decoded.routeHash);
   assert.throws(() => decodeUniswapRouterCalldata(calldata(0x21), { recipient: RECIPIENT, inputAmountAtomic: input, minimumOutputAtomic: minimum, deadline }), { code: "APN_PROVIDER_PROTOCOL" });
   assert.throws(() => decodeUniswapRouterCalldata(calldata(0x00, ACCOUNT), { recipient: RECIPIENT, inputAmountAtomic: input, minimumOutputAtomic: minimum, deadline }), { code: "APN_PROVIDER_PROTOCOL" });
   assert.throws(() => decodeUniswapRouterCalldata(calldata(0x00, RECIPIENT, "1"), { recipient: RECIPIENT, inputAmountAtomic: input, minimumOutputAtomic: minimum, deadline }), { code: "APN_PROVIDER_PROTOCOL" });
+  const legacySwap = encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "bytes" }, { type: "bool" }],
+    [RECIPIENT, BigInt(input), BigInt(minimum), `0x${WETH.slice(2)}000bb8${UNISWAP_USDC.slice(2)}`, false]);
+  const wrap = encodeAbiParameters([{ type: "address" }, { type: "uint256" }], ["0x0000000000000000000000000000000000000002", BigInt(input)]);
+  const legacy = encodeFunctionData({ abi: executeAbi, functionName: "execute", args: ["0x0b00", [wrap, legacySwap], BigInt(deadline)] });
+  assert.throws(() => decodeUniswapRouterCalldata(legacy, { recipient: RECIPIENT, inputAmountAtomic: input,
+    minimumOutputAtomic: minimum, deadline }), { code: "APN_PROVIDER_PROTOCOL" });
 });
 
 test("exact simulation binds safe block, eth_call, estimateGas and bounded head drift", async () => {
@@ -122,6 +135,20 @@ test("CLI and MCP expose identical dormant surface; inventory grants no admissio
   assert.equal((inventory.data as any).admitted, false); assert.equal((inventory.data as any).execution, "dormant");
   const prepare = await core.execute({ command: "swap.uniswap.prepare", profile: "swap-test", quoteHash: H("1"), idempotencyKey: "uniswap-test-0001" });
   assert.equal(prepare.error?.code, "APN_OPERATION_BLOCKED");
+  const approve = await core.execute({ command: "swap.uniswap.approve", operationId: H("2") });
+  assert.equal(approve.error?.details?.reason, "uniswap_native_no_approval");
   const execute = await core.execute({ command: "swap.uniswap.execute", operationId: H("2") });
   assert.equal(execute.error?.details?.reason, "uniswap_execution_dormant");
+});
+
+test("runtime and CLI inputs reject prototypes, excess fields, noncanonical integers and hashes", () => {
+  const request: any = { amountAtomic: input, swapper: ACCOUNT, recipient: RECIPIENT, slippageBps: 100, ownerSlippageCapBps: 100 };
+  assert.throws(() => createUniswapQuoteRequest({ ...request, extra: true }), { code: "APN_INVALID_INPUT" });
+  const proto = Object.create({ inherited: true }); Object.assign(proto, request);
+  assert.throws(() => createUniswapQuoteRequest(proto), { code: "APN_INVALID_INPUT" });
+  const args = ["swap", "ethereum", "uniswap", "quote", "--profile", "swap-test", "--account", ACCOUNT, "--to", RECIPIENT,
+    "--amount", input, "--slippage-bps", "1e2", "--owner-slippage-cap-bps", "100", "--deadline", String(deadline),
+    "--max-gas-limit", "150000", "--max-fee-per-gas", "2000000000", "--max-priority-fee-per-gas", "100000000"];
+  assert.throws(() => bindArgv(args), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => bindArgv(["swap", "ethereum", "uniswap", "status", "--operation", H("A")]), { code: "APN_INVALID_INPUT" });
 });

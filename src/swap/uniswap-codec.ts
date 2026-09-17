@@ -26,6 +26,9 @@ export interface UniswapSwapResponse { readonly requestId: string; readonly swap
 
 export function createUniswapQuoteRequest(input: { readonly amountAtomic: string; readonly swapper: string;
   readonly recipient: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number }): UniswapQuoteRequest {
+  if (!isPlainRecord(input) || !exactKeys(input, ["amountAtomic", "swapper", "recipient", "slippageBps", "ownerSlippageCapBps"])) {
+    invalid("Uniswap quote request is invalid.");
+  }
   const amount = uint(input.amountAtomic, true), swapper = address(input.swapper), recipient = address(input.recipient);
   if (!Number.isSafeInteger(input.slippageBps) || input.slippageBps < 0 || input.slippageBps > 10_000 ||
       !Number.isSafeInteger(input.ownerSlippageCapBps) || input.ownerSlippageCapBps < 0 || input.ownerSlippageCapBps > 10_000 ||
@@ -71,7 +74,9 @@ export function decodeUniswapSwapResponse(value: unknown, input: { readonly acco
   } else if (uint(swap.maxFeePerGas, true) > uint(input.maxFeePerGas, true) ||
       uint(swap.maxPriorityFeePerGas, false) > uint(input.maxPriorityFeePerGas, false) ||
       uint(swap.maxPriorityFeePerGas, false) > uint(swap.maxFeePerGas, true)) malformed("EIP-1559 gas cap");
-  uint(value.gasFee, false);
+  const gasLimit = BigInt(uint(swap.gasLimit, true));
+  const effectiveGasPrice = BigInt(uint(keys.includes("gasPrice") ? swap.gasPrice : swap.maxFeePerGas, true));
+  if (uint(value.gasFee, false) !== (gasLimit * effectiveGasPrice).toString()) malformed("gas fee binding");
   return value as unknown as UniswapSwapResponse;
 }
 

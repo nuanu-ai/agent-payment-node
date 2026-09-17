@@ -63,7 +63,7 @@
     {
       "url": "https://developers.uniswap.org/docs/api-reference/check_approval",
       "commit": null,
-      "sha256": "documented-live-reference-2026-09-17"
+      "sha256": "765ac7b6995f0230cf09d5290fedaee4fdb33380fffab78292c7070c231c05ef"
     },
     {
       "url": "https://developers.uniswap.org/docs/api-reference/aggregator_quote",
@@ -86,10 +86,10 @@
       "sha256": "68b206fe26d0323103202562ff29087b84e4cf1acc3650e254fa4ecefd749251"
     },
     {
-      "url": "https://github.com/Uniswap/sdks/blob/57f126ee4ae5d435938569ad22c489e4a0262ca2/sdks/universal-router-sdk/src/utils/constants.ts",
-      "commit": "57f126ee4ae5d435938569ad22c489e4a0262ca2",
+      "url": "https://github.com/Uniswap/sdks/blob/ce522044434cfa8b70921b0848c8bb67cbfbac96/sdks/universal-router-sdk/src/utils/constants.ts",
+      "commit": "ce522044434cfa8b70921b0848c8bb67cbfbac96",
       "sha256": "8fe3fab44bd1e8fa49780811de40b2c87a16f4d6636b4e3faf5fec2bafd2bd3a"
     }
   ],
-  "catalogDigest": "7e646f00f18cf99e4da50682eff06d901b6b6439a8681ec5e07adcb7980893f1"
+  "catalogDigest": "89a5ed81c7aa818190b76652799c6fa57cfa5ce05c95b7484fd1c0325ddb42ab"
 }

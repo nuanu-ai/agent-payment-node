@@ -9,7 +9,7 @@ export declare const UNISWAP_ROUTER: "0x0542093271A31f6FC1DADB232bd59eeb27de780F
 export declare const UNISWAP_PERMIT2: "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 export declare const UNISWAP_API: "https://trade-api.gateway.uniswap.org/v1";
 export declare const UNISWAP_ROUTER_VERSION: "2.2.0";
-export declare const UNISWAP_PIN_CATALOG_DIGEST: "7e646f00f18cf99e4da50682eff06d901b6b6439a8681ec5e07adcb7980893f1";
+export declare const UNISWAP_PIN_CATALOG_DIGEST: "89a5ed81c7aa818190b76652799c6fa57cfa5ce05c95b7484fd1c0325ddb42ab";
 export interface UniswapOfficialPinCatalog {
     readonly schemaVersion: typeof UNISWAP_PIN_CATALOG_SCHEMA;
     readonly catalogVersion: string;

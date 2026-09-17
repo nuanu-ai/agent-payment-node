@@ -20,6 +20,8 @@ export async function executeUniswapCommand(request: Request, context: RuntimeCo
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
     return { proofClass: operation.state, data: null, operation, receipt: null, nextActions: [] };
   }
+  if (request.command === "swap.uniswap.approve") throw new ApnError("APN_OPERATION_BLOCKED",
+    "Native ETH input has no ERC20 or Permit2 approval operation.", { reason: "uniswap_native_no_approval" });
   throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
     "Uniswap signing and sending are dormant until a complete exact single-send adapter is installed.", { reason: "uniswap_execution_dormant" });
 }

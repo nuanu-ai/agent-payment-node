@@ -22,8 +22,11 @@ export class UniswapGuardedSwapBuilder {
             input.deadline <= Math.floor(input.now.getTime() / 1000) || input.deadline - Math.floor(input.now.getTime() / 1000) > 1_800) {
             throw new ApnError("APN_INVALID_INPUT", "Uniswap quote deadline must be in the next 30 minutes.");
         }
-        const request = createUniswapQuoteRequest({ ...input, swapper: input.account }), rawQuote = await this.api.quote(request), quoteResponse = decodeUniswapQuoteResponse(rawQuote, request);
-        const expectedOutput = BigInt(quoteResponse.quote.output.amount), minimumOutput = expectedOutput * BigInt(10_000 - input.slippageBps) / 10000n;
+        const request = createUniswapQuoteRequest({ amountAtomic: input.amountAtomic, swapper: input.account, recipient: input.recipient,
+            slippageBps: input.slippageBps, ownerSlippageCapBps: input.ownerSlippageCapBps });
+        const rawQuote = await this.api.quote(request), quoteResponse = decodeUniswapQuoteResponse(rawQuote, request);
+        const expectedOutput = BigInt(quoteResponse.quote.output.amount), numerator = expectedOutput * BigInt(10_000 - input.slippageBps);
+        const minimumOutput = (numerator + 9999n) / 10000n;
         if (minimumOutput <= 0n)
             throw new ApnError("APN_PROVIDER_PROTOCOL", "Uniswap output floor is zero.");
         const swapRequest = createUniswapSwapRequest(quoteResponse.quote, input.deadline), rawSwap = await this.api.swap(swapRequest);
