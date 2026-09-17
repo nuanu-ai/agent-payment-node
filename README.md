@@ -506,7 +506,7 @@ private destinations, redirects, unsafe TLS and unbounded retries stay forbidden
 The payment rail remains x402 v2 exact on Base USDC; this is not all-chain,
 all-asset or all-x402-version support. No live payment acceptance is implied.
 
-## Guarded Uniswap discovery
+## Guarded swap discovery
 
 `apn swap ethereum uniswap inventory` exposes the immutable Ethereum native
 ETH to canonical USDC pin catalog without admitting it. Quote and prepare use
@@ -514,6 +514,13 @@ strict Trading API, Universal Router calldata, exact simulation, owner policy,
 and shared usage bindings. The installed signer/send path is intentionally
 dormant, so approval and execution return stable refusals and cannot transact.
 See `docs/uniswap.md` for the frozen identities and recovery contract.
+
+The same six-command surface is present for native TRX to USDT through
+SunSwap and native SOL to USDC through Jupiter. Both inventories are offline
+and unadmitted. Quotes require an explicitly injected read-only builder;
+prepare, approval and execution stay dormant. Jupiter additionally refuses
+approval and execution because the JUP6 instruction and account ABI has not
+been verified for signing. See `docs/sunswap.md` and `docs/jupiter.md`.
 
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
@@ -584,6 +591,18 @@ apn swap ethereum uniswap prepare --profile <profile> --quote <string> --idempot
 apn swap ethereum uniswap status --operation <operation_id>
 apn swap ethereum uniswap approve --operation <operation_id>
 apn swap ethereum uniswap execute --operation <operation_id>
+apn swap tron sunswap inventory
+apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string>
+apn swap tron sunswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
+apn swap tron sunswap status --operation <operation_id>
+apn swap tron sunswap approve --operation <operation_id>
+apn swap tron sunswap execute --operation <operation_id>
+apn swap solana jupiter inventory
+apn swap solana jupiter quote --profile <profile> --account <string> --to <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string>
+apn swap solana jupiter prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
+apn swap solana jupiter status --operation <operation_id>
+apn swap solana jupiter approve --operation <operation_id>
+apn swap solana jupiter execute --operation <operation_id>
 ```
 <!-- END APN COMMAND CATALOG -->
 

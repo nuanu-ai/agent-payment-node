@@ -5,6 +5,8 @@ import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
     uniswap;
+    sunswap;
+    jupiter;
     facilitatorGasless;
     smartAccountGasless;
     metaMaskGasless;
@@ -43,6 +45,10 @@ export class RuntimeContext {
     constructor(dependencies) {
         if (dependencies.uniswap !== undefined)
             this.uniswap = dependencies.uniswap;
+        if (dependencies.sunswap !== undefined)
+            this.sunswap = dependencies.sunswap;
+        if (dependencies.jupiter !== undefined)
+            this.jupiter = dependencies.jupiter;
         if (dependencies.facilitatorGasless !== undefined)
             this.facilitatorGasless = dependencies.facilitatorGasless;
         if (dependencies.smartAccountGasless !== undefined)
