@@ -13,7 +13,9 @@
     "platformMetadataRequestUrl": "https://api.coingecko.com/api/v3/coins/list?include_platform=true",
     "platformMetadataResponsePath": "raw/coingecko/coins-list.json",
     "platformMetadataResponseSha256": "161624a1dd3b3ea24f4563f4b5faf9c48db7a7b5b5406ca500750713af7d9cd6",
-    "platformMetadataExtractPath": "raw/coingecko/top10-platforms.json"
+    "platformMetadataExtractPath": "raw/coingecko/top10-platforms.json",
+    "candidateSemantics": "The ranked candidate set is exactly the frozen CoinGecko top 10; no native additions alter or extend those ten ranks.",
+    "chainProjectionSemantics": "Each named target network has one native gas-asset row. top_10 means that native asset is one of the ranked ten; native_additional is required network inventory only and is not an added market-ranked candidate."
   },
   "assetPolicyRegistryCompatibility": {
     "targetSchemaVersion": "apn.asset-policy-registry.v1",
@@ -1000,7 +1002,12 @@
     {
       "asset": "USDT",
       "chain": "eip155:56",
-      "reason": "Tether's BNB Smart Chain section lists XAUT but no USD\u20ae address; same-symbol third-party contracts are refused."
+      "reason": "Tether's BNB Smart Chain section lists XAUT but no USD₮ address; same-symbol third-party contracts are refused."
+    },
+    {
+      "asset": "USDC",
+      "chain": "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc",
+      "reason": "Circle's primary USDC registry does not list TRON mainnet; the CoinGecko platform address is not substituted."
     }
   ],
   "sourceNotes": [

@@ -2,7 +2,7 @@
 
 This directory is a reproducible owner-level candidate dataset. It is **not an active allowlist**.
 
-- Selection: the first 10 rows from the frozen CoinGecko global circulating market-cap request, with `includeRehypothecated=false`.
+- Selection: exactly the first 10 rows from the frozen CoinGecko global circulating market-cap request, with `includeRehypothecated=false`. Native gas assets marked `native_additional` are required target-network inventory and do not extend or alter those ten ranks.
 - Networks: Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Smart Chain, Avalanche C-Chain, Unichain, Linea, Monad, Sei EVM, TRON, and Solana.
 - Eligibility: native coins, plus issuer-native token deployments verified against Circle or Tether primary registries and read-only chain state.
 - Safety: all rail flags are `false`; caps are `null`; the dataset cannot satisfy or be sealed as `apn.asset-policy-registry.v1` until the owner supplies caps and explicitly admits rails.
@@ -21,4 +21,4 @@ npm ci
 npm run validate:allowlist-dataset
 ```
 
-The validator checks the market rows and timestamps, platform metadata extraction, SHA-256 provenance, unique chain and asset identities, canonical EVM/TRON/Solana identifiers, exact network identities, on-chain decimals, disabled rails, and absent owner caps.
+The validator checks the exact request, market rows and timestamps, platform metadata extraction, exhaustive SHA-256 provenance, the fixed target-chain and issuer deployment projections, canonical EVM/TRON/Solana identifiers, exact network identities, on-chain decimals, disabled rails, absent owner caps, and required refusals. Negative tests prove that market tampering, unsupported chains or deployments, same-symbol substitution, enabled rails, supplied caps, and ambiguous native-addition classification are rejected.
