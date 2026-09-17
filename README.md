@@ -506,6 +506,15 @@ private destinations, redirects, unsafe TLS and unbounded retries stay forbidden
 The payment rail remains x402 v2 exact on Base USDC; this is not all-chain,
 all-asset or all-x402-version support. No live payment acceptance is implied.
 
+## Guarded Uniswap discovery
+
+`apn swap ethereum uniswap inventory` exposes the immutable Ethereum native
+ETH to canonical USDC pin catalog without admitting it. Quote and prepare use
+strict Trading API, Universal Router calldata, exact simulation, owner policy,
+and shared usage bindings. The installed signer/send path is intentionally
+dormant, so approval and execution return stable refusals and cannot transact.
+See `docs/uniswap.md` for the frozen identities and recovery contract.
+
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
 apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>]
@@ -569,6 +578,12 @@ apn allowlist inventory
 apn allowlist resolve --chain <exact-network-identity> --kind <native|token> [--identifier <exact-token-identifier>]
 apn allowlist policy prepare --profile <profile> --account <canonical-account> --overlay-version <version> --chain <network> --kind <native|token> [--identifier <token>] --rail <rail> --max-per-transfer-atomic <atomic> --daily-limit-atomic <atomic> --effective-at <ISO-instant> [--expires-at <ISO-instant>] [--mechanism-provider <provider> --mechanism-reference <reference>] [--expected-revision <revision>]
 apn allowlist policy status --profile <profile>
+apn swap ethereum uniswap inventory
+apn swap ethereum uniswap quote --profile <profile> --account <address> --to <address> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --deadline <string> --max-gas-limit <wei> --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>
+apn swap ethereum uniswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
+apn swap ethereum uniswap status --operation <operation_id>
+apn swap ethereum uniswap approve --operation <operation_id>
+apn swap ethereum uniswap execute --operation <operation_id>
 ```
 <!-- END APN COMMAND CATALOG -->
 

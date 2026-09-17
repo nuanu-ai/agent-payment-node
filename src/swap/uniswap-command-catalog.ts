@@ -1,0 +1,47 @@
+import type { CommandDefinition, CommandGroup, CommandOption } from "../command-catalog.js";
+import type { CommandRequest } from "../commands.js";
+
+const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
+  ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
+const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
+  success: "Pinned Uniswap inventory, unsigned quote, prepared operation, or durable status.",
+  failures: ["Classified refusal; no signing, broadcast, approval, or provider fallback."] } as const;
+const states = { terminal: ["finalized", "failed_before_effect"], non_terminal: ["quoted", "prepared", "awaiting_approval",
+  "reserved", "submitting", "submitted", "unknown_finality"] } as const;
+const profile = option("--profile", "profile", ["existing_profile_name"]), account = option("--account", "address", ["checksummed_ethereum_address"]);
+const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
+export const UNISWAP_COMMAND_GROUPS: readonly CommandGroup[] = [
+  { path: ["swap"], summary: "Separately admitted guarded swaps.", kind: "group" },
+  { path: ["swap", "ethereum"], summary: "Ethereum guarded swaps.", kind: "group" },
+  { path: ["swap", "ethereum", "uniswap"], summary: "Pinned Universal Router native ETH to USDC exact input.", kind: "group" },
+];
+export const UNISWAP_COMMANDS: readonly CommandDefinition[] = [
+  command("inventory", [], "Read the immutable official Uniswap pin and frozen pair without admitting it.", "none"),
+  command("quote", [profile, account, option("--to", "address", ["checksummed_recipient"]), option("--amount", "wei", ["positive_native_wei"]),
+    option("--slippage-bps", "string", ["integer_0_through_owner_cap"]), option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"]),
+    option("--deadline", "string", ["unix_seconds_within_30_minutes"]), option("--max-gas-limit", "wei", ["positive_bound"]),
+    option("--max-fee-per-gas", "wei", ["positive_bound"]), option("--max-priority-fee-per-gas", "wei", ["positive_bound"])],
+    "Construct, decode, and exactly simulate one unsigned quote.", "network_read"),
+  command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"])],
+    "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
+  command("status", [operation], "Read one durable guarded swap operation without resending.", "local_read"),
+  command("approve", [operation], "Foreground approval is dormant until the complete signer and sender adapter exists.", "none"),
+  command("execute", [operation], "Execution is dormant until the complete signer, sender, and observer adapter exists.", "none"),
+];
+function command(name: string, options: readonly CommandOption[], summary: string, effect: CommandDefinition["effect"]["class"]): CommandDefinition {
+  const suffix = options.map((row) => ` ${row.name} <${row.type}>`).join("");
+  return { path: ["swap", "ethereum", "uniswap", name], synopsis: `apn swap ethereum uniswap ${name}${suffix}`, summary, options,
+    effect: { class: effect, summary }, approval: { class: "none", when: "Never signs or broadcasts." }, output, states,
+    recovery: [], examples: [`apn swap ethereum uniswap ${name}`] };
+}
+export function bindUniswapCommand(path: string, o: Readonly<Record<string, string>>): CommandRequest {
+  const action = path.slice("swap ethereum uniswap ".length);
+  if (action === "inventory") return { command: "swap.uniswap.inventory" };
+  if (action === "status") return { command: "swap.uniswap.status", operationId: o["--operation"]! };
+  if (action === "approve") return { command: "swap.uniswap.approve", operationId: o["--operation"]! };
+  if (action === "execute") return { command: "swap.uniswap.execute", operationId: o["--operation"]! };
+  if (action === "prepare") return { command: "swap.uniswap.prepare", profile: o["--profile"]!, quoteHash: o["--quote"]!, idempotencyKey: o["--idempotency-key"]! };
+  return { command: "swap.uniswap.quote", profile: o["--profile"]!, account: o["--account"]!, recipient: o["--to"]!, amountAtomic: o["--amount"]!,
+    slippageBps: Number(o["--slippage-bps"]), ownerSlippageCapBps: Number(o["--owner-slippage-cap-bps"]), deadline: Number(o["--deadline"]),
+    maxGasLimit: o["--max-gas-limit"]!, maxFeePerGas: o["--max-fee-per-gas"]!, maxPriorityFeePerGas: o["--max-priority-fee-per-gas"]! };
+}

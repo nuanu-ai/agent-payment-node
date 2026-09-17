@@ -29,6 +29,17 @@ export class SwapOperationRepository extends SecureStateStore {
       async () => await this.readBound(ownerProfileHash, operationId));
   }
 
+  async loadAny(operationId: string): Promise<SwapOperationRecord | null> {
+    stateIdentifier(operationId, "swap operation id"); await this.ready();
+    const profiles = await this.readDirectory("swap-operations"); let found: SwapOperationRecord | null = null;
+    for (const profile of profiles) {
+      if (!profile.isDirectory() || profile.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(profile.name)) corrupt();
+      const candidate = await this.readBound(profile.name, operationId);
+      if (candidate !== null) { if (found !== null) corrupt(); found = candidate; }
+    }
+    return found;
+  }
+
   async transition(ownerProfileHash: string, operationId: string, expectedIntegrityHash: string,
     state: SwapOperationState, evidence: SwapTransitionEvidence, now: Date): Promise<SwapOperationRecord> {
     stateIdentifier(ownerProfileHash, "swap profile hash"); stateIdentifier(operationId, "swap operation id");

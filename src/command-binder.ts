@@ -17,6 +17,7 @@ import { bindOneClickCommand } from "./lifi/near-oneclick-command-catalog.js";
 import { bindCircleCommand } from "./lifi/circle-command-catalog.js";
 import { bindGaslessCommand } from "./gasless/command-catalog.js";
 import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
+import { bindUniswapCommand } from "./swap/uniswap-command-catalog.js";
 
 export interface BoundCommand {
   readonly request: CommandRequest;
@@ -56,6 +57,7 @@ export function mcpFieldName(optionName: `--${string}`): string {
 
 function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   const options = parsed.values;
+  if (parsed.command.path[0] === "swap") return { request: bindUniswapCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path[0] === "gasless") return { request: bindGaslessCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path[0] === "bridge") return { request: bindBridgeCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path[0] === "oneclick") return { request: bindOneClickCommand(parsed.command.path.join(" "), options) };
