@@ -137,7 +137,7 @@ export type {
   DirectAssetUsageInput,
   DirectAssetUsageLease,
 } from "./direct-asset-usage.js";
-
+export * from "./swap/index.js";
 export class ApnCore {
   readonly context: RuntimeContext;
   readonly wallet: WalletService;
