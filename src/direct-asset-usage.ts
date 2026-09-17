@@ -40,8 +40,9 @@ export class DirectAssetUsageAdapter {
   async reserve(input: DirectAssetUsageInput): Promise<DirectAssetUsageLease> {
     const profile = canonicalProfile(input.profile);
     if (input.rail !== "direct") invalid("The direct usage adapter accepts only the direct rail.");
-    const registry = validateAssetPolicyRegistry(input.registry);
+    const registry = structuredClone(validateAssetPolicyRegistry(input.registry));
     const at = instant(input.now);
+    const now = new Date(at);
     const admission = evaluateAssetPolicy(registry, {
       chain: input.chain,
       asset: input.asset,
@@ -58,7 +59,7 @@ export class DirectAssetUsageAdapter {
       rail: "direct",
       amountAtomic: input.amountAtomic,
       idempotencyKey: input.idempotencyKey,
-      now: input.now,
+      now,
     });
     if (reservation.policyDigest !== admission.policyDigest || reservation.registryVersion !== admission.registryVersion ||
         reservation.chain !== admission.chain || reservation.rail !== admission.rail ||
@@ -74,11 +75,18 @@ export class DirectAssetUsageAdapter {
     effect: (lease: DirectAssetUsageLease) => Promise<T>,
   ): Promise<{ readonly lease: DirectAssetUsageLease; readonly result: T }> {
     const lease = await this.reserve(input);
-    return { lease, result: await effect(lease) };
+    if (lease.reservation.state !== "reserved") {
+      blocked("A replayed direct reservation that already crossed a durable transition cannot invoke the effect callback.");
+    }
+    return { lease, result: await effect(structuredClone(lease)) };
   }
 
   async failedBeforeEffect(leaseValue: unknown, now: Date, outcomeDigest: string): Promise<DirectAssetUsageLease> {
-    return await this.transition(leaseValue, "failed_before_effect", now, outcomeDigest);
+    const lease = validateDirectAssetUsageLease(leaseValue);
+    if (lease.reservation.state !== "reserved" && lease.reservation.state !== "failed_before_effect") {
+      blocked("Only a direct reservation that has not crossed the effect boundary can be released.");
+    }
+    return await this.transition(lease, "failed_before_effect", now, outcomeDigest, ["reserved", "failed_before_effect"]);
   }
 
   async submitted(leaseValue: unknown, now: Date): Promise<DirectAssetUsageLease> {
@@ -98,6 +106,7 @@ export class DirectAssetUsageAdapter {
     state: "failed_before_effect" | "submitted" | "unknown_finality" | "finalized",
     now: Date,
     outcomeDigest?: string,
+    expectedCurrentStates?: readonly AssetUsageReservation["state"][],
   ): Promise<DirectAssetUsageLease> {
     const lease = validateDirectAssetUsageLease(leaseValue);
     const reservation = await this.ledger.transition({
@@ -109,6 +118,7 @@ export class DirectAssetUsageAdapter {
       state,
       now,
       ...(outcomeDigest === undefined ? {} : { outcomeDigest }),
+      ...(expectedCurrentStates === undefined ? {} : { expectedCurrentStates }),
     });
     return sealLease({
       schemaVersion: DIRECT_ASSET_USAGE_LEASE_SCHEMA,
@@ -150,3 +160,4 @@ function instant(value: Date): string {
 }
 function invalid(message: string): never { throw new ApnError("APN_INVALID_INPUT", message); }
 function corrupt(message: string): never { throw new ApnError("APN_STATE_CORRUPT", message); }
+function blocked(message: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message); }

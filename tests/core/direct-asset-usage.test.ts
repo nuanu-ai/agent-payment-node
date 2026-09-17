@@ -105,3 +105,51 @@ test("a lease seals its exact profile and direct reservation binding", async (t)
     { code: "APN_STATE_CORRUPT" });
   assert.equal(lease.reservation.state, "reserved");
 });
+
+test("direct input snapshots cannot be widened while the durable ledger lock is pending", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const adapter = new DirectAssetUsageAdapter(new AssetUsageLedger(temporary.root));
+  await adapter.reserve(input("direct-snapshot-prior-01", "90"));
+
+  const policy = registry("100") as unknown as Record<string, unknown>;
+  const now = new Date(NOW);
+  const pending = adapter.reserve(input("direct-snapshot-pending1", "20", policy, now));
+  Object.assign(policy, registry("1000"));
+  now.setUTCDate(now.getUTCDate() + 1);
+
+  await assert.rejects(pending, { code: "APN_OPERATION_BLOCKED" });
+});
+
+test("replayed transitioned reservations cannot repeat a direct effect callback", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const adapter = new DirectAssetUsageAdapter(new AssetUsageLedger(temporary.root));
+  let calls = 0;
+  const first = await adapter.withReservationBeforeEffect(input("direct-effect-replay-01", "10"), async (lease) => {
+    (lease as unknown as { profile: string }).profile = "mutated-callback-copy";
+    return ++calls;
+  });
+  assert.equal(validateDirectAssetUsageLease(first.lease).profile, "direct-test");
+  const submitted = await adapter.submitted(first.lease, new Date("2026-09-17T10:01:00.000Z"));
+
+  await assert.rejects(adapter.withReservationBeforeEffect(input("direct-effect-replay-01", "10"), async () => ++calls),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(calls, 1);
+  assert.equal(submitted.reservation.state, "submitted");
+});
+
+test("callback failure stays charged and unknown finality cannot be relabeled as pre-effect failure", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root);
+  const adapter = new DirectAssetUsageAdapter(ledger);
+  let callbackLease: ReturnType<typeof validateDirectAssetUsageLease> | undefined;
+  await assert.rejects(adapter.withReservationBeforeEffect(input("direct-effect-failure-01", "25"), async (lease) => {
+    callbackLease = validateDirectAssetUsageLease(lease);
+    throw new Error("provider outcome unavailable");
+  }), /provider outcome unavailable/u);
+  assert.equal((await ledger.usage(IDENTITY, NOW)).amountAtomic, "25");
+
+  await adapter.unknownFinality(callbackLease, new Date("2026-09-17T10:01:00.000Z"));
+  await assert.rejects(adapter.failedBeforeEffect(callbackLease, new Date("2026-09-17T10:02:00.000Z"), "c".repeat(64)),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await ledger.usage(IDENTITY, new Date("2026-09-18T00:00:00.000Z"))).amountAtomic, "25");
+});

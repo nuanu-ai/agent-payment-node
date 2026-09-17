@@ -46,6 +46,8 @@ export interface AssetUsageTransitionInput extends AssetUsageIdentity {
     readonly state: Exclude<AssetUsageState, "reserved">;
     readonly now: Date;
     readonly outcomeDigest?: string;
+    /** Optional compare-and-transition guard, checked atomically while the bucket lock is held. */
+    readonly expectedCurrentStates?: readonly AssetUsageState[];
 }
 export interface AssetUsageSnapshot {
     readonly windowPolicy: typeof ASSET_USAGE_WINDOW;
