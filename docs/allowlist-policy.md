@@ -101,8 +101,10 @@ loadActiveAssetPolicyRegistry(stateRoot: string, profile: string, now: Date): Pr
 ```
 
 - The loader returns `null` when nothing is active.
-- A tampered, missing or reordered staged or activation file throws `APN_STATE_CORRUPT`. So does a staged revision that no longer compiles against the frozen inventory.
+- A tampered staged or activation file throws `APN_STATE_CORRUPT`. So does a missing staged revision, a gap or reordering in the activation chain, or a staged revision that no longer compiles against the frozen inventory.
 - An activation whose `expiresAt` has passed throws `APN_OPERATION_BLOCKED` with reason `allowlist_policy_expired`.
 - Evaluate the returned `registry` with `evaluateAssetPolicy`, and reserve usage with `AssetUsageLedger`, `DirectAssetUsageAdapter` or `GuardedSwapService`. `digest` is the policy digest to bind in operation journals.
+
+Integrity here is tamper evidence, not tamper resistance. The digests are unkeyed, and nothing outside the state directory anchors the newest activation entry. Deleting that one file therefore rolls the profile back to the previous decision; for example, it undoes a revocation, and loading does not detect it. Anyone who can write `~/.apn` can also forge entries. A head anchored outside the state directory, such as in the Keychain, is follow-up work.
 
 Daily caps are per rail, but the usage ledger counts an asset's usage per account, network and asset across all rails. A rail's daily cap is therefore checked against the asset's combined usage for the UTC day. Spending on one rail can only narrow another rail; it never widens it.
