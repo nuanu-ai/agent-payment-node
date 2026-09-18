@@ -6,7 +6,12 @@ const ROUTER_ABI = parseAbi(["function execute(bytes commands, bytes[] inputs, u
 const WRAP_ETH = 0x0b, V3_SWAP_EXACT_IN = 0x00, V2_SWAP_EXACT_IN = 0x08;
 const ROUTER_RECIPIENT = "0x0000000000000000000000000000000000000002";
 const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+/** The official Trading API catalog pair: native ETH to USDC only. */
 export function decodeUniswapRouterCalldata(data, expected) {
+    return decodeUniswapRouterCalldataFor(data, { ...expected, outputToken: UNISWAP_USDC });
+}
+/** Same strict proof for an explicit pinned output token; the path must end at exactly that token. */
+export function decodeUniswapRouterCalldataFor(data, expected) {
     try {
         const decoded = decodeFunctionData({ abi: ROUTER_ABI, data });
         if (decoded.functionName !== "execute")
@@ -30,7 +35,7 @@ export function decodeUniswapRouterCalldata(data, expected) {
             const values = decodeAbiParameters(types, inputs[1]);
             if (encodeAbiParameters(types, values).toLowerCase() !== inputs[1].toLowerCase())
                 fail();
-            const path = v3Path(values[3]);
+            const path = v3Path(values[3], getAddress(expected.outputToken));
             [recipient, amountIn, amountOutMin] = values;
             if (values[4] !== false || (values[5].length !== 0 && values[5].length !== path.hops.length))
                 fail();
@@ -44,7 +49,7 @@ export function decodeUniswapRouterCalldata(data, expected) {
                 fail();
             const path = values[3].map(getAddress);
             [recipient, amountIn, amountOutMin] = values;
-            if (values[4] !== false || canonicalJson(path) !== canonicalJson([WETH, UNISWAP_USDC]) ||
+            if (values[4] !== false || canonicalJson(path) !== canonicalJson([WETH, getAddress(expected.outputToken)]) ||
                 (values[5].length !== 0 && values[5].length !== path.length - 1))
                 fail();
             route = { command: "V2_SWAP_EXACT_IN", path, minHopPriceX36: values[5].map(String) };
@@ -62,7 +67,7 @@ export function decodeUniswapRouterCalldata(data, expected) {
         return fail();
     }
 }
-function v3Path(path) {
+function v3Path(path, outputToken) {
     const hex = path.slice(2);
     if (hex.length < 86 || (hex.length - 40) % 46 !== 0)
         fail();
@@ -76,7 +81,7 @@ function v3Path(path) {
         tokens.push(getAddress(`0x${hex.slice(offset + 6, offset + 46)}`));
         offset += 46;
     }
-    if (tokens[0] !== WETH || tokens.at(-1) !== UNISWAP_USDC || tokens.length > 5)
+    if (tokens[0] !== WETH || tokens.at(-1) !== outputToken || tokens.length > 5)
         fail();
     return { tokens, hops };
 }

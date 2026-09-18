@@ -6,7 +6,7 @@ import { validateSwapOperation, type SwapOperationRecord } from "../../model.js"
 import { requireSwapProtocol, validateSwapProtocolRegistry, type SwapProtocolRegistry } from "../../protocol-registry.js";
 import type { UniswapTransactionEnvelope } from "../../uniswap-codec.js";
 import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../../uniswap-pin.js";
-import { decodeUniswapRouterCalldata } from "../../uniswap-router.js";
+import { decodeUniswapRouterCalldataFor } from "../../uniswap-router.js";
 import type { UniswapExecutionApprovalRequest, UniswapExecutionBinding, UniswapExecutionFreshness, UniswapOwnerAdmission } from "./types.js";
 
 const BINDING_VERSION = "apn.uniswap-ethereum.execution-binding.v1" as const;
@@ -178,8 +178,12 @@ function validateEnvelope(operation: SwapOperationRecord, envelope: UniswapTrans
     maximumFee = fee;
   }
   if (gas * maximumFee > MAX_UINT256) invalid("Uniswap maximum gas cost exceeds uint256.");
-  const decoded = decodeUniswapRouterCalldata(envelope.data, { recipient: operation.quote.recipient,
-    inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic, deadline });
+  if (operation.quote.destinationAsset.kind !== "token" || operation.quote.destinationAsset.identifier === null) {
+    blocked("Uniswap output must be an exact pinned token.", "uniswap_envelope_binding");
+  }
+  const decoded = decodeUniswapRouterCalldataFor(envelope.data, { recipient: operation.quote.recipient,
+    inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic, deadline,
+    outputToken: operation.quote.destinationAsset.identifier });
   if (decoded.routeHash !== operation.quote.routeHash) blocked("Uniswap router route changed after quote validation.", "uniswap_route_drift");
 }
 

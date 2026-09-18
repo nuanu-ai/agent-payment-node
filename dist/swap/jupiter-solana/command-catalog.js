@@ -5,7 +5,7 @@ const option = (name, type, constraints) => ({ name, type, constraints, required
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
     success: "Frozen Jupiter inventory, unsigned read-only quote, or durable status.",
     failures: ["Classified refusal; no signing, broadcast, approval, or provider fallback."] };
-const states = { terminal: ["finalized", "failed_before_effect"], non_terminal: ["quoted", "prepared", "awaiting_approval",
+const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert"], non_terminal: ["quoted", "prepared", "awaiting_approval",
         "reserved", "submitting", "submitted", "unknown_finality"] };
 const profile = option("--profile", "profile", ["existing_profile_name"]);
 const account = option("--account", "string", ["canonical_32_byte_base58_solana_address"]);

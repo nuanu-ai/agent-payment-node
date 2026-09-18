@@ -508,12 +508,14 @@ all-asset or all-x402-version support. No live payment acceptance is implied.
 
 ## Guarded swap discovery
 
-`apn swap ethereum uniswap inventory` exposes the immutable Ethereum native
-ETH to canonical USDC pin catalog without admitting it. Quote and prepare use
-strict Trading API, Universal Router calldata, exact simulation, owner policy,
-and shared usage bindings. The installed signer/send path is intentionally
-dormant, so approval and execution return stable refusals and cannot transact.
-See `docs/uniswap.md` for the frozen identities and recovery contract.
+`apn swap ethereum uniswap` swaps native ETH for Ethereum USDC or USDT through
+Uniswap V3 without an API key. `quote` reads the pinned pool and QuoterV2 on
+chain, encodes the Universal Router 2.2.0 call locally and simulates it
+(`APN_ETHEREUM_RPC_URL`). `prepare` needs the owner's active policy to admit
+both assets with the keyless mechanism pin shown by `inventory`. `approve`
+runs in the foreground CLI only: it shows the exact screen, takes a typed
+code, and the local wallet signs and sends once. `status` only observes. See
+`docs/uniswap.md` for the pinned contracts and recovery contract.
 
 The same six-command surface is present for native TRX to USDT through
 SunSwap and native SOL to USDC through Jupiter. Both inventories are offline
@@ -656,7 +658,7 @@ apn allowlist policy activate --profile <profile> --revision <revision>
 apn allowlist policy revoke --profile <profile> --revision <revision>
 apn allowlist policy status --profile <profile>
 apn swap ethereum uniswap inventory
-apn swap ethereum uniswap quote --profile <profile> --account <address> --to <address> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --deadline <string> --max-gas-limit <wei> --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>
+apn swap ethereum uniswap quote --profile <profile> --account <address> --to <address> --output-token <address> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --deadline <string> --max-gas-limit <wei> --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>
 apn swap ethereum uniswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
 apn swap ethereum uniswap status --operation <operation_id>
 apn swap ethereum uniswap approve --operation <operation_id>

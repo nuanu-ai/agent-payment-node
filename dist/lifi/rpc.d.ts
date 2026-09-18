@@ -9,6 +9,14 @@ export declare const BRIDGE_RPC_ENV: {
     readonly 8453: "APN_BASE_RPC_URL";
     readonly 42161: "APN_ARBITRUM_RPC_URL";
 };
+/** The single explicit Ethereum-family RPC reader: endpoint only from its named environment variable, public HTTPS, no query. */
+export declare function bridgeRpcCall(chainId: EvmChainId, environment: Readonly<Record<string, string | undefined>>, options?: {
+    readonly transport?: Pick<BridgeHttps, "request">;
+    readonly wait?: (milliseconds: number) => Promise<void>;
+}): {
+    readonly origin: string;
+    readonly call: EvmRpcCall;
+};
 export declare function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options?: {
     readonly transport?: Pick<BridgeHttps, "request">;
     readonly wait?: (milliseconds: number) => Promise<void>;

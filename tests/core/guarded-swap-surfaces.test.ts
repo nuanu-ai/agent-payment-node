@@ -127,6 +127,7 @@ function sample(option: string, chain: string): string {
   if (option === "--profile") return "swap-test";
   if (option === "--account" || option === "--to") return chain === "tron" ? TRON_OWNER : chain === "solana" ? SOLANA_OWNER :
     "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1";
+  if (option === "--output-token") return "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
   if (option === "--amount") return "1000000";
   if (option === "--slippage-bps") return "100";
   if (option === "--owner-slippage-cap-bps") return "200";

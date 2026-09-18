@@ -493,13 +493,13 @@ export declare const consentSchema: z.ZodObject<{
     expiresAt: z.ZodString;
 }, z.core.$strict>;
 export declare const stateSchema: z.ZodEnum<{
+    completed: "completed";
+    failed_confirmed_revert: "failed_confirmed_revert";
     awaiting_approval: "awaiting_approval";
     submitted_pending: "submitted_pending";
     unknown_finality: "unknown_finality";
     abandoned_unknown: "abandoned_unknown";
-    completed: "completed";
     failed_before_effect: "failed_before_effect";
-    failed_confirmed_revert: "failed_confirmed_revert";
     execution_pending: "execution_pending";
     included_success: "included_success";
     included_revert: "included_revert";
@@ -564,13 +564,13 @@ export declare const transitionSchema: z.ZodObject<{
     previousHash: z.ZodString;
     transitionHash: z.ZodString;
     state: z.ZodEnum<{
+        completed: "completed";
+        failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
         submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
         abandoned_unknown: "abandoned_unknown";
-        completed: "completed";
         failed_before_effect: "failed_before_effect";
-        failed_confirmed_revert: "failed_confirmed_revert";
         execution_pending: "execution_pending";
         included_success: "included_success";
         included_revert: "included_revert";
@@ -982,13 +982,13 @@ export declare const operationSchema: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         state: z.ZodEnum<{
+            completed: "completed";
+            failed_confirmed_revert: "failed_confirmed_revert";
             awaiting_approval: "awaiting_approval";
             submitted_pending: "submitted_pending";
             unknown_finality: "unknown_finality";
             abandoned_unknown: "abandoned_unknown";
-            completed: "completed";
             failed_before_effect: "failed_before_effect";
-            failed_confirmed_revert: "failed_confirmed_revert";
             execution_pending: "execution_pending";
             included_success: "included_success";
             included_revert: "included_revert";
@@ -1297,13 +1297,13 @@ export declare const operationSchema: z.ZodObject<{
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     state: z.ZodEnum<{
+        completed: "completed";
+        failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
         submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
         abandoned_unknown: "abandoned_unknown";
-        completed: "completed";
         failed_before_effect: "failed_before_effect";
-        failed_confirmed_revert: "failed_confirmed_revert";
         execution_pending: "execution_pending";
         included_success: "included_success";
         included_revert: "included_revert";

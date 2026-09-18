@@ -9,7 +9,7 @@ import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/com
 export type CommandRequest =
   | { readonly command: "swap.uniswap.inventory" }
   | { readonly command: "swap.uniswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
-      readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly deadline: number;
+      readonly outputToken: string; readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly deadline: number;
       readonly maxGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string }
   | { readonly command: "swap.uniswap.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
   | { readonly command: "swap.uniswap.status" | "swap.uniswap.approve" | "swap.uniswap.execute"; readonly operationId: string }

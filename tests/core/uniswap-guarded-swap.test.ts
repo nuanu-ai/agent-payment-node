@@ -122,7 +122,8 @@ test("final receipt requires exact transaction, successful receipt, output log, 
       "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", `0x${H("0")}`, recipientTopic],
       data: `0x${BigInt(minimum).toString(16).padStart(64, "0")}` }] }, beforeNative: "2000000000000000", afterNative: "900000000000000",
     beforeOutput: "0", afterOutput: minimum, finalizedHead: { number: "110", hash: `0x${H("e")}` }, observedAt: "2026-09-17T00:00:00.000Z" },
-  envelope(), { transactionHash: txHash, account: ACCOUNT, recipient: RECIPIENT, inputAmountAtomic: input, minimumOutputAtomic: minimum });
+  envelope(), { transactionHash: txHash, account: ACCOUNT, recipient: RECIPIENT, inputAmountAtomic: input, minimumOutputAtomic: minimum,
+    outputToken: UNISWAP_USDC });
   assert.equal(proof.finalized, true);
 });
 
@@ -147,7 +148,7 @@ test("runtime and CLI inputs reject prototypes, excess fields, noncanonical inte
   const proto = Object.create({ inherited: true }); Object.assign(proto, request);
   assert.throws(() => createUniswapQuoteRequest(proto), { code: "APN_INVALID_INPUT" });
   const args = ["swap", "ethereum", "uniswap", "quote", "--profile", "swap-test", "--account", ACCOUNT, "--to", RECIPIENT,
-    "--amount", input, "--slippage-bps", "1e2", "--owner-slippage-cap-bps", "100", "--deadline", String(deadline),
+    "--output-token", UNISWAP_USDC, "--amount", input, "--slippage-bps", "1e2", "--owner-slippage-cap-bps", "100", "--deadline", String(deadline),
     "--max-gas-limit", "150000", "--max-fee-per-gas", "2000000000", "--max-priority-fee-per-gas", "100000000"];
   assert.throws(() => bindArgv(args), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bindArgv(["swap", "ethereum", "uniswap", "status", "--operation", H("A")]), { code: "APN_INVALID_INPUT" });
