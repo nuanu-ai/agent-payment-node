@@ -20,6 +20,7 @@ import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { bindUniswapCommand } from "./swap/uniswap-command-catalog.js";
 import { bindSunSwapCommand } from "./swap/sunswap-tron/command-catalog.js";
 import { bindJupiterCommand } from "./swap/jupiter-solana/command-catalog.js";
+import { bindOrcaCommand } from "./swap/orca-solana/command-catalog.js";
 import { bindAllowlistCommand } from "./allowlist-command-catalog.js";
 
 export interface BoundCommand {
@@ -65,6 +66,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     if (path.startsWith("swap ethereum uniswap ")) return { request: bindUniswapCommand(path, options) };
     if (path.startsWith("swap tron sunswap ")) return { request: bindSunSwapCommand(path, options) };
     if (path.startsWith("swap solana jupiter ")) return { request: bindJupiterCommand(path, options) };
+    if (path.startsWith("swap solana orca ")) return { request: bindOrcaCommand(path, options) };
     throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported guarded swap command.");
   }
   if (parsed.command.path[0] === "allowlist") return { request: bindAllowlistCommand(parsed.command.path.join(" "), options) };

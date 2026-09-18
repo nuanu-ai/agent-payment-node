@@ -10,6 +10,7 @@ const EXPECTED = {
     uniswap_ethereum: { family: "evm", chain: "eip155:1" },
     sunswap_tron: { family: "tron", chain: "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc" },
     jupiter_solana: { family: "solana", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
+    orca_solana: { family: "solana", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
 };
 export function validateSwapMechanismPin(value) {
     if (!isPlainRecord(value) || !exactKeys(value, [
@@ -17,7 +18,7 @@ export function validateSwapMechanismPin(value) {
         "constructorIdentity", "constructorVersion", "routerProgramIdentity", "auxiliaryContractProgramIdentities",
         "quoteSchemaVersion", "transactionSchemaVersion", "validationPolicyIdentity", "validationPolicyVersion",
     ]) || value.schemaVersion !== SWAP_MECHANISM_PIN_SCHEMA ||
-        (value.protocolFamily !== "uniswap_ethereum" && value.protocolFamily !== "sunswap_tron" && value.protocolFamily !== "jupiter_solana") ||
+        !Object.hasOwn(EXPECTED, value.protocolFamily) ||
         (value.networkFamily !== "evm" && value.networkFamily !== "tron" && value.networkFamily !== "solana") ||
         (value.constructorKind !== "builder_api" && value.constructorKind !== "sdk") ||
         typeof value.chain !== "string" || typeof value.protocolVersion !== "string" ||

@@ -7,6 +7,7 @@ export class RuntimeContext {
     portfolio;
     uniswapRuntime;
     sunswapRuntime;
+    orcaRuntime;
     uniswap;
     sunswap;
     jupiter;
@@ -53,6 +54,8 @@ export class RuntimeContext {
             this.uniswapRuntime = dependencies.uniswapRuntime;
         if (dependencies.sunswapRuntime !== undefined)
             this.sunswapRuntime = dependencies.sunswapRuntime;
+        if (dependencies.orcaRuntime !== undefined)
+            this.orcaRuntime = dependencies.orcaRuntime;
         if (dependencies.uniswap !== undefined)
             this.uniswap = dependencies.uniswap;
         if (dependencies.sunswap !== undefined)

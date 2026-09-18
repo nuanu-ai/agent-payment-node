@@ -14,6 +14,8 @@ const SELECTED_PATHS = [
   "swap tron sunswap status", "swap tron sunswap approve", "swap tron sunswap execute",
   "swap solana jupiter inventory", "swap solana jupiter quote", "swap solana jupiter prepare",
   "swap solana jupiter status", "swap solana jupiter approve", "swap solana jupiter execute",
+  "swap solana orca inventory", "swap solana orca quote", "swap solana orca prepare",
+  "swap solana orca status", "swap solana orca approve", "swap solana orca execute",
   "allowlist inventory",
   "allowlist resolve",
   "allowlist policy prepare",

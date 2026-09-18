@@ -34,11 +34,13 @@ import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapRuntime } from "./swap/runtime.js";
+import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 
 export interface CoreDependencies {
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
+  readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -82,6 +84,7 @@ export class RuntimeContext {
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
+  readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -126,6 +129,7 @@ export class RuntimeContext {
     if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;
     if (dependencies.uniswapRuntime !== undefined) this.uniswapRuntime = dependencies.uniswapRuntime;
     if (dependencies.sunswapRuntime !== undefined) this.sunswapRuntime = dependencies.sunswapRuntime;
+    if (dependencies.orcaRuntime !== undefined) this.orcaRuntime = dependencies.orcaRuntime;
     if (dependencies.uniswap !== undefined) this.uniswap = dependencies.uniswap;
     if (dependencies.sunswap !== undefined) this.sunswap = dependencies.sunswap;
     if (dependencies.jupiter !== undefined) this.jupiter = dependencies.jupiter;
