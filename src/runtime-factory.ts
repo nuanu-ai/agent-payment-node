@@ -101,11 +101,15 @@ import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVA
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
+import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
+import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
+import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 
 export interface RuntimeFactoryOptions {
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
+  readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */
   readonly swapPolicy?: GuardedSwapPolicyResolver;
@@ -262,6 +266,12 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
+  // Keyless Orca uses the owner-named APN_SOLANA_RPC_URL rail client and the encrypted local Solana wallet.
+  const orcaRuntime = options.orcaRuntime ?? (bound.request.command.startsWith("swap.orca.")
+    ? createOrcaKeylessRuntime({ state, clock, rpc: solanaRpc, accounts: chainAccounts, verifyPins: verifyOrcaProgramPins,
+      policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
+      foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
+    : undefined);
   return new ApnCore({
     state,
     // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
@@ -270,6 +280,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     } : {}),
     ...(uniswapRuntime === undefined ? {} : { uniswapRuntime }),
     ...(sunswapRuntime === undefined ? {} : { sunswapRuntime }),
+    ...(orcaRuntime === undefined ? {} : { orcaRuntime }),
     ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
     ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
     ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
