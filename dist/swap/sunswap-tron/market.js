@@ -21,7 +21,7 @@ export async function readSunSwapV2Market(rpc, request) {
     const reference = sunSwapBlockReference(await sunSwapHead(rpc));
     const codeHashes = {};
     for (const { role, address } of SUNSWAP_PINNED_CONTRACTS)
-        codeHashes[role] = await verifyPinnedCode(rpc, address, SUNSWAP_V2_CODE_HASHES[role]);
+        codeHashes[role] = await verifySunSwapPinnedCode(rpc, address, SUNSWAP_V2_CODE_HASHES[role]);
     const amounts = await triggerSunSwapConstant(rpc, { owner: request.caller, contract: SUNSWAP_V2_ROUTER, callValueAtomic: "0",
         data: encodeFunctionData({ abi: ABI, functionName: "getAmountsOut", args: [amountIn, [abi(SUNSWAP_WTRX), abi(SUNSWAP_USDT)]] }).slice(2) });
     const reserves = await triggerSunSwapConstant(rpc, { owner: request.caller, contract: SUNSWAP_V2_WTRX_USDT_PAIR, callValueAtomic: "0",
@@ -98,7 +98,8 @@ export function priceSunSwapV2Market(marketValue, slippageBps, ownerSlippageCapB
         executionPriceUsdtPerTrx: ratio(out, amountIn), priceImpactBps: ((impactNumerator * 10000n + spotNumerator - 1n) / spotNumerator).toString(),
         lpFeeBps: "30" };
 }
-async function verifyPinnedCode(rpc, address, expected) {
+/** keccak256(runtimecode) and the node's code_hash must both equal the frozen pin. */
+export async function verifySunSwapPinnedCode(rpc, address, expected) {
     let value;
     try {
         value = await rpc.call("wallet/getcontractinfo", { value: tronHex(address), visible: false });

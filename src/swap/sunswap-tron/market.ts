@@ -52,7 +52,7 @@ export async function readSunSwapV2Market(rpc: TronRpcPort, request: SunSwapV2Ma
   const amountIn = safeAmount(request.amountInAtomic);
   const reference = sunSwapBlockReference(await sunSwapHead(rpc));
   const codeHashes = {} as Record<SunSwapPinnedContract, string>;
-  for (const { role, address } of SUNSWAP_PINNED_CONTRACTS) codeHashes[role] = await verifyPinnedCode(rpc, address, SUNSWAP_V2_CODE_HASHES[role]);
+  for (const { role, address } of SUNSWAP_PINNED_CONTRACTS) codeHashes[role] = await verifySunSwapPinnedCode(rpc, address, SUNSWAP_V2_CODE_HASHES[role]);
   const amounts = await triggerSunSwapConstant(rpc, { owner: request.caller, contract: SUNSWAP_V2_ROUTER, callValueAtomic: "0",
     data: encodeFunctionData({ abi: ABI, functionName: "getAmountsOut", args: [amountIn, [abi(SUNSWAP_WTRX), abi(SUNSWAP_USDT)]] }).slice(2) });
   const reserves = await triggerSunSwapConstant(rpc, { owner: request.caller, contract: SUNSWAP_V2_WTRX_USDT_PAIR, callValueAtomic: "0",
@@ -127,7 +127,8 @@ export function priceSunSwapV2Market(marketValue: SunSwapV2Market, slippageBps: 
     lpFeeBps: "30" };
 }
 
-async function verifyPinnedCode(rpc: TronRpcPort, address: string, expected: string): Promise<string> {
+/** keccak256(runtimecode) and the node's code_hash must both equal the frozen pin. */
+export async function verifySunSwapPinnedCode(rpc: TronRpcPort, address: string, expected: string): Promise<string> {
   let value: unknown;
   try { value = await rpc.call("wallet/getcontractinfo", { value: tronHex(address), visible: false }); }
   catch (error) {

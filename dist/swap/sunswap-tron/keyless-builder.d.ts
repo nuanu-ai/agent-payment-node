@@ -92,3 +92,11 @@ export declare class SunSwapKeylessQuoteBuilder implements SunSwapGuardedReadOnl
     }): Promise<SunSwapPreparedMaterial>;
     load(quoteHash: string): Promise<SunSwapPreparedMaterial | null>;
 }
+export interface SunSwapChainParameters {
+    readonly energyPriceSun: bigint;
+    readonly maximumFeeLimitSun: bigint;
+    readonly bandwidthPriceSun: bigint;
+}
+export declare function sunSwapChainParameters(rpc: TronRpcPort): Promise<SunSwapChainParameters>;
+/** Economic guard: the owner must hold the call value, the full fee_limit and the full bandwidth burn before any signing exists. */
+export declare function assertSunSwapOwnerFunding(rpc: TronRpcPort, owner: string, requiredSun: bigint): Promise<bigint>;

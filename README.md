@@ -517,12 +517,20 @@ runs in the foreground CLI only: it shows the exact screen, takes a typed
 code, and the local wallet signs and sends once. `status` only observes. See
 `docs/uniswap.md` for the pinned contracts and recovery contract.
 
-The same six-command surface is present for native TRX to USDT through
-SunSwap and native SOL to USDC through Jupiter. Both inventories are offline
-and unadmitted. Quotes require an explicitly injected read-only builder;
-prepare, approval and execution stay dormant. Jupiter additionally refuses
-approval and execution because the JUP6 instruction and account ABI has not
-been verified for signing. See `docs/sunswap.md` and `docs/jupiter.md`.
+`apn swap tron sunswap` swaps native TRX for TRON USDT through the pinned
+SunSwap V2 router the same way: `quote` reads the router and pair on chain,
+encodes `swapExactETHForTokens` locally and simulates it from the owner
+(`APN_TRON_RPC_URL`), with an owner-supplied `--fee-limit-sun` and
+`--deadline` that are never defaulted. `prepare` needs both assets admitted
+with the keyless pin from `inventory`; `approve` shows the exact screen,
+takes a typed code, and the profile's local TRON key signs and broadcasts
+once. See `docs/sunswap.md`.
+
+The same six-command surface is present for native SOL to USDC through
+Jupiter. Its inventory is offline and unadmitted, quotes require an
+explicitly injected read-only builder, and approval and execution refuse
+because the JUP6 instruction and account ABI has not been verified for
+signing. See `docs/jupiter.md`.
 
 ## Portfolio read
 
@@ -664,7 +672,7 @@ apn swap ethereum uniswap status --operation <operation_id>
 apn swap ethereum uniswap approve --operation <operation_id>
 apn swap ethereum uniswap execute --operation <operation_id>
 apn swap tron sunswap inventory
-apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string>
+apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --fee-limit-sun <wei> --deadline <string>
 apn swap tron sunswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
 apn swap tron sunswap status --operation <operation_id>
 apn swap tron sunswap approve --operation <operation_id>
