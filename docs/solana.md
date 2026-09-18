@@ -57,9 +57,12 @@ Token-2022 assets and self-transfers are outside this bounded direct journey.
 
 ## Policy, preparation and approval
 
-Both assets start denied. A human must admit each asset in a foreground terminal
-with principal limits in the selected asset and a separate fee/rent cap in SOL.
-These example limits illustrate the syntax; choose the intended spending bounds.
+Both assets start denied. Two owner decisions are needed. The owner allowlist
+policy must admit the asset on the `direct` rail; its per-operation and daily
+caps are the only principal caps (see `docs/allowlist-direct-integration.md`).
+The chain policy below, admitted in a foreground terminal, now caps only the
+fee and rent in SOL; its principal flags are still required by the command but
+are not enforced. These example limits illustrate the syntax.
 
 ```sh
 apn policy admit-solana --profile solana-local --asset usdc \
@@ -75,8 +78,8 @@ Amounts must be positive canonical decimal strings: `1`, `1.25` and `0.000001`
 are accepted at the applicable precision. Signs, exponent notation, whitespace,
 leading zeroes, trailing fractional zeroes and excess precision are refused.
 USDC principal is never added to SOL fees as if they were the same currency.
-Daily principal usage follows UTC; unresolved reservations continue to count
-across midnight. A confirmed revert charges actual network fees and no delivered
+Daily principal usage follows UTC in the shared allowlist usage ledger;
+unresolved reservations continue to count across midnight. A confirmed revert charges actual network fees and no delivered
 principal. Timeouts do not release unknown reservations.
 
 ```sh

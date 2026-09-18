@@ -27,9 +27,11 @@ export const EVM_COMMANDS = [
     {
         path: ["pay", "transfer", "prepare-asset"],
         synopsis: `apn pay transfer prepare-asset ${selectorSynopsis} --to <address> --amount <decimal> --max-fee-wei <wei> --idempotency-key <key>`,
-        summary: "Freeze a local-wallet native ETH or arbitrary ERC-20 direct transfer with an explicit fee quote budget.",
+        summary: "Freeze a local-wallet native ETH or frozen-allowlist token direct transfer within the owner's active allowlist caps and an explicit fee quote budget.",
         options: [
-            ...selection, required("--to", "address", ["nonzero_recipient_address"]),
+            ...selection.map((option) => option.name === "--asset" ? { ...option, constraints: ["native_or_frozen_allowlist_contract"] }
+                : option.name === "--decimals" ? { ...option, constraints: ["canonical_integer_0_through_255", "must_match_frozen_allowlist_row"] } : option),
+            required("--to", "address", ["nonzero_recipient_address"]),
             required("--amount", "string", ["positive_exact_asset_decimal", "uint256_without_rounding"]),
             required("--max-fee-wei", "wei", ["positive_canonical_integer", "total_presubmission_quote_budget_not_onchain_total_cap"]),
             required("--idempotency-key", "idempotency_key", ["8_to_200_safe_ascii_characters"]),

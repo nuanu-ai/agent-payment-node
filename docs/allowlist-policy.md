@@ -104,6 +104,7 @@ loadActiveAssetPolicyRegistry(stateRoot: string, profile: string, now: Date): Pr
 - A tampered staged or activation file throws `APN_STATE_CORRUPT`. So does a missing staged revision, a gap or reordering in the activation chain, or a staged revision that no longer compiles against the frozen inventory.
 - An activation whose `expiresAt` has passed throws `APN_OPERATION_BLOCKED` with reason `allowlist_policy_expired`.
 - Evaluate the returned `registry` with `evaluateAssetPolicy`, and reserve usage with `AssetUsageLedger`, `DirectAssetUsageAdapter` or `GuardedSwapService`. `digest` is the policy digest to bind in operation journals.
+- Direct transfers (explicit-asset EVM, TRON and Solana) use this loader at prepare and approval; without an active policy they refuse with `APN_ALLOWLIST_REFUSED` (`allowlist_policy_required`). See `docs/allowlist-direct-integration.md`.
 
 Integrity here is tamper evidence, not tamper resistance. The digests are unkeyed, and nothing outside the state directory anchors the newest activation entry. Deleting that one file therefore rolls the profile back to the previous decision; for example, it undoes a revocation, and loading does not detect it. Anyone who can write `~/.apn` can also forge entries. A head anchored outside the state directory, such as in the Keychain, is follow-up work.
 
