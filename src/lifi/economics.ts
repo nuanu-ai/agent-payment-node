@@ -1,6 +1,7 @@
 import { hashObject } from "../canonical.js";
 import type { FeeEstimate } from "../ports.js";
 import { validateEconomics } from "../transfer-policy.js";
+import { bridgeNativePrincipal } from "./asset-registry.js";
 import { bridgeDeployment } from "./deployments.js";
 import type { BridgeAccountSnapshot, BridgeEnvelope, BridgeFeeCeiling, BridgeMaterialization, BridgeTransaction, DecodedBridgeCall } from "./model.js";
 import type { BridgeOperationRecord } from "./operation-model.js";
@@ -23,13 +24,30 @@ export function bridgeApprovedPrices(fees: Pick<FeeEstimate, "maxFeePerGasAtomic
       quotedMaxFeePerGasAtomic: fees.maxFeePerGasAtomic, quotedMaxPriorityFeePerGasAtomic: fees.maxPriorityFeePerGasAtomic } };
 }
 
+/**
+ * Whether this intent needs a separate approval effect. A native principal never does: its allowance is the constant
+ * zero, its approval cap is zero and the principal is the bridge transaction's value. A token needs one from zero.
+ */
+export function bridgeApprovalRequired(request: BridgeMaterialization["request"], allowanceAtomic: string): boolean {
+  if (bridgeNativePrincipal(request)) {
+    if (allowanceAtomic !== "0") bridgeFailure("APN_STATE_CORRUPT", "native_principal_allowance");
+    return false;
+  }
+  return allowanceAtomic === "0";
+}
+/** The part of a native debit that is the principal itself: excluded from the fee cap, included in the funding check. */
+export function bridgeNativePrincipalWei(request: BridgeMaterialization["request"]): bigint {
+  return bridgeNativePrincipal(request) ? BigInt(request.amountAtomic) : 0n;
+}
+
 export async function freezeBridgeEnvelopes(m: BridgeMaterialization, account: BridgeAccountSnapshot, rpc: BridgeRpcPort): Promise<readonly BridgeEnvelope[]> {
   const amount = BigInt(m.request.amountAtomic), allowance = BigInt(account.allowanceAtomic);
+  const approval = bridgeApprovalRequired(m.request, account.allowanceAtomic), principal = bridgeNativePrincipalWei(m.request);
   if (allowance !== 0n && allowance !== amount) bridgeFailure("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "residual_allowance_review_required");
   if (account.pendingNonceAtomic !== account.latestNonceAtomic) bridgeFailure("APN_OPERATION_BLOCKED", "pending_source_nonce");
   if (BigInt(account.balanceAtomic) < amount) bridgeFailure("APN_INSUFFICIENT_ASSET", "source_asset_balance");
   const effects: BridgeEnvelope[] = [];
-  if (allowance === 0n) {
+  if (approval) {
     const transaction: BridgeTransaction = { chainId: m.request.fromChainId, from: m.sender, to: m.request.fromToken,
       data: approvalData(m.approvalAddress, m.request.amountAtomic), valueAtomic: "0", gasLimitAtomic: "0" };
     const fees = await rpc.estimate(transaction), approved = bridgeApprovedPrices(fees);
@@ -40,17 +58,17 @@ export async function freezeBridgeEnvelopes(m: BridgeMaterialization, account: B
     const { gasLimitAtomic: _gas, ...envelope } = body;
     effects.push({ ...envelope, envelopeHash: hashObject(envelope) });
   }
-  const fees = allowance === 0n ? { ...await rpc.prices(), gasLimitAtomic: m.transaction.gasLimitAtomic } : await rpc.estimate(m.transaction);
+  const fees = approval ? { ...await rpc.prices(), gasLimitAtomic: m.transaction.gasLimitAtomic } : await rpc.estimate(m.transaction);
   if (bridgeUint(fees.gasLimitAtomic, true) > BigInt(m.transaction.gasLimitAtomic)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_estimate_over_ceiling");
   const approved = bridgeApprovedPrices(fees);
   const economics = validateEconomics((BigInt(account.latestNonceAtomic) + BigInt(effects.length)).toString(),
     { ...fees, ...approved, gasLimitAtomic: m.transaction.gasLimitAtomic });
   const { gasLimitAtomic: _gas, ...transaction } = m.transaction;
   const body = { role: "bridge" as const, ...transaction, economics, feeQuote: await rpc.feeQuote({ economics }),
-    provisionalGas: allowance === 0n, feeCeiling: approved.feeCeiling };
+    provisionalGas: approval, feeCeiling: approved.feeCeiling };
   effects.push({ ...body, envelopeHash: hashObject(body) });
   const total = effects.reduce((sum, e) => sum + BigInt(e.feeQuote.totalQuoteWei) + BigInt(e.valueAtomic), 0n);
-  if (total > BigInt(m.request.maxNativeDebitWei)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "aggregate_native_debit");
+  if (total - principal > BigInt(m.request.maxNativeDebitWei)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "aggregate_native_debit");
   if (total > BigInt(account.nativeBalanceWei)) bridgeFailure("APN_INSUFFICIENT_GAS", "aggregate_native_funding");
   return effects;
 }
@@ -88,7 +106,8 @@ export async function guardBridgeEffect(op: BridgeOperationRecord, role: "approv
   const account = await source.account(m.sender, m.approvalAddress, m.request.fromToken), envelope = effect.envelope, c = envelope.economics;
   assertProtocolTime(m, i.decoded, account);
   if (account.latestNonceAtomic !== c.nonceAtomic || account.pendingNonceAtomic !== c.nonceAtomic) bridgeFailure("APN_OPERATION_BLOCKED", "bridge_nonce_changed");
-  if (account.allowanceAtomic !== (role === "approval" ? "0" : m.request.amountAtomic)) bridgeFailure("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "bridge_exact_allowance_changed");
+  const expectedAllowance = role === "approval" || bridgeNativePrincipal(m.request) ? "0" : m.request.amountAtomic;
+  if (account.allowanceAtomic !== expectedAllowance) bridgeFailure("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "bridge_exact_allowance_changed");
   if (BigInt(account.balanceAtomic) < BigInt(m.request.amountAtomic)) bridgeFailure("APN_INSUFFICIENT_ASSET", "source_asset_balance");
   const estimate = await source.estimate({ chainId: envelope.chainId, from: envelope.from, to: envelope.to, data: envelope.data,
     valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic });
@@ -109,7 +128,7 @@ export async function guardBridgeEffect(op: BridgeOperationRecord, role: "approv
       unpaid += BigInt(quote.totalQuoteWei) + BigInt(e.envelope.valueAtomic);
     }
   }
-  if (paid + unpaid > BigInt(m.request.maxNativeDebitWei)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "fresh_aggregate_native_debit");
+  if (paid + unpaid - bridgeNativePrincipalWei(m.request) > BigInt(m.request.maxNativeDebitWei)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "fresh_aggregate_native_debit");
   if (unpaid > BigInt(account.nativeBalanceWei)) bridgeFailure("APN_INSUFFICIENT_GAS", "fresh_native_funding");
   assertBridgeRemaining(op, now());
 }

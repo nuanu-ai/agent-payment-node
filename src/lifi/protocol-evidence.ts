@@ -2,6 +2,7 @@ import { decodeEventLog } from "viem";
 import { canonicalJson, sha256 } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
 import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./abi.js";
+import { BRIDGE_ASSET_REGISTRY } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
 import type { AcrossCorrelation, BridgeDestinationProof, BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall, StargateCorrelation } from "./model.js";
@@ -29,7 +30,8 @@ export function bridgeSourceProof(materialization: BridgeMaterialization, decode
   if (!bridgeSame(canonical, decoded) || receipt.chainId !== decoded.sourceChainId) fail("source_binding");
   validateReceipt(receipt);
   validateCommonSourceEvents(decoded, receipt);
-  validateSourceTransfers(decoded, receipt);
+  if (decoded.sourceToken === BRIDGE_ZERO_ADDRESS) nativeMovement(decoded.sourceChainId, receipt, "wrap", decoded.bridgeAmountAtomic);
+  else validateSourceTransfers(decoded, receipt);
   const correlation = decoded.tool === "across" ? acrossSource(decoded, receipt) : stargateSource(decoded, receipt);
   return {
     tool: decoded.tool, chainId: receipt.chainId, transactionHash: receipt.transactionHash,
@@ -166,6 +168,12 @@ function acrossDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall
   const relayerCredit = bridgeHex(e.relayer, 32, 32, "APN_RPC_PROTOCOL");
   const repaymentChainIdAtomic = bridgeUint(e.repaymentChainId.toString()).toString();
   if (info.fillType === 2 && (relayerCredit !== BRIDGE_ZERO_WORD || repaymentChainIdAtomic !== "0")) fail("slow_fill_credit");
+  if (decoded.destinationToken === BRIDGE_ZERO_ADDRESS) {
+    // The pinned SpokePool unwraps a native fill and sends the value to the recipient; the value send itself has no
+    // log, so the credit is proved by the exact relay tuple plus the unwrap of exactly the output from the SpokePool.
+    nativeMovement(decoded.destinationChainId, receipt, "unwrap", c.outputAmountAtomic);
+    return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType as 0 | 1 | 2, relayerCredit, repaymentChainIdAtomic);
+  }
   const transfers = events(receipt, decoded.destinationToken, EVENT_TOPICS.transfer, "Transfer") as readonly Transfer[];
   const delivered = transfers.filter((x) => x.to === decoded.recipient);
   if (delivered.length !== 1 || bridgeAddress(delivered[0]!.from) !== delivered[0]!.from || delivered[0]!.from === BRIDGE_ZERO_ADDRESS ||
@@ -186,6 +194,26 @@ function stargateDestination(source: BridgeSourceProof, decoded: DecodedBridgeCa
   const delivered = transfers.filter((x) => x.to === decoded.recipient);
   if (delivered.length !== 1 || delivered[0]!.from !== emitter || delivered[0]!.value !== received.amountReceivedLD) fail("destination_token_movement");
   return destinationResult(source, decoded, receipt, received.amountReceivedLD.toString(), null, null, null);
+}
+
+/**
+ * One exact wrapped-native movement by the Across SpokePool. WETH9 logs `Deposit(dst)` / `Withdrawal(src)`; Arbitrum's
+ * aeWETH mints and burns, logging `Transfer` from or to the zero address. Exactly one log must match the amount.
+ */
+function nativeMovement(chainId: DecodedBridgeCall["sourceChainId"], receipt: BridgeProtocolReceipt, direction: "wrap" | "unwrap", amountAtomic: string): void {
+  const wrapped = BRIDGE_ASSET_REGISTRY[chainId].nativeCoin.wrapped, spoke = bridgeProtocolEmitter(chainId, "across", BRIDGE_ZERO_ADDRESS);
+  const amount = bridgeUint(amountAtomic, true, "APN_RPC_PROTOCOL");
+  let matches: number;
+  if (wrapped.events === "weth9") {
+    const name = direction === "wrap" ? "Deposit" : "Withdrawal";
+    const rows = events(receipt, wrapped.address, direction === "wrap" ? EVENT_TOPICS.wrappedDeposit : EVENT_TOPICS.wrappedWithdrawal, name) as readonly { dst?: Address; src?: Address; wad: bigint }[];
+    matches = rows.filter((x) => (direction === "wrap" ? x.dst : x.src) === spoke && x.wad === amount).length;
+  } else {
+    const rows = events(receipt, wrapped.address, EVENT_TOPICS.transfer, "Transfer") as readonly Transfer[];
+    matches = rows.filter((x) => (direction === "wrap" ? x.from === BRIDGE_ZERO_ADDRESS && x.to === spoke
+      : x.from === spoke && x.to === BRIDGE_ZERO_ADDRESS) && x.value === amount).length;
+  }
+  if (matches !== 1) fail(direction === "wrap" ? "native_source_wrap" : "native_destination_unwrap");
 }
 
 function destinationResult(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt, amountAtomic: string, fillType: 0 | 1 | 2 | null, relayerCredit: Hex | null, repaymentChainIdAtomic: string | null): BridgeDestinationProof {

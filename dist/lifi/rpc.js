@@ -7,7 +7,7 @@ import { bridgeDeployment } from "./deployments.js";
 import { BridgeHttps } from "./https.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
-import { bridgeChain, bridgeTokenRow } from "./asset-registry.js";
+import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
 import { BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }];
@@ -104,15 +104,17 @@ export class BridgeRpc {
         return { chainId: this.chainId, peerChainId, tool, block: at, rpcOrigin: this.origin,
             contractHash: hashObject({ protocol: contract, feeContract }), codeHash: hashObject(code), configurationHash: hashObject(configuration) };
     }
+    /** A native principal's balance is the native balance itself and its allowance is the constant zero: nothing is approved. */
     async account(owner, spender, token) {
         await this.assertChain();
         const at = await this.block("latest"), tag = quantity(BigInt(at.numberAtomic));
-        bridgeTokenRow(this.chainId, token, "APN_RPC_CONFIG");
+        const asset = bridgeAssetRow(this.chainId, token, "APN_RPC_CONFIG");
         const data = encodeFunctionData({ abi: ERC20_READ, functionName: "balanceOf", args: [owner] });
         const allowanceData = encodeFunctionData({ abi: ERC20_READ, functionName: "allowance", args: [owner, spender] });
+        const nativeBalance = this.call("eth_getBalance", [owner, tag]).then(evmRpcQuantity);
         const [balance, native, allowance, latest, pending] = await Promise.all([
-            this.call("eth_call", [{ to: token, data }, tag]).then(evmRpcWord), this.call("eth_getBalance", [owner, tag]).then(evmRpcQuantity),
-            this.call("eth_call", [{ to: token, data: allowanceData }, tag]).then(evmRpcWord),
+            asset.kind === "native" ? nativeBalance : this.call("eth_call", [{ to: token, data }, tag]).then(evmRpcWord), nativeBalance,
+            asset.kind === "native" ? Promise.resolve(0n) : this.call("eth_call", [{ to: token, data: allowanceData }, tag]).then(evmRpcWord),
             this.call("eth_getTransactionCount", [owner, "latest"]).then(evmRpcQuantity), this.call("eth_getTransactionCount", [owner, "pending"]).then(evmRpcQuantity),
         ]);
         await this.recheck(at);

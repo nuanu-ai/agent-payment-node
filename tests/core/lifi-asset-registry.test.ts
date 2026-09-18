@@ -28,12 +28,15 @@ test("LI.FI registry admits exactly the reviewed chains, first-class native coin
   for (const chainId of BRIDGE_CHAINS) {
     const row = BRIDGE_ASSET_REGISTRY[chainId];
     assert.equal(row.caip2, `eip155:${chainId}`);
-    assert.deepEqual(bridgeNativeCoin(chainId), { kind: "native", chainId, symbol: "ETH", coinKey: "ETH", decimals: 18 });
+    const native = bridgeNativeCoin(chainId);
+    assert.deepEqual({ kind: native.kind, chainId: native.chainId, symbol: native.symbol, coinKey: native.coinKey, decimals: native.decimals,
+      pairKey: native.pairKey, stargate: native.stargate, listing: native.listing },
+    { kind: "native", chainId, symbol: "ETH", coinKey: "ETH", decimals: 18, pairKey: "eth", stargate: null, listing: "frozen_list" });
     assert.ok(row.tokens.every((asset) => asset.kind === "erc20" && asset.address !== BRIDGE_ZERO_ADDRESS));
     assert.ok(row.tokens.length > 0);
   }
   assert.deepEqual(BRIDGE_CHAINS.map((id) => BRIDGE_ASSET_REGISTRY[id].tokens.map((t) => `${t.symbol}/${t.coinKey}/${t.decimals}`)),
-    [["USDC/USDC/6", "WBTC/WBTC/8"], ["USDC/USDC/6"], ["USDC/USDC/6", "WBTC/WBTC/8"]]);
+    [["USDC/USDC/6", "USDT/USDT/6", "WBTC/WBTC/8"], ["USDC/USDC/6"], ["USDC/USDC/6", "WBTC/WBTC/8"]]);
   assert.equal(bridgeTokenRow(1, USDC[1]).code.upgradeability, "legacy_proxy");
   assert.equal(bridgeTokenRow(8453, USDC[8453]).code.upgradeability, "legacy_proxy");
   assert.equal(bridgeTokenRow(42161, USDC[42161]).code.upgradeability, "legacy_proxy");
@@ -50,9 +53,10 @@ test("LI.FI registry admits exactly the reviewed chains, first-class native coin
       assert.ok(other.peers.includes(chainId), `${asset.symbol} peer sets must be symmetric`);
     }
   }
-  // A native coin is never a token with a sentinel address: the provider's zero address is refused outright.
+  // A native coin is never a token with a sentinel address: as a token the provider's zero address is refused outright,
+  // and as a route leg it names the native coin, which pairs only with the native coin of a peer chain.
   for (const chainId of BRIDGE_CHAINS) assert.throws(() => bridgeTokenRow(chainId, BRIDGE_ZERO_ADDRESS), /native_sentinel_is_not_a_token/u);
-  assert.throws(() => validateBridgeRequest(request({ fromToken: BRIDGE_ZERO_ADDRESS })), /native_sentinel_is_not_a_token/u);
+  assert.throws(() => validateBridgeRequest(request({ fromToken: BRIDGE_ZERO_ADDRESS })), /admitted_asset_pair/u);
 });
 
 test("LI.FI refuses a chain the registry does not admit", () => {
@@ -64,11 +68,11 @@ test("LI.FI refuses a chain the registry does not admit", () => {
   assert.throws(() => validateBridgeRequest(request({ toChainId: 10, toToken: USDC[8453] })), { code: "APN_INVALID_INPUT" });
   // Base admits no WBTC row, so that direction is refused even though both chains are admitted.
   assert.throws(() => bridgeDeployment(1, 8453, "across", WBTC[1]), /finite_chain/u);
-  assert.throws(() => bridgeTokenRow(8453, WBTC[1]), /asset_not_admitted/u);
+  assert.throws(() => bridgeTokenRow(8453, WBTC[1]), /asset_not_on_frozen_list/u);
 });
 
 test("LI.FI refuses an asset the registry does not admit", () => {
-  assert.throws(() => bridgeTokenRow(1, DAI_ETHEREUM), /asset_not_admitted/u);
+  assert.throws(() => bridgeTokenRow(1, DAI_ETHEREUM), /asset_not_on_frozen_list/u);
   assert.throws(() => validateBridgeRequest(request({ fromToken: DAI_ETHEREUM })), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bridgeDeployment(1, 8453, "across", DAI_ETHEREUM), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
   // Mismatched pair keys and mismatched decimals are both refused.

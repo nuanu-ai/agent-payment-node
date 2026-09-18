@@ -33,11 +33,12 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
     asset: {
         from: {
             chain: string;
-            token: `0x${string}`;
+            token: string;
             symbol: string;
             coin_key: string;
             decimals: number;
-            upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+            upgradeability: string;
+            approval: string;
             native_coin: {
                 symbol: string;
                 decimals: 18;
@@ -45,11 +46,12 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
         };
         to: {
             chain: string;
-            token: `0x${string}`;
+            token: string;
             symbol: string;
             coin_key: string;
             decimals: number;
-            upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+            upgradeability: string;
+            approval: string;
             native_coin: {
                 symbol: string;
                 decimals: 18;
@@ -174,11 +176,12 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
     asset: {
         from: {
             chain: string;
-            token: `0x${string}`;
+            token: string;
             symbol: string;
             coin_key: string;
             decimals: number;
-            upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+            upgradeability: string;
+            approval: string;
             native_coin: {
                 symbol: string;
                 decimals: 18;
@@ -186,11 +189,12 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
         };
         to: {
             chain: string;
-            token: `0x${string}`;
+            token: string;
             symbol: string;
             coin_key: string;
             decimals: number;
-            upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+            upgradeability: string;
+            approval: string;
             native_coin: {
                 symbol: string;
                 decimals: 18;

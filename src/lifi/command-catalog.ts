@@ -1,7 +1,8 @@
 import type { CommandDefinition, CommandOption } from "../command-catalog.js";
 import type { CommandRequest } from "../commands.js";
-import { bridgeCaip2, bridgeDecimal, bridgeTokenRow, validateBridgeRequest } from "./asset-registry.js";
-import { bridgeAddress, bridgeHash, bridgeOpaque, bridgeUint } from "./validation.js";
+import type { Address } from "../model.js";
+import { bridgeAssetRow, bridgeCaip2, bridgeDecimal, validateBridgeRequest } from "./asset-registry.js";
+import { BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHash, bridgeOpaque, bridgeUint } from "./validation.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[], required = true): CommandOption => ({
   name, type, constraints, required, default: { kind: "none" }, sensitivity: "operator_input",
@@ -26,9 +27,9 @@ export const BRIDGE_COMMANDS: readonly CommandDefinition[] = [
   { path: ["bridge", "routes"], synopsis: "apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --from-token <address> --to-token <address> --amount <decimal> --to <address> --min-output <decimal> --max-native-debit-wei <uint> --max-route-fee <decimal> --slippage-bps <uint>",
     summary: "Save bounded LI.FI alternatives for the admitted assets between Ethereum, Base and Arbitrum.",
     options: [profile, option("--from-chain", "string", ["eip155:1_or_eip155:8453_or_eip155:42161"]), option("--to-chain", "string", ["different_admitted_eip155_chain"]),
-      option("--from-token", "address", ["admitted_source_asset"]), option("--to-token", "address", ["admitted_destination_asset_same_pair"]),
+      option("--from-token", "string", ["native_or_admitted_source_token_address"]), option("--to-token", "string", ["native_or_admitted_destination_token_same_pair"]),
       option("--amount", "string", ["positive_decimal_at_the_asset_decimals"]), option("--to", "address", ["nonzero_recipient"]),
-      option("--min-output", "string", ["positive_decimal_floor_at_the_asset_decimals"]), option("--max-native-debit-wei", "wei", ["aggregate_source_native_debit_including_approval_and_messaging"]),
+      option("--min-output", "string", ["positive_decimal_floor_at_the_asset_decimals"]), option("--max-native-debit-wei", "wei", ["aggregate_source_native_fee_debit_including_approval_and_messaging_excluding_a_native_principal"]),
       option("--max-route-fee", "string", ["source_minus_minimum_output_cap_at_the_asset_decimals"]), option("--slippage-bps", "string", ["integer_0_through_1000"])],
     effect: { class: "local_write", summary: "Reads LI.FI and the existing public local wallet binding; saves a profile-bound quote without signing." },
     approval: readApproval, output, states: done, recovery: [{ command_path: ["bridge", "prepare"], when: "Select one returned route ID with its quote hash." }],
@@ -51,6 +52,13 @@ export function includeBridgeRecovery(commands: readonly CommandDefinition[]): r
     effect: { ...c.effect, summary: `${c.effect.summary} Bridge operations retain both chains' evidence; recovery never resends a submitted effect. Bridge RPCs use APN_ETHEREUM_RPC_URL, APN_BASE_RPC_URL and APN_ARBITRUM_RPC_URL.` },
   });
 }
+/** `native` names the chain's native coin; the provider's zero-address sentinel is never accepted as operator input. */
+function bridgeLegToken(value: string | undefined): Address {
+  if (value === "native") return BRIDGE_ZERO_ADDRESS;
+  const token = bridgeAddress(value, "APN_INVALID_INPUT");
+  if (token === BRIDGE_ZERO_ADDRESS) bridgeFailure("APN_INVALID_INPUT", "native_leg_is_named_native");
+  return token;
+}
 export function bindBridgeCommand(path: string, o: Readonly<Record<string, string>>): CommandRequest {
   if (path === "bridge capabilities") return { command: "bridge.capabilities", ...(o["--profile"] === undefined ? {} : { profile: o["--profile"] }) };
   if (path === "bridge inventory") return { command: "bridge.inventory" };
@@ -59,9 +67,9 @@ export function bindBridgeCommand(path: string, o: Readonly<Record<string, strin
   if (path === "bridge approve") return { command: "bridge.approve", operationId: o["--operation"]! };
   const slippage = bridgeUint(o["--slippage-bps"], false, "APN_INVALID_INPUT");
   const fromChainId = bridgeCaip2(o["--from-chain"]), toChainId = bridgeCaip2(o["--to-chain"]);
-  const fromToken = bridgeAddress(o["--from-token"], "APN_INVALID_INPUT"), toToken = bridgeAddress(o["--to-token"], "APN_INVALID_INPUT");
+  const fromToken = bridgeLegToken(o["--from-token"]), toToken = bridgeLegToken(o["--to-token"]);
   // Amounts are parsed at the admitted asset's own precision, never at a fixed six places.
-  const decimals = bridgeTokenRow(fromChainId, fromToken, "APN_INVALID_INPUT").decimals;
+  const decimals = bridgeAssetRow(fromChainId, fromToken, "APN_INVALID_INPUT").decimals;
   const request = validateBridgeRequest({ fromChainId, toChainId, fromToken, toToken,
     amountAtomic: bridgeDecimal(o["--amount"], decimals, true), recipient: bridgeAddress(o["--to"], "APN_INVALID_INPUT"),
     minOutputAtomic: bridgeDecimal(o["--min-output"], decimals, true), maxNativeDebitWei: bridgeUint(o["--max-native-debit-wei"], true, "APN_INVALID_INPUT").toString(),

@@ -131,18 +131,28 @@ not a fallback for bridge operations.
 
 ### Admitted chains and native coins
 
-| Chain | RPC environment variable | Native coin |
-| --- | --- | --- |
-| `eip155:1` Ethereum | `APN_ETHEREUM_RPC_URL` | ETH, 18 decimals |
-| `eip155:8453` Base | `APN_BASE_RPC_URL` | ETH, 18 decimals |
-| `eip155:42161` Arbitrum One | `APN_ARBITRUM_RPC_URL` | ETH, 18 decimals |
+| Chain | RPC environment variable | Native coin | Wrapped native pinned for Across |
+| --- | --- | --- | --- |
+| `eip155:1` Ethereum | `APN_ETHEREUM_RPC_URL` | ETH, 18 decimals | WETH9 `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2`, code hash |
+| `eip155:8453` Base | `APN_BASE_RPC_URL` | ETH, 18 decimals | WETH9 predeploy `0x4200000000000000000000000000000000000006`, code hash |
+| `eip155:42161` Arbitrum One | `APN_ARBITRUM_RPC_URL` | ETH, 18 decimals | aeWETH `0x82aF49447D8a07e3bd95BD0d56f35241523fBab1`, EIP-1967 implementation and admin slots |
 
 A native coin is a first-class registry row, not a token with a sentinel
-address. It pays gas and Stargate's LayerZero messaging fee, and APN translates
-the provider's zero-address wire sentinel into that row at the parse boundary.
-The zero address is refused as a bridgeable asset, and a native **principal** is
-not admitted at all: the LI.FI fee forwarder call, the allowance model and the
-exact three-`Transfer`-log delivery proof are all ERC-20 shaped.
+address. It pays gas and Stargate's LayerZero messaging fee, and since this
+change it is also a bridgeable **principal** over Across between all three
+chains. The operator names it `native` (`--from-token native --to-token
+native`); the provider's zero-address wire sentinel is never accepted as
+operator input and is never a token. See [Native ETH principal](#native-eth-principal).
+
+### The frozen list binds the registry
+
+Every native coin and every token row except WBTC must equal an entry of the
+frozen allowlist dataset (`data/allowlist/2026-09-17/dataset.json`): chain,
+kind, contract, symbol and decimals. APN checks this against the compiled
+inventory before admitting any route leg and treats a drift as an installation
+fault. An address the list does not name is refused as
+`asset_not_on_frozen_list`; it is never matched by symbol. WBTC predates the
+list and stays a `legacy_pinned` row with its own pins.
 
 ### Admitted token rows
 
@@ -151,21 +161,23 @@ exact three-`Transfer`-log delivery proof are all ERC-20 shaped.
 | `eip155:1` | USDC | 6 | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | legacy proxy: implementation and admin slots | Across, Stargate pool 1 | Base, Arbitrum |
 | `eip155:8453` | USDC | 6 | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | legacy proxy: implementation and admin slots | Across, Stargate pool 1 | Ethereum, Arbitrum |
 | `eip155:42161` | USDC | 6 | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` | legacy proxy: implementation and admin slots | Across, Stargate pool 1 | Ethereum, Base |
+| `eip155:1` | USDT | 6 | `0xdAC17F958D2ee523a2206206994597C13D831ec7` | immutable code hash, plus `basisPointsRate() == 0`, `maximumFee() == 0`, `deprecated() == false` | Across | none: the list names no USDT on Base or Arbitrum One |
 | `eip155:1` | WBTC | 8 | `0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599` | immutable: code hash only | Across | Arbitrum |
 | `eip155:42161` | WBTC | 8 | `0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f` | beacon proxy: EIP-1967 beacon slot, beacon code, `implementation()` | Across | Ethereum |
 
-Both sides of a route must be admitted rows with the same pair key, the same
-decimals, and each other in their peer sets. Peer sets are asymmetric on
-purpose: Base admits no canonical WBTC, so no WBTC direction touches Base.
+Both sides of a route must be admitted rows of the same kind with the same pair
+key, the same decimals, and each other in their peer sets. Peer sets are
+asymmetric on purpose: Base admits no canonical WBTC, so no WBTC direction
+touches Base. A row with no peer is refused as `asset_has_no_listed_peer`.
 
 ### Assets refused rather than approximated
 
 | Asset | Why it is refused |
 | --- | --- |
-| Native ETH principal | fee forwarder, allowance and `Transfer`-log evidence are ERC-20 shaped |
-| WETH on any admitted chain | LI.FI itself filters the route: Across does not send WETH to EOAs, so delivery would be native ETH with no `Transfer` log to prove |
-| USDT (Ethereum) | the Tether contract carries an owner-settable `basisPointsRate` transfer fee; a storage-only change is invisible to a code-hash pin and breaks the exact three-`Transfer` proof |
-| DAI, cbBTC on these lanes | LI.FI returns no Across route for them between these chains |
+| Native ETH principal over Stargate | Stargate's native pools have not been reviewed; the route is listed but not preparable (`asset_tool_unreviewed`) |
+| WETH on any admitted chain | not on the frozen list; LI.FI itself filters the route because Across does not send WETH to EOAs |
+| USDT from Ethereum | the row is pinned but has no peer: LI.FI's Arbitrum USDT output is USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9`, which the frozen list does not name, and LI.FI returns no Across or Stargate route from USDT to a listed USDC without a swap |
+| Any token the frozen list does not name (DAI, cbBTC, USD₮0, ...) | `asset_not_on_frozen_list` |
 | Any Stargate pool other than `assetId 1` | the pool has not been reviewed the way USDC was |
 | Any fee-on-transfer or rebasing token | the exact-amount `Transfer` proof cannot hold |
 | A proxy with no stable implementation, admin or beacon slot | there is nothing to pin an upgrade against |
@@ -221,8 +233,11 @@ unknown deployment fails closed.
 
 `--amount`, `--min-output` and `--max-route-fee` are decimal strings at the
 selected asset's own precision, taken from its registry row: six fractional
-digits for USDC, eight for WBTC. `--max-native-debit-wei` is an integer
-native-coin budget on the source chain. APN uses integer arithmetic and rejects
+digits for USDC and USDT, eight for WBTC, eighteen for native ETH.
+`--max-native-debit-wei` is an integer native-coin budget on the source chain.
+For a native principal it bounds the fees only (gas, L1/operator fees); the
+principal itself is bound by `--amount`, and the funding check still requires
+principal plus fees. APN uses integer arithmetic and rejects
 exponent notation, signs, whitespace, excess precision and uint256 overflow.
 
 The token loss bound is source principal minus the materialized minimum output;
@@ -291,6 +306,82 @@ execution gas, Arbitrum's inclusive gas total without double-counting poster
 gas, and Base execution plus explicit L1 fee plus a receipt-block operator
 oracle result. Base requires the reviewed GasPriceOracle 1.6.0, L1Block 1.7.0
 and Jovian configuration. A missing operator receipt field never implies zero.
+
+## Native ETH principal
+
+A native principal is carried by Across V4 only, between any two of Ethereum,
+Base and Arbitrum One. There is no approval effect: the approval cap is zero,
+the account's allowance is the constant zero, and the principal is the bridge
+transaction's `value`. The decoder accepts exactly the call LI.FI returned in the
+read-only captures of 18 September 2026:
+
+- `swapAndStartBridgeTokensViaAcrossV4` (`0x1794958f`) on the Diamond with
+  `value == amount` and `bridgeData.sendingAssetId` the zero address;
+- one FeeForwarder step with `forwardNativeFees` (`0x0e8ae67f`), native in and
+  out, `fromAmount == amount`, one distribution of exactly
+  `amount - bridgeData.minAmount` to the reviewed fee recipient;
+- Across data whose input token is the source chain's pinned wrapped native and
+  whose output token is the destination chain's pinned wrapped native, with the
+  same recipient, refund, output, exclusivity and message rules as ERC-20.
+
+The route estimate must state `skipApproval: true` and must not ask for an
+approval reset. Every fee row is the native coin itself (`asset: "native"`);
+LI.FI's fixed fee must equal the forwarded amount. A Stargate native route is
+listed but not preparable, and a token request can never reuse native calldata.
+
+Source proof replaces the three ERC-20 `Transfer` logs with the wrap: exactly
+one wrapped-native log crediting the source SpokePool with the bridge amount
+(`Deposit(dst)` from WETH9 on Ethereum and Base, a `Transfer` from the zero
+address on Arbitrum's aeWETH), next to the unchanged `LiFiTransferStarted`,
+`FeesForwarded` (token = zero address) and `FundsDeposited` checks.
+Destination proof keeps the full `FilledRelay` tuple and replaces the recipient
+`Transfer` with the unwrap: exactly one log of exactly the output amount from
+the destination SpokePool (`Withdrawal(src)` from WETH9, or a `Transfer` to the
+zero address from aeWETH). The value send to the recipient has no log; the
+pinned SpokePool code performs it in the same fill, and the destination scan
+still starts at the block frozen at preparation, after the source.
+
+```sh
+apn bridge routes --profile existing-local \
+  --from-chain eip155:1 --to-chain eip155:8453 \
+  --from-token native --to-token native \
+  --amount 0.001 --to <recipient> --min-output 0.00099 \
+  --max-native-debit-wei 1000000000000000 \
+  --max-route-fee 0.00001 --slippage-bps 50
+```
+
+On 18 September 2026 a read-only rehearsal ran this exact lane through APN's
+own modules from a public address without signing: anonymous LI.FI routes and
+step materialization, the finite decoder, the live deployment pins of both
+chains at their safe blocks (Diamond, FeeForwarder, Across facet and SpokePool,
+wrapped native), the account read and the envelope freeze with
+`eth_estimateGas`. It produced one bridge effect with `value` 0.001 ETH, no
+approval, and a fee quote of about 0.0001 ETH under a 0.001 ETH fee cap. The
+same run refused 1 USDT Ethereum → Arbitrum as `asset_not_on_frozen_list`.
+
+## USDT on Ethereum
+
+The Tether row is pinned the same way a token is admitted, plus the storage a
+code hash cannot see: every deployment read requires `basisPointsRate()`,
+`maximumFee()` and `deprecated()` to be zero, so a switched-on transfer fee or
+a deprecation forward fails closed. Tether's `approve` returns no value and
+reverts a nonzero approve over a nonzero allowance; APN never reads the return
+value (it proves the approval by the exact `Approval` log and the observed
+allowance) and only approves exactly the principal from a zero allowance, or
+uses an exact existing allowance. The provider's `approvalReset` flag is
+accepted only for this `zero_first` row and never acted on. The row has no peer
+today, so every USDT route is refused before any provider call; admitting one
+needs a listed USDT destination on an admitted chain.
+
+## Allowlist gate for the bridge rail
+
+The frozen list now bounds which identities the bridge registry may admit. The
+owner allowlist policy (`docs/allowlist-policy.md`, rail `bridge` with a
+`{ provider, reference }` mechanism pin) is **not yet enforced** by
+`bridge routes` or `bridge prepare`: the seam is `BridgePreparation.prepare` in
+`src/lifi/prepare.ts`, right after `validateBridgeRequest`, where
+`loadActiveAssetPolicyRegistry` and a usage reservation for the source leg
+would bind the operation to the policy digest. It is listed as follow-up work.
 
 ## Recovery and proof
 
