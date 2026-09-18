@@ -10,7 +10,14 @@ export declare function readAccounts(rpc: SolanaRpcPort, addresses: readonly str
     readonly slot: bigint;
     readonly accounts: readonly (SolanaAccountInfo | null)[];
 }>;
+/** Decodes one base64 `getMultipleAccounts` result that must carry exactly `count` entries. */
+export declare function multipleAccounts(value: unknown, count: number): {
+    readonly slot: bigint;
+    readonly accounts: readonly (SolanaAccountInfo | null)[];
+};
 export declare function requireNativeAccount(account: SolanaAccountInfo | null): bigint;
 export declare function requireUsdcMint(account: SolanaAccountInfo | null): void;
 export declare function usdcAmount(account: SolanaAccountInfo | null, owner: string): bigint;
+/** An absent associated token account holds zero; a present one must be an initialized classic SPL account of this owner and mint. */
+export declare function tokenAccountAmount(account: SolanaAccountInfo | null, owner: string, mint: string): bigint;
 export declare function requireSolanaFunds(nativeBalance: bigint, tokenBalance: bigint, amount: bigint, feeAndRent: bigint, native: boolean): void;

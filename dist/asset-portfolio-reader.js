@@ -1,243 +1,170 @@
 import { address as solanaAddress } from "@solana/kit";
 import { getAddress } from "viem";
 import { exactKeys, isPlainRecord } from "./canonical.js";
-import { validateAssetPolicyRegistry } from "./asset-policy-registry.js";
 import { ApnError } from "./errors.js";
-import { parseAtomic } from "./money.js";
+import { formatAtomic, parseAtomic } from "./money.js";
 import { tronAddress } from "./tron/codec.js";
 const MAX_UINT256 = (1n << 256n) - 1n;
-const MAX_RETRIES = 2;
-class AssetPortfolioCache {
-    entries = new Map();
-    lookup(key, nowMs) {
-        const value = this.entries.get(key);
-        if (value === undefined)
-            return null;
-        if (nowMs < value.expiresAtMs)
-            return { state: "fresh", value: structuredClone(value) };
-        this.entries.delete(key);
-        return { state: "expired", value: structuredClone(value) };
-    }
-    store(key, value) { this.entries.set(key, structuredClone(value)); }
-}
+export const PORTFOLIO_MAX_ATTEMPTS = 3;
+/** Pause before attempt 2 and attempt 3. */
+export const PORTFOLIO_RETRY_PAUSES_MS = Object.freeze([1_000, 2_000]);
+const RETRYABLE = new Set(["rate_limited", "server_error", "timeout", "unreachable"]);
+const BATCH_REASONS = new Set(["rate_limited", "server_error", "timeout", "unreachable",
+    "http_status", "rpc_error", "protocol", "chain_mismatch", "multicall_code_mismatch", "transport_refused"]);
 export class AssetPortfolioReader {
     now;
     wait;
-    cache = new AssetPortfolioCache();
     ports;
-    constructor(ports, now = Date.now, wait = async (milliseconds) => await new Promise((resolve) => setTimeout(resolve, milliseconds))) {
+    /** `wait` resolves "interrupted" to end retries early; the last classified result is then reported. */
+    constructor(ports, now, wait) {
         this.now = now;
         this.wait = wait;
-        const pinned = {};
         for (const family of ["evm", "solana", "tron"]) {
-            const port = ports[family];
-            if (port.family !== family || !source(port.source) || typeof port.read !== "function") {
+            if (ports[family]?.family !== family || typeof ports[family].read !== "function")
                 invalid("A portfolio balance port is invalid.");
-            }
-            pinned[family] = { family, source: port.source, read: port.read.bind(port) };
         }
-        this.ports = pinned;
+        this.ports = ports;
     }
-    async read(registryValue, accountsValue, cachePolicyValue) {
-        const registry = structuredClone(validateAssetPolicyRegistry(registryValue));
-        const accounts = portfolioAccounts(accountsValue, registry.chains);
-        const cachePolicy = cachePolicyContract(cachePolicyValue);
-        const networks = [];
-        let requestCount = 0;
-        for (const chain of [...registry.chains].sort((left, right) => left.chain.localeCompare(right.chain))) {
-            const account = accounts.get(chain.chain);
-            const key = `${registry.policyDigest}\0${chain.chain}\0${account}\0${cachePolicy.availableTtlMs}\0${cachePolicy.unavailableTtlMs}`;
-            const nowMs = this.now();
-            const cached = this.cache.lookup(key, nowMs);
-            if (cached?.state === "fresh") {
-                networks.push(networkResult(chain, account, registry.policyDigest, "fresh", cached.value));
-                continue;
-            }
-            const assets = orderedAssets(chain.assets);
-            const read = await this.readNetwork(chain, account, assets);
-            requestCount += read.attempts;
-            const balances = projectBalances(chain, account, assets, read.result, this.ports[chain.family].source, read.attempts, new Date(this.now()).toISOString());
-            const hasUnavailable = balances.some((row) => row.observation.status === "unavailable");
-            const ttlMs = hasUnavailable ? cachePolicy.unavailableTtlMs : cachePolicy.availableTtlMs;
-            const storedAtMs = this.now(), expiresAtMs = storedAtMs + ttlMs;
-            const value = { storedAtMs, expiresAtMs, unavailableCached: hasUnavailable && ttlMs > 0, balances };
-            if (ttlMs > 0)
-                this.cache.store(key, value);
-            networks.push(networkResult(chain, account, registry.policyDigest, cached?.state ?? "miss", value));
-        }
-        return { datasetDigest: registry.policyDigest, requestCount, networks };
+    /** Reads every network of the frozen list concurrently; each network is one batch attempt plus bounded retries. */
+    async read(input) {
+        const accounts = portfolioAccounts(input.accounts);
+        const networks = await Promise.all(input.inventory.networks.map(async (network) => await this.readNetwork(network, input.inventory.assets.filter((asset) => asset.chain === network.chain), accounts[network.family], input.endpoint(network.chain))));
+        return { datasetVersion: input.inventory.dataset.version, datasetSha256: input.inventory.dataset.sha256,
+            rpcCallsTotal: networks.reduce((total, network) => total + network.rpcCalls, 0), networks };
     }
-    async readNetwork(chain, account, assets) {
-        const port = this.ports[chain.family];
-        const request = { mode: mode(chain.family), chain: chain.chain, account,
+    async readNetwork(network, assets, account, endpoint) {
+        if (assets.length === 0 || assets.length !== network.assetCount)
+            invalid("The frozen list network has no exact asset rows.");
+        const base = { chain: network.chain, name: network.name, family: network.family,
+            account: account.kind === "account" ? account.address : null, endpoint: publicEndpoint(endpoint),
+            mode: null, rpcCalls: 0, attempts: 0, methods: 0, retried: [], block: null, slot: null, observedAt: null };
+        if (account.kind === "none")
+            return { ...base, rows: assets.map((asset) => row(asset, "no_account")) };
+        if (account.kind === "unsupported")
+            return { ...base, rows: assets.map((asset) => row(asset, "unavailable", account.reason)) };
+        if (endpoint.source === "not_configured")
+            return { ...base, rows: assets.map((asset) => row(asset, "rpc_not_configured")) };
+        if (endpoint.source === "invalid_env")
+            return { ...base, rows: assets.map((asset) => row(asset, "unavailable", "rpc_config_invalid")) };
+        const request = { chain: network.chain, family: network.family, account: account.address, endpoint: endpoint.url.href,
             assets: assets.map(({ kind, identifier }) => ({ kind, identifier })) };
+        let calls = 0, methods = 0;
+        const retried = [];
         for (let attempt = 1;; attempt += 1) {
-            let received;
-            try {
-                received = await port.read(structuredClone(request));
+            const result = await this.attempt(this.ports[network.family], request);
+            calls += result.calls;
+            methods += result.methods;
+            if (result.status === "available" || !RETRYABLE.has(result.reason) || attempt >= PORTFOLIO_MAX_ATTEMPTS ||
+                await this.wait(PORTFOLIO_RETRY_PAUSES_MS[attempt - 1]) !== "elapsed") {
+                return { ...base, mode: result.mode, rpcCalls: calls, attempts: attempt, methods, retried,
+                    block: result.status === "available" ? result.block : null, slot: result.status === "available" ? result.slot : null,
+                    observedAt: this.now().toISOString(), rows: project(assets, result) };
             }
-            catch {
-                received = { status: "unavailable", reason: "transport", observedAt: new Date(this.now()).toISOString(), block: null, slot: null };
-            }
-            let cloned;
-            try {
-                cloned = structuredClone(received);
-            }
-            catch {
-                cloned = undefined;
-            }
-            const result = batchResultContract(cloned, new Date(this.now()).toISOString());
-            if (result.status !== "unavailable" || result.httpStatus !== 429 || attempt > MAX_RETRIES) {
-                return { attempts: attempt, result };
-            }
-            await this.wait(attempt === 1 ? 1_000 : 2_000);
+            retried.push(result.reason);
+        }
+    }
+    async attempt(port, request) {
+        const fallback = { status: "unavailable", reason: "protocol", mode: defaultMode(request.family), calls: 0, methods: 0 };
+        try {
+            return batchResult(await port.read(structuredClone(request)), request.family) ?? fallback;
+        }
+        catch {
+            return fallback;
         }
     }
 }
-function batchResultContract(value, fallbackObservedAt) {
-    const unavailable = () => ({ status: "unavailable", reason: "protocol",
-        observedAt: fallbackObservedAt, block: null, slot: null });
-    if (!isPlainRecord(value) || (value.status !== "available" && value.status !== "unavailable"))
-        return unavailable();
-    if (value.status === "available") {
-        if (!exactKeys(value, ["status", "observedAt", "block", "slot", "balances"]) ||
-            typeof value.observedAt !== "string" || (value.block !== null && typeof value.block !== "string") ||
-            (value.slot !== null && typeof value.slot !== "string") || !Array.isArray(value.balances))
-            return unavailable();
+/** Exact per-row projection: a row without a validated amount is unavailable, never zero. */
+function project(assets, result) {
+    if (result.status === "unavailable")
+        return assets.map((asset) => row(asset, "unavailable", result.reason, result.httpStatus ?? null));
+    const expected = new Set(assets.map(assetKey)), seen = new Map();
+    let malformed = result.balances.length > assets.length;
+    for (const value of result.balances) {
+        const key = assetKey(value);
+        if (!expected.has(key) || seen.has(key)) {
+            malformed = true;
+            break;
+        }
+        seen.set(key, value);
+    }
+    return assets.map((asset) => {
+        const value = seen.get(assetKey(asset));
+        if (malformed)
+            return row(asset, "unavailable", "protocol");
+        if (value === undefined)
+            return row(asset, "unavailable", "partial_batch");
+        if ("unavailable" in value)
+            return row(asset, "unavailable", value.unavailable);
+        return { ...row(asset, "ok"), atomic: value.amountAtomic, display: formatAtomic(value.amountAtomic, asset.decimals) };
+    });
+}
+function row(asset, status, reason = null, httpStatus = null) {
+    return { symbol: asset.symbol, kind: asset.kind, contract: asset.identifier, decimals: asset.decimals, status,
+        atomic: null, display: null, reason, httpStatus };
+}
+function batchResult(value, family) {
+    if (!isPlainRecord(value) || !cost(value.calls) || !cost(value.methods) || value.mode !== modeFamily(value.mode, family))
+        return null;
+    if (value.status === "unavailable") {
+        const keys = ["status", "reason", "mode", "calls", "methods", ...(Object.hasOwn(value, "httpStatus") ? ["httpStatus"] : [])];
+        if (!exactKeys(value, keys) || typeof value.reason !== "string" || !BATCH_REASONS.has(value.reason) ||
+            (Object.hasOwn(value, "httpStatus") && !httpStatus(value.httpStatus)))
+            return null;
         return value;
     }
-    const keys = Object.hasOwn(value, "httpStatus") ?
-        ["status", "reason", "httpStatus", "observedAt", "block", "slot"] :
-        ["status", "reason", "observedAt", "block", "slot"];
-    if (!exactKeys(value, keys) ||
-        (value.reason !== "rate_limited" && value.reason !== "transport" && value.reason !== "protocol") ||
-        (Object.hasOwn(value, "httpStatus") && (typeof value.httpStatus !== "number" ||
-            !Number.isSafeInteger(value.httpStatus) || value.httpStatus < 100 || value.httpStatus > 599)) ||
-        typeof value.observedAt !== "string" || (value.block !== null && typeof value.block !== "string") ||
-        (value.slot !== null && typeof value.slot !== "string"))
-        return unavailable();
-    return value;
-}
-function portfolioAccounts(value, chains) {
-    if (!Array.isArray(value) || value.length !== chains.length)
-        invalid("Portfolio accounts must exactly cover the registry networks.");
-    const families = new Map(chains.map((chain) => [chain.chain, chain.family]));
-    const result = new Map();
-    for (const row of value) {
-        if (!isPlainRecord(row) || !exactKeys(row, ["chain", "account"]) || typeof row.chain !== "string" ||
-            typeof row.account !== "string" || result.has(row.chain))
-            invalid("A portfolio account row is invalid or duplicated.");
-        const family = families.get(row.chain);
-        if (family === undefined)
-            invalid("A portfolio account names an unlisted network.");
-        result.set(row.chain, canonicalAccount(family, row.account));
+    if (value.status !== "available" || !exactKeys(value, ["status", "mode", "calls", "methods", "block", "slot", "balances"]) ||
+        !Array.isArray(value.balances) || !anchor(value.block, family !== "solana") || !anchor(value.slot, family === "solana"))
+        return null;
+    for (const entry of value.balances) {
+        if (!isPlainRecord(entry) || (entry.kind !== "native" && entry.kind !== "token") ||
+            (entry.kind === "native" ? entry.identifier !== null : typeof entry.identifier !== "string"))
+            return null;
+        if (Object.hasOwn(entry, "amountAtomic") ? !exactKeys(entry, ["kind", "identifier", "amountAtomic"]) || !uint256(entry.amountAtomic)
+            : !exactKeys(entry, ["kind", "identifier", "unavailable"]) || (entry.unavailable !== "partial_batch" && entry.unavailable !== "protocol"))
+            return null;
     }
-    if (result.size !== families.size)
-        invalid("Portfolio accounts must exactly cover the registry networks.");
-    return result;
-}
-function cachePolicyContract(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["availableTtlMs", "unavailableTtlMs"]) ||
-        !ttl(value.availableTtlMs) || !ttl(value.unavailableTtlMs))
-        invalid("The portfolio cache policy is invalid.");
     return value;
 }
-function ttl(value) {
-    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 300_000;
+function portfolioAccounts(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["evm", "solana", "tron"]))
+        invalid("Portfolio accounts must name exactly evm, solana and tron.");
+    for (const family of ["evm", "solana", "tron"]) {
+        const account = value[family];
+        if (account.kind === "account")
+            canonicalAccount(family, account.address);
+        else if (account.kind !== "none" && !(account.kind === "unsupported" && account.reason === "external_provider_profile")) {
+            invalid("A portfolio account state is invalid.");
+        }
+    }
+    return value;
 }
 function canonicalAccount(family, value) {
     try {
-        if (family === "evm") {
-            const account = getAddress(value);
-            if (account !== value || account === "0x0000000000000000000000000000000000000000")
-                throw new Error("account");
-            return account;
-        }
-        if (family === "solana")
-            return solanaAddress(value);
-        const account = tronAddress(value);
-        if (account !== value)
+        const canonical = family === "evm" ? getAddress(value) : family === "solana" ? solanaAddress(value) : tronAddress(value);
+        if (canonical !== value || canonical === "0x0000000000000000000000000000000000000000")
             throw new Error("account");
-        return account;
     }
     catch {
-        return invalid("A portfolio account is not canonical for its network family.");
+        invalid("A portfolio account is not canonical for its network family.");
     }
 }
-function projectBalances(chain, account, assets, result, sourceValue, attempts, fallbackObservedAt) {
-    let provenance;
-    try {
-        const observedAt = instant(result.observedAt), anchor = anchors(chain.family, result.block, result.slot, result.status === "available");
-        provenance = { ...anchor, observedAt, source: sourceValue, attempts };
-    }
-    catch {
-        provenance = { block: null, slot: null, observedAt: fallbackObservedAt, source: sourceValue, attempts };
-        return assets.map((asset) => ({ chain: chain.chain, family: chain.family, account, asset,
-            observation: { status: "unavailable", reason: "protocol", provenance } }));
-    }
-    if (result.status === "unavailable") {
-        const reason = result.httpStatus === 429 ? "rate_limited" : result.reason;
-        return assets.map((asset) => ({ chain: chain.chain, family: chain.family, account, asset,
-            observation: { status: "unavailable", reason, provenance } }));
-    }
-    const expected = new Map(assets.map((asset) => [assetKey(asset), asset]));
-    const balances = new Map();
-    let protocolFailure = false;
-    if (!Array.isArray(result.balances) || result.balances.length > assets.length)
-        protocolFailure = true;
-    else
-        for (const row of result.balances) {
-            if (!isPlainRecord(row) || !exactKeys(row, ["kind", "identifier", "amountAtomic"]) ||
-                (row.kind !== "native" && row.kind !== "token") ||
-                (row.kind === "native" ? row.identifier !== null : typeof row.identifier !== "string") ||
-                typeof row.amountAtomic !== "string") {
-                protocolFailure = true;
-                break;
-            }
-            const key = assetKey(row);
-            if (!expected.has(key) || balances.has(key)) {
-                protocolFailure = true;
-                break;
-            }
-            try {
-                const amount = parseAtomic(row.amountAtomic);
-                if (amount > MAX_UINT256)
-                    throw new Error("uint256");
-                balances.set(key, amount.toString());
-            }
-            catch {
-                protocolFailure = true;
-                break;
-            }
-        }
-    return assets.map((asset) => {
-        const amount = balances.get(assetKey(asset));
-        const observation = protocolFailure ? { status: "unavailable", reason: "protocol", provenance }
-            : amount === undefined ? { status: "unavailable", reason: "partial_batch", provenance }
-                : { status: "available", amountAtomic: amount, provenance };
-        return { chain: chain.chain, family: chain.family, account, asset, observation };
-    });
+function publicEndpoint(endpoint) {
+    // Owner-supplied URLs may carry credentials in the path; only the pinned public default is echoed.
+    return { source: endpoint.source, env: endpoint.env, url: endpoint.source === "default_public" ? endpoint.display : null };
 }
-function networkResult(chain, account, digest, state, cached) {
-    return { chain: chain.chain, family: chain.family, account, datasetDigest: digest,
-        cache: { state, storedAt: new Date(cached.storedAtMs).toISOString(), expiresAt: new Date(cached.expiresAtMs).toISOString(),
-            unavailableCached: cached.unavailableCached }, balances: structuredClone(cached.balances) };
+function defaultMode(family) {
+    return family === "evm" ? "evm_multicall3_aggregate3" : family === "solana" ? "solana_json_rpc_batch" : "tron_http_sequential";
 }
-function orderedAssets(assets) {
-    return [...assets].sort((left, right) => assetKey(left).localeCompare(assetKey(right)));
+function modeFamily(mode, family) {
+    if (family === "evm")
+        return mode === "evm_multicall3_aggregate3" || mode === "evm_json_rpc_batch" ? mode : null;
+    return mode === defaultMode(family) ? defaultMode(family) : null;
 }
-function assetKey(asset) { return asset.kind === "native" ? "0:native" : `1:${asset.identifier}`; }
-function mode(family) {
-    return family === "evm" ? "evm_multicall" : family === "solana" ? "solana_native_and_token_accounts" : "tron_native_and_trc20";
-}
-function anchors(family, block, slot, requiredAnchor) {
-    const required = family === "solana" ? slot : block, absent = family === "solana" ? block : slot;
-    if (absent !== null || (requiredAnchor && required === null) ||
-        (required !== null && !atomicString(required)))
-        invalid("A portfolio batch provenance anchor is invalid.");
-    return { block: family === "solana" ? null : required, slot: family === "solana" ? required : null };
-}
-function atomicString(value) {
+function assetKey(asset) { return asset.kind === "native" ? "native" : `token:${asset.identifier}`; }
+function cost(value) { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 64; }
+function httpStatus(value) { return typeof value === "number" && Number.isSafeInteger(value) && value >= 100 && value <= 599; }
+function anchor(value, required) { return required ? uint256(value) : value === null; }
+function uint256(value) {
     if (typeof value !== "string")
         return false;
     try {
@@ -247,14 +174,5 @@ function atomicString(value) {
         return false;
     }
 }
-function instant(value) {
-    if (typeof value !== "string")
-        invalid("A portfolio batch observation time is invalid.");
-    const time = Date.parse(value);
-    if (!Number.isFinite(time) || new Date(time).toISOString() !== value)
-        invalid("A portfolio batch observation time is invalid.");
-    return value;
-}
-function source(value) { return typeof value === "string" && /^[a-z0-9][a-z0-9._:/-]{0,127}$/u.test(value); }
 function invalid(message) { throw new ApnError("APN_INVALID_INPUT", message); }
 //# sourceMappingURL=asset-portfolio-reader.js.map
