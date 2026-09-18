@@ -3,6 +3,7 @@ import * as coreRuntime from "../../src/core.js";
 import { testRuntime } from "./installed-runtime.js";
 import * as errorRuntime from "../../src/errors.js";
 import { resolveEvmAsset } from "../../src/evm-asset.js";
+import { directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "../../src/evm-direct-networks.js";
 import type { EvmRpcPort } from "../../src/evm-ports.js";
 import * as nativeRuntime from "../../src/local-wallet-native.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
@@ -64,7 +65,7 @@ export class EvmTestRpc extends TestRpc {
     },
     nonce: async (chainId, _address, tag) => { await this.evm.assertChain(chainId); return tag === "pending" ? this.nonceAtomic : this.latestNonceAtomic; },
     estimate: async () => this.fees,
-    feeQuote: async (chainId, economics) => ({ chainId, ...(chainId === 42161 ? { feeModel: "arbitrum-inclusive" as const } : {}), maximumExecutionFeeWei: economics.maximumGasCostAtomic,
+    feeQuote: async (chainId, economics) => ({ chainId, ...quoteFeeModel(chainId), maximumExecutionFeeWei: economics.maximumGasCostAtomic,
       l1DataFeeUpperWei: this.l1Fee.toString(), operatorFeeUpperWei: this.operatorFee.toString(),
       totalQuoteWei: (BigInt(economics.maximumGasCostAtomic) + this.l1Fee + this.operatorFee).toString(), totalFeeEnforcedOnchain: false,
       blockNumberAtomic: "12345", blockHash: EVM_BLOCK_HASH, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin }),
@@ -79,7 +80,7 @@ export class EvmTestRpc extends TestRpc {
         logs: data === undefined || !this.transferLogEnabled ? [] : [{ address: transaction.to! as Address,
           topics: [TRANSFER_TOPIC, pad(this.sender, { size: 32 }), pad(RECIPIENT, { size: 32 })], data: toHex(BigInt(`0x${data.slice(-64)}`), { size: 32 }) }] };
     },
-    evidence: async (operation) => ({ ...(operation.chainId === 42161 ? { safeBlockNumberAtomic: "12346", safeBlockHash: EVM_BLOCK_HASH } : {}), blockHash: EVM_BLOCK_HASH, transactionVerified: this.transactionVerified,
+    evidence: async (operation) => ({ ...(directEvmRequiresSafeHead(operation.chainId) ? { safeBlockNumberAtomic: "12346", safeBlockHash: EVM_BLOCK_HASH } : {}), blockHash: EVM_BLOCK_HASH, transactionVerified: this.transactionVerified,
       tokenBalanceDeltasVerified: operation.evm?.asset.kind === "erc20" && this.deltasVerified,
       ...(operation.evm?.asset.kind === "erc20" ? { senderDeltaAtomic: operation.amountAtomic, recipientDeltaAtomic: this.deltasVerified ? operation.amountAtomic : "0" } : {}) }),
     confirmedAtNonce: async () => this.confirmedAtNonce,
@@ -91,6 +92,12 @@ export class EvmTestRpc extends TestRpc {
     this.returnedHash = keccak256(rawTransaction);
     return await super.submitRawTransaction(rawTransaction);
   }
+}
+
+/** The fake quote names the same fee model the production RPC does for the selected network. */
+function quoteFeeModel(chainId: DirectEvmChainId) {
+  const feeModel = directEvmQuoteFeeModel(chainId);
+  return feeModel === undefined ? {} : { feeModel };
 }
 
 export function evmCore(root: string, rpc = new EvmTestRpc(), wrapping = new EvmWrappingSecret(), approval = new EvmApproval(), wrapNative?: (native: NativePort) => NativePort) {
