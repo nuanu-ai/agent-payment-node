@@ -18,9 +18,6 @@ import { SavedUniswapQuoteStore } from "./material.js";
 import { UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, type UniswapV3PinVerifier } from "./pins.js";
 import { TtyUniswapSwapApproval } from "./tty.js";
 
-/** Until the allowlist activation installs its resolver, no profile has an active swap admission: preparation refuses. */
-export const NO_ACTIVE_SWAP_ADMISSION: GuardedSwapPolicyResolver = async () => null;
-
 /** Only the foreground CLI approve command receives a terminal; every other surface refuses consent outright. */
 export const REFUSING_SWAP_APPROVAL: GuardedSwapForegroundApprovalPort = {
   async approve() {
