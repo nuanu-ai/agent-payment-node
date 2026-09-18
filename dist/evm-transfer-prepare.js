@@ -3,6 +3,7 @@ import { APPROVAL_WINDOW_MS, STATE_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { EVM_NETWORKS, evmAmount, evmDecimals, evmUint } from "./evm-asset.js";
+import { directEvmNetwork } from "./evm-direct-networks.js";
 import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { evmDirectFingerprint, evmTransaction, requireEvmFunding, requireEvmRpc } from "./evm-direct.js";
 import { appendTransition, sealOperation } from "./state-integrity.js";
@@ -28,6 +29,10 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
     const listed = listedEvmAsset(request.asset.chainId, request.asset.token, request.asset.decimals === undefined ? undefined : evmDecimals(request.asset.decimals));
     const selection = listed.selection;
     const maximumFeeWei = evmUint(request.maxFeeWei, true).toString();
+    const priorityFeeWei = request.priorityFeeWei === undefined ? undefined : evmUint(request.priorityFeeWei).toString();
+    if (priorityFeeWei !== undefined && directEvmNetwork(selection.chainId).feeModel === "arbitrum-inclusive") {
+        throw new ApnError("APN_INVALID_INPUT", "Arbitrum One prices gas without a separate priority fee; omit --priority-fee-wei.", { reason: "priority_fee_not_applicable" });
+    }
     const profile = canonicalProfile(request.profile), recipient = canonicalAddress(request.recipient);
     const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
     if (typeof request.amount !== "string" || request.amount.length > 335 || !/^(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/u.test(request.amount) || request.amount === "0") {
@@ -36,7 +41,9 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
     await context.ready();
     const state = context.state, profileHash = state.profileHash(profile);
     const operationId = state.operationId(profile, idempotencyKey), idempotencyHash = state.idempotencyHash(idempotencyKey);
-    const requestHash = hashObject({ method: "pay.transfer.evm.v1", profile, recipient, selection, amount: request.amount, maxFeeWei: maximumFeeWei });
+    // A request without an owner tip hashes exactly as before, so existing idempotency keys keep resolving.
+    const requestHash = hashObject({ method: "pay.transfer.evm.v1", profile, recipient, selection, amount: request.amount, maxFeeWei: maximumFeeWei,
+        ...(priorityFeeWei === undefined ? {} : { priorityFeeWei }) });
     return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
         const existing = await operations.resolvePrepare({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash });
         if (existing !== null)
@@ -60,8 +67,8 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
         if (evmUint(balance.assetAtomic) < BigInt(amount.atomic))
             throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
         const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
-        const [nonce, fees] = await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]);
-        const economics = validateEconomics(nonce, fees);
+        const [nonce, estimated] = await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]);
+        const economics = validateEconomics(nonce, priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
         const quote = await rpc.feeQuote(selection.chainId, economics);
         requireEvmFunding(balance, amount.atomic, quote, maximumFeeWei);
         const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000).toISOString();
@@ -83,5 +90,16 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
         await persist(operation);
         return publicOperation(operation);
     });
+}
+/** The owner's tip replaces the RPC suggestion; the fee cap keeps its headroom of twice the base fee, plus that tip. */
+function withOwnerPriorityFee(fees, priorityFeeWei) {
+    const baseFeeTwice = BigInt(fees.maxFeePerGasAtomic) - BigInt(fees.maxPriorityFeePerGasAtomic);
+    if (baseFeeTwice < 0n)
+        throw new ApnError("APN_RPC_PROTOCOL", "The RPC fee estimate has a priority fee above its fee cap.");
+    const maximum = baseFeeTwice + BigInt(priorityFeeWei);
+    if (maximum === 0n) {
+        throw new ApnError("APN_INVALID_INPUT", "A zero total gas price is never signed; set a positive --priority-fee-wei on a zero-base-fee network.", { reason: "zero_gas_price" });
+    }
+    return { ...fees, maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priorityFeeWei };
 }
 //# sourceMappingURL=evm-transfer-prepare.js.map

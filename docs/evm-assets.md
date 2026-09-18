@@ -20,6 +20,16 @@ apn operation resume --operation <operation-id> --rpc-url <https-base-rpc-url>
 apn receipt get --operation <operation-id>
 ```
 
+The priority fee (the tip per gas) comes from the RPC's `eth_maxPriorityFeePerGas`
+by default. Some public RPCs answer 0, and a transaction with no tip can wait a
+few blocks for inclusion. `--priority-fee-wei <wei>` makes the owner's tip replace
+that suggestion. The fee cap then becomes twice the base fee plus that tip. It
+counts toward `--max-fee-wei` and is part of the request, so reusing an
+idempotency key with a different tip is a conflict. Arbitrum One prices gas
+without a separate tip, so there the flag is refused with
+`priority_fee_not_applicable`. On a network whose base fee is zero, a zero tip is
+refused because a zero total price is never signed.
+
 Direct transfers accept only the frozen allowlist (`data/allowlist/2026-09-17/dataset.json`).
 For a token, replace `native` with its pinned list contract; any other address is
 refused with `APN_ALLOWLIST_REFUSED` (`allowlist_asset_unlisted`) before any RPC.
