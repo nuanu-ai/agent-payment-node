@@ -83,10 +83,12 @@ can show a USDT balance while remaining unable to originate a transaction.
 
 ## Policy, preparation and the total TRX cap
 
-TRX and USDT start denied. A human must admit each asset in a foreground terminal
-with principal limits in that asset and a separate total resource cap in TRX.
-The values below only illustrate command syntax; choose limits for the intended
-payment.
+TRX and USDT start denied. Two owner decisions are needed. The owner allowlist
+policy must admit the asset on the `direct` rail; its per-operation and daily
+caps are the only principal caps (see `docs/allowlist-direct-integration.md`).
+The chain policy below, admitted in a foreground terminal, now caps only the
+total resource fee in TRX; its principal flags are still required by the
+command but are not enforced. The values below only illustrate command syntax.
 
 ```sh
 apn policy admit-tron --profile tron-local --asset trx \
@@ -104,9 +106,10 @@ is blocked while the profile has an unresolved money operation.
 Amounts and TRX fee caps must be positive canonical decimal strings with at most
 six fractional digits. Values such as `1`, `1.25` and `0.000001` are accepted.
 Signs, exponent notation, whitespace, leading zeroes, trailing fractional zeroes
-and excess precision are refused. Daily principal usage follows UTC. Every
-nonterminal reservation continues to reserve its full principal and native-fee
-maximum across UTC days; a timeout or unknown outcome does not release it.
+and excess precision are refused. Daily principal usage follows UTC in the
+shared allowlist usage ledger. Every nonterminal reservation continues to
+reserve its full principal across UTC days; a timeout or unknown outcome does
+not release it.
 
 Prepare one immutable transfer:
 

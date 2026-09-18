@@ -16,11 +16,16 @@ apn operation resume --operation <operation-id> --rpc-url <https-base-rpc-url>
 apn receipt get --operation <operation-id>
 ```
 
-For ERC-20, replace `native` with the exact contract address. Symbol is not
-identity. The same core reads balance and optional decimals at a pinned block;
-if decimals are unavailable, supply independently verified `--decimals 0..255`.
-Conflicting observed decimals fail. No implicit six-decimal fallback, rounding,
-token whitelist, NFT, swap, approval or arbitrary calldata is supported.
+Direct transfers accept only the frozen allowlist (`data/allowlist/2026-09-17/dataset.json`).
+For a token, replace `native` with its pinned list contract; any other address is
+refused with `APN_ALLOWLIST_REFUSED` (`allowlist_asset_unlisted`) before any RPC.
+Symbol is not identity. Decimals come from the list row: `--decimals` is optional
+and must equal it, and a contract reporting other decimals fails. Every direct
+transfer also needs an owner-activated allowlist policy that admits the asset on
+the `direct` rail; its per-operation and daily caps apply to native ETH and every
+listed token (see `docs/allowlist-direct-integration.md`). No rounding, NFT,
+swap, approval or arbitrary calldata is supported. `wallet balance-asset` still
+reads any contract.
 
 `--amount` is a canonical exact positive decimal; `--max-fee-wei` is a positive
 integer native-ETH **pre-submission quote budget**, not an onchain-enforced total
@@ -98,7 +103,7 @@ separate; neither Ethereum nor Arbitrum inherits another network allowance.
 Ethereum x402 supports only exact EIP-3009 canonical Ethereum USDC at
 `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`. Name, version and domain separator
 are independently read at a pinned safe block. Arbitrum uses native USDC at
-`0xaf88d065e77c8cC2239327C5EDb3A432268e5831`, not bridged USDC.e. Arbitrary ERC-20 direct support
+`0xaf88d065e77c8cC2239327C5EDb3A432268e5831`, not bridged USDC.e. Direct ERC-20 support for list contracts
 does not imply other x402 tokens or ERC-7710/Permit2 support. External wallet
 profiles are refused before provider execution on non-Base networks.
 
@@ -120,14 +125,14 @@ installation, merchant availability or x402 settlement proof.
 
 ## Capability boundary
 
-| Profile | Base / Ethereum / Arbitrum native and arbitrary ERC-20 direct | Base-USDC direct | Standard x402 |
+| Profile | Base / Ethereum / Arbitrum native and list ERC-20 direct (owner allowlist caps) | Base-USDC direct | Standard x402 |
 | --- | --- | --- | --- |
 | Local encrypted wallet | APN 0.5.10 capability; bounded Base/Arbitrum D4-D9 direct proof passed on 2026-09-10 | Existing journey preserved; D5/D8 included in the bounded direct proof | Base plus APN 0.5.10 Ethereum/Arbitrum-USDC exact EIP-3009; fresh merchant proof held |
 | Coinbase Agentic Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route; pinned AWAL rejects present bodies, including empty |
 | MetaMask Agent Wallet | Explicitly unsupported | Existing provider route | Existing Base-USDC route |
 | MetaMask Smart Account | Explicitly unsupported | Existing bounded consent route | Existing advertised ERC-7710 route |
 
-Arbitrary direct tokens do **not** imply arbitrary x402 tokens or merchant
+Direct list tokens do **not** imply arbitrary x402 tokens or merchant
 support. Existing exact HTTP method/headers/absent/empty/nonempty body binding is
 unchanged. Legacy 0.5.8 operations retain their old schema/hash and recovery path.
 The earlier live provider proof was Local/Coinbase/MetaMask Agent on 0.5.6 and

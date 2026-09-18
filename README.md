@@ -15,7 +15,8 @@ for saved Local gasless operations whose original RPC cannot serve historical
 reads. The published 0.5.11 binary does not provide this option.
 
 The local wallet supports Base, Ethereum and Arbitrum One native ETH and
-arbitrary ERC-20 direct transfers, plus independently network-bound canonical
+frozen-allowlist token direct transfers within the owner's activated allowlist
+caps ([direct allowlist gate](docs/allowlist-direct-integration.md)), plus independently network-bound canonical
 USDC EIP-3009 x402. The approved transaction stays frozen while harmless fee
 recommendation changes remain executable. See [EVM asset transfers](docs/evm-assets.md)
 for fee limits and the separate source, installed and mainnet proof boundaries.
