@@ -97,7 +97,7 @@ test("Smart Account static CLI/MCP discovery and approval handoff access no stat
   assert.deepEqual(data.provider_networks["metamask-smart-account"].map((row: any) => [row.chain_id, row.executable_adapter, row.mainnet_acceptance]), [[8453, true, "open"]]);
   assert.equal(semantics.fee_atomic, "0"); assert.equal(semantics.onchain_permission_expiry, true);
   assert.equal(semantics.recovery_after_exposure, "independent_chain_observation_only");
-  const listed = await c.client.listTools(); assert.equal(listed.tools.length, 48);
+  const listed = await c.client.listTools(); assert.equal(listed.tools.length, projectMcpTools().length);
   assert.deepEqual(listed.tools.map(tool => tool.name), projectMcpTools().map(tool => tool.name));
   const handoff = await c.call("apn_gasless_transfer_approve", { operation: ID });
   assert.equal(handoff.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");

@@ -1,6 +1,6 @@
 # TRON mainnet direct transfers
 
-This APN 0.5.21 package includes local TRX and canonical USDT transfers on
+This APN 0.5.22 package includes local TRX and canonical USDT transfers on
 TRON mainnet. Package availability, clean installation and live mainnet transfer
 acceptance require separate evidence. No TRX or USDT mainnet execution acceptance
 has been recorded yet.
