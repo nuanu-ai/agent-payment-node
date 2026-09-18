@@ -109,7 +109,7 @@ export class ChainPolicyService {
 }
 export function solanaCapabilities() {
     return {
-        rail: "solana", network: "mainnet", assets: [chainAsset("solana", "sol"), chainAsset("solana", "usdc")], x402: { available: false },
+        rail: "solana", network: "mainnet", assets: [chainAsset("solana", "sol"), chainAsset("solana", "usdc"), chainAsset("solana", "usdt")], x402: { available: false },
         profiles: [
             { provider: "local", execution: "local_signed", direct: true, requires: ["separate_encrypted_wallet", "explicit_rpc", "foreground_policy", "foreground_transfer_approval"] },
             { provider: "coinbase-awal", execution: "provider_atomic", direct: false, accountAndBalance: true, blocker: "pinned_provider_fee_and_rent_guarantee_unavailable" },
