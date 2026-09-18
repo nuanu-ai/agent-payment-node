@@ -1,7 +1,6 @@
 import { address as solanaAddress } from "@solana/kit";
 import { getAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
-import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
 import {
   ALLOWLIST_DATASET_SCHEMA,
@@ -18,7 +17,7 @@ import {
   type UnsignedAssetPolicyRegistry,
 } from "./asset-policy-registry.js";
 import { parseAtomic } from "./money.js";
-import { SecureStateStore, stateCorrupt } from "./secure-state-store.js";
+import { stateCorrupt } from "./secure-state-store.js";
 import { tronAddress } from "./tron/codec.js";
 import { validateSwapMechanismPin, type SwapMechanismPin } from "./swap/pin.js";
 
@@ -80,12 +79,18 @@ export interface PrepareAllowlistPolicyInput extends AllowlistPolicyOverlayInput
   readonly now: Date;
 }
 
+/** Storage identity shared by every overlay and activation schema for one policy profile. */
+export function allowlistProfileHash(profile: string): string {
+  if (typeof profile !== "string" || !PROFILE.test(profile)) invalid("Allowlist policy profile is invalid.", "invalid_profile");
+  return domainHash(ALLOWLIST_POLICY_OVERLAY_SCHEMA, `profile\0${profile}`);
+}
+
 export function compileAllowlistPolicyOverlay(
   raw: AllowlistPolicyOverlayInput,
   inventory: AllowlistInventory = loadAllowlistInventory(),
 ): { readonly overlay: AllowlistPolicyOverlay; readonly registry: AssetPolicyRegistry } {
   const value = overlayInput(raw, inventory);
-  const profileHash = domainHash(ALLOWLIST_POLICY_OVERLAY_SCHEMA, `profile\0${value.profile}`);
+  const profileHash = allowlistProfileHash(value.profile);
   const body = { schemaVersion: ALLOWLIST_POLICY_OVERLAY_SCHEMA, ...value, profileHash } as const;
   const overlay: AllowlistPolicyOverlay = {
     ...body,
@@ -149,96 +154,6 @@ export function validateAllowlistPolicyRecord(value: unknown): AllowlistPolicyRe
   return value as unknown as AllowlistPolicyRecord;
 }
 
-export class AllowlistPolicyStore extends SecureStateStore {
-  private initialized: Promise<void> | undefined;
-
-  async prepare(input: PrepareAllowlistPolicyInput): Promise<AllowlistPolicyRecord> {
-    const { expectedRevision, now, ...overlayInputValue } = input;
-    const compiled = compileAllowlistPolicyOverlay(overlayInputValue);
-    const preparedAt = instant(now, "Preparation time");
-    await this.ready();
-    return await this.withLocks([`profile:${compiled.overlay.profileHash}`], async () => {
-      const current = await this.latest(compiled.overlay.profileHash);
-      if (current === null) {
-        if (expectedRevision !== undefined) conflict("The initial allowlist policy must omit expected revision.");
-      } else if (expectedRevision === undefined || expectedRevision !== current.revision) {
-        conflict("Allowlist policy expected revision does not match durable state.");
-      } else if (current.overlay.account !== compiled.overlay.account) {
-        throw new ApnError("APN_PROFILE_DRIFT", "The allowlist policy profile is already bound to a different owner account.");
-      }
-      const revision = (current?.revision ?? 0) + 1;
-      const body = { schemaVersion: ALLOWLIST_POLICY_RECORD_SCHEMA, revision, status: "staged_unadmitted" as const,
-        preparedAt, overlay: compiled.overlay, registry: compiled.registry };
-      const record: AllowlistPolicyRecord = { ...body,
-        recordDigest: domainHash(ALLOWLIST_POLICY_RECORD_SCHEMA, canonicalJson(body)) };
-      await this.ensureDirectory(`allowlist-policies/${compiled.overlay.profileHash}`);
-      await this.writeJson(this.path(compiled.overlay.profileHash, revision), record, true);
-      return record;
-    });
-  }
-
-  async status(profile: string): Promise<AllowlistPolicyRecord | null> {
-    if (!PROFILE.test(profile)) invalid("Allowlist policy profile is invalid.", "invalid_profile");
-    await this.ready();
-    const profileHash = domainHash(ALLOWLIST_POLICY_OVERLAY_SCHEMA, `profile\0${profile}`);
-    return await this.withLocks([`profile:${profileHash}`], async () => await this.latest(profileHash));
-  }
-
-  private async latest(profileHash: string): Promise<AllowlistPolicyRecord | null> {
-    const entries = await this.readDirectory(`allowlist-policies/${profileHash}`);
-    let latest: AllowlistPolicyRecord | null = null;
-    for (const entry of entries) {
-      if (!entry.isFile() || entry.isSymbolicLink() || !/^v[0-9]{8}\.json$/u.test(entry.name)) {
-        corrupt("Allowlist policy directory contains an unsafe entry.");
-      }
-      const value = await this.readJson(`allowlist-policies/${profileHash}/${entry.name}`);
-      if (value === null) corrupt("Allowlist policy version disappeared during validation.");
-      const record = validateAllowlistPolicyRecord(value);
-      if (record.overlay.profileHash !== profileHash || entry.name !== `v${String(record.revision).padStart(8, "0")}.json`) {
-        corrupt("Allowlist policy path binding is invalid.");
-      }
-      if (latest === null || record.revision > latest.revision) latest = record;
-    }
-    return latest;
-  }
-
-  private path(profileHash: string, revision: number): string {
-    return `allowlist-policies/${profileHash}/v${String(revision).padStart(8, "0")}.json`;
-  }
-
-  private async ready(): Promise<void> {
-    this.initialized ??= (async () => { await this.initialize(); await this.ensureDirectory("allowlist-policies"); })();
-    await this.initialized;
-  }
-}
-
-export async function executeAllowlistPolicyCommand(
-  request: Extract<CommandRequest, { command: "allowlist.policy.prepare" | "allowlist.policy.status" }>,
-  stateRoot: string,
-  now: Date,
-): Promise<unknown> {
-  const store = new AllowlistPolicyStore(stateRoot);
-  if (request.command === "allowlist.policy.status") {
-    const record = await store.status(request.profile);
-    return record ?? { configured: false, status: "not_present", profile: request.profile, activation: "not_available" };
-  }
-  if ((request.mechanismProvider === undefined) !== (request.mechanismReference === undefined)) {
-    invalid("Pinned mechanism provider and reference must be supplied together.", "invalid_mechanism");
-  }
-  const inventory = loadAllowlistInventory();
-  return await store.prepare({ overlayVersion: request.overlayVersion, profile: request.profile, account: request.account,
-    datasetVersion: inventory.dataset.version, datasetSha256: inventory.dataset.sha256,
-    inventorySha256: inventory.inventorySha256, effectiveAt: request.effectiveAt,
-    ...(request.expiresAt === undefined ? {} : { expiresAt: request.expiresAt }),
-    admissions: [{ chain: request.chain, kind: request.kind,
-      ...(request.identifier === undefined ? {} : { identifier: request.identifier }), rail: request.rail,
-      maximumPerTransferAtomic: request.maximumPerTransferAtomic, dailyLimitAtomic: request.dailyLimitAtomic,
-      ...(request.mechanismProvider === undefined ? {} : { mechanism: {
-        provider: request.mechanismProvider, reference: request.mechanismReference!,
-      } }) }],
-    ...(request.expectedRevision === undefined ? {} : { expectedRevision: request.expectedRevision }), now });
-}
-
 function overlayInput(value: AllowlistPolicyOverlayInput, inventory: AllowlistInventory): AllowlistPolicyOverlayInput {
   if (!isPlainRecord(value) || !exactKeys(value, [
     "overlayVersion", "profile", "account", "datasetVersion", "datasetSha256", "inventorySha256", "effectiveAt",
@@ -251,7 +166,7 @@ function overlayInput(value: AllowlistPolicyOverlayInput, inventory: AllowlistIn
       !Array.isArray(value.admissions) || value.admissions.length === 0 || value.admissions.length > 256) {
     invalid("Allowlist policy overlay metadata is invalid.", "invalid_overlay");
   }
-  const admissions = value.admissions.map(admission);
+  const admissions = value.admissions.map(validateAllowlistAdmission);
   const identities = new Set<string>();
   let family: string | undefined;
   for (const row of admissions) {
@@ -262,11 +177,12 @@ function overlayInput(value: AllowlistPolicyOverlayInput, inventory: AllowlistIn
     if (identities.has(identity)) invalid("Allowlist policy contains a duplicate admission row.", "duplicate_admission");
     identities.add(identity);
   }
-  canonicalAccount(family!, value.account);
+  canonicalAllowlistAccount(family!, value.account);
   return { ...value, admissions };
 }
 
-function admission(value: unknown): AllowlistPolicyAdmissionInput {
+/** One owner-supplied admission row: exact identity, one rail, positive owner caps and the rail's pinned mechanism. */
+export function validateAllowlistAdmission(value: unknown): AllowlistPolicyAdmissionInput {
   if (!isPlainRecord(value) || !exactKeys(value, [
     "chain", "kind", ...(value.identifier === undefined ? [] : ["identifier"]), "rail", "maximumPerTransferAtomic",
     "dailyLimitAtomic", ...(value.mechanism === undefined ? [] : ["mechanism"]),
@@ -321,8 +237,9 @@ function positiveAtomic(value: unknown, field: string): string {
   } catch { return invalid("Atomic caps must be positive canonical uint256 values.", field); }
 }
 
-function canonicalAccount(family: string, value: string): string {
+export function canonicalAllowlistAccount(family: string, value: unknown): string {
   try {
+    if (typeof value !== "string") throw new Error("account");
     if (family === "evm") {
       const result = getAddress(value);
       if (result !== value || result === "0x0000000000000000000000000000000000000000") throw new Error("account");
@@ -333,17 +250,10 @@ function canonicalAccount(family: string, value: string): string {
   } catch { return invalid("Owner account is not canonical for the selected family.", "account_mismatch"); }
 }
 
-function isoInstant(value: string): boolean {
+export function isoInstant(value: string): boolean {
   const parsed = Date.parse(value); return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
-}
-function instant(value: Date, label: string): string {
-  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) invalid(`${label} is invalid.`, "invalid_time");
-  return value.toISOString();
 }
 function invalid(message: string, reason: string): never {
   throw new ApnError("APN_INVALID_INPUT", message, { reason });
-}
-function conflict(message: string): never {
-  throw new ApnError("APN_PROFILE_REVISION_CONFLICT", message, { reason: "stale_policy_revision" });
 }
 function corrupt(message: string): never { return stateCorrupt(message); }

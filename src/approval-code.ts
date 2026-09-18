@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
-export type ApprovalAction = "transfer" | "policy" | "asset-admission" | "abandon" | "gasless" | "bridge";
+export type ApprovalAction = "transfer" | "policy" | "asset-admission" | "abandon" | "gasless" | "bridge"
+  | "allowlist-activate" | "allowlist-revoke";
 
 /**
  * Six hexadecimal characters bound to one action and one exact fingerprint.

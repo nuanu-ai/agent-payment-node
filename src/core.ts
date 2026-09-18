@@ -39,11 +39,12 @@ import { saFail } from "./smart-account-gasless/reasons.js";
 import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { facilitatorFail } from "./facilitator-gasless/failure.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
-import { executeAllowlistPolicyCommand } from "./allowlist-policy-overlay.js";
+import { executeAllowlistPolicyCommand } from "./allowlist-policy-command.js";
 import { executeUniswapCommand } from "./swap/uniswap-command-service.js";import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";
 export type { CommandRequest, OutputEnvelope } from "./commands.js";export type { CoreDependencies } from "./runtime.js";
 export {
   ASSET_POLICY_REGISTRY_SCHEMA,
+  ASSET_POLICY_REGISTRY_SCHEMA_V2,
   assetPolicyDigest,
   evaluateAssetPolicy,
   sealAssetPolicyRegistry,
@@ -70,22 +71,7 @@ export type {
   CandidateRail,
   CandidateRails,
 } from "./allowlist-inventory.js";
-export {
-  ALLOWLIST_POLICY_OVERLAY_SCHEMA,
-  ALLOWLIST_POLICY_RECORD_SCHEMA,
-  AllowlistPolicyStore,
-  compileAllowlistPolicyOverlay,
-  executeAllowlistPolicyCommand,
-  validateAllowlistPolicyRecord,
-} from "./allowlist-policy-overlay.js";
-export type {
-  AllowlistMechanismPin,
-  AllowlistPolicyAdmissionInput,
-  AllowlistPolicyOverlay,
-  AllowlistPolicyOverlayInput,
-  AllowlistPolicyRecord,
-  PrepareAllowlistPolicyInput,
-} from "./allowlist-policy-overlay.js";
+export * from "./allowlist-policy.js";
 export type {
   AssetAtomicCaps,
   AssetPolicyAdmission,
@@ -94,6 +80,7 @@ export type {
   AssetPolicyEvaluationInput,
   AssetPolicyRail,
   AssetPolicyRegistry,
+  AssetPolicyRegistrySchema,
   AssetPolicyRow,
   AssetRailAdmission,
   UnsignedAssetPolicyRegistry,
@@ -182,10 +169,8 @@ export class ApnCore {
         dataset: loadAllowlistInventory().dataset,
         asset: resolveAllowlistAsset(request),
       }, "exact_candidate_identity");
-      case "allowlist.policy.status": return dataOutcome(await executeAllowlistPolicyCommand(request,
-        this.context.state.root, this.context.clock.now()), "staged_allowlist_policy_status");
-      case "allowlist.policy.prepare": return dataOutcome(await executeAllowlistPolicyCommand(request,
-        this.context.state.root, this.context.clock.now()), "staged_unadmitted_allowlist_policy");
+      case "allowlist.policy.status": case "allowlist.policy.prepare": case "allowlist.policy.stage":
+      case "allowlist.policy.activate": case "allowlist.policy.revoke": return await executeAllowlistPolicyCommand(request, this.context);
       case "circle.approval.prepare": {
         await this.context.ready();
         const owner = (await bridgeOwner(this.context.state, request.profile)).owner;

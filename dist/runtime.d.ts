@@ -22,6 +22,7 @@ import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
+import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 export interface CoreDependencies {
     readonly portfolio?: PortfolioDependencies;
     readonly uniswap?: UniswapGuardedSwapBuilder;
@@ -39,6 +40,7 @@ export interface CoreDependencies {
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;
     readonly chainPolicyApproval?: ChainPolicyApprovalPort;
+    readonly allowlistPolicyApproval?: AllowlistPolicyApprovalPort;
     readonly state: StateStore;
     readonly native?: NativePort;
     readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
@@ -78,6 +80,7 @@ export declare class RuntimeContext {
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;
     readonly chainPolicyApproval?: ChainPolicyApprovalPort;
+    readonly allowlistPolicyApproval?: AllowlistPolicyApprovalPort;
     readonly state: StateStore;
     readonly native?: NativePort;
     readonly keychainProbe?: Pick<WrappingSecretPort, "load">;

@@ -44,6 +44,12 @@ async function callTool(tool, input, options) {
             const handoff = createCliHandoff(["apn", "gasless", "transfer", "approve", "--operation", bound.request.operationId]);
             return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review the USDC fee budget and provider-specific permission, including Smart Account child expiry, in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
         }
+        if (bound.request.command === "allowlist.policy.activate" || bound.request.command === "allowlist.policy.revoke") {
+            const action = bound.request.command === "allowlist.policy.activate" ? "activate" : "revoke";
+            const handoff = createCliHandoff(["apn", "allowlist", "policy", action, "--profile", bound.request.profile,
+                "--revision", String(bound.request.revision)]);
+            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", `Review every admission, cap and pin and ${action} this allowlist revision in the foreground CLI.`, { ...cliHandoffDetails(handoff), foreground_auth: true, approval_boundary: "foreground_tty" }));
+        }
         if (bound.request.command === "bridge.approve") {
             const handoff = createCliHandoff(["apn", "bridge", "approve", "--operation", bound.request.operationId]);
             return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review and approve this bridge intent in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));

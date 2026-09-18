@@ -31,6 +31,7 @@ import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
+import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 
 export interface CoreDependencies {
   readonly portfolio?: PortfolioDependencies;
@@ -49,6 +50,7 @@ export interface CoreDependencies {
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly railApproval?: RailApprovalPort;
   readonly chainPolicyApproval?: ChainPolicyApprovalPort;
+  readonly allowlistPolicyApproval?: AllowlistPolicyApprovalPort;
   readonly state: StateStore;
   readonly native?: NativePort;
   readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
@@ -89,6 +91,7 @@ export class RuntimeContext {
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly railApproval?: RailApprovalPort;
   readonly chainPolicyApproval?: ChainPolicyApprovalPort;
+  readonly allowlistPolicyApproval?: AllowlistPolicyApprovalPort;
   readonly state: StateStore;
   readonly native?: NativePort;
   readonly keychainProbe?: Pick<WrappingSecretPort, "load">;
@@ -130,6 +133,7 @@ export class RuntimeContext {
     if (dependencies.chainAccounts !== undefined) this.chainAccounts = dependencies.chainAccounts;
     if (dependencies.railApproval !== undefined) this.railApproval = dependencies.railApproval;
     if (dependencies.chainPolicyApproval !== undefined) this.chainPolicyApproval = dependencies.chainPolicyApproval;
+    if (dependencies.allowlistPolicyApproval !== undefined) this.allowlistPolicyApproval = dependencies.allowlistPolicyApproval;
     this.state = dependencies.state;
     if (dependencies.native !== undefined) this.native = dependencies.native;
     if (dependencies.keychainProbe !== undefined) this.keychainProbe = dependencies.keychainProbe;
