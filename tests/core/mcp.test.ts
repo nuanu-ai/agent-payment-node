@@ -85,6 +85,7 @@ const TOOL_NAMES = [
   "apn_x402_fetch_prepare_network",
   "apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare", "apn_bridge_approve",
   "apn_gasless_capabilities", "apn_gasless_balance", "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve",
+  "apn_oneclick_source_submit", "apn_oneclick_source_status",
 ] as const;
 const MASTER = Buffer.from("55".repeat(32), "hex");
 
@@ -228,6 +229,8 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], defaults: {} },
       { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], required: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], defaults: {} },
       { name: "apn_gasless_transfer_approve", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_oneclick_source_submit", properties: ["lane", "profile", "expected_payer", "recipient", "amount_atomic", "min_output_atomic", "max_quoted_loss_atomic", "max_gas_limit_atomic", "max_fee_per_gas_wei", "max_priority_fee_per_gas_wei", "max_native_debit_wei", "idempotency_key"], required: ["lane", "profile", "expected_payer", "recipient", "amount_atomic", "min_output_atomic", "max_quoted_loss_atomic", "max_gas_limit_atomic", "max_fee_per_gas_wei", "max_priority_fee_per_gas_wei", "max_native_debit_wei", "idempotency_key"], defaults: {} },
+      { name: "apn_oneclick_source_status", properties: ["operation"], required: ["operation"], defaults: {} },
     ]);
     const listedBytes = JSON.stringify(listed);
     assert.equal(listedBytes.includes(MASTER.toString("hex")), false);

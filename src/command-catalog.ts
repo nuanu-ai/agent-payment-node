@@ -127,7 +127,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GRO
   { path: ["gasless"], summary: "Transfer USDC with gas paid from the total USDC budget.", kind: "group" },
   { path: ["gasless", "transfer"], summary: "Prepare and approve a USDC fee transfer.", kind: "group" },
   { path: ["bridge"], summary: "Discover, prepare and recover finite LI.FI cross-chain routes.", kind: "group" },
-  { path: ["oneclick"], summary: "Direct NEAR 1Click Base to TRON operations.", kind: "group" },{ path: ["oneclick", "source"], summary: "One Base USDC source deposit.", kind: "group" },
+  { path: ["oneclick"], summary: "Direct NEAR 1Click deposits on pinned lanes to TRON and Solana.", kind: "group" },{ path: ["oneclick", "source"], summary: "One Base USDC or Ethereum ETH source deposit.", kind: "group" },
   { path: ["circle"], summary: "Bounded Circle V2 Base to Solana USDC operations.", kind: "group" },
   { path: ["circle", "approval"], summary: "Prepare and execute an exact Base USDC allowance.", kind: "group" },
   { path: ["circle", "source"], summary: "Submit one Base CCTP V2 source transfer.", kind: "group" },
