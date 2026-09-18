@@ -1,6 +1,6 @@
 /** Pure catalog data; never hydrate a wallet or infer live provider availability. */
 export declare function metaMaskGaslessNetworks(): {
-    chain_id: 1 | 10 | 8453 | 42161 | 137 | 143 | 1329 | 59144;
+    chain_id: 1 | 10 | 8453 | 42161 | 137 | 59144 | 143 | 1329;
     name: string;
     token: `0x${string}`;
     symbol: string;

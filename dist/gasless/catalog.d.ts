@@ -28,7 +28,7 @@ export declare function gaslessCapabilities(profile?: string): {
     provider_networks: {
         local: import("./model.js").GaslessChainId[];
         "metamask-agent-wallet": {
-            chain_id: 1 | 10 | 8453 | 42161 | 137 | 143 | 1329 | 59144;
+            chain_id: 1 | 10 | 8453 | 42161 | 137 | 59144 | 143 | 1329;
             name: string;
             token: `0x${string}`;
             symbol: string;
