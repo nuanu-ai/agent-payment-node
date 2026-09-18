@@ -129,6 +129,10 @@ There is no default chain, arbitrary token option or native-payment fallback.
 The USDC address comes from the verified chain registry. USDC has six decimals;
 amount inputs use ordinary decimal notation with at most six fractional digits.
 
+USDT on Ethereum uses a separate engine. Pimlico's keyless ERC-20 paymaster takes its fee in USDT. The CLI does not
+use this engine yet; see [Gasless USDT on Ethereum](gasless-usdt.md). Avalanche USDT is blocked because neither
+keyless sponsor accepts EIP-7702 there.
+
 ## Shared commands
 
 ```sh
