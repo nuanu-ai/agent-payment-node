@@ -5,12 +5,16 @@ import { validateSwapOperation } from "../../model.js";
 import { validateUniswapReceipt } from "../../uniswap-receipt.js";
 import { UNISWAP_ROUTER } from "../../uniswap-pin.js";
 import { validateUniswapExecutionBinding } from "./binding.js";
+import { sealUniswapBalanceEvidence } from "./evidence-store.js";
 export class UniswapEthereumReceiptObserver {
     call;
     now;
-    constructor(call, now = () => new Date()) {
+    evidence;
+    /** Without an evidence store every observation reads the balances around the swap block again. */
+    constructor(call, now = () => new Date(), evidence) {
         this.call = call;
         this.now = now;
+        this.evidence = evidence;
     }
     async observe(operationValue, bindingValue, transactionHash) {
         const outcome = await this.observeOutcome(operationValue, bindingValue, transactionHash);
@@ -48,20 +52,16 @@ export class UniswapEthereumReceiptObserver {
         const block = await evmRpcBlock(this.call, `0x${txBlock.toString(16)}`);
         if (block.hash !== txBlockHash)
             blocked("Uniswap receipt block is no longer canonical.", "uniswap_reorg_conflict");
-        const [safeHead, finalizedHead] = await Promise.all([evmRpcBlock(this.call, "safe"), evmRpcBlock(this.call, "finalized")]);
-        if (BigInt(safeHead.number) < txBlock || BigInt(finalizedHead.number) < txBlock)
-            return null;
         if (txBlock === 0n)
             blocked("Uniswap receipt has no pre-state block.", "uniswap_balance_proof");
         const status = evmRpcQuantity(receipt.status);
+        // Balances are taken on first sight, before finality, while a pruning node still serves the state around this block.
+        const balances = status === 1n ? await this.balanceEvidence(operation, transactionHash, txBlock, block) : null;
+        const [safeHead, finalizedHead] = await Promise.all([evmRpcBlock(this.call, "safe"), evmRpcBlock(this.call, "finalized")]);
+        if (BigInt(safeHead.number) < txBlock || BigInt(finalizedHead.number) < txBlock)
+            return null;
         if (status === 0n)
             return await this.revertProof({ transactionHash, txBlock, block, safeHead, finalizedHead, receipt, binding });
-        const beforeTag = `0x${(txBlock - 1n).toString(16)}`, afterTag = block.tag, outputToken = outputTokenOf(operation);
-        const [beforeNative, afterNative, beforeOutput, afterOutput] = await Promise.all([
-            this.balance(operation.quote.account, beforeTag), this.balance(operation.quote.account, afterTag),
-            evmTokenBalance(this.call, outputToken, operation.quote.recipient, beforeTag),
-            evmTokenBalance(this.call, outputToken, operation.quote.recipient, afterTag),
-        ]);
         await recheckEvmBlock(this.call, block);
         await recheckEvmBlock(this.call, safeHead);
         await recheckEvmBlock(this.call, finalizedHead);
@@ -79,16 +79,16 @@ export class UniswapEthereumReceiptObserver {
             }
             return { address: evmRpcAddress(log.address), topics: log.topics.map((topic) => evmRpcHex(topic, 32)), data: evmRpcHex(log.data) };
         });
-        if (status !== 1n)
+        if (status !== 1n || balances === null)
             blocked("Uniswap swap receipt is reverted or invalid.", "uniswap_receipt_revert");
         const observedAt = instant(this.now());
         return { outcome: "succeeded", proof: validateUniswapReceipt({ transactionHash, transaction: { hash: txHash, from: evmRpcAddress(tx.from),
                     to: evmRpcAddress(tx.to), input: evmRpcHex(tx.input), value: evmRpcQuantity(tx.value).toString(),
                     blockNumber: txBlock.toString(), blockHash: txBlockHash }, receipt: { transactionHash: receiptHash, status: "0x1",
-                    blockNumber: receiptBlock.toString(), blockHash: receiptBlockHash, logs }, beforeNative: beforeNative.toString(),
-                afterNative: afterNative.toString(), beforeOutput: beforeOutput.toString(), afterOutput: afterOutput.toString(),
+                    blockNumber: receiptBlock.toString(), blockHash: receiptBlockHash, logs }, beforeNative: balances.beforeNative,
+                afterNative: balances.afterNative, beforeOutput: balances.beforeOutput, afterOutput: balances.afterOutput,
                 finalizedHead: { number: finalizedHead.number, hash: finalizedHead.hash }, observedAt }, binding.envelope, { transactionHash, account: operation.quote.account, recipient: operation.quote.recipient,
-                inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic, outputToken }) };
+                inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic, outputToken: outputTokenOf(operation) }) };
     }
     /** Status 0 at a canonical finalized block with no logs proves the input never left; only gas was spent. */
     async revertProof(input) {
@@ -103,6 +103,29 @@ export class UniswapEthereumReceiptObserver {
             status: "0x0", blockNumber: input.txBlock.toString(), blockHash: input.block.hash, bindingHash: input.binding.bindingHash,
             envelopeHash: input.binding.envelopeHash, finalizedHead: { number: input.finalizedHead.number, hash: input.finalizedHead.hash }, observedAt }));
         return { outcome: "reverted", proof: { receiptHash, transactionHash: input.transactionHash, observedAt, finalized: true } };
+    }
+    /** Balance evidence for this exact canonical block: kept from first sight, or read now and kept. */
+    async balanceEvidence(operation, transactionHash, txBlock, block) {
+        const stored = this.evidence === undefined ? null : await this.evidence.load(operation);
+        if (stored !== null && stored.transactionHash === transactionHash && stored.blockHash === block.hash &&
+            stored.blockNumber === txBlock.toString())
+            return stored;
+        const beforeTag = `0x${(txBlock - 1n).toString(16)}`, outputToken = outputTokenOf(operation);
+        const recipient = operation.quote.recipient;
+        let values;
+        try {
+            values = await Promise.all([this.balance(operation.quote.account, beforeTag), this.balance(operation.quote.account, block.tag),
+                evmTokenBalance(this.call, outputToken, recipient, beforeTag), evmTokenBalance(this.call, outputToken, recipient, block.tag)]);
+        }
+        catch (error) {
+            throw new ApnError("APN_PROVIDER_UNAVAILABLE", `Ethereum balances around block ${txBlock} could not be read. A pruning RPC serves only ` +
+                "about the last 128 blocks; retry, or re-run status with an archive-capable APN_ETHEREUM_RPC_URL.", { reason: "uniswap_pre_state_unavailable", block: txBlock.toString(), cause: error instanceof ApnError ? error.code : "rpc_error" });
+        }
+        await recheckEvmBlock(this.call, block);
+        const [beforeNative, afterNative, beforeOutput, afterOutput] = values.map((value) => value.toString());
+        const evidence = sealUniswapBalanceEvidence({ operationId: operation.operationId, transactionHash, blockNumber: txBlock.toString(),
+            blockHash: block.hash, beforeNative, afterNative, beforeOutput, afterOutput, capturedAt: instant(this.now()) });
+        return this.evidence === undefined ? evidence : await this.evidence.save(operation, evidence);
     }
     async balance(address, tag) { return evmRpcQuantity(await this.call("eth_getBalance", [address, tag])); }
     async assertChain() { if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n)

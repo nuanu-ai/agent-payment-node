@@ -59,6 +59,17 @@ that exact pin.
 - `status` never signs or sends. A finalized success moves the operation to
   `finalized`. A finalized reverted receipt moves it to
   `failed_confirmed_revert` and releases the reservation.
+- The success proof includes the native and output-token balances just before
+  and just after the swap block. A pruning public RPC serves that state for
+  only about 128 blocks, while finality takes 65–95. So the first `status`
+  that sees the receipt reads those balances and keeps them in the state root,
+  bound to the block hash. A later `status` reuses them and needs no historical
+  state. After a reorg they are read again.
+- Run `status` within about 25 minutes of sending. If the first observation
+  comes later, `status` fails with `APN_PROVIDER_UNAVAILABLE` /
+  `uniswap_pre_state_unavailable`. Re-run it with an archive-capable
+  `APN_ETHEREUM_RPC_URL`. Any other observation failure is also reported by
+  `status`, never hidden behind an unchanged `submitted`.
 
 MCP serves `inventory`, `quote`, `prepare` and `status`. `approve` and
 `execute` return `APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI

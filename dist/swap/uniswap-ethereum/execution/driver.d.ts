@@ -32,6 +32,10 @@ export declare class UniswapEthereumExecutionDriver implements GuardedSwapExecut
     constructor(d: UniswapExecutionDriverDependencies);
     execute(input: GuardedSwapExecutionInput): Promise<SwapOperationRecord>;
     observe(input: GuardedSwapObservationInput): Promise<SwapOperationRecord>;
+    /**
+     * Right after the single send an observation failure must not hide the recorded send, so it returns the operation. A status
+     * or resume call surfaces the failure instead: the state stays durable and the caller sees why it did not advance.
+     */
     private observeExact;
     private releaseUnsent;
 }
