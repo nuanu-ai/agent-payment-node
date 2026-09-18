@@ -10,6 +10,7 @@ import { bridgeDeployment } from "./deployments.js";
 import { BridgeHttps } from "./https.js";
 import type { BridgeBlock, BridgeEnvelope, BridgeLog, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 import type { BridgeRpcFactory, BridgeRpcPort } from "./ports.js";
+import { bridgeArchiveEndpoint, isHistoricalStateRead } from "./rpc-archive.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
@@ -31,12 +32,22 @@ export function bridgeRpcCall(chainId: EvmChainId, environment: Readonly<Record<
   if (value === undefined || value.length === 0) bridgeFailure("APN_RPC_CONFIG", `missing_${BRIDGE_RPC_ENV[chainId]}`);
   const endpoint = parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "Bridge RPC endpoint", 2048);
   if (endpoint.search !== "") bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_query_forbidden");
-  let sequence = 0n;
+  const archive = bridgeArchiveEndpoint(chainId, environment);
+  let sequence = 0n, archiveChain = false;
   const call: EvmRpcCall = async (method, params) => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
+    if (archive === null || !isHistoricalStateRead(method, params)) return await exchange(endpoint, method, params);
+    // Only an explicitly named archive reader answers block-pinned state reads, after it proves the same chain once.
+    if (!archiveChain) {
+      if (evmRpcQuantity(await exchange(archive, "eth_chainId", [])) !== BigInt(chainId)) bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
+      archiveChain = true;
+    }
+    return await exchange(archive, method, params);
+  };
+  const exchange = async (target: URL, method: string, params: readonly unknown[]): Promise<unknown> => {
     for (let attempt = 0; ; attempt += 1) {
       const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
-      const response = await transport.request(endpoint.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");
+      const response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");
       if (response.status === 429 && chainId === 8453 && method !== "eth_sendRawTransaction" && attempt < 2) {
         await wait(attempt === 0 ? 1_000 : 2_000);
         continue;
