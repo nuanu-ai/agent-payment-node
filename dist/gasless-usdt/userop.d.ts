@@ -1,5 +1,10 @@
 import type { Address, Hex } from "../model.js";
 import { type UsdtTransferPlan } from "./model.js";
+/**
+ * The ERC-7769 short EIP-7702 marker. Pimlico's paymaster endpoint refuses the 20-byte spelling ("factory that is neither
+ * null or 0x7702"); both pack to the same initCode on chain, and the EntryPoint hashes the delegate in its place.
+ */
+export declare const USDT_7702_FACTORY_MARKER: "0x7702";
 /** The signed EIP-7702 tuple for a first use; a delegated account sends none. */
 export interface UsdtAuthorization {
     readonly chainId: Hex;
@@ -13,7 +18,7 @@ export interface UsdtAuthorization {
 export interface UsdtUserOperation {
     readonly sender: Address;
     readonly nonce: Hex;
-    readonly factory?: Address;
+    readonly factory?: typeof USDT_7702_FACTORY_MARKER;
     readonly factoryData?: Hex;
     readonly callData: Hex;
     readonly callGasLimit: Hex;

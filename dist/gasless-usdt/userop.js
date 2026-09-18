@@ -1,8 +1,12 @@
 import { concat, encodeFunctionData, hashTypedData, numberToHex, padHex, parseAbi } from "viem";
-import { GASLESS_FACTORY } from "../gasless/validation.js";
 import { USDT_GASLESS, usdtFailure } from "./model.js";
 const TOKEN_ABI = parseAbi(["function approve(address spender, uint256 value)", "function transfer(address to, uint256 value)"]);
 const ACCOUNT_ABI = parseAbi(["function executeBatch((address target, uint256 value, bytes data)[] calls)"]);
+/**
+ * The ERC-7769 short EIP-7702 marker. Pimlico's paymaster endpoint refuses the 20-byte spelling ("factory that is neither
+ * null or 0x7702"); both pack to the same initCode on chain, and the EntryPoint hashes the delegate in its place.
+ */
+export const USDT_7702_FACTORY_MARKER = "0x7702";
 /**
  * The account batch: reset the paymaster allowance to zero (USDT refuses a nonzero-to-nonzero approve), grant exactly F,
  * then send exactly N. The paymaster pulls its charge from the sender in postOp, after this batch, so F - A stays
@@ -23,7 +27,7 @@ export function usdtUserOperation(plan, input) {
     const q = (value) => numberToHex(value);
     return {
         sender: plan.request.sender, nonce: q(input.entryPointNonce),
-        ...(input.authorization === null ? {} : { factory: GASLESS_FACTORY, factoryData: "0x" }),
+        ...(input.authorization === null ? {} : { factory: USDT_7702_FACTORY_MARKER, factoryData: "0x" }),
         callData: usdtBatchCallData(plan), callGasLimit: q(plan.gas.callGasLimit), verificationGasLimit: q(plan.gas.verificationGasLimit),
         preVerificationGas: q(plan.gas.preVerificationGas), maxFeePerGas: q(plan.price.maxFeePerGas),
         maxPriorityFeePerGas: q(plan.price.maxPriorityFeePerGas), paymaster: USDT_GASLESS.paymaster,

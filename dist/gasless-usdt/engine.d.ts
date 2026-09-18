@@ -10,6 +10,8 @@ export interface UsdtSponsorPort {
     gasPrice(): Promise<unknown>;
     paymasterData(op: UsdtUserOperation): Promise<unknown>;
     send(op: UsdtUserOperation): Promise<unknown>;
+    /** A candidate transaction hash only; completion always needs the canonical RPC receipt. */
+    receiptLocator(userOpHash: Hex): Promise<Hex | null>;
 }
 export interface UsdtAccountState {
     readonly usdtBalanceAtomic: bigint;
@@ -22,7 +24,8 @@ export interface UsdtChainPort {
     /** Code hashes of token, EntryPoint, delegate and paymaster; USDT unpaused with zero transfer fee. Throws on drift. */
     verifyPins(): Promise<void>;
     account(sender: UsdtTransferRequest["sender"]): Promise<UsdtAccountState>;
-    receiptFor(userOpHash: Hex): Promise<UsdtChainReceipt | null>;
+    /** The canonical receipt once its block is at or below the safe head and on the canonical chain; null before that. */
+    receiptAt(transactionHash: Hex): Promise<UsdtChainReceipt | null>;
 }
 /** The local key. Only `approveAndSend` reaches it, after the sponsor data is validated. */
 export interface UsdtSignerPort {
@@ -71,5 +74,11 @@ export type UsdtObservation = {
     readonly state: "completed";
     readonly settlement: UsdtSettlement;
 };
-/** Status observes only: one canonical receipt read and its proof. It never signs, discloses or sends. */
-export declare function observeUsdtGasless(chain: UsdtChainPort, plan: UsdtTransferPlan, userOpHash: Hex): Promise<UsdtObservation>;
+/**
+ * Status observes only: the bundler names a candidate transaction, the canonical RPC proves it at the safe head. It never
+ * signs, discloses or sends, and absence proves nothing.
+ */
+export declare function observeUsdtGasless(ports: {
+    sponsor: Pick<UsdtSponsorPort, "receiptLocator">;
+    chain: UsdtChainPort;
+}, plan: UsdtTransferPlan, userOpHash: Hex): Promise<UsdtObservation>;
