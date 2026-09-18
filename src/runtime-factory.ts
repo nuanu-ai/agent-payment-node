@@ -95,9 +95,13 @@ import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-
 import { portfolioPause, type PortfolioDependencies } from "./portfolio/command.js";
 import { PortfolioHttps } from "./portfolio/https.js";
 import { TtyAllowlistPolicyApproval, type AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
+import type { CommandRequest } from "./commands.js";
+import type { GuardedSwapRuntime } from "./swap/runtime.js";
 
 export interface RuntimeFactoryOptions {
   readonly portfolio?: PortfolioDependencies;
+  readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
+  readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -243,6 +247,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
       portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
     } : {}),
+    ...(options.uniswapRuntime === undefined ? {} : { uniswapRuntime: options.uniswapRuntime }),
+    ...(options.sunswapRuntime === undefined ? {} : { sunswapRuntime: options.sunswapRuntime }),
     ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
     ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
     ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),

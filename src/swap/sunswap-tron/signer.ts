@@ -48,7 +48,9 @@ export class SunSwapProtectedExecutionAdapter implements SwapChainSignerPort, Sw
 
   async sign(operationValue: SwapOperationRecord): Promise<{ readonly signedMaterialHandle: string }> {
     const operation = validateSwapOperation(operationValue);
-    if (operation.state !== "reserved" || immutableOperationHash(operation) !== immutableOperationHash(this.operation) ||
+    if ((operation.state !== "reserved" && operation.state !== "submitting") ||
+        (operation.state === "submitting" && operation.submissionMarker === null) ||
+        immutableOperationHash(operation) !== immutableOperationHash(this.operation) ||
         validateSunSwapExecutionBinding(operation, this.binding) !== this.fingerprint) mismatch();
     const existing = await this.effect();
     if (existing !== null) return { signedMaterialHandle: this.fingerprint };
