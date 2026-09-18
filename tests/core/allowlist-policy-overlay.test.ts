@@ -155,8 +155,8 @@ test("CLI and MCP prepare/status are identical, no policy exists by default, and
   const statusArgs = { profile: "card2-parity" };
   const absentCli = await runCli(["allowlist", "policy", "status", "--profile", "card2-parity"], {}, { stateRoot: temporary.root, ids });
   const absentMcp = await mcp(client, "apn_allowlist_policy_status", statusArgs);
-  assert.deepEqual(absentMcp, absentCli); assert.deepEqual(absentCli.data,
-    { configured: false, status: "not_present", profile: "card2-parity", activation: "not_available" });
+  assert.deepEqual(absentMcp, absentCli); assert.deepEqual(absentCli.data, { profile: "card2-parity", activation: "never_activated",
+    stagedRevisions: 0, staged: null, active: null, lastDecision: null });
   const args = { profile: "card2-parity", account: ACCOUNT, overlay_version: "owner.1", chain: "eip155:1", kind: "token",
     identifier: USDC, rail: "direct", max_per_transfer_atomic: "100", daily_limit_atomic: "300",
     effective_at: "2026-09-18T01:02:03.000Z" };

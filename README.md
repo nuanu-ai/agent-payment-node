@@ -651,6 +651,9 @@ apn gasless transfer approve --operation <operation-id>
 apn allowlist inventory
 apn allowlist resolve --chain <exact-network-identity> --kind <native|token> [--identifier <exact-token-identifier>]
 apn allowlist policy prepare --profile <profile> --account <canonical-account> --overlay-version <version> --chain <network> --kind <native|token> [--identifier <token>] --rail <rail> --max-per-transfer-atomic <atomic> --daily-limit-atomic <atomic> --effective-at <ISO-instant> [--expires-at <ISO-instant>] [--mechanism-provider <provider> --mechanism-reference <reference>] [--expected-revision <revision>]
+apn allowlist policy stage --profile <profile> --file <absolute-policy-file> [--expected-revision <revision>]
+apn allowlist policy activate --profile <profile> --revision <revision>
+apn allowlist policy revoke --profile <profile> --revision <revision>
 apn allowlist policy status --profile <profile>
 apn swap ethereum uniswap inventory
 apn swap ethereum uniswap quote --profile <profile> --account <address> --to <address> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --deadline <string> --max-gas-limit <wei> --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>
