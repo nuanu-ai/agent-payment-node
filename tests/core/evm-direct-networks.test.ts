@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeFunctionData, parseTransaction, toHex } from "viem";
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
+import { ApnCore } from "../../src/core.js";
 import { ApnError } from "../../src/errors.js";
 import { EVM_NETWORKS } from "../../src/evm-asset.js";
 import { requireEvmFunding, validateEvmFeeQuote } from "../../src/evm-direct.js";
@@ -10,6 +11,7 @@ import { DIRECT_EVM_NETWORKS, directEvmListRows, type DirectEvmChainId } from ".
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 import { EvmRpc } from "../../src/evm-rpc.js";
 import type { Address } from "../../src/model.js";
+import type { ProviderProfileRecord } from "../../src/provider-profile.js";
 import { activateDirectPolicy, directAdmission, directUsage } from "./direct-allowlist-helpers.js";
 import { EVM_BLOCK_HASH, EVM_REQUEST, evmCore } from "./evm-helpers.js";
 import { RECIPIENT, WALLET, temporaryState } from "./helpers.js";
@@ -179,4 +181,21 @@ test("an asset admitted on one new network is not admitted on another, and an am
   (setup.rpc.evm as { estimate: typeof estimate }).estimate = async (input) => { estimated = true; return await estimate(input); };
   await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 43114, token: "native" }, amount: "0.000001", idempotencyKey: "evm8-avax-poor" }), { code: "APN_INSUFFICIENT_ASSET" });
   assert.equal(estimated, false);
+});
+
+test("external wallet profiles are refused on the new direct networks before policy, RPC or custody", async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root);
+  await setup.core.wallet.ensure("default");
+  for (const providerId of ["coinbase-agentic-wallet", "metamask-agent-wallet", "metamask-smart-account"]) {
+    const core = new ApnCore({ state: setup.state, rpc: setup.rpc, native: setup.local, profileRepository: {
+      load: async () => ({ provider_id: providerId }) as ProviderProfileRecord,
+      save: async () => { throw new Error("unexpected profile mutation"); }, remove: async () => { throw new Error("unexpected profile mutation"); },
+    } });
+    for (const chainId of EIGHT) {
+      const refusal = await core.execute({ ...EVM_REQUEST, asset: { chainId, token: "native" }, idempotencyKey: `evm8-external-${chainId}` });
+      assert.equal(refusal.error?.code, "APN_PROVIDER_UNAVAILABLE", `${providerId} ${chainId}`);
+    }
+  }
+  assert.equal(setup.rpc.genericBalanceCalls, 0); assert.equal(setup.approval.intents.length, 0);
 });
