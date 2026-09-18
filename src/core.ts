@@ -11,7 +11,8 @@ import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
-import { evmWalletBalance } from "./evm-wallet-balance.js";import { readProfilePortfolio } from "./portfolio/command.js";
+import { evmWalletBalance } from "./evm-wallet-balance.js";
+import { readProfilePortfolio } from "./portfolio/command.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
 import { ProviderPermissionService } from "./provider-permission-service.js";
