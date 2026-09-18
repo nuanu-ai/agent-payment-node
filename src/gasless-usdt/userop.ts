@@ -1,10 +1,14 @@
 import { concat, encodeFunctionData, hashTypedData, numberToHex, padHex, parseAbi } from "viem";
-import { GASLESS_FACTORY } from "../gasless/validation.js";
 import type { Address, Hex } from "../model.js";
 import { USDT_GASLESS, usdtFailure, type UsdtTransferPlan } from "./model.js";
 
 const TOKEN_ABI = parseAbi(["function approve(address spender, uint256 value)", "function transfer(address to, uint256 value)"]);
 const ACCOUNT_ABI = parseAbi(["function executeBatch((address target, uint256 value, bytes data)[] calls)"]);
+/**
+ * The ERC-7769 short EIP-7702 marker. Pimlico's paymaster endpoint refuses the 20-byte spelling ("factory that is neither
+ * null or 0x7702"); both pack to the same initCode on chain, and the EntryPoint hashes the delegate in its place.
+ */
+export const USDT_7702_FACTORY_MARKER = "0x7702" as const;
 
 /** The signed EIP-7702 tuple for a first use; a delegated account sends none. */
 export interface UsdtAuthorization {
@@ -13,7 +17,7 @@ export interface UsdtAuthorization {
 
 /** ERC-4337 v0.8 JSON-RPC form. Every field is exact; nothing is filled in by the bundler or the paymaster. */
 export interface UsdtUserOperation {
-  readonly sender: Address; readonly nonce: Hex; readonly factory?: Address; readonly factoryData?: Hex; readonly callData: Hex;
+  readonly sender: Address; readonly nonce: Hex; readonly factory?: typeof USDT_7702_FACTORY_MARKER; readonly factoryData?: Hex; readonly callData: Hex;
   readonly callGasLimit: Hex; readonly verificationGasLimit: Hex; readonly preVerificationGas: Hex;
   readonly maxFeePerGas: Hex; readonly maxPriorityFeePerGas: Hex; readonly paymaster: Address;
   readonly paymasterVerificationGasLimit: Hex; readonly paymasterPostOpGasLimit: Hex; readonly paymasterData: Hex;
@@ -43,7 +47,7 @@ export function usdtUserOperation(plan: UsdtTransferPlan, input: {
   const q = (value: bigint): Hex => numberToHex(value);
   return {
     sender: plan.request.sender, nonce: q(input.entryPointNonce),
-    ...(input.authorization === null ? {} : { factory: GASLESS_FACTORY, factoryData: "0x" as Hex }),
+    ...(input.authorization === null ? {} : { factory: USDT_7702_FACTORY_MARKER, factoryData: "0x" as Hex }),
     callData: usdtBatchCallData(plan), callGasLimit: q(plan.gas.callGasLimit), verificationGasLimit: q(plan.gas.verificationGasLimit),
     preVerificationGas: q(plan.gas.preVerificationGas), maxFeePerGas: q(plan.price.maxFeePerGas),
     maxPriorityFeePerGas: q(plan.price.maxPriorityFeePerGas), paymaster: USDT_GASLESS.paymaster,

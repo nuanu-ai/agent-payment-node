@@ -16,6 +16,8 @@ export interface UsdtSponsorPort {
   gasPrice(): Promise<unknown>;
   paymasterData(op: UsdtUserOperation): Promise<unknown>;
   send(op: UsdtUserOperation): Promise<unknown>;
+  /** A candidate transaction hash only; completion always needs the canonical RPC receipt. */
+  receiptLocator(userOpHash: Hex): Promise<Hex | null>;
 }
 export interface UsdtAccountState {
   readonly usdtBalanceAtomic: bigint; readonly entryPointNonce: bigint; readonly eoaNonce: bigint; readonly delegation: "empty" | "expected";
@@ -25,7 +27,8 @@ export interface UsdtChainPort {
   /** Code hashes of token, EntryPoint, delegate and paymaster; USDT unpaused with zero transfer fee. Throws on drift. */
   verifyPins(): Promise<void>;
   account(sender: UsdtTransferRequest["sender"]): Promise<UsdtAccountState>;
-  receiptFor(userOpHash: Hex): Promise<UsdtChainReceipt | null>;
+  /** The canonical receipt once its block is at or below the safe head and on the canonical chain; null before that. */
+  receiptAt(transactionHash: Hex): Promise<UsdtChainReceipt | null>;
 }
 /** The local key. Only `approveAndSend` reaches it, after the sponsor data is validated. */
 export interface UsdtSignerPort {
@@ -82,6 +85,11 @@ export type UsdtSendOutcome =
 export async function approveAndSendUsdtGasless(ports: { sponsor: UsdtSponsorPort; chain: UsdtChainPort; signer: UsdtSignerPort;
   journal: UsdtJournalPort }, plan: UsdtTransferPlan, nowSeconds: bigint): Promise<UsdtSendOutcome> {
   await ports.chain.verifyPins();
+  // The frozen prices must still clear the bundler's current floor; a rise refuses here, before any signature.
+  const { slow } = validateUsdtGasPrice(await ports.sponsor.gasPrice());
+  if (plan.price.maxFeePerGas < slow.maxFeePerGas || plan.price.maxPriorityFeePerGas < slow.maxPriorityFeePerGas) {
+    usdtFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_usdt_price_drift", "Gas prices rose above the prepared offer; prepare a new transfer.");
+  }
   const account = await ports.chain.account(plan.request.sender);
   assertUsdtFunding(plan, account);
   const paymasterData = await sponsorUsdtOperation(ports.sponsor, plan, account, nowSeconds);
@@ -113,9 +121,15 @@ export type UsdtObservation =
   | { readonly state: "pending" }
   | { readonly state: "completed"; readonly settlement: UsdtSettlement };
 
-/** Status observes only: one canonical receipt read and its proof. It never signs, discloses or sends. */
-export async function observeUsdtGasless(chain: UsdtChainPort, plan: UsdtTransferPlan, userOpHash: Hex): Promise<UsdtObservation> {
-  const receipt = await chain.receiptFor(userOpHash);
+/**
+ * Status observes only: the bundler names a candidate transaction, the canonical RPC proves it at the safe head. It never
+ * signs, discloses or sends, and absence proves nothing.
+ */
+export async function observeUsdtGasless(ports: { sponsor: Pick<UsdtSponsorPort, "receiptLocator">; chain: UsdtChainPort },
+  plan: UsdtTransferPlan, userOpHash: Hex): Promise<UsdtObservation> {
+  const locator = await ports.sponsor.receiptLocator(userOpHash);
+  if (locator === null) return { state: "pending" };
+  const receipt = await ports.chain.receiptAt(locator);
   if (receipt === null) return { state: "pending" };
   return { state: "completed", settlement: verifyUsdtReceipt(plan, userOpHash, receipt) };
 }

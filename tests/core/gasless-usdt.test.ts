@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeFunctionData, encodeAbiParameters, getAddress, pad, parseAbi, toEventSelector, type Hex } from "viem";
+import { getUserOperationHash } from "viem/account-abstraction";
 import { usdtApprovalScreen } from "../../src/gasless-usdt/approval.js";
 import { UsdtGaslessAllowlistGate } from "../../src/gasless-usdt/allowlist.js";
 import {
@@ -69,6 +70,21 @@ test("the batch resets and grants exactly F to the pinned paymaster, then sends 
     [[USDT_GASLESS.paymaster, 0n], [USDT_GASLESS.paymaster, 500_000n], [RECIPIENT, 500_000n]]);
   const op = usdtUserOperation(p, { entryPointNonce: 0n, paymasterData: SIGNED.paymasterData as Hex, signature: "0x", authorization: null });
   assert.notEqual(usdtUserOperationHash(op), usdtUserOperationHash({ ...op, paymasterData: "0x" }));
+  // The hash the bundler returns must be the EntryPoint v0.8 hash; cross-checked against viem for both delegation states.
+  const auth = { chainId: "0x1" as Hex, address: USDT_GASLESS.delegate, nonce: "0x1f" as Hex, yParity: "0x0" as Hex,
+    r: `0x${"11".repeat(32)}` as Hex, s: `0x${"22".repeat(32)}` as Hex };
+  for (const authorization of [auth, null]) {
+    const wire = usdtUserOperation(p, { entryPointNonce: 5n, paymasterData: SIGNED.paymasterData as Hex, signature: "0x", authorization });
+    const expected = getUserOperationHash({ chainId: 1, entryPointAddress: USDT_GASLESS.entryPoint, entryPointVersion: "0.8", userOperation: {
+      sender: wire.sender, nonce: 5n, callData: wire.callData, callGasLimit: BigInt(wire.callGasLimit),
+      verificationGasLimit: BigInt(wire.verificationGasLimit), preVerificationGas: BigInt(wire.preVerificationGas),
+      maxFeePerGas: BigInt(wire.maxFeePerGas), maxPriorityFeePerGas: BigInt(wire.maxPriorityFeePerGas), paymaster: wire.paymaster,
+      paymasterVerificationGasLimit: BigInt(wire.paymasterVerificationGasLimit), paymasterPostOpGasLimit: BigInt(wire.paymasterPostOpGasLimit),
+      paymasterData: wire.paymasterData, signature: "0x",
+      ...(authorization === null ? {} : { factory: "0x7702" as const, factoryData: "0x" as const,
+        authorization: { chainId: 1, address: auth.address, nonce: 31, yParity: 0, r: auth.r, s: auth.s } }) } });
+    assert.equal(usdtUserOperationHash(wire), expected);
+  }
 });
 
 const USER_OP_EVENT = toEventSelector("UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)");
@@ -95,15 +111,17 @@ test("a receipt proves the USDT debit and the recipient credit, or it proves not
   assert.throws(() => verifyUsdtReceipt(p, `0x${"ef".repeat(32)}`, receipt([])), /receipt_user_operation/u);
 });
 
-function ports(log: string[], options: { readonly marker?: "fails"; readonly send?: "throws" } = {}) {
+function ports(log: string[], options: { readonly marker?: "fails"; readonly send?: "throws"; readonly locator?: Hex;
+  readonly receipt?: UsdtChainReceipt } = {}) {
   const sponsor: UsdtSponsorPort = {
     tokenQuote: async () => { log.push("quote"); return QUOTE_V08; },
     gasPrice: async () => { log.push("price"); return PRICE; },
     paymasterData: async (op) => { log.push(`sponsor:${op.signature.length}:${op.eip7702Auth?.nonce ?? "none"}`); return SIGNED; },
     send: async (op) => { log.push("send"); if (options.send === "throws") throw new Error("lost"); return usdtUserOperationHash(op); },
+    receiptLocator: async () => { log.push("locator"); return options.locator ?? null; },
   };
   const chain: UsdtChainPort = { verifyPins: async () => { log.push("pins"); }, account: async () => { log.push("account"); return funded; },
-    receiptFor: async () => { log.push("receipt"); return null; } };
+    receiptAt: async () => { log.push("receipt"); return options.receipt ?? null; } };
   const signer = { authorize: async (nonce: bigint) => { log.push("sign:authorization"); return { chainId: "0x1" as Hex, address: USDT_GASLESS.delegate,
     nonce: `0x${nonce.toString(16)}` as Hex, yParity: "0x1" as Hex, r: `0x${"33".repeat(32)}` as Hex, s: `0x${"44".repeat(32)}` as Hex }; },
   signUserOperation: async () => { log.push("sign:userop"); return `0x${"55".repeat(65)}` as Hex; } };
@@ -120,7 +138,14 @@ test("quote and sponsor data never reach the key; the marker is durable before t
   assert.throws(() => assertUsdtFunding(p, { ...funded, usdtBalanceAtomic: 0n }), /gasless_usdt_balance_below_gross|holds 0 atomic/u);
   const sent: string[] = [];
   assert.equal((await approveAndSendUsdtGasless(ports(sent), p, SIGNED_UNTIL - 300n)).state, "sent");
-  assert.deepEqual(sent, ["pins", "account", "sponsor:132:0x1f", "sign:authorization", "sign:userop", "marker", "send", "sent:accepted"]);
+  assert.deepEqual(sent, ["pins", "price", "account", "sponsor:132:0x1f", "sign:authorization", "sign:userop", "marker", "send", "sent:accepted"]);
+  const drift: string[] = [], dearer = { ...p, price: { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n } };
+  await assert.rejects(approveAndSendUsdtGasless(ports(drift), dearer, SIGNED_UNTIL - 300n), /price_drift|rose above/u);
+  assert.deepEqual(drift, ["pins", "price"]);
+  const broke: string[] = [], empty = ports(broke);
+  await assert.rejects(approveAndSendUsdtGasless({ ...empty, chain: { ...empty.chain, account: async () => ({ ...funded, usdtBalanceAtomic: 999_999n }) } },
+    p, SIGNED_UNTIL - 300n), /holds 999999 atomic/u);
+  assert.equal(broke.some((entry) => entry.startsWith("sign") || entry === "send" || entry.startsWith("sponsor")), false);
   const failed: string[] = [];
   await assert.rejects(approveAndSendUsdtGasless(ports(failed, { marker: "fails" }), p, SIGNED_UNTIL - 300n), /disk/u);
   assert.equal(failed.includes("send"), false);
@@ -128,8 +153,14 @@ test("quote and sponsor data never reach the key; the marker is durable before t
   assert.equal((await approveAndSendUsdtGasless(ports(lost, { send: "throws" }), p, SIGNED_UNTIL - 300n)).state, "send_unacknowledged");
   assert.equal(lost.filter((entry) => entry === "send").length, 1);
   const observed: string[] = [];
-  assert.deepEqual(await observeUsdtGasless(ports(observed).chain, p, HASH), { state: "pending" });
-  assert.deepEqual(observed, ["receipt"]);
+  assert.deepEqual(await observeUsdtGasless(ports(observed), p, HASH), { state: "pending" });
+  const unsafe = ports(observed, { locator: `0x${"cd".repeat(32)}` });
+  assert.deepEqual(await observeUsdtGasless(unsafe, p, HASH), { state: "pending" });
+  const proven = ports(observed, { locator: `0x${"cd".repeat(32)}`,
+    receipt: receipt([transfer(RECIPIENT, 500_000n), transfer(USDT_GASLESS.treasury, 301_234n)]) });
+  const done = await observeUsdtGasless(proven, p, HASH);
+  assert.equal(done.state === "completed" ? done.settlement.recipientCreditAtomic : null, "500000");
+  assert.deepEqual(observed, ["locator", "locator", "receipt", "locator", "receipt"]);
 });
 
 test("the gate admits only the pinned gasless mechanism under the owner's caps and counts the gross in the ledger", async () => {
