@@ -67,10 +67,15 @@ export class SunSwapGuardedExecutor {
       validateSunSwapForegroundApproval(await this.dependencies.approval.approve(approvalInput), approvalInput, operation.updatedAt, now);
       operation = await this.dependencies.service.reserve(operation, this.dependencies.policy, now);
     }
-    const signed = await this.dependencies.signer.sign(operation);
     operation = await this.dependencies.service.markSubmitting(operation, now);
     const marker = operation.submissionMarker;
     if (marker === null) stateCorrupt();
+    let signed: { readonly signedMaterialHandle: string };
+    try { signed = await this.dependencies.signer.sign(operation); }
+    catch {
+      operation = await this.dependencies.service.recordPossibleSend(operation, "unknown_finality", now);
+      return operation;
+    }
     let sent: { readonly transactionHash: string };
     try {
       sent = await this.dependencies.sender.sendOnce(signed.signedMaterialHandle, marker.markerHash);

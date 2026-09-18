@@ -77,6 +77,15 @@ async function callTool(
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED",
         "Review and approve this bridge intent in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
     }
+    if (bound.request.command === "swap.uniswap.approve" || bound.request.command === "swap.uniswap.execute" ||
+        bound.request.command === "swap.sunswap.approve" || bound.request.command === "swap.sunswap.execute") {
+      const uniswap = bound.request.command.startsWith("swap.uniswap."), action = bound.request.command.endsWith(".approve") ? "approve" : "execute";
+      const handoff = createCliHandoff(["apn", "swap", uniswap ? "ethereum" : "tron", uniswap ? "uniswap" : "sunswap",
+        action, "--operation", bound.request.operationId]);
+      return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED",
+        "Guarded swap approval and execution must continue in the foreground CLI.",
+        { ...cliHandoffDetails(handoff), foreground_auth: true }));
+    }
     if (bound.request.command === "wallet.connect") {
       const handoff = walletConnectHandoff(bound.request);
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError(
