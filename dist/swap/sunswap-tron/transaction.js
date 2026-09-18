@@ -3,7 +3,7 @@ import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical
 import { ApnError } from "../../errors.js";
 import { tronAddress, tronHash, tronHex } from "../../tron/codec.js";
 import { decodeSunSwapCalldata } from "./calldata.js";
-import { SUNSWAP_V4_UNIVERSAL_ROUTER } from "./catalog.js";
+import { SUNSWAP_V2_ROUTER } from "./catalog.js";
 export function buildSunSwapUnsignedTransaction(input) {
     if (!isPlainRecord(input) || !exactKeys(input, ["owner", "recipient", "inputAmountAtomic", "minimumOutputAtomic", "deadlineSeconds",
         "maximumEnergy", "energyPriceSun", "maximumFeeLimitSun", "calldata", "callValueAtomic", "referenceBlockId", "timestampMs",
@@ -19,7 +19,7 @@ export function buildSunSwapUnsignedTransaction(input) {
         invalid();
     const raw_data = {
         contract: [{ type: "TriggerSmartContract", parameter: { type_url: "type.googleapis.com/protocol.TriggerSmartContract",
-                    value: { owner_address: tronHex(input.owner), contract_address: tronHex(SUNSWAP_V4_UNIVERSAL_ROUTER), data: input.calldata.slice(2), call_value: callValue } } }],
+                    value: { owner_address: tronHex(input.owner), contract_address: tronHex(SUNSWAP_V2_ROUTER), data: input.calldata.slice(2), call_value: callValue } } }],
         ref_block_bytes: input.referenceBlockId.slice(12, 16), ref_block_hash: input.referenceBlockId.slice(16, 32), timestamp, expiration, fee_limit: feeLimit,
     };
     try {
@@ -47,6 +47,17 @@ export function validateEnergyBounds(input) {
         throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "SunSwap energy or fee_limit exceeds the frozen budget.");
 }
 export function sunSwapUnsignedPayloadHash(transaction) { return sha256(canonicalJson(transaction)); }
+/**
+ * Bandwidth java-tron charges for the signed transaction: the serialized Transaction (raw_data field and one
+ * 65-byte signature field) plus the 64-byte MAX_RESULT_SIZE_IN_TX reserved for contract transactions.
+ */
+export function sunSwapMaximumBandwidthBytes(transaction) {
+    const raw = BigInt(transaction.raw_data_hex.length / 2);
+    let lengthBytes = 1n;
+    for (let value = raw >> 7n; value > 0n; value >>= 7n)
+        lengthBytes++;
+    return 1n + lengthBytes + raw + 1n + 1n + 65n + 64n;
+}
 function positive(value) { if (!/^[1-9][0-9]{0,77}$/u.test(value))
     invalid(); return BigInt(value); }
 function safe(value) { const number = positive(value); if (number > BigInt(Number.MAX_SAFE_INTEGER))

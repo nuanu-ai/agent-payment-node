@@ -14,9 +14,10 @@ export interface SunSwapObservationRpcPort {
 export class SunSwapSolidifiedObserver implements SwapChainObserverPort {
   constructor(private readonly rpc: SunSwapObservationRpcPort, private readonly expectedOperation: SwapOperationRecord,
     private readonly binding: SunSwapExecutionBinding, private readonly maximumFeeSun: string,
-    private readonly now: () => Date = () => new Date()) {
+    private readonly maximumBandwidthFeeSun: string, private readonly now: () => Date = () => new Date()) {
     validateSunSwapExecutionBinding(expectedOperation, binding);
-    if (maximumFeeSun !== binding.intent.feeLimitSun) conflict();
+    if (maximumFeeSun !== binding.intent.feeLimitSun || typeof maximumBandwidthFeeSun !== "string" ||
+        !/^[1-9][0-9]{0,15}$/u.test(maximumBandwidthFeeSun)) conflict();
   }
 
   async observe(operationValue: SwapOperationRecord): Promise<SwapReceiptProof | null> {
@@ -25,8 +26,10 @@ export class SunSwapSolidifiedObserver implements SwapChainObserverPort {
         validateSunSwapExecutionBinding(operation, this.binding) !== validateSunSwapExecutionBinding(this.expectedOperation, this.binding) ||
         operation.submissionMarker === null) conflict();
     const receipt = await observeSunSwapFinality(this.rpc, { transactionHash: this.binding.transaction.txID,
-      recipient: operation.quote.recipient, minimumOutputAtomic: operation.quote.minimumOutputAtomic,
-      unsignedRawDataHex: this.binding.transaction.raw_data_hex, maximumFeeSun: this.maximumFeeSun });
+      recipient: operation.quote.recipient, inputAmountAtomic: operation.quote.inputAmountAtomic,
+      minimumOutputAtomic: operation.quote.minimumOutputAtomic,
+      unsignedRawDataHex: this.binding.transaction.raw_data_hex, maximumFeeSun: this.maximumFeeSun,
+      maximumBandwidthFeeSun: this.maximumBandwidthFeeSun });
     const observedAt = this.now();
     if (!Number.isFinite(observedAt.getTime())) conflict();
     return { receiptHash: receipt.receiptHash, transactionHash: receipt.transactionHash,
@@ -50,8 +53,8 @@ export async function observeSunSwapFinality(rpc: SunSwapObservationRpcPort,
   const full = validateSunSwapReceipt(fullTransaction, fullInfo, solid, expected);
   const finalized = validateSunSwapReceipt(solidTransaction, solidInfo, solid, expected);
   const proof = (value: SunSwapReceiptValidation) => ({ transactionHash: value.transactionHash, blockNumber: value.blockNumber,
-    solidifiedHeadNumber: value.solidifiedHeadNumber, outputAmountAtomic: value.outputAmountAtomic, feeSun: value.feeSun,
-    finalized: value.finalized });
+    solidifiedHeadNumber: value.solidifiedHeadNumber, inputAmountAtomic: value.inputAmountAtomic,
+    outputAmountAtomic: value.outputAmountAtomic, feeSun: value.feeSun, trxDebitSun: value.trxDebitSun, finalized: value.finalized });
   if (canonicalJson(proof(full)) !== canonicalJson(proof(finalized))) conflict();
   if (full.receiptHash !== finalized.receiptHash) conflict();
   return finalized;

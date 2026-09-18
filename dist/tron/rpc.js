@@ -4,7 +4,12 @@ import { ApnError } from "../errors.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { TRON_GENESIS, tronAtomic, tronHash, tronProtocolFailure, tronRecord } from "./codec.js";
 import { tronHttpsFetch } from "./https.js";
-const METHODS = ["wallet/getblockbynum", "wallet/getnowblock", "wallet/getnodeinfo", "wallet/getchainparameters", "wallet/getnextmaintenancetime", "wallet/getaccount", "wallet/getaccountresource", "wallet/triggerconstantcontract", "wallet/estimateenergy", "wallet/broadcasttransaction", "walletsolidity/gettransactionbyid", "walletsolidity/gettransactioninfobyid", "walletsolidity/getblockbynum", "walletsolidity/getnowblock", "walletsolidity/getaccount", "walletsolidity/triggerconstantcontract"];
+export const TRON_RPC_METHODS = Object.freeze(["wallet/getblockbynum", "wallet/getnowblock", "wallet/getnodeinfo",
+    "wallet/getchainparameters", "wallet/getnextmaintenancetime", "wallet/getaccount", "wallet/getaccountresource",
+    "wallet/triggerconstantcontract", "wallet/estimateenergy", "wallet/broadcasttransaction", "wallet/getcontractinfo",
+    "wallet/gettransactionbyid", "wallet/gettransactioninfobyid", "walletsolidity/gettransactionbyid",
+    "walletsolidity/gettransactioninfobyid", "walletsolidity/getblockbynum", "walletsolidity/getnowblock", "walletsolidity/getaccount",
+    "walletsolidity/triggerconstantcontract"]);
 export class TronRpc {
     endpoint;
     fetcher;
@@ -15,7 +20,7 @@ export class TronRpc {
         this.originHash = sha256(endpoint ?? "tron_rpc_unconfigured");
     }
     async call(method, body) {
-        if (this.endpoint === undefined || !METHODS.includes(method))
+        if (this.endpoint === undefined || !TRON_RPC_METHODS.includes(method))
             configFailure();
         let base;
         try {

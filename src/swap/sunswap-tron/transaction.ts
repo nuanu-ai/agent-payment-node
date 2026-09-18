@@ -3,7 +3,7 @@ import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical
 import { ApnError } from "../../errors.js";
 import { tronAddress, tronHash, tronHex } from "../../tron/codec.js";
 import { decodeSunSwapCalldata, type SunSwapCalldataIntent } from "./calldata.js";
-import { SUNSWAP_V4_UNIVERSAL_ROUTER } from "./catalog.js";
+import { SUNSWAP_V2_ROUTER } from "./catalog.js";
 
 export interface SunSwapTransactionBounds {
   readonly maximumEnergy: string; readonly energyPriceSun: string; readonly maximumFeeLimitSun: string;
@@ -34,7 +34,7 @@ export function buildSunSwapUnsignedTransaction(input: SunSwapUnsignedIntent): S
   if (expiration <= timestamp || expiration - timestamp > 600_000 || deadlineMs < BigInt(timestamp) || deadlineMs > BigInt(expiration)) invalid();
   const raw_data = {
     contract: [{ type: "TriggerSmartContract" as const, parameter: { type_url: "type.googleapis.com/protocol.TriggerSmartContract" as const,
-      value: { owner_address: tronHex(input.owner), contract_address: tronHex(SUNSWAP_V4_UNIVERSAL_ROUTER), data: input.calldata.slice(2), call_value: callValue } } }] as const,
+      value: { owner_address: tronHex(input.owner), contract_address: tronHex(SUNSWAP_V2_ROUTER), data: input.calldata.slice(2), call_value: callValue } } }] as const,
     ref_block_bytes: input.referenceBlockId.slice(12, 16), ref_block_hash: input.referenceBlockId.slice(16, 32), timestamp, expiration, fee_limit: feeLimit,
   };
   try {
@@ -58,6 +58,15 @@ export function validateEnergyBounds(input: SunSwapTransactionBounds & { readonl
   if (fee > maximum || energy * price > fee) throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "SunSwap energy or fee_limit exceeds the frozen budget.");
 }
 export function sunSwapUnsignedPayloadHash(transaction: SunSwapUnsignedTransaction): string { return sha256(canonicalJson(transaction)); }
+/**
+ * Bandwidth java-tron charges for the signed transaction: the serialized Transaction (raw_data field and one
+ * 65-byte signature field) plus the 64-byte MAX_RESULT_SIZE_IN_TX reserved for contract transactions.
+ */
+export function sunSwapMaximumBandwidthBytes(transaction: SunSwapUnsignedTransaction): bigint {
+  const raw = BigInt(transaction.raw_data_hex.length / 2);
+  let lengthBytes = 1n; for (let value = raw >> 7n; value > 0n; value >>= 7n) lengthBytes++;
+  return 1n + lengthBytes + raw + 1n + 1n + 65n + 64n;
+}
 function positive(value: string): bigint { if (!/^[1-9][0-9]{0,77}$/u.test(value)) invalid(); return BigInt(value); }
 function safe(value: string): number { const number = positive(value); if (number > BigInt(Number.MAX_SAFE_INTEGER)) invalid(); return Number(number); }
 function invalid(): never { throw new ApnError("APN_INVALID_INPUT", "SunSwap unsigned transaction or resource bounds are invalid."); }
