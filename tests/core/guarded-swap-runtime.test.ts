@@ -3,7 +3,6 @@ import test from "node:test";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { compileAllowlistPolicyOverlay, type AllowlistPolicyOverlayInput } from "../../src/allowlist-policy-overlay.js";
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
-import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { StateStore } from "../../src/state.js";
 import { createSwapQuote, type SwapQuoteInput } from "../../src/swap/quote.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
@@ -36,13 +35,7 @@ async function fixture(root: string, options: { readonly admitted?: boolean; rea
       { chain: "eip155:1", kind: "native", rail: "swap", maximumPerTransferAtomic: "100", dailyLimitAtomic: "100", mechanism: pin },
       { chain: "eip155:1", kind: "token", identifier: USDC, rail: "swap", maximumPerTransferAtomic: "100", dailyLimitAtomic: "100", mechanism: pin },
     ] };
-  const compiled = compileAllowlistPolicyOverlay(overlay).registry;
-  const policy = sealAssetPolicyRegistry({ schemaVersion: compiled.schemaVersion, registryVersion: compiled.registryVersion,
-    publishedAt: compiled.publishedAt, effectiveDate: compiled.effectiveDate,
-    ...(compiled.effectiveAt === undefined ? {} : { effectiveAt: compiled.effectiveAt }),
-    ...(compiled.expiresAt === undefined ? {} : { expiresAt: compiled.expiresAt }),
-    chains: compiled.chains.map(chain => ({ ...chain,
-    assets: chain.assets.map(asset => ({ ...asset, rails: { ...asset.rails, direct: true } })) })) });
+  const policy = compileAllowlistPolicyOverlay(overlay).registry;
   const protocols = compileSwapProtocolRegistry({ registryVersion: "runtime-swap.1", pins: [pin] });
   const operations = new SwapOperationRepository(root), usage = new AssetUsageLedger(root), approvals = new GuardedSwapApprovalRepository(root);
   const quote = createSwapQuote(quoteInput), material = { quote, approvalCapAtomic: "0",
@@ -60,7 +53,8 @@ async function fixture(root: string, options: { readonly admitted?: boolean; rea
     ownerAdmission: { async assert() { admissionCalls++; } },
     foregroundApproval: { async approve(intent) { clockMs += options.typingMs ?? 0; return sealGuardedSwapApproval(intent, clock.now(), H("f")); } }, execution,
     rpc: {}, effectStore: {}, signer: {}, sender: {}, observer: {}, caps: { gasLimit: "100000", maxFeePerGas: "2" } });
-  return { runtime, quote, approvals, operations, counters: () => ({ sends, observes, admissionCalls }) };
+  return { runtime, quote, approvals, operations, counters: () => ({ sends, observes, admissionCalls }),
+    setClock: (value: Date) => { clockMs = value.getTime(); } };
 }
 
 test("explicit runtime prepares, separately approves, and only execute crosses the durable marker", async (t) => {
@@ -112,4 +106,14 @@ test("no active owner admission refuses preparation with a stable classification
   await assert.rejects(f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "runtime-swap-0004" }, NOW),
     (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "swap_owner_admission_required");
   assert.equal(f.counters().sends, 0);
+});
+
+test("an approved reservation that outlives its deadline or loses its consent is released unsigned", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
+  const prepared = await f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "runtime-swap-0005" }, NOW);
+  await f.runtime.approve(prepared.operationId, NOW);
+  f.setClock(new Date(prepared.quote.expiresAt));
+  const released = await f.runtime.execute(prepared.operationId, new Date(prepared.quote.expiresAt));
+  assert.equal(released.state, "failed_before_effect"); assert.equal(released.usageLease?.state, "failed_before_effect");
+  assert.equal(released.submissionMarker, null); assert.equal(f.counters().sends, 0);
 });
