@@ -230,21 +230,21 @@ export type CommandRequest = {
 } | {
     readonly command: "wallet.balance-solana";
     readonly profile: string;
-    readonly asset: "sol" | "usdc";
+    readonly asset: "sol" | "usdc" | "usdt";
 } | {
     readonly command: "wallet.capabilities-solana";
     readonly profile?: string;
 } | {
     readonly command: "policy.admit-solana";
     readonly profile: string;
-    readonly asset: "sol" | "usdc";
+    readonly asset: "sol" | "usdc" | "usdt";
     readonly maximumPerTransfer: string;
     readonly dailyLimit: string;
     readonly maximumFee: string;
 } | {
     readonly command: "transfer.prepare-solana";
     readonly profile: string;
-    readonly asset: "sol" | "usdc";
+    readonly asset: "sol" | "usdc" | "usdt";
     readonly recipient: string;
     readonly amount: string;
     readonly maximumFee: string;

@@ -53,7 +53,7 @@ export function validateOperation(value) {
     const optionalKeys = [
         "transactionData", "economics", "preparedBlockNumberAtomic", "providerDirect", "providerEffect",
         "transactionHash", "rawTransactionHash", "lastSubmissionAt", "evm", "coinbaseGaslessLocator",
-        "coinbaseGaslessCursor", "coinbaseGaslessSettlement",
+        "coinbaseGaslessCursor", "coinbaseGaslessSettlement", "allowlist", "allowlistLease",
     ];
     const actualKeys = Object.keys(value);
     if (requiredKeys.some((key) => !actualKeys.includes(key)) ||
@@ -78,6 +78,8 @@ export function validateOperation(value) {
         stateCorrupt("Operation frozen transfer identity is invalid.");
     if (operation.evm !== undefined)
         validateEvmOperation(operation);
+    else if (operation.allowlist !== undefined || operation.allowlistLease !== undefined)
+        stateCorrupt("Only an explicit EVM asset operation carries a direct allowlist binding.");
     if (operation.providerDirect === undefined)
         validateLocalDirect(operation);
     else

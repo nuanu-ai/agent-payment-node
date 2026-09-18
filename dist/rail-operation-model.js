@@ -4,6 +4,8 @@ import { atomic, isoDate, SOLANA_GENESIS, validateChainAsset } from "./chain-pol
 import { ApnError } from "./errors.js";
 import { validateRailSendBinding } from "./rail-send-binding.js";
 import { TRON_GENESIS } from "./tron/constants.js";
+import { publicDirectAllowlist } from "./direct-allowlist-gate.js";
+import { RAIL_LEASE_STATES, railAllowlistSubject, validateRailAllowlist } from "./rail-direct-allowlist.js";
 import { validateTronFinalResources, validateTronResources } from "./tron/resource-model.js";
 const TERMINAL = ["completed", "failed_before_effect", "failed_confirmed_revert", "abandoned_unknown"];
 const EDGES = {
@@ -41,6 +43,7 @@ export function transitionRail(operation, input) {
     };
     const { integrityHash: _hash, ...body } = operation;
     const result = seal({ ...body, ...(input.send === undefined ? {} : { send: input.send }),
+        ...(input.allowlistLease === undefined ? {} : { allowlistLease: input.allowlistLease }),
         ...latest(entry), terminal: TERMINAL.includes(entry.state),
         transitions: [...operation.transitions, { ...entry, transitionHash: hashObject(entry) }],
     });
@@ -60,9 +63,14 @@ export function validateRailContinuity(previous, next) {
     // a record written before the field existed carries it in no transition, and a mixed record is corrupt.
     if (previous.send !== undefined && (next.send === undefined || canonicalJson(previous.send) !== canonicalJson(next.send)))
         corrupt();
+    // The usage lease follows the same write-once rule.
+    if (previous.allowlistLease !== undefined && (next.allowlistLease === undefined ||
+        canonicalJson(previous.allowlistLease) !== canonicalJson(next.allowlistLease)))
+        corrupt();
 }
 export function validateRailOperation(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, Object.hasOwn(value, "send") ? [...RECORD_KEYS, "send"] : RECORD_KEYS))
+    if (!isPlainRecord(value) || !exactKeys(value, [...RECORD_KEYS,
+        ...["send", "allowlist", "allowlistLease"].filter((key) => Object.hasOwn(value, key))]))
         corrupt();
     if (value.schemaVersion !== "apn.rail-operation.v1" || value.kind !== "rail_transfer")
         corrupt();
@@ -73,6 +81,7 @@ export function validateRailOperation(value) {
     const prepared = validateRailPrepared(value.prepared, account);
     if (value.profile !== account.profile || value.profileHash !== account.profileHash)
         corrupt();
+    validateRailAllowlist(value, railAllowlistSubject({ profile: account.profile, operationId: value.operationId, account, prepared }));
     if (value.send !== undefined) {
         if (account.provider !== "local" || !Array.isArray(value.transitions) ||
             !value.transitions.some((entry) => isPlainRecord(entry) && entry.state === "signing_started"))
@@ -232,6 +241,7 @@ export function publicRailOperation(operation) {
         kind: operation.kind, schema_version: operation.schemaVersion, operation_id: operation.operationId,
         profile: operation.profile, provider: operation.account.provider, custody: operation.account.custody,
         account: operation.account.address, fingerprint: operation.fingerprint, policy_hash: operation.policyHash,
+        ...(operation.allowlist === undefined ? {} : { allowlist: publicDirectAllowlist(operation.allowlist, operation.allowlistLease) }),
         transfer, ...(operation.send === undefined ? {} : { send_binding: operation.send }),
         state: operation.state, terminal: operation.terminal, proof_class: operation.proofClass,
         reason: operation.reason, transaction_id: operation.transactionId, evidence: operation.evidence,
@@ -255,15 +265,18 @@ export function railHistoricalReceipt(operation, transitionIndex) {
     const entry = operation.transitions[transitionIndex];
     if (entry === undefined)
         corrupt();
-    const { integrityHash: _hash, send, ...body } = operation;
+    const { integrityHash: _hash, send, allowlistLease, ...body } = operation;
     const transitions = operation.transitions.slice(0, transitionIndex + 1);
     const bound = send !== undefined && transitions.some((item) => item.state === "signing_started") ? { send } : {};
-    return railReceipt(seal({ ...body, ...bound, ...latest(entry), terminal: TERMINAL.includes(entry.state), transitions }));
+    const leased = allowlistLease !== undefined && transitions.some((item) => RAIL_LEASE_STATES.includes(item.state)) ? { allowlistLease } : {};
+    return railReceipt(seal({ ...body, ...bound, ...leased, ...latest(entry), terminal: TERMINAL.includes(entry.state), transitions }));
 }
 function intentOf(operation) {
     return { schemaVersion: operation.schemaVersion, kind: operation.kind, operationId: operation.operationId,
         profile: operation.profile, profileHash: operation.profileHash, idempotencyHash: operation.idempotencyHash,
-        requestHash: operation.requestHash, account: operation.account, prepared: operation.prepared, policyHash: operation.policyHash };
+        requestHash: operation.requestHash, account: operation.account, prepared: operation.prepared, policyHash: operation.policyHash,
+        // Records written before the direct allowlist gate keep their original fingerprint.
+        ...(operation.allowlist === undefined ? {} : { allowlist: operation.allowlist }) };
 }
 function latest(entry) {
     return { state: entry.state, reason: entry.reason, proofClass: entry.proofClass, transactionId: entry.transactionId,

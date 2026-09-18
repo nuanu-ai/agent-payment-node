@@ -8,7 +8,8 @@ import { decodeFunctionData, toHex } from "viem";
 import { EvmRpc } from "../../src/evm-rpc.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 import type { Address, Hex } from "../../src/model.js";
-import { EVM_BLOCK_HASH, EVM_REQUEST, EVM_TOKEN, evmCore } from "./evm-helpers.js";
+import { EVM_BLOCK_HASH, EVM_REQUEST, EVM_TOKEN, ensureDirectWallet, evmCore } from "./evm-helpers.js";
+import { EVM_USDC } from "./direct-allowlist-helpers.js";
 import { RECIPIENT, WALLET, temporaryState } from "./helpers.js";
 
 const BLOCK = { number: "0x3039", hash: EVM_BLOCK_HASH, baseFeePerGas: "0x1", parentHash: `0x${"a".repeat(64)}` };
@@ -125,8 +126,9 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId} on-chain
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
-  const wallet = await setup.core.wallet.ensure("default") as { address: Address }; setup.rpc.sender = wallet.address;
-  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: EVM_TOKEN }, amount: "1" }) as { operation_id: string };
+  const wallet = await ensureDirectWallet(setup); setup.rpc.sender = wallet.address;
+  // 100 list USDC (6 decimals) is the 100000000 atomic delta the scripted balances below prove.
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: EVM_USDC[chainId] }, amount: "100" }) as { operation_id: string };
   await setup.core.transfer.approve(prepared.operation_id);
   const operation = (await setup.state.findOperation(prepared.operation_id))!;
   const receipt = (await setup.rpc.evm.receipt(chainId, operation.transactionHash!))!;
@@ -134,7 +136,7 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId} on-chain
   const call: EvmRpcCall = async (method, params) => {
     if (method === "eth_chainId") return toHex(chainId);
     if (method === "eth_getBlockByNumber") return { ...BLOCK, number: params[0] === "safe" ? "0x303a" : params[0], hash: params[0] === "0x303a" || params[0] === "safe" ? EVM_BLOCK_HASH : HASH, parentHash: wrongParent ? EVM_BLOCK_HASH : HASH };
-    if (method === "eth_getTransactionByHash") return { hash: operation.transactionHash, blockHash: EVM_BLOCK_HASH, blockNumber: "0x303a", chainId: toHex(chainId), type: "0x2", from: operation.walletAddress, to: EVM_TOKEN, value: transactionValue, input: operation.transactionData, nonce: "0x7", gas: toHex(BigInt(operation.economics!.gasLimitAtomic)), maxFeePerGas: toHex(BigInt(operation.economics!.maxFeePerGasAtomic)), maxPriorityFeePerGas: toHex(BigInt(operation.economics!.maxPriorityFeePerGasAtomic)), accessList: [] };
+    if (method === "eth_getTransactionByHash") return { hash: operation.transactionHash, blockHash: EVM_BLOCK_HASH, blockNumber: "0x303a", chainId: toHex(chainId), type: "0x2", from: operation.walletAddress, to: EVM_USDC[chainId], value: transactionValue, input: operation.transactionData, nonce: "0x7", gas: toHex(BigInt(operation.economics!.gasLimitAtomic)), maxFeePerGas: toHex(BigInt(operation.economics!.maxFeePerGasAtomic)), maxPriorityFeePerGas: toHex(BigInt(operation.economics!.maxPriorityFeePerGasAtomic)), accessList: [] };
     if (method === "eth_call") {
       balanceCalls += 1;
       const input = params[0] as { data: string };
@@ -234,7 +236,7 @@ test("Arbitrum gas quote includes all estimated gas once, with no Base oracle or
 test("Arbitrum receipt and supersession evidence refuse latest-only or reorged safe heads", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
   await setup.core.transfer.approve(prepared.operation_id);
   const operation = (await setup.state.findOperation(prepared.operation_id))!;

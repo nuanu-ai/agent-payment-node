@@ -7,13 +7,12 @@ import {
 import { getTransferSolInstruction } from "@solana-program/system";
 import { getCreateAssociatedTokenIdempotentInstruction, getTransferCheckedInstruction } from "@solana-program/token";
 import { sha256 } from "../canonical.js";
-import { SOLANA_USDC } from "../chain-policy.js";
 import type { RailPreparedTransfer, RailSendBinding, RailSignedEffect } from "../direct-rail-ports.js";
 
 /** Only the two lifetime fields are needed to compile bytes, so the guard can compile before it simulates. */
 export type RailSendLifetime = Pick<RailSendBinding, "blockReference" | "lastValidBlockHeight">;
 import { ApnError } from "../errors.js";
-import { associatedUsdc } from "./accounts.js";
+import { associatedToken } from "./accounts.js";
 import { solanaAddress, solanaSignature } from "./rpc.js";
 
 /** `send` supersedes the preparation-time lifetime once the send guard has re-acquired one. */
@@ -35,14 +34,16 @@ export async function solanaTransferInstructions(input: Pick<RailPreparedTransfe
   const recipient = address(solanaAddress(input.recipient)); const instructions: Instruction[] = [];
   if (input.asset.alias === "sol") {
     instructions.push(getTransferSolInstruction({ source: sender, destination: recipient, amount: BigInt(input.amountAtomic) }));
-  } else if (input.asset.alias === "usdc") {
-    const source = await associatedUsdc(input.sender); const destination = await associatedUsdc(input.recipient);
+  } else if (input.asset.kind === "token") {
+    // The asset is one of the pinned mints (validateChainAsset), so its identifier and decimals are the list's.
+    const mint = input.asset.identifier;
+    const source = await associatedToken(input.sender, mint); const destination = await associatedToken(input.recipient, mint);
     if (source !== input.sourceTokenAccount || destination !== input.destinationTokenAccount) invalid();
     if (input.createsRecipientAccount) instructions.push(getCreateAssociatedTokenIdempotentInstruction({
-      payer: createNoopSigner(address(solanaAddress(rentPayer))), ata: address(destination), owner: recipient, mint: address(SOLANA_USDC),
+      payer: createNoopSigner(address(solanaAddress(rentPayer))), ata: address(destination), owner: recipient, mint: address(mint),
     }));
-    instructions.push(getTransferCheckedInstruction({ source: address(source), mint: address(SOLANA_USDC),
-      destination: address(destination), authority: sender, amount: BigInt(input.amountAtomic), decimals: 6 }));
+    instructions.push(getTransferCheckedInstruction({ source: address(source), mint: address(mint),
+      destination: address(destination), authority: sender, amount: BigInt(input.amountAtomic), decimals: input.asset.decimals }));
   } else invalid();
   return instructions;
 }

@@ -1,11 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { createKeyPairSignerFromPrivateKeyBytes, getBase64EncodedWireTransaction, getSignatureFromTransaction, signTransaction } from "@solana/kit";
 import { canonicalJson, sha256 } from "../canonical.js";
-import { atomic, chainAsset, SOLANA_GENESIS, SOLANA_USDC } from "../chain-policy.js";
+import { atomic, chainAsset, SOLANA_GENESIS } from "../chain-policy.js";
 import { ApnError } from "../errors.js";
 import { validateRailPrepared } from "../rail-operation-model.js";
 import { railSendLifetime, SOLANA_APPROVAL_WINDOW_MS, validateRailSendBinding } from "../rail-send-binding.js";
-import { associatedUsdc, readAccounts, requireNativeAccount, requireSolanaFunds, requireUsdcMint, usdcAmount } from "./accounts.js";
+import { associatedToken, readAccounts, requireNativeAccount, requireSolanaFunds, requireTokenMint, tokenAccountAmount } from "./accounts.js";
 import { inspectSolana } from "./evidence.js";
 import { solanaMessage, validateSolanaEffect, validateSolanaMessage } from "./message.js";
 import { simulateSolanaSend } from "./simulation.js";
@@ -224,28 +224,28 @@ export class SolanaLocalAdapter {
 export async function readSolanaBalance(rpc, account, asset, now) {
     if (canonicalJson(asset) !== canonicalJson(chainAsset("solana", asset.alias)))
         mismatch();
-    const source = asset.kind === "token" ? await associatedUsdc(account.address) : null;
-    const response = await readAccounts(rpc, [account.address, ...(source === null ? [] : [SOLANA_USDC, source])]);
+    const source = asset.kind === "token" ? await associatedToken(account.address, asset.identifier) : null;
+    const response = await readAccounts(rpc, [account.address, ...(source === null ? [] : [asset.identifier, source])]);
     const native = requireNativeAccount(response.accounts[0] ?? null);
     let amount = native;
     if (source !== null) {
-        requireUsdcMint(response.accounts[1] ?? null);
-        amount = usdcAmount(response.accounts[2] ?? null, account.address);
+        requireTokenMint(response.accounts[1] ?? null, asset.decimals);
+        amount = tokenAccountAmount(response.accounts[2] ?? null, account.address, asset.identifier);
     }
     return { account, asset, amountAtomic: amount.toString(), nativeBalanceAtomic: native.toString(), networkIdentity: SOLANA_GENESIS,
         blockNumberAtomic: response.slot.toString(), observedAt: now.toISOString(), rpcOriginHash: rpc.originHash };
 }
 async function transferSnapshot(rpc, account, asset, recipient) {
-    const source = asset.kind === "token" ? await associatedUsdc(account.address) : null;
-    const destination = asset.kind === "token" ? await associatedUsdc(recipient) : null;
-    const response = await readAccounts(rpc, [account.address, ...(source === null || destination === null ? [] : [SOLANA_USDC, source, destination])]);
+    const source = asset.kind === "token" ? await associatedToken(account.address, asset.identifier) : null;
+    const destination = asset.kind === "token" ? await associatedToken(recipient, asset.identifier) : null;
+    const response = await readAccounts(rpc, [account.address, ...(source === null || destination === null ? [] : [asset.identifier, source, destination])]);
     const native = requireNativeAccount(response.accounts[0] ?? null);
     let token = 0n;
     let createsRecipientAccount = false;
     if (source !== null && destination !== null) {
-        requireUsdcMint(response.accounts[1] ?? null);
-        token = usdcAmount(response.accounts[2] ?? null, account.address);
-        usdcAmount(response.accounts[3] ?? null, recipient);
+        requireTokenMint(response.accounts[1] ?? null, asset.decimals);
+        token = tokenAccountAmount(response.accounts[2] ?? null, account.address, asset.identifier);
+        tokenAccountAmount(response.accounts[3] ?? null, recipient, asset.identifier);
         createsRecipientAccount = response.accounts[3] === null;
     }
     return { native, token, source, destination, createsRecipientAccount };

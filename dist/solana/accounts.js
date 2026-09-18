@@ -4,8 +4,10 @@ import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { SOLANA_USDC } from "../chain-policy.js";
 import { ApnError } from "../errors.js";
 import { protocolFailure, rpcArray, rpcAtomic, rpcRecord, solanaAddress } from "./rpc.js";
-export async function associatedUsdc(owner) {
-    const [ata] = await findAssociatedTokenPda({ owner: address(solanaAddress(owner)), mint: address(SOLANA_USDC), tokenProgram: TOKEN_PROGRAM_ADDRESS });
+export async function associatedUsdc(owner) { return await associatedToken(owner, SOLANA_USDC); }
+/** The classic SPL associated token account of one owner for one pinned mint. */
+export async function associatedToken(owner, mint) {
+    const [ata] = await findAssociatedTokenPda({ owner: address(solanaAddress(owner)), mint: address(solanaAddress(mint)), tokenProgram: TOKEN_PROGRAM_ADDRESS });
     return ata;
 }
 export async function readAccounts(rpc, addresses) {
@@ -28,12 +30,14 @@ export function requireNativeAccount(account) {
         protocolFailure();
     return account.lamports;
 }
-export function requireUsdcMint(account) {
+export function requireUsdcMint(account) { requireTokenMint(account, 6); }
+/** A pinned mint must be an initialized classic SPL mint with exactly the pinned decimals. */
+export function requireTokenMint(account, decimals) {
     if (account === null || account.owner !== TOKEN_PROGRAM_ADDRESS || account.executable || account.data.length !== 82)
         protocolFailure();
     try {
         const mint = getMintDecoder().decode(account.data);
-        if (!mint.isInitialized || mint.decimals !== 6)
+        if (!mint.isInitialized || mint.decimals !== decimals)
             protocolFailure();
     }
     catch {
@@ -61,7 +65,7 @@ export function tokenAccountAmount(account, owner, mint) {
 }
 export function requireSolanaFunds(nativeBalance, tokenBalance, amount, feeAndRent, native) {
     if (!native && tokenBalance < amount)
-        throw new ApnError("APN_INSUFFICIENT_ASSET", "The Solana USDC balance cannot cover the transfer.");
+        throw new ApnError("APN_INSUFFICIENT_ASSET", "The Solana token balance cannot cover the transfer.");
     if (nativeBalance < feeAndRent + (native ? amount : 0n))
         throw new ApnError("APN_INSUFFICIENT_GAS", "The SOL balance cannot cover principal and the approved fee/rent reserve.");
 }

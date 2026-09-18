@@ -1,5 +1,5 @@
 import { canonicalJson } from "./canonical.js";
-import { assertChainPolicy, chainAsset, chainDecimal, chainUsage, sealChainPolicy, type ChainPolicy } from "./chain-policy.js";
+import { assertChainFeePolicy, chainAsset, chainDecimal, chainUsage, sealChainPolicy, type ChainPolicy } from "./chain-policy.js";
 import { ChainPolicyStore } from "./chain-policy-store.js";
 import type { ChainAccount, ChainAssetAlias, ChainProvider, DirectRailName, DirectRailPort } from "./direct-rail-ports.js";
 import { ApnError } from "./errors.js";
@@ -92,17 +92,17 @@ export class ChainPolicyService {
     if (policy === null) throw new ApnError("APN_WALLET_POLICY_REQUIRED", "This mainnet asset is denied until foreground policy admission.");
     return policy;
   }
-  async authorize(account: ChainAccount, alias: ChainAssetAlias, amount: string, maximumFee: string, excluding?: string): Promise<ChainPolicy> {
+  /** The chain policy caps only native fees, rent and resources; the owner allowlist policy caps the amount (one counter, no double count). */
+  async authorize(account: ChainAccount, alias: ChainAssetAlias, maximumFee: string): Promise<ChainPolicy> {
     const policy = await this.requiredPolicy(account, alias);
-    assertChainPolicy(policy, account, chainAsset(account.rail, alias), amount, maximumFee,
-      await this.records.listOperations(account.profileHash), this.context.clock.now(), excluding);
+    assertChainFeePolicy(policy, account, chainAsset(account.rail, alias), maximumFee);
     return policy;
   }
 }
 
 export function solanaCapabilities() {
   return {
-    rail: "solana", network: "mainnet", assets: [chainAsset("solana", "sol"), chainAsset("solana", "usdc")], x402: { available: false },
+    rail: "solana", network: "mainnet", assets: [chainAsset("solana", "sol"), chainAsset("solana", "usdc"), chainAsset("solana", "usdt")], x402: { available: false },
     profiles: [
       { provider: "local", execution: "local_signed", direct: true, requires: ["separate_encrypted_wallet", "explicit_rpc", "foreground_policy", "foreground_transfer_approval"] },
       { provider: "coinbase-awal", execution: "provider_atomic", direct: false, accountAndBalance: true, blocker: "pinned_provider_fee_and_rent_guarantee_unavailable" },

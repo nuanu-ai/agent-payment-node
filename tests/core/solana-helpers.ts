@@ -12,9 +12,10 @@ import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { WaitPort } from "../../src/ports.js";
 import { ApnError } from "../../src/errors.js";
 import { StateStore } from "../../src/state.js";
-import { associatedUsdc } from "../../src/solana/accounts.js";
+import { associatedToken } from "../../src/solana/accounts.js";
 import { SolanaLocalAdapter } from "../../src/solana/local-adapter.js";
 import type { SolanaMethod, SolanaRpcPort } from "../../src/solana/rpc.js";
+import { SOLANA_CHAIN, activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 
 export const SOL_RECIPIENT = "So11111111111111111111111111111111111111112";
 export const SOL_BLOCKHASH = "11111111111111111111111111111111";
@@ -57,7 +58,12 @@ export class SolanaTestRpc implements SolanaRpcPort {
   private blockhashCalls = 0;
   failed = false; corruptEffect = false; corruptSignature = false;
   prepared?: RailPreparedTransfer;
-  async bind(sender: string): Promise<void> { this.sender = sender; this.sourceAta = await associatedUsdc(sender); this.destinationAta = await associatedUsdc(SOL_RECIPIENT); }
+  /** The token mint this synthetic chain serves; USDC unless a test selects another pinned mint. */
+  mint: string = SOLANA_USDC;
+  async bind(sender: string): Promise<void> {
+    this.sender = sender; this.sourceAta = await associatedToken(sender, this.mint); this.destinationAta = await associatedToken(SOL_RECIPIENT, this.mint);
+  }
+  async useMint(mint: string): Promise<void> { this.mint = mint; await this.bind(this.sender); }
   async call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown> {
     this.calls.push(method);
     switch (method) {
@@ -92,11 +98,11 @@ export class SolanaTestRpc implements SolanaRpcPort {
   private error(): unknown { return this.failed ? { InstructionError: [0n, { Custom: 1n }] } : null; }
   private account(key: string): unknown {
     if (key === this.sender) return info(SYSTEM_PROGRAM_ADDRESS, Buffer.alloc(0), this.native);
-    if (key === SOLANA_USDC) return info(this.corruptMint ? SYSTEM_PROGRAM_ADDRESS : TOKEN_PROGRAM_ADDRESS, Buffer.from(getMintEncoder().encode({
+    if (key === this.mint) return info(this.corruptMint ? SYSTEM_PROGRAM_ADDRESS : TOKEN_PROGRAM_ADDRESS, Buffer.from(getMintEncoder().encode({
       mintAuthority: null, supply: 1_000_000_000_000n, decimals: 6, isInitialized: true, freezeAuthority: null,
     })), this.rent);
     if (key === this.sourceAta || key === this.destinationAta && this.destinationExists) return info(TOKEN_PROGRAM_ADDRESS, Buffer.from(getTokenEncoder().encode({
-      mint: address(SOLANA_USDC), owner: address(this.corruptTokenOwner ? SOL_RECIPIENT : key === this.sourceAta ? this.sender : SOL_RECIPIENT),
+      mint: address(this.mint), owner: address(this.corruptTokenOwner ? SOL_RECIPIENT : key === this.sourceAta ? this.sender : SOL_RECIPIENT),
       amount: key === this.sourceAta ? this.token : 0n, delegate: null, state: 1, isNative: null, delegatedAmount: 0n, closeAuthority: null,
     })), this.rent);
     return null;
@@ -122,12 +128,12 @@ export class SolanaTestRpc implements SolanaRpcPort {
       if (!this.failed) { change(this.sender, -amount); change(SOL_RECIPIENT, amount + (this.corruptEffect ? 1n : 0n)); }
     } else {
       if (prepared.createsRecipientAccount) instructions.push({ program: "spl-associated-token-account", programId: ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-        parsed: { type: "createIdempotent", info: { source: this.sender, account: this.destinationAta, wallet: SOL_RECIPIENT, mint: SOLANA_USDC, systemProgram: SYSTEM_PROGRAM_ADDRESS, tokenProgram: TOKEN_PROGRAM_ADDRESS } } });
+        parsed: { type: "createIdempotent", info: { source: this.sender, account: this.destinationAta, wallet: SOL_RECIPIENT, mint: this.mint, systemProgram: SYSTEM_PROGRAM_ADDRESS, tokenProgram: TOKEN_PROGRAM_ADDRESS } } });
       instructions.push({ program: "spl-token", programId: TOKEN_PROGRAM_ADDRESS, parsed: { type: "transferChecked", info: {
-        source: this.sourceAta, destination: this.destinationAta, authority: this.sender, mint: SOLANA_USDC,
+        source: this.sourceAta, destination: this.destinationAta, authority: this.sender, mint: this.mint,
         tokenAmount: { amount: amount.toString(), decimals: 6n, uiAmount: Number(amount) / 1e6 },
       } } });
-      const balance = (key: string, owner: string, balance: bigint) => ({ accountIndex: BigInt(keys.indexOf(address(key))), owner, mint: SOLANA_USDC, programId: TOKEN_PROGRAM_ADDRESS, uiTokenAmount: { amount: balance.toString(), decimals: 6n } });
+      const balance = (key: string, owner: string, balance: bigint) => ({ accountIndex: BigInt(keys.indexOf(address(key))), owner, mint: this.mint, programId: TOKEN_PROGRAM_ADDRESS, uiTokenAmount: { amount: balance.toString(), decimals: 6n } });
       preTokenBalances = [balance(this.sourceAta, this.sender, this.token), ...(this.destinationExists ? [balance(this.destinationAta, SOL_RECIPIENT, 0n)] : [])];
       postTokenBalances = this.failed ? preTokenBalances : [balance(this.sourceAta, this.sender, this.token - amount), balance(this.destinationAta, SOL_RECIPIENT, amount + (this.corruptEffect ? 1n : 0n))];
       if (!this.failed && prepared.createsRecipientAccount) { change(this.sender, -this.rent); change(this.destinationAta, this.rent); }
@@ -152,9 +158,15 @@ export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc
   const adapter = new SolanaLocalAdapter(storage, rpc, clock.now); const approval = options.approval ?? new SolanaApproval();
   const core = new ApnCore({ state: new StateStore(root), chainAccounts: storage, directRails: [adapter], railApproval: approval,
     chainPolicyApproval: { approve: async () => {} }, clock, wait, ...(options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {}) });
-  if (options.admit !== false) for (const asset of ["sol", "usdc"] as const) {
-    const admitted = await core.execute({ command: "policy.admit-solana", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "0.003" });
-    assert.equal(admitted.ok, true, admitted.error?.message);
+  if (options.admit !== false) {
+    for (const asset of ["sol", "usdc"] as const) {
+      const admitted = await core.execute({ command: "policy.admit-solana", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "0.003" });
+      assert.equal(admitted.ok, true, admitted.error?.message);
+    }
+    // The chain policy now caps only fees and rent; the owner's amount caps come from the activated allowlist policy.
+    await activateDirectPolicy(root, account.profile, { accounts: { solana: account.address }, now: clock.now(), admissions: [
+      directAdmission(SOLANA_CHAIN, null, { maximumPerTransferAtomic: "2000000000", dailyLimitAtomic: "3000000000" }),
+      directAdmission(SOLANA_CHAIN, SOLANA_USDC, { maximumPerTransferAtomic: "2000000", dailyLimitAtomic: "3000000" })] });
   }
   const prepare = async (asset: "sol" | "usdc" = "sol", idempotencyKey = "solana-fixture-0001") => {
     const result = await core.execute({ command: "transfer.prepare-solana", profile: account.profile, asset,

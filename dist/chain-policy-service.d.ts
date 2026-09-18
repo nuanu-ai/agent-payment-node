@@ -23,7 +23,8 @@ export declare class ChainPolicyService {
         readonly maximumFee: string;
     }): Promise<unknown>;
     requiredPolicy(account: ChainAccount, alias: ChainAssetAlias): Promise<ChainPolicy>;
-    authorize(account: ChainAccount, alias: ChainAssetAlias, amount: string, maximumFee: string, excluding?: string): Promise<ChainPolicy>;
+    /** The chain policy caps only native fees, rent and resources; the owner allowlist policy caps the amount (one counter, no double count). */
+    authorize(account: ChainAccount, alias: ChainAssetAlias, maximumFee: string): Promise<ChainPolicy>;
 }
 export declare function solanaCapabilities(): {
     rail: string;

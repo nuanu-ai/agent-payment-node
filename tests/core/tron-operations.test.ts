@@ -12,6 +12,7 @@ import { temporaryState } from "./helpers.js";
 import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import { SOL_RECIPIENT } from "./solana-helpers.js";
 import { TRON_RECIPIENT, tronFixture } from "./tron-helpers.js";
+import { reserveRailLease } from "./direct-allowlist-helpers.js";
 
 test("TRON assets are default-denied independently before RPC or signer access", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root, { admit: false });
@@ -82,10 +83,12 @@ test("TRON durable submission boundary survives receipt-write interruption witho
 test("TRON missing uncommitted effect ends safely, while a sealed expired transaction is retained without first submission", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare();
   let record = (await s.core.rails.records.findOperation(id))!;
-  record = transitionRail(record, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect" }); await s.core.rails.records.persist(record);
+  record = transitionRail(record, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect",
+    allowlistLease: await reserveRailLease(temporary.root, s.now, record) }); await s.core.rails.records.persist(record);
   assert.equal(((await s.core.execute({ command: "operation.resume", operationId: id })).operation as { state: string }).state, "failed_before_effect");
   const next = await s.prepare("trx", "tron-sealed-expiry-0002"); const nextRecord = (await s.core.rails.records.findOperation(next))!;
-  const signing = transitionRail(nextRecord, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect" }); await s.core.rails.records.persist(signing);
+  const signing = transitionRail(nextRecord, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect",
+    allowlistLease: await reserveRailLease(temporary.root, s.now, nextRecord) }); await s.core.rails.records.persist(signing);
   const effect = await s.adapter.sign({ account: signing.account, operationId: next, fingerprint: signing.fingerprint, prepared: signing.prepared, send: null });
   s.now.setTime(s.now.getTime() + 121_000);
   const result = await s.core.execute({ command: "operation.resume", operationId: next }); assert.equal((result.operation as { state: string }).state, "failed_before_effect"); assert.equal(s.rpc.submissions.length, 0);
