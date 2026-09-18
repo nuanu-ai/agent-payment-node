@@ -28,7 +28,9 @@ export class SunSwapProtectedExecutionAdapter {
     }
     async sign(operationValue) {
         const operation = validateSwapOperation(operationValue);
-        if (operation.state !== "reserved" || immutableOperationHash(operation) !== immutableOperationHash(this.operation) ||
+        if ((operation.state !== "reserved" && operation.state !== "submitting") ||
+            (operation.state === "submitting" && operation.submissionMarker === null) ||
+            immutableOperationHash(operation) !== immutableOperationHash(this.operation) ||
             validateSunSwapExecutionBinding(operation, this.binding) !== this.fingerprint)
             mismatch();
         const existing = await this.effect();

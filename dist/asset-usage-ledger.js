@@ -77,7 +77,8 @@ export class AssetUsageLedger extends SecureStateStore {
             if (value === null)
                 throw blocked("The usage reservation does not exist.");
             const current = validateAssetUsageReservation(value);
-            if (current.policyDigest !== policyDigest || canonicalJson(exactIdentity(current)) !== canonicalJson(identity)) {
+            if (current.reservationId !== reservationId || current.policyDigest !== policyDigest ||
+                canonicalJson(exactIdentity(current)) !== canonicalJson(identity)) {
                 throw blocked("The usage reservation binding does not match the requested transition.");
             }
             if (expectedCurrentStates !== undefined && !expectedCurrentStates.includes(current.state)) {
@@ -85,7 +86,7 @@ export class AssetUsageLedger extends SecureStateStore {
             }
             if (at < current.updatedAt)
                 throw blocked("The usage reservation transition cannot move backward in time.");
-            const terminal = input.state === "finalized" || input.state === "failed_before_effect";
+            const terminal = input.state === "finalized" || input.state === "failed_before_effect" || input.state === "failed_confirmed_revert";
             const outcomeDigest = terminal ? digest(input.outcomeDigest, "Outcome digest") : null;
             if (current.state === input.state) {
                 if (current.outcomeDigest !== outcomeDigest)
@@ -122,7 +123,13 @@ export class AssetUsageLedger extends SecureStateStore {
         await this.ready();
         return await this.withLocks([this.bucketLock(identity)], async () => {
             const value = await this.readJson(this.recordPath(identity, reservationId));
-            return value === null ? null : validateAssetUsageReservation(value);
+            if (value === null)
+                return null;
+            const record = validateAssetUsageReservation(value);
+            if (record.reservationId !== reservationId || canonicalJson(exactIdentity(record)) !== canonicalJson(identity)) {
+                corrupt("A usage reservation path binding is invalid.");
+            }
+            return record;
         });
     }
     async ready() {
@@ -182,7 +189,7 @@ function validateBody(value) {
     if (!["direct", "gasless", "x402", "bridge", "swap"].includes(value.rail))
         corrupt("The usage rail binding is invalid.");
     atomic(value.amountAtomic, true, true);
-    if (!["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect"].includes(value.state))
+    if (!["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"].includes(value.state))
         corrupt("The usage state is invalid.");
     const reservedAt = storedInstant(value.reservedAt);
     const updatedAt = storedInstant(value.updatedAt);
@@ -194,9 +201,9 @@ function validateBody(value) {
             corrupt("The finalized usage effect timestamp is invalid.");
         digest(value.outcomeDigest, "Outcome digest", true);
     }
-    else if (value.state === "failed_before_effect") {
+    else if (value.state === "failed_before_effect" || value.state === "failed_confirmed_revert") {
         if (value.effectAt !== null)
-            corrupt("A pre-effect failure cannot contain an effect timestamp.");
+            corrupt("A released usage failure cannot contain an effect timestamp.");
         digest(value.outcomeDigest, "Outcome digest", true);
     }
     else if (value.effectAt !== null || value.outcomeDigest !== null) {
@@ -204,7 +211,7 @@ function validateBody(value) {
     }
 }
 function expectedStates(value) {
-    const allowed = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect"];
+    const allowed = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
     if (!Array.isArray(value) || value.length === 0 || value.some((state) => !allowed.includes(state))) {
         throw invalid("Expected usage reservation source states are invalid.");
     }
@@ -217,7 +224,7 @@ function sumUsage(records, now) {
     const day = instant(now).slice(0, 10);
     let total = 0n;
     for (const record of records) {
-        if (record.state === "failed_before_effect")
+        if (record.state === "failed_before_effect" || record.state === "failed_confirmed_revert")
             continue;
         if (record.state === "finalized" && record.effectAt.slice(0, 10) !== day)
             continue;
@@ -242,10 +249,11 @@ function assertBucketWindow(records, at) {
 function assertTransition(from, to) {
     const allowed = {
         reserved: ["submitted", "unknown_finality", "finalized", "failed_before_effect"],
-        submitted: ["unknown_finality", "finalized"],
-        unknown_finality: ["finalized", "failed_before_effect"],
+        submitted: ["unknown_finality", "finalized", "failed_confirmed_revert"],
+        unknown_finality: ["finalized", "failed_confirmed_revert"],
         finalized: [],
         failed_before_effect: [],
+        failed_confirmed_revert: [],
     };
     if (!allowed[from].includes(to))
         throw blocked("The usage reservation transition is invalid.");

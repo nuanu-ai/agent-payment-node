@@ -28,13 +28,13 @@ export declare function gaslessCapabilities(profile?: string): {
     provider_networks: {
         local: import("./model.js").GaslessChainId[];
         "metamask-agent-wallet": {
-            chain_id: 1 | 8453 | 42161 | 10 | 137 | 143 | 1329 | 59144;
+            chain_id: 1 | 10 | 8453 | 42161 | 137 | 143 | 1329 | 59144;
             name: string;
             token: `0x${string}`;
             symbol: string;
             decimals: number;
             rpc_environment: string;
-            finality_tag: "safe" | "finalized";
+            finality_tag: "finalized" | "safe";
             deployment_evidence_hash: string;
             executable_adapter: boolean;
             action_time_verification_required: boolean;

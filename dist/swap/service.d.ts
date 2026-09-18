@@ -19,6 +19,8 @@ export declare class GuardedSwapService {
     markSubmitting(operation: SwapOperationRecord, now: Date): Promise<SwapOperationRecord>;
     recordPossibleSend(operation: SwapOperationRecord, state: "submitted" | "unknown_finality", now: Date, receiptProof?: SwapReceiptProof): Promise<SwapOperationRecord>;
     finalize(operation: SwapOperationRecord, now: Date, receiptProof: SwapReceiptProof): Promise<SwapOperationRecord>;
+    /** A finalized reverted receipt proves the input never left; only gas was spent. The principal lease is released. */
+    failConfirmedRevert(operation: SwapOperationRecord, now: Date, revertProof: SwapReceiptProof): Promise<SwapOperationRecord>;
     failBeforeEffect(operation: SwapOperationRecord, now: Date, failureProofHash: string): Promise<SwapOperationRecord>;
     resumeDirective(operation: SwapOperationRecord): "prepare_or_approve" | "observe_only" | "terminal";
 }

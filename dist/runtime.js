@@ -5,6 +5,8 @@ import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
     portfolio;
+    uniswapRuntime;
+    sunswapRuntime;
     uniswap;
     sunswap;
     jupiter;
@@ -47,6 +49,10 @@ export class RuntimeContext {
     constructor(dependencies) {
         if (dependencies.portfolio !== undefined)
             this.portfolio = dependencies.portfolio;
+        if (dependencies.uniswapRuntime !== undefined)
+            this.uniswapRuntime = dependencies.uniswapRuntime;
+        if (dependencies.sunswapRuntime !== undefined)
+            this.sunswapRuntime = dependencies.sunswapRuntime;
         if (dependencies.uniswap !== undefined)
             this.uniswap = dependencies.uniswap;
         if (dependencies.sunswap !== undefined)
