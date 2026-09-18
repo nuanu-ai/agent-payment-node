@@ -7,6 +7,7 @@ import { PRODUCT_VERSION } from "./constants.js";
 import { chainPolicyHandoff, RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
 import { MCP_TOOLS } from "./mcp-projection.js";
 import { genericTransferHandoff, RejectingMcpRailApproval, RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
+import { oneClickSubmitHandoff } from "./lifi/near-oneclick-command-catalog.js";
 import { failureEnvelope } from "./output.js";
 import { createApnCore, executeBoundCommand } from "./runtime-factory.js";
 import { ApnError } from "./errors.js";
@@ -60,6 +61,9 @@ async function callTool(tool, input, options) {
             const handoff = createCliHandoff(["apn", "swap", uniswap ? "ethereum" : "tron", uniswap ? "uniswap" : "sunswap",
                 action, "--operation", bound.request.operationId]);
             return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Guarded swap approval and execution must continue in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
+        }
+        if (bound.request.command === "oneclick.source.submit") {
+            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review and approve this exact 1Click deposit in the foreground CLI.", { ...cliHandoffDetails(oneClickSubmitHandoff(bound.request)), foreground_auth: true }));
         }
         if (bound.request.command === "wallet.connect") {
             const handoff = walletConnectHandoff(bound.request);

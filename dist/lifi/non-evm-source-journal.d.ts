@@ -48,9 +48,9 @@ declare const rpcObservedNearSafe: z.ZodObject<{
     receiptHash: z.ZodString;
     logsHash: z.ZodString;
     executionAdmitted: z.ZodLiteral<false>;
+    bridgeCompletion: z.ZodLiteral<false>;
     protocolInputDigest: z.ZodString;
     protocolProofHash: z.ZodNullable<z.ZodString>;
-    bridgeCompletion: z.ZodLiteral<false>;
     provenance: z.ZodLiteral<"rpc_observed_untrusted_near_tron_base_source_v1">;
 }, z.core.$strict>;
 declare const schemaV1: z.ZodObject<{
@@ -119,9 +119,9 @@ declare const schemaV1: z.ZodObject<{
             receiptHash: z.ZodString;
             logsHash: z.ZodString;
             executionAdmitted: z.ZodLiteral<false>;
+            bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
             protocolProofHash: z.ZodNullable<z.ZodString>;
-            bridgeCompletion: z.ZodLiteral<false>;
             provenance: z.ZodLiteral<"rpc_observed_untrusted_near_tron_base_source_v1">;
         }, z.core.$strict>]>>;
         reason: z.ZodNullable<z.ZodString>;
@@ -188,9 +188,9 @@ declare const schemaV1: z.ZodObject<{
         receiptHash: z.ZodString;
         logsHash: z.ZodString;
         executionAdmitted: z.ZodLiteral<false>;
+        bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
         protocolProofHash: z.ZodNullable<z.ZodString>;
-        bridgeCompletion: z.ZodLiteral<false>;
         provenance: z.ZodLiteral<"rpc_observed_untrusted_near_tron_base_source_v1">;
     }, z.core.$strict>]>>;
     reason: z.ZodNullable<z.ZodString>;
@@ -292,9 +292,9 @@ declare const schemaV2: z.ZodObject<{
             receiptHash: z.ZodString;
             logsHash: z.ZodString;
             executionAdmitted: z.ZodLiteral<false>;
+            bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
             protocolProofHash: z.ZodNullable<z.ZodString>;
-            bridgeCompletion: z.ZodLiteral<false>;
             provenance: z.ZodLiteral<"rpc_observed_untrusted_near_tron_base_source_v1">;
         }, z.core.$strict>]>>;
         reason: z.ZodNullable<z.ZodString>;
@@ -361,9 +361,9 @@ declare const schemaV2: z.ZodObject<{
         receiptHash: z.ZodString;
         logsHash: z.ZodString;
         executionAdmitted: z.ZodLiteral<false>;
+        bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
         protocolProofHash: z.ZodNullable<z.ZodString>;
-        bridgeCompletion: z.ZodLiteral<false>;
         provenance: z.ZodLiteral<"rpc_observed_untrusted_near_tron_base_source_v1">;
     }, z.core.$strict>]>>;
     reason: z.ZodNullable<z.ZodString>;
@@ -473,9 +473,9 @@ declare const schemaV3: z.ZodObject<{
             receiptHash: z.ZodString;
             logsHash: z.ZodString;
             executionAdmitted: z.ZodLiteral<false>;
+            bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
             protocolProofHash: z.ZodNullable<z.ZodString>;
-            bridgeCompletion: z.ZodLiteral<false>;
             provenance: z.ZodLiteral<"rpc_observed_untrusted_near_tron_base_source_v1">;
         }, z.core.$strict>]>>;
         reason: z.ZodNullable<z.ZodString>;
@@ -544,9 +544,9 @@ declare const schemaV3: z.ZodObject<{
         receiptHash: z.ZodString;
         logsHash: z.ZodString;
         executionAdmitted: z.ZodLiteral<false>;
+        bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
         protocolProofHash: z.ZodNullable<z.ZodString>;
-        bridgeCompletion: z.ZodLiteral<false>;
         provenance: z.ZodLiteral<"rpc_observed_untrusted_near_tron_base_source_v1">;
     }, z.core.$strict>]>>;
     draftIntegrityHash: z.ZodString;

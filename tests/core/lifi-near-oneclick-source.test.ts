@@ -3,6 +3,8 @@ import test from "node:test";
 import { inspectOneClickSourceQuote, oneClickStatusQuoteMatchesRecord, assertOneClickPostApproval } from "../../src/lifi/near-oneclick-source-service.js";
 import type { OneClickSourceRecord } from "../../src/lifi/near-oneclick-source-journal.js";
 import { bindOneClickCommand } from "../../src/lifi/near-oneclick-command-catalog.js";
+import { oneClickLane } from "../../src/lifi/near-oneclick-lanes.js";
+const lane = oneClickLane("base-usdc-to-tron-usdt");
 const now = Date.parse("2026-09-17T00:00:00.000Z");
 const request = { dry: false, swapType: "EXACT_INPUT", slippageTolerance: 100,
   originAsset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
@@ -14,22 +16,22 @@ const response = { timestamp: "2026-09-17T00:00:00.000Z", signature: "a".repeat(
   amountOut: "1264167", minAmountOut: "1251525", deadline: "2026-09-20T00:00:00.000Z",
   depositAddress: "0x76b4c56085ED136a8744D52bE956396624a730E8", depositMemo: null } };
 test("1Click direct quote binds exact Base amount, recipient, minimum and short requested deadline", () => {
-  const result = inspectOneClickSourceQuote(response, request, 1000000n, 2000000n, now);
+  const result = inspectOneClickSourceQuote(response, request, 1000000n, 2000000n, now, lane);
   assert.equal(result.amountIn, 3000000n); assert.equal(result.minimum, 1251525n);
   assert.equal(result.deposit, "0x76b4c56085ED136a8744D52bE956396624a730E8");
   assert.equal(result.effectiveDeadline, request.deadline);
-  assert.throws(() => inspectOneClickSourceQuote({ ...response, quoteRequest: { ...request, recipient: "TWrong" } }, request, 1000000n, 2000000n, now));
-  assert.throws(() => inspectOneClickSourceQuote({ ...response, quote: { ...response.quote, minAmountOut: "999999" } }, request, 1000000n, 2000000n, now));
-  assert.throws(() => inspectOneClickSourceQuote({ ...response, quote: { ...response.quote, depositMemo: "123" } }, request, 1000000n, 2000000n, now));
-  assert.throws(() => inspectOneClickSourceQuote(response, request, 1000000n, 2000000n, now + 150000));
+  assert.throws(() => inspectOneClickSourceQuote({ ...response, quoteRequest: { ...request, recipient: "TWrong" } }, request, 1000000n, 2000000n, now, lane));
+  assert.throws(() => inspectOneClickSourceQuote({ ...response, quote: { ...response.quote, minAmountOut: "999999" } }, request, 1000000n, 2000000n, now, lane));
+  assert.throws(() => inspectOneClickSourceQuote({ ...response, quote: { ...response.quote, depositMemo: "123" } }, request, 1000000n, 2000000n, now, lane));
+  assert.throws(() => inspectOneClickSourceQuote(response, request, 1000000n, 2000000n, now + 150000, lane));
   const earlier = { ...response, quote: { ...response.quote, deadline: "2026-09-17T00:01:10.000Z" } };
-  assert.equal(inspectOneClickSourceQuote(earlier, request, 1000000n, 2000000n, now).effectiveDeadline,
+  assert.equal(inspectOneClickSourceQuote(earlier, request, 1000000n, 2000000n, now, lane).effectiveDeadline,
     "2026-09-17T00:01:10.000Z");
   assert.throws(() => inspectOneClickSourceQuote({ ...response, quote: { ...response.quote,
-    deadline: "2026-09-17T00:00:40.000Z" } }, request, 1000000n, 2000000n, now));
+    deadline: "2026-09-17T00:00:40.000Z" } }, request, 1000000n, 2000000n, now, lane));
 });
 test("1Click command binding carries explicit limits", () => {
-  const bound = bindOneClickCommand("oneclick source submit", { "--profile": "evm-live-buyer",
+  const bound = bindOneClickCommand("oneclick source submit", { "--lane": "base-usdc-to-tron-usdt", "--profile": "evm-live-buyer",
     "--expected-payer": request.refundTo, "--recipient": request.recipient, "--amount-atomic": request.amount,
     "--min-output-atomic": "1000000", "--max-quoted-loss-atomic": "2000000", "--max-gas-limit-atomic": "100000",
     "--max-fee-per-gas-wei": "2000000000", "--max-priority-fee-per-gas-wei": "100000000",
@@ -51,12 +53,12 @@ test("durable 1Click journal seals exact ERC20 transfer and permits one submissi
     const data = encodeFunctionData({ abi: parseAbi(["function transfer(address,uint256) returns (bool)"]),
       functionName: "transfer", args: [deposit, 3000000n] });
     const repo = new OneClickSourceJournal(temp.root);
-    let record = await repo.stage({ operationId: "a".repeat(64), profileHash: "b".repeat(64), payer: account.address,
+    let record = await repo.stage({ lane: "base-usdc-to-tron-usdt", operationId: "a".repeat(64), profileHash: "b".repeat(64), payer: account.address,
       recipient: request.recipient, refundTo: account.address, depositAddress: deposit, quoteHash: "c".repeat(64),
       quoteRequestDeadline: request.deadline, quoteDeadline: response.quote.deadline,
       effectiveDeadline: request.deadline, amountInAtomic: "3000000", minAmountOutAtomic: "1251525",
       quotedAmountOutAtomic: "1264167", sourceBlockHash: `0x${"d".repeat(64)}`,
-      sourceCall: { to: token, data, nonce: "7", gas: "100000", maxFeePerGas: "2000000000",
+      sourceCall: { to: token, data, value: "0", nonce: "7", gas: "100000", maxFeePerGas: "2000000000",
         maxPriorityFeePerGas: "100000000", maxNativeDebitWei: "200000000000000" } });
     record = await repo.advance(record.operationId, record.integrityHash, "signing_started");
     const raw = await account.signTransaction({ type: "eip1559", chainId: 8453, to: token, data, value: 0n,
@@ -85,7 +87,7 @@ test("provider status binds the live quote shape despite a different outer corre
   const actualEnvelope = { correlationId: "quote-correlation", ...stable };
   const statusQuote = { ...stable, quoteRequest: statusRequest };
   const statusEnvelope = { correlationId: "status-correlation", quoteResponse: statusQuote, status: "PENDING_DEPOSIT" };
-  const inspected = inspectOneClickSourceQuote(actualEnvelope, request, 1000000n, 2000000n, now);
+  const inspected = inspectOneClickSourceQuote(actualEnvelope, request, 1000000n, 2000000n, now, lane);
   const record = { schemaVersion: "apn.oneclick-source.v2" as const, quoteHash: inspected.quoteHash, payer: request.refundTo, refundTo: request.refundTo,
     recipient: request.recipient, depositAddress: response.quote.depositAddress,
     quoteRequestDeadline: request.deadline, quoteDeadline: response.quote.deadline,

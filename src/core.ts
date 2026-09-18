@@ -192,7 +192,7 @@ export class ApnCore {
       case "oneclick.source.submit": {
         const service = this.context.oneClickSource;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "1Click source runtime is unavailable.");
-        return dataOutcome(await service.submit(request), "oneclick_base_source_submission_only");
+        return dataOutcome(await service.submit(request), "oneclick_source_submission_only");
       }
       case "oneclick.source.status": {
         const service = this.context.oneClickSource;
