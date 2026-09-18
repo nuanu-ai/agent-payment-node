@@ -4,6 +4,7 @@ import type { Address, Hex } from "../model.js";
 export const ACROSS_SELECTOR = "0x1794958f" as Hex;
 export const STARGATE_SELECTOR = "0xa6010a66" as Hex;
 export const FEE_FORWARDER_SELECTOR = "0x332d746b" as Hex;
+export const FEE_FORWARDER_NATIVE_SELECTOR = "0x0e8ae67f" as Hex;
 
 export const FEE_FORWARDER = "0xCE40449B773a3E6E5e769ADb4e567179d4828cbd" as Address;
 export const FEE_RECIPIENT = "0xC06ebbefD94032B85424D51906e2A335EFAe264B" as Address;
@@ -22,6 +23,7 @@ export const stargateBridgeAbi = parseAbi([
 
 export const feeForwarderAbi = parseAbi([
   "function forwardERC20Fees(address token,(address recipient,uint256 amount)[] distributions)",
+  "function forwardNativeFees((address recipient,uint256 amount)[] distributions) payable",
 ]);
 
 export const bridgeEventsAbi = parseAbi([
@@ -33,6 +35,8 @@ export const bridgeEventsAbi = parseAbi([
   "event OFTReceived(bytes32 indexed guid,uint32 srcEid,address indexed toAddress,uint256 amountReceivedLD)",
   "event UnreceivedTokenCached(bytes32 guid,uint8 index,uint32 srcEid,address receiver,uint256 amountLD,bytes composeMsg)",
   "event Transfer(address indexed from,address indexed to,uint256 value)",
+  "event Deposit(address indexed dst,uint256 wad)",
+  "event Withdrawal(address indexed src,uint256 wad)",
 ]);
 
 export const EVENT_TOPICS = {
@@ -44,6 +48,8 @@ export const EVENT_TOPICS = {
   oftReceived: "0xefed6d3500546b29533b128a29e3a94d70788727f0507505ac12eaf2e578fd9c",
   unreceivedTokenCached: "0x007c17198cd078035dc663f9a0961f84cb6265411d0b4c793f96d432f6af4b55",
   transfer: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+  wrappedDeposit: "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c",
+  wrappedWithdrawal: "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65",
 } as const satisfies Readonly<Record<string, Hex>>;
 
 export const deploymentAbi = parseAbi([
@@ -65,4 +71,7 @@ export const deploymentAbi = parseAbi([
   "function endpoint() view returns (address)",
   "function sharedDecimals() view returns (uint8)",
   "function getAddressConfig() view returns (address feeLib,address planner,address treasurer,address tokenMessaging,address creditMessaging,address lzToken)",
+  "function basisPointsRate() view returns (uint256)",
+  "function maximumFee() view returns (uint256)",
+  "function deprecated() view returns (bool)",
 ]);
