@@ -56,6 +56,8 @@ import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVA
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
+import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
+import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -132,6 +134,12 @@ export function createApnCore(bound, options = {}) {
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
             foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
         : undefined);
+    // Keyless Orca uses the owner-named APN_SOLANA_RPC_URL rail client and the encrypted local Solana wallet.
+    const orcaRuntime = options.orcaRuntime ?? (bound.request.command.startsWith("swap.orca.")
+        ? createOrcaKeylessRuntime({ state, clock, rpc: solanaRpc, accounts: chainAccounts, verifyPins: verifyOrcaProgramPins,
+            policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
+            foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
+        : undefined);
     return new ApnCore({
         state,
         // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
@@ -140,6 +148,7 @@ export function createApnCore(bound, options = {}) {
         } : {}),
         ...(uniswapRuntime === undefined ? {} : { uniswapRuntime }),
         ...(sunswapRuntime === undefined ? {} : { sunswapRuntime }),
+        ...(orcaRuntime === undefined ? {} : { orcaRuntime }),
         ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
         ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
         ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
