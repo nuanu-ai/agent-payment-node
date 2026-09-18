@@ -9,7 +9,7 @@ import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import { StateStore } from "../../src/state.js";
 import {
   JUPITER_SWAP_API_V2, JUPITER_V6_PROGRAM, SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT, SUNSWAP_PIN_CATALOG,
-  SUNSWAP_USDT, SUNSWAP_V4_UNIVERSAL_ROUTER, WRAPPED_SOL_MINT,
+  SUNSWAP_USDT, SUNSWAP_V2_ROUTER, WRAPPED_SOL_MINT,
 } from "../../src/swap/index.js";
 import { temporaryState } from "./helpers.js";
 
@@ -72,7 +72,7 @@ test("inventories expose frozen chain identities without admission and runtime f
   const core = new ApnCore({ state: new StateStore(temporary.root) });
   const sun = await core.execute({ command: "swap.sunswap.inventory" });
   assert.equal(sun.ok, true); assert.equal((sun.data as any).admitted, false); assert.equal((sun.data as any).execution, "dormant");
-  assert.equal((sun.data as any).catalog.router, SUNSWAP_V4_UNIVERSAL_ROUTER); assert.equal((sun.data as any).catalog.usdt, SUNSWAP_USDT);
+  assert.equal((sun.data as any).catalog.router.address, SUNSWAP_V2_ROUTER); assert.equal((sun.data as any).catalog.usdt.address, SUNSWAP_USDT);
   assert.deepEqual((sun.data as any).catalog, SUNSWAP_PIN_CATALOG);
   const jupiter = await core.execute({ command: "swap.jupiter.inventory" });
   assert.equal(jupiter.ok, true); assert.equal((jupiter.data as any).admitted, false); assert.equal((jupiter.data as any).execution, "dormant");

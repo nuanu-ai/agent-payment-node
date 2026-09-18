@@ -3,7 +3,7 @@ import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical
 import { ApnError } from "../../errors.js";
 import { tronAddress, tronHash, tronHex } from "../../tron/codec.js";
 import { decodeSunSwapCalldata } from "./calldata.js";
-import { SUNSWAP_V4_UNIVERSAL_ROUTER } from "./catalog.js";
+import { SUNSWAP_V2_ROUTER } from "./catalog.js";
 export function buildSunSwapUnsignedTransaction(input) {
     if (!isPlainRecord(input) || !exactKeys(input, ["owner", "recipient", "inputAmountAtomic", "minimumOutputAtomic", "deadlineSeconds",
         "maximumEnergy", "energyPriceSun", "maximumFeeLimitSun", "calldata", "callValueAtomic", "referenceBlockId", "timestampMs",
@@ -19,7 +19,7 @@ export function buildSunSwapUnsignedTransaction(input) {
         invalid();
     const raw_data = {
         contract: [{ type: "TriggerSmartContract", parameter: { type_url: "type.googleapis.com/protocol.TriggerSmartContract",
-                    value: { owner_address: tronHex(input.owner), contract_address: tronHex(SUNSWAP_V4_UNIVERSAL_ROUTER), data: input.calldata.slice(2), call_value: callValue } } }],
+                    value: { owner_address: tronHex(input.owner), contract_address: tronHex(SUNSWAP_V2_ROUTER), data: input.calldata.slice(2), call_value: callValue } } }],
         ref_block_bytes: input.referenceBlockId.slice(12, 16), ref_block_hash: input.referenceBlockId.slice(16, 32), timestamp, expiration, fee_limit: feeLimit,
     };
     try {

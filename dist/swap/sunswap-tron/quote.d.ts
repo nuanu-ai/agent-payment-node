@@ -1,41 +1,18 @@
 import { type SwapQuoteSnapshot, type SwapSimulationProof } from "../quote.js";
-export interface SunSwapQuoteRoute {
-    readonly inputAmountAtomic: string;
-    readonly roadForAddr: readonly string[];
-    readonly roadForName: readonly string[];
-    readonly pool: readonly string[];
-    readonly amount: string;
-    readonly amountOutAtomic: string;
-    readonly inUsd: string;
-    readonly outUsd: string;
-    readonly impact: string;
-    readonly fee: string;
-    readonly routeHash: string;
-}
-export interface SunSwapQuoteRequest {
-    readonly inputAmountAtomic: string;
-}
+import { type SunSwapV2Market } from "./market.js";
 export interface SunSwapQuoteSnapshotInput {
     readonly profile: string;
     readonly account: string;
     readonly recipient: string;
-    readonly inputAmountAtomic: string;
-    readonly minimumOutputAtomic: string;
     readonly slippageBps: number;
+    readonly ownerSlippageCapBps: number;
     readonly effectiveAt: string;
     readonly expiresAt: string;
-    readonly providerResponseHash: string;
     readonly unsignedTransactionPayloadHash: string;
-    readonly route: SunSwapQuoteRoute;
+    readonly market: SunSwapV2Market;
     readonly simulation: SwapSimulationProof;
 }
-export declare function sunSwapQuoteUrl(input: SunSwapQuoteRequest): URL;
-export declare function decodeSunSwapQuote(value: unknown, inputAmountAtomic: string): readonly SunSwapQuoteRoute[];
-export declare function validateSunSwapQuoteRoute(value: unknown): SunSwapQuoteRoute;
-export declare function assertSunSwapDirectRoute(value: unknown, minimumOutputAtomic: string): SunSwapQuoteRoute;
+/** The generic quote carries on-chain V2 evidence only: the route hash binds router, pair, path, pins, reserves and block. */
 export declare function createSunSwapQuoteSnapshot(input: SunSwapQuoteSnapshotInput): SwapQuoteSnapshot;
-export declare class SunSwapQuoteAdapter {
-    private readonly fetcher;
-    constructor(fetcher?: typeof fetch);
-    quote(input: SunSwapQuoteRequest): Promise<readonly SunSwapQuoteRoute[]>;
-}
+/** No provider response exists: this digest names the raw on-chain constant results and the pinned code hashes read. */
+export declare function sunSwapOnChainEvidenceHash(market: SunSwapV2Market): string;

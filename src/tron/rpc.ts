@@ -9,11 +9,17 @@ export type TronMethod =
   | "wallet/getblockbynum" | "wallet/getnowblock" | "wallet/getnodeinfo"
   | "wallet/getchainparameters" | "wallet/getnextmaintenancetime"
   | "wallet/getaccount" | "wallet/getaccountresource" | "wallet/triggerconstantcontract"
-  | "wallet/estimateenergy" | "wallet/broadcasttransaction"
+  | "wallet/estimateenergy" | "wallet/broadcasttransaction" | "wallet/getcontractinfo"
+  | "wallet/gettransactionbyid" | "wallet/gettransactioninfobyid"
   | "walletsolidity/gettransactionbyid" | "walletsolidity/gettransactioninfobyid"
   | "walletsolidity/getblockbynum" | "walletsolidity/getnowblock"
   | "walletsolidity/getaccount" | "walletsolidity/triggerconstantcontract";
-const METHODS: readonly TronMethod[] = ["wallet/getblockbynum", "wallet/getnowblock", "wallet/getnodeinfo", "wallet/getchainparameters", "wallet/getnextmaintenancetime", "wallet/getaccount", "wallet/getaccountresource", "wallet/triggerconstantcontract", "wallet/estimateenergy", "wallet/broadcasttransaction", "walletsolidity/gettransactionbyid", "walletsolidity/gettransactioninfobyid", "walletsolidity/getblockbynum", "walletsolidity/getnowblock", "walletsolidity/getaccount", "walletsolidity/triggerconstantcontract"];
+export const TRON_RPC_METHODS: readonly TronMethod[] = Object.freeze(["wallet/getblockbynum", "wallet/getnowblock", "wallet/getnodeinfo",
+  "wallet/getchainparameters", "wallet/getnextmaintenancetime", "wallet/getaccount", "wallet/getaccountresource",
+  "wallet/triggerconstantcontract", "wallet/estimateenergy", "wallet/broadcasttransaction", "wallet/getcontractinfo",
+  "wallet/gettransactionbyid", "wallet/gettransactioninfobyid", "walletsolidity/gettransactionbyid",
+  "walletsolidity/gettransactioninfobyid", "walletsolidity/getblockbynum", "walletsolidity/getnowblock", "walletsolidity/getaccount",
+  "walletsolidity/triggerconstantcontract"] as const);
 export interface TronRpcPort {
   readonly originHash: string;
   call(method: TronMethod, body: Readonly<Record<string, unknown>>): Promise<unknown>;
@@ -24,7 +30,7 @@ export class TronRpc implements TronRpcPort {
     this.originHash = sha256(endpoint ?? "tron_rpc_unconfigured");
   }
   async call(method: TronMethod, body: Readonly<Record<string, unknown>>): Promise<unknown> {
-    if (this.endpoint === undefined || !METHODS.includes(method)) configFailure();
+    if (this.endpoint === undefined || !TRON_RPC_METHODS.includes(method)) configFailure();
     let base: URL;
     try { base = parsePublicHttpsUrl(this.endpoint, "APN_RPC_CONFIG", "TRON RPC endpoint", 2048); } catch { return configFailure(); }
     if (base.protocol !== "https:" || base.username !== "" || base.password !== "" || base.hash !== "" || base.search !== "" || base.port !== "" && base.port !== "443") configFailure();

@@ -1,4 +1,5 @@
-export type TronMethod = "wallet/getblockbynum" | "wallet/getnowblock" | "wallet/getnodeinfo" | "wallet/getchainparameters" | "wallet/getnextmaintenancetime" | "wallet/getaccount" | "wallet/getaccountresource" | "wallet/triggerconstantcontract" | "wallet/estimateenergy" | "wallet/broadcasttransaction" | "walletsolidity/gettransactionbyid" | "walletsolidity/gettransactioninfobyid" | "walletsolidity/getblockbynum" | "walletsolidity/getnowblock" | "walletsolidity/getaccount" | "walletsolidity/triggerconstantcontract";
+export type TronMethod = "wallet/getblockbynum" | "wallet/getnowblock" | "wallet/getnodeinfo" | "wallet/getchainparameters" | "wallet/getnextmaintenancetime" | "wallet/getaccount" | "wallet/getaccountresource" | "wallet/triggerconstantcontract" | "wallet/estimateenergy" | "wallet/broadcasttransaction" | "wallet/getcontractinfo" | "wallet/gettransactionbyid" | "wallet/gettransactioninfobyid" | "walletsolidity/gettransactionbyid" | "walletsolidity/gettransactioninfobyid" | "walletsolidity/getblockbynum" | "walletsolidity/getnowblock" | "walletsolidity/getaccount" | "walletsolidity/triggerconstantcontract";
+export declare const TRON_RPC_METHODS: readonly TronMethod[];
 export interface TronRpcPort {
     readonly originHash: string;
     call(method: TronMethod, body: Readonly<Record<string, unknown>>): Promise<unknown>;
