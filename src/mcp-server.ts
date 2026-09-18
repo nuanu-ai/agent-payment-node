@@ -87,6 +87,12 @@ async function callTool(
         "Guarded swap approval and execution must continue in the foreground CLI.",
         { ...cliHandoffDetails(handoff), foreground_auth: true }));
     }
+    if (bound.request.command === "swap.orca.approve" || bound.request.command === "swap.orca.execute") {
+      const handoff = createCliHandoff(["apn", "swap", "solana", "orca", bound.request.command === "swap.orca.approve" ? "approve" : "execute",
+        "--operation", bound.request.operationId]);
+      return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED",
+        "Guarded swap approval and execution must continue in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
+    }
     if (bound.request.command === "oneclick.source.submit") {
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED",
         "Review and approve this exact 1Click deposit in the foreground CLI.", { ...cliHandoffDetails(oneClickSubmitHandoff(bound.request)), foreground_auth: true }));

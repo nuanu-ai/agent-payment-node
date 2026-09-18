@@ -1,5 +1,5 @@
 export declare const SWAP_MECHANISM_PIN_SCHEMA: "apn.swap-mechanism-pin.v1";
-export type SwapProtocolFamily = "uniswap_ethereum" | "sunswap_tron" | "jupiter_solana";
+export type SwapProtocolFamily = "uniswap_ethereum" | "sunswap_tron" | "jupiter_solana" | "orca_solana";
 export type SwapNetworkFamily = "evm" | "tron" | "solana";
 export interface SwapMechanismPin {
     readonly schemaVersion: typeof SWAP_MECHANISM_PIN_SCHEMA;

@@ -683,6 +683,12 @@ apn swap solana jupiter prepare --profile <profile> --quote <string> --idempoten
 apn swap solana jupiter status --operation <operation_id>
 apn swap solana jupiter approve --operation <operation_id>
 apn swap solana jupiter execute --operation <operation_id>
+apn swap solana orca inventory
+apn swap solana orca quote --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
+apn swap solana orca prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
+apn swap solana orca status --operation <operation_id>
+apn swap solana orca approve --operation <operation_id>
+apn swap solana orca execute --operation <operation_id>
 ```
 <!-- END APN COMMAND CATALOG -->
 
