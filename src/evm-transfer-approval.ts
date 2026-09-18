@@ -1,5 +1,6 @@
 import { ApnError } from "./errors.js";
 import { requireEvmFunding, requireEvmRpc, evmTransaction } from "./evm-direct.js";
+import { directEvmNetwork } from "./evm-direct-networks.js";
 import type { Economics, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
 import { validateEconomics } from "./transfer-policy.js";
@@ -37,7 +38,7 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
       throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen nonce or transaction fee envelope is no longer executable before approval.");
     }
   }
-  if (!beforeSigning && operation.chainId === 42161) {
+  if (!beforeSigning && directEvmNetwork(operation.chainId).feeModel === "arbitrum-inclusive") {
     const fees = await rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic));
     const current = validateEconomics(operation.economics.nonceAtomic, fees);
     if (!frozenEconomicsRemainExecutable({ ...current, nonceAtomic: operation.economics.nonceAtomic }, operation.economics)) {
