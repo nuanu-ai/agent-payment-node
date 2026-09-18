@@ -1,0 +1,204 @@
+{
+  "observedAt": "2026-09-18T07:39:52.912Z",
+  "note": "Ephemeral unfunded payer and payee generated in memory; POST /verify only; no /settle; keys discarded.",
+  "payer": "0x22a9cEa90b40C019591FCf74F078bcF745de193D",
+  "payTo": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+  "payerUsdtBalance": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "payerEip2612Nonce": "0",
+  "cases": [
+    {
+      "case": "permit2_plain",
+      "endpoint": "https://facilitator.payai.network/verify",
+      "startedAt": "2026-09-18T07:39:50.937Z",
+      "request": {
+        "x402Version": 2,
+        "paymentPayload": {
+          "x402Version": 2,
+          "accepted": {
+            "scheme": "exact",
+            "network": "eip155:43114",
+            "asset": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "amount": "1",
+            "payTo": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+            "maxTimeoutSeconds": 60,
+            "extra": {
+              "assetTransferMethod": "permit2",
+              "name": "TetherToken",
+              "version": "1"
+            }
+          },
+          "payload": {
+            "signature": "0x3f23d0fb21cf17771347ea15530b31e2766f2bf4fea533554733c6277ff53658559fb0b2551c81e938cb839a5997d1a271234786b1271cce38549fa481945f541b",
+            "permit2Authorization": {
+              "from": "0x22a9cEa90b40C019591FCf74F078bcF745de193D",
+              "permitted": {
+                "token": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+                "amount": "1"
+              },
+              "spender": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+              "nonce": "14496826119353092323971522301858901587713638513641362470213992886565995664845",
+              "deadline": "1789717250",
+              "witness": {
+                "to": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+                "validAfter": "0"
+              }
+            }
+          }
+        },
+        "paymentRequirements": {
+          "scheme": "exact",
+          "network": "eip155:43114",
+          "asset": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+          "amount": "1",
+          "payTo": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "assetTransferMethod": "permit2",
+            "name": "TetherToken",
+            "version": "1"
+          }
+        }
+      },
+      "status": 200,
+      "response": {
+        "isValid": false,
+        "invalidReason": "permit2_insufficient_balance",
+        "payer": "0x22a9cEa90b40C019591FCf74F078bcF745de193D"
+      }
+    },
+    {
+      "case": "permit2_eip2612GasSponsoring",
+      "endpoint": "https://facilitator.payai.network/verify",
+      "startedAt": "2026-09-18T07:39:52.178Z",
+      "request": {
+        "x402Version": 2,
+        "paymentPayload": {
+          "x402Version": 2,
+          "accepted": {
+            "scheme": "exact",
+            "network": "eip155:43114",
+            "asset": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "amount": "1",
+            "payTo": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+            "maxTimeoutSeconds": 60,
+            "extra": {
+              "assetTransferMethod": "permit2",
+              "name": "TetherToken",
+              "version": "1"
+            }
+          },
+          "payload": {
+            "signature": "0x3f23d0fb21cf17771347ea15530b31e2766f2bf4fea533554733c6277ff53658559fb0b2551c81e938cb839a5997d1a271234786b1271cce38549fa481945f541b",
+            "permit2Authorization": {
+              "from": "0x22a9cEa90b40C019591FCf74F078bcF745de193D",
+              "permitted": {
+                "token": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+                "amount": "1"
+              },
+              "spender": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+              "nonce": "14496826119353092323971522301858901587713638513641362470213992886565995664845",
+              "deadline": "1789717250",
+              "witness": {
+                "to": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+                "validAfter": "0"
+              }
+            }
+          },
+          "extensions": {
+            "eip2612GasSponsoring": {
+              "info": {
+                "from": "0x22a9cEa90b40C019591FCf74F078bcF745de193D",
+                "asset": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+                "spender": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+                "amount": "1",
+                "nonce": "0",
+                "deadline": "1789717250",
+                "signature": "0xaeb18d42015f6c35e7a22554b8cfbd8d9bec18e9f41af3811250accd67f9bfb773e96450e3daa898dc03d25126255b442c85c2a239eb2527af4fd5bfed3a9c0f1b",
+                "version": "1"
+              }
+            }
+          }
+        },
+        "paymentRequirements": {
+          "scheme": "exact",
+          "network": "eip155:43114",
+          "asset": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+          "amount": "1",
+          "payTo": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "assetTransferMethod": "permit2",
+            "name": "TetherToken",
+            "version": "1"
+          }
+        }
+      },
+      "status": 200,
+      "response": {
+        "isValid": false,
+        "invalidReason": "permit2_insufficient_balance",
+        "payer": "0x22a9cEa90b40C019591FCf74F078bcF745de193D"
+      }
+    },
+    {
+      "case": "permit2_tampered_signature",
+      "endpoint": "https://facilitator.payai.network/verify",
+      "startedAt": "2026-09-18T07:39:52.568Z",
+      "request": {
+        "x402Version": 2,
+        "paymentPayload": {
+          "x402Version": 2,
+          "accepted": {
+            "scheme": "exact",
+            "network": "eip155:43114",
+            "asset": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "amount": "1",
+            "payTo": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+            "maxTimeoutSeconds": 60,
+            "extra": {
+              "assetTransferMethod": "permit2",
+              "name": "TetherToken",
+              "version": "1"
+            }
+          },
+          "payload": {
+            "signature": "0x3f23d0fb01cf17771347ea15530b31e2766f2bf4fea533554733c6277ff53658559fb0b2551c81e938cb839a5997d1a271234786b1271cce38549fa481945f541b",
+            "permit2Authorization": {
+              "from": "0x22a9cEa90b40C019591FCf74F078bcF745de193D",
+              "permitted": {
+                "token": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+                "amount": "1"
+              },
+              "spender": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+              "nonce": "14496826119353092323971522301858901587713638513641362470213992886565995664845",
+              "deadline": "1789717250",
+              "witness": {
+                "to": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+                "validAfter": "0"
+              }
+            }
+          }
+        },
+        "paymentRequirements": {
+          "scheme": "exact",
+          "network": "eip155:43114",
+          "asset": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+          "amount": "1",
+          "payTo": "0x4193a5E5A77315e4CFA2dDE1D3D528A0a5B49ca1",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "assetTransferMethod": "permit2",
+            "name": "TetherToken",
+            "version": "1"
+          }
+        }
+      },
+      "status": 200,
+      "response": {
+        "isValid": false,
+        "invalidReason": "invalid_permit2_signature",
+        "payer": "0x22a9cEa90b40C019591FCf74F078bcF745de193D"
+      }
+    }
+  ]
+}

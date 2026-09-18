@@ -1,0 +1,25 @@
+HTTP/2 200 
+date: Fri, 18 Sep 2026 07:35:59 GMT
+content-type: application/json; charset=utf-8
+content-length: 4047
+x-powered-by: Express
+ratelimit-policy: "payments-read";q=200;w=1
+cache-control: no-store
+etag: W/"fcf-jGkQ+iKWCXeEqOZqolYxeljwR2U"
+vary: Accept-Encoding
+strict-transport-security: max-age=31536000; includeSubDomains
+
+HTTP/2 200 
+date: Fri, 18 Sep 2026 07:36:16 GMT
+content-type: application/json
+cf-ray: a3ceadbadcd5a6d7-CGK
+cf-cache-status: DYNAMIC
+age: 0
+cache-control: public, max-age=0, must-revalidate
+x-vercel-id: sin1::iad1::x67g7-1789716975997-4dd703c9ef91
+server: cloudflare
+strict-transport-security: max-age=63072000; includeSubDomains; preload
+vary: accept-encoding
+x-matched-path: /facilitator/supported
+x-vercel-cache: MISS
+

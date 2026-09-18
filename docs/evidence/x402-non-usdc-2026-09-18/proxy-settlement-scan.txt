@@ -1,0 +1,5 @@
+Read-only eth_getLogs scan for x402 exact Permit2 proxy events Settled()/SettledWithPermit() at 0x402085c248EeA27D92E8b30b2C58ed07f9E20001, 2026-09-18 ~08:05Z
+avalanche https://api.avax.network/ext/bc/C/rpc head 95574146: none in 10 windows of 2000 blocks
+base https://mainnet.base.org head 51464536: found 2; first 0xb882d8d3bc4add6e20fc13df3654f546de6094eb98436eb44528e87f5f6a6e51 status 0x1 to proxy; logs SBC Approval, SBC Approval, SBC Transfer, proxy SettledWithPermit()
+ethereum https://ethereum-rpc.publicnode.com head 26003049: none in 10 windows of 1000 blocks
+Full Base receipt: tests/fixtures/x402-permit2/base-settle-with-permit-live.json

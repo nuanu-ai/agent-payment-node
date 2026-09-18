@@ -1,0 +1,56 @@
+{
+  "observedAt": "2026-09-18T07:40:40.282Z",
+  "note": "Ephemeral unfunded keys; POST /verify only.",
+  "startedAt": "2026-09-18T07:40:39.208Z",
+  "request": {
+    "x402Version": 2,
+    "paymentPayload": {
+      "x402Version": 2,
+      "accepted": {
+        "scheme": "exact",
+        "network": "eip155:1",
+        "asset": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "amount": "1",
+        "payTo": "0xF19A23b498A5d3F57d8D40893bCF9dDAf04da463",
+        "maxTimeoutSeconds": 60,
+        "extra": {
+          "assetTransferMethod": "permit2"
+        }
+      },
+      "payload": {
+        "signature": "0xa78fbb9e3cb4ec7d23a0142e9db2bd5a3cc67f8ff2ea11b2374c8daac76127e10bbfee682a08016297cd85a8d7b530bb33361e502dba799338317c72193379bb1b",
+        "permit2Authorization": {
+          "from": "0xAB6Dbd17800b3cb6DeA75d67A58fDA3A717aE1d5",
+          "permitted": {
+            "token": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "amount": "1"
+          },
+          "spender": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+          "nonce": "53583744086209908701034512715869373088557414569220809597676715872814641663234",
+          "deadline": "1789717299",
+          "witness": {
+            "to": "0xF19A23b498A5d3F57d8D40893bCF9dDAf04da463",
+            "validAfter": "0"
+          }
+        }
+      }
+    },
+    "paymentRequirements": {
+      "scheme": "exact",
+      "network": "eip155:1",
+      "asset": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "amount": "1",
+      "payTo": "0xF19A23b498A5d3F57d8D40893bCF9dDAf04da463",
+      "maxTimeoutSeconds": 60,
+      "extra": {
+        "assetTransferMethod": "permit2"
+      }
+    }
+  },
+  "status": 400,
+  "response": {
+    "isValid": false,
+    "invalidReason": "invalid_network",
+    "invalidMessage": "Unsupported network: eip155:1"
+  }
+}

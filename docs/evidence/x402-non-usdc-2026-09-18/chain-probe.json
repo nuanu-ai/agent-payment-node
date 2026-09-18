@@ -1,0 +1,866 @@
+{
+  "observedAt": "2026-09-18T07:37:56.023Z",
+  "summary": {
+    "ethereum": {
+      "chainId": "0x1",
+      "permit2": {
+        "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        "codeBytes": 9152,
+        "codeHash": "0xc67d1657868aa5146eaf24fb879fb1fdec3d2d493b3683a61c9c2f4fb2851131"
+      },
+      "exactPermit2Proxy": {
+        "address": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+        "codeBytes": 2913,
+        "codeHash": "0xce6429c0bb49284660683287c0a8fe548a88379072327d026626909d202048b9"
+      },
+      "uptoPermit2Proxy": {
+        "address": "0x4020A4f3b7b90ccA423B9fabCc0CE57C6C240002",
+        "codeBytes": 3142,
+        "codeHash": "0x4662dc27323421a3698be49ac95f7b0dba141c238d31ef543248d1a11f8d8eec"
+      },
+      "exactProxyPERMIT2": "0x000000000000000000000000000000000022d473030f116ddee9f6b43ac78ba3",
+      "usdt": {
+        "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "name()": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000a5465746865722055534400000000000000000000000000000000000000000000",
+        "symbol()": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045553445400000000000000000000000000000000000000000000000000000000",
+        "decimals()": "0x0000000000000000000000000000000000000000000000000000000000000006",
+        "version()": {
+          "error": "execution reverted"
+        },
+        "DOMAIN_SEPARATOR()": {
+          "error": "execution reverted"
+        },
+        "eip712Domain()": {
+          "error": "execution reverted"
+        },
+        "nonces(address)": {
+          "error": "execution reverted"
+        },
+        "authorizationState(address,bytes32)": {
+          "error": "execution reverted"
+        },
+        "TRANSFER_WITH_AUTHORIZATION_TYPEHASH()": {
+          "error": "execution reverted"
+        },
+        "PERMIT_TYPEHASH()": {
+          "error": "execution reverted"
+        },
+        "allowance(address,address)": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "nameDecoded": "Tether USD"
+      }
+    },
+    "avalanche": {
+      "chainId": "0xa86a",
+      "permit2": {
+        "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        "codeBytes": 9152,
+        "codeHash": "0x081beff14e75c5a5c1e60740445f58d54ba0fef228148a11d3e4287dc3551cbb"
+      },
+      "exactPermit2Proxy": {
+        "address": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+        "codeBytes": 2913,
+        "codeHash": "0xce6429c0bb49284660683287c0a8fe548a88379072327d026626909d202048b9"
+      },
+      "uptoPermit2Proxy": {
+        "address": "0x4020A4f3b7b90ccA423B9fabCc0CE57C6C240002",
+        "codeBytes": 0,
+        "codeHash": null
+      },
+      "exactProxyPERMIT2": "0x000000000000000000000000000000000022d473030f116ddee9f6b43ac78ba3",
+      "usdt": {
+        "address": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+        "name()": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000b546574686572546f6b656e000000000000000000000000000000000000000000",
+        "symbol()": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045553447400000000000000000000000000000000000000000000000000000000",
+        "decimals()": "0x0000000000000000000000000000000000000000000000000000000000000006",
+        "version()": {
+          "error": "execution reverted"
+        },
+        "DOMAIN_SEPARATOR()": "0xf6d4d20bf85d69d29f5cd682e5fb2884425e4aa291bb7318e203fd68c96cc0f4",
+        "eip712Domain()": {
+          "error": "execution reverted"
+        },
+        "nonces(address)": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "authorizationState(address,bytes32)": {
+          "error": "execution reverted"
+        },
+        "TRANSFER_WITH_AUTHORIZATION_TYPEHASH()": {
+          "error": "execution reverted"
+        },
+        "PERMIT_TYPEHASH()": {
+          "error": "execution reverted"
+        },
+        "allowance(address,address)": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "nameDecoded": "TetherToken"
+      }
+    }
+  },
+  "log": [
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:48.651Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_chainId",
+        "params": []
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "result": "0x1",
+        "id": 1
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:48.987Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "eth_getCode",
+        "params": [
+          "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "elided": "runtime bytecode",
+          "bytes": 9152,
+          "sha256": "62f01f46295c143ebea4d1cf12be2085d8b93d53f86d95afba4f016ee2d694ba"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:49.280Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "eth_getCode",
+        "params": [
+          "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "elided": "runtime bytecode",
+          "bytes": 2913,
+          "sha256": "bcf0d9a12e9ac8060e1a76ef2bbc0895273c3f9946057376c60cf2fe565cc0f0"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:49.429Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "eth_getCode",
+        "params": [
+          "0x4020A4f3b7b90ccA423B9fabCc0CE57C6C240002",
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "result": {
+          "elided": "runtime bytecode",
+          "bytes": 3142,
+          "sha256": "41a4ff7607b539a7dad42cebf57ce4edc90dba91f9e8bdf6843eda479a74b912"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:49.554Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+            "data": "0x6afdd850"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "result": "0x000000000000000000000000000000000022d473030f116ddee9f6b43ac78ba3"
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:49.734Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0x06fdde03"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000a5465746865722055534400000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:49.874Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0x95d89b41"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045553445400000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:50.025Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0x313ce567"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000006",
+        "id": 8
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:50.165Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0x54fd4d50"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "error": {
+          "code": 3,
+          "message": "execution reverted"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:50.331Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0x3644e515"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "error": {
+          "code": 3,
+          "message": "execution reverted"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:50.480Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0x84b0196e"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "error": {
+          "code": 3,
+          "message": "execution reverted"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:50.623Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0x7ecebe000000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "error": {
+          "code": 3,
+          "message": "execution reverted"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:50.780Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0xe94a010200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "error": {
+          "code": 3,
+          "message": "execution reverted"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:51.121Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0xa0cc6a68"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "error": {
+          "code": 3,
+          "message": "execution reverted"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:51.340Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 15,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0x30adf81f"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 15,
+        "error": {
+          "code": 3,
+          "message": "execution reverted"
+        }
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "started": "2026-09-18T07:37:51.484Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 16,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "data": "0xdd62ed3e0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000022d473030f116ddee9f6b43ac78ba3"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 16,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:51.630Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 17,
+        "method": "eth_chainId",
+        "params": []
+      },
+      "response": {
+        "result": "0xa86a",
+        "id": 17,
+        "jsonrpc": "2.0"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:51.889Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 18,
+        "method": "eth_getCode",
+        "params": [
+          "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 18,
+        "result": {
+          "elided": "runtime bytecode",
+          "bytes": 9152,
+          "sha256": "4a4b1b451b4dc250a1ea77b4c3a2e78e3b64f6a5f4cbfb485ee5ad331b2ef6eb"
+        }
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:52.293Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 19,
+        "method": "eth_getCode",
+        "params": [
+          "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 19,
+        "result": {
+          "elided": "runtime bytecode",
+          "bytes": 2913,
+          "sha256": "bcf0d9a12e9ac8060e1a76ef2bbc0895273c3f9946057376c60cf2fe565cc0f0"
+        }
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:52.539Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "eth_getCode",
+        "params": [
+          "0x4020A4f3b7b90ccA423B9fabCc0CE57C6C240002",
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "result": "0x"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:52.876Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+            "data": "0x6afdd850"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "result": "0x000000000000000000000000000000000022d473030f116ddee9f6b43ac78ba3"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:53.118Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 22,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0x06fdde03"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 22,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000b546574686572546f6b656e000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:53.354Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 23,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0x95d89b41"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 23,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045553447400000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:53.612Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 24,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0x313ce567"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 24,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000006"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:53.929Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 25,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0x54fd4d50"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 25,
+        "error": {
+          "code": 0,
+          "message": "execution reverted",
+          "data": "0x"
+        }
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:54.189Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 26,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0x3644e515"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 26,
+        "result": "0xf6d4d20bf85d69d29f5cd682e5fb2884425e4aa291bb7318e203fd68c96cc0f4"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:54.467Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 27,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0x84b0196e"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 27,
+        "error": {
+          "code": 0,
+          "message": "execution reverted",
+          "data": "0x"
+        }
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:54.737Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 28,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0x7ecebe000000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 28,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:54.985Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 29,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0xe94a010200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 29,
+        "error": {
+          "code": 0,
+          "message": "execution reverted",
+          "data": "0x"
+        }
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:55.236Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 30,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0xa0cc6a68"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 30,
+        "error": {
+          "code": 0,
+          "message": "execution reverted",
+          "data": "0x"
+        }
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:55.510Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 31,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0x30adf81f"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 31,
+        "error": {
+          "code": 0,
+          "message": "execution reverted",
+          "data": "0x"
+        }
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "started": "2026-09-18T07:37:55.744Z",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 32,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+            "data": "0xdd62ed3e0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000022d473030f116ddee9f6b43ac78ba3"
+          },
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 32,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ]
+}
