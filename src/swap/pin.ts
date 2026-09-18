@@ -5,7 +5,7 @@ import { address as solanaAddress } from "@solana/kit";
 import { tronAddress } from "../tron/codec.js";
 
 export const SWAP_MECHANISM_PIN_SCHEMA = "apn.swap-mechanism-pin.v1" as const;
-export type SwapProtocolFamily = "uniswap_ethereum" | "sunswap_tron" | "jupiter_solana";
+export type SwapProtocolFamily = "uniswap_ethereum" | "sunswap_tron" | "jupiter_solana" | "orca_solana";
 export type SwapNetworkFamily = "evm" | "tron" | "solana";
 
 export interface SwapMechanismPin {
@@ -31,6 +31,7 @@ const EXPECTED: Readonly<Record<SwapProtocolFamily, { family: SwapNetworkFamily;
   uniswap_ethereum: { family: "evm", chain: "eip155:1" },
   sunswap_tron: { family: "tron", chain: "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc" },
   jupiter_solana: { family: "solana", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
+  orca_solana: { family: "solana", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
 };
 
 export function validateSwapMechanismPin(value: unknown): SwapMechanismPin {
@@ -39,7 +40,7 @@ export function validateSwapMechanismPin(value: unknown): SwapMechanismPin {
     "constructorIdentity", "constructorVersion", "routerProgramIdentity", "auxiliaryContractProgramIdentities",
     "quoteSchemaVersion", "transactionSchemaVersion", "validationPolicyIdentity", "validationPolicyVersion",
   ]) || value.schemaVersion !== SWAP_MECHANISM_PIN_SCHEMA ||
-      (value.protocolFamily !== "uniswap_ethereum" && value.protocolFamily !== "sunswap_tron" && value.protocolFamily !== "jupiter_solana") ||
+      !Object.hasOwn(EXPECTED, value.protocolFamily as string) ||
       (value.networkFamily !== "evm" && value.networkFamily !== "tron" && value.networkFamily !== "solana") ||
       (value.constructorKind !== "builder_api" && value.constructorKind !== "sdk") ||
       typeof value.chain !== "string" || typeof value.protocolVersion !== "string" ||
@@ -55,7 +56,7 @@ export function validateSwapMechanismPin(value: unknown): SwapMechanismPin {
         typeof item !== "string") ||
       new Set([value.routerProgramIdentity, ...value.auxiliaryContractProgramIdentities]).size !==
         value.auxiliaryContractProgramIdentities.length + 1) invalid("Swap mechanism pin is malformed, duplicate, or unversioned.");
-  const expected = EXPECTED[value.protocolFamily];
+  const expected = EXPECTED[value.protocolFamily as SwapProtocolFamily];
   if (value.networkFamily !== expected.family || value.chain !== expected.chain) {
     invalid("Swap protocol family does not match its exact network family and chain.");
   }
