@@ -1,5 +1,5 @@
 import type { CommandRequest } from "./commands.js";
-import type { DirectEvmChainId } from "./evm-direct-networks.js";
+import { type DirectEvmChainId } from "./evm-direct-networks.js";
 import type { OperationRecord } from "./model.js";
 import type { OperationService } from "./operation-service.js";
 import type { RuntimeContext } from "./runtime.js";
