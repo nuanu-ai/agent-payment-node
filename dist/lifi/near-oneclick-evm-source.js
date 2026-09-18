@@ -20,14 +20,18 @@ export function assertOneClickPostApproval(initial, fresh, maxNativeDebit, effec
         nowMs > effectiveDeadlineMs - 30_000)
         fail("post_approval_drift");
 }
-/** Native debit is exactly value plus gas times the signed max fee; both must fit the owner's caps and the pinned balance. */
+/**
+ * Native debit is exactly value plus gas times the signed max fee; both must fit the owner's caps and the pinned balance.
+ * The signed tip is the owner's explicit maxPriorityFeePerGas (EIP-1559 semantics), not the RPC suggestion: public
+ * endpoints suggest 0 on Ethereum, and a tipless deposit can miss the provider deadline and come back as a paid refund.
+ */
 export function planOneClickNative(observed, amount, caps) {
-    const fee = 2n * observed.baseFee + observed.tip, nativeDebit = amount + observed.gas * fee;
-    if (observed.gas > caps.maxGas || fee > caps.maxFee || observed.tip > caps.maxPriority)
+    const tip = caps.maxPriority, fee = 2n * observed.baseFee + tip, nativeDebit = amount + observed.gas * fee;
+    if (tip <= 0n || observed.gas > caps.maxGas || fee > caps.maxFee)
         fail("gas_fee");
     if (nativeDebit > caps.maxNative || observed.balance < nativeDebit)
         fail("native_balance_or_cap");
-    return { blockHash: observed.blockHash, nonce: observed.nonce, gas: observed.gas, fee, tip: observed.tip, nativeDebit,
+    return { blockHash: observed.blockHash, nonce: observed.nonce, gas: observed.gas, fee, tip, nativeDebit,
         depositCode: observed.depositCode };
 }
 /**

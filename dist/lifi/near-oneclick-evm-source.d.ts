@@ -41,7 +41,11 @@ export declare function assertOneClickPostApproval(initial: Readonly<{
     tip: bigint;
     nativeDebit: bigint;
 }>, maxNativeDebit: bigint, effectiveDeadlineMs: number, nowMs: number): void;
-/** Native debit is exactly value plus gas times the signed max fee; both must fit the owner's caps and the pinned balance. */
+/**
+ * Native debit is exactly value plus gas times the signed max fee; both must fit the owner's caps and the pinned balance.
+ * The signed tip is the owner's explicit maxPriorityFeePerGas (EIP-1559 semantics), not the RPC suggestion: public
+ * endpoints suggest 0 on Ethereum, and a tipless deposit can miss the provider deadline and come back as a paid refund.
+ */
 export declare function planOneClickNative(observed: OneClickNativeObservation, amount: bigint, caps: OneClickSourceCaps): OneClickSourcePlan;
 /**
  * Ethereum base fee and tip suggestions move every block, while the signed envelope keeps the approved values.
