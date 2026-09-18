@@ -42,6 +42,7 @@ import { executeAllowlistPolicyCommand } from "./allowlist-policy-command.js";
 import { executeUniswapCommand } from "./swap/uniswap-command-service.js";
 import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";
 import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";
+import { executeOrcaCommand } from "./swap/orca-solana/command-service.js";
 export { ASSET_POLICY_REGISTRY_SCHEMA, ASSET_POLICY_REGISTRY_SCHEMA_V2, assetPolicyDigest, evaluateAssetPolicy, sealAssetPolicyRegistry, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
 export { ALLOWLIST_DATASET_PATH, ALLOWLIST_DATASET_SCHEMA, ALLOWLIST_DATASET_SHA256, ALLOWLIST_DATASET_VERSION, ALLOWLIST_INVENTORY_SCHEMA, assertAllowlistExecutionConfigured, compileAllowlistInventory, loadAllowlistInventory, resolveAllowlistAsset, } from "./allowlist-inventory.js";
 export * from "./allowlist-policy.js";
@@ -111,6 +112,12 @@ export class ApnCore {
             case "swap.jupiter.status":
             case "swap.jupiter.approve":
             case "swap.jupiter.execute": return await executeJupiterCommand(request, this.context);
+            case "swap.orca.inventory":
+            case "swap.orca.quote":
+            case "swap.orca.prepare":
+            case "swap.orca.status":
+            case "swap.orca.approve":
+            case "swap.orca.execute": return await executeOrcaCommand(request, this.context);
             case "allowlist.inventory": return dataOutcome(loadAllowlistInventory(), "frozen_candidate_inventory");
             case "allowlist.resolve": return dataOutcome({
                 dataset: loadAllowlistInventory().dataset,

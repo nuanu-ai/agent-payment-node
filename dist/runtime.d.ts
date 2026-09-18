@@ -25,6 +25,7 @@ import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapRuntime } from "./swap/runtime.js";
+import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 export interface CoreDependencies {
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
@@ -33,6 +34,7 @@ export interface CoreDependencies {
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.sunswap.quote";
     }>>;
+    readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -79,6 +81,7 @@ export declare class RuntimeContext {
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.sunswap.quote";
     }>>;
+    readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
