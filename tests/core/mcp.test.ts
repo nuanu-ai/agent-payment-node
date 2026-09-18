@@ -210,7 +210,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_x402_fetch_prepare", properties: ["profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
       { name: "apn_x402_fetch_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
       { name: "apn_pay_transfer_prepare", properties: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], required: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], defaults: {} },
-      { name: "apn_pay_transfer_prepare_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], required: ["profile", "chain", "asset", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], defaults: {} },
+      { name: "apn_pay_transfer_prepare_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url", "to", "amount", "max_fee_wei", "priority_fee_wei", "idempotency_key"], required: ["profile", "chain", "asset", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], defaults: {} },
       { name: "apn_pay_transfer_approve", properties: ["operation", "rpc_url"], required: ["operation"], defaults: {} },
       { name: "apn_operation_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_operation_abandon", properties: ["operation"], required: ["operation"], defaults: {} },

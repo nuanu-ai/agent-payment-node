@@ -218,6 +218,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
       request: {
         command: "transfer.prepare", profile: value(options, "--profile"), asset: bindListedAsset(options),
         recipient: value(options, "--to"), amount: value(options, "--amount"), maxFeeWei: value(options, "--max-fee-wei"),
+        ...(options["--priority-fee-wei"] === undefined ? {} : { priorityFeeWei: value(options, "--priority-fee-wei") }),
         idempotencyKey: value(options, "--idempotency-key"),
       },
       rpcUrl: value(options, "--rpc-url"),

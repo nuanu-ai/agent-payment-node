@@ -220,3 +220,20 @@ test("a record written before the gate still validates, reads and resumes, but a
   assert.equal((await setup.state.findOperation(interrupted))!.state, "failed_before_effect");
   assert.equal(await directUsage(temporary.root, setup.wallet.address, BASE, null, setup.clock.now()), "0");
 });
+
+test("an owner priority fee replaces the RPC tip inside the fee cap, binds idempotency, and is refused where it cannot apply", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const setup = await owner(temporary.root);
+  const suggested = setup.rpc.fees, baseFeeTwice = BigInt(suggested.maxFeePerGasAtomic) - BigInt(suggested.maxPriorityFeePerGasAtomic);
+  type Prepared = { operation_id: string; economics: { maxFeePerGasAtomic: string; maxPriorityFeePerGasAtomic: string } };
+  const tipped = await setup.core.transfer.prepare({ ...eth("0.0001", "eth-owner-tip-0001"), priorityFeeWei: "1500000000" }) as Prepared;
+  assert.equal(tipped.economics.maxPriorityFeePerGasAtomic, "1500000000");
+  assert.equal(tipped.economics.maxFeePerGasAtomic, (baseFeeTwice + 1_500_000_000n).toString());
+  await assert.rejects(setup.core.transfer.prepare({ ...eth("0.0001", "eth-owner-tip-0001"), priorityFeeWei: "2000000000" }), { code: "APN_IDEMPOTENCY_CONFLICT" });
+  assert.equal((await setup.core.transfer.approve(tipped.operation_id) as { state: string }).state, "completed");
+  const plain = await setup.core.transfer.prepare(eth("0.0001", "eth-owner-tip-0002")) as Prepared;
+  assert.equal(plain.economics.maxPriorityFeePerGasAtomic, suggested.maxPriorityFeePerGasAtomic);
+  await assert.rejects(setup.core.transfer.prepare({ ...eth("0.0001", "eth-owner-tip-0003"), asset: { chainId: 42161, token: "native" }, priorityFeeWei: "1" }),
+    { code: "APN_INVALID_INPUT", details: { reason: "priority_fee_not_applicable" } });
+  await assert.rejects(setup.core.transfer.prepare({ ...eth("0.0001", "eth-owner-tip-0004"), priorityFeeWei: "-1" }), { code: "APN_INVALID_INPUT" });
+});
