@@ -1,0 +1,126 @@
+import { approvalCode } from "./approval-code.js";
+import { canonicalJson, domainHash } from "./canonical.js";
+import type { AllowlistPolicyAccounts } from "./allowlist-policy-v2.js";
+import type { StagedAllowlistPolicyRecord } from "./allowlist-policy-store.js";
+import {
+  ASSET_POLICY_REGISTRY_SCHEMA_V2,
+  type AssetAtomicCaps,
+  type AssetPolicyRail,
+  type AssetPolicyRegistry,
+} from "./asset-policy-registry.js";
+import { swapMechanismDigest, type SwapMechanismPin } from "./swap/pin.js";
+import { exactChainConsent, TTY_APPROVAL_DEADLINE_MS, type TtyTransferApprovalOptions } from "./tty-approval.js";
+
+const FINGERPRINT_DOMAIN = "apn.allowlist-policy-decision-fingerprint.v1";
+const RAILS: readonly AssetPolicyRail[] = ["direct", "gasless", "x402", "bridge", "swap"];
+
+export type AllowlistPolicyAction = "activate" | "revoke";
+
+/** Everything the owner must see before one activation or revocation is written. */
+export interface AllowlistPolicyDecisionIntent {
+  readonly action: AllowlistPolicyAction;
+  readonly profile: string;
+  readonly record: StagedAllowlistPolicyRecord;
+  readonly accounts: AllowlistPolicyAccounts;
+  readonly currentActiveRevision: number | null;
+  readonly fingerprint: string;
+  readonly code: string;
+}
+
+export interface AllowlistPolicyApprovalPort {
+  approve(intent: AllowlistPolicyDecisionIntent): Promise<void>;
+}
+
+/** One admitted asset x rail pair, flattened from a sealed v1 or v2 registry. */
+export interface AllowlistAdmissionView {
+  readonly network: string;
+  readonly chain: string;
+  readonly symbol: string;
+  readonly kind: "native" | "token";
+  readonly identifier: string | null;
+  readonly decimals: number;
+  readonly rail: AssetPolicyRail;
+  readonly maximumPerTransferAtomic: string;
+  readonly dailyLimitAtomic: string;
+  readonly mechanism: Readonly<{ provider: string; reference: string }> | SwapMechanismPin | null;
+}
+
+export function allowlistAdmissions(registry: AssetPolicyRegistry): readonly AllowlistAdmissionView[] {
+  return registry.chains.flatMap((chain) => chain.assets.flatMap((asset) => RAILS.filter((rail) => asset.rails[rail]).map((rail) => {
+    const caps = (registry.schemaVersion === ASSET_POLICY_REGISTRY_SCHEMA_V2 ? asset.railCaps?.[rail] : asset.caps) as AssetAtomicCaps;
+    const mechanism = rail === "direct" ? undefined : asset.mechanismPins?.[rail];
+    return { network: chain.name, chain: chain.chain, symbol: asset.symbol, kind: asset.kind, identifier: asset.identifier,
+      decimals: asset.decimals, rail, maximumPerTransferAtomic: caps.maximumPerTransferAtomic, dailyLimitAtomic: caps.dailyLimitAtomic,
+      mechanism: mechanism ?? null };
+  })));
+}
+
+export function allowlistDecisionFingerprint(input: {
+  readonly action: AllowlistPolicyAction; readonly profileHash: string; readonly revision: number;
+  readonly stagedRecordDigest: string; readonly policyDigest: string; readonly headEntryDigest: string | null;
+}): string {
+  return domainHash(FINGERPRINT_DOMAIN, canonicalJson(input));
+}
+
+export function allowlistDecisionCode(action: AllowlistPolicyAction, fingerprint: string): string {
+  return approvalCode(action === "activate" ? "allowlist-activate" : "allowlist-revoke", fingerprint);
+}
+
+/** The exact owner screen. Pure, so tests and the scripted transcript show the same text the terminal prints. */
+export function allowlistDecisionLines(intent: AllowlistPolicyDecisionIntent, approvalWindowClosesAt: string): readonly string[] {
+  const { record } = intent;
+  const registry = record.registry;
+  const admissions = allowlistAdmissions(registry);
+  const accounts = (["evm", "solana", "tron"] as const).filter((family) => intent.accounts[family] !== undefined)
+    .map((family) => `${family} ${intent.accounts[family]}`).join("; ");
+  return [
+    intent.action === "activate" ? "Agent Payment Node allowlist policy ACTIVATION" : "Agent Payment Node allowlist policy REVOCATION",
+    `Profile: ${intent.profile}`,
+    `Revision: ${record.revision} (overlay ${record.overlay.overlayVersion}; staged ${record.preparedAt}; ${record.schemaVersion})`,
+    `Currently active revision: ${intent.currentActiveRevision ?? "none"}`,
+    intent.action === "activate"
+      ? (intent.currentActiveRevision === null ? "Effect: this revision becomes the active policy." : `Effect: this revision replaces active revision ${intent.currentActiveRevision}.`)
+      : "Effect: no allowlist policy stays active for this profile; rails that require one refuse.",
+    `Owner accounts: ${accounts}`,
+    `Frozen dataset: ${record.overlay.datasetVersion} (sha256 ${record.overlay.datasetSha256})`,
+    `Effective at: ${registry.effectiveAt ?? `${registry.effectiveDate} (UTC date)`}`,
+    `Expires at: ${registry.expiresAt ?? "never (active until revoked)"}`,
+    `Admissions: ${admissions.length}`,
+    ...admissions.flatMap((row, index) => [
+      `${index + 1}. ${row.network} (${row.chain}) ${row.symbol} ${row.kind === "native" ? "native" : `token ${row.identifier}`}; rail ${row.rail}`,
+      `   Per operation: ${display(row.maximumPerTransferAtomic, row.decimals)} ${row.symbol} (${row.maximumPerTransferAtomic} atomic, ${row.decimals} decimals)`,
+      `   Daily (UTC): ${display(row.dailyLimitAtomic, row.decimals)} ${row.symbol} (${row.dailyLimitAtomic} atomic)`,
+      ...(row.mechanism === null ? [] : [`   Mechanism pin: ${mechanismText(row.mechanism)}`]),
+    ]),
+    "Daily caps count this asset's combined usage on every rail during the UTC day.",
+    `Policy digest: ${registry.policyDigest}`,
+    `Staged record: ${record.recordDigest}`,
+    `Fingerprint: ${intent.fingerprint}`,
+    `Approval window closes: ${approvalWindowClosesAt}`,
+  ];
+}
+
+export class TtyAllowlistPolicyApproval implements AllowlistPolicyApprovalPort {
+  constructor(private readonly options: TtyTransferApprovalOptions = {}) {}
+
+  async approve(intent: AllowlistPolicyDecisionIntent): Promise<void> {
+    const closesAt = new Date(Date.now() + TTY_APPROVAL_DEADLINE_MS).toISOString();
+    await exactChainConsent(allowlistDecisionLines(intent, closesAt), intent.code, closesAt, this.options);
+  }
+}
+
+function mechanismText(pin: NonNullable<AllowlistAdmissionView["mechanism"]>): string {
+  if (!("schemaVersion" in pin)) return `provider ${pin.provider}; reference ${pin.reference}`;
+  return [`swap ${pin.protocolFamily} ${pin.protocolVersion} on ${pin.chain}`, `router ${pin.routerProgramIdentity}`,
+    `auxiliary [${pin.auxiliaryContractProgramIdentities.join(", ")}]`,
+    `${pin.constructorKind} ${pin.constructorIdentity}@${pin.constructorVersion}`,
+    `quote ${pin.quoteSchemaVersion}; transaction ${pin.transactionSchemaVersion}`,
+    `validation ${pin.validationPolicyIdentity}@${pin.validationPolicyVersion}`, `pin digest ${swapMechanismDigest(pin)}`].join("; ");
+}
+
+function display(atomic: string, decimals: number): string {
+  if (decimals === 0) return atomic;
+  const text = atomic.padStart(decimals + 1, "0");
+  const fraction = text.slice(-decimals).replace(/0+$/u, "");
+  return `${text.slice(0, -decimals)}${fraction === "" ? "" : `.${fraction}`}`;
+}

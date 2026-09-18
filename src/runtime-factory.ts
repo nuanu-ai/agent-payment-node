@@ -94,6 +94,7 @@ import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-se
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import { portfolioPause, type PortfolioDependencies } from "./portfolio/command.js";
 import { PortfolioHttps } from "./portfolio/https.js";
+import { TtyAllowlistPolicyApproval, type AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 
 export interface RuntimeFactoryOptions {
   readonly portfolio?: PortfolioDependencies;
@@ -112,6 +113,7 @@ export interface RuntimeFactoryOptions {
   readonly directRails?: readonly DirectRailPort[];
   readonly railApproval?: RailApprovalPort;
   readonly chainPolicyApproval?: ChainPolicyApprovalPort;
+  readonly allowlistPolicyApproval?: AllowlistPolicyApprovalPort;
   readonly solanaRpcUrl?: string;
   readonly tronRpcUrl?: string;
   readonly stateRoot?: string;
@@ -278,6 +280,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     chainAccounts, directRails,
     ...(bound.request.command === "transfer.approve" || options.railApproval !== undefined ? { railApproval: options.railApproval ?? new TtyRailApproval() } : {}),
     ...(bound.request.command === "policy.admit-solana" || bound.request.command === "policy.admit-tron" || options.chainPolicyApproval !== undefined ? { chainPolicyApproval: options.chainPolicyApproval ?? new TtyChainPolicyApproval() } : {}),
+    ...(bound.request.command === "allowlist.policy.activate" || bound.request.command === "allowlist.policy.revoke" ||
+      options.allowlistPolicyApproval !== undefined
+      ? { allowlistPolicyApproval: options.allowlistPolicyApproval ?? new TtyAllowlistPolicyApproval() } : {}),
     profileRepository,
     providerRegistry,
     ...(foregroundAuthentication === undefined ? {} : { foregroundAuthentication }),
