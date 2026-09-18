@@ -78,7 +78,8 @@ test("ETH to TRX signs one plain value transfer of exactly amountIn to an EOA de
   const tx = parseTransaction(h.sent[0]!);
   assert.equal(tx.chainId, 1); assert.equal(tx.to?.toLowerCase(), deposit.toLowerCase()); assert.equal(tx.value, 2_000_000_000_000_000n);
   assert.equal(tx.data, undefined); assert.equal(tx.gas, 21_000n); assert.equal(tx.nonce, 4);
-  assert.equal(tx.maxFeePerGas, 2_100_000_000n); assert.equal(tx.maxPriorityFeePerGas, 100_000_000n);
+  // Owner tip 2 gwei (not the 0.1 gwei RPC suggestion) over a 1 gwei base fee with 2x headroom.
+  assert.equal(tx.maxFeePerGas, 4_000_000_000n); assert.equal(tx.maxPriorityFeePerGas, 2_000_000_000n);
   assert.equal(h.methods.includes("eth_estimateGas"), false);
   const record = await h.journal.load(result.operationId as string);
   assert.equal(record?.schemaVersion, "apn.oneclick-source.v3"); assert.equal(record?.depositCode, "eoa");

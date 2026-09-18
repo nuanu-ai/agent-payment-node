@@ -116,13 +116,16 @@ test("native quotes bind the lane assets and bound the quoted loss in destinatio
 test("native source plan caps value plus fee and tolerates only bounded base fee drift after consent", () => {
   const observed: OneClickNativeObservation = { blockHash: `0x${"a".repeat(64)}`, nonce: 4n, depositCode: "eoa", gas: 21_000n,
     baseFee: 1_000_000_000n, tip: 100_000_000n, balance: 21_200_000_000_000_000n };
-  const amount = 2_000_000_000_000_000n, caps = { maxGas: 60_000n, maxFee: 20_000_000_000n, maxPriority: 2_000_000_000n, maxNative: 2_600_000_000_000_000n };
+  const amount = 2_000_000_000_000_000n, caps = { maxGas: 60_000n, maxFee: 20_000_000_000n, maxPriority: 100_000_000n, maxNative: 2_600_000_000_000_000n };
   const plan = planOneClickNative(observed, amount, caps);
   assert.equal(plan.fee, 2_100_000_000n); assert.equal(plan.nativeDebit, amount + 21_000n * 2_100_000_000n);
+  // The signed tip is the owner's explicit priority fee, never the RPC suggestion (public Ethereum RPCs suggest 0).
+  assert.equal(plan.tip, caps.maxPriority);
+  assert.equal(planOneClickNative({ ...observed, tip: 0n }, amount, caps).tip, caps.maxPriority);
   assert.throws(() => planOneClickNative(observed, amount, { ...caps, maxNative: plan.nativeDebit - 1n }), /native_balance_or_cap/u);
   assert.throws(() => planOneClickNative({ ...observed, balance: plan.nativeDebit - 1n }, amount, caps), /native_balance_or_cap/u);
   assert.throws(() => planOneClickNative(observed, amount, { ...caps, maxFee: 2_099_999_999n }), /gas_fee/u);
-  assert.throws(() => planOneClickNative(observed, amount, { ...caps, maxPriority: 99_999_999n }), /gas_fee/u);
+  assert.throws(() => planOneClickNative(observed, amount, { ...caps, maxPriority: 0n }), /gas_fee/u);
   assert.throws(() => planOneClickNative({ ...observed, gas: 60_001n, depositCode: "contract" }, amount, caps), /gas_fee/u);
   const deadline = now + 120_000;
   assert.doesNotThrow(() => assertOneClickNativePostApproval(plan, { ...observed, baseFee: 2_000_000_000n, tip: 900_000_000n }, amount, deadline, now));
