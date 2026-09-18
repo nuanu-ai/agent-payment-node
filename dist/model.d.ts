@@ -1,4 +1,4 @@
-import type { EvmChainId } from "./evm-asset.js";
+import type { DirectEvmChainId } from "./evm-direct-networks.js";
 import type { EvmDirectBinding } from "./evm-direct.js";
 import type { EvmTransferEvidence } from "./evm-ports.js";
 import type { DirectAllowlistBinding } from "./direct-allowlist-gate.js";
@@ -125,7 +125,8 @@ export interface OperationRecord {
     readonly recipient: Address;
     readonly amountAtomic: string;
     readonly amountDecimal: string;
-    readonly chainId: EvmChainId;
+    /** The legacy Base USDC and provider paths use 8453; an explicit EVM asset transfer uses its direct network. */
+    readonly chainId: DirectEvmChainId;
     readonly token: Address;
     readonly evm?: EvmDirectBinding;
     /** Owner allowlist revision frozen at prepare; writes can never add, change or drop it. Absent on records written before the gate. */
