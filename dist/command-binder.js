@@ -14,6 +14,7 @@ import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { bindUniswapCommand } from "./swap/uniswap-command-catalog.js";
 import { bindSunSwapCommand } from "./swap/sunswap-tron/command-catalog.js";
 import { bindJupiterCommand } from "./swap/jupiter-solana/command-catalog.js";
+import { bindAllowlistCommand } from "./allowlist-command-catalog.js";
 export function bindArgv(argv) {
     return bindParsedCatalog(parseCatalogArgv(argv));
 }
@@ -56,6 +57,8 @@ function bindParsedCatalog(parsed) {
             return { request: bindJupiterCommand(path, options) };
         throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported guarded swap command.");
     }
+    if (parsed.command.path[0] === "allowlist")
+        return { request: bindAllowlistCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "gasless")
         return { request: bindGaslessCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "bridge")
@@ -65,37 +68,6 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path[0] === "circle")
         return { request: bindCircleCommand(parsed.command.path.join(" "), options) };
     switch (parsed.command.path.join(" ")) {
-        case "allowlist inventory": return { request: { command: "allowlist.inventory" } };
-        case "allowlist resolve": {
-            const kind = value(options, "--kind");
-            if (kind !== "native" && kind !== "token")
-                throw new ApnError("APN_ALLOWLIST_IDENTITY_INVALID", "Asset kind must be exactly native or token.", { reason: "invalid_kind" });
-            return { request: { command: "allowlist.resolve", chain: value(options, "--chain"), kind,
-                    ...(options["--identifier"] === undefined ? {} : { identifier: options["--identifier"] }) } };
-        }
-        case "allowlist policy status": return { request: { command: "allowlist.policy.status", profile: value(options, "--profile") } };
-        case "allowlist policy prepare": {
-            const kind = value(options, "--kind");
-            if (kind !== "native" && kind !== "token")
-                throw new ApnError("APN_ALLOWLIST_IDENTITY_INVALID", "Asset kind must be exactly native or token.", { reason: "invalid_kind" });
-            const rail = value(options, "--rail");
-            if (rail !== "direct" && rail !== "gasless" && rail !== "x402" && rail !== "bridge" && rail !== "swap") {
-                throw new ApnError("APN_INVALID_INPUT", "Allowlist policy rail is invalid.", { reason: "invalid_rail" });
-            }
-            const expected = options["--expected-revision"];
-            if (expected !== undefined && (!/^[1-9][0-9]*$/u.test(expected) || !Number.isSafeInteger(Number(expected)))) {
-                throw new ApnError("APN_INVALID_INPUT", "Expected revision must be a positive safe integer.", { reason: "invalid_revision" });
-            }
-            return { request: { command: "allowlist.policy.prepare", profile: value(options, "--profile"),
-                    account: value(options, "--account"), overlayVersion: value(options, "--overlay-version"),
-                    chain: value(options, "--chain"), kind, ...(options["--identifier"] === undefined ? {} : { identifier: options["--identifier"] }),
-                    rail, maximumPerTransferAtomic: value(options, "--max-per-transfer-atomic"),
-                    dailyLimitAtomic: value(options, "--daily-limit-atomic"), effectiveAt: value(options, "--effective-at"),
-                    ...(options["--expires-at"] === undefined ? {} : { expiresAt: options["--expires-at"] }),
-                    ...(options["--mechanism-provider"] === undefined ? {} : { mechanismProvider: options["--mechanism-provider"] }),
-                    ...(options["--mechanism-reference"] === undefined ? {} : { mechanismReference: options["--mechanism-reference"] }),
-                    ...(expected === undefined ? {} : { expectedRevision: Number(expected) }) } };
-        }
         case "--version": return { request: { command: "version" } };
         case "doctor keychain": return { request: { command: "doctor.keychain" } };
         case "wallet ensure-tron": {

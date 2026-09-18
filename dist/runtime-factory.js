@@ -51,6 +51,7 @@ import { avalancheFacilitatorRpc } from "./facilitator-gasless/rpc.js";
 import { TtyFacilitatorApproval } from "./facilitator-gasless/tty.js";
 import { portfolioPause } from "./portfolio/command.js";
 import { PortfolioHttps } from "./portfolio/https.js";
+import { TtyAllowlistPolicyApproval } from "./allowlist-policy-activation.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -152,6 +153,9 @@ export function createApnCore(bound, options = {}) {
         chainAccounts, directRails,
         ...(bound.request.command === "transfer.approve" || options.railApproval !== undefined ? { railApproval: options.railApproval ?? new TtyRailApproval() } : {}),
         ...(bound.request.command === "policy.admit-solana" || bound.request.command === "policy.admit-tron" || options.chainPolicyApproval !== undefined ? { chainPolicyApproval: options.chainPolicyApproval ?? new TtyChainPolicyApproval() } : {}),
+        ...(bound.request.command === "allowlist.policy.activate" || bound.request.command === "allowlist.policy.revoke" ||
+            options.allowlistPolicyApproval !== undefined
+            ? { allowlistPolicyApproval: options.allowlistPolicyApproval ?? new TtyAllowlistPolicyApproval() } : {}),
         profileRepository,
         providerRegistry,
         ...(foregroundAuthentication === undefined ? {} : { foregroundAuthentication }),
