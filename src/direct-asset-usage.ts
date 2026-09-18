@@ -50,6 +50,8 @@ export class DirectAssetUsageAdapter {
       amountAtomic: input.amountAtomic,
       dailyUsageAtomic: "0",
       asOfDate: at.slice(0, 10),
+      // Overlay registries carry exact effective/expiry instants; the evaluator refuses them without this instant.
+      asOf: at,
     });
     const reservation = await this.ledger.reserve({
       account: input.account,

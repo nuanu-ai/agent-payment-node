@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   AssetUsageLedger,
   DirectAssetUsageAdapter,
+  compileAllowlistPolicyOverlay,
+  loadAllowlistInventory,
   sealAssetPolicyRegistry,
   validateDirectAssetUsageLease,
   type DirectAssetUsageInput,
@@ -152,4 +154,23 @@ test("callback failure stays charged and unknown finality cannot be relabeled as
   await assert.rejects(adapter.failedBeforeEffect(callbackLease, new Date("2026-09-17T10:02:00.000Z"), "c".repeat(64)),
     { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await ledger.usage(IDENTITY, new Date("2026-09-18T00:00:00.000Z"))).amountAtomic, "25");
+});
+
+test("instant-bounded overlay registries reserve through the direct seam instead of throwing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root);
+  const adapter = new DirectAssetUsageAdapter(ledger);
+  const inventory = loadAllowlistInventory();
+  const overlay = compileAllowlistPolicyOverlay({ overlayVersion: "direct-instant.1", profile: "direct-test", account: ACCOUNT,
+    datasetVersion: inventory.dataset.version, datasetSha256: inventory.dataset.sha256, inventorySha256: inventory.inventorySha256,
+    effectiveAt: "2026-09-17T09:00:00.000Z", expiresAt: "2026-09-17T11:00:00.000Z", admissions: [{ chain: "eip155:1", kind: "token",
+      identifier: USDC, rail: "direct", maximumPerTransferAtomic: "60", dailyLimitAtomic: "100" }] });
+  assert.ok(overlay.registry.effectiveAt !== undefined && overlay.registry.expiresAt !== undefined);
+  const lease = await adapter.reserve(input("direct-instant-bound-01", "60", overlay.registry));
+  assert.equal(lease.reservation.policyDigest, overlay.registry.policyDigest);
+  await assert.rejects(adapter.reserve(input("direct-instant-bound-02", "61", overlay.registry)), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(adapter.reserve(input("direct-instant-late-001", "1", overlay.registry, new Date("2026-09-17T11:00:00.000Z"))),
+    { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(adapter.reserve(input("direct-instant-early-01", "1", overlay.registry, new Date("2026-09-17T08:59:59.999Z"))),
+    { code: "APN_OPERATION_BLOCKED" });
 });
