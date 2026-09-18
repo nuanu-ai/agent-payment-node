@@ -38,6 +38,8 @@ export type CommandRequest = {
     readonly amountAtomic: string;
     readonly slippageBps: number;
     readonly ownerSlippageCapBps: number;
+    readonly feeLimitSun: string;
+    readonly deadline: number;
 } | {
     readonly command: "swap.sunswap.prepare";
     readonly profile: string;
