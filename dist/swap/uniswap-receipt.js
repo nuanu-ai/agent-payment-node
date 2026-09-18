@@ -12,7 +12,7 @@ export function validateUniswapReceipt(evidence, envelope, expected) {
         !isPlainRecord(evidence.receipt) || !exactKeys(evidence.receipt, ["transactionHash", "status", "blockNumber", "blockHash", "logs"]) ||
         !Array.isArray(evidence.receipt.logs) || evidence.receipt.logs.length > 4096 ||
         evidence.receipt.logs.some((log) => !isPlainRecord(log) || !exactKeys(log, ["address", "topics", "data"]) ||
-            !Array.isArray(log.topics) || log.topics.length > 4 || log.topics.some((topic) => !hexWord(topic)) || !hexWord(log.data)) ||
+            !Array.isArray(log.topics) || log.topics.length > 4 || log.topics.some((topic) => !hexWord(topic)) || !hexData(log.data)) ||
         !isPlainRecord(evidence.finalizedHead) || !exactKeys(evidence.finalizedHead, ["number", "hash"]) ||
         !hex32(evidence.transactionHash) || !hex32(evidence.transaction.hash) || !hex32(evidence.receipt.transactionHash) ||
         !hex32(evidence.transaction.blockHash) || !hex32(evidence.receipt.blockHash) || !hex32(evidence.finalizedHead.hash) ||
@@ -29,7 +29,8 @@ export function validateUniswapReceipt(evidence, envelope, expected) {
         fail();
     const recipientTopic = `0x${address(expected.recipient).slice(2).toLowerCase().padStart(64, "0")}`;
     const outputToken = address(expected.outputToken);
-    const credited = receipt.logs.filter((log) => address(log.address) === outputToken && log.topics.length === 3 &&
+    // A pool Swap event carries several data words; only a one-word ERC-20 Transfer to the recipient counts as credit.
+    const credited = receipt.logs.filter((log) => address(log.address) === outputToken && log.topics.length === 3 && hexWord(log.data) &&
         log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() && log.topics[2]?.toLowerCase() === recipientTopic)
         .reduce((sum, log) => sum + BigInt(log.data), 0n);
     if (credited < minimumOutput)
@@ -56,6 +57,7 @@ catch {
 function hex32(value) { return typeof value === "string" && /^0x[a-fA-F0-9]{64}$/u.test(value) && !/^0x0{64}$/u.test(value); }
 function hexBytes(value) { return typeof value === "string" && /^0x(?:[a-fA-F0-9]{2})+$/u.test(value); }
 function hexWord(value) { return typeof value === "string" && /^0x[a-fA-F0-9]{64}$/u.test(value); }
+function hexData(value) { return typeof value === "string" && /^0x(?:[a-fA-F0-9]{2})*$/u.test(value); }
 function canonicalInstant(value) { return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value; }
 function fail() { throw new ApnError("APN_OPERATION_BLOCKED", "Uniswap receipt does not prove the exact successful finalized swap.", { reason: "uniswap_receipt" }); }
 //# sourceMappingURL=uniswap-receipt.js.map

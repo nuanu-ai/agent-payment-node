@@ -127,6 +127,26 @@ test("final receipt requires exact transaction, successful receipt, output log, 
   assert.equal(proof.finalized, true);
 });
 
+test("final receipt accepts a real V3 swap's multi-word pool Swap log and credits only one-word output Transfers", () => {
+  const txHash = `0x${H("c")}` as const, blockHash = `0x${H("d")}` as const, word = (v: string) => BigInt(v).toString(16).padStart(64, "0");
+  const recipientTopic = `0x${RECIPIENT.slice(2).toLowerCase().padStart(64, "0")}` as `0x${string}`, pool = `0x${H("7")}` as `0x${string}`;
+  const transfer = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" as const;
+  const receipt = (outputData: `0x${string}`) => validateUniswapReceipt({ transactionHash: txHash, transaction: { hash: txHash, from: ACCOUNT,
+    to: UNISWAP_ROUTER, input: calldata(), value: input, blockNumber: "100", blockHash }, receipt: { transactionHash: txHash, status: "0x1",
+    blockNumber: "100", blockHash, logs: [
+      { address: WETH, topics: ["0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c", pool], data: `0x${word(input)}` },
+      { address: UNISWAP_USDC, topics: [transfer, pool, recipientTopic], data: outputData },
+      { address: WETH, topics: [transfer, pool, pool], data: `0x${word(input)}` },
+      { address: "0x4e68ccd3e89f51c3074ca5072bbac773960dfa36", topics: ["0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+        pool, recipientTopic], data: `0x${word("1").repeat(5)}` }] }, beforeNative: "2000000000000000", afterNative: "900000000000000",
+    beforeOutput: "0", afterOutput: minimum, finalizedHead: { number: "110", hash: `0x${H("e")}` }, observedAt: "2026-09-17T00:00:00.000Z" },
+  envelope(), { transactionHash: txHash, account: ACCOUNT, recipient: RECIPIENT, inputAmountAtomic: input, minimumOutputAtomic: minimum,
+    outputToken: UNISWAP_USDC });
+  assert.equal(receipt(`0x${word(minimum)}`).finalized, true);
+  assert.throws(() => receipt(`0x${word(minimum)}${word("0")}`), { code: "APN_OPERATION_BLOCKED", message: /exact successful finalized swap/u });
+  assert.throws(() => receipt("0x0" as `0x${string}`), { code: "APN_OPERATION_BLOCKED" });
+});
+
 test("CLI and MCP expose identical dormant surface; inventory grants no admission and prepare/execute refuse stably", async (t) => {
   const paths = ["inventory", "quote", "prepare", "status", "approve", "execute"];
   for (const action of paths) assert.ok(MCP_TOOLS.some((row) => row.name === `apn_swap_ethereum_uniswap_${action}`));
