@@ -41,9 +41,9 @@ async function parameters(rpc) {
 }
 export async function readTronWindow(rpc, now) {
     const before = tronBlock(await rpc.call("wallet/getnowblock", {}));
-    const node = tronRecord(tronRecord(await rpc.call("wallet/getnodeinfo", {})).configNodeInfo);
-    if (node.codeVersion !== "4.8.2.1")
-        unsupported();
+    // The node's software version is not pinned: TRON ships mandatory patch releases (4.8.2.2 on 2026-09-08), and an
+    // exact match refused every transfer after each upgrade. Charging is bound by the reviewed chain parameters below.
+    tronRecord(tronRecord(await rpc.call("wallet/getnodeinfo", {})).configNodeInfo);
     const fees = await parameters(rpc);
     const nextMaintenance = tronAtomic(tronRecord(await rpc.call("wallet/getnextmaintenancetime", {})).num);
     const after = tronBlock(await rpc.call("wallet/getnowblock", {}));

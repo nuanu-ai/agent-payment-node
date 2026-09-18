@@ -46,7 +46,7 @@ test("TRON chain, protocol, permission, funding, asset and resource refusals hav
   const loads = s.wrapping.loads;
   const check = async (code: string) => { const result = await s.core.execute(request); assert.equal(result.error?.code, code); assert.equal(s.rpc.submissions.length, 0); assert.equal(s.approval.calls.length, 0); assert.equal(s.wrapping.loads, loads); assert.equal((await s.core.rails.records.listOperations(s.account.profileHash)).length, 0); };
   s.rpc.genesis = "00".repeat(32); await check("APN_CHAIN_MISMATCH"); s.rpc.genesis = TRON_GENESIS;
-  s.rpc.version = "future"; await check("APN_PROVIDER_CAPABILITY_UNAVAILABLE"); s.rpc.version = "4.8.2.1";
+  s.rpc.version = "4.8.2.2"; // A node patch release no longer refuses; charging stays bound by the chain parameters.
   s.rpc.senderExists = false; await check("APN_OPERATION_BLOCKED"); s.rpc.senderExists = true;
   s.rpc.senderContract = true; await check("APN_WALLET_MISMATCH"); s.rpc.senderContract = false;
   s.rpc.badPermission = true; await check("APN_WALLET_MISMATCH"); s.rpc.badPermission = false;
