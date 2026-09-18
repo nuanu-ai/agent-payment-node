@@ -1,52 +1,47 @@
-import { canonicalJson, domainHash, isPlainRecord } from "../../canonical.js";
+import { decodeFunctionResult, parseAbi } from "viem";
+import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
-import { tronBlock } from "../../tron/rpc.js";
+import { SUNSWAP_MAX_HEAD_DRIFT_BLOCKS, SUNSWAP_V2_ROUTER } from "./catalog.js";
+import { assertSunSwapHeadDrift, sunSwapConstantBody, sunSwapHead, triggerSunSwapConstant } from "./tron-call.js";
 import { validateSunSwapUnsignedTransaction } from "./transaction.js";
+const ABI = parseAbi(["function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)"]);
+/**
+ * Simulates the exact unsigned call from the owner with call_value = input. The proof is bound to the recorded
+ * reference block of the unsigned transaction; the head read after the call must stay within the frozen drift bound.
+ */
 export async function simulateSunSwapTransaction(rpc, transaction, intent) {
-    validateSunSwapUnsignedTransaction(transaction, intent);
-    const value = transaction.raw_data.contract[0].parameter.value;
-    const body = { owner_address: value.owner_address, contract_address: value.contract_address, function_selector: "execute(bytes,bytes[],uint256)",
-        parameter: value.data.slice(8), call_value: value.call_value, fee_limit: transaction.raw_data.fee_limit, visible: false };
-    let constant, estimate, block, head;
+    const exact = validateSunSwapUnsignedTransaction(transaction, intent);
+    const call = { owner: intent.owner, contract: SUNSWAP_V2_ROUTER, data: exact.raw_data.contract[0].parameter.value.data,
+        callValueAtomic: intent.callValueAtomic };
+    const reference = { number: BigInt(`0x${intent.referenceBlockId.slice(0, 16)}`).toString(), id: intent.referenceBlockId };
+    const result = await triggerSunSwapConstant(rpc, call);
+    const headBlockNumber = assertSunSwapHeadDrift(reference, await sunSwapHead(rpc));
+    let amounts;
     try {
-        block = tronBlock(await rpc.call("wallet/getnowblock", {}));
-        constant = await rpc.call("wallet/triggerconstantcontract", body);
-        estimate = await rpc.call("wallet/estimateenergy", body);
-        head = tronBlock(await rpc.call("wallet/getnowblock", {}));
+        amounts = decodeFunctionResult({ abi: ABI, functionName: "swapExactETHForTokens", data: `0x${result.resultHex}` });
     }
     catch {
-        return unavailable();
+        return protocol();
     }
-    if (head.id !== block.id || head.number !== block.number)
-        revert();
-    const constantEnergy = response(constant, "energy_used"), estimatedEnergy = response(estimate, "energy_required");
-    const energy = constantEnergy > estimatedEnergy ? constantEnergy : estimatedEnergy;
-    if (energy > BigInt(intent.maximumEnergy) || energy * BigInt(intent.energyPriceSun) > BigInt(intent.feeLimitSun)) {
-        throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "SunSwap simulation exceeds the frozen energy or fee_limit bound.");
+    if (result.resultHex.length !== 256 || amounts.length !== 2 || amounts[0] !== BigInt(intent.inputAmountAtomic))
+        protocol();
+    if (amounts[1] < BigInt(intent.minimumOutputAtomic)) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Simulated SunSwap output is below the frozen minimum.", { reason: "sunswap_simulated_output_below_minimum" });
     }
-    const blockHash = `0x${block.id}`, blockNumber = block.number.toString();
-    const requestHash = domainHash("apn.sunswap-tron-simulation-request.v1", canonicalJson({ originHash: rpc.originHash, body,
-        txID: transaction.txID, blockNumber, blockHash }));
-    const resultHash = domainHash("apn.sunswap-tron-simulation-result.v1", canonicalJson({ constant, estimate,
-        energyRequired: energy.toString(), blockNumber, blockHash }));
-    return { requestHash, resultHash, success: true, energyRequired: energy.toString(), feeLimitSun: intent.feeLimitSun,
-        blockNumber, blockHash, headBlockNumber: blockNumber, maxHeadDrift: 0, gasEstimate: energy.toString() };
-}
-function response(value, field) {
-    if (!isPlainRecord(value) || !isPlainRecord(value.result) || value.result.result !== true || value.result.message !== undefined)
-        revert();
-    const energy = integer(value[field]);
+    const energy = BigInt(result.energyUsed);
     if (energy <= 0n)
-        revert();
-    return energy;
+        protocol();
+    if (energy > BigInt(intent.maximumEnergy) || energy * BigInt(intent.energyPriceSun) > BigInt(intent.feeLimitSun)) {
+        throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "SunSwap simulation energy exceeds the owner fee_limit.", { reason: "sunswap_fee_limit_exceeded" });
+    }
+    const blockHash = `0x${intent.referenceBlockId}`, blockNumber = reference.number;
+    const requestHash = domainHash("apn.sunswap-tron-simulation-request.v1", canonicalJson({ originHash: rpc.originHash,
+        body: sunSwapConstantBody(call), txID: exact.txID, blockNumber, blockHash }));
+    const resultHash = domainHash("apn.sunswap-tron-simulation-result.v1", canonicalJson({ resultHex: result.resultHex,
+        energyUsed: result.energyUsed, energyPenalty: result.energyPenalty, outputAtomic: amounts[1].toString(), blockNumber, blockHash,
+        headBlockNumber }));
+    return { requestHash, resultHash, success: true, energyRequired: result.energyUsed, feeLimitSun: intent.feeLimitSun,
+        blockNumber, blockHash, headBlockNumber, maxHeadDrift: SUNSWAP_MAX_HEAD_DRIFT_BLOCKS, gasEstimate: result.energyUsed };
 }
-function integer(value) {
-    if (typeof value === "number" && !Number.isSafeInteger(value))
-        revert();
-    if ((typeof value !== "string" && typeof value !== "number" && typeof value !== "bigint") || !/^[0-9]+$/u.test(String(value)))
-        revert();
-    return BigInt(value);
-}
-function unavailable() { throw new ApnError("APN_RPC_PROTOCOL", "Both TRON triggerconstantcontract and estimateenergy are required for SunSwap simulation."); }
-function revert() { throw new ApnError("APN_OPERATION_BLOCKED", "SunSwap simulation reverted or returned transaction drift."); }
+function protocol() { throw new ApnError("APN_RPC_PROTOCOL", "TRON returned a SunSwap simulation with an invalid shape or binding."); }
 //# sourceMappingURL=simulation.js.map

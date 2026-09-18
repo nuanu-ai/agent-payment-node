@@ -26,7 +26,8 @@ export class SunSwapSolidifiedObserver {
             operation.submissionMarker === null)
             conflict();
         const receipt = await observeSunSwapFinality(this.rpc, { transactionHash: this.binding.transaction.txID,
-            recipient: operation.quote.recipient, minimumOutputAtomic: operation.quote.minimumOutputAtomic,
+            recipient: operation.quote.recipient, inputAmountAtomic: operation.quote.inputAmountAtomic,
+            minimumOutputAtomic: operation.quote.minimumOutputAtomic,
             unsignedRawDataHex: this.binding.transaction.raw_data_hex, maximumFeeSun: this.maximumFeeSun });
         const observedAt = this.now();
         if (!Number.isFinite(observedAt.getTime()))
@@ -53,8 +54,8 @@ export async function observeSunSwapFinality(rpc, expected) {
     const full = validateSunSwapReceipt(fullTransaction, fullInfo, solid, expected);
     const finalized = validateSunSwapReceipt(solidTransaction, solidInfo, solid, expected);
     const proof = (value) => ({ transactionHash: value.transactionHash, blockNumber: value.blockNumber,
-        solidifiedHeadNumber: value.solidifiedHeadNumber, outputAmountAtomic: value.outputAmountAtomic, feeSun: value.feeSun,
-        finalized: value.finalized });
+        solidifiedHeadNumber: value.solidifiedHeadNumber, inputAmountAtomic: value.inputAmountAtomic,
+        outputAmountAtomic: value.outputAmountAtomic, feeSun: value.feeSun, trxDebitSun: value.trxDebitSun, finalized: value.finalized });
     if (canonicalJson(proof(full)) !== canonicalJson(proof(finalized)))
         conflict();
     if (full.receiptHash !== finalized.receiptHash)

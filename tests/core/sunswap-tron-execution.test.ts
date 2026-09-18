@@ -4,11 +4,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { utils } from "tronweb";
 import {
-  AssetUsageLedger, GuardedSwapService, SUNSWAP_NATIVE_TRX, SUNSWAP_PERMIT2,
-  SUNSWAP_TRON_CHAIN, SUNSWAP_USDT, SUNSWAP_V4_POOL_MANAGER, SUNSWAP_V4_UNIVERSAL_ROUTER,
+  AssetUsageLedger, GuardedSwapService, SUNSWAP_TRON_CHAIN, SUNSWAP_USDT, SUNSWAP_V2_FACTORY, SUNSWAP_V2_ROUTER,
+  SUNSWAP_V2_WTRX_USDT_PAIR, SUNSWAP_WTRX,
   SWAP_MECHANISM_PIN_SCHEMA, SunSwapGuardedExecutor, SunSwapProtectedExecutionAdapter,
   SunSwapSolidifiedObserver, SwapOperationRepository, buildSunSwapUnsignedTransaction,
-  compileAllowlistPolicyOverlay, compileSwapProtocolRegistry, createSunSwapQuoteSnapshot, decodeSunSwapQuote,
+  compileAllowlistPolicyOverlay, compileSwapProtocolRegistry, createSunSwapQuoteSnapshot, priceSunSwapV2Market,
   encodeSunSwapCalldata, loadAllowlistInventory, observeSunSwapFinality, sealAssetPolicyRegistry,
   sealSunSwapForegroundApproval, sunSwapUnsignedPayloadHash, validateSunSwapExecutionBinding,
   validateSunSwapSignedTransaction, type AllowlistPolicyOverlayInput,
@@ -20,12 +20,13 @@ import { sha256 } from "../../src/canonical.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { SunSwapBroadcastRpcPort } from "../../src/swap/sunswap-tron/signer.js";
-import { tronHex } from "../../src/tron/codec.js";
 import { temporaryState } from "./helpers.js";
+import { syntheticMarket, v2Output, v2Receipt } from "./sunswap-tron-fixtures.js";
 
 const SEED = Buffer.alloc(32, 19);
 const OWNER = utils.crypto.getBase58CheckAddress(utils.crypto.getAddressFromPriKey([...SEED]));
-const RECIPIENT = utils.crypto.getBase58CheckAddress(utils.crypto.getAddressFromPriKey(Array(32).fill(48)));
+const RECIPIENT = OWNER;
+const OUTPUT = v2Output(1_000_000n);
 const HASH = "000000000000007b" + "1".repeat(48);
 const NOW = new Date("2026-09-17T00:01:00.000Z");
 
@@ -36,24 +37,20 @@ class Wrapping implements WrappingSecretPort {
 }
 
 const pin: SwapMechanismPin = { schemaVersion: SWAP_MECHANISM_PIN_SCHEMA, protocolFamily: "sunswap_tron", networkFamily: "tron",
-  chain: SUNSWAP_TRON_CHAIN, protocolVersion: "4.0.0", constructorKind: "builder_api", constructorIdentity: "open.sun.io.apiv2",
-  constructorVersion: "2.0.0", routerProgramIdentity: SUNSWAP_V4_UNIVERSAL_ROUTER,
-  auxiliaryContractProgramIdentities: [SUNSWAP_V4_POOL_MANAGER, SUNSWAP_PERMIT2], quoteSchemaVersion: "2.0.0",
-  transactionSchemaVersion: "1.0.0", validationPolicyIdentity: "apn.sunswap.direct-native-input",
+  chain: SUNSWAP_TRON_CHAIN, protocolVersion: "2.0.0", constructorKind: "sdk", constructorIdentity: "apn.sunswap-v2-local-abi",
+  constructorVersion: "1.0.0", routerProgramIdentity: SUNSWAP_V2_ROUTER,
+  auxiliaryContractProgramIdentities: [SUNSWAP_V2_FACTORY, SUNSWAP_V2_WTRX_USDT_PAIR, SUNSWAP_WTRX], quoteSchemaVersion: "1.0.0",
+  transactionSchemaVersion: "1.0.0", validationPolicyIdentity: "apn.sunswap.v2-owner-native-input",
   validationPolicyVersion: "1.0.0" };
-
-function route() {
-  return decodeSunSwapQuote({ code: 0, message: "SUCCESS", data: [{ roadForAddr: [SUNSWAP_NATIVE_TRX, SUNSWAP_USDT],
-    roadForName: ["TRX", "USDT"], pool: ["v2"], amount: "0.345678", inUsd: "1.0", outUsd: "0.345678",
-    impact: "-0.001", fee: "0.003" }] }, "1000000")[0]!;
-}
 
 async function fixture(root: string, options: { readonly referenceBlockId?: string; readonly simulationBlockHash?: string } = {}) {
   const wrapping = new Wrapping();
   const storage = new ChainAccountStore(root, wrapping);
   const account = await storage.ensureLocal({ profile: "sunswap", rail: "tron",
     create: async () => ({ address: OWNER, seed: Buffer.from(SEED) }) });
-  const intent = { owner: OWNER, recipient: RECIPIENT, inputAmountAtomic: "1000000", minimumOutputAtomic: "300000",
+  const market = syntheticMarket({ amountIn: 1_000_000n, referenceBlockId: options.simulationBlockHash ?? HASH, headBlockNumber: "124" });
+  const minimum = priceSunSwapV2Market(market, 2000, 2000).minimumOutputAtomic;
+  const intent = { owner: OWNER, recipient: RECIPIENT, inputAmountAtomic: "1000000", minimumOutputAtomic: minimum,
     deadlineSeconds: "1789603500", calldata: "", callValueAtomic: "1000000", referenceBlockId: options.referenceBlockId ?? HASH,
     timestampMs: "1789603200000", expirationMs: "1789603500000", feeLimitSun: "100000000",
     maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" };
@@ -63,11 +60,10 @@ async function fixture(root: string, options: { readonly referenceBlockId?: stri
   const transaction = buildSunSwapUnsignedTransaction(intent);
   const simulation = { requestHash: "c".repeat(64), resultHash: "d".repeat(64), success: true as const,
     energyRequired: "50000", feeLimitSun: intent.feeLimitSun, blockNumber: "123", blockHash: `0x${options.simulationBlockHash ?? HASH}`,
-    headBlockNumber: "123", maxHeadDrift: 0, gasEstimate: "50000" };
-  const quote = createSunSwapQuoteSnapshot({ profile: "sunswap", account: OWNER, recipient: RECIPIENT,
-    inputAmountAtomic: "1000000", minimumOutputAtomic: "300000", slippageBps: 2000,
-    effectiveAt: "2026-09-17T00:00:00.000Z", expiresAt: "2026-09-17T00:05:00.000Z",
-    providerResponseHash: "a".repeat(64), unsignedTransactionPayloadHash: sunSwapUnsignedPayloadHash(transaction), route: route(),
+    headBlockNumber: "124", maxHeadDrift: 10, gasEstimate: "50000" };
+  const quote = createSunSwapQuoteSnapshot({ profile: "sunswap", account: OWNER, recipient: RECIPIENT, slippageBps: 2000,
+    ownerSlippageCapBps: 2000, effectiveAt: "2026-09-17T00:00:00.000Z", expiresAt: "2026-09-17T00:05:00.000Z",
+    unsignedTransactionPayloadHash: sunSwapUnsignedPayloadHash(transaction), market,
     simulation: { requestHash: simulation.requestHash, resultHash: simulation.resultHash, success: true,
       blockNumber: simulation.blockNumber, blockHash: simulation.blockHash, headBlockNumber: simulation.headBlockNumber,
       maxHeadDrift: simulation.maxHeadDrift, gasEstimate: simulation.gasEstimate } });
@@ -103,12 +99,8 @@ class Broadcast implements SunSwapBroadcastRpcPort {
 }
 
 function approval(input: SunSwapForegroundApprovalInput) { return sealSunSwapForegroundApproval(input, NOW); }
-function receiptFixture(binding: SunSwapExecutionBinding, output = "300001", solid = "124") {
-  const topic = tronHex(RECIPIENT).slice(2).padStart(64, "0");
-  const transaction = { txID: binding.transaction.txID, raw_data_hex: binding.transaction.raw_data_hex, ret: [{ contractRet: "SUCCESS" }] };
-  const info = { id: binding.transaction.txID, blockNumber: "123", fee: "12345", receipt: { result: "SUCCESS" }, log: [{
-    address: tronHex(SUNSWAP_USDT).slice(2), topics: ["ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-      "0".repeat(64), topic], data: BigInt(output).toString(16).padStart(64, "0") }] };
+function receiptFixture(binding: SunSwapExecutionBinding, output = OUTPUT, solid = "124") {
+  const { transaction, info } = v2Receipt(binding.transaction, RECIPIENT, 1_000_000n, output);
   return { transaction, info, head: { block_header: { raw_data: { number: solid } } } };
 }
 class ObservationRpc implements SunSwapObservationRpcPort {
@@ -179,10 +171,11 @@ test("executor persists marker before one ambiguous broadcast and restart is obs
 
 test("observer requires matching full and solidified router transaction, output and fee proof", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
-  const expected = { transactionHash: f.binding.transaction.txID, recipient: RECIPIENT, minimumOutputAtomic: "300000",
-    unsignedRawDataHex: f.binding.transaction.raw_data_hex, maximumFeeSun: "100000000" };
+  const expected = { transactionHash: f.binding.transaction.txID, recipient: RECIPIENT, inputAmountAtomic: "1000000",
+    minimumOutputAtomic: f.operation.quote.minimumOutputAtomic, unsignedRawDataHex: f.binding.transaction.raw_data_hex, maximumFeeSun: "100000000" };
   const rpc = new ObservationRpc(receiptFixture(f.binding));
-  const proof = await observeSunSwapFinality(rpc, expected); assert.equal(proof.outputAmountAtomic, "300001"); assert.equal(proof.finalized, true);
+  const proof = await observeSunSwapFinality(rpc, expected); assert.equal(proof.outputAmountAtomic, OUTPUT.toString()); assert.equal(proof.finalized, true);
+  assert.equal(proof.trxDebitSun, "1012345");
   assert.deepEqual(rpc.calls, ["wallet/gettransactionbyid", "wallet/gettransactioninfobyid", "walletsolidity/gettransactionbyid",
     "walletsolidity/gettransactioninfobyid", "walletsolidity/getnowblock"]);
   rpc.conflict = true; await assert.rejects(observeSunSwapFinality(rpc, expected), { code: "APN_RPC_PROTOCOL" });
@@ -228,7 +221,7 @@ test("explicit admission, cross-rail cap, fee cap and exact foreground approval 
       ownerAdmission: { admit: async () => kind === "admission" ? { admitted: true as const, accountIdentityHash: "0".repeat(64) } :
         { admitted: true as const, accountIdentityHash: f.account.identityHash } },
       approval: { approve: async (input: SunSwapForegroundApprovalInput) => {
-        const sealed: any = approval(input); if (kind === "approval") sealed.minimumOutputAtomic = "299999"; return sealed; } },
+        const sealed: any = approval(input); if (kind === "approval") sealed.minimumOutputAtomic = "1"; return sealed; } },
       clock: { now: () => NOW }, resourceFeeCap: kind === "fee" ? { maximumEnergy: "99999", energyPriceSun: "100", maximumFeeLimitSun: "100000000" } :
         { maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" },
       signer, sender: { sendOnce: async () => ({ transactionHash: f.binding.transaction.txID }) }, observer }, f.binding);

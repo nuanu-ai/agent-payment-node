@@ -5,7 +5,7 @@ import { ApnError } from "../../errors.js";
 import { tronAddress } from "../../tron/codec.js";
 import { validateSwapOperation } from "../model.js";
 import { SwapOperationRepository } from "../repository.js";
-import { SUNSWAP_TRON_CHAIN, SUNSWAP_USDT } from "./catalog.js";
+import { SUNSWAP_MAX_HEAD_DRIFT_BLOCKS, SUNSWAP_TRON_CHAIN, SUNSWAP_USDT } from "./catalog.js";
 import { sunSwapUnsignedPayloadHash, validateSunSwapUnsignedTransaction, } from "./transaction.js";
 /**
  * A per-operation protected adapter. Signed bytes remain in ChainAccountStore's authenticated
@@ -109,8 +109,9 @@ export function validateSunSwapExecutionBinding(operationValue, bindingValue) {
         simulation.blockNumber !== operation.quote.simulation.blockNumber || simulation.blockHash !== operation.quote.simulation.blockHash ||
         simulation.headBlockNumber !== operation.quote.simulation.headBlockNumber || simulation.maxHeadDrift !== operation.quote.simulation.maxHeadDrift ||
         simulation.gasEstimate !== operation.quote.simulation.gasEstimate || simulation.energyRequired !== operation.quote.simulation.gasEstimate ||
-        simulation.blockHash !== `0x${binding.intent.referenceBlockId}` || simulation.blockNumber !== simulation.headBlockNumber ||
-        simulation.maxHeadDrift !== 0 ||
+        simulation.blockHash !== `0x${binding.intent.referenceBlockId}` ||
+        simulation.blockNumber !== BigInt(`0x${binding.intent.referenceBlockId.slice(0, 16)}`).toString() ||
+        simulation.maxHeadDrift !== SUNSWAP_MAX_HEAD_DRIFT_BLOCKS ||
         simulation.feeLimitSun !== binding.intent.feeLimitSun || BigInt(simulation.energyRequired) > BigInt(binding.intent.maximumEnergy) ||
         BigInt(simulation.energyRequired) * BigInt(binding.intent.energyPriceSun) > BigInt(binding.intent.feeLimitSun))
         mismatch();
