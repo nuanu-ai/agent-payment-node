@@ -26,7 +26,9 @@ import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/servi
 import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
+import { type PortfolioDependencies } from "./portfolio/command.js";
 export interface RuntimeFactoryOptions {
+    readonly portfolio?: PortfolioDependencies;
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;

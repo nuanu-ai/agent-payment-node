@@ -12,6 +12,7 @@ import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
 import { evmWalletBalance } from "./evm-wallet-balance.js";
+import { readProfilePortfolio } from "./portfolio/command.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
 import { ProviderPermissionService } from "./provider-permission-service.js";
@@ -113,19 +114,9 @@ export type {
 } from "./asset-usage-ledger.js";
 export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
 export type {
-  AssetPortfolio,
-  BalanceObservation,
-  BalanceProvenance,
-  BatchBalanceAsset,
-  BatchBalanceAvailable,
-  BatchBalanceRequest,
-  BatchBalanceResult,
-  BatchBalanceUnavailable,
-  FamilyBalanceBatchPort,
-  PortfolioAccount,
-  PortfolioAssetBalance,
-  PortfolioCachePolicy,
-  PortfolioNetworkBalance,
+  AssetPortfolio, AssetPortfolioInput, BatchBalanceAsset, BatchBalanceAvailable, BatchBalanceMode, BatchBalanceRequest,
+  BatchBalanceResult, BatchBalanceRow, BatchBalanceUnavailable, FamilyBalanceBatchPort, PortfolioAccount,
+  PortfolioNetworkResult, PortfolioRow, PortfolioRowStatus, PortfolioUnavailableReason,
 } from "./asset-portfolio-reader.js";
 export {
   DIRECT_ASSET_USAGE_LEASE_SCHEMA,
@@ -295,6 +286,7 @@ export class ApnCore {
           await evmWalletBalance(this.context, request.profile, request.asset),
         "chain_verified_public_read",
       );
+      case "wallet.portfolio": return dataOutcome(await readProfilePortfolio(this.context, request.profile), "chain_verified_public_read");
       case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile, request.chainId), "encrypted_profile_policy_status");
       case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
       case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, request.chainId), "seller_challenge_static");

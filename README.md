@@ -522,6 +522,72 @@ prepare, approval and execution stay dormant. Jupiter additionally refuses
 approval and execution because the JUP6 instruction and account ABI has not
 been verified for signing. See `docs/sunswap.md` and `docs/jupiter.md`.
 
+## Portfolio read
+
+`apn wallet portfolio [--profile <profile>]` (MCP: `apn_wallet_portfolio`)
+reads the native coin and every token of the frozen allowlist
+(`data/allowlist/2026-09-17/dataset.json`: 13 networks, 28 rows) for the
+profile's local EVM wallet and its Solana and TRON chain accounts. It is
+read-only: it never signs, submits or moves funds, and needs no admitted
+policy. It works without keys: each network has one pinned keyless public
+endpoint, verified live (EVM `chainId`, Solana/TRON genesis) on 2026-09-18.
+An owner variable overrides the default for this command only; money-moving
+rails keep their owner-named RPC and never use these defaults.
+
+| Network | Owner override | Keyless default |
+|---|---|---|
+| Ethereum `eip155:1` | `APN_ETHEREUM_RPC_URL` | `https://ethereum-rpc.publicnode.com` |
+| Base `eip155:8453` | `APN_BASE_RPC_URL` | `https://mainnet.base.org` |
+| Arbitrum One `eip155:42161` | `APN_ARBITRUM_RPC_URL` | `https://arb1.arbitrum.io/rpc` |
+| OP Mainnet `eip155:10` | `APN_OPTIMISM_RPC_URL` | `https://mainnet.optimism.io` |
+| Polygon PoS `eip155:137` | `APN_POLYGON_RPC_URL` | `https://polygon-bor-rpc.publicnode.com` |
+| BNB Smart Chain `eip155:56` | `APN_BNB_RPC_URL` | `https://bsc-rpc.publicnode.com` |
+| Avalanche C-Chain `eip155:43114` | `APN_AVALANCHE_RPC_URL` | `https://api.avax.network/ext/bc/C/rpc` |
+| Unichain `eip155:130` | `APN_UNICHAIN_RPC_URL` | `https://mainnet.unichain.org` |
+| Linea `eip155:59144` | `APN_LINEA_RPC_URL` | `https://rpc.linea.build` |
+| Monad `eip155:143` | `APN_MONAD_RPC_URL` | `https://rpc.monad.xyz` |
+| Sei EVM `eip155:1329` | `APN_SEI_RPC_URL` | `https://evm-rpc.sei-apis.com` |
+| TRON | `APN_TRON_RPC_URL` | `https://api.trongrid.io` |
+| Solana | `APN_SOLANA_RPC_URL` | `https://api.mainnet-beta.solana.com` |
+
+An empty variable counts as unset. An invalid owner value (not public
+credential-free HTTPS; for Solana and TRON also any query or non-443 port) is
+reported as `unavailable` / `rpc_config_invalid` and is never replaced by the
+default. Output shows each network's `endpoint.source` (`default_public` or
+`env`) and variable name; only the pinned public default URL is printed, never
+an owner URL. A read sends the profile's public addresses to the selected
+endpoints; set the owner variables to keep those lookups on your own nodes.
+
+A full read of the list is **16 RPC calls** (HTTP requests):
+
+- EVM, 11 × 1: one JSON-RPC batch with `eth_getCode` of Multicall3
+  (`0xcA11bde05977b3631167028862bE2a173976CA11`) and one `aggregate3`
+  `eth_call` carrying `getChainId`, `getBlockNumber`, `getEthBalance` and each
+  ERC-20 `balanceOf`. The runtime-code keccak is pinned per chain and checked
+  on every read; a mismatch fails closed. A chain without a pinned Multicall3
+  would use one plain JSON-RPC batch array (`evm_json_rpc_batch`); today all
+  11 are pinned. The block anchor is `block.number` inside the call (on
+  Arbitrum One that is the L1 block number).
+- Solana, 1: one JSON-RPC batch with `getGenesisHash` and one
+  `getMultipleAccounts` for the owner plus each mint's associated token
+  account. An absent account reads as zero; tokens held outside the
+  associated token account are not counted.
+- TRON, 4: genesis check, solidified head, `walletsolidity/getaccount` and one
+  `walletsolidity/triggerconstantcontract` `balanceOf` (TRON has no batch API).
+
+Each row has `status` `ok` (exact `atomic` integer plus `display` with the
+list decimals), `unavailable` with a `reason`, `no_account` or
+`rpc_not_configured`. HTTP 429, 5xx, timeouts and unreachable nodes are
+retried: 3 attempts with 1 s then 2 s pauses; if they all fail the rows are
+`unavailable` (`rate_limited`, `server_error`, `timeout`, `unreachable`),
+never zero. Chain mismatch, Multicall3 code mismatch, other HTTP statuses,
+JSON-RPC errors and malformed evidence are not retried. Each network reports
+`rpc.calls` (including retries), `rpc.attempts`, `rpc.methods`, `rpc.mode` and
+`rpc.retried` (the classified reason of each retried attempt);
+`rpc_calls_total` is the sum. External (provider-managed) EVM profiles are
+reported as `external_provider_profile`, not guessed. There is no balance
+cache: every run reads the chains.
+
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
 apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>]
@@ -566,6 +632,7 @@ apn wallet balance-tron --profile <profile> --asset <trx-or-usdt>
 apn wallet capabilities-tron [--profile <profile>]
 apn policy admit-tron --profile <profile> --asset <trx-or-usdt> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-trx <decimal>
 apn pay transfer prepare-tron --profile <profile> --asset <trx-or-usdt> --to <tron-address> --amount <decimal> --max-fee-trx <decimal> --idempotency-key <key>
+apn wallet portfolio [--profile <profile>]
 apn bridge capabilities [--profile <profile>]
 apn bridge inventory
 apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --from-token <address> --to-token <address> --amount <decimal> --to <address> --min-output <decimal> --max-native-debit-wei <uint> --max-route-fee <decimal> --slippage-bps <uint>

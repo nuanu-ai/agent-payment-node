@@ -1,220 +1,191 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AssetPortfolioReader, type BatchBalanceRequest, type BatchBalanceResult,
-  type FamilyBalanceBatchPort } from "../../src/asset-portfolio-reader.js";
-import { sealAssetPolicyRegistry, type AssetPolicyChain, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
+import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
+import { AssetPortfolioReader, type BatchBalanceAvailable, type BatchBalanceRequest, type BatchBalanceResult, type FamilyBalanceBatchPort,
+  type PortfolioAccount } from "../../src/asset-portfolio-reader.js";
+import { portfolioEndpoint, type PortfolioEndpoint } from "../../src/portfolio/registry.js";
 
-const EVM_ACCOUNT = "0x0000000000000000000000000000000000000001";
-const EVM_ACCOUNT_TWO = "0x0000000000000000000000000000000000000002";
-const EVM_TOKEN = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
-const SOL_ACCOUNT = "11111111111111111111111111111111";
-const SOL_TOKEN = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const TRON_ACCOUNT = "TXHwnAuEUFnzk474xAKnY9DmemrZ8AsxpF";
-const TRON_TOKEN = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
-const rails = { direct: true, gasless: false, x402: false, bridge: false, swap: false } as const;
-const caps = { maximumPerTransferAtomic: "1000", dailyLimitAtomic: "3000" } as const;
-const at = "2026-09-17T05:00:00.000Z";
+const inventory = loadAllowlistInventory();
+const EVM = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
+const SOLANA = "7TyHe1sAhTaSCMF1uzWNhpgEoAmYQFuihxisWV6FWbUm";
+const TRON = "TXHwnAuEUFnzk474xAKnY9DmemrZ8AsxpF";
+const ETHEREUM = "eip155:1", BASE = "eip155:8453", OPTIMISM = "eip155:10", BNB = "eip155:56";
+const SOLANA_CHAIN = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+const TRON_CHAIN = "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc";
+const now = () => new Date("2026-09-18T05:00:00.000Z");
+const COST = { evm: { mode: "evm_multicall3_aggregate3", calls: 1, methods: 2 }, solana: { mode: "solana_json_rpc_batch", calls: 1, methods: 2 },
+  tron: { mode: "tron_http_sequential", calls: 4, methods: 4 } } as const;
 
-function chain(family: "evm" | "solana" | "tron"): AssetPolicyChain {
-  if (family === "evm") return { chain: "eip155:1", family, name: "Ethereum", assets: [
-    { kind: "token", identifier: EVM_TOKEN, symbol: "USDC", decimals: 6, rails, caps },
-    { kind: "native", identifier: null, symbol: "ETH", decimals: 18, rails, caps },
-  ] };
-  if (family === "solana") return { chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", family, name: "Solana", assets: [
-    { kind: "token", identifier: SOL_TOKEN, symbol: "USDC", decimals: 6, rails, caps },
-    { kind: "native", identifier: null, symbol: "SOL", decimals: 9, rails, caps },
-  ] };
-  return { chain: "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc", family, name: "TRON", assets: [
-    { kind: "token", identifier: TRON_TOKEN, symbol: "USDT", decimals: 6, rails, caps },
-    { kind: "native", identifier: null, symbol: "TRX", decimals: 6, rails, caps },
-  ] };
-}
-
-function registry(families: readonly ("evm" | "solana" | "tron")[] = ["tron", "evm", "solana"], version = "portfolio.1") {
-  const value: UnsignedAssetPolicyRegistry = { schemaVersion: "apn.asset-policy-registry.v1", registryVersion: version,
-    publishedAt: at, effectiveDate: "2026-09-18", chains: families.map(chain) };
-  return sealAssetPolicyRegistry(value);
-}
-
-function accounts(families: readonly ("evm" | "solana" | "tron")[] = ["evm", "solana", "tron"], evm = EVM_ACCOUNT) {
-  return families.map((family) => ({ chain: chain(family).chain,
-    account: family === "evm" ? evm : family === "solana" ? SOL_ACCOUNT : TRON_ACCOUNT }));
-}
-
+type Reply = (request: BatchBalanceRequest, call: number) => BatchBalanceResult | Promise<BatchBalanceResult>;
 class Port implements FamilyBalanceBatchPort {
-  readonly calls: BatchBalanceRequest[] = [];
-  constructor(readonly family: "evm" | "solana" | "tron", readonly source: string,
-    private readonly reply: (request: BatchBalanceRequest, call: number) => BatchBalanceResult | Promise<BatchBalanceResult>) {}
+  readonly requests: BatchBalanceRequest[] = [];
+  constructor(readonly family: "evm" | "solana" | "tron", private readonly reply: Reply) {}
   async read(request: BatchBalanceRequest): Promise<BatchBalanceResult> {
-    this.calls.push(structuredClone(request)); return await this.reply(request, this.calls.length);
+    this.requests.push(request);
+    return await this.reply(request, this.requests.filter((entry) => entry.chain === request.chain).length);
   }
 }
+function available(request: BatchBalanceRequest, amount = "7"): BatchBalanceAvailable {
+  const family = request.family;
+  return { status: "available", ...COST[family], block: family === "solana" ? null : "100", slot: family === "solana" ? "200" : null,
+    balances: request.assets.map((asset) => ({ ...asset, amountAtomic: amount })) };
+}
+function failure(request: BatchBalanceRequest, reason: string, httpStatus?: number): BatchBalanceResult {
+  return { status: "unavailable", reason, ...(httpStatus === undefined ? {} : { httpStatus }), ...COST[request.family], calls: 1,
+    methods: COST[request.family].methods } as BatchBalanceResult;
+}
+function ports(overrides: Partial<Record<"evm" | "solana" | "tron", Reply>> = {}) {
+  return { evm: new Port("evm", overrides.evm ?? ((request) => available(request))),
+    solana: new Port("solana", overrides.solana ?? ((request) => available(request))),
+    tron: new Port("tron", overrides.tron ?? ((request) => available(request))) };
+}
+const accounts: Record<"evm" | "solana" | "tron", PortfolioAccount> = { evm: { kind: "account", address: EVM },
+  solana: { kind: "account", address: SOLANA }, tron: { kind: "account", address: TRON } };
+function reader(p: ReturnType<typeof ports>, waits: number[] = [], result: "elapsed" | "interrupted" = "elapsed") {
+  return new AssetPortfolioReader(p, now, async (milliseconds) => { waits.push(milliseconds); return result; });
+}
+const defaults = (chain: string): PortfolioEndpoint => portfolioEndpoint(chain, {});
+const network = (value: Awaited<ReturnType<AssetPortfolioReader["read"]>>, chain: string) => value.networks.find((entry) => entry.chain === chain)!;
 
-function available(family: "evm" | "solana" | "tron",
-  balances: readonly { readonly kind: "native" | "token"; readonly identifier: string | null; readonly amountAtomic: string }[]): BatchBalanceResult {
-  return { status: "available", observedAt: at, block: family === "solana" ? null : "100", slot: family === "solana" ? "200" : null,
-    balances };
-}
-function all(request: BatchBalanceRequest, family: "evm" | "solana" | "tron", amount = "7"): BatchBalanceResult {
-  return available(family, request.assets.map((asset) => ({ ...asset, amountAtomic: amount })));
-}
-function ports(overrides: Partial<Record<"evm" | "solana" | "tron", Port>> = {}) {
-  return {
-    evm: overrides.evm ?? new Port("evm", "fixture:evm", (request) => all(request, "evm")),
-    solana: overrides.solana ?? new Port("solana", "fixture:solana", (request) => all(request, "solana")),
-    tron: overrides.tron ?? new Port("tron", "fixture:tron", (request) => all(request, "tron")),
-  };
-}
-
-test("portfolio batches once per network in deterministic order and keeps zero distinct from unavailable", async () => {
-  const evm = new Port("evm", "fixture:evm", (request) => available("evm", [
-    { ...request.assets[0]!, amountAtomic: "0" },
-  ]));
-  const p = ports({ evm }), reader = new AssetPortfolioReader(p, () => Date.parse(at), async () => {});
-  const result = await reader.read(registry(), accounts(), { availableTtlMs: 10_000, unavailableTtlMs: 0 });
-  assert.equal(result.requestCount, 3);
-  assert.deepEqual(result.networks.map((row) => row.chain), ["eip155:1", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
-    "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc"]);
-  assert.equal(p.evm.calls.length, 1); assert.equal(p.solana.calls.length, 1); assert.equal(p.tron.calls.length, 1);
-  assert.equal(p.evm.calls[0]!.mode, "evm_multicall");
-  assert.equal(p.solana.calls[0]!.mode, "solana_native_and_token_accounts");
-  assert.equal(p.tron.calls[0]!.mode, "tron_native_and_trc20");
-  assert.deepEqual(p.evm.calls[0]!.assets.map((asset) => asset.kind), ["native", "token"]);
-  const observations = result.networks[0]!.balances.map((row) => row.observation);
-  assert.deepEqual(observations[0], { status: "available", amountAtomic: "0",
-    provenance: { block: "100", slot: null, observedAt: at, source: "fixture:evm", attempts: 1 } });
-  const missing = observations[1]!;
-  assert.equal(missing.status, "unavailable");
-  assert.equal(missing.status === "unavailable" && missing.reason, "partial_batch");
-  assert.equal(result.networks[0]!.cache.unavailableCached, false);
+test("reads every frozen-list network once per batch in list order and totals the RPC calls", async () => {
+  const p = ports();
+  const result = await reader(p).read({ inventory, accounts, endpoint: defaults });
+  assert.deepEqual(result.networks.map((entry) => entry.chain), inventory.networks.map((entry) => entry.chain));
+  assert.equal(result.networks.length, 13);
+  assert.equal(result.networks.flatMap((entry) => entry.rows).length, 28);
+  assert.equal(p.evm.requests.length, 11); assert.equal(p.solana.requests.length, 1); assert.equal(p.tron.requests.length, 1);
+  assert.equal(result.rpcCallsTotal, 11 + 1 + 4);
+  assert.equal(result.datasetSha256, inventory.dataset.sha256);
+  const ethereum = network(result, ETHEREUM);
+  assert.deepEqual(ethereum.rows.map((row) => [row.symbol, row.status, row.atomic, row.contract]), [
+    ["ETH", "ok", "7", null], ["USDC", "ok", "7", "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"],
+    ["USDT", "ok", "7", "0xdAC17F958D2ee523a2206206994597C13D831ec7"]]);
+  assert.deepEqual([ethereum.rpcCalls, ethereum.attempts, ethereum.methods, ethereum.block, ethereum.slot], [1, 1, 2, "100", null]);
+  assert.deepEqual(network(result, SOLANA_CHAIN).slot, "200");
+  assert.deepEqual(p.evm.requests[0]!.assets, [{ kind: "native", identifier: null },
+    { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" }, { kind: "token", identifier: "0xdAC17F958D2ee523a2206206994597C13D831ec7" }]);
 });
 
-test("only explicit HTTP 429 retries, then records success or bounded exhaustion", async () => {
+test("HTTP 429 exhausts three attempts with 1 s then 2 s pauses and reports unavailable, never zero", async () => {
   const waits: number[] = [];
-  const success = new Port("evm", "fixture:evm", (request, call) => call === 1 ?
-    { status: "unavailable", reason: "rate_limited", httpStatus: 429, observedAt: at, block: null, slot: null } : all(request, "evm"));
-  let reader = new AssetPortfolioReader(ports({ evm: success }), () => Date.parse(at), async (ms) => { waits.push(ms); });
-  let result = await reader.read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1, unavailableTtlMs: 0 });
-  assert.equal(result.requestCount, 2); assert.deepEqual(waits, [1_000]);
-  assert.equal(result.networks[0]!.balances[0]!.observation.provenance.attempts, 2);
-
-  const exhausted = new Port("evm", "fixture:evm", () =>
-    ({ status: "unavailable", reason: "rate_limited", httpStatus: 429, observedAt: at, block: null, slot: null }));
-  reader = new AssetPortfolioReader(ports({ evm: exhausted }), () => Date.parse(at), async () => {});
-  result = await reader.read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1, unavailableTtlMs: 0 });
-  assert.equal(result.requestCount, 3); assert.equal(exhausted.calls.length, 3);
-  const unavailable = result.networks[0]!.balances[0]!.observation;
-  assert.equal(unavailable.status, "unavailable"); assert.equal(unavailable.status === "unavailable" && unavailable.reason, "rate_limited");
-  assert.equal(unavailable.provenance.attempts, 3);
-
-  const noRetry = new Port("evm", "fixture:evm", () =>
-    ({ status: "unavailable", reason: "transport", httpStatus: 503, observedAt: at, block: null, slot: null }));
-  reader = new AssetPortfolioReader(ports({ evm: noRetry }), () => Date.parse(at), async () => {});
-  result = await reader.read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1, unavailableTtlMs: 0 });
-  assert.equal(result.requestCount, 1); assert.equal(noRetry.calls.length, 1);
+  const p = ports({ evm: (request) => request.chain === BASE ? failure(request, "rate_limited", 429) : available(request) });
+  const result = await reader(p, waits).read({ inventory, accounts, endpoint: defaults });
+  const base = network(result, BASE);
+  assert.deepEqual(waits, [1_000, 2_000]);
+  assert.deepEqual([base.attempts, base.rpcCalls, base.retried], [3, 3, ["rate_limited", "rate_limited"]]);
+  assert.deepEqual(base.rows.map((row) => [row.status, row.reason, row.httpStatus, row.atomic, row.display]),
+    [["unavailable", "rate_limited", 429, null, null], ["unavailable", "rate_limited", 429, null, null]]);
+  assert.equal(network(result, ETHEREUM).rows.every((row) => row.status === "ok"), true);
+  assert.equal(result.rpcCallsTotal, 16 - 1 + 3);
 });
 
-test("cache expiry, account and dataset digest isolate reads; unavailable caching is explicit", async () => {
-  let now = Date.parse(at);
-  const evm = new Port("evm", "fixture:evm", (request) => all(request, "evm"));
-  const reader = new AssetPortfolioReader(ports({ evm }), () => now, async () => {});
-  const policy = { availableTtlMs: 1_000, unavailableTtlMs: 500 };
-  let result = await reader.read(registry(["evm"]), accounts(["evm"]), policy);
-  assert.equal(result.requestCount, 1); assert.equal(result.networks[0]!.cache.state, "miss");
-  (result.networks[0]!.balances[0]!.observation as any).amountAtomic = "0";
-  result = await reader.read(registry(["evm"]), accounts(["evm"]), policy);
-  assert.equal(result.requestCount, 0); assert.equal(result.networks[0]!.cache.state, "fresh");
-  assert.equal(result.networks[0]!.balances[0]!.observation.status === "available" &&
-    result.networks[0]!.balances[0]!.observation.amountAtomic, "7");
-  now += 1_000;
-  result = await reader.read(registry(["evm"]), accounts(["evm"]), policy);
-  assert.equal(result.requestCount, 1); assert.equal(result.networks[0]!.cache.state, "expired");
-  result = await reader.read(registry(["evm"]), accounts(["evm"], EVM_ACCOUNT_TWO), policy);
-  assert.equal(result.requestCount, 1);
-  result = await reader.read(registry(["evm"], "portfolio.2"), accounts(["evm"]), policy);
-  assert.equal(result.requestCount, 1); assert.equal(evm.calls.length, 4);
-
-  const unavailable = new Port("evm", "fixture:evm", () =>
-    ({ status: "unavailable", reason: "transport", observedAt: at, block: null, slot: null }));
-  const uncached = new AssetPortfolioReader(ports({ evm: unavailable }), () => now, async () => {});
-  await uncached.read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
-  result = await uncached.read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
-  assert.equal(result.requestCount, 1); assert.equal(unavailable.calls.length, 2); assert.equal(result.networks[0]!.cache.unavailableCached, false);
-  const cachedUnavailable = new AssetPortfolioReader(ports({ evm: unavailable }), () => now, async () => {});
-  result = await cachedUnavailable.read(registry(["evm"]), accounts(["evm"]), policy);
-  assert.equal(result.networks[0]!.cache.unavailableCached, true);
-  result = await cachedUnavailable.read(registry(["evm"]), accounts(["evm"]), policy);
-  assert.equal(result.requestCount, 0); assert.equal(result.networks[0]!.cache.state, "fresh");
+test("5xx, timeout and unreachable nodes are retried; a later success reports every call spent", async () => {
+  const waits: number[] = [];
+  const p = ports({ evm: (request, call) => request.chain === BASE
+    ? call === 1 ? failure(request, "server_error", 503) : call === 2 ? failure(request, "timeout") : available(request, "9")
+    : request.chain === OPTIMISM ? failure(request, "unreachable") : available(request) });
+  const result = await reader(p, waits).read({ inventory, accounts, endpoint: defaults });
+  const base = network(result, BASE), optimism = network(result, OPTIMISM);
+  assert.deepEqual([base.attempts, base.rpcCalls, base.retried, base.rows.map((row) => row.atomic)],
+    [3, 3, ["server_error", "timeout"], ["9", "9"]]);
+  assert.deepEqual([optimism.attempts, optimism.rows.map((row) => row.reason)], [3, ["unreachable", "unreachable"]]);
+  assert.deepEqual(waits.sort(), [1_000, 1_000, 2_000, 2_000]);
 });
 
-test("duplicate batch assets fail the network closed without changing its one-request count", async () => {
-  const evm = new Port("evm", "fixture:evm", (request) => available("evm", [
-    { ...request.assets[0]!, amountAtomic: "1" }, { ...request.assets[0]!, amountAtomic: "2" },
-  ]));
-  const result = await new AssetPortfolioReader(ports({ evm }), () => Date.parse(at), async () => {})
-    .read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
-  assert.equal(result.requestCount, 1); assert.equal(evm.calls.length, 1);
-  assert.ok(result.networks[0]!.balances.every((row) =>
-    row.observation.status === "unavailable" && row.observation.reason === "protocol"));
-});
-
-test("malformed available provenance becomes explicit unavailable and never a synthetic zero", async () => {
-  const evm = new Port("evm", "fixture:evm", (request) => ({ ...all(request, "evm"), block: null } as BatchBalanceResult));
-  const result = await new AssetPortfolioReader(ports({ evm }), () => Date.parse(at), async () => {})
-    .read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
-  assert.equal(result.requestCount, 1);
-  for (const row of result.networks[0]!.balances) {
-    assert.deepEqual(row.observation, { status: "unavailable", reason: "protocol",
-      provenance: { block: null, slot: null, observedAt: at, source: "fixture:evm", attempts: 1 } });
+test("non-retryable failures end after one attempt and keep their classification", async () => {
+  for (const [reason, httpStatus] of [["chain_mismatch"], ["multicall_code_mismatch"], ["protocol"], ["http_status", 404],
+    ["rpc_error"], ["transport_refused"]] as const) {
+    const waits: number[] = [];
+    const p = ports({ evm: (request) => request.chain === ETHEREUM ? failure(request, reason, httpStatus) : available(request) });
+    const ethereum = network(await reader(p, waits).read({ inventory, accounts, endpoint: defaults }), ETHEREUM);
+    assert.deepEqual([ethereum.attempts, ethereum.rpcCalls, waits], [1, 1, []], reason);
+    assert.deepEqual(ethereum.rows.map((row) => [row.status, row.reason, row.httpStatus]),
+      Array(3).fill(["unavailable", reason, httpStatus ?? null]), reason);
   }
 });
 
-test("runtime provider envelopes are exact and malformed 429 claims are not retried", async () => {
-  const malformed = new Port("evm", "fixture:evm", () => ({
-    status: "unavailable", reason: "invented", httpStatus: 429, observedAt: at, block: null, slot: null, extra: true,
-  } as unknown as BatchBalanceResult));
-  const result = await new AssetPortfolioReader(ports({ evm: malformed }), () => Date.parse(at), async () => {
-    assert.fail("a malformed provider envelope must not retry");
-  }).read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
-  assert.equal(result.requestCount, 1); assert.equal(malformed.calls.length, 1);
-  assert.ok(result.networks[0]!.balances.every((row) =>
-    row.observation.status === "unavailable" && row.observation.reason === "protocol"));
+test("an interrupted pause stops retrying and reports the classified failure", async () => {
+  const waits: number[] = [];
+  const p = ports({ tron: (request) => failure(request, "rate_limited", 429) });
+  const tron = network(await reader(p, waits, "interrupted").read({ inventory, accounts, endpoint: defaults }), TRON_CHAIN);
+  assert.deepEqual([tron.attempts, waits, tron.rows.map((row) => row.reason)], [1, [1_000], ["rate_limited", "rate_limited"]]);
 });
 
-test("cache policy changes are isolated and cannot reuse a longer prior TTL", async () => {
-  let now = Date.parse(at);
-  const evm = new Port("evm", "fixture:evm", (request) => all(request, "evm"));
-  const reader = new AssetPortfolioReader(ports({ evm }), () => now, async () => {});
-  await reader.read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 10_000, unavailableTtlMs: 0 });
-  now += 1;
-  const result = await reader.read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1, unavailableTtlMs: 0 });
-  assert.equal(result.requestCount, 1); assert.equal(result.networks[0]!.cache.state, "miss"); assert.equal(evm.calls.length, 2);
+test("a partial batch keeps validated rows and marks failed or missing rows unavailable", async () => {
+  const p = ports({ evm: (request) => request.chain !== ETHEREUM ? available(request) : { status: "available", ...COST.evm, block: "5", slot: null,
+    balances: [{ kind: "native", identifier: null, amountAtomic: "12" },
+      { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", unavailable: "partial_batch" }] } });
+  const ethereum = network(await reader(p).read({ inventory, accounts, endpoint: defaults }), ETHEREUM);
+  assert.deepEqual(ethereum.rows.map((row) => [row.symbol, row.status, row.reason, row.atomic]),
+    [["ETH", "ok", null, "12"], ["USDC", "unavailable", "partial_batch", null], ["USDT", "unavailable", "partial_batch", null]]);
 });
 
-test("registry and port descriptor mutation cannot escape the validated digest snapshot", async () => {
-  const sealed = registry(["evm"]);
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const original = new Port("evm", "fixture:evm", async (request) => { await gate; return all(request, "evm"); });
-  const descriptor = ports({ evm: original });
-  const reader = new AssetPortfolioReader(descriptor, () => Date.parse(at), async () => {});
-  const pending = reader.read(sealed, accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
-  (sealed.chains[0]!.assets[0] as any).symbol = "FAKE";
-  (descriptor as any).evm = new Port("evm", "fixture:replaced", () => { assert.fail("replacement port used"); });
-  release();
-  const result = await pending;
-  assert.equal(result.datasetDigest, sealed.policyDigest);
-  assert.deepEqual(result.networks[0]!.balances.map((row) => row.asset.symbol), ["ETH", "USDC"]);
-  assert.ok(result.networks[0]!.balances.every((row) => row.observation.status === "available"));
+test("malformed, oversized, duplicated or throwing port results are protocol failures, never zero", async () => {
+  const cases: Reply[] = [
+    (request) => ({ ...available(request), balances: [...available(request).balances, ...available(request).balances] }) as BatchBalanceResult,
+    (request) => available(request, "-1"), (request) => available(request, "01"),
+    (request) => available(request, (1n << 256n).toString()),
+    (request) => ({ ...available(request), block: null }) as BatchBalanceResult,
+    (request) => ({ ...available(request), calls: -1 }) as BatchBalanceResult,
+    (request) => ({ ...failure(request, "rate_limited"), reason: "invented" }) as unknown as BatchBalanceResult,
+    () => { throw new Error("port bug"); },
+  ];
+  for (const [index, reply] of cases.entries()) {
+    const p = ports({ evm: (request, call) => request.chain === ETHEREUM ? reply(request, call) : available(request) });
+    const ethereum = network(await reader(p).read({ inventory, accounts, endpoint: defaults }), ETHEREUM);
+    assert.deepEqual(ethereum.rows.map((row) => [row.status, row.reason, row.atomic]), Array(3).fill(["unavailable", "protocol", null]), String(index));
+    assert.equal(ethereum.attempts, 1);
+  }
+  const max = network(await reader(ports({ evm: (request) => available(request, ((1n << 256n) - 1n).toString()) }))
+    .read({ inventory, accounts, endpoint: defaults }), BNB);
+  assert.equal(max.rows[0]!.atomic, ((1n << 256n) - 1n).toString());
 });
 
-test("noncanonical provider identities fail the whole network as protocol data", async () => {
-  const evm = new Port("evm", "fixture:evm", (request) => available("evm", [
-    { ...request.assets[0]!, amountAtomic: "1" },
-    { kind: "token", identifier: EVM_TOKEN.toLowerCase(), amountAtomic: "2" },
-  ]));
-  const result = await new AssetPortfolioReader(ports({ evm }), () => Date.parse(at), async () => {})
-    .read(registry(["evm"]), accounts(["evm"]), { availableTtlMs: 1_000, unavailableTtlMs: 0 });
-  assert.ok(result.networks[0]!.balances.every((row) =>
-    row.observation.status === "unavailable" && row.observation.reason === "protocol"));
+test("absent accounts, external EVM profiles, unconfigured and invalid endpoints spend zero calls", async () => {
+  const p = ports();
+  const endpoint = (chain: string): PortfolioEndpoint => chain === BNB ? { source: "not_configured", env: null }
+    : chain === ETHEREUM ? { source: "invalid_env", env: "APN_ETHEREUM_RPC_URL" } : defaults(chain);
+  const result = await reader(p).read({ inventory, endpoint, accounts: { ...accounts, solana: { kind: "none" } } });
+  assert.deepEqual(network(result, SOLANA_CHAIN).rows.map((row) => row.status), ["no_account", "no_account", "no_account"]);
+  assert.deepEqual(network(result, BNB).rows.map((row) => [row.status, row.reason]), [["rpc_not_configured", null]]);
+  assert.deepEqual(network(result, ETHEREUM).rows.map((row) => row.reason), Array(3).fill("rpc_config_invalid"));
+  for (const chain of [SOLANA_CHAIN, BNB, ETHEREUM]) assert.deepEqual([network(result, chain).rpcCalls, network(result, chain).mode], [0, null]);
+  assert.equal(p.solana.requests.length, 0);
+  assert.equal(p.evm.requests.some((request) => request.chain === BNB || request.chain === ETHEREUM), false);
+  assert.equal(result.rpcCallsTotal, 9 + 4);
+  const external = await reader(ports()).read({ inventory, endpoint: defaults,
+    accounts: { ...accounts, evm: { kind: "unsupported", reason: "external_provider_profile" } } });
+  assert.equal(external.networks.filter((entry) => entry.family === "evm").every((entry) =>
+    entry.rpcCalls === 0 && entry.account === null && entry.rows.every((row) => row.reason === "external_provider_profile")), true);
+});
+
+test("amounts stay exact atomic integers and display with the list decimals", async () => {
+  const amounts: Record<string, string> = { native: "1234567890123456789", token: "1000001" };
+  const p = ports({
+    evm: (request) => ({ ...available(request), balances: request.assets.map((asset) => ({ ...asset, amountAtomic: amounts[asset.kind]! })) }),
+    solana: (request) => ({ ...available(request), balances: request.assets.map((asset) => ({ ...asset, amountAtomic: asset.kind === "native" ? "1" : "0" })) }),
+    tron: (request) => ({ ...available(request), balances: request.assets.map((asset) => ({ ...asset, amountAtomic: asset.kind === "native" ? "5000000" : "123456789012" })) }),
+  });
+  const result = await reader(p).read({ inventory, accounts, endpoint: defaults });
+  assert.deepEqual(network(result, ETHEREUM).rows.map((row) => [row.decimals, row.atomic, row.display]),
+    [[18, "1234567890123456789", "1.234567890123456789"], [6, "1000001", "1.000001"], [6, "1000001", "1.000001"]]);
+  assert.deepEqual(network(result, SOLANA_CHAIN).rows.map((row) => [row.decimals, row.display]), [[9, "0.000000001"], [6, "0"], [6, "0"]]);
+  assert.deepEqual(network(result, TRON_CHAIN).rows.map((row) => [row.symbol, row.display]), [["TRX", "5"], ["USDT", "123456.789012"]]);
+});
+
+test("only pinned public defaults are echoed; owner endpoints are named by variable, never by URL", async () => {
+  const endpoint = (chain: string) => portfolioEndpoint(chain, { APN_BASE_RPC_URL: "https://base.example/v2/owner-secret" });
+  const result = await reader(ports()).read({ inventory, accounts, endpoint });
+  assert.deepEqual(network(result, BASE).endpoint, { source: "env", env: "APN_BASE_RPC_URL", url: null });
+  assert.deepEqual(network(result, ETHEREUM).endpoint, { source: "default_public", env: "APN_ETHEREUM_RPC_URL", url: "https://ethereum-rpc.publicnode.com" });
+  assert.equal(JSON.stringify(result).includes("owner-secret"), false);
+});
+
+test("account states are exact and canonical", async () => {
+  await assert.rejects(reader(ports()).read({ inventory, endpoint: defaults,
+    accounts: { ...accounts, evm: { kind: "account", address: EVM.toLowerCase() } } }), { code: "APN_INVALID_INPUT" });
+  await assert.rejects(reader(ports()).read({ inventory, endpoint: defaults,
+    accounts: { evm: accounts.evm, solana: accounts.solana } as never }), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => new AssetPortfolioReader({ ...ports(), tron: new Port("solana", (request) => available(request)) },
+    now, async () => "elapsed"), { code: "APN_INVALID_INPUT" });
 });

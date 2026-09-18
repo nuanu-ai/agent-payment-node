@@ -25,7 +25,7 @@ export type { AssetAtomicCaps, AssetPolicyAdmission, AssetPolicyChain, AssetPoli
 export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, AssetUsageLedger, validateAssetUsageReservation, } from "./asset-usage-ledger.js";
 export type { AssetUsageIdentity, AssetUsageReservation, AssetUsageReserveInput, AssetUsageSnapshot, AssetUsageState, AssetUsageTransitionInput, } from "./asset-usage-ledger.js";
 export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
-export type { AssetPortfolio, BalanceObservation, BalanceProvenance, BatchBalanceAsset, BatchBalanceAvailable, BatchBalanceRequest, BatchBalanceResult, BatchBalanceUnavailable, FamilyBalanceBatchPort, PortfolioAccount, PortfolioAssetBalance, PortfolioCachePolicy, PortfolioNetworkBalance, } from "./asset-portfolio-reader.js";
+export type { AssetPortfolio, AssetPortfolioInput, BatchBalanceAsset, BatchBalanceAvailable, BatchBalanceMode, BatchBalanceRequest, BatchBalanceResult, BatchBalanceRow, BatchBalanceUnavailable, FamilyBalanceBatchPort, PortfolioAccount, PortfolioNetworkResult, PortfolioRow, PortfolioRowStatus, PortfolioUnavailableReason, } from "./asset-portfolio-reader.js";
 export { DIRECT_ASSET_USAGE_LEASE_SCHEMA, DirectAssetUsageAdapter, validateDirectAssetUsageLease, } from "./direct-asset-usage.js";
 export type { DirectAssetUsageInput, DirectAssetUsageLease, } from "./direct-asset-usage.js";
 export * from "./swap/index.js";
