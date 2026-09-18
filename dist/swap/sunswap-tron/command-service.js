@@ -1,13 +1,18 @@
 import { ApnError } from "../../errors.js";
+import { swapMechanismDigest } from "../pin.js";
 import { SwapOperationRepository } from "../repository.js";
-import { loadSunSwapPinCatalog } from "./catalog.js";
+import { SUNSWAP_PINNED_CONTRACTS, SUNSWAP_V2_CODE_HASHES, loadSunSwapPinCatalog } from "./catalog.js";
+import { SUNSWAP_V2_KEYLESS_MECHANISM_PIN, SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY } from "./mechanism.js";
 export async function executeSunSwapCommand(request, context) {
     if (request.command === "swap.sunswap.inventory")
         return data({ catalog: loadSunSwapPinCatalog(), admitted: false,
-            execution: "dormant" }, "official_catalog_not_owner_admission");
+            execution: context.sunswapRuntime === undefined ? "dormant" : "foreground_cli_after_owner_admission",
+            keyless: { mechanismPin: SUNSWAP_V2_KEYLESS_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(SUNSWAP_V2_KEYLESS_MECHANISM_PIN),
+                protocolRegistryDigest: SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY.registryDigest,
+                codePins: SUNSWAP_PINNED_CONTRACTS.map(({ role, address }) => ({ role, address, codeHash: SUNSWAP_V2_CODE_HASHES[role] })) } }, "official_catalog_not_owner_admission");
     if (request.command === "swap.sunswap.quote") {
         if (context.sunswapRuntime !== undefined)
-            return data(await context.sunswapRuntime.quote(request, context.clock.now()), "unsigned_read_only_swap_quote");
+            return data(await context.sunswapRuntime.quote(request, context.clock.now()), "unsigned_exact_simulated_swap_quote");
         if (context.sunswap === undefined)
             throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "SunSwap quote requires an explicitly injected read-only builder.", { reason: "sunswap_runtime_unavailable" });
         return data(await context.sunswap.quote({ ...request, now: context.clock.now() }), "unsigned_read_only_swap_quote");
@@ -23,7 +28,8 @@ export async function executeSunSwapCommand(request, context) {
     if (request.command === "swap.sunswap.approve") {
         if (context.sunswapRuntime === undefined)
             throw new ApnError("APN_OPERATION_BLOCKED", "Native TRX input has no TRC20 or Permit2 approval operation.", { reason: "sunswap_native_no_approval" });
-        return operation(await context.sunswapRuntime.approve(request.operationId, context.clock.now()));
+        // Foreground CLI: the typed approval code and the single broadcast are one command, like Uniswap approve.
+        return operation(await context.sunswapRuntime.approveAndExecute(request.operationId, context.clock.now()));
     }
     if (context.sunswapRuntime !== undefined)
         return operation(await context.sunswapRuntime.execute(request.operationId, context.clock.now()));

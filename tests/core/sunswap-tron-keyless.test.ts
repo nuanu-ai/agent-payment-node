@@ -122,7 +122,7 @@ test("keyless builder persists exact prepared material by quoteHash and load re-
   assert.equal(material.quote.simulation.blockNumber, "86344586"); assert.equal(material.quote.simulation.headBlockNumber, "86344589");
   const rawBytes = BigInt(material.execution.transaction.raw_data_hex.length / 2), bandwidth = sunSwapMaximumBandwidthBytes(material.execution.transaction);
   assert.equal(bandwidth, 1n + (rawBytes >= 128n ? 2n : 1n) + rawBytes + 67n + 64n);
-  assert.deepEqual(material.gasOrEnergy, { resource: "tron_energy_and_bandwidth", energyUsed: "157354", energyPriceSun: "100",
+  assert.deepEqual(material.gasOrEnergy, { energyUsed: "157354", energyPriceSun: "100",
     estimatedEnergyFeeSun: "15735400", feeLimitSun: "30000000", maximumEnergy: "300000", bandwidthPriceSun: "1000",
     maximumBandwidthBytes: bandwidth.toString(), maximumBandwidthFeeSun: (bandwidth * 1000n).toString(), callValueSun: "5000000",
     maximumTrxDebitSun: (35_000_000n + bandwidth * 1000n).toString(), rawDataBytes: rawBytes.toString() });
@@ -194,9 +194,9 @@ test("owner economics refuse before any material exists: unactivated, underfunde
   const legacy: any = { ...request() }; delete legacy.feeLimitSun; delete legacy.deadline;
   await assert.rejects(new SunSwapKeylessQuoteBuilder(funded(new FakeSunSwapRpc()), new SunSwapPreparedMaterialStore(temp.root)).quote(legacy),
     { code: "APN_INVALID_INPUT", message: /feeLimitSun, deadline and now; fee_limit and deadline have no default/u });
-  // @ts-expect-error the keyless builder needs feeLimitSun and deadline, so the legacy CLI quote port must reject it at compile time
-  const legacyPort: SunSwapReadOnlyQuoteBuilder = new SunSwapKeylessQuoteBuilder(new FakeSunSwapRpc(), new SunSwapPreparedMaterialStore(temp.root));
-  void legacyPort;
+  // The CLI quote now carries the owner's fee_limit and deadline, so the keyless builder fits the injected quote port exactly.
+  const port: SunSwapReadOnlyQuoteBuilder = new SunSwapKeylessQuoteBuilder(new FakeSunSwapRpc(), new SunSwapPreparedMaterialStore(temp.root));
+  void port;
   const extra: any = { ...request(), feeLimit: "30000000" };
   await assert.rejects(new SunSwapKeylessQuoteBuilder(funded(new FakeSunSwapRpc()), new SunSwapPreparedMaterialStore(temp.root)).quote(extra), { code: "APN_INVALID_INPUT" });
   assert.deepEqual(await readdir(join(temp.root, "sunswap-tron-prepared")).catch(() => []), []);

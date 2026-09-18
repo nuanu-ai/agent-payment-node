@@ -7,7 +7,7 @@ import { tronAddress } from "../../tron/codec.js";
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
   ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
-  success: "Frozen SunSwap inventory, unsigned read-only quote, or durable status.",
+  success: "Frozen SunSwap inventory, unsigned exact simulated quote, prepared operation, or durable status.",
   failures: ["Classified refusal; no signing, broadcast, approval, or provider fallback."] } as const;
 const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert"], non_terminal: ["quoted", "prepared", "awaiting_approval",
   "reserved", "submitting", "submitted", "unknown_finality"] } as const;
@@ -21,24 +21,29 @@ export const SUNSWAP_COMMAND_GROUPS: readonly CommandGroup[] = [
 ];
 
 export const SUNSWAP_COMMANDS: readonly CommandDefinition[] = [
-  command("inventory", [], "Read the immutable SunSwap pin catalog without admitting it.", "none"),
-  command("quote", [profile, account, option("--to", "string", ["canonical_tron_base58check_recipient"]),
+  command("inventory", [], "Read the immutable SunSwap pin catalog and keyless mechanism pin without admitting them.", "none"),
+  command("quote", [profile, account, option("--to", "string", ["canonical_tron_base58check_recipient_equal_to_account"]),
     option("--amount", "wei", ["positive_native_sun"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
-    option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"])],
-    "Request one unsigned quote through an explicitly injected read-only builder.", "network_read"),
+    option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"]),
+    option("--fee-limit-sun", "wei", ["positive_owner_fee_limit_sun_no_default"]),
+    option("--deadline", "string", ["unix_seconds_within_10_minutes_no_default"])],
+    "Quote from the pinned router and pair on-chain, encode locally, and exactly simulate one unsigned transaction. Uses APN_TRON_RPC_URL.",
+    "network_read"),
   command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]),
     option("--idempotency-key", "idempotency_key", ["global_payment_key"])],
     "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
-  command("status", [operation], "Read one durable guarded swap operation without resending.", "local_read"),
-  command("approve", [operation], "Native TRX has no token approval operation.", "none"),
-  command("execute", [operation], "Execution remains dormant without a signer, sender, and observer.", "none"),
+  command("status", [operation], "Read one durable guarded swap operation; after the marker it only observes, never resends.", "local_read"),
+  command("approve", [operation], "Show the exact swap screen, take the typed approval code, then sign locally and broadcast exactly once.",
+    "payment_submit", { class: "foreground_tty", when: "Every guarded swap; MCP returns the exact CLI handoff only." }),
+  command("execute", [operation], "Continue an approved reservation with its single broadcast, or observe an already marked swap without resending.",
+    "payment_submit", { class: "foreground_tty", when: "Only an unexpired stored foreground approval; MCP returns the exact CLI handoff only." }),
 ];
 
-function command(name: string, options: readonly CommandOption[], summary: string,
-  effect: CommandDefinition["effect"]["class"]): CommandDefinition {
+function command(name: string, options: readonly CommandOption[], summary: string, effect: CommandDefinition["effect"]["class"],
+  approval: CommandDefinition["approval"] = { class: "none", when: "Never signs or broadcasts." }): CommandDefinition {
   const suffix = options.map((row) => ` ${row.name} <${row.type}>`).join("");
   return { path: ["swap", "tron", "sunswap", name], synopsis: `apn swap tron sunswap ${name}${suffix}`, summary, options,
-    effect: { class: effect, summary }, approval: { class: "none", when: "Never signs or broadcasts." }, output, states,
+    effect: { class: effect, summary }, approval, output, states,
     recovery: [], examples: [`apn swap tron sunswap ${name}`] };
 }
 
@@ -55,11 +60,12 @@ export function bindSunSwapCommand(path: string, options: Readonly<Record<string
       idempotencyKey: options["--idempotency-key"]! };
   }
   if (action === "quote") {
-    exact(options, ["--profile", "--account", "--to", "--amount", "--slippage-bps", "--owner-slippage-cap-bps"]);
+    exact(options, ["--profile", "--account", "--to", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--fee-limit-sun", "--deadline"]);
     const slippageBps = basisPoints(options["--slippage-bps"]), ownerSlippageCapBps = basisPoints(options["--owner-slippage-cap-bps"]);
     if (slippageBps > ownerSlippageCapBps) invalid("SunSwap slippage exceeds the owner cap.");
     return { command: "swap.sunswap.quote", profile: options["--profile"]!, account: tronAddress(options["--account"]!),
-      recipient: tronAddress(options["--to"]!), amountAtomic: positiveAtomic(options["--amount"]), slippageBps, ownerSlippageCapBps };
+      recipient: tronAddress(options["--to"]!), amountAtomic: positiveAtomic(options["--amount"]), slippageBps, ownerSlippageCapBps,
+      feeLimitSun: positiveAtomic(options["--fee-limit-sun"]), deadline: unixSeconds(options["--deadline"]) };
   }
   return invalid("Unsupported SunSwap action.");
 }
@@ -73,6 +79,10 @@ function basisPoints(value: string | undefined): number {
 }
 function positiveAtomic(value: string | undefined): string {
   if (value === undefined || !/^[1-9][0-9]{0,77}$/u.test(value)) invalid("SunSwap amount must be a positive canonical uint256."); return value;
+}
+function unixSeconds(value: string | undefined): number {
+  if (value === undefined || !/^[1-9][0-9]{0,15}$/u.test(value)) invalid("SunSwap deadline must be canonical unix seconds.");
+  const parsed = Number(value); if (!Number.isSafeInteger(parsed)) invalid("SunSwap deadline exceeds the safe range."); return parsed;
 }
 function hash(value: string | undefined): string {
   if (value === undefined || !/^[a-f0-9]{64}$/u.test(value)) invalid("SunSwap hash must be 64 lowercase hexadecimal characters."); return value;

@@ -55,6 +55,7 @@ import { TtyAllowlistPolicyApproval } from "./allowlist-policy-activation.js";
 import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
+import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -125,6 +126,12 @@ export function createApnCore(bound, options = {}) {
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
             foreground: bound.request.command === "swap.uniswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
         : undefined);
+    // Keyless SunSwap likewise, over APN_TRON_RPC_URL and the profile's encrypted local TRON wallet.
+    const sunswapRuntime = options.sunswapRuntime ?? (bound.request.command.startsWith("swap.sunswap.") && options.sunswap === undefined
+        ? createSunSwapKeylessRuntime({ state, rpc: tronRpc, accounts: chainAccounts, clock,
+            policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
+            foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
+        : undefined);
     return new ApnCore({
         state,
         // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
@@ -132,7 +139,7 @@ export function createApnCore(bound, options = {}) {
             portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
         } : {}),
         ...(uniswapRuntime === undefined ? {} : { uniswapRuntime }),
-        ...(options.sunswapRuntime === undefined ? {} : { sunswapRuntime: options.sunswapRuntime }),
+        ...(sunswapRuntime === undefined ? {} : { sunswapRuntime }),
         ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
         ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
         ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),

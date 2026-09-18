@@ -27,7 +27,7 @@ export class SunSwapKeylessQuoteBuilder {
     async quote(input) {
         const request = validateRequest(input);
         await assertTronNetwork(this.rpc);
-        const parameters = await chainParameters(this.rpc);
+        const parameters = await sunSwapChainParameters(this.rpc);
         if (BigInt(request.feeLimitSun) > parameters.maximumFeeLimitSun) {
             throw new ApnError("APN_INVALID_INPUT", "SunSwap fee_limit exceeds the TRON chain maximum fee limit.");
         }
@@ -44,7 +44,7 @@ export class SunSwapKeylessQuoteBuilder {
         const transaction = buildSunSwapUnsignedTransaction(intent);
         const simulation = await simulateSunSwapTransaction(this.rpc, transaction, intent);
         const bandwidthFeeSun = sunSwapMaximumBandwidthBytes(transaction) * parameters.bandwidthPriceSun;
-        await assertOwnerFunding(this.rpc, request.account, BigInt(request.amountAtomic) + BigInt(request.feeLimitSun) + bandwidthFeeSun);
+        await assertSunSwapOwnerFunding(this.rpc, request.account, BigInt(request.amountAtomic) + BigInt(request.feeLimitSun) + bandwidthFeeSun);
         const { energyRequired: _energy, feeLimitSun: _fee, ...proof } = simulation;
         const quote = createSunSwapQuoteSnapshot({ profile: request.profile, account: request.account, recipient: request.recipient,
             slippageBps: request.slippageBps, ownerSlippageCapBps: request.ownerSlippageCapBps, effectiveAt: request.now.toISOString(),
@@ -89,7 +89,7 @@ function validateRequest(input) {
         invalid("SunSwap deadline must be within the next 10 minutes (TRON expiration bound).");
     return input;
 }
-async function chainParameters(rpc) {
+export async function sunSwapChainParameters(rpc) {
     let value;
     try {
         value = await rpc.call("wallet/getchainparameters", {});
@@ -111,7 +111,7 @@ async function chainParameters(rpc) {
     return { energyPriceSun: read("getEnergyFee"), maximumFeeLimitSun: read("getMaxFeeLimit"), bandwidthPriceSun: read("getTransactionFee") };
 }
 /** Economic guard: the owner must hold the call value, the full fee_limit and the full bandwidth burn before any signing exists. */
-async function assertOwnerFunding(rpc, owner, requiredSun) {
+export async function assertSunSwapOwnerFunding(rpc, owner, requiredSun) {
     let value;
     try {
         value = await rpc.call("wallet/getaccount", { address: tronHex(owner), visible: false });
@@ -126,9 +126,11 @@ async function assertOwnerFunding(rpc, owner, requiredSun) {
     }
     if (value.address !== tronHex(owner))
         protocol();
-    if (tronAtomic(value.balance, true) < requiredSun) {
+    const balance = tronAtomic(value.balance, true);
+    if (balance < requiredSun) {
         throw new ApnError("APN_INSUFFICIENT_ASSET", "Owner TRX cannot cover the call value plus the owner fee_limit and bandwidth budget.", { reason: "sunswap_owner_trx_insufficient" });
     }
+    return balance;
 }
 function unavailable(error) {
     if (error instanceof ApnError && (error.code === "APN_RPC_CONFIG" || error.code === "APN_RPC_PROTOCOL"))

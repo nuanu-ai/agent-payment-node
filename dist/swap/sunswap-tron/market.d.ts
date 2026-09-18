@@ -44,3 +44,5 @@ export declare function sealSunSwapV2Market(body: Omit<SunSwapV2Market, "routeHa
 export declare function validateSunSwapV2Market(value: unknown, mode: "input" | "stored"): SunSwapV2Market;
 /** Exact integer pricing: minimum output from the slippage bound and price impact against the reserve spot price. */
 export declare function priceSunSwapV2Market(marketValue: SunSwapV2Market, slippageBps: number, ownerSlippageCapBps: number, mode?: "input" | "stored"): SunSwapV2Pricing;
+/** keccak256(runtimecode) and the node's code_hash must both equal the frozen pin. */
+export declare function verifySunSwapPinnedCode(rpc: TronRpcPort, address: string, expected: string): Promise<string>;
