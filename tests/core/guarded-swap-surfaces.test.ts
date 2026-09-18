@@ -22,14 +22,15 @@ const FAMILIES = [
   { path: "swap ethereum uniswap", command: "swap.uniswap" },
   { path: "swap tron sunswap", command: "swap.sunswap" },
   { path: "swap solana jupiter", command: "swap.jupiter" },
+  { path: "swap solana orca", command: "swap.orca" },
 ] as const;
 const ACTIONS = ["inventory", "quote", "prepare", "status", "approve", "execute"] as const;
 
-test("the guarded swap catalog and MCP projection expose exactly six parity actions for all three families", () => {
+test("the guarded swap catalog and MCP projection expose exactly six parity actions for all four families", () => {
   const catalog = COMMANDS.filter((row) => row.path[0] === "swap");
   assert.deepEqual(catalog.map((row) => row.path.join(" ")), FAMILIES.flatMap((family) => ACTIONS.map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
-  assert.equal(tools.length, 18);
+  assert.equal(tools.length, 24);
   assert.deepEqual(tools.map((row) => row.command), catalog);
   for (const command of catalog) {
     const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "))!;
@@ -140,6 +141,8 @@ function sample(option: string, chain: string): string {
   if (option === "--owner-slippage-cap-bps") return "200";
   if (option === "--deadline") return "1790000600";
   if (option === "--fee-limit-sun") return "30000000";
+  if (option === "--compute-unit-limit") return "200000";
+  if (option === "--compute-unit-price") return "1000";
   if (option === "--max-gas-limit") return "150000";
   if (option === "--max-fee-per-gas") return "2000000000";
   if (option === "--max-priority-fee-per-gas") return "100000000";
