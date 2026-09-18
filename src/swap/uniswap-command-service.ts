@@ -3,11 +3,17 @@ import { ApnError } from "../errors.js";
 import type { RuntimeContext } from "../runtime.js";
 import { SwapOperationRepository } from "./repository.js";
 import { UNISWAP_OFFICIAL_PIN_CATALOG } from "./uniswap-pin.js";
+import { swapMechanismDigest } from "./pin.js";
+import { UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS,
+  USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
 
 type Request = Extract<CommandRequest, { readonly command: `swap.uniswap.${string}` }>;
 export async function executeUniswapCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome> {
   if (request.command === "swap.uniswap.inventory") return data({ catalog: UNISWAP_OFFICIAL_PIN_CATALOG, admitted: false,
-    execution: "dormant" }, "official_catalog_not_owner_admission");
+    execution: context.uniswapRuntime === undefined ? "dormant" : "foreground_cli_after_owner_admission",
+    keyless: { mechanismPin: UNISWAP_V3_KEYLESS_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(UNISWAP_V3_KEYLESS_MECHANISM_PIN),
+      protocolRegistryDigest: UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY.registryDigest, pairs: UNISWAP_V3_PAIRS,
+      codePins: [...UNISWAP_V3_CODE_PINS, USDC_IMPLEMENTATION_PIN] } }, "official_catalog_not_owner_admission");
   if (request.command === "swap.uniswap.quote") {
     if (context.uniswapRuntime !== undefined) return data(await context.uniswapRuntime.quote(request, context.clock.now()), "unsigned_exact_simulated_swap_quote");
     if (context.uniswap === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
@@ -28,7 +34,8 @@ export async function executeUniswapCommand(request: Request, context: RuntimeCo
   if (request.command === "swap.uniswap.approve") {
     if (context.uniswapRuntime === undefined) throw new ApnError("APN_OPERATION_BLOCKED",
       "Native ETH input has no ERC20 or Permit2 approval operation.", { reason: "uniswap_native_no_approval" });
-    return operationOutcome(await context.uniswapRuntime.approve(request.operationId, context.clock.now()));
+    // Foreground CLI: the typed approval code and the single send are one command, like bridge approve.
+    return operationOutcome(await context.uniswapRuntime.approveAndExecute(request.operationId, context.clock.now()));
   }
   if (context.uniswapRuntime !== undefined) return operationOutcome(await context.uniswapRuntime.execute(request.operationId, context.clock.now()));
   throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",

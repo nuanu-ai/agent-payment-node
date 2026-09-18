@@ -23,7 +23,9 @@ export type AssetUsageState =
   | "submitted"
   | "unknown_finality"
   | "finalized"
-  | "failed_before_effect";
+  | "failed_before_effect"
+  /** A sent effect that is proven reverted at a finalized block releases its principal. */
+  | "failed_confirmed_revert";
 
 export interface AssetUsageIdentity {
   /** Stable canonical identity for the paying account; aliases must be resolved by the caller. */
@@ -151,7 +153,7 @@ export class AssetUsageLedger extends SecureStateStore {
         throw blocked("The usage reservation is no longer in an expected source state.");
       }
       if (at < current.updatedAt) throw blocked("The usage reservation transition cannot move backward in time.");
-      const terminal = input.state === "finalized" || input.state === "failed_before_effect";
+      const terminal = input.state === "finalized" || input.state === "failed_before_effect" || input.state === "failed_confirmed_revert";
       const outcomeDigest = terminal ? digest(input.outcomeDigest, "Outcome digest") : null;
       if (current.state === input.state) {
         if (current.outcomeDigest !== outcomeDigest) throw blocked("The idempotent usage transition outcome does not match.");
@@ -256,15 +258,15 @@ function validateBody(value: Record<string, unknown>): void {
   validateIdentity(value as unknown as AssetUsageIdentity, true);
   if (!["direct", "gasless", "x402", "bridge", "swap"].includes(value.rail as string)) corrupt("The usage rail binding is invalid.");
   atomic(value.amountAtomic, true, true);
-  if (!["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect"].includes(value.state as string)) corrupt("The usage state is invalid.");
+  if (!["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"].includes(value.state as string)) corrupt("The usage state is invalid.");
   const reservedAt = storedInstant(value.reservedAt); const updatedAt = storedInstant(value.updatedAt);
   if (updatedAt < reservedAt) corrupt("The usage reservation timestamps are invalid.");
   if (value.state === "finalized") {
     const effectAt = storedInstant(value.effectAt);
     if (effectAt !== updatedAt) corrupt("The finalized usage effect timestamp is invalid.");
     digest(value.outcomeDigest, "Outcome digest", true);
-  } else if (value.state === "failed_before_effect") {
-    if (value.effectAt !== null) corrupt("A pre-effect failure cannot contain an effect timestamp.");
+  } else if (value.state === "failed_before_effect" || value.state === "failed_confirmed_revert") {
+    if (value.effectAt !== null) corrupt("A released usage failure cannot contain an effect timestamp.");
     digest(value.outcomeDigest, "Outcome digest", true);
   } else if (value.effectAt !== null || value.outcomeDigest !== null) {
     corrupt("A nonterminal usage reservation contains terminal outcome data.");
@@ -272,7 +274,7 @@ function validateBody(value: Record<string, unknown>): void {
 }
 
 function expectedStates(value: readonly AssetUsageState[]): readonly AssetUsageState[] {
-  const allowed: readonly AssetUsageState[] = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect"];
+  const allowed: readonly AssetUsageState[] = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
   if (!Array.isArray(value) || value.length === 0 || value.some((state) => !allowed.includes(state))) {
     throw invalid("Expected usage reservation source states are invalid.");
   }
@@ -287,7 +289,7 @@ function sumUsage(records: readonly AssetUsageReservation[], now: Date): string 
   const day = instant(now).slice(0, 10);
   let total = 0n;
   for (const record of records) {
-    if (record.state === "failed_before_effect") continue;
+    if (record.state === "failed_before_effect" || record.state === "failed_confirmed_revert") continue;
     if (record.state === "finalized" && record.effectAt!.slice(0, 10) !== day) continue;
     total += atomic(record.amountAtomic, true, true);
     if (total > MAX_UINT256) corrupt("The usage ledger total exceeds uint256.");
@@ -312,10 +314,11 @@ function assertBucketWindow(records: readonly AssetUsageReservation[], at: strin
 function assertTransition(from: AssetUsageState, to: Exclude<AssetUsageState, "reserved">): void {
   const allowed: Readonly<Record<AssetUsageState, readonly AssetUsageState[]>> = {
     reserved: ["submitted", "unknown_finality", "finalized", "failed_before_effect"],
-    submitted: ["unknown_finality", "finalized"],
-    unknown_finality: ["finalized"],
+    submitted: ["unknown_finality", "finalized", "failed_confirmed_revert"],
+    unknown_finality: ["finalized", "failed_confirmed_revert"],
     finalized: [],
     failed_before_effect: [],
+    failed_confirmed_revert: [],
   };
   if (!allowed[from].includes(to)) throw blocked("The usage reservation transition is invalid.");
 }

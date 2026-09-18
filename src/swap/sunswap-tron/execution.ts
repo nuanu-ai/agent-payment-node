@@ -1,6 +1,7 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canonical.js";
 import type { AssetPolicyRegistry } from "../../asset-policy-registry.js";
 import { ApnError } from "../../errors.js";
+import type { ClockPort } from "../../ports.js";
 import { requireSwapProtocol, validateSwapProtocolRegistry, type SwapProtocolRegistry } from "../protocol-registry.js";
 import type { SwapChainObserverPort, SwapChainSenderPort, SwapChainSignerPort } from "../ports.js";
 import { GuardedSwapService } from "../service.js";
@@ -38,13 +39,16 @@ export interface SunSwapExecutionDependencies {
   readonly signer: SwapChainSignerPort;
   readonly sender: SwapChainSenderPort;
   readonly observer: SwapChainObserverPort;
+  /** Re-read after the foreground prompt: typing time never makes a fresh approval look stale. */
+  readonly clock: ClockPort;
 }
 
 /** Dormant until all authority, policy, signer, sender and observer ports are explicitly injected. */
 export class SunSwapGuardedExecutor {
   constructor(private readonly dependencies: SunSwapExecutionDependencies, private readonly binding: SunSwapExecutionBinding) {}
 
-  async execute(operationValue: SwapOperationRecord, now: Date): Promise<SwapOperationRecord> {
+  async execute(operationValue: SwapOperationRecord, commandNow: Date): Promise<SwapOperationRecord> {
+    let now = commandNow;
     let operation = validateSwapOperation(operationValue);
     this.validateDependencies(operation);
     if (operation.state === "finalized" || operation.state === "failed_before_effect") return operation;
@@ -64,7 +68,10 @@ export class SunSwapGuardedExecutor {
       if (!isPlainRecord(admission) || !exactKeys(admission, ["admitted", "accountIdentityHash"]) || admission.admitted !== true ||
           admission.accountIdentityHash !== this.binding.account.identityHash) blocked("The exact local TRON owner is not admitted for SunSwap execution.");
       const approvalInput = foregroundInput(operation, this.binding);
-      validateSunSwapForegroundApproval(await this.dependencies.approval.approve(approvalInput), approvalInput, operation.updatedAt, now);
+      const answer = await this.dependencies.approval.approve(approvalInput);
+      now = this.dependencies.clock.now();
+      validateSunSwapForegroundApproval(answer, approvalInput, operation.updatedAt, now);
+      if (!executionWindowLive(this.binding, now)) blocked("The frozen SunSwap signing window closed during foreground approval.");
       operation = await this.dependencies.service.reserve(operation, this.dependencies.policy, now);
     }
     operation = await this.dependencies.service.markSubmitting(operation, now);

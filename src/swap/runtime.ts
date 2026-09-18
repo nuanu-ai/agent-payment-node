@@ -2,6 +2,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonica
 import type { AssetPolicyRegistry } from "../asset-policy-registry.js";
 import { ApnError } from "../errors.js";
 import type { AssetUsageLedger } from "../asset-usage-ledger.js";
+import type { ClockPort } from "../ports.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { validateSwapOperation, type SwapOperationRecord } from "./model.js";
 import type { SwapProtocolRegistry } from "./protocol-registry.js";
@@ -25,8 +26,15 @@ export interface GuardedSwapReadOnlyBuilder<Request> {
   load(quoteHash: string): Promise<GuardedSwapPreparedMaterial | null>;
 }
 
+/**
+ * Resolves the owner's active sealed asset policy for one profile. Null means no owner admission is installed and
+ * every preparation or approval refuses with swap_owner_admission_required. The allowlist activation supplies it.
+ */
+export type GuardedSwapPolicyResolver = (profile: string) => Promise<AssetPolicyRegistry | null>;
+
 export interface GuardedSwapOwnerAdmissionPort {
-  assert(operation: SwapOperationRecord, material: GuardedSwapPreparedMaterial): Promise<void>;
+  /** Fails closed when the owner, wallet, or active policy no longer matches. Any returned value is ignored. */
+  assert(operation: SwapOperationRecord, material: GuardedSwapPreparedMaterial): Promise<unknown>;
 }
 
 export interface GuardedSwapApprovalIntent {
@@ -88,7 +96,9 @@ export interface GuardedSwapExecutionDependencies {
 export interface GuardedSwapRuntimeDependencies<Request> extends GuardedSwapExecutionDependencies {
   readonly chain: string;
   readonly builder: GuardedSwapReadOnlyBuilder<Request>;
-  readonly assetPolicy: AssetPolicyRegistry;
+  readonly policy: GuardedSwapPolicyResolver;
+  /** Read again after every human prompt: consent time is never the command start time. */
+  readonly clock: ClockPort;
   readonly protocolRegistry: SwapProtocolRegistry;
   readonly usage: AssetUsageLedger;
   readonly operations: SwapOperationRepository;
@@ -145,7 +155,10 @@ export class GuardedSwapRuntime<Request> {
     const quote = validateSwapQuote(material.quote, "input");
     if (quote.profile !== request.profile || quote.quoteHash !== request.quoteHash || quote.sourceAsset.chain !== this.dependencies.chain ||
         quote.destinationAsset.chain !== this.dependencies.chain) blocked("Prepared quote does not match the exact profile, hash, or chain.", "swap_quote_binding");
-    return await this.service.prepare({ quote, assetPolicy: this.dependencies.assetPolicy,
+    const assetPolicy = await this.activePolicy(request.profile);
+    // The core re-derives the identical quote hash from the unsealed input; bindMaterial later proves equality.
+    const { schemaVersion: _schema, profileHash: _profile, quoteHash: _hash, ...input } = quote;
+    return await this.service.prepare({ quote: input, assetPolicy,
       protocolRegistry: this.dependencies.protocolRegistry, idempotencyKey: request.idempotencyKey,
       approvalCapAtomic: material.approvalCapAtomic, now });
   }
@@ -153,28 +166,38 @@ export class GuardedSwapRuntime<Request> {
   async approve(operationId: string, now: Date): Promise<SwapOperationRecord> {
     const operation = await this.required(operationId);
     if (operation.state !== "awaiting_approval") blocked("Guarded swap is not awaiting foreground approval.", "swap_approval_state");
+    instant(now);
     const material = await this.material(operation.quote.quoteHash); bindMaterial(operation, material);
+    const policy = await this.activePolicy(operation.quote.profile);
     await this.dependencies.ownerAdmission.assert(operation, material);
-    const intent = approvalIntent(operation, material), artifact = validateGuardedSwapApprovalArtifact(
-      await this.dependencies.foregroundApproval.approve(intent), operation, intent, now);
-    const reserved = await this.service.reserve(operation, this.dependencies.assetPolicy, now);
+    const intent = approvalIntent(operation, material), answer = await this.dependencies.foregroundApproval.approve(intent);
+    // The human may type for a while: validate against a fresh clock, and reserve at the sealed consent instant.
+    const artifact = validateGuardedSwapApprovalArtifact(answer, operation, intent, this.now());
+    const reserved = await this.service.reserve(operation, policy, new Date(artifact.approvedAt));
     await this.dependencies.approvals.store(reserved, artifact);
     return reserved;
   }
 
+  /** The foreground CLI folds consent and the single send into one command. MCP never reaches this method. */
+  async approveAndExecute(operationId: string, now: Date): Promise<SwapOperationRecord> {
+    const reserved = await this.approve(operationId, now);
+    return await this.execute(reserved.operationId, this.now());
+  }
+
   async execute(operationId: string, now: Date): Promise<SwapOperationRecord> {
     const operation = await this.required(operationId);
-    if (operation.submissionMarker !== null) return await this.observe(operation, now);
+    instant(now);
+    if (operation.submissionMarker !== null) return await this.observe(operation);
     if (operation.state !== "reserved" || operation.usageLease?.state !== "reserved") {
       blocked("Guarded swap execution requires the exact approved reservation.", "swap_execution_lease");
     }
     const artifact = await this.dependencies.approvals.load(operation);
     if (artifact === null) blocked("Guarded swap approval artifact is missing.", "swap_approval_missing");
-    validateGuardedSwapApprovalArtifact(artifact, operation, undefined, now);
+    validateGuardedSwapApprovalArtifact(artifact, operation, undefined, this.now());
     const material = await this.material(operation.quote.quoteHash); bindMaterial(operation, material);
     await this.dependencies.ownerAdmission.assert(operation, material);
     const result = validateSwapOperation(await this.dependencies.execution.execute({ operation, material, approval: artifact,
-      dependencies: effectDependencies(this.dependencies), now }));
+      dependencies: effectDependencies(this.dependencies), now: this.now() }));
     if (result.operationId !== operation.operationId || result.submissionMarker === null) {
       throw new ApnError("APN_STATE_CORRUPT", "Guarded swap execution returned without its durable submission marker.");
     }
@@ -183,17 +206,24 @@ export class GuardedSwapRuntime<Request> {
 
   async status(operationId: string, now: Date): Promise<SwapOperationRecord> {
     const operation = await this.required(operationId);
-    return operation.submissionMarker === null ? operation : await this.observe(operation, now);
+    instant(now);
+    return operation.submissionMarker === null ? operation : await this.observe(operation);
   }
 
-  private async observe(operation: SwapOperationRecord, now: Date): Promise<SwapOperationRecord> {
+  private async observe(operation: SwapOperationRecord): Promise<SwapOperationRecord> {
     const material = await this.material(operation.quote.quoteHash); bindMaterial(operation, material);
     const result = validateSwapOperation(await this.dependencies.execution.observe({ operation, material,
-      dependencies: effectDependencies(this.dependencies), now }));
+      dependencies: effectDependencies(this.dependencies), now: this.now() }));
     if (result.operationId !== operation.operationId || result.submissionMarker === null) {
       throw new ApnError("APN_STATE_CORRUPT", "Guarded swap observation lost its durable submission marker.");
     }
     return result;
+  }
+  private now(): Date { const value = this.dependencies.clock.now(); instant(value); return value; }
+  private async activePolicy(profile: string): Promise<AssetPolicyRegistry> {
+    const policy = await this.dependencies.policy(profile);
+    if (policy === null) blocked("No active owner swap admission is installed for this profile.", "swap_owner_admission_required");
+    return policy;
   }
   private async required(operationId: string): Promise<SwapOperationRecord> {
     const operation = await this.dependencies.operations.loadAny(operationId);
@@ -261,7 +291,7 @@ function effectDependencies(value: GuardedSwapRuntimeDependencies<unknown>): Gua
     observer: value.observer, caps: value.caps };
 }
 function assertDependencyObject(value: GuardedSwapRuntimeDependencies<unknown>): void {
-  for (const [name, dependency] of Object.entries({ builder: value.builder, assetPolicy: value.assetPolicy,
+  for (const [name, dependency] of Object.entries({ builder: value.builder, policy: value.policy, clock: value.clock,
     protocolRegistry: value.protocolRegistry, usage: value.usage, operations: value.operations, ownerAdmission: value.ownerAdmission,
     foregroundApproval: value.foregroundApproval, execution: value.execution, approvals: value.approvals, rpc: value.rpc,
     effectStore: value.effectStore, signer: value.signer, sender: value.sender, observer: value.observer, caps: value.caps })) {

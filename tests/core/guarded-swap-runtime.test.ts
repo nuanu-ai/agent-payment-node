@@ -29,7 +29,7 @@ const quoteInput: SwapQuoteInput = { profile: "runtime-swap", account: ACCOUNT, 
   routeHash: H("b"), unsignedTransactionPayloadHash: H("c"), simulation: { requestHash: H("d"), resultHash: H("e"), success: true,
     blockNumber: "100", blockHash: `0x${H("1")}`, headBlockNumber: "101", maxHeadDrift: 2, gasEstimate: "100000" } };
 
-async function fixture(root: string) {
+async function fixture(root: string, options: { readonly admitted?: boolean; readonly typingMs?: number } = {}) {
   const inventory = loadAllowlistInventory(), overlay: AllowlistPolicyOverlayInput = { overlayVersion: "runtime-swap.1", profile: "runtime-swap",
     account: ACCOUNT, datasetVersion: inventory.dataset.version, datasetSha256: inventory.dataset.sha256, inventorySha256: inventory.inventorySha256,
     effectiveAt: "2026-09-18T00:00:00.000Z", expiresAt: "2026-09-18T00:05:00.000Z", admissions: [
@@ -47,16 +47,18 @@ async function fixture(root: string) {
   const operations = new SwapOperationRepository(root), usage = new AssetUsageLedger(root), approvals = new GuardedSwapApprovalRepository(root);
   const quote = createSwapQuote(quoteInput), material = { quote, approvalCapAtomic: "0",
     gasOrEnergy: { gasLimit: "100000", maxFeePerGas: "2", maxPriorityFeePerGas: "1", executionHead: "101" }, execution: { unsigned: true } };
-  let runtime!: GuardedSwapRuntime<any>, sends = 0, observes = 0, admissionCalls = 0;
+  let runtime!: GuardedSwapRuntime<any>, sends = 0, observes = 0, admissionCalls = 0, clockMs = NOW.getTime();
+  const clock = { now: () => new Date(clockMs) };
   const execution: GuardedSwapExecutionDriver = {
     async execute(input) { sends++; let op = await runtime.service.markSubmitting(input.operation, input.now);
       return await runtime.service.recordPossibleSend(op, "unknown_finality", input.now); },
     async observe(input) { observes++; return input.operation; },
   };
   runtime = new GuardedSwapRuntime({ chain: "eip155:1", builder: { async quote() { return material; }, async load(hash) { return hash === quote.quoteHash ? material : null; } },
-    assetPolicy: policy, protocolRegistry: protocols, usage, operations, approvals,
+    policy: async (profile) => options.admitted === false || profile !== "runtime-swap" ? null : policy, clock,
+    protocolRegistry: protocols, usage, operations, approvals,
     ownerAdmission: { async assert() { admissionCalls++; } },
-    foregroundApproval: { async approve(intent) { return sealGuardedSwapApproval(intent, NOW, H("f")); } }, execution,
+    foregroundApproval: { async approve(intent) { clockMs += options.typingMs ?? 0; return sealGuardedSwapApproval(intent, clock.now(), H("f")); } }, execution,
     rpc: {}, effectStore: {}, signer: {}, sender: {}, observer: {}, caps: { gasLimit: "100000", maxFeePerGas: "2" } });
   return { runtime, quote, approvals, operations, counters: () => ({ sends, observes, admissionCalls }) };
 }
@@ -95,4 +97,19 @@ test("runtime construction requires all effectful dependencies and uses no netwo
   assert.throws(() => new GuardedSwapRuntime({ ...dependencies, rpc: undefined }), { code: "APN_INVALID_INPUT" });
   const state = new StateStore(temporary.root); await state.initialize();
   assert.equal((await f.operations.loadAny(H("0"))), null);
+});
+
+test("a human who types for 45 seconds is not refused: consent and reservation use the post-prompt clock", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, { typingMs: 45_000 });
+  const prepared = await f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "runtime-swap-0003" }, NOW);
+  const executed = await f.runtime.approveAndExecute(prepared.operationId, NOW);
+  assert.equal(executed.state, "unknown_finality"); assert.equal(f.counters().sends, 1);
+  assert.equal(executed.usageLease?.reservedAt, new Date(NOW.getTime() + 45_000).toISOString());
+});
+
+test("no active owner admission refuses preparation with a stable classification", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, { admitted: false });
+  await assert.rejects(f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "runtime-swap-0004" }, NOW),
+    (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "swap_owner_admission_required");
+  assert.equal(f.counters().sends, 0);
 });

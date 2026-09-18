@@ -17,10 +17,11 @@ const ALLOWED: Readonly<Record<SwapOperationState, readonly SwapOperationState[]
   awaiting_approval: ["reserved", "failed_before_effect"],
   reserved: ["submitting", "failed_before_effect"],
   submitting: ["submitted", "unknown_finality"],
-  submitted: ["unknown_finality", "finalized"],
-  unknown_finality: ["finalized"],
+  submitted: ["unknown_finality", "finalized", "failed_confirmed_revert"],
+  unknown_finality: ["finalized", "failed_confirmed_revert"],
   finalized: [],
   failed_before_effect: [],
+  failed_confirmed_revert: [],
 };
 
 export function transitionSwapOperation(opValue: unknown, state: SwapOperationState, evidence: SwapTransitionEvidence, now: Date): SwapOperationRecord {
@@ -66,6 +67,13 @@ function transitionPatch(op: SwapOperationRecord, state: SwapOperationState, evi
       invalid("Finalized swap requires a finalized usage lease and receipt proof.");
     }
     return { usageLease: evidence.usageLease, receiptProof: evidence.receiptProof };
+  }
+  if (state === "failed_confirmed_revert") {
+    if (evidence.usageLease?.state !== "failed_confirmed_revert" || evidence.receiptProof?.finalized !== true ||
+        evidence.failureProofHash !== evidence.receiptProof.receiptHash || Object.keys(evidence).length !== 3) {
+      invalid("Confirmed swap revert requires a released lease and its finalized revert proof.");
+    }
+    return { usageLease: evidence.usageLease, receiptProof: evidence.receiptProof, failureProofHash: evidence.failureProofHash };
   }
   if (state === "failed_before_effect") {
     if (evidence.failureProofHash === undefined || !/^[a-f0-9]{64}$/u.test(evidence.failureProofHash) ||

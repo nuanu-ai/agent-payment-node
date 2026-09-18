@@ -7,7 +7,7 @@ import { validateSwapQuote, type SwapQuoteSnapshot } from "./quote.js";
 
 export const SWAP_OPERATION_SCHEMA = "apn.swap-operation.v1" as const;
 export type SwapOperationState = "quoted" | "prepared" | "awaiting_approval" | "reserved" | "submitting" |
-  "submitted" | "unknown_finality" | "finalized" | "failed_before_effect";
+  "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
 export interface SwapSubmissionMarker {
   readonly markerHash: string;
   readonly markedAt: string;
@@ -82,13 +82,14 @@ export function validateSwapOperation(value: unknown): SwapOperationRecord {
   return value as unknown as SwapOperationRecord;
 }
 
-const STATES: readonly SwapOperationState[] = ["quoted", "prepared", "awaiting_approval", "reserved", "submitting", "submitted", "unknown_finality", "finalized", "failed_before_effect"];
+const STATES: readonly SwapOperationState[] = ["quoted", "prepared", "awaiting_approval", "reserved", "submitting", "submitted",
+  "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
 function validateStateBindings(op: SwapOperationRecord): void {
   if (op.previousIntegrityHash !== null) hash(op.previousIntegrityHash, "stored");
-  const reserved = ["reserved", "submitting", "submitted", "unknown_finality", "finalized"].includes(op.state);
+  const reserved = ["reserved", "submitting", "submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(op.state);
   if (reserved && op.usageLease === null) corrupt("Swap operation usage lease phase is invalid.");
   if (["quoted", "prepared", "awaiting_approval"].includes(op.state) && op.usageLease !== null) corrupt("Swap operation usage lease phase is invalid.");
-  const exposed = ["submitting", "submitted", "unknown_finality", "finalized"].includes(op.state);
+  const exposed = ["submitting", "submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(op.state);
   if (exposed !== (op.submissionMarker !== null)) corrupt("Swap submission marker phase is invalid.");
   if (op.submissionMarker !== null) {
     if (!isPlainRecord(op.submissionMarker) || !exactKeys(op.submissionMarker, ["markerHash", "markedAt", "operationIntegrityHash", "unsignedTransactionPayloadHash"]) ||
@@ -110,10 +111,13 @@ function validateStateBindings(op: SwapOperationRecord): void {
     if (op.submissionMarker === null) corrupt("Swap receipt proof phase is invalid.");
     validateSwapReceiptProof(op.receiptProof, op.quote.sourceAsset.chain, op.submissionMarker.markedAt, op.updatedAt, "stored");
   }
-  if (op.receiptProof !== null && !["submitted", "unknown_finality", "finalized"].includes(op.state)) corrupt("Swap receipt proof phase is invalid.");
+  if (op.receiptProof !== null && !["submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(op.state)) corrupt("Swap receipt proof phase is invalid.");
   if (op.state === "finalized" && (op.receiptProof === null || !op.receiptProof.finalized)) corrupt("Finalized swap lacks final receipt proof.");
   if (op.failureProofHash !== null) hash(op.failureProofHash, "stored");
-  if ((op.state === "failed_before_effect") !== (op.failureProofHash !== null)) corrupt("Swap failure proof phase is invalid.");
+  const failed = op.state === "failed_before_effect" || op.state === "failed_confirmed_revert";
+  if (failed !== (op.failureProofHash !== null)) corrupt("Swap failure proof phase is invalid.");
+  if (op.state === "failed_confirmed_revert" && (op.receiptProof === null || !op.receiptProof.finalized ||
+      op.receiptProof.receiptHash !== op.failureProofHash)) corrupt("Confirmed swap revert lacks its finalized revert proof.");
   if (op.state === "failed_before_effect" && (op.submissionMarker !== null ||
       (op.usageLease !== null && op.usageLease.state !== "failed_before_effect"))) corrupt("Pre-effect failure lease is not released.");
 }
