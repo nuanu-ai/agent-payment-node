@@ -44,3 +44,8 @@ export declare function validateEnergyBounds(input: SunSwapTransactionBounds & {
     readonly feeLimitSun: string;
 }): void;
 export declare function sunSwapUnsignedPayloadHash(transaction: SunSwapUnsignedTransaction): string;
+/**
+ * Bandwidth java-tron charges for the signed transaction: the serialized Transaction (raw_data field and one
+ * 65-byte signature field) plus the 64-byte MAX_RESULT_SIZE_IN_TX reserved for contract transactions.
+ */
+export declare function sunSwapMaximumBandwidthBytes(transaction: SunSwapUnsignedTransaction): bigint;
