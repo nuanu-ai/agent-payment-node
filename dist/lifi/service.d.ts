@@ -36,14 +36,23 @@ export declare class BridgeService {
                     decimals: 18;
                     bridgeable_principal: boolean;
                     role: string;
+                    token: string;
+                    tools: string[];
+                    wrapped_native: `0x${string}`;
+                    approval: string;
+                    listing: "frozen_list";
+                    peers: string[];
                 };
                 tokens: {
                     token: `0x${string}`;
                     symbol: string;
                     coin_key: string;
                     decimals: number;
-                    upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                    upgradeability: "immutable" | "legacy_proxy" | "eip1967_proxy" | "beacon_proxy";
                     tools: string[];
+                    approval: "standard" | "zero_first";
+                    transfer_fee: "none" | "tether_fee_zero";
+                    listing: "frozen_list" | "legacy_pinned";
                     peers: string[];
                 }[];
             }[];
@@ -187,11 +196,12 @@ export declare class BridgeService {
         asset: {
             from: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;
@@ -199,11 +209,12 @@ export declare class BridgeService {
             };
             to: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;
@@ -326,11 +337,12 @@ export declare class BridgeService {
         asset: {
             from: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;
@@ -338,11 +350,12 @@ export declare class BridgeService {
             };
             to: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;
@@ -465,11 +478,12 @@ export declare class BridgeService {
         asset: {
             from: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;
@@ -477,11 +491,12 @@ export declare class BridgeService {
             };
             to: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;
@@ -604,11 +619,12 @@ export declare class BridgeService {
         asset: {
             from: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;
@@ -616,11 +632,12 @@ export declare class BridgeService {
             };
             to: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;
@@ -745,11 +762,12 @@ export declare class BridgeService {
         asset: {
             from: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;
@@ -757,11 +775,12 @@ export declare class BridgeService {
             };
             to: {
                 chain: string;
-                token: `0x${string}`;
+                token: string;
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "beacon_proxy";
+                upgradeability: string;
+                approval: string;
                 native_coin: {
                     symbol: string;
                     decimals: 18;

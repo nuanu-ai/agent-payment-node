@@ -1,9 +1,9 @@
 import { decodeFunctionData, encodeFunctionData, getAddress } from "viem";
 import { sha256 } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
-import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, STARGATE_SELECTOR, stargateBridgeAbi } from "./abi.js";
+import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER, FEE_FORWARDER_NATIVE_SELECTOR, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, STARGATE_SELECTOR, stargateBridgeAbi } from "./abi.js";
 import type { BridgeMaterialization, DecodedBridgeCall } from "./model.js";
-import { validateBridgeRequest } from "./asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeFeeAsset, bridgeNativePrincipal, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 
 type BridgeData = Readonly<{
@@ -35,10 +35,11 @@ export function decodeBridgeCall(materialization: BridgeMaterialization): Decode
   const minimumOutput = bridgeUint(materialization.minimumOutputAtomic, true);
   const value = bridgeUint(tx.valueAtomic, false);
   const gas = bridgeUint(tx.gasLimitAtomic, true);
+  // A native principal is the transaction value itself and is bound by the amount; the native debit cap bounds fees.
   if (gas > BRIDGE_MAX_GAS || tx.chainId !== request.fromChainId || tx.from !== materialization.sender ||
     bridgeAddress(tx.from) !== tx.from || tx.to !== BRIDGE_DIAMOND || materialization.approvalAddress !== BRIDGE_DIAMOND ||
     materialization.sender !== bridgeAddress(materialization.sender) || materialization.sender === BRIDGE_ZERO_ADDRESS ||
-    value > BigInt(request.maxNativeDebitWei)) fail("transaction_envelope");
+    (bridgeNativePrincipal(request) ? value !== sourceAmount : value > BigInt(request.maxNativeDebitWei))) fail("transaction_envelope");
   if (quotedOutput < minimumOutput || minimumOutput < BigInt(request.minOutputAtomic) || sourceAmount < quotedOutput ||
     sourceAmount - minimumOutput > BigInt(request.maxRouteFeeAtomic) ||
     (quotedOutput - minimumOutput) * 10_000n > quotedOutput * BigInt(request.slippageBps)) fail("output_economics");
@@ -67,8 +68,11 @@ export function decodeBridgeCall(materialization: BridgeMaterialization): Decode
 function decodeAcross(m: BridgeMaterialization, bridge: BridgeData, swaps: readonly SwapData[], across: AcrossData, data: Hex, sourceAmount: bigint, minimum: bigint, value: bigint): DecodedBridgeCall {
   const common = decodeCommon(m, bridge, swaps, sourceAmount);
   const receiverWord = addressWord(m.request.recipient), senderWord = addressWord(m.sender);
-  const inputWord = addressWord(m.request.fromToken), outputWord = addressWord(m.request.toToken);
-  if (value !== 0n || across.receiverAddress.toLowerCase() !== receiverWord || across.refundAddress.toLowerCase() !== senderWord ||
+  // Across carries a native leg as the chain's pinned wrapped-native token: the facet deposits it, the fill unwraps it.
+  const native = bridgeNativePrincipal(m.request);
+  const inputWord = addressWord(native ? BRIDGE_ASSET_REGISTRY[m.request.fromChainId].nativeCoin.wrapped.address : m.request.fromToken);
+  const outputWord = addressWord(native ? BRIDGE_ASSET_REGISTRY[m.request.toChainId].nativeCoin.wrapped.address : m.request.toToken);
+  if (value !== (native ? sourceAmount : 0n) || across.receiverAddress.toLowerCase() !== receiverWord || across.refundAddress.toLowerCase() !== senderWord ||
     across.sendingAssetId.toLowerCase() !== inputWord || across.receivingAssetId.toLowerCase() !== outputWord ||
     across.exclusiveRelayer.toLowerCase() !== BRIDGE_ZERO_WORD || across.exclusivityParameter !== 0 || across.message !== "0x" ||
     across.outputAmountMultiplier <= 0n || across.outputAmountMultiplier > 1_000_000_000_000_000_000n ||
@@ -81,10 +85,11 @@ function decodeAcross(m: BridgeMaterialization, bridge: BridgeData, swaps: reado
     outputAmountAtomic: across.outputAmount.toString(), outputAmountMultiplier: across.outputAmountMultiplier.toString(),
     exclusiveRelayer: bridgeHex(across.exclusiveRelayer, 32, 32), quoteTimestamp: String(across.quoteTimestamp),
     fillDeadline: String(across.fillDeadline), exclusivityParameter: String(across.exclusivityParameter), message: "0x",
-  }, common.bridgeAmount, "0");
+  }, common.bridgeAmount, value.toString());
 }
 
 function decodeStargate(m: BridgeMaterialization, bridge: BridgeData, swaps: readonly SwapData[], stargate: StargateData, data: Hex, sourceAmount: bigint, minimum: bigint, value: bigint): DecodedBridgeCall {
+  if (bridgeNativePrincipal(m.request)) fail("stargate_native_principal_unreviewed");
   const common = decodeCommon(m, bridge, swaps, sourceAmount);
   const expectedEid = destinationEid(m.request.toChainId);
   const p = stargate.sendParams;
@@ -107,12 +112,14 @@ function decodeCommon(m: BridgeMaterialization, bridge: BridgeData, swaps: reado
   const swap = swaps[0]!;
   if (swap.callTo !== FEE_FORWARDER || swap.approveTo !== FEE_FORWARDER || swap.sendingAssetId !== request.fromToken ||
     swap.receivingAssetId !== request.fromToken || swap.fromAmount !== sourceAmount || !swap.requiresDeposit) fail("fee_swap");
-  const callData = bridgeHex(swap.callData);
-  if (callData.slice(0, 10) !== FEE_FORWARDER_SELECTOR) fail("fee_selector");
+  // The fee forwarder takes the principal in its own kind: `forwardNativeFees` for the native coin, else the token call.
+  const native = bridgeNativePrincipal(request), callData = bridgeHex(swap.callData);
+  if (callData.slice(0, 10) !== (native ? FEE_FORWARDER_NATIVE_SELECTOR : FEE_FORWARDER_SELECTOR)) fail("fee_selector");
   let inner: ReturnType<typeof decodeFunctionData>;
   try { inner = decodeFunctionData({ abi: feeForwarderAbi, data: callData }); } catch { return fail("fee_ABI"); }
-  if (inner.functionName !== "forwardERC20Fees" || canonicalData(feeForwarderAbi, inner.functionName, inner.args) !== callData) fail("fee_noncanonical");
-  const [token, distributions] = inner.args as unknown as readonly [Address, readonly { recipient: Address; amount: bigint }[]];
+  if (inner.functionName !== (native ? "forwardNativeFees" : "forwardERC20Fees") ||
+    canonicalData(feeForwarderAbi, inner.functionName, inner.args) !== callData) fail("fee_noncanonical");
+  const [token, distributions] = (native ? [BRIDGE_ZERO_ADDRESS, inner.args[0]] : inner.args) as unknown as readonly [Address, readonly { recipient: Address; amount: bigint }[]];
   const fee = sourceAmount - bridge.minAmount;
   if (token !== request.fromToken || distributions.length !== 1 || distributions[0]!.recipient !== FEE_RECIPIENT || distributions[0]!.amount !== fee || fee <= 0n) fail("fee_distribution");
   return { fee, bridgeAmount: bridge.minAmount };
@@ -120,13 +127,15 @@ function decodeCommon(m: BridgeMaterialization, bridge: BridgeData, swaps: reado
 
 function validateFeeRows(m: BridgeMaterialization, forwardedFee: bigint, value: bigint, tool: "across" | "stargateV2"): void {
   let included = 0n, fixed = 0, native = 0;
+  const sourceAsset = bridgeFeeAsset(bridgeAssetRow(m.request.fromChainId, m.request.fromToken));
+  const destinationAsset = bridgeFeeAsset(bridgeAssetRow(m.request.toChainId, m.request.toToken));
   for (const fee of m.feeCosts) {
     const amount = bridgeUint(fee.amountAtomic, false);
     if (fee.included) {
       if (fee.chainId !== m.request.fromChainId && fee.chainId !== m.request.toChainId) fail("included_fee_asset");
-      if (fee.asset !== (fee.chainId === m.request.fromChainId ? m.request.fromToken : m.request.toToken)) fail("included_fee_asset");
+      if (fee.asset !== (fee.chainId === m.request.fromChainId ? sourceAsset : destinationAsset)) fail("included_fee_asset");
       included += amount;
-      if (fee.name === "LIFI Fixed Fee" && fee.chainId === m.request.fromChainId && fee.asset === m.request.fromToken && amount === forwardedFee) fixed += 1;
+      if (fee.name === "LIFI Fixed Fee" && fee.chainId === m.request.fromChainId && fee.asset === sourceAsset && amount === forwardedFee) fixed += 1;
     } else {
       if (tool !== "stargateV2" || fee.name !== "LayerZero native fee" || fee.chainId !== m.request.fromChainId || fee.asset !== "native" || amount !== value) fail("native_fee_row");
       native += 1;

@@ -1,5 +1,6 @@
 import { hashObject, sha256 } from "../canonical.js";
 import { decodeBridgeCall } from "./decode.js";
+import { bridgeApprovalRequired, bridgeNativePrincipalWei } from "./economics.js";
 import { BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot, type BridgeEffect, type BridgeEffectPhase,
   type BridgeEffectSnapshot, type BridgeOperationRecord, type BridgeState, type BridgeTransition } from "./operation-model.js";
 import { operationSchema } from "./schema.js";
@@ -68,7 +69,8 @@ function validateIntent(op: BridgeOperationRecord): void {
   if (a.owner !== m.sender || a.token !== r.fromToken || a.spender !== m.approvalAddress || a.spender !== BRIDGE_DIAMOND ||
     a.chainId !== r.fromChainId || a.rpcOrigin !== i.sourceRpcOrigin || a.latestNonceAtomic !== a.pendingNonceAtomic ||
     !["0", r.amountAtomic].includes(a.allowanceAtomic) || bridgeUint(a.balanceAtomic) < bridgeUint(r.amountAtomic)) bridgeCorrupt();
-  if (op.effects.length !== (a.allowanceAtomic === "0" ? 2 : 1) || op.effects.at(-1)?.role !== "bridge" ||
+  const approval = bridgeApprovalRequired(r, a.allowanceAtomic);
+  if (op.effects.length !== (approval ? 2 : 1) || op.effects.at(-1)?.role !== "bridge" ||
     (op.effects.length === 2 && op.effects[0]!.role !== "approval")) bridgeCorrupt();
   op.effects.forEach((effect, index) => {
     validateEnvelope(effect.envelope);
@@ -77,11 +79,11 @@ function validateIntent(op: BridgeOperationRecord): void {
       BigInt(e.economics.nonceAtomic) !== BigInt(a.latestNonceAtomic) + BigInt(index)) bridgeCorrupt();
     if (effect.role === "bridge") {
       if (e.to !== m.transaction.to || e.data !== m.transaction.data || e.valueAtomic !== m.transaction.valueAtomic ||
-        e.economics.gasLimitAtomic !== m.transaction.gasLimitAtomic || e.provisionalGas !== (a.allowanceAtomic === "0")) bridgeCorrupt();
+        e.economics.gasLimitAtomic !== m.transaction.gasLimitAtomic || e.provisionalGas !== approval) bridgeCorrupt();
     } else if (e.to !== r.fromToken || e.data !== approvalData(m.approvalAddress, r.amountAtomic) || e.valueAtomic !== "0" || e.provisionalGas) bridgeCorrupt();
   });
   const native = op.effects.reduce((sum, e) => sum + BigInt(e.envelope.feeQuote.totalQuoteWei) + BigInt(e.envelope.valueAtomic), 0n);
-  if (native > BigInt(r.maxNativeDebitWei) || native > BigInt(a.nativeBalanceWei)) bridgeCorrupt();
+  if (native - bridgeNativePrincipalWei(r) > BigInt(r.maxNativeDebitWei) || native > BigInt(a.nativeBalanceWei)) bridgeCorrupt();
   const included = m.feeCosts.filter((f) => f.included).reduce((sum, f) => sum + BigInt(f.amountAtomic), 0n);
   if (included + BigInt(m.quotedOutputAtomic) + BigInt(i.implicitProtocolFeeAtomic) !== BigInt(r.amountAtomic)) bridgeCorrupt();
 }
