@@ -33,7 +33,7 @@ export type CommandRequest =
       readonly rail: "direct" | "gasless" | "x402" | "bridge" | "swap"; readonly maximumPerTransferAtomic: string;
       readonly dailyLimitAtomic: string; readonly effectiveAt: string; readonly expiresAt?: string;
       readonly mechanismProvider?: string; readonly mechanismReference?: string; readonly expectedRevision?: number }
-  | { readonly command: "oneclick.source.submit"; readonly profile: string; readonly expectedPayer: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxQuotedLossAtomic: string; readonly maxGasLimitAtomic: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string; readonly maxNativeDebitWei: string; readonly idempotencyKey: string }
+  | { readonly command: "oneclick.source.submit"; readonly lane: string; readonly profile: string; readonly expectedPayer: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxQuotedLossAtomic: string; readonly maxGasLimitAtomic: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string; readonly maxNativeDebitWei: string; readonly idempotencyKey: string }
   | { readonly command: "oneclick.source.status"; readonly operationId: string }
   | { readonly command: "circle.approval.prepare"; readonly profile: string; readonly approvalCapAtomic: string;
       readonly maxGasLimitAtomic: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string;
