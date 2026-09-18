@@ -191,9 +191,13 @@ export class GuardedSwapRuntime<Request> {
     if (operation.state !== "reserved" || operation.usageLease?.state !== "reserved") {
       blocked("Guarded swap execution requires the exact approved reservation.", "swap_execution_lease");
     }
-    const artifact = await this.dependencies.approvals.load(operation);
-    if (artifact === null) blocked("Guarded swap approval artifact is missing.", "swap_approval_missing");
-    validateGuardedSwapApprovalArtifact(artifact, operation, undefined, this.now());
+    const artifact = await this.dependencies.approvals.load(operation), at = this.now();
+    if (artifact === null || at.toISOString() >= operation.quote.expiresAt) {
+      // Nothing was signed: without surviving consent, or past the deadline, the reservation is released, never kept.
+      return await this.service.failBeforeEffect(operation, at, domainHash("apn.guarded-swap-unsent-release.v1", canonicalJson({
+        operationId: operation.operationId, integrityHash: operation.integrityHash, reason: artifact === null ? "approval_missing" : "quote_expired" })));
+    }
+    validateGuardedSwapApprovalArtifact(artifact, operation, undefined, at);
     const material = await this.material(operation.quote.quoteHash); bindMaterial(operation, material);
     await this.dependencies.ownerAdmission.assert(operation, material);
     const result = validateSwapOperation(await this.dependencies.execution.execute({ operation, material, approval: artifact,
