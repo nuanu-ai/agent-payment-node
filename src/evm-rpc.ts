@@ -1,7 +1,8 @@
 import { encodeFunctionData } from "viem";
 import { MAX_NONCE_SCAN_BLOCKS } from "./constants.js";
 import { ApnError } from "./errors.js";
-import { evmChain, evmDecimals, evmToken, evmUint, MAX_DIRECT_TRANSACTION_BYTES, resolveEvmAsset, type EvmAssetSelection, type EvmChainId } from "./evm-asset.js";
+import { evmDecimals, evmToken, evmUint, MAX_DIRECT_TRANSACTION_BYTES, resolveEvmAsset, type EvmAssetSelection } from "./evm-asset.js";
+import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "./evm-direct-networks.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcReceipt } from "./ports.js";
 import type { EvmBalanceSnapshot, EvmFeeQuote, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence } from "./evm-ports.js";
@@ -22,8 +23,8 @@ export class EvmRpc implements EvmRpcPort {
     }
   }
 
-  async assertChain(chainId: EvmChainId): Promise<void> {
-    evmChain(chainId);
+  async assertChain(chainId: DirectEvmChainId): Promise<void> {
+    directEvmChain(chainId);
     if (evmRpcQuantity(await this.call("eth_chainId", [])) !== BigInt(chainId)) {
       throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
     }
@@ -52,7 +53,7 @@ export class EvmRpc implements EvmRpcPort {
     return { address, asset, assetAtomic, nativeAtomic, blockNumberAtomic: block.number, blockHash: block.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
   }
 
-  async nonce(chainId: EvmChainId, address: Address, tag: "pending" | "latest"): Promise<string> {
+  async nonce(chainId: DirectEvmChainId, address: Address, tag: "pending" | "latest"): Promise<string> {
     await this.assertChain(chainId);
     const nonce = evmRpcQuantity(await this.call("eth_getTransactionCount", [address, tag])).toString();
     await this.assertChain(chainId);
@@ -62,20 +63,25 @@ export class EvmRpc implements EvmRpcPort {
   async estimate(input: EvmTransactionInput): Promise<FeeEstimate> {
     await this.assertChain(input.chainId);
     const gas = evmRpcQuantity(await this.call("eth_estimateGas", [{ from: input.from, to: input.to, data: input.data, value: `0x${evmUint(input.valueAtomic).toString(16)}` }]));
-    const priority = input.chainId === 42161 ? 0n : evmRpcQuantity(await this.call("eth_maxPriorityFeePerGas", []));
+    const model = directEvmNetwork(input.chainId).feeModel;
+    const priority = model === "arbitrum-inclusive" ? 0n : evmRpcQuantity(await this.call("eth_maxPriorityFeePerGas", []));
     const block = await evmRpcBlock(this.call, "latest");
+    // A zero base fee (BNB Smart Chain) leaves the priority fee as the whole price; a zero total price is never signed.
     const maximum = 2n * evmRpcQuantity(block.raw.baseFeePerGas) + priority;
+    if (maximum === 0n) throw new ApnError("APN_RPC_PROTOCOL", "The selected RPC quoted a zero gas price.");
     evmUint(maximum.toString(), true);
     await this.assertChain(input.chainId);
     return { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
   }
 
-  async feeQuote(chainId: EvmChainId, economics: Economics): Promise<EvmFeeQuote> {
+  async feeQuote(chainId: DirectEvmChainId, economics: Economics): Promise<EvmFeeQuote> {
     await this.assertChain(chainId);
     const block = await evmRpcBlock(this.call, "latest");
     const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(this.maximumSignedBytes)] });
     const operatorData = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
-    const [l1Fee, operatorFee] = chainId !== 8453 ? [0n, 0n] : await Promise.all([
+    // OP-stack chains add the L1 data fee and operator fee on top of execution; the owner's budget caps the sum.
+    const feeModel = directEvmQuoteFeeModel(chainId);
+    const [l1Fee, operatorFee] = directEvmNetwork(chainId).feeModel !== "op-stack" ? [0n, 0n] : await Promise.all([
       this.call("eth_call", [{ to: GAS_ORACLE, data }, block.tag]).then(evmRpcWord),
       this.call("eth_call", [{ to: GAS_ORACLE, data: operatorData }, block.tag]).then(evmRpcWord),
     ]);
@@ -84,13 +90,13 @@ export class EvmRpc implements EvmRpcPort {
     await recheckEvmBlock(this.call, block);
     await this.assertChain(chainId);
     return {
-      chainId, ...(chainId === 42161 ? { feeModel: "arbitrum-inclusive" as const } : {}), l1DataFeeUpperWei: l1Fee.toString(), operatorFeeUpperWei: operatorFee.toString(),
+      chainId, ...(feeModel === undefined ? {} : { feeModel }), l1DataFeeUpperWei: l1Fee.toString(), operatorFeeUpperWei: operatorFee.toString(),
       maximumExecutionFeeWei: execution.toString(), totalQuoteWei: total.toString(), totalFeeEnforcedOnchain: false,
       blockNumberAtomic: block.number, blockHash: block.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString(),
     };
   }
 
-  async receipt(chainId: EvmChainId, transactionHash: Hex): Promise<RpcReceipt | null> {
+  async receipt(chainId: DirectEvmChainId, transactionHash: Hex): Promise<RpcReceipt | null> {
     await this.assertChain(chainId);
     const raw = await this.call("eth_getTransactionReceipt", [transactionHash]);
     if (raw === null) return null;
@@ -125,9 +131,9 @@ export class EvmRpc implements EvmRpcPort {
     return evidence;
   }
 
-  async confirmedAtNonce(chainId: EvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null> {
+  async confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null> {
     await this.assertChain(chainId);
-    const latest = await evmRpcBlock(this.call, chainId === 42161 ? "safe" : "latest");
+    const latest = await evmRpcBlock(this.call, directEvmRequiresSafeHead(chainId) ? "safe" : "latest");
     const last = BigInt(latest.number);
     const lower = last >= MAX_NONCE_SCAN_BLOCKS - 1n ? last - MAX_NONCE_SCAN_BLOCKS + 1n : 0n;
     const first = evmUint(startBlock) > lower ? evmUint(startBlock) : lower;

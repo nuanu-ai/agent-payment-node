@@ -39,7 +39,7 @@ async function mcpClient(t: test.TestContext, root: string, rpc: EvmTestRpc) {
   return async (input: Record<string, string>) => (await client.callTool({ name: "apn_pay_transfer_prepare_asset", arguments: input })).structuredContent as unknown as OutputEnvelope;
 }
 
-test("unlisted networks, unpinned contracts, wrong decimals and not-yet-enabled networks refuse identically over CLI and MCP before any RPC", async (t) => {
+test("unlisted networks, unpinned contracts and wrong decimals refuse identically over CLI and MCP before any RPC, on every direct network", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const rpc = new EvmTestRpc(), mcp = await mcpClient(t, temporary.root, rpc);
   const base = { profile: "default", chain: BASE, asset: "native", rpc_url: "https://rpc.example", to: EVM_REQUEST.recipient, amount: "0.000001",
@@ -49,7 +49,10 @@ test("unlisted networks, unpinned contracts, wrong decimals and not-yet-enabled 
     [{ asset: EVM_TOKEN }, "allowlist_asset_unlisted"],
     [{ chain: "eip155:1", asset: EVM_USDC[8453] }, "allowlist_asset_unlisted"],
     [{ asset: EVM_USDC[8453], decimals: "18" }, "allowlist_decimals_mismatch"],
-    [{ chain: "eip155:10" }, "allowlist_network_not_enabled"],
+    [{ chain: "eip155:10", asset: EVM_USDC[8453] }, "allowlist_asset_unlisted"],
+    [{ chain: "eip155:137", asset: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F" }, "allowlist_asset_unlisted"],
+    [{ chain: "eip155:56", asset: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d" }, "allowlist_asset_unlisted"],
+    [{ chain: "eip155:43114", asset: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", decimals: "18" }, "allowlist_decimals_mismatch"],
   ];
   for (const [override, reason] of cases) {
     const input = { ...base, ...override };

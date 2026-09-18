@@ -2,6 +2,7 @@ import { approvalCode } from "./approval-code.js";
 import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { directEvmNetwork } from "./evm-direct-networks.js";
 import type { Address } from "./model.js";
 import type { EvmDirectBinding } from "./evm-direct.js";
 import type { RailApprovalPort } from "./direct-rail-ports.js";
@@ -78,16 +79,19 @@ export class TtyTransferApproval implements TransferApprovalPort {
         "\nAgent Payment Node approval",
         `Profile: ${intent.profile}`,
         `Operation: ${intent.operationId}`,
-        `Chain: ${intent.evm === undefined ? `Base (${CHAIN_ID})` : `eip155:${intent.evm.asset.chainId}`}`,
-        `Token: ${intent.evm === undefined ? BASE_USDC : intent.evm.asset.kind === "native" ? "native ETH" : intent.evm.asset.address}`,
+        `Chain: ${intent.evm === undefined ? `Base (${CHAIN_ID})` : `${directEvmNetwork(intent.evm.asset.chainId).name} (eip155:${intent.evm.asset.chainId})`}`,
+        `Token: ${intent.evm === undefined ? BASE_USDC : intent.evm.asset.kind === "native" ? `native ${directEvmNetwork(intent.evm.asset.chainId).nativeSymbol}` : intent.evm.asset.address}`,
         `Sender: ${intent.walletAddress}`,
         `Recipient: ${intent.recipient}`,
-        `Amount: ${intent.amountDecimal} ${intent.evm === undefined ? "USDC" : intent.evm.asset.kind === "native" ? "ETH" : "token"} (${intent.amountAtomic} atomic)`,
+        `Amount: ${intent.amountDecimal} ${intent.evm === undefined ? "USDC" : intent.evm.asset.kind === "native" ? directEvmNetwork(intent.evm.asset.chainId).nativeSymbol : "token"} (${intent.amountAtomic} atomic)`,
         ...(intent.evm === undefined ? [] : [
           `Decimals: ${intent.evm.asset.decimals} (${intent.evm.asset.decimalsSource})`,
           ...(intent.evm.feeQuote.feeModel === "arbitrum-inclusive" ? [
             "Fee model: Arbitrum inclusive gas (L2 execution plus L1 posting; no separate surcharge)",
             `Maximum inclusive transaction fee: ${intent.evm.feeQuote.maximumExecutionFeeWei} wei`,
+          ] : intent.evm.feeQuote.feeModel === "monad-gas-limit" ? [
+            "Fee model: Monad bills the full gas limit, not gas used",
+            `Maximum execution fee: ${intent.evm.feeQuote.maximumExecutionFeeWei} wei`,
           ] : [`Maximum execution fee: ${intent.evm.feeQuote.maximumExecutionFeeWei} wei`]),
           `L1 data fee upper estimate: ${intent.evm.feeQuote.l1DataFeeUpperWei} wei`,
           `Operator fee estimate: ${intent.evm.feeQuote.operatorFeeUpperWei} wei`,
