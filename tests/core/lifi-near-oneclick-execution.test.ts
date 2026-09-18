@@ -15,7 +15,7 @@ const deposit = "0x76b4c56085ED136a8744D52bE956396624a730E8";
 const recipient = "TXHwnAuEUFnzk474xAKnY9DmemrZ8AsxpF";
 const blockHash = `0x${"a".repeat(64)}`;
 const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
-const request = { profile: "imported", expectedPayer: payer, recipient, amountAtomic: "3000000",
+const request = { lane: "base-usdc-to-tron-usdt", profile: "imported", expectedPayer: payer, recipient, amountAtomic: "3000000",
   minOutputAtomic: "1000000", maxQuotedLossAtomic: "2000000", maxGasLimitAtomic: "130000",
   maxFeePerGasWei: "3000000000", maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "300000000000000",
   idempotencyKey: "oneclick-once-test" };
@@ -36,7 +36,8 @@ async function harness(t: import("node:test").TestContext, sendAmbiguous = false
       const quoteRequest = JSON.parse(body!);
       const quote = { amountIn: "3000000", minAmountIn: "2800000", amountOut: "1264167", minAmountOut: "1251525",
         deadline: new Date(Date.now() + providerDeadlineMs).toISOString(), ...(quoteRequest.dry ? {} : { depositAddress: deposit, depositMemo: null }) };
-      const response = { quoteRequest, quote };
+      // The provider signs every quote; its timestamp and signature participate in the saved quote digest.
+      const response = { timestamp: new Date(Date.now()).toISOString(), signature: `ed25519:${"a".repeat(80)}`, quoteRequest, quote };
       if (!quoteRequest.dry) actualQuote = response;
       return { status: 201, body: JSON.stringify(response) };
     }
