@@ -1,7 +1,7 @@
 import { encodeAbiParameters, encodeFunctionData, encodePacked, getAddress, parseAbi } from "viem";
 import { ApnError } from "../../errors.js";
 import { parseAtomic } from "../../money.js";
-import { decodeUniswapRouterCalldata, type UniswapDecodedRoute } from "../uniswap-router.js";
+import { decodeUniswapRouterCalldataFor, type UniswapDecodedRoute } from "../uniswap-router.js";
 import { UNISWAP_WETH9, type UniswapV3PairPin } from "./pins.js";
 
 const ROUTER_ABI = parseAbi(["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"]);
@@ -20,7 +20,7 @@ export interface UniswapV3ExactInputCall {
 }
 
 /**
- * Exact inverse of decodeUniswapRouterCalldata: execute(0x0b00, [WRAP_ETH(ADDRESS_THIS, amountIn),
+ * Exact inverse of decodeUniswapRouterCalldataFor: execute(0x0b00, [WRAP_ETH(ADDRESS_THIS, amountIn),
  * V3_SWAP_EXACT_IN(recipient, amountIn, amountOutMin, WETH|fee|output, payerIsUser=false, minHopPriceX36=[])], deadline).
  * The empty per-hop floor array is the router's documented "no per-hop check"; the single-hop amountOutMin is the floor.
  */
@@ -32,8 +32,8 @@ export function encodeUniswapV3ExactInput(input: UniswapV3ExactInputCall): { rea
   const swap = encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "uint256" }, { type: "bytes" }, { type: "bool" },
     { type: "uint256[]" }], [recipient, amountIn, amountOutMin, path, false, []]);
   const data = encodeFunctionData({ abi: ROUTER_ABI, functionName: "execute", args: [COMMANDS, [wrap, swap], BigInt(input.deadline)] });
-  const route = decodeUniswapRouterCalldata(data, { recipient, inputAmountAtomic: amountIn.toString(),
-    minimumOutputAtomic: amountOutMin.toString(), deadline: input.deadline });
+  const route = decodeUniswapRouterCalldataFor(data, { recipient, inputAmountAtomic: amountIn.toString(),
+    minimumOutputAtomic: amountOutMin.toString(), deadline: input.deadline, outputToken: input.pair.outputToken });
   if (route.command !== "V3_SWAP_EXACT_IN" || route.recipient !== recipient || route.inputAmountAtomic !== amountIn.toString() ||
       route.minimumOutputAtomic !== amountOutMin.toString() || route.deadline !== input.deadline) {
     throw new ApnError("APN_PROVIDER_PROTOCOL", "Local Universal Router encoding did not round-trip through the strict decoder.");

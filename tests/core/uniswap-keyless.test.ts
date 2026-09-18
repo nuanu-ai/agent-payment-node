@@ -14,12 +14,12 @@ import { encodeUniswapV3ExactInput } from "../../src/swap/uniswap-v3/encoder.js"
 import { SavedUniswapQuoteStore, validateUniswapKeylessMaterial } from "../../src/swap/uniswap-v3/material.js";
 import { spotOutput } from "../../src/swap/uniswap-v3/onchain.js";
 import { UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS,
-  USDC_IMPLEMENTATION_PIN, USDC_IMPLEMENTATION_SLOT, verifyCodePins } from "../../src/swap/uniswap-v3/pins.js";
+  USDC_IMPLEMENTATION_PIN, USDC_IMPLEMENTATION_SLOT, ETHEREUM_USDT, verifyCodePins, verifyUsdtNotDeprecated } from "../../src/swap/uniswap-v3/pins.js";
 import { temporaryState } from "./helpers.js";
-import { ACCOUNT, AMOUNT_IN, H, KeylessRpc, PROFILE, QUOTED_OUT, SQRT_PRICE_X96 } from "./uniswap-keyless-helpers.js";
+import { ACCOUNT, AMOUNT_IN, H, KeylessRpc, PROFILE, QUOTED_OUT, SQRT_PRICE_X96, USDT_SQRT_PRICE_X96 } from "./uniswap-keyless-helpers.js";
 
 const NOW = new Date("2026-09-18T05:00:00.000Z"), DEADLINE = Math.floor(NOW.getTime() / 1000) + 900, pair = UNISWAP_V3_PAIRS[0]!;
-const request = { profile: PROFILE, account: ACCOUNT, recipient: ACCOUNT, amountAtomic: AMOUNT_IN, slippageBps: 50, ownerSlippageCapBps: 100,
+const request = { profile: PROFILE, account: ACCOUNT, recipient: ACCOUNT, outputToken: UNISWAP_USDC, amountAtomic: AMOUNT_IN, slippageBps: 50, ownerSlippageCapBps: 100,
   deadline: DEADLINE, maxGasLimit: "300000", maxFeePerGas: "30000000000", maxPriorityFeePerGas: "1000000000" };
 const noPins = async () => [];
 
@@ -27,7 +27,10 @@ test("keyless pins are canonical, verified hashes are fixed, and the mechanism i
   assert.equal(validateSwapMechanismPin(UNISWAP_V3_KEYLESS_MECHANISM_PIN).constructorKind, "sdk");
   assert.equal(JSON.stringify(UNISWAP_V3_KEYLESS_MECHANISM_PIN).includes("trade-api"), false);
   assert.equal(UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY.records.length, 1);
-  assert.deepEqual(UNISWAP_V3_CODE_PINS.map((pin) => pin.role), ["universal_router_2_2_0", "quoter_v2", "v3_factory", "weth9", "usdc_proxy", "pool_usdc_weth_500"]);
+  assert.deepEqual(UNISWAP_V3_CODE_PINS.map((pin) => pin.role), ["universal_router_2_2_0", "quoter_v2", "v3_factory", "weth9", "usdc_proxy",
+    "pool_usdc_weth_500", "usdt", "pool_weth_usdt_3000"]);
+  assert.deepEqual(UNISWAP_V3_PAIRS[1], { outputToken: ETHEREUM_USDT, outputSymbol: "USDT", outputDecimals: 6,
+    pool: "0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36", fee: 3000, wethIsToken0: true });
   for (const pin of [...UNISWAP_V3_CODE_PINS, USDC_IMPLEMENTATION_PIN]) assert.match(pin.codeHash, /^0x[a-f0-9]{64}$/u);
   assert.deepEqual(pair, { outputToken: UNISWAP_USDC, outputSymbol: "USDC", outputDecimals: 6, pool: "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640",
     fee: 500, wethIsToken0: false });
@@ -149,4 +152,20 @@ test("createApnCore builds the keyless runtime per swap.uniswap command and refu
   const approve = await createApnCore(bindArgv(["swap", "ethereum", "uniswap", "execute", "--operation", H("c")]), { stateRoot: temporary.root })
     .execute({ command: "swap.uniswap.execute", operationId: H("c") });
   assert.equal(approve.error?.code, "APN_OPERATION_NOT_FOUND");
+});
+
+test("ETH to USDT quotes the deepest pinned pool with WETH as token0, and a deprecated USDT fails closed", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  assert.equal(spotOutput(10n ** 18n, USDT_SQRT_PRICE_X96, true), 2_475_838_041n);
+  const rpc = new KeylessRpc(); rpc.quoted = 2_468_410n;
+  const quotes = new SavedUniswapQuoteStore(temporary.root);
+  const quoted: any = await new KeylessUniswapQuoteBuilder(rpc.call, quotes, noPins).quote({ ...request, outputToken: ETHEREUM_USDT, now: NOW });
+  assert.equal(quoted.quote.destinationAsset.identifier, ETHEREUM_USDT); assert.equal(quoted.price.pool, "0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36");
+  assert.equal(quoted.price.feeTier, 3000); assert.equal(quoted.price.priceImpactBps, 0); assert.equal(quoted.price.outputSymbol, "USDT");
+  assert.equal(quoted.quote.minimumOutputAtomic, "2456068");
+  assert.equal((await quotes.load(quoted.quoteHash))?.execution.evidence.pool.fee, 3000);
+  await assert.rejects(new KeylessUniswapQuoteBuilder(rpc.call, quotes, noPins).quote({ ...request,
+    outputToken: "0x6B175474E89094C44Da98b954EedeAC495271d0F", now: NOW }), (error: any) => error.details?.reason === "uniswap_pair_unpinned");
+  await verifyUsdtNotDeprecated(rpc.call, "0x64"); rpc.usdtDeprecated = true;
+  await assert.rejects(verifyUsdtNotDeprecated(rpc.call, "0x64"), (error: any) => error.details?.reason === "uniswap_code_pin_drift");
 });

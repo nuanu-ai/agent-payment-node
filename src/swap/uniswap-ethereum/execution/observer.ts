@@ -5,7 +5,7 @@ import type { EvmRpcCall } from "../../../evm-ports.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmTokenBalance, recheckEvmBlock } from "../../../evm-rpc-codec.js";
 import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../../model.js";
 import { validateUniswapReceipt, type UniswapReceiptEvidence } from "../../uniswap-receipt.js";
-import { UNISWAP_ROUTER, UNISWAP_USDC } from "../../uniswap-pin.js";
+import { UNISWAP_ROUTER } from "../../uniswap-pin.js";
 import { validateUniswapExecutionBinding } from "./binding.js";
 import type { UniswapExecutionBinding, UniswapReceiptObserverPort } from "./types.js";
 
@@ -54,11 +54,11 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
     if (txBlock === 0n) blocked("Uniswap receipt has no pre-state block.", "uniswap_balance_proof");
     const status = evmRpcQuantity(receipt.status);
     if (status === 0n) return await this.revertProof({ transactionHash, txBlock, block, safeHead, finalizedHead, receipt, binding });
-    const beforeTag = `0x${(txBlock - 1n).toString(16)}` as Hex, afterTag = block.tag;
+    const beforeTag = `0x${(txBlock - 1n).toString(16)}` as Hex, afterTag = block.tag, outputToken = outputTokenOf(operation);
     const [beforeNative, afterNative, beforeOutput, afterOutput] = await Promise.all([
       this.balance(operation.quote.account, beforeTag), this.balance(operation.quote.account, afterTag),
-      evmTokenBalance(this.call, UNISWAP_USDC, operation.quote.recipient as `0x${string}`, beforeTag),
-      evmTokenBalance(this.call, UNISWAP_USDC, operation.quote.recipient as `0x${string}`, afterTag),
+      evmTokenBalance(this.call, outputToken, operation.quote.recipient as `0x${string}`, beforeTag),
+      evmTokenBalance(this.call, outputToken, operation.quote.recipient as `0x${string}`, afterTag),
     ]);
     await recheckEvmBlock(this.call, block); await recheckEvmBlock(this.call, safeHead); await recheckEvmBlock(this.call, finalizedHead);
     await this.assertChain();
@@ -81,7 +81,7 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
       afterNative: afterNative.toString(), beforeOutput: beforeOutput.toString(), afterOutput: afterOutput.toString(),
       finalizedHead: { number: finalizedHead.number, hash: finalizedHead.hash }, observedAt }, binding.envelope,
     { transactionHash, account: operation.quote.account, recipient: operation.quote.recipient,
-      inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic }) };
+      inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic, outputToken }) };
   }
 
   /** Status 0 at a canonical finalized block with no logs proves the input never left; only gas was spent. */
@@ -116,5 +116,10 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
   }
 }
 
+function outputTokenOf(operation: SwapOperationRecord): `0x${string}` {
+  const token = operation.quote.destinationAsset;
+  if (token.kind !== "token" || token.identifier === null) blocked("Uniswap output must be an exact pinned token.", "uniswap_output_token");
+  return token.identifier as `0x${string}`;
+}
 function instant(value: Date): string { if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new ApnError("APN_RPC_PROTOCOL", "Uniswap observation time is invalid."); return value.toISOString(); }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

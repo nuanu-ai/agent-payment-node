@@ -2,18 +2,19 @@ import { encodeFunctionResult, keccak256, parseAbi, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { compileAllowlistPolicyOverlay, type AllowlistPolicyOverlayInput } from "../../src/allowlist-policy-overlay.js";
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
-import { sealAssetPolicyRegistry, type AssetPolicyRegistry } from "../../src/asset-policy-registry.js";
+import type { AssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { hashObject } from "../../src/canonical.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { sealWallet, StateStore } from "../../src/state.js";
 import { UNISWAP_ROUTER, UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
-import { UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_QUOTER_V2, UNISWAP_V3_USDC_WETH_500 } from "../../src/swap/uniswap-v3/pins.js";
+import { ETHEREUM_USDT, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_QUOTER_V2, UNISWAP_V3_USDC_WETH_500,
+  UNISWAP_V3_WETH_USDT_3000 } from "../../src/swap/uniswap-v3/pins.js";
 
 export const KEY = `0x${"0".repeat(63)}1` as const;
 export const ACCOUNT = privateKeyToAccount(KEY).address;
 export const PROFILE = "uniswap-keyless";
-export const SQRT_PRICE_X96 = 1594054304753181319742465080701116n;
+export const SQRT_PRICE_X96 = 1594054304753181319742465080701116n, USDT_SQRT_PRICE_X96 = 3942218571885532111480293n;
 export const AMOUNT_IN = "1000000000000000", QUOTED_OUT = 2469083n;
 export const H = (c: string) => c.repeat(64);
 const POOL = parseAbi([
@@ -33,7 +34,7 @@ export class MemoryWrapping implements WrappingSecretPort {
 /** Deterministic mainnet-shaped reader. Effects are counted; nothing leaves the process. */
 export class KeylessRpc {
   head = 100n; baseFee = 1_000_000_000n; balance = 10n ** 18n; nonce = 7n; pendingNonce = 7n; quoted = QUOTED_OUT;
-  routerReverts = false; chainId = "0x1"; sends: Hex[] = []; receipt: "none" | "success" | "revert" = "none"; minedAt = 0n;
+  routerReverts = false; usdtDeprecated = false; chainId = "0x1"; sends: Hex[] = []; receipt: "none" | "success" | "revert" = "none"; minedAt = 0n;
   calls: string[] = [];
   readonly call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
     this.calls.push(method);
@@ -56,6 +57,11 @@ export class KeylessRpc {
       return encodeFunctionResult({ abi: POOL, functionName: "slot0", result: [SQRT_PRICE_X96, 198186, 1, 2, 2, 0, true] });
     }
     if (tx.to === UNISWAP_V3_USDC_WETH_500) return encodeFunctionResult({ abi: POOL, functionName: "liquidity", result: 4_492_850_338_529_522_898n });
+    if (tx.to === UNISWAP_V3_WETH_USDT_3000 && tx.data.startsWith("0x3850c7bd")) {
+      return encodeFunctionResult({ abi: POOL, functionName: "slot0", result: [USDT_SQRT_PRICE_X96, -198000, 1, 2, 2, 0, true] });
+    }
+    if (tx.to === UNISWAP_V3_WETH_USDT_3000) return encodeFunctionResult({ abi: POOL, functionName: "liquidity", result: 18_294_847_725_868_403_502n });
+    if (tx.to === ETHEREUM_USDT) return `0x${"0".repeat(63)}${this.usdtDeprecated ? "1" : "0"}`;
     if (tx.to === UNISWAP_V3_QUOTER_V2) {
       return encodeFunctionResult({ abi: QUOTER, functionName: "quoteExactInputSingle", result: [this.quoted, SQRT_PRICE_X96 + 1n, 1, 90_039n] });
     }
@@ -76,7 +82,8 @@ export class KeylessRpc {
 
 export function quantity(value: bigint): Hex { return `0x${value.toString(16)}`; }
 
-export async function keylessPolicy(now: Date, deadline: Date, caps = { native: AMOUNT_IN, usdc: "10000000" }): Promise<AssetPolicyRegistry> {
+export async function keylessPolicy(now: Date, deadline: Date): Promise<AssetPolicyRegistry> {
+  const caps = { native: AMOUNT_IN, usdc: "10000000" };
   const inventory = loadAllowlistInventory(), overlay: AllowlistPolicyOverlayInput = { overlayVersion: "uniswap-keyless.1", profile: PROFILE,
     account: ACCOUNT, datasetVersion: inventory.dataset.version, datasetSha256: inventory.dataset.sha256, inventorySha256: inventory.inventorySha256,
     effectiveAt: new Date(now.getTime() - 60_000).toISOString(), expiresAt: new Date(deadline.getTime() + 3_600_000).toISOString(), admissions: [
@@ -84,12 +91,8 @@ export async function keylessPolicy(now: Date, deadline: Date, caps = { native: 
       { chain: "eip155:1", kind: "token", identifier: UNISWAP_USDC, rail: "swap", maximumPerTransferAtomic: caps.usdc, dailyLimitAtomic: caps.usdc,
         mechanism: UNISWAP_V3_KEYLESS_MECHANISM_PIN },
     ] };
-  const compiled = compileAllowlistPolicyOverlay(overlay).registry;
-  return sealAssetPolicyRegistry({ schemaVersion: compiled.schemaVersion, registryVersion: compiled.registryVersion,
-    publishedAt: compiled.publishedAt, effectiveDate: compiled.effectiveDate,
-    ...(compiled.effectiveAt === undefined ? {} : { effectiveAt: compiled.effectiveAt }),
-    ...(compiled.expiresAt === undefined ? {} : { expiresAt: compiled.expiresAt }),
-    chains: compiled.chains.map((chain) => ({ ...chain, assets: chain.assets.map((asset) => ({ ...asset, rails: { ...asset.rails, direct: true } })) })) });
+  // The compiled overlay is used as-is: no row caps are read or rewritten, so per-rail registry versions stay valid.
+  return compileAllowlistPolicyOverlay(overlay).registry;
 }
 
 /** Local non-custodial wallet for the profile: encrypted key plus the public wallet record the owner check reads. */

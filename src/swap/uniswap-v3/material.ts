@@ -6,7 +6,7 @@ import { validateSwapQuote, type SwapQuoteSnapshot } from "../quote.js";
 import type { GuardedSwapPreparedMaterial } from "../runtime.js";
 import type { UniswapTransactionEnvelope } from "../uniswap-codec.js";
 import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../uniswap-pin.js";
-import { decodeUniswapRouterCalldata } from "../uniswap-router.js";
+import { decodeUniswapRouterCalldataFor } from "../uniswap-router.js";
 import type { UniswapV3PoolQuote } from "./onchain.js";
 import { uniswapV3Pair, type UniswapV3CodePin } from "./pins.js";
 
@@ -61,8 +61,8 @@ export function validateUniswapKeylessMaterial(value: unknown, mode: "input" | "
   const gasLimit = uint(envelope.gasLimit, fail), maxFee = uint(envelope.maxFeePerGas, fail), priority = uint(envelope.maxPriorityFeePerGas ?? "", fail, false);
   if (priority > maxFee || BigInt(quote.simulation.gasEstimate) > gasLimit) fail("Uniswap gas envelope is inconsistent.");
   if (canonicalJson(record.gasOrEnergy) !== canonicalJson(uniswapGasDisplay(envelope))) fail("Uniswap gas display is not bound to the envelope.");
-  const route = decodeUniswapRouterCalldata(envelope.data, { recipient: quote.recipient, inputAmountAtomic: quote.inputAmountAtomic,
-    minimumOutputAtomic: quote.minimumOutputAtomic, deadline });
+  const route = decodeUniswapRouterCalldataFor(envelope.data, { recipient: quote.recipient, inputAmountAtomic: quote.inputAmountAtomic,
+    minimumOutputAtomic: quote.minimumOutputAtomic, deadline, outputToken: pair.outputToken });
   if (route.routeHash !== quote.routeHash || route.minimumOutputAtomic !== quote.minimumOutputAtomic) fail("Uniswap route is not bound to its quote.");
   if (!exactKeys(evidence as unknown as Record<string, unknown>, ["chainId", "blockNumber", "blockHash", "baseFeePerGas", "accountBalanceWei", "codePins", "pool"]) ||
       evidence.chainId !== 1 || evidence.blockNumber !== quote.simulation.blockNumber || evidence.blockHash !== quote.simulation.blockHash ||

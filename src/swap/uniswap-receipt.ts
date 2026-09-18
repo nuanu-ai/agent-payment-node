@@ -3,7 +3,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonica
 import { ApnError } from "../errors.js";
 import type { SwapReceiptProof } from "./model.js";
 import type { UniswapTransactionEnvelope } from "./uniswap-codec.js";
-import { UNISWAP_ROUTER, UNISWAP_USDC } from "./uniswap-pin.js";
+import { UNISWAP_ROUTER } from "./uniswap-pin.js";
 
 const TRANSFER = parseAbi(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
 const TRANSFER_TOPIC = encodeEventTopics({ abi: TRANSFER, eventName: "Transfer" })[0];
@@ -17,7 +17,7 @@ export interface UniswapReceiptEvidence { readonly transactionHash: `0x${string}
 
 export function validateUniswapReceipt(evidence: UniswapReceiptEvidence, envelope: UniswapTransactionEnvelope,
   expected: { readonly transactionHash: `0x${string}`; readonly account: string; readonly recipient: string;
-    readonly inputAmountAtomic: string; readonly minimumOutputAtomic: string }): SwapReceiptProof {
+    readonly inputAmountAtomic: string; readonly minimumOutputAtomic: string; readonly outputToken: string }): SwapReceiptProof {
   if (!isPlainRecord(evidence) || !exactKeys(evidence, ["transactionHash", "transaction", "receipt", "beforeNative", "afterNative",
     "beforeOutput", "afterOutput", "finalizedHead", "observedAt"])) fail();
   if (!isPlainRecord(evidence.transaction) || !exactKeys(evidence.transaction, ["hash", "from", "to", "input", "value", "blockNumber", "blockHash"]) ||
@@ -42,7 +42,8 @@ export function validateUniswapReceipt(evidence: UniswapReceiptEvidence, envelop
       tx.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() || beforeNative < afterNative || beforeNative - afterNative < inputAmount ||
       afterOutput < beforeOutput || afterOutput - beforeOutput < minimumOutput || finalizedBlock < receiptBlock) fail();
   const recipientTopic = `0x${address(expected.recipient).slice(2).toLowerCase().padStart(64, "0")}`;
-  const credited = receipt.logs.filter((log) => address(log.address) === UNISWAP_USDC && log.topics.length === 3 &&
+  const outputToken = address(expected.outputToken);
+  const credited = receipt.logs.filter((log) => address(log.address) === outputToken && log.topics.length === 3 &&
     log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() && log.topics[2]?.toLowerCase() === recipientTopic)
     .reduce((sum, log) => sum + BigInt(log.data), 0n);
   if (credited < minimumOutput) fail();

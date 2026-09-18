@@ -25,7 +25,8 @@ async function flow(root: string, options: { readonly typingMs?: number; readonl
   const runtime = createUniswapKeylessRuntime({ state, wrapping, call: rpc.call, verifyPins: noPins, clock,
     policy: async (profile) => options.admitted === false || profile !== PROFILE ? null : policy, foreground: "tty",
     tty: { isTerminal: () => true, openTerminal: terminal } });
-  const quoted: any = await runtime.quote({ profile: PROFILE, account: ACCOUNT, recipient: ACCOUNT, amountAtomic: AMOUNT_IN, slippageBps: 50,
+  const quoted: any = await runtime.quote({ profile: PROFILE, account: ACCOUNT, recipient: ACCOUNT, outputToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    amountAtomic: AMOUNT_IN, slippageBps: 50,
     ownerSlippageCapBps: 100, deadline, maxGasLimit: "300000", maxFeePerGas: "30000000000", maxPriorityFeePerGas: "1000000000" }, clock.now());
   return { runtime, rpc, state, clock, advance: (ms: number) => { clockMs += ms; }, quoted, printed: () => printed,
     usage: () => new AssetUsageLedger(root).usage({ account: ACCOUNT, chain: "eip155:1", asset: { kind: "native", identifier: null } }, clock.now()) };
