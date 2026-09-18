@@ -7,16 +7,21 @@ export class TtyBridgeApproval implements BridgeApprovalPort {
   constructor(private readonly options: TtyTransferApprovalOptions = {}) {}
   async confirm(input: Parameters<BridgeApprovalPort["confirm"]>[0]): Promise<boolean> {
     const s = input.summary as ReturnType<typeof publicBridgeOperation>;
+    const from = s.asset.from, to = s.asset.to, native = s.asset.native_principal_admitted;
     const lines = ["Agent Payment Node cross-chain bridge approval", `Profile: ${s.profile}`, `Provider: ${s.provider}`,
       `Custody: ${s.custody}`, `Execution owner: ${s.execution_owner}`, `Operation: ${input.operationId}`,
       `LI.FI route: ${s.route.route_id}; tool: ${s.route.tool}`, `Source chain: eip155:${s.transfer.fromChainId}`,
-      `Destination chain: eip155:${s.transfer.toChainId}`, `Source USDC: ${s.transfer.fromToken}`, `Destination USDC: ${s.transfer.toToken}`,
-      `Sender: ${s.transfer.sender}`, `Recipient: ${s.transfer.recipient}`, `Source principal: ${s.transfer.amountAtomic} USDC atomic (6 decimals)`,
-      `Quoted destination output: ${s.transfer.quoted_output_atomic} USDC atomic`, `Maximum slippage: ${s.transfer.slippageBps} basis points`,
-      `Minimum destination output: ${s.transfer.minimum_output_atomic} USDC atomic`, `Maximum USDC loss including fees/slippage: ${s.transfer.maxRouteFeeAtomic} atomic`,
-      `Unitemized protocol token fee: ${s.fees.implicit_protocol_token_fee_atomic} USDC atomic`,
-      `Aggregate source native debit cap: ${s.transfer.maxNativeDebitWei} wei`, `Allowance at prepare: ${s.transfer.allowance_atomic_at_prepare} atomic`,
-      `Spender: ${s.transfer.spender}`, "A separate included approval costs gas even if the bridge cannot proceed.",
+      `Destination chain: eip155:${s.transfer.toChainId}`, `Source ${from.symbol}: ${from.token}`, `Destination ${to.symbol}: ${to.token}`,
+      `Sender: ${s.transfer.sender}`, `Recipient: ${s.transfer.recipient}`, `Source principal: ${s.transfer.amountAtomic} ${from.symbol} atomic (${from.decimals} decimals)`,
+      `Quoted destination output: ${s.transfer.quoted_output_atomic} ${to.symbol} atomic`, `Maximum slippage: ${s.transfer.slippageBps} basis points`,
+      `Minimum destination output: ${s.transfer.minimum_output_atomic} ${to.symbol} atomic`, `Maximum ${from.symbol} loss including fees/slippage: ${s.transfer.maxRouteFeeAtomic} atomic`,
+      `Token loss bound at this route: ${s.fees.token_loss_bound_atomic} ${from.symbol} atomic`,
+      `Unitemized protocol fee: ${s.fees.implicit_protocol_token_fee_atomic} ${from.symbol} atomic`,
+      `Aggregate source native debit cap: ${s.transfer.maxNativeDebitWei} wei${native ? " (fees only; the native principal is bound by the amount)" : ""}`,
+      `Allowance at prepare: ${s.transfer.allowance_atomic_at_prepare} atomic`, `Spender: ${s.transfer.spender}`,
+      ...(native ? ["Native principal: sent as the bridge transaction value; no approval effect; approval cap 0."]
+        : ["A separate included approval costs gas even if the bridge cannot proceed.",
+          ...(from.approval === "zero_first" ? ["This token approves only from a zero allowance; APN approves exactly the principal and never resets."] : [])]),
       "Base total native fee is checked before sending; L1/operator fees have no transaction-level on-chain cap.",
       ...s.effects.flatMap((e) => [`${e.role}: target ${e.to}; native value ${e.value_atomic} wei; nonce ${e.economics.nonceAtomic}`,
         `${e.role}: gas ceiling ${e.economics.gasLimitAtomic}; maxFeePerGas ${e.economics.maxFeePerGasAtomic}; maxPriorityFeePerGas ${e.economics.maxPriorityFeePerGasAtomic}`,
