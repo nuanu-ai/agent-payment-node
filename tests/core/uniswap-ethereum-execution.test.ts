@@ -18,7 +18,7 @@ import { UNISWAP_CHAIN, UNISWAP_MECHANISM_PIN, UNISWAP_ROUTER, UNISWAP_USDC } fr
 import { decodeUniswapRouterCalldata } from "../../src/swap/uniswap-router.js";
 import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { temporaryState } from "./helpers.js";
-import { EncryptedUniswapExecutionEffectStore, LocalUniswapEthereumSigner,
+import { EncryptedUniswapExecutionEffectStore, LocalUniswapEthereumSigner, UniswapBalanceEvidenceStore,
   UniswapEthereumReceiptObserver, UniswapSingleSendAdapter, createUniswapApprovalRequest, createUniswapExecutionBinding,
   newUniswapExecutionEffect, validateEffect, validateFreshness, verifySignedUniswapTransaction,
   type UniswapExecutionBinding, type UniswapExecutionEffect, type UniswapExecutionFreshness,
@@ -196,4 +196,58 @@ test("observer requires marker and proves exact finalized receipt, reorg, finali
   await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ nonce: "0x8" })).observe(m.operation, m.binding, hash), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ removed: true })).observe(m.operation, m.binding, hash), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(observer.observe({ ...f.operation, submissionMarker: null } as any, m.binding, hash));
+});
+
+test("observer keeps balance evidence from first sight, so a status after the node pruned that state still finalizes", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root), m = await marked(f);
+  const raw = await privateKeyToAccount(KEY).signTransaction({ type: "eip1559", chainId: 1, to: f.e.to, data: f.e.data, value: BigInt(f.e.value),
+    nonce: 7, gas: 150000n, maxFeePerGas: 2000000000n, maxPriorityFeePerGas: 100000000n, accessList: [] });
+  const hash = await verifySignedUniswapTransaction(raw, m.binding, m.operation);
+  const recipientTopic = `0x${RECIPIENT.slice(2).toLowerCase().padStart(64, "0")}`, transfer = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+  const output = BigInt(minimumOutput);
+  let stateReads = 0;
+  const rpc = (o: { finalized: number; blockHash: `0x${string}`; pruned: boolean }) => async (method: string, params: readonly unknown[]) => {
+    if (method === "eth_chainId") return "0x1";
+    if (method === "eth_getTransactionByHash") return { hash, from: ACCOUNT, to: UNISWAP_ROUTER, input: f.e.data,
+      value: `0x${BigInt(inputAmount).toString(16)}`, chainId: "0x1", nonce: "0x7", gas: "0x249f0", type: "0x2",
+      maxFeePerGas: "0x77359400", maxPriorityFeePerGas: "0x5f5e100", blockNumber: "0x64", blockHash: o.blockHash };
+    if (method === "eth_getTransactionReceipt") return { transactionHash: hash, from: ACCOUNT, to: UNISWAP_ROUTER, status: "0x1",
+      blockNumber: "0x64", blockHash: o.blockHash, logs: [{ address: UNISWAP_USDC, transactionHash: hash, blockNumber: "0x64", blockHash: o.blockHash,
+        removed: false, topics: [transfer, `0x${H("0")}`, recipientTopic], data: `0x${output.toString(16).padStart(64, "0")}` }] };
+    if (method === "eth_getBlockByNumber") { const tag = params[0];
+      if (tag === "safe" || tag === "finalized" || tag === `0x${o.finalized.toString(16)}`) return { number: `0x${o.finalized.toString(16)}`, hash: `0x${H("a")}` };
+      return { number: "0x64", hash: o.blockHash }; }
+    if (method === "eth_getBalance" || method === "eth_call") {
+      stateReads++;
+      if (o.pruned) throw new Error("Archive requests require a personal token");
+      if (method === "eth_getBalance") return params[1] === "0x63" ? "0x38d7ea4c68000" : "0x0";
+      return params[1] === "0x63" ? `0x${"0".repeat(64)}` : `0x${output.toString(16).padStart(64, "0")}`;
+    }
+    throw new Error(method);
+  };
+  const clock = () => new Date((deadline - 200) * 1000), store = new UniswapBalanceEvidenceStore(temporary.root);
+  const blockE = `0x${H("e")}` as const, block9 = `0x${H("9")}` as const;
+  // First sight, not yet final: balances around block 100 are read once and kept.
+  assert.equal(await new UniswapEthereumReceiptObserver(rpc({ finalized: 99, blockHash: blockE, pruned: false }), clock, store)
+    .observeOutcome(m.operation, m.binding, hash), null);
+  const kept = await store.load(m.operation);
+  assert.equal(kept?.blockHash, blockE); assert.equal(kept?.beforeNative, "1000000000000000"); assert.equal(kept?.afterOutput, minimumOutput);
+  // Finality observed after the node pruned that state: no state read, the kept evidence proves the swap.
+  stateReads = 0;
+  const late = await new UniswapEthereumReceiptObserver(rpc({ finalized: 110, blockHash: blockE, pruned: true }), clock, store)
+    .observeOutcome(m.operation, m.binding, hash);
+  assert.equal(late?.outcome, "succeeded"); assert.equal(stateReads, 0);
+  // Without kept evidence the failure is named instead of silently staying submitted.
+  await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ finalized: 110, blockHash: blockE, pruned: true }), clock)
+    .observeOutcome(m.operation, m.binding, hash), { code: "APN_PROVIDER_UNAVAILABLE", message: /archive-capable APN_ETHEREUM_RPC_URL/u });
+  // After a reorg the kept evidence names another block, so it is read again and replaced.
+  await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ finalized: 110, blockHash: block9, pruned: true }), clock, store)
+    .observeOutcome(m.operation, m.binding, hash), { code: "APN_PROVIDER_UNAVAILABLE" });
+  assert.equal((await new UniswapEthereumReceiptObserver(rpc({ finalized: 110, blockHash: block9, pruned: false }), clock, store)
+    .observeOutcome(m.operation, m.binding, hash))?.outcome, "succeeded");
+  assert.equal((await store.load(m.operation))?.blockHash, block9);
+  // Kept evidence is sealed: an edited balance is refused as corrupt state.
+  const file = join(temporary.root, "uniswap-balance-evidence", m.operation.ownerProfileHash, `${m.operation.operationId}.json`);
+  const edited = JSON.parse(await readFile(file, "utf8")); edited.afterOutput = "99999999"; await writeFile(file, JSON.stringify(edited));
+  await assert.rejects(store.load(m.operation), { code: "APN_STATE_CORRUPT" });
 });
