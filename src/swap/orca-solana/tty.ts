@@ -7,7 +7,7 @@ import { exactChainConsent, type TtyTransferApprovalOptions } from "../../tty-ap
 import { sealGuardedSwapApproval, type GuardedSwapApprovalArtifact, type GuardedSwapApprovalIntent,
   type GuardedSwapForegroundApprovalPort } from "../runtime.js";
 import type { SavedOrcaQuoteStore } from "./material.js";
-import { ORCA_SOL_USDC_POOL, WHIRLPOOL_PROGRAM } from "./pins.js";
+import { ORCA_SOL_USDC_POOL, ORCA_SOLANA_CHAIN, WHIRLPOOL_PROGRAM } from "./pins.js";
 
 /** The exact foreground screen for one guarded Orca swap. The owner types a short code bound to every line. */
 export class TtyOrcaSwapApproval implements GuardedSwapForegroundApprovalPort {
@@ -37,7 +37,7 @@ export async function orcaApprovalScreen(quotes: Pick<SavedOrcaQuoteStore, "load
     throw new ApnError("APN_OPERATION_BLOCKED", "Prepared swap material does not match the approval intent.", { reason: "swap_material_drift" });
   }
   return [
-    "Agent Payment Node guarded swap approval: Solana mainnet (solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp), Orca Whirlpool, keyless",
+    `Agent Payment Node guarded swap approval: Solana mainnet (${ORCA_SOLANA_CHAIN}), Orca Whirlpool, keyless`,
     `Profile: ${intent.profile}`, `Operation: ${intent.operationId}`, `Signer and fee payer (local wallet, non-custodial): ${intent.account}`,
     `You send: ${chainDisplay(intent.inputAmountAtomic, 9)} SOL (${intent.inputAmountAtomic} lamports), exact input, wrapped to wSOL inside this transaction`,
     `USDC goes to your own token account ${execution.plan.usdcAccount}; the temporary wSOL account ${execution.plan.wsolAccount} is closed back to you`,
