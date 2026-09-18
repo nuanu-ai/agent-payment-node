@@ -49,6 +49,8 @@ import { LocalFacilitatorSigner } from "./facilitator-gasless/custody.js";
 import { PayAiFacilitator } from "./facilitator-gasless/facilitator.js";
 import { avalancheFacilitatorRpc } from "./facilitator-gasless/rpc.js";
 import { TtyFacilitatorApproval } from "./facilitator-gasless/tty.js";
+import { portfolioPause } from "./portfolio/command.js";
+import { PortfolioHttps } from "./portfolio/https.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
@@ -112,6 +114,10 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     return new ApnCore({
         state,
+        // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
+        ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
+            portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
+        } : {}),
         ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
         ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
         ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),

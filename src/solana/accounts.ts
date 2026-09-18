@@ -12,10 +12,14 @@ export async function associatedUsdc(owner: string): Promise<string> {
 }
 export async function readAccounts(rpc: SolanaRpcPort, addresses: readonly string[]): Promise<{ readonly slot: bigint; readonly accounts: readonly (SolanaAccountInfo | null)[] }> {
   addresses.forEach(solanaAddress);
-  const response = rpcRecord(await rpc.call("getMultipleAccounts", [addresses, { encoding: "base64", commitment: "confirmed" }]));
-  const slot = rpcAtomic(rpcRecord(response.context).slot); const values = rpcArray(response.value, addresses.length);
-  if (values.length !== addresses.length) protocolFailure();
-  return { slot, accounts: values.map((value) => value === null ? null : decodeAccount(value)) };
+  return multipleAccounts(await rpc.call("getMultipleAccounts", [addresses, { encoding: "base64", commitment: "confirmed" }]), addresses.length);
+}
+/** Decodes one base64 `getMultipleAccounts` result that must carry exactly `count` entries. */
+export function multipleAccounts(value: unknown, count: number): { readonly slot: bigint; readonly accounts: readonly (SolanaAccountInfo | null)[] } {
+  const response = rpcRecord(value);
+  const slot = rpcAtomic(rpcRecord(response.context).slot); const values = rpcArray(response.value, count);
+  if (values.length !== count) protocolFailure();
+  return { slot, accounts: values.map((entry) => entry === null ? null : decodeAccount(entry)) };
 }
 export function requireNativeAccount(account: SolanaAccountInfo | null): bigint {
   if (account === null) return 0n;
@@ -30,11 +34,15 @@ export function requireUsdcMint(account: SolanaAccountInfo | null): void {
   } catch { protocolFailure(); }
 }
 export function usdcAmount(account: SolanaAccountInfo | null, owner: string): bigint {
+  return tokenAccountAmount(account, owner, SOLANA_USDC);
+}
+/** An absent associated token account holds zero; a present one must be an initialized classic SPL account of this owner and mint. */
+export function tokenAccountAmount(account: SolanaAccountInfo | null, owner: string, mint: string): bigint {
   if (account === null) return 0n;
   if (account.owner !== TOKEN_PROGRAM_ADDRESS || account.executable || account.data.length !== 165) protocolFailure();
   try {
     const token = getTokenDecoder().decode(account.data);
-    if (token.owner !== owner || token.mint !== SOLANA_USDC || token.state !== 1 || token.isNative.__option !== "None") protocolFailure();
+    if (token.owner !== owner || token.mint !== mint || token.state !== 1 || token.isNative.__option !== "None") protocolFailure();
     return token.amount;
   } catch { return protocolFailure(); }
 }
