@@ -65,7 +65,7 @@ export class UniswapEthereumExecutionDriver implements GuardedSwapExecutionDrive
     try { sent = await this.d.sender.sendOnce(operation, binding, this.d.clock.now()); } catch { sent = null; }
     const accepted = sent !== null && sent.kind === "submitted" && sent.transactionHash === transactionHash;
     operation = await this.d.core.recordPossibleSend(operation, accepted ? "submitted" : "unknown_finality", this.d.clock.now());
-    return await this.observeExact(operation, binding, transactionHash);
+    return await this.observeExact(operation, binding, transactionHash, false);
   }
 
   async observe(input: GuardedSwapObservationInput): Promise<SwapOperationRecord> {
@@ -81,13 +81,18 @@ export class UniswapEthereumExecutionDriver implements GuardedSwapExecutionDrive
     }
     if (operation.state === "submitting") operation = await this.d.core.recordPossibleSend(operation,
       effect.phase === "send_accepted" ? "submitted" : "unknown_finality", this.d.clock.now());
-    return await this.observeExact(operation, binding, effect.transactionHash);
+    return await this.observeExact(operation, binding, effect.transactionHash, true);
   }
 
-  private async observeExact(operation: SwapOperationRecord, binding: UniswapExecutionBinding, transactionHash: Hex): Promise<SwapOperationRecord> {
+  /**
+   * Right after the single send an observation failure must not hide the recorded send, so it returns the operation. A status
+   * or resume call surfaces the failure instead: the state stays durable and the caller sees why it did not advance.
+   */
+  private async observeExact(operation: SwapOperationRecord, binding: UniswapExecutionBinding, transactionHash: Hex,
+    surfaceFailure: boolean): Promise<SwapOperationRecord> {
     let outcome: UniswapObservedOutcome | null;
     try { outcome = await this.d.observer.observeOutcome(operation, binding, transactionHash); }
-    catch { return operation; }
+    catch (error) { if (surfaceFailure) throw error; return operation; }
     if (outcome === null || (operation.state !== "submitted" && operation.state !== "unknown_finality")) return operation;
     return outcome.outcome === "succeeded" ? await this.d.core.finalize(operation, this.d.clock.now(), outcome.proof)
       : await this.d.core.failConfirmedRevert(operation, this.d.clock.now(), outcome.proof);

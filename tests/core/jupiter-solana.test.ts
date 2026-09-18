@@ -166,17 +166,18 @@ test("simulation proof uses exact non-replacing unsigned request and rejects cha
 test("finalized receipt binds status, v0 loaded addresses, spend, fee, and recipient output", async () => {
   const envelope = await parseJupiterV0Envelope(transaction(), new Resolver()); const signature = "2".repeat(88);
   const keys = envelope.accounts.map((item) => item.address); const takerIndex = keys.indexOf(TAKER); const recipientIndex = keys.indexOf(RECIPIENT_ATA);
-  const preBalances = keys.map(() => 0); const postBalances = keys.map(() => 0); preBalances[takerIndex] = 2_000_000; postBalances[takerIndex] = 995_000;
+  // The Solana transport parses every JSON number as a bigint; the fixture mirrors that wire shape.
+  const preBalances = keys.map(() => 0n); const postBalances = keys.map(() => 0n); preBalances[takerIndex] = 2_000_000n; postBalances[takerIndex] = 995_000n;
   const wire = getTransactionDecoder().decode(Buffer.from(envelope.transactionBase64, "base64"));
   const signedWire = { ...wire, signatures: { [TAKER]: getBase58Encoder().encode(signature) } } as unknown as typeof wire;
   const signedTransaction = getBase64EncodedWireTransaction(signedWire);
-  const transactionResult = { slot: 500, blockTime: 1_790_000_000, version: 0, meta: { err: null, fee: 5_000,
+  const transactionResult = { slot: 500n, blockTime: 1_790_000_000n, version: 0n, meta: { err: null, fee: 5_000n,
     loadedAddresses: { writable: [], readonly: [] }, preBalances, postBalances, preTokenBalances: [],
     postTokenBalances: [{ accountIndex: recipientIndex, mint: SOLANA_USDC_MINT, owner: RECIPIENT,
-      uiTokenAmount: { amount: "148500", decimals: 6 } }] },
+      uiTokenAmount: { amount: "148500", decimals: 6n } }] },
     transaction: [signedTransaction, "base64"] };
   const reader = { call: async (method: string) => method === "getSignatureStatuses"
-    ? { context: { slot: 501 }, value: [{ slot: 500, confirmationStatus: "finalized", confirmations: null, err: null }] }
+    ? { context: { slot: 501n }, value: [{ slot: 500n, confirmationStatus: "finalized", confirmations: null, err: null }] }
     : transactionResult };
   const receipt = await validateFinalizedJupiterReceipt(reader, envelope, { signature, taker: TAKER, recipient: RECIPIENT,
     recipientTokenAccount: RECIPIENT_ATA, minimumOutputAtomic: "148500", maximumTotalNativeSpendLamports: "1005000",

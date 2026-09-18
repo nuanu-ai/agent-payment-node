@@ -1,6 +1,7 @@
 import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { tronAddress } from "../../tron/codec.js";
+import { slippageAboveCap } from "../slippage-refusal.js";
 const option = (name, type, constraints) => ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
     success: "Frozen SunSwap inventory, unsigned exact simulated quote, prepared operation, or durable status.",
@@ -54,7 +55,7 @@ export function bindSunSwapCommand(path, options) {
         exact(options, ["--profile", "--account", "--to", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--fee-limit-sun", "--deadline"]);
         const slippageBps = basisPoints(options["--slippage-bps"]), ownerSlippageCapBps = basisPoints(options["--owner-slippage-cap-bps"]);
         if (slippageBps > ownerSlippageCapBps)
-            invalid("SunSwap slippage exceeds the owner cap.");
+            slippageAboveCap("SunSwap", slippageBps, ownerSlippageCapBps);
         return { command: "swap.sunswap.quote", profile: options["--profile"], account: tronAddress(options["--account"]),
             recipient: tronAddress(options["--to"]), amountAtomic: positiveAtomic(options["--amount"]), slippageBps, ownerSlippageCapBps,
             feeLimitSun: positiveAtomic(options["--fee-limit-sun"]), deadline: unixSeconds(options["--deadline"]) };
