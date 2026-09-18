@@ -1,18 +1,29 @@
 import type { Hex } from "viem";
+import { canonicalJson, domainHash } from "../../../canonical.js";
 import { ApnError } from "../../../errors.js";
 import type { EvmRpcCall } from "../../../evm-ports.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmTokenBalance, recheckEvmBlock } from "../../../evm-rpc-codec.js";
 import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../../model.js";
 import { validateUniswapReceipt, type UniswapReceiptEvidence } from "../../uniswap-receipt.js";
-import { UNISWAP_ROUTER, UNISWAP_USDC } from "../../uniswap-pin.js";
+import { UNISWAP_ROUTER } from "../../uniswap-pin.js";
 import { validateUniswapExecutionBinding } from "./binding.js";
 import type { UniswapExecutionBinding, UniswapReceiptObserverPort } from "./types.js";
+
+/** A finalized outcome: success carries the full receipt proof; a revert carries its finalized status-0 proof. */
+export type UniswapObservedOutcome = { readonly outcome: "succeeded" | "reverted"; readonly proof: SwapReceiptProof };
 
 export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPort {
   constructor(private readonly call: EvmRpcCall, private readonly now: () => Date = () => new Date()) {}
 
   async observe(operationValue: SwapOperationRecord, bindingValue: UniswapExecutionBinding,
     transactionHash: Hex): Promise<SwapReceiptProof | null> {
+    const outcome = await this.observeOutcome(operationValue, bindingValue, transactionHash);
+    if (outcome?.outcome === "reverted") blocked("Uniswap swap receipt is reverted or invalid.", "uniswap_receipt_revert");
+    return outcome === null ? null : outcome.proof;
+  }
+
+  async observeOutcome(operationValue: SwapOperationRecord, bindingValue: UniswapExecutionBinding,
+    transactionHash: Hex): Promise<UniswapObservedOutcome | null> {
     const operation = validateSwapOperation(operationValue), binding = validateUniswapExecutionBinding(bindingValue, operation);
     if (operation.submissionMarker === null || operation.submissionMarker.markerHash !== binding.submissionMarkerHash) {
       blocked("Uniswap observation is forbidden before the durable submission marker.", "uniswap_observation_before_marker");
@@ -41,11 +52,13 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
     const [safeHead, finalizedHead] = await Promise.all([evmRpcBlock(this.call, "safe"), evmRpcBlock(this.call, "finalized")]);
     if (BigInt(safeHead.number) < txBlock || BigInt(finalizedHead.number) < txBlock) return null;
     if (txBlock === 0n) blocked("Uniswap receipt has no pre-state block.", "uniswap_balance_proof");
-    const beforeTag = `0x${(txBlock - 1n).toString(16)}` as Hex, afterTag = block.tag;
+    const status = evmRpcQuantity(receipt.status);
+    if (status === 0n) return await this.revertProof({ transactionHash, txBlock, block, safeHead, finalizedHead, receipt, binding });
+    const beforeTag = `0x${(txBlock - 1n).toString(16)}` as Hex, afterTag = block.tag, outputToken = outputTokenOf(operation);
     const [beforeNative, afterNative, beforeOutput, afterOutput] = await Promise.all([
       this.balance(operation.quote.account, beforeTag), this.balance(operation.quote.account, afterTag),
-      evmTokenBalance(this.call, UNISWAP_USDC, operation.quote.recipient as `0x${string}`, beforeTag),
-      evmTokenBalance(this.call, UNISWAP_USDC, operation.quote.recipient as `0x${string}`, afterTag),
+      evmTokenBalance(this.call, outputToken, operation.quote.recipient as `0x${string}`, beforeTag),
+      evmTokenBalance(this.call, outputToken, operation.quote.recipient as `0x${string}`, afterTag),
     ]);
     await recheckEvmBlock(this.call, block); await recheckEvmBlock(this.call, safeHead); await recheckEvmBlock(this.call, finalizedHead);
     await this.assertChain();
@@ -59,17 +72,31 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
       }
       return { address: evmRpcAddress(log.address), topics: log.topics.map((topic) => evmRpcHex(topic, 32)), data: evmRpcHex(log.data) };
     });
-    const status = evmRpcQuantity(receipt.status);
     if (status !== 1n) blocked("Uniswap swap receipt is reverted or invalid.", "uniswap_receipt_revert");
     const observedAt = instant(this.now());
-    return validateUniswapReceipt({ transactionHash, transaction: { hash: txHash, from: evmRpcAddress(tx.from),
+    return { outcome: "succeeded", proof: validateUniswapReceipt({ transactionHash, transaction: { hash: txHash, from: evmRpcAddress(tx.from),
       to: evmRpcAddress(tx.to), input: evmRpcHex(tx.input), value: evmRpcQuantity(tx.value).toString(),
       blockNumber: txBlock.toString(), blockHash: txBlockHash }, receipt: { transactionHash: receiptHash, status: "0x1",
       blockNumber: receiptBlock.toString(), blockHash: receiptBlockHash, logs }, beforeNative: beforeNative.toString(),
       afterNative: afterNative.toString(), beforeOutput: beforeOutput.toString(), afterOutput: afterOutput.toString(),
       finalizedHead: { number: finalizedHead.number, hash: finalizedHead.hash }, observedAt }, binding.envelope,
     { transactionHash, account: operation.quote.account, recipient: operation.quote.recipient,
-      inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic });
+      inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic, outputToken }) };
+  }
+
+  /** Status 0 at a canonical finalized block with no logs proves the input never left; only gas was spent. */
+  private async revertProof(input: { readonly transactionHash: Hex; readonly txBlock: bigint;
+    readonly block: { readonly tag: Hex; readonly hash: Hex }; readonly safeHead: { readonly tag: Hex; readonly hash: Hex; readonly number: string };
+    readonly finalizedHead: { readonly tag: Hex; readonly hash: Hex; readonly number: string }; readonly receipt: Record<string, unknown>;
+    readonly binding: UniswapExecutionBinding }): Promise<UniswapObservedOutcome> {
+    if (!Array.isArray(input.receipt.logs) || input.receipt.logs.length !== 0) blocked("A reverted Uniswap receipt must carry no logs.", "uniswap_receipt_conflict");
+    await recheckEvmBlock(this.call, input.block); await recheckEvmBlock(this.call, input.safeHead);
+    await recheckEvmBlock(this.call, input.finalizedHead); await this.assertChain();
+    const observedAt = instant(this.now());
+    const receiptHash = domainHash("apn.uniswap-revert-proof.v1", canonicalJson({ transactionHash: input.transactionHash,
+      status: "0x0", blockNumber: input.txBlock.toString(), blockHash: input.block.hash, bindingHash: input.binding.bindingHash,
+      envelopeHash: input.binding.envelopeHash, finalizedHead: { number: input.finalizedHead.number, hash: input.finalizedHead.hash }, observedAt }));
+    return { outcome: "reverted", proof: { receiptHash, transactionHash: input.transactionHash, observedAt, finalized: true } };
   }
 
   private async balance(address: string, tag: Hex): Promise<bigint> { return evmRpcQuantity(await this.call("eth_getBalance", [address, tag])); }
@@ -89,5 +116,10 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
   }
 }
 
+function outputTokenOf(operation: SwapOperationRecord): `0x${string}` {
+  const token = operation.quote.destinationAsset;
+  if (token.kind !== "token" || token.identifier === null) blocked("Uniswap output must be an exact pinned token.", "uniswap_output_token");
+  return token.identifier as `0x${string}`;
+}
 function instant(value: Date): string { if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new ApnError("APN_RPC_PROTOCOL", "Uniswap observation time is invalid."); return value.toISOString(); }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

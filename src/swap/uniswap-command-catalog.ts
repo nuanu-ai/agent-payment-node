@@ -9,32 +9,36 @@ const option = (name: CommandOption["name"], type: CommandOption["type"], constr
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
   success: "Pinned Uniswap inventory, unsigned quote, prepared operation, or durable status.",
   failures: ["Classified refusal; no signing, broadcast, approval, or provider fallback."] } as const;
-const states = { terminal: ["finalized", "failed_before_effect"], non_terminal: ["quoted", "prepared", "awaiting_approval",
+const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert"], non_terminal: ["quoted", "prepared", "awaiting_approval",
   "reserved", "submitting", "submitted", "unknown_finality"] } as const;
 const profile = option("--profile", "profile", ["existing_profile_name"]), account = option("--account", "address", ["checksummed_ethereum_address"]);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
 export const UNISWAP_COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["swap"], summary: "Separately admitted guarded swaps.", kind: "group" },
   { path: ["swap", "ethereum"], summary: "Ethereum guarded swaps.", kind: "group" },
-  { path: ["swap", "ethereum", "uniswap"], summary: "Pinned Universal Router native ETH to USDC exact input.", kind: "group" },
+  { path: ["swap", "ethereum", "uniswap"], summary: "Keyless Uniswap V3 native ETH to USDC or USDT exact input via pinned Universal Router 2.2.0.", kind: "group" },
 ];
 export const UNISWAP_COMMANDS: readonly CommandDefinition[] = [
   command("inventory", [], "Read the immutable official Uniswap pin and frozen pair without admitting it.", "none"),
-  command("quote", [profile, account, option("--to", "address", ["checksummed_recipient"]), option("--amount", "wei", ["positive_native_wei"]),
+  command("quote", [profile, account, option("--to", "address", ["checksummed_recipient"]),
+    option("--output-token", "address", ["pinned_checksummed_usdc_or_usdt"]), option("--amount", "wei", ["positive_native_wei"]),
     option("--slippage-bps", "string", ["integer_0_through_owner_cap"]), option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"]),
     option("--deadline", "string", ["unix_seconds_within_30_minutes"]), option("--max-gas-limit", "wei", ["positive_bound"]),
     option("--max-fee-per-gas", "wei", ["positive_bound"]), option("--max-priority-fee-per-gas", "wei", ["positive_bound"])],
-    "Construct, decode, and exactly simulate one unsigned quote.", "network_read"),
+    "Quote from the pinned pool and QuoterV2 on-chain, encode locally, and exactly simulate one unsigned transaction. Uses APN_ETHEREUM_RPC_URL.", "network_read"),
   command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"])],
     "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
   command("status", [operation], "Read one durable guarded swap operation without resending.", "local_read"),
-  command("approve", [operation], "Foreground approval is dormant until the complete signer and sender adapter exists.", "none"),
-  command("execute", [operation], "Execution is dormant until the complete signer, sender, and observer adapter exists.", "none"),
+  command("approve", [operation], "Show the exact swap screen, take the typed approval code, then sign locally and send exactly once.",
+    "payment_submit", { class: "foreground_tty", when: "Every guarded swap; MCP returns the exact CLI handoff only." }),
+  command("execute", [operation], "Continue an approved reservation with its single send, or observe an already marked swap without resending.",
+    "payment_submit", { class: "foreground_tty", when: "Only an unexpired stored foreground approval; MCP returns the exact CLI handoff only." }),
 ];
-function command(name: string, options: readonly CommandOption[], summary: string, effect: CommandDefinition["effect"]["class"]): CommandDefinition {
+function command(name: string, options: readonly CommandOption[], summary: string, effect: CommandDefinition["effect"]["class"],
+  approval: CommandDefinition["approval"] = { class: "none", when: "Never signs or broadcasts." }): CommandDefinition {
   const suffix = options.map((row) => ` ${row.name} <${row.type}>`).join("");
   return { path: ["swap", "ethereum", "uniswap", name], synopsis: `apn swap ethereum uniswap ${name}${suffix}`, summary, options,
-    effect: { class: effect, summary }, approval: { class: "none", when: "Never signs or broadcasts." }, output, states,
+    effect: { class: effect, summary }, approval, output, states,
     recovery: [], examples: [`apn swap ethereum uniswap ${name}`] };
 }
 export function bindUniswapCommand(path: string, o: Readonly<Record<string, string>>): CommandRequest {
@@ -49,11 +53,12 @@ export function bindUniswapCommand(path: string, o: Readonly<Record<string, stri
     return { command: "swap.uniswap.prepare", profile: o["--profile"]!, quoteHash: hash(o["--quote"]), idempotencyKey: o["--idempotency-key"]! };
   }
   if (action !== "quote") invalid("Unsupported Uniswap action.");
-  exact(o, ["--profile", "--account", "--to", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--deadline",
+  exact(o, ["--profile", "--account", "--to", "--output-token", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--deadline",
     "--max-gas-limit", "--max-fee-per-gas", "--max-priority-fee-per-gas"]);
   const slippageBps = safeInteger(o["--slippage-bps"]), ownerSlippageCapBps = safeInteger(o["--owner-slippage-cap-bps"]);
   if (slippageBps > ownerSlippageCapBps || ownerSlippageCapBps > 10_000) invalid("Uniswap slippage exceeds the owner cap.");
-  return { command: "swap.uniswap.quote", profile: o["--profile"]!, account: evmAddress(o["--account"]), recipient: evmAddress(o["--to"]), amountAtomic: o["--amount"]!,
+  return { command: "swap.uniswap.quote", profile: o["--profile"]!, account: evmAddress(o["--account"]), recipient: evmAddress(o["--to"]),
+    outputToken: evmAddress(o["--output-token"]), amountAtomic: o["--amount"]!,
     slippageBps, ownerSlippageCapBps,
     deadline: safeInteger(o["--deadline"]),
     maxGasLimit: o["--max-gas-limit"]!, maxFeePerGas: o["--max-fee-per-gas"]!, maxPriorityFeePerGas: o["--max-priority-fee-per-gas"]! };

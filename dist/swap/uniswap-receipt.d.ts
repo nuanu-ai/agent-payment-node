@@ -38,4 +38,5 @@ export declare function validateUniswapReceipt(evidence: UniswapReceiptEvidence,
     readonly recipient: string;
     readonly inputAmountAtomic: string;
     readonly minimumOutputAtomic: string;
+    readonly outputToken: string;
 }): SwapReceiptProof;

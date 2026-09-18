@@ -1,7 +1,7 @@
 import { encodeEventTopics, getAddress, parseAbi } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { UNISWAP_ROUTER, UNISWAP_USDC } from "./uniswap-pin.js";
+import { UNISWAP_ROUTER } from "./uniswap-pin.js";
 const TRANSFER = parseAbi(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
 const TRANSFER_TOPIC = encodeEventTopics({ abi: TRANSFER, eventName: "Transfer" })[0];
 export function validateUniswapReceipt(evidence, envelope, expected) {
@@ -28,7 +28,8 @@ export function validateUniswapReceipt(evidence, envelope, expected) {
         afterOutput < beforeOutput || afterOutput - beforeOutput < minimumOutput || finalizedBlock < receiptBlock)
         fail();
     const recipientTopic = `0x${address(expected.recipient).slice(2).toLowerCase().padStart(64, "0")}`;
-    const credited = receipt.logs.filter((log) => address(log.address) === UNISWAP_USDC && log.topics.length === 3 &&
+    const outputToken = address(expected.outputToken);
+    const credited = receipt.logs.filter((log) => address(log.address) === outputToken && log.topics.length === 3 &&
         log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() && log.topics[2]?.toLowerCase() === recipientTopic)
         .reduce((sum, log) => sum + BigInt(log.data), 0n);
     if (credited < minimumOutput)

@@ -165,7 +165,7 @@ test("executor persists marker before one ambiguous broadcast and restart is obs
   const deps = { service: f.service, policy: f.policy, protocolRegistry: f.protocols,
     ownerAdmission: { admit: async () => ({ admitted: true as const, accountIdentityHash: f.account.identityHash }) },
     approval: { approve: async (input: SunSwapForegroundApprovalInput) => approval(input) },
-    resourceFeeCap: { maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" },
+    clock: { now: () => NOW }, resourceFeeCap: { maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" },
     signer: protectedAdapter, sender: protectedAdapter, observer };
   const unknown = await new SunSwapGuardedExecutor(deps, f.binding).execute(f.operation, NOW);
   assert.equal(unknown.state, "unknown_finality"); assert.equal(unknown.usageLease?.state, "unknown_finality"); assert.equal(broadcast.calls, 1);
@@ -197,7 +197,7 @@ test("execution rejects a stale signing window, stale approval, and simulation/T
   let signs = 0;
   const base = { service: f.service, policy: f.policy, protocolRegistry: f.protocols,
     ownerAdmission: { admit: async () => ({ admitted: true as const, accountIdentityHash: f.account.identityHash }) },
-    resourceFeeCap: { maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" },
+    clock: { now: () => NOW }, resourceFeeCap: { maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" },
     signer: { sign: async () => { signs++; return { signedMaterialHandle: "f".repeat(64) }; } },
     sender: { sendOnce: async () => ({ transactionHash: f.binding.transaction.txID }) },
     observer: { observe: async () => null } };
@@ -229,7 +229,7 @@ test("explicit admission, cross-rail cap, fee cap and exact foreground approval 
         { admitted: true as const, accountIdentityHash: f.account.identityHash } },
       approval: { approve: async (input: SunSwapForegroundApprovalInput) => {
         const sealed: any = approval(input); if (kind === "approval") sealed.minimumOutputAtomic = "299999"; return sealed; } },
-      resourceFeeCap: kind === "fee" ? { maximumEnergy: "99999", energyPriceSun: "100", maximumFeeLimitSun: "100000000" } :
+      clock: { now: () => NOW }, resourceFeeCap: kind === "fee" ? { maximumEnergy: "99999", energyPriceSun: "100", maximumFeeLimitSun: "100000000" } :
         { maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" },
       signer, sender: { sendOnce: async () => ({ transactionHash: f.binding.transaction.txID }) }, observer }, f.binding);
     await assert.rejects(executor.execute(f.operation, NOW), { code: "APN_OPERATION_BLOCKED" }); assert.equal(signs, 0);
@@ -245,7 +245,7 @@ test("successful execution finalizes exact solidified receipt with no token appr
   const executor = new SunSwapGuardedExecutor({ service: f.service, policy: f.policy, protocolRegistry: f.protocols,
     ownerAdmission: { admit: async () => ({ admitted: true as const, accountIdentityHash: f.account.identityHash }) },
     approval: { approve: async (input: SunSwapForegroundApprovalInput) => approval(input) },
-    resourceFeeCap: { maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" },
+    clock: { now: () => NOW }, resourceFeeCap: { maximumEnergy: "100000", energyPriceSun: "100", maximumFeeLimitSun: "100000000" },
     signer: protectedAdapter, sender: protectedAdapter, observer }, f.binding);
   const final = await executor.execute(f.operation, NOW);
   assert.equal(final.state, "finalized"); assert.equal(final.approvalCapAtomic, "0"); assert.equal(final.receiptProof?.transactionHash, f.binding.transaction.txID);

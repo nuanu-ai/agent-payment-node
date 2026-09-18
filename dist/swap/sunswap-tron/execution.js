@@ -13,7 +13,8 @@ export class SunSwapGuardedExecutor {
         this.dependencies = dependencies;
         this.binding = binding;
     }
-    async execute(operationValue, now) {
+    async execute(operationValue, commandNow) {
+        let now = commandNow;
         let operation = validateSwapOperation(operationValue);
         this.validateDependencies(operation);
         if (operation.state === "finalized" || operation.state === "failed_before_effect")
@@ -36,14 +37,25 @@ export class SunSwapGuardedExecutor {
                 admission.accountIdentityHash !== this.binding.account.identityHash)
                 blocked("The exact local TRON owner is not admitted for SunSwap execution.");
             const approvalInput = foregroundInput(operation, this.binding);
-            validateSunSwapForegroundApproval(await this.dependencies.approval.approve(approvalInput), approvalInput, operation.updatedAt, now);
+            const answer = await this.dependencies.approval.approve(approvalInput);
+            now = this.dependencies.clock.now();
+            validateSunSwapForegroundApproval(answer, approvalInput, operation.updatedAt, now);
+            if (!executionWindowLive(this.binding, now))
+                blocked("The frozen SunSwap signing window closed during foreground approval.");
             operation = await this.dependencies.service.reserve(operation, this.dependencies.policy, now);
         }
-        const signed = await this.dependencies.signer.sign(operation);
         operation = await this.dependencies.service.markSubmitting(operation, now);
         const marker = operation.submissionMarker;
         if (marker === null)
             stateCorrupt();
+        let signed;
+        try {
+            signed = await this.dependencies.signer.sign(operation);
+        }
+        catch {
+            operation = await this.dependencies.service.recordPossibleSend(operation, "unknown_finality", now);
+            return operation;
+        }
         let sent;
         try {
             sent = await this.dependencies.sender.sendOnce(signed.signedMaterialHandle, marker.markerHash);

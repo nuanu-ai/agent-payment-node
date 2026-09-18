@@ -337,8 +337,8 @@ export declare const scanSchema: z.ZodObject<{
 }, z.core.$strict>;
 export declare const providerObservationSchema: z.ZodObject<{
     status: z.ZodEnum<{
-        unknown: "unknown";
         pending: "pending";
+        unknown: "unknown";
         not_found: "not_found";
         completed_observed: "completed_observed";
         partial_observed: "partial_observed";
@@ -368,11 +368,11 @@ export declare const consentSchema: z.ZodObject<{
     expiresAt: z.ZodString;
 }, z.core.$strict>;
 export declare const stateSchema: z.ZodEnum<{
+    completed: "completed";
+    failed_confirmed_revert: "failed_confirmed_revert";
     awaiting_approval: "awaiting_approval";
     unknown_finality: "unknown_finality";
-    completed: "completed";
     failed_before_effect: "failed_before_effect";
-    failed_confirmed_revert: "failed_confirmed_revert";
     execution_pending: "execution_pending";
     source_pending: "source_pending";
     destination_pending: "destination_pending";
@@ -687,11 +687,11 @@ export declare const transitionSchema: z.ZodObject<{
     previousHash: z.ZodString;
     transitionHash: z.ZodString;
     state: z.ZodEnum<{
+        completed: "completed";
+        failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
         unknown_finality: "unknown_finality";
-        completed: "completed";
         failed_before_effect: "failed_before_effect";
-        failed_confirmed_revert: "failed_confirmed_revert";
         execution_pending: "execution_pending";
         source_pending: "source_pending";
         destination_pending: "destination_pending";
@@ -770,8 +770,8 @@ export declare const transitionSchema: z.ZodObject<{
     }, z.core.$strict>>;
     providerObservation: z.ZodNullable<z.ZodObject<{
         status: z.ZodEnum<{
-            unknown: "unknown";
             pending: "pending";
+            unknown: "unknown";
             not_found: "not_found";
             completed_observed: "completed_observed";
             partial_observed: "partial_observed";
@@ -1242,11 +1242,11 @@ export declare const operationSchema: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         state: z.ZodEnum<{
+            completed: "completed";
+            failed_confirmed_revert: "failed_confirmed_revert";
             awaiting_approval: "awaiting_approval";
             unknown_finality: "unknown_finality";
-            completed: "completed";
             failed_before_effect: "failed_before_effect";
-            failed_confirmed_revert: "failed_confirmed_revert";
             execution_pending: "execution_pending";
             source_pending: "source_pending";
             destination_pending: "destination_pending";
@@ -1325,8 +1325,8 @@ export declare const operationSchema: z.ZodObject<{
         }, z.core.$strict>>;
         providerObservation: z.ZodNullable<z.ZodObject<{
             status: z.ZodEnum<{
-                unknown: "unknown";
                 pending: "pending";
+                unknown: "unknown";
                 not_found: "not_found";
                 completed_observed: "completed_observed";
                 partial_observed: "partial_observed";
@@ -1365,11 +1365,11 @@ export declare const operationSchema: z.ZodObject<{
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     state: z.ZodEnum<{
+        completed: "completed";
+        failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
         unknown_finality: "unknown_finality";
-        completed: "completed";
         failed_before_effect: "failed_before_effect";
-        failed_confirmed_revert: "failed_confirmed_revert";
         execution_pending: "execution_pending";
         source_pending: "source_pending";
         destination_pending: "destination_pending";
@@ -1448,8 +1448,8 @@ export declare const operationSchema: z.ZodObject<{
     }, z.core.$strict>>;
     providerObservation: z.ZodNullable<z.ZodObject<{
         status: z.ZodEnum<{
-            unknown: "unknown";
             pending: "pending";
+            unknown: "unknown";
             not_found: "not_found";
             completed_observed: "completed_observed";
             partial_observed: "partial_observed";

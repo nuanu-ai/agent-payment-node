@@ -6,16 +6,27 @@ export async function executeSunSwapCommand(request, context) {
         return data({ catalog: loadSunSwapPinCatalog(), admitted: false,
             execution: "dormant" }, "official_catalog_not_owner_admission");
     if (request.command === "swap.sunswap.quote") {
+        if (context.sunswapRuntime !== undefined)
+            return data(await context.sunswapRuntime.quote(request, context.clock.now()), "unsigned_read_only_swap_quote");
         if (context.sunswap === undefined)
             throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "SunSwap quote requires an explicitly injected read-only builder.", { reason: "sunswap_runtime_unavailable" });
         return data(await context.sunswap.quote({ ...request, now: context.clock.now() }), "unsigned_read_only_swap_quote");
     }
-    if (request.command === "swap.sunswap.prepare")
-        throw new ApnError("APN_OPERATION_BLOCKED", "No active owner swap admission is installed; catalog presence does not authorize preparation.", { reason: "sunswap_owner_admission_required" });
+    if (request.command === "swap.sunswap.prepare") {
+        if (context.sunswapRuntime === undefined)
+            throw new ApnError("APN_OPERATION_BLOCKED", "No active owner swap admission is installed; catalog presence does not authorize preparation.", { reason: "sunswap_owner_admission_required" });
+        return operation(await context.sunswapRuntime.prepare(request, context.clock.now()));
+    }
     if (request.command === "swap.sunswap.status")
-        return await status(request.operationId, context);
-    if (request.command === "swap.sunswap.approve")
-        throw new ApnError("APN_OPERATION_BLOCKED", "Native TRX input has no TRC20 or Permit2 approval operation.", { reason: "sunswap_native_no_approval" });
+        return context.sunswapRuntime === undefined
+            ? await status(request.operationId, context) : operation(await context.sunswapRuntime.status(request.operationId, context.clock.now()));
+    if (request.command === "swap.sunswap.approve") {
+        if (context.sunswapRuntime === undefined)
+            throw new ApnError("APN_OPERATION_BLOCKED", "Native TRX input has no TRC20 or Permit2 approval operation.", { reason: "sunswap_native_no_approval" });
+        return operation(await context.sunswapRuntime.approve(request.operationId, context.clock.now()));
+    }
+    if (context.sunswapRuntime !== undefined)
+        return operation(await context.sunswapRuntime.execute(request.operationId, context.clock.now()));
     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "SunSwap signing and sending are dormant until a complete exact single-send adapter is installed.", { reason: "sunswap_execution_dormant" });
 }
 async function status(operationId, context) {
@@ -26,5 +37,8 @@ async function status(operationId, context) {
 }
 function data(value, proofClass) {
     return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };
+}
+function operation(value) {
+    return { proofClass: value.state, data: null, operation: value, receipt: null, nextActions: [] };
 }
 //# sourceMappingURL=command-service.js.map

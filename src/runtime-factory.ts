@@ -95,10 +95,19 @@ import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-
 import { portfolioPause, type PortfolioDependencies } from "./portfolio/command.js";
 import { PortfolioHttps } from "./portfolio/https.js";
 import { TtyAllowlistPolicyApproval, type AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
+import type { CommandRequest } from "./commands.js";
+import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runtime.js";
+import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
+import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
+import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
 
 export interface RuntimeFactoryOptions {
   readonly portfolio?: PortfolioDependencies;
+  readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
+  readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
+  /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */
+  readonly swapPolicy?: GuardedSwapPolicyResolver;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
@@ -237,12 +246,23 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       ? new EncryptedProviderAuthorizationStore(state, wrappingSecret)
       : undefined
   );
+  const clock = options.clock ?? { now: () => new Date() };
+  // Keyless Uniswap is built per swap.uniswap.* command, like bridge and 1Click. Only CLI approve gets a terminal;
+  // MCP intercepts approve/execute with a CLI handoff before this factory runs.
+  const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.") && options.uniswap === undefined
+    ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, clock,
+      // The owner's activated allowlist revision; none active means preparation refuses with swap_owner_admission_required.
+      policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
+      foreground: bound.request.command === "swap.uniswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
+    : undefined);
   return new ApnCore({
     state,
     // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
     ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
       portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
     } : {}),
+    ...(uniswapRuntime === undefined ? {} : { uniswapRuntime }),
+    ...(options.sunswapRuntime === undefined ? {} : { sunswapRuntime: options.sunswapRuntime }),
     ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
     ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
     ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),

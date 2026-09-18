@@ -12,6 +12,7 @@ export type CommandRequest = {
     readonly profile: string;
     readonly account: string;
     readonly recipient: string;
+    readonly outputToken: string;
     readonly amountAtomic: string;
     readonly slippageBps: number;
     readonly ownerSlippageCapBps: number;

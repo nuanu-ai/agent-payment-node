@@ -101,6 +101,19 @@ export class GuardedSwapService {
       { usageLease: lease, receiptProof: receipt }, now);
   }
 
+  /** A finalized reverted receipt proves the input never left; only gas was spent. The principal lease is released. */
+  async failConfirmedRevert(operation: SwapOperationRecord, now: Date, revertProof: SwapReceiptProof): Promise<SwapOperationRecord> {
+    operation = validateSwapOperation(operation);
+    if (operation.state !== "submitted" && operation.state !== "unknown_finality") blocked("Swap is not awaiting finality.");
+    const at = instant(now);
+    const proof = validateSwapReceiptProof(revertProof, operation.quote.sourceAsset.chain, operation.submissionMarker!.markedAt, at);
+    if (!proof.finalized) invalid("Confirmed swap revert proof must be finalized.");
+    const lease = await this.usage.transition({ ...usageIdentity(operation), reservationId: operation.usageLease!.reservationId,
+      policyDigest: operation.policyDigest, state: "failed_confirmed_revert", now, outcomeDigest: proof.receiptHash });
+    return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash,
+      "failed_confirmed_revert", { usageLease: lease, receiptProof: proof, failureProofHash: proof.receiptHash }, now);
+  }
+
   async failBeforeEffect(operation: SwapOperationRecord, now: Date, failureProofHash: string): Promise<SwapOperationRecord> {
     operation = validateSwapOperation(operation);
     if (!["quoted", "prepared", "awaiting_approval", "reserved"].includes(operation.state)) blocked("Swap crossed the possible-send boundary.");
@@ -114,7 +127,7 @@ export class GuardedSwapService {
 
   resumeDirective(operation: SwapOperationRecord): "prepare_or_approve" | "observe_only" | "terminal" {
     operation = validateSwapOperation(operation);
-    if (["finalized", "failed_before_effect"].includes(operation.state)) return "terminal";
+    if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(operation.state)) return "terminal";
     return operation.submissionMarker === null ? "prepare_or_approve" : "observe_only";
   }
 }
