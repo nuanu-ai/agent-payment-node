@@ -137,8 +137,8 @@ export class AllowlistPolicyStore extends SecureStateStore {
       } else if (expectedRevision === undefined || expectedRevision !== current.revision) {
         conflict("Allowlist policy expected revision does not match durable state.");
       }
-      if (current !== undefined) {
-        const bound = stagedRecordAccounts(current);
+      // A family's account is bound by the first revision that named it, even if later revisions omit that family.
+      for (const bound of state.records.map(stagedRecordAccounts)) {
         for (const family of ["evm", "solana", "tron"] as const) {
           if (bound[family] !== undefined && accounts[family] !== undefined && bound[family] !== accounts[family]) {
             throw new ApnError("APN_PROFILE_DRIFT", "The allowlist policy profile is already bound to a different owner account.");

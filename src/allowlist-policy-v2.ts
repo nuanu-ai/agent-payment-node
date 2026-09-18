@@ -124,9 +124,10 @@ export function compileAllowlistPolicyOverlayV2(
     effectiveDate: overlay.effectiveAt.slice(0, 10),
     effectiveAt: overlay.effectiveAt,
     ...(overlay.expiresAt === undefined ? {} : { expiresAt: overlay.expiresAt }),
-    chains: [...chains.values()].sort((left, right) => left.chain.localeCompare(right.chain)).map((chain) => ({
+    // Code-unit order, never locale collation: the sealed bytes must recompile identically under any locale.
+    chains: [...chains.values()].sort((left, right) => codeUnitOrder(left.chain, right.chain)).map((chain) => ({
       ...chain,
-      assets: [...chain.assets].sort((left, right) => `${left.kind}:${left.identifier ?? ""}`.localeCompare(`${right.kind}:${right.identifier ?? ""}`)),
+      assets: [...chain.assets].sort((left, right) => codeUnitOrder(`${left.kind}:${left.identifier ?? ""}`, `${right.kind}:${right.identifier ?? ""}`)),
     })),
   }) };
 }
@@ -202,6 +203,7 @@ function overlayInput(value: AllowlistPolicyOverlayV2Input, inventory: Allowlist
   return { ...value, accounts: Object.fromEntries(used.map((family) => [family, accounts[family]])), admissions };
 }
 
+function codeUnitOrder(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
 function invalid(message: string, reason: string): never {
   throw new ApnError("APN_INVALID_INPUT", message, { reason });
 }

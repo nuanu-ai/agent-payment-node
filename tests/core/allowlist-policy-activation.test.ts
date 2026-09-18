@@ -204,9 +204,14 @@ test("v1 records stay readable, activatable and account-bound next to v2 revisio
   assert.equal((await stage(policy(), "v2.json")).error?.code, "APN_PROFILE_REVISION_CONFLICT");
   assert.equal((await stage(policy({ overlayVersion: "legacy.1" }), "reuse.json", 1)).error?.details?.reason, "overlay_version_reused");
   assert.equal((await stage(policy(), "v2.json", 1)).ok, true);
+  // A revision that omits the EVM family does not release the EVM binding for later revisions.
+  assert.equal((await stage(policy({ overlayVersion: "owner.3", accounts: { solana: SOLANA_OWNER }, admissions: ownerAdmissions().slice(5) }),
+    "solana-only.json", 2)).ok, true);
+  assert.equal((await stage(policy({ overlayVersion: "owner.4", accounts: { evm: "0x0000000000000000000000000000000000000001" },
+    admissions: ownerAdmissions().slice(0, 3) }), "evm-drift.json", 3)).error?.code, "APN_PROFILE_DRIFT");
   const store = new AllowlistPolicyStore(temporary.root);
   assert.deepEqual((await store.read(PROFILE)).records.map((record) => record.schemaVersion),
-    ["apn.allowlist-policy-record.v1", "apn.allowlist-policy-record.v2"]);
+    ["apn.allowlist-policy-record.v1", "apn.allowlist-policy-record.v2", "apn.allowlist-policy-record.v2"]);
 });
 
 test("policy files are strict: owner-written, canonical path, no defaults filled in", async (t) => {

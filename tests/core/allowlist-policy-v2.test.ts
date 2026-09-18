@@ -97,3 +97,16 @@ test("a v2 registry refuses rail caps that do not exactly match the admitted rai
   }
   assert.throws(() => validateAssetPolicyRegistry({ ...registry, policyDigest: "0".repeat(64) }), { code: "APN_INVALID_INPUT" });
 });
+
+test("sealed order is code-unit order, so the registry bytes never depend on the process locale", () => {
+  const natives = ["eip155:1", "eip155:137", "eip155:143", "eip155:1329", "eip155:56", "eip155:8453", "eip155:43114"];
+  const input = overlayV2({ accounts: { evm: EVM_OWNER }, admissions: natives.map((chain) => ({ chain, kind: "native" as const,
+    rail: "direct" as const, maximumPerTransferAtomic: "1", dailyLimitAtomic: "2" })) });
+  const expected = compileAllowlistPolicyOverlayV2(input).registry;
+  assert.deepEqual(expected.chains.map((chain) => chain.chain), [...natives].sort());
+  const original = String.prototype.localeCompare;
+  const numeric = new Intl.Collator("en-u-kn-true");
+  String.prototype.localeCompare = function (this: string, other: string) { return numeric.compare(this, other); } as typeof original;
+  try { assert.equal(compileAllowlistPolicyOverlayV2(input).registry.policyDigest, expected.policyDigest); }
+  finally { String.prototype.localeCompare = original; }
+});
