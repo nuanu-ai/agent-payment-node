@@ -540,3 +540,59 @@ The event ABI and packed message format follow Circle's
 [technical guide](https://developers.circle.com/cctp/references/technical-guide),
 [contract addresses](https://developers.circle.com/cctp/references/contract-addresses),
 and [Solana programs](https://developers.circle.com/cctp/references/solana-programs).
+
+## Direct NEAR 1Click lanes
+
+`apn oneclick source submit --lane <lane>` sends one origin-chain deposit to the
+`depositAddress` of a fresh NEAR Intents 1Click quote
+(`https://1click.chaindefuser.com/v0/quote`, status from `/v0/status`). Only these pinned lanes exist; any other `--lane` value is refused before
+any network call. Asset IDs match the public `GET /v0/tokens` list (2026-09-18).
+
+| Lane | Origin effect | Destination | 1Click origin → destination | Loss bound (`--max-quoted-loss-atomic`) |
+|---|---|---|---|---|
+| `base-usdc-to-tron-usdt` | Base USDC `transfer` (6 decimals) | TRON USDT (6) | `nep141:base-0x8335…2913.omft.near` → `nep141:tron-d28a…f015.omft.near` | amount in minus quoted minimum, USDC atomic at par |
+| `ethereum-eth-to-tron-trx` | Ethereum ETH value transfer (18) | TRON TRX (6, SUN) | `nep141:eth.omft.near` → `nep141:tron.omft.near` | quoted output minus quoted minimum, SUN |
+| `ethereum-eth-to-solana-sol` | Ethereum ETH value transfer (18) | Solana SOL (9, lamports) | `nep141:eth.omft.near` → `nep141:sol.omft.near` | quoted output minus quoted minimum, lamports |
+| `ethereum-eth-to-tron-usdt` | Ethereum ETH value transfer (18) | TRON USDT (6) | `nep141:eth.omft.near` → `nep141:tron-d28a…f015.omft.near` | quoted output minus quoted minimum, USDT atomic |
+
+For different assets the only in-band valuation is the quote's own rate, so the
+loss bound covers the quote's slippage floor; `--min-output-atomic` is the
+owner's price floor. Recipients must be canonical: TRON base58check for TRX and
+USDT, a 32-byte Solana base58 key for SOL. `refundTo` is always the payer.
+
+Submission is keyless and fails closed: a dry quote (no deposit address), then an
+actual quote whose echo must match the lane assets, payer, refund address,
+recipient, amount and a request deadline at most 180 seconds ahead; the quoted
+minimum must meet `--min-output-atomic`; the deposit address may not be zero,
+the payer or the origin token, and no memo is accepted. Origin reads are pinned
+to the safe block hash. For native ETH the transaction is exactly `amountIn` wei
+to the deposit address with empty calldata; `eth_getCode` decides the gas: an
+account without code uses 21000, a contract deposit is estimated at the same
+block (plus 20 percent) and must fit `--max-gas-limit-atomic`. The max fee is
+twice the larger of the safe and latest base fee plus the RPC tip suggestion;
+value plus gas times that max fee must fit `--max-native-debit-wei` and the safe
+balance. The record is staged, the owner types a six-character code in the
+foreground terminal, and the reads repeat: the nonce and deposit code class must
+be unchanged, gas may not grow, the approved max fee must still cover the fresh
+base fee plus the approved tip, and the balance must still cover the approved
+debit. The signed raw transaction is saved before the single send; an unknown
+send result is recorded as `unknown_finality` and never resent. MCP exposes
+`apn_oneclick_source_submit` only as an `APN_FOREGROUND_APPROVAL_REQUIRED`
+handoff carrying the exact CLI command, plus the read-only status tool.
+
+`apn oneclick source status --operation <id>` keeps three observations apart:
+the safe source receipt, the provider's HTTPS status claim (bound to the saved
+quote digest), and an independent destination proof for the Ethereum lanes. The
+proof reads only transaction IDs the provider names in
+`swapDetails.destinationChainTxHashes`: TRX needs a solidified `TransferContract`
+to the recipient whose JSON re-encodes to the hashed raw data, with block
+membership and a successful result (a first transfer may create the recipient
+account); USDT needs the solidified TRC20 `Transfer` log; SOL needs the recipient's
+finalized balance delta inside the named transaction. Credits in blocks older
+than the quote request are refused, and `destinationFinalized` is true only when
+the proven credits reach the saved minimum output. Source RPCs come only from
+`APN_BASE_RPC_URL` or `APN_ETHEREUM_RPC_URL`, destination RPCs only from
+`APN_TRON_RPC_URL` or `APN_SOLANA_RPC_URL`; there are no default endpoints. The
+Base lane keeps its original status output, operation IDs and nonce reservation
+path; v1 and v2 records remain readable as that lane, and v3 records carry the
+lane. Ethereum nonce reservations are scoped under `eip155-1`.

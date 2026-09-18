@@ -100,6 +100,7 @@ export type CommandRequest = {
     readonly expectedRevision?: number;
 } | {
     readonly command: "oneclick.source.submit";
+    readonly lane: string;
     readonly profile: string;
     readonly expectedPayer: string;
     readonly recipient: string;
