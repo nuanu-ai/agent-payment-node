@@ -97,7 +97,8 @@ import { PortfolioHttps } from "./portfolio/https.js";
 import { TtyAllowlistPolicyApproval, type AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runtime.js";
-import { createUniswapKeylessRuntime, lazyEthereumRpcCall, NO_ACTIVE_SWAP_ADMISSION, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
+import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
+import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
 
 export interface RuntimeFactoryOptions {
@@ -105,7 +106,7 @@ export interface RuntimeFactoryOptions {
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
-  /** Injection point for the owner's active sealed swap policy (allowlist activation's loadActiveAssetPolicyRegistry). */
+  /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */
   readonly swapPolicy?: GuardedSwapPolicyResolver;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -250,7 +251,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   // MCP intercepts approve/execute with a CLI handoff before this factory runs.
   const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.") && options.uniswap === undefined
     ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, clock,
-      policy: options.swapPolicy ?? NO_ACTIVE_SWAP_ADMISSION,
+      // The owner's activated allowlist revision; none active means preparation refuses with swap_owner_admission_required.
+      policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.uniswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
   return new ApnCore({

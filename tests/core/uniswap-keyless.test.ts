@@ -137,7 +137,7 @@ test("confirmed revert is terminal in the shared ledger and releases the princip
     state: "finalized", now: NOW, outcomeDigest: H("b") }), { code: "APN_OPERATION_BLOCKED" });
 });
 
-test("createApnCore builds the keyless runtime per swap.uniswap command and refuses preparation without owner admission", async (t) => {
+test("createApnCore builds the keyless runtime and the activated allowlist gates preparation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const quote = createApnCore(bindArgv(["swap", "ethereum", "uniswap", "status", "--operation", H("c")]), { stateRoot: temporary.root });
   assert.ok(quote.context.uniswapRuntime); assert.equal(quote.context.uniswap, undefined);
@@ -145,6 +145,12 @@ test("createApnCore builds the keyless runtime per swap.uniswap command and refu
     "--idempotency-key", "keyless-core-0001"]), { stateRoot: temporary.root }).execute({ command: "swap.uniswap.prepare", profile: PROFILE,
     quoteHash: H("a"), idempotencyKey: "keyless-core-0001" });
   assert.equal(prepare.ok, false); assert.equal(prepare.error?.code, "APN_OPERATION_NOT_FOUND");
+  const saved: any = await new KeylessUniswapQuoteBuilder(new KeylessRpc().call, new SavedUniswapQuoteStore(temporary.root), noPins)
+    .quote({ ...request, deadline: Math.floor(Date.now() / 1000) + 900, now: new Date() });
+  const unadmitted = await createApnCore(bindArgv(["swap", "ethereum", "uniswap", "prepare", "--profile", PROFILE, "--quote", saved.quoteHash,
+    "--idempotency-key", "keyless-core-0002"]), { stateRoot: temporary.root }).execute({ command: "swap.uniswap.prepare", profile: PROFILE,
+    quoteHash: saved.quoteHash, idempotencyKey: "keyless-core-0002" });
+  assert.equal(unadmitted.error?.code, "APN_OPERATION_BLOCKED"); assert.equal(unadmitted.error?.details?.reason, "swap_owner_admission_required");
   const inventory = await createApnCore(bindArgv(["swap", "ethereum", "uniswap", "inventory"]), { stateRoot: temporary.root })
     .execute({ command: "swap.uniswap.inventory" });
   assert.equal((inventory.data as any).execution, "foreground_cli_after_owner_admission");
