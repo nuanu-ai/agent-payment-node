@@ -57,7 +57,7 @@ test("a swap that would leave the passed tick arrays is refused, and crossing an
   assert.throws(() => quoteWhirlpoolExactInAToB(pool, arraysFrom(empty), 1_000_000_000_000_000n), (error) => reason(error) === "orca_tick_boundary");
   const below = Math.floor((pool.tickCurrentIndex - FIXTURE.tickArrays[0]!.startTickIndex) / 4);
   const halfOut = FIXTURE.tickArrays.map((row, index) => ({ ...row, liquidityNet: index === 0 ? [[below, (pool.liquidity / 2n).toString()]] as [number, string][] : [] }));
-  const crossing = quoteWhirlpoolExactInAToB(pool, arraysFrom(halfOut), 50_000_000_000_000n);
+  const crossing = quoteWhirlpoolExactInAToB(pool, arraysFrom(halfOut), 1_000_000_000_000n);
   assert.equal(crossing.initializedTicksCrossed, 1); assert.equal(crossing.steps, 2);
   const stale = FIXTURE.tickArrays.map((row) => ({ ...row, startTickIndex: row.startTickIndex - 352 }));
   assert.throws(() => quoteWhirlpoolExactInAToB(pool, arraysFrom(stale), AMOUNT_IN), (error) => reason(error) === "orca_tick_array_state");
