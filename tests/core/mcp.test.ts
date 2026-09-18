@@ -142,7 +142,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_swap_ethereum_uniswap_approve", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_execute", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_swap_tron_sunswap_inventory", properties: [], required: [], defaults: {} },
-      { name: "apn_swap_tron_sunswap_quote", properties: ["profile", "account", "to", "amount", "slippage_bps", "owner_slippage_cap_bps"], required: ["profile", "account", "to", "amount", "slippage_bps", "owner_slippage_cap_bps"], defaults: {} },
+      { name: "apn_swap_tron_sunswap_quote", properties: ["profile", "account", "to", "amount", "slippage_bps", "owner_slippage_cap_bps", "fee_limit_sun", "deadline"], required: ["profile", "account", "to", "amount", "slippage_bps", "owner_slippage_cap_bps", "fee_limit_sun", "deadline"], defaults: {} },
       { name: "apn_swap_tron_sunswap_prepare", properties: ["profile", "quote", "idempotency_key"], required: ["profile", "quote", "idempotency_key"], defaults: {} },
       { name: "apn_swap_tron_sunswap_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_swap_tron_sunswap_approve", properties: ["operation"], required: ["operation"], defaults: {} },

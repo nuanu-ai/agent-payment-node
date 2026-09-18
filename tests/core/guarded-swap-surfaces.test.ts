@@ -43,18 +43,25 @@ test("the guarded swap catalog and MCP projection expose exactly six parity acti
 
 test("chain binders reject excess fields, inherited objects, malformed integers, hashes, and identities", () => {
   assert.equal(bindArgv(["swap", "tron", "sunswap", "quote", "--profile", "swap-test", "--account", TRON_OWNER,
-    "--to", TRON_RECIPIENT, "--amount", "1000000", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200"]).request.command,
+    "--to", TRON_RECIPIENT, "--amount", "1000000", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200",
+    "--fee-limit-sun", "30000000", "--deadline", "1790000600"]).request.command,
   "swap.sunswap.quote");
   assert.equal(bindArgv(["swap", "solana", "jupiter", "quote", "--profile", "swap-test", "--account", SOLANA_OWNER,
     "--to", SOLANA_OWNER, "--amount", "1000000", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200"]).request.command,
   "swap.jupiter.quote");
   for (const argv of [
     ["swap", "tron", "sunswap", "quote", "--profile", "swap-test", "--account", "not-tron", "--to", TRON_RECIPIENT,
-      "--amount", "1000000", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200"],
+      "--amount", "1000000", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200", "--fee-limit-sun", "30000000", "--deadline", "1790000600"],
+    ["swap", "tron", "sunswap", "quote", "--profile", "swap-test", "--account", TRON_OWNER, "--to", TRON_RECIPIENT,
+      "--amount", "1000000", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200", "--deadline", "1790000600"],
+    ["swap", "tron", "sunswap", "quote", "--profile", "swap-test", "--account", TRON_OWNER, "--to", TRON_RECIPIENT,
+      "--amount", "1000000", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200", "--fee-limit-sun", "0", "--deadline", "1790000600"],
+    ["swap", "tron", "sunswap", "quote", "--profile", "swap-test", "--account", TRON_OWNER, "--to", TRON_RECIPIENT,
+      "--amount", "1000000", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200", "--fee-limit-sun", "30000000", "--deadline", "01"],
     ["swap", "solana", "jupiter", "quote", "--profile", "swap-test", "--account", "not-solana", "--to", SOLANA_OWNER,
       "--amount", "1000000", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200"],
     ["swap", "tron", "sunswap", "quote", "--profile", "swap-test", "--account", TRON_OWNER, "--to", TRON_RECIPIENT,
-      "--amount", "01", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200"],
+      "--amount", "01", "--slippage-bps", "100", "--owner-slippage-cap-bps", "200", "--fee-limit-sun", "30000000", "--deadline", "1790000600"],
     ["swap", "solana", "jupiter", "quote", "--profile", "swap-test", "--account", SOLANA_OWNER, "--to", SOLANA_OWNER,
       "--amount", "1", "--slippage-bps", "201", "--owner-slippage-cap-bps", "200"],
     ["swap", "tron", "sunswap", "status", "--operation", H("A")],
@@ -87,7 +94,7 @@ test("quote uses only an explicit read-only builder while all state-changing sur
     sunswap: { quote: async (request) => { sunQuotes++; return { family: "sunswap", request }; } },
     jupiter: { quote: async (request) => { jupiterQuotes++; return { family: "jupiter", request }; } } });
   const sunQuote = await core.execute({ command: "swap.sunswap.quote", profile: "swap-test", account: TRON_OWNER,
-    recipient: TRON_RECIPIENT, amountAtomic: "1000000", slippageBps: 100, ownerSlippageCapBps: 200 });
+    recipient: TRON_RECIPIENT, amountAtomic: "1000000", slippageBps: 100, ownerSlippageCapBps: 200, feeLimitSun: "30000000", deadline: 1790000600 });
   const jupiterQuote = await core.execute({ command: "swap.jupiter.quote", profile: "swap-test", account: SOLANA_OWNER,
     recipient: SOLANA_OWNER, amountAtomic: "1000000", slippageBps: 100, ownerSlippageCapBps: 200 });
   assert.equal(sunQuote.ok, true); assert.equal(jupiterQuote.ok, true); assert.equal(sunQuotes, 1); assert.equal(jupiterQuotes, 1);
@@ -105,7 +112,7 @@ test("quote uses only an explicit read-only builder while all state-changing sur
   const noRuntime = new ApnCore({ state: new StateStore(temporary.root) });
   for (const command of ["swap.sunswap.quote", "swap.jupiter.quote"] as const) {
     const result = await noRuntime.execute(command === "swap.sunswap.quote" ? { command, profile: "swap-test", account: TRON_OWNER,
-      recipient: TRON_RECIPIENT, amountAtomic: "1", slippageBps: 0, ownerSlippageCapBps: 0 } : { command, profile: "swap-test",
+      recipient: TRON_RECIPIENT, amountAtomic: "1", slippageBps: 0, ownerSlippageCapBps: 0, feeLimitSun: "1", deadline: 1790000600 } : { command, profile: "swap-test",
       account: SOLANA_OWNER, recipient: SOLANA_OWNER, amountAtomic: "1", slippageBps: 0, ownerSlippageCapBps: 0 });
     assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
   }
@@ -132,6 +139,7 @@ function sample(option: string, chain: string): string {
   if (option === "--slippage-bps") return "100";
   if (option === "--owner-slippage-cap-bps") return "200";
   if (option === "--deadline") return "1790000600";
+  if (option === "--fee-limit-sun") return "30000000";
   if (option === "--max-gas-limit") return "150000";
   if (option === "--max-fee-per-gas") return "2000000000";
   if (option === "--max-priority-fee-per-gas") return "100000000";

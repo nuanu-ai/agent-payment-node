@@ -15,7 +15,7 @@ export type CommandRequest =
   | { readonly command: "swap.uniswap.status" | "swap.uniswap.approve" | "swap.uniswap.execute"; readonly operationId: string }
   | { readonly command: "swap.sunswap.inventory" }
   | { readonly command: "swap.sunswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
-      readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number }
+      readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly feeLimitSun: string; readonly deadline: number }
   | { readonly command: "swap.sunswap.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
   | { readonly command: "swap.sunswap.status" | "swap.sunswap.approve" | "swap.sunswap.execute"; readonly operationId: string }
   | { readonly command: "swap.jupiter.inventory" }

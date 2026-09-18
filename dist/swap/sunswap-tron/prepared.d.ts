@@ -27,7 +27,8 @@ export interface SunSwapPreparedMaterialPort {
 }
 /**
  * Display of the TRON resource bound; every value derives from the frozen intent, the exact simulation and the chain
- * bandwidth price. fee_limit caps only energy, so the worst-case debit also carries the full bandwidth burn.
+ * bandwidth price. fee_limit caps only energy, so the worst-case debit also carries the full bandwidth burn. Every
+ * value is a canonical unsigned integer, as the guarded swap runtime requires of its gas or energy display.
  */
 export declare function sunSwapGasOrEnergy(intent: SunSwapUnsignedIntent, simulation: SunSwapSimulationProof, transaction: SunSwapUnsignedTransaction, bandwidthPriceSun: string): Readonly<Record<string, string>>;
 /** Re-derives every binding between quote, market, pricing, unsigned transaction, simulation and resource display. */

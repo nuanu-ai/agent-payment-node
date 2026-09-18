@@ -64,22 +64,145 @@ minutes. Nothing is defaulted. The builder then:
    `quoteHash`. `load(quoteHash)` re-derives every binding and reports
    `APN_STATE_CORRUPT` on any drift.
 
-The builder is not installed in the CLI or MCP runtime. The shipped runtime
-still reports `sunswap_runtime_unavailable` for `quote`.
+## Keyless mechanism pin
 
-## Execution and receipt
+`apn swap tron sunswap inventory` lists the frozen catalog and, under
+`keyless`, the mechanism pin owners admit, its digest, the protocol registry
+digest and the five code pins. The pin is `constructorKind: sdk`, identity
+`apn.sunswap-v2.local-abi-builder` 1.0.0, router
+`TKzxdSv2FZKQrEqkKVgp5DcwEXBEKMg2Ax`, auxiliaries factory, pair and WTRX:
 
-`prepare` refuses until the owner separately admits both exact assets and the
-mechanism. Native TRX has no TRC20 or Permit2 approval, so `approve` always
-returns `sunswap_native_no_approval`. `execute` returns
-`sunswap_execution_dormant`; the signer, single-send and observer adapters stay
-unwired. The receipt proof requires full-node and solidified history to agree,
+```json
+{
+  "schemaVersion": "apn.swap-mechanism-pin.v1",
+  "protocolFamily": "sunswap_tron",
+  "networkFamily": "tron",
+  "chain": "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc",
+  "protocolVersion": "2.0.0",
+  "constructorKind": "sdk",
+  "constructorIdentity": "apn.sunswap-v2.local-abi-builder",
+  "constructorVersion": "1.0.0",
+  "routerProgramIdentity": "TKzxdSv2FZKQrEqkKVgp5DcwEXBEKMg2Ax",
+  "auxiliaryContractProgramIdentities": [
+    "TKWJdrQkqHisa1X8HUdHEfREvTzw4pMAaY",
+    "TFGDbUyP8xez44C76fin3bn3Ss6jugoUwJ",
+    "TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR"
+  ],
+  "quoteSchemaVersion": "v2-router-getamountsout-pair-getreserves.1",
+  "transactionSchemaVersion": "v2-router-swapexactethfortokens-owner-recipient.1",
+  "validationPolicyIdentity": "apn.sunswap.tron-native-v2-keyless",
+  "validationPolicyVersion": "1.0.0"
+}
+```
+
+Mechanism digest: `3319811f1171ad202094cb7c8d3ee20e257e751b98322a18a4808a3ba7d72b2b`.
+
+## Owner admission
+
+`prepare` needs the profile's active allowlist policy to admit native TRX and
+canonical USDT for the `swap` rail, both with exactly this pin. Add the two
+admissions to the profile's policy file (keep any admissions it already has,
+use a new `overlayVersion`, and the profile's existing TRON account):
+
+```json
+{
+  "schemaVersion": "apn.allowlist-policy-file.v1",
+  "overlayVersion": "owner.2026-09-18.sunswap.1",
+  "accounts": { "tron": "<the profile's local TRON account>" },
+  "effectiveAt": "2026-09-18T08:00:00.000Z",
+  "expiresAt": "2026-10-18T08:00:00.000Z",
+  "admissions": [
+    { "chain": "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc",
+      "kind": "native", "rail": "swap",
+      "maximumPerTransferAtomic": "8900000", "dailyLimitAtomic": "29700000",
+      "mechanism": { "...": "the complete pin above" } },
+    { "chain": "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc",
+      "kind": "token", "identifier": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", "rail": "swap",
+      "maximumPerTransferAtomic": "3000000", "dailyLimitAtomic": "10000000",
+      "mechanism": { "...": "the complete pin above" } }
+  ]
+}
+```
+
+Stage it with `apn allowlist policy stage` (pass `--expected-revision` when
+the profile already has a revision) and activate it in the foreground with
+`apn allowlist policy activate`. The TRX per-operation cap is checked at
+`prepare`; the USDT cap is checked against the minimum output; the daily caps
+are enforced by the shared usage ledger when the approval reserves the input.
+The caps above are examples; nothing defaults to them. Without an active
+admission `prepare` refuses with `swap_owner_admission_required`, and a policy
+changed after `prepare` refuses with `swap_policy_drift`.
+
+The profile's local TRON account (`apn wallet ensure-tron`) must be the quoted
+`--account`; otherwise approval refuses with `swap_owner_account` before the
+screen is shown. The recipient is always that same account.
+
+## Commands
+
+- `quote` takes `--fee-limit-sun` and `--deadline` (unix seconds, at most ten
+  minutes ahead) from the owner; neither is defaulted. It returns the
+  `quoteHash`, the exact unsigned transaction, the price and resource display,
+  the simulation and the mechanism pin. Nothing is signed or broadcast.
+- `prepare --quote <quoteHash>` binds the saved material to the owner policy
+  and the protocol registry and waits for foreground approval.
+- `approve` runs in the foreground CLI only. It prints the exact screen: TRX
+  in (SUN and TRX), expected and minimum USDT, slippage, price impact, the
+  simulated energy and its fee, `fee_limit`, the bandwidth budget, the maximum
+  TRX debit, the deadline, the reference block and its TAPOS window, approval
+  cap 0, the pair and router, and the quote, policy and mechanism digests. The
+  owner types the six-character code. APN reads the clock again, reserves the
+  input, and runs the pre-send guard at the current head: mainnet genesis,
+  unchanged energy and bandwidth prices, all five code hashes, a live
+  reference block and expiration, the exact call still returning at least the
+  minimum within `fee_limit`, and a balance covering the maximum TRX debit.
+  Any refusal before the submission marker releases the reservation as
+  `failed_before_effect` with nothing signed. APN then persists the
+  submission marker and the execution binding, signs with the profile's
+  encrypted local TRON key, and broadcasts exactly once.
+- `execute` continues an approved reservation that has no marker yet; after
+  the marker it only observes.
+- `status` never signs or broadcasts. It reads full-node and solidified
+  history for the exact transaction id. A solidified success with the full
+  receipt proof moves the operation to `finalized`. A solidified failed call
+  (`REVERT`, `OUT_OF_ENERGY` and the other failed contract results), with the
+  exact bytes, fees within `fee_limit` and the bandwidth budget and no emitted
+  logs, moves it to `failed_confirmed_revert` and releases the reserved input;
+  only the fee was burned. A lost broadcast answer is `unknown_finality` and
+  is only observed, never rebroadcast.
+
+MCP serves `inventory`, `quote`, `prepare` and `status`. `approve` and
+`execute` return `APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI handoff.
+
+The success proof requires full-node and solidified history to agree,
 `SUCCESS`, the exact transaction bytes, owner debit `= amount + fee` where
 `fee = energy_fee + net_fee`, `energy_fee <= fee_limit` and `net_fee <=` the
 frozen bandwidth budget, one WTRX `Deposit` of the amount by the router, one
 pair `Swap` to the owner, and one USDT `Transfer` from the pair to the owner of
-at least the minimum output. Three real mainnet `swapExactETHForTokens`
-receipts pass this validator through the production RPC transport.
+at least the minimum output. Real mainnet `swapExactETHForTokens` successes,
+and real `REVERT` and `OUT_OF_ENERGY` router calls for the failed-call proof,
+parse through the production RPC transport with full-node and solidified
+records equal.
+
+## Owner sequence for 5 TRX to USDT
+
+`tron-local` and `TCikdGHFWNFWBc9ZqtTh2dmma1mnC4CanS` are the example profile
+and account; the whole sequence must finish before the quote deadline.
+
+```sh
+export APN_TRON_RPC_URL=https://tron-rpc.publicnode.com
+apn swap tron sunswap inventory
+QUOTE=$(apn swap tron sunswap quote --profile tron-local --account TCikdGHFWNFWBc9ZqtTh2dmma1mnC4CanS --to TCikdGHFWNFWBc9ZqtTh2dmma1mnC4CanS --amount 5000000 --slippage-bps 50 --owner-slippage-cap-bps 50 --fee-limit-sun 30000000 --deadline $(( $(date +%s) + 540 )) | jq -r .data.quoteHash)
+OP=$(apn swap tron sunswap prepare --profile tron-local --quote $QUOTE --idempotency-key sunswap-5trx-2026-09-18-1 | jq -r .operation.operationId)
+apn swap tron sunswap approve --operation $OP
+apn swap tron sunswap status --operation $OP
+```
+
+Run `status` again until it reports `finalized` (solidification takes about a
+minute). A 2026-09-18 read-only rehearsal from that account quoted 1.671655
+USDT expected, 1.663297 USDT minimum, a 31 basis-point price impact and
+223,354 energy (22.3354 TRX at 100 SUN per energy), so the maximum TRX debit
+is 35.512 TRX: 5 TRX input, the 30 TRX `fee_limit` and a 0.512 TRX
+bandwidth budget.
 
 The simulated energy includes the current dynamic-energy penalty of the pinned
 contracts, which TRON recalculates every maintenance cycle (observed 157,354
