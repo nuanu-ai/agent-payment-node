@@ -19,7 +19,7 @@ export declare class MetaMaskGaslessService {
     balance(profile: string, chainId: MetaMaskGaslessChainId): Promise<{
         profile: string;
         provider: string;
-        chain_id: 1 | 8453 | 42161 | 10 | 137 | 143 | 1329 | 59144;
+        chain_id: 1 | 10 | 8453 | 42161 | 137 | 143 | 1329 | 59144;
         token: `0x${string}`;
         symbol: string;
         decimals: number;

@@ -3,7 +3,9 @@ import { SecureStateStore } from "./secure-state-store.js";
 export declare const ASSET_USAGE_RESERVATION_SCHEMA: "apn.asset-usage-reservation.v1";
 /** Existing chain-policy convention: [00:00:00.000Z, next 00:00:00.000Z). */
 export declare const ASSET_USAGE_WINDOW: "utc-calendar-day";
-export type AssetUsageState = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect";
+export type AssetUsageState = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect"
+/** A sent effect that is proven reverted at a finalized block releases its principal. */
+ | "failed_confirmed_revert";
 export interface AssetUsageIdentity {
     /** Stable canonical identity for the paying account; aliases must be resolved by the caller. */
     readonly account: string;

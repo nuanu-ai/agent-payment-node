@@ -23,8 +23,16 @@ import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-se
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
+import type { CommandRequest } from "./commands.js";
+import type { GuardedSwapRuntime } from "./swap/runtime.js";
 export interface CoreDependencies {
     readonly portfolio?: PortfolioDependencies;
+    readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.uniswap.quote";
+    }>>;
+    readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.sunswap.quote";
+    }>>;
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -65,6 +73,12 @@ export interface CoreDependencies {
 }
 export declare class RuntimeContext {
     readonly portfolio?: PortfolioDependencies;
+    readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.uniswap.quote";
+    }>>;
+    readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.sunswap.quote";
+    }>>;
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;

@@ -28,9 +28,19 @@ import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-se
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import { type PortfolioDependencies } from "./portfolio/command.js";
 import { type AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
+import type { CommandRequest } from "./commands.js";
+import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runtime.js";
 export interface RuntimeFactoryOptions {
     readonly portfolio?: PortfolioDependencies;
+    readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.uniswap.quote";
+    }>>;
+    readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.sunswap.quote";
+    }>>;
     readonly uniswap?: UniswapGuardedSwapBuilder;
+    /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */
+    readonly swapPolicy?: GuardedSwapPolicyResolver;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;

@@ -1,4 +1,5 @@
 import type { AssetPolicyRegistry } from "../../asset-policy-registry.js";
+import type { ClockPort } from "../../ports.js";
 import { type SwapProtocolRegistry } from "../protocol-registry.js";
 import type { SwapChainObserverPort, SwapChainSenderPort, SwapChainSignerPort } from "../ports.js";
 import { GuardedSwapService } from "../service.js";
@@ -59,13 +60,15 @@ export interface SunSwapExecutionDependencies {
     readonly signer: SwapChainSignerPort;
     readonly sender: SwapChainSenderPort;
     readonly observer: SwapChainObserverPort;
+    /** Re-read after the foreground prompt: typing time never makes a fresh approval look stale. */
+    readonly clock: ClockPort;
 }
 /** Dormant until all authority, policy, signer, sender and observer ports are explicitly injected. */
 export declare class SunSwapGuardedExecutor {
     private readonly dependencies;
     private readonly binding;
     constructor(dependencies: SunSwapExecutionDependencies, binding: SunSwapExecutionBinding);
-    execute(operationValue: SwapOperationRecord, now: Date): Promise<SwapOperationRecord>;
+    execute(operationValue: SwapOperationRecord, commandNow: Date): Promise<SwapOperationRecord>;
     resume(operationValue: SwapOperationRecord, now: Date): Promise<SwapOperationRecord>;
     private observeOnly;
     private validateDependencies;

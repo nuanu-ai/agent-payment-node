@@ -1,7 +1,7 @@
 import type { AssetUsageReservation } from "../asset-usage-ledger.js";
 import { type SwapQuoteSnapshot } from "./quote.js";
 export declare const SWAP_OPERATION_SCHEMA: "apn.swap-operation.v1";
-export type SwapOperationState = "quoted" | "prepared" | "awaiting_approval" | "reserved" | "submitting" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect";
+export type SwapOperationState = "quoted" | "prepared" | "awaiting_approval" | "reserved" | "submitting" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
 export interface SwapSubmissionMarker {
     readonly markerHash: string;
     readonly markedAt: string;
