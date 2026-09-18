@@ -10,7 +10,11 @@ const DEPOSIT_TOPIC = "e1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5
 
 export interface SunSwapReceiptExpectation {
   readonly transactionHash: string; readonly recipient: string; readonly inputAmountAtomic: string;
-  readonly minimumOutputAtomic: string; readonly unsignedRawDataHex: string; readonly maximumFeeSun: string;
+  readonly minimumOutputAtomic: string; readonly unsignedRawDataHex: string;
+  /** The owner fee_limit: the only cap on the energy fee. */
+  readonly maximumFeeSun: string;
+  /** The frozen bandwidth budget: signed bytes x bandwidth price, burned when no free or staked bandwidth remains. */
+  readonly maximumBandwidthFeeSun: string;
 }
 export interface SunSwapReceiptValidation {
   readonly transactionHash: string; readonly blockNumber: string; readonly solidifiedHeadNumber: string;
@@ -29,13 +33,15 @@ export async function observeSunSwapReceipt(rpc: TronRpcPort, expected: SunSwapR
 }
 
 /**
- * Proves one solidified successful V2 swap: exact txid and bytes, owner debit = call_value (input) + fee, one WTRX
- * deposit of the input by the router, one pair Swap to the owner, and one USDT Transfer from the pair to the owner >= minOut.
+ * Proves one solidified successful V2 swap: exact txid and bytes, owner debit = call_value (input) + fee where
+ * fee = energy_fee (<= fee_limit) + net_fee (<= bandwidth budget), one WTRX deposit of the input by the router, one pair
+ * Swap to the owner, and one USDT Transfer from the pair to the owner >= minOut.
  */
 export function validateSunSwapReceipt(transactionValue: unknown, infoValue: unknown, solidifiedHeadNumber: string,
   expected: SunSwapReceiptExpectation): SunSwapReceiptValidation {
   if (!isPlainRecord(expected) || !exactKeys(expected, ["transactionHash", "recipient", "inputAmountAtomic", "minimumOutputAtomic",
-    "unsignedRawDataHex", "maximumFeeSun"]) || !/^[a-f0-9]{64}$/u.test(expected.transactionHash) ||
+    "unsignedRawDataHex", "maximumFeeSun", "maximumBandwidthFeeSun"]) || !/^[a-f0-9]{64}$/u.test(expected.transactionHash) ||
+      typeof expected.maximumBandwidthFeeSun !== "string" || !/^[1-9][0-9]{0,77}$/u.test(expected.maximumBandwidthFeeSun) ||
       !/^[1-9][0-9]{0,15}$/u.test(expected.inputAmountAtomic) || !/^[1-9][0-9]{0,77}$/u.test(expected.minimumOutputAtomic) ||
       !/^[1-9][0-9]{0,77}$/u.test(expected.maximumFeeSun) || !/^[a-f0-9]+$/u.test(expected.unsignedRawDataHex) ||
       expected.unsignedRawDataHex.length % 2 !== 0 || typeof expected.recipient !== "string" || canonical(expected.recipient) !== expected.recipient) fail();
@@ -48,8 +54,10 @@ export function validateSunSwapReceipt(transactionValue: unknown, infoValue: unk
   if (call.owner_address !== tronHex(expected.recipient) || call.contract_address !== tronHex(SUNSWAP_V2_ROUTER) ||
       integer(call.call_value).toString() !== expected.inputAmountAtomic) fail();
   const receipt = record(info.receipt); if (receipt.result !== "SUCCESS") fail();
-  const block = integer(info.blockNumber), solid = integer(solidifiedHeadNumber), fee = info.fee === undefined ? 0n : integer(info.fee);
-  if (block <= 0n || solid < block || fee > BigInt(expected.maximumFeeSun)) fail();
+  const block = integer(info.blockNumber), solid = integer(solidifiedHeadNumber), fee = optional(info.fee);
+  const energyFee = optional(receipt.energy_fee), bandwidthFee = optional(receipt.net_fee);
+  if (block <= 0n || solid < block || fee !== energyFee + bandwidthFee || energyFee > BigInt(expected.maximumFeeSun) ||
+      bandwidthFee > BigInt(expected.maximumBandwidthFeeSun)) fail();
   const input = BigInt(expected.inputAmountAtomic), owner = word(expected.recipient), router = word(SUNSWAP_V2_ROUTER);
   const logs = array(info.log, 64);
   const transfer = single(logs, SUNSWAP_USDT, TRON_TRANSFER_TOPIC, 3, 64);
@@ -88,6 +96,7 @@ function array(value: unknown, maximum: number): readonly unknown[] {
   for (let index = 0; index < value.length; index++) if (!Object.hasOwn(value, index)) fail();
   return value;
 }
+function optional(value: unknown): bigint { return value === undefined ? 0n : integer(value); }
 function integer(value: unknown): bigint {
   if (typeof value === "number" && !Number.isSafeInteger(value)) fail();
   if ((typeof value !== "string" && typeof value !== "number" && typeof value !== "bigint") || !/^[0-9]+$/u.test(String(value))) fail();

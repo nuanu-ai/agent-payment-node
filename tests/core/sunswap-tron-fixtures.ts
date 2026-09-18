@@ -42,14 +42,17 @@ export function syntheticMarket(options: { readonly amountIn: bigint; readonly r
     amountsOutResultHex: amountsHex(options.amountIn, out), reservesResultHex: reservesHex(RESERVE_IN, RESERVE_OUT) });
 }
 
-/** A solidified V2 receipt with WTRX deposit, pair swap and USDT transfer logs to the owner. */
-export function v2Receipt(transaction: SunSwapUnsignedTransaction, owner: string, input: bigint, output: bigint, fee = "12345") {
+/** A solidified V2 receipt with WTRX deposit, pair swap and USDT transfer logs to the owner; fee = energy_fee + net_fee. */
+export function v2Receipt(transaction: SunSwapUnsignedTransaction, owner: string, input: bigint, output: bigint,
+  fees: { readonly energy?: bigint; readonly net?: bigint } = { energy: 12_345n }) {
   const data = (...words: bigint[]) => words.map((value) => value.toString(16).padStart(64, "0")).join("");
   const router = word(SUNSWAP_V2_ROUTER), pair = word(SUNSWAP_V2_WTRX_USDT_PAIR), to = word(owner);
   return {
     transaction: { txID: transaction.txID, raw_data_hex: transaction.raw_data_hex, raw_data: structuredClone(transaction.raw_data),
       ret: [{ contractRet: "SUCCESS" }] },
-    info: { id: transaction.txID, blockNumber: "123", fee, receipt: { result: "SUCCESS", energy_usage_total: "157354" }, log: [
+    info: { id: transaction.txID, blockNumber: "123", fee: ((fees.energy ?? 0n) + (fees.net ?? 0n)).toString(),
+      receipt: { result: "SUCCESS", energy_usage_total: "157354", ...(fees.energy === undefined ? {} : { energy_fee: fees.energy.toString() }),
+        ...(fees.net === undefined ? {} : { net_fee: fees.net.toString() }) }, log: [
       { address: tronHex(SUNSWAP_WTRX).slice(2), topics: [DEPOSIT_TOPIC, router], data: data(input) },
       { address: tronHex(SUNSWAP_WTRX).slice(2), topics: [TRANSFER_TOPIC, router, pair], data: data(input) },
       { address: tronHex(SUNSWAP_USDT).slice(2), topics: [TRANSFER_TOPIC, pair, to], data: data(output) },
@@ -70,6 +73,7 @@ export class FakeSunSwapRpc implements TronRpcPort {
   reserves: [bigint, bigint] = [RESERVE_IN, RESERVE_OUT];
   reserveShift = 0n;
   simulation: SimulationMode = "success";
+  revertReason = "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT";
   energyUsed = 157354n;
   account: Record<string, unknown> | null = null;
   runtimeOverride: string | null = null;
@@ -117,8 +121,7 @@ export class FakeSunSwapRpc implements TronRpcPort {
       return { result: { code: "CONTRACT_VALIDATE_ERROR", message: Buffer.from(message).toString("hex") } };
     }
     if (this.simulation === "revert") {
-      const reason = "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT";
-      const revert = `08c379a0${encodeAbiParameters([{ type: "string" }], [reason]).slice(2)}`;
+      const revert = `08c379a0${encodeAbiParameters([{ type: "string" }], [this.revertReason]).slice(2)}`;
       return { result: { result: true, message: Buffer.from("REVERT opcode executed").toString("hex") }, energy_used: 30_000n,
         constant_result: [revert], transaction: transaction({ ret: "FAILED" }) };
     }

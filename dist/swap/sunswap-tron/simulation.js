@@ -26,7 +26,7 @@ export async function simulateSunSwapTransaction(rpc, transaction, intent) {
     if (result.resultHex.length !== 256 || amounts.length !== 2 || amounts[0] !== BigInt(intent.inputAmountAtomic))
         protocol();
     if (amounts[1] < BigInt(intent.minimumOutputAtomic)) {
-        throw new ApnError("APN_OPERATION_BLOCKED", "Simulated SunSwap output is below the frozen minimum.", { reason: "sunswap_simulated_output_below_minimum" });
+        throw new ApnError("APN_OPERATION_BLOCKED", "Simulated SunSwap output is below the frozen minimum.", { reason: "sunswap_output_below_minimum" });
     }
     const energy = BigInt(result.energyUsed);
     if (energy <= 0n)

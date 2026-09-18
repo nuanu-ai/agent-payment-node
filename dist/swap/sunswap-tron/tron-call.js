@@ -102,7 +102,9 @@ function reverted(resultHex) {
             revertReason = Buffer.from(resultHex.slice(136, 136 + length * 2), "hex").toString("latin1").replace(/[^\x20-\x7e]/gu, "");
         }
     }
-    throw new ApnError("APN_OPERATION_BLOCKED", "The exact SunSwap constant call reverted.", { reason: "sunswap_constant_call_reverted", ...(revertReason === "" ? {} : { revertReason }) });
+    const reason = revertReason === "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT" ? "sunswap_output_below_minimum" :
+        revertReason === "UniswapV2Router: EXPIRED" ? "sunswap_deadline_expired" : "sunswap_constant_call_reverted";
+    throw new ApnError("APN_OPERATION_BLOCKED", "The exact SunSwap constant call reverted.", { reason, ...(revertReason === "" ? {} : { revertReason }) });
 }
 function unavailable(error) {
     if (error instanceof ApnError && (error.code === "APN_RPC_CONFIG" || error.code === "APN_RPC_PROTOCOL"))

@@ -11,6 +11,8 @@ export interface SunSwapKeylessExecutionMaterial {
     readonly simulation: SunSwapSimulationProof;
     readonly market: SunSwapV2Market;
     readonly pricing: SunSwapV2Pricing;
+    /** Chain getTransactionFee (SUN per bandwidth byte) read at quote time; it prices the bandwidth budget. */
+    readonly bandwidthPriceSun: string;
 }
 /** Structurally a GuardedSwapPreparedMaterial: native TRX input needs no token approval, so the cap is always "0". */
 export interface SunSwapPreparedMaterial {
@@ -23,8 +25,11 @@ export interface SunSwapPreparedMaterialPort {
     save(material: SunSwapPreparedMaterial): Promise<SunSwapPreparedMaterial>;
     load(quoteHash: string): Promise<SunSwapPreparedMaterial | null>;
 }
-/** Display of the TRON resource bound; every value is derived from the frozen intent and the exact simulation. */
-export declare function sunSwapGasOrEnergy(intent: SunSwapUnsignedIntent, simulation: SunSwapSimulationProof, transaction: SunSwapUnsignedTransaction): Readonly<Record<string, string>>;
+/**
+ * Display of the TRON resource bound; every value derives from the frozen intent, the exact simulation and the chain
+ * bandwidth price. fee_limit caps only energy, so the worst-case debit also carries the full bandwidth burn.
+ */
+export declare function sunSwapGasOrEnergy(intent: SunSwapUnsignedIntent, simulation: SunSwapSimulationProof, transaction: SunSwapUnsignedTransaction, bandwidthPriceSun: string): Readonly<Record<string, string>>;
 /** Re-derives every binding between quote, market, pricing, unsigned transaction, simulation and resource display. */
 export declare function validateSunSwapPreparedMaterial(value: unknown, mode: "input" | "stored"): SunSwapPreparedMaterial;
 /** Owner-private durable prepared material keyed by quoteHash; create-only and fully re-validated on every read. */

@@ -111,7 +111,7 @@ class ObservationRpc implements SunSwapObservationRpcPort {
     if (method === "walletsolidity/getnowblock") return this.fixture.head;
     if (method.endsWith("gettransactionbyid")) return this.fixture.transaction;
     if (this.conflict && method === "walletsolidity/gettransactioninfobyid") {
-      return { ...this.fixture.info, fee: "12346" };
+      return { ...this.fixture.info, fee: "12346", receipt: { ...this.fixture.info.receipt, energy_fee: "12346" } };
     }
     if (this.historyConflict && method === "walletsolidity/gettransactioninfobyid") {
       return { ...this.fixture.info, providerSpecificHistory: true };
@@ -172,7 +172,8 @@ test("executor persists marker before one ambiguous broadcast and restart is obs
 test("observer requires matching full and solidified router transaction, output and fee proof", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   const expected = { transactionHash: f.binding.transaction.txID, recipient: RECIPIENT, inputAmountAtomic: "1000000",
-    minimumOutputAtomic: f.operation.quote.minimumOutputAtomic, unsignedRawDataHex: f.binding.transaction.raw_data_hex, maximumFeeSun: "100000000" };
+    minimumOutputAtomic: f.operation.quote.minimumOutputAtomic, unsignedRawDataHex: f.binding.transaction.raw_data_hex, maximumFeeSun: "100000000",
+    maximumBandwidthFeeSun: "512000" };
   const rpc = new ObservationRpc(receiptFixture(f.binding));
   const proof = await observeSunSwapFinality(rpc, expected); assert.equal(proof.outputAmountAtomic, OUTPUT.toString()); assert.equal(proof.finalized, true);
   assert.equal(proof.trxDebitSun, "1012345");
@@ -216,7 +217,7 @@ test("explicit admission, cross-rail cap, fee cap and exact foreground approval 
     if (kind === "usage") await f.usage.reserve({ account: OWNER, chain: SUNSWAP_TRON_CHAIN, asset: { kind: "native", identifier: null },
       registry: f.policy, rail: "direct", amountAtomic: "1", idempotencyKey: "existing-direct-use", now: NOW });
     const signer = { sign: async () => { signs++; return { signedMaterialHandle: "f".repeat(64) }; } };
-    const observer = new SunSwapSolidifiedObserver(new ObservationRpc(receiptFixture(f.binding)), f.operation, f.binding, "100000000", () => NOW);
+    const observer = new SunSwapSolidifiedObserver(new ObservationRpc(receiptFixture(f.binding)), f.operation, f.binding, "100000000", "512000", () => NOW);
     const executor = new SunSwapGuardedExecutor({ service: f.service, policy: f.policy, protocolRegistry: f.protocols,
       ownerAdmission: { admit: async () => kind === "admission" ? { admitted: true as const, accountIdentityHash: "0".repeat(64) } :
         { admitted: true as const, accountIdentityHash: f.account.identityHash } },
@@ -234,7 +235,7 @@ test("successful execution finalizes exact solidified receipt with no token appr
   const broadcast = new Broadcast(f.binding.transaction.txID);
   const protectedAdapter = new SunSwapProtectedExecutionAdapter(f.storage, broadcast, f.operations, f.operation, f.binding);
   const observer = new SunSwapSolidifiedObserver(new ObservationRpc(receiptFixture(f.binding)), f.operation, f.binding,
-    "100000000", () => NOW);
+    "100000000", "512000", () => NOW);
   const executor = new SunSwapGuardedExecutor({ service: f.service, policy: f.policy, protocolRegistry: f.protocols,
     ownerAdmission: { admit: async () => ({ admitted: true as const, accountIdentityHash: f.account.identityHash }) },
     approval: { approve: async (input: SunSwapForegroundApprovalInput) => approval(input) },
