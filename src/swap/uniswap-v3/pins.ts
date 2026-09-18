@@ -17,6 +17,9 @@ export const UNISWAP_WETH9 = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as con
 export const UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984" as const;
 export const UNISWAP_V3_QUOTER_V2 = "0x61fFE014bA17989E743c5F6cB21bF9697530B21e" as const;
 export const UNISWAP_V3_USDC_WETH_500 = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640" as const;
+export const ETHEREUM_USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7" as const;
+/** Deepest WETH/USDT V3 pool by in-range liquidity (1.83e19 vs 5.1e17 for 0.05%), block 26002096, 2026-09-18. */
+export const UNISWAP_V3_WETH_USDT_3000 = "0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36" as const;
 /** EIP-1967 style ZeppelinOS implementation slot used by the FiatTokenProxy behind USDC. */
 export const USDC_IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3" as const;
 
@@ -28,7 +31,11 @@ export const UNISWAP_V3_CODE_PINS: readonly UniswapV3CodePin[] = [
   { role: "weth9", address: UNISWAP_WETH9, codeHash: "0xd0a06b12ac47863b5c7be4185c2deaad1c61557033f56c7d4ea74429cbb25e23" },
   { role: "usdc_proxy", address: UNISWAP_USDC, codeHash: "0xd80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505" },
   { role: "pool_usdc_weth_500", address: UNISWAP_V3_USDC_WETH_500, codeHash: "0xa981b66c747a3d9fa29d7e200d5faaa2826960523d0e5a0df8148e8868c480b4" },
+  { role: "usdt", address: ETHEREUM_USDT, codeHash: "0xb44fb4e949d0f78f87f79ee46428f23a2a5713ce6fc6e0beb3dda78c2ac1ea55" },
+  { role: "pool_weth_usdt_3000", address: UNISWAP_V3_WETH_USDT_3000, codeHash: "0x97fa75f9d265c8e1eaa82fb01cbeb07677e39d709937493d728b0bf6d5e8a3a2" },
 ];
+/** TetherToken forwards every call to upgradedAddress once deprecated(); its code hash cannot pin that storage flag. */
+const USDT_DEPRECATED_CALL = { to: ETHEREUM_USDT, data: "0x0e136b19" } as const;
 export const USDC_IMPLEMENTATION_PIN: UniswapV3CodePin = { role: "usdc_implementation",
   address: "0x43506849D7C04F9138D1A2050bbF3A0c054402dd", codeHash: "0xcdfb7d322961af3acae7a8f7ee8b69c205b36f576cc5b077f170c7eb8ecbe3ea" };
 
@@ -44,13 +51,14 @@ export interface UniswapV3PairPin {
 }
 export const UNISWAP_V3_PAIRS: readonly UniswapV3PairPin[] = [
   { outputToken: UNISWAP_USDC, outputSymbol: "USDC", outputDecimals: 6, pool: UNISWAP_V3_USDC_WETH_500, fee: 500, wethIsToken0: false },
+  { outputToken: ETHEREUM_USDT, outputSymbol: "USDT", outputDecimals: 6, pool: UNISWAP_V3_WETH_USDT_3000, fee: 3000, wethIsToken0: true },
 ];
 
 export const UNISWAP_V3_KEYLESS_MECHANISM_PIN: SwapMechanismPin = validateSwapMechanismPin({
   schemaVersion: SWAP_MECHANISM_PIN_SCHEMA, protocolFamily: "uniswap_ethereum", networkFamily: "evm", chain: "eip155:1",
   protocolVersion: UNISWAP_ROUTER_VERSION, constructorKind: "sdk", constructorIdentity: "apn.uniswap-v3.quoter-v2.local-encoder",
   constructorVersion: "1.0.0", routerProgramIdentity: UNISWAP_ROUTER,
-  auxiliaryContractProgramIdentities: [UNISWAP_V3_QUOTER_V2, UNISWAP_V3_FACTORY, UNISWAP_WETH9, UNISWAP_V3_USDC_WETH_500],
+  auxiliaryContractProgramIdentities: [UNISWAP_V3_QUOTER_V2, UNISWAP_V3_FACTORY, UNISWAP_WETH9, UNISWAP_V3_USDC_WETH_500, UNISWAP_V3_WETH_USDT_3000],
   quoteSchemaVersion: "quoter-v2.quote-exact-input-single.1",
   transactionSchemaVersion: "universal-router-2.2.0.wrap-eth-v3-exact-in.1",
   validationPolicyIdentity: "apn.uniswap.ethereum-native-v3-keyless", validationPolicyVersion: "1.0.0",
@@ -69,9 +77,18 @@ export function uniswapV3Pair(outputToken: string): UniswapV3PairPin {
 /** Verifies the code pins a quote or send depends on at one exact block tag; drift fails closed. */
 export type UniswapV3PinVerifier = (call: EvmRpcCall, tag: Hex) => Promise<readonly UniswapV3CodePin[]>;
 
-/** Production verifier: every pinned runtime code hash, plus the USDC proxy implementation address and code. */
-export const verifyUniswapV3CodePins: UniswapV3PinVerifier = async (call, tag) =>
-  await verifyCodePins(call, tag, UNISWAP_V3_CODE_PINS, { proxy: UNISWAP_USDC, slot: USDC_IMPLEMENTATION_SLOT, pin: USDC_IMPLEMENTATION_PIN });
+/** Production verifier: every pinned runtime code hash, the USDC proxy implementation, and USDT not deprecated. */
+export const verifyUniswapV3CodePins: UniswapV3PinVerifier = async (call, tag) => {
+  const verified = await verifyCodePins(call, tag, UNISWAP_V3_CODE_PINS, { proxy: UNISWAP_USDC, slot: USDC_IMPLEMENTATION_SLOT, pin: USDC_IMPLEMENTATION_PIN });
+  await verifyUsdtNotDeprecated(call, tag);
+  return verified;
+};
+
+export async function verifyUsdtNotDeprecated(call: EvmRpcCall, tag: Hex): Promise<void> {
+  if (evmRpcHex(await call("eth_call", [USDT_DEPRECATED_CALL, tag]), 32) !== `0x${"0".repeat(64)}`) {
+    blocked("USDT is deprecated and forwards to another contract.", "uniswap_code_pin_drift");
+  }
+}
 
 export async function verifyCodePins(call: EvmRpcCall, tag: Hex, pins: readonly UniswapV3CodePin[],
   implementation: { readonly proxy: string; readonly slot: Hex; readonly pin: UniswapV3CodePin }): Promise<readonly UniswapV3CodePin[]> {

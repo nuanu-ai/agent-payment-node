@@ -8,7 +8,7 @@ import { swapMechanismDigest } from "../pin.js";
 import { createSwapQuote } from "../quote.js";
 import type { GuardedSwapReadOnlyBuilder } from "../runtime.js";
 import type { UniswapTransactionEnvelope } from "../uniswap-codec.js";
-import { UNISWAP_CHAIN, UNISWAP_ROUTER, UNISWAP_USDC } from "../uniswap-pin.js";
+import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../uniswap-pin.js";
 import { encodeUniswapV3ExactInput } from "./encoder.js";
 import { readUniswapV3Quote } from "./onchain.js";
 import { UNISWAP_V3_KEYLESS_MECHANISM_PIN, uniswapV3Pair, type UniswapV3PinVerifier } from "./pins.js";
@@ -16,7 +16,7 @@ import { SavedUniswapQuoteStore, UNISWAP_KEYLESS_EXECUTION_SCHEMA, uniswapEviden
   type UniswapKeylessEvidence, type UniswapKeylessMaterial } from "./material.js";
 
 export interface UniswapKeylessQuoteRequest {
-  readonly profile: string; readonly account: string; readonly recipient: string; readonly amountAtomic: string;
+  readonly profile: string; readonly account: string; readonly recipient: string; readonly outputToken: string; readonly amountAtomic: string;
   readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly deadline: number;
   readonly maxGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string;
 }
@@ -35,7 +35,7 @@ export class KeylessUniswapQuoteBuilder implements GuardedSwapReadOnlyBuilder<Un
     if (request.deadline <= now || request.deadline - now > 1_800) invalid("Uniswap quote deadline must be in the next 30 minutes.");
     await this.assertChain();
     const block = await evmRpcBlock(this.call, "latest"), baseFee = evmRpcQuantity(block.raw.baseFeePerGas);
-    const codePins = await this.verifyPins(this.call, block.tag), pair = uniswapV3Pair(UNISWAP_USDC);
+    const codePins = await this.verifyPins(this.call, block.tag), pair = request.pair;
     const pool = await readUniswapV3Quote(this.call, pair, request.amount, block.tag);
     if (pool.priceImpactBps > request.ownerSlippageCapBps) blocked("Pool price impact exceeds the owner slippage cap.", "uniswap_price_impact");
     const expected = BigInt(pool.amountOutAtomic), minimum = (expected * BigInt(10_000 - request.slippageBps) + 9_999n) / 10_000n;
@@ -95,7 +95,7 @@ export class KeylessUniswapQuoteBuilder implements GuardedSwapReadOnlyBuilder<Un
 
 function validateRequest(input: UniswapKeylessQuoteRequest & { readonly now: Date }) {
   if (!(input.now instanceof Date) || !Number.isFinite(input.now.getTime())) invalid("Uniswap quote time is invalid.");
-  const account = canonical(input.account), recipient = canonical(input.recipient);
+  const account = canonical(input.account), recipient = canonical(input.recipient), pair = uniswapV3Pair(canonical(input.outputToken));
   if (!Number.isSafeInteger(input.slippageBps) || !Number.isSafeInteger(input.ownerSlippageCapBps) || input.slippageBps < 0 ||
       input.ownerSlippageCapBps < 0 || input.ownerSlippageCapBps > 10_000 || input.slippageBps > input.ownerSlippageCapBps ||
       input.slippageBps >= 10_000) invalid("Uniswap slippage exceeds the owner cap.");
@@ -103,7 +103,7 @@ function validateRequest(input: UniswapKeylessQuoteRequest & { readonly now: Dat
   const amount = uint(input.amountAtomic), maxGasLimit = uint(input.maxGasLimit), maxFeePerGas = uint(input.maxFeePerGas),
     maxPriorityFeePerGas = uint(input.maxPriorityFeePerGas, false);
   if (maxPriorityFeePerGas > maxFeePerGas || maxGasLimit > 30_000_000n) invalid("Uniswap gas or fee caps are inconsistent.");
-  return { profile: input.profile, account, recipient, amount, slippageBps: input.slippageBps, ownerSlippageCapBps: input.ownerSlippageCapBps,
+  return { profile: input.profile, account, recipient, pair, amount, slippageBps: input.slippageBps, ownerSlippageCapBps: input.ownerSlippageCapBps,
     deadline: input.deadline, maxGasLimit, maxFeePerGas, maxPriorityFeePerGas };
 }
 function canonical(value: string): string {

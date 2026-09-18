@@ -10,8 +10,16 @@ const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 export interface UniswapDecodedRoute { readonly command: "V2_SWAP_EXACT_IN" | "V3_SWAP_EXACT_IN"; readonly recipient: string;
   readonly inputAmountAtomic: string; readonly minimumOutputAtomic: string; readonly deadline: number; readonly routeHash: string }
 
+/** The official Trading API catalog pair: native ETH to USDC only. */
 export function decodeUniswapRouterCalldata(data: `0x${string}`, expected: { readonly recipient: string;
   readonly inputAmountAtomic: string; readonly minimumOutputAtomic: string; readonly deadline: number }): UniswapDecodedRoute {
+  return decodeUniswapRouterCalldataFor(data, { ...expected, outputToken: UNISWAP_USDC });
+}
+
+/** Same strict proof for an explicit pinned output token; the path must end at exactly that token. */
+export function decodeUniswapRouterCalldataFor(data: `0x${string}`, expected: { readonly recipient: string;
+  readonly inputAmountAtomic: string; readonly minimumOutputAtomic: string; readonly deadline: number;
+  readonly outputToken: string }): UniswapDecodedRoute {
   try {
     const decoded = decodeFunctionData({ abi: ROUTER_ABI, data });
     if (decoded.functionName !== "execute") fail();
@@ -29,7 +37,7 @@ export function decodeUniswapRouterCalldata(data: `0x${string}`, expected: { rea
         { type: "uint256[]" }] as const;
       const values = decodeAbiParameters(types, inputs[1]!);
       if (encodeAbiParameters(types, values).toLowerCase() !== inputs[1]!.toLowerCase()) fail();
-      const path = v3Path(values[3]);
+      const path = v3Path(values[3], getAddress(expected.outputToken));
       [recipient, amountIn, amountOutMin] = values;
       if (values[4] !== false || (values[5].length !== 0 && values[5].length !== path.hops.length)) fail();
       route = { command: "V3_SWAP_EXACT_IN", path, minHopPriceX36: values[5].map(String) };
@@ -40,7 +48,7 @@ export function decodeUniswapRouterCalldata(data: `0x${string}`, expected: { rea
       if (encodeAbiParameters(types, values).toLowerCase() !== inputs[1]!.toLowerCase()) fail();
       const path = values[3].map(getAddress);
       [recipient, amountIn, amountOutMin] = values;
-      if (values[4] !== false || canonicalJson(path) !== canonicalJson([WETH, UNISWAP_USDC]) ||
+      if (values[4] !== false || canonicalJson(path) !== canonicalJson([WETH, getAddress(expected.outputToken)]) ||
           (values[5].length !== 0 && values[5].length !== path.length - 1)) fail();
       route = { command: "V2_SWAP_EXACT_IN", path, minHopPriceX36: values[5].map(String) };
     }
@@ -52,11 +60,11 @@ export function decodeUniswapRouterCalldata(data: `0x${string}`, expected: { rea
   } catch (error) { if (error instanceof ApnError) throw error; return fail(); }
 }
 
-function v3Path(path: `0x${string}`): { readonly tokens: readonly string[]; readonly hops: readonly number[] } {
+function v3Path(path: `0x${string}`, outputToken: string): { readonly tokens: readonly string[]; readonly hops: readonly number[] } {
   const hex = path.slice(2); if (hex.length < 86 || (hex.length - 40) % 46 !== 0) fail();
   const tokens: string[] = [getAddress(`0x${hex.slice(0, 40)}`)], hops: number[] = []; let offset = 40;
   while (offset < hex.length) { const fee = Number.parseInt(hex.slice(offset, offset + 6), 16); if (![100, 500, 3000, 10000].includes(fee)) fail();
     hops.push(fee); tokens.push(getAddress(`0x${hex.slice(offset + 6, offset + 46)}`)); offset += 46; }
-  if (tokens[0] !== WETH || tokens.at(-1) !== UNISWAP_USDC || tokens.length > 5) fail(); return { tokens, hops };
+  if (tokens[0] !== WETH || tokens.at(-1) !== outputToken || tokens.length > 5) fail(); return { tokens, hops };
 }
 function fail(): never { throw new ApnError("APN_PROVIDER_PROTOCOL", "Universal Router calldata is unsupported or does not prove the exact guarded swap."); }

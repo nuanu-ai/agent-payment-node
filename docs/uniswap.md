@@ -1,7 +1,7 @@
 # Guarded Ethereum Uniswap swap
 
-APN swaps native ETH for canonical Ethereum USDC through Uniswap V3 without
-an API key or an off-chain quote service. The Uniswap Trading API is not used
+APN swaps native ETH for canonical Ethereum USDC or USDT through Uniswap V3
+without an API key or an off-chain quote service. The Uniswap Trading API is not used
 by the default path. Every price fact comes from the chain, and the owner's
 local wallet signs, so APN never takes custody.
 
@@ -18,9 +18,14 @@ All addresses and runtime code hashes were read on Ethereum mainnet with
 | WETH9 | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` |
 | USDC proxy and implementation | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`, `0x43506849D7C04F9138D1A2050bbF3A0c054402dd` |
 | USDC/WETH 0.05% pool | `0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640` |
+| USDT | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |
+| WETH/USDT 0.3% pool | `0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36` |
 
-The pool's token0 is USDC, token1 is WETH and its fee is 500. The factory's
-`getPool` returns this pool. QuoterV2 reports the same factory and WETH9.
+The USDC pool's token0 is USDC, token1 is WETH and its fee is 500. The USDT
+pool is the deepest WETH/USDT V3 pool by in-range liquidity: token0 WETH,
+token1 USDT, fee 3000. The factory's `getPool` returns each pool, and QuoterV2
+reports the same factory and WETH9. USDT's `deprecated()` must stay false,
+because a deprecated TetherToken forwards to another contract.
 Contract immutables live in runtime code, so each code hash pins them too.
 Quote and pre-send checks verify every hash again, and any drift fails
 closed. The keyless mechanism pin (`constructorKind: sdk`) and its digest are
@@ -29,7 +34,8 @@ that exact pin.
 
 ## Commands
 
-- `quote` reads `slot0` and QuoterV2 `quoteExactInputSingle` by `eth_call`
+- `quote --output-token <USDC or USDT>` reads `slot0` and QuoterV2
+  `quoteExactInputSingle` by `eth_call`
   at one block. It computes the expected output, the minimum output from the
   owner's slippage cap, and the price impact against the fee-adjusted spot
   price. It encodes `execute(WRAP_ETH, V3_SWAP_EXACT_IN)` locally as the

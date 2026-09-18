@@ -135,7 +135,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       };
     }), [
       { name: "apn_swap_ethereum_uniswap_inventory", properties: [], required: [], defaults: {} },
-      { name: "apn_swap_ethereum_uniswap_quote", properties: ["profile", "account", "to", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], required: ["profile", "account", "to", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], defaults: {} },
+      { name: "apn_swap_ethereum_uniswap_quote", properties: ["profile", "account", "to", "output_token", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], required: ["profile", "account", "to", "output_token", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_prepare", properties: ["profile", "quote", "idempotency_key"], required: ["profile", "quote", "idempotency_key"], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_approve", properties: ["operation"], required: ["operation"], defaults: {} },

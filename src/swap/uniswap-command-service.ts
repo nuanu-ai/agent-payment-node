@@ -2,7 +2,7 @@ import type { CommandOutcome, CommandRequest } from "../commands.js";
 import { ApnError } from "../errors.js";
 import type { RuntimeContext } from "../runtime.js";
 import { SwapOperationRepository } from "./repository.js";
-import { UNISWAP_OFFICIAL_PIN_CATALOG } from "./uniswap-pin.js";
+import { UNISWAP_OFFICIAL_PIN_CATALOG, UNISWAP_USDC } from "./uniswap-pin.js";
 import { swapMechanismDigest } from "./pin.js";
 import { UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS,
   USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
@@ -18,6 +18,8 @@ export async function executeUniswapCommand(request: Request, context: RuntimeCo
     if (context.uniswapRuntime !== undefined) return data(await context.uniswapRuntime.quote(request, context.clock.now()), "unsigned_exact_simulated_swap_quote");
     if (context.uniswap === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
       "Uniswap quote requires an explicitly configured Trading API and Ethereum RPC adapter.", { reason: "uniswap_runtime_unavailable" });
+    if (request.outputToken !== UNISWAP_USDC) throw new ApnError("APN_OPERATION_BLOCKED",
+      "The injected Trading API builder is pinned to native ETH to USDC only.", { reason: "uniswap_pair_unpinned" });
     return data(await context.uniswap.quote({ ...request, now: context.clock.now() }), "unsigned_exact_simulated_swap_quote");
   }
   if (request.command === "swap.uniswap.prepare") {
