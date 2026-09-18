@@ -26,6 +26,8 @@ export type CommandRequest =
   | { readonly command: "allowlist.inventory" }
   | { readonly command: "allowlist.resolve"; readonly chain: string; readonly kind: "native" | "token"; readonly identifier?: string }
   | { readonly command: "allowlist.policy.status"; readonly profile: string }
+  | { readonly command: "allowlist.policy.stage"; readonly profile: string; readonly file: string; readonly expectedRevision?: number }
+  | { readonly command: "allowlist.policy.activate" | "allowlist.policy.revoke"; readonly profile: string; readonly revision: number }
   | { readonly command: "allowlist.policy.prepare"; readonly profile: string; readonly account: string;
       readonly overlayVersion: string; readonly chain: string; readonly kind: "native" | "token"; readonly identifier?: string;
       readonly rail: "direct" | "gasless" | "x402" | "bridge" | "swap"; readonly maximumPerTransferAtomic: string;

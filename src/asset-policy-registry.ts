@@ -7,7 +7,9 @@ import { tronAddress } from "./tron/codec.js";
 import { validateSwapMechanismPin, type SwapMechanismPin } from "./swap/pin.js";
 
 export const ASSET_POLICY_REGISTRY_SCHEMA = "apn.asset-policy-registry.v1" as const;
-const POLICY_DIGEST_DOMAIN = ASSET_POLICY_REGISTRY_SCHEMA;
+/** Version 2 replaces the single asset cap pair with exactly one owner cap pair per admitted rail. */
+export const ASSET_POLICY_REGISTRY_SCHEMA_V2 = "apn.asset-policy-registry.v2" as const;
+export type AssetPolicyRegistrySchema = typeof ASSET_POLICY_REGISTRY_SCHEMA | typeof ASSET_POLICY_REGISTRY_SCHEMA_V2;
 const MAX_CHAINS = 64;
 const MAX_ASSETS_PER_CHAIN = 256;
 const MAX_UINT256 = (1n << 256n) - 1n;
@@ -35,7 +37,10 @@ export interface AssetPolicyRow {
   readonly symbol: string;
   readonly decimals: number;
   readonly rails: AssetRailAdmission;
-  readonly caps: AssetAtomicCaps;
+  /** Version 1 only: one cap pair shared by every admitted rail. */
+  readonly caps?: AssetAtomicCaps;
+  /** Version 2 only: exactly one cap pair for each admitted rail and no other rail. */
+  readonly railCaps?: Readonly<Partial<Record<AssetPolicyRail, AssetAtomicCaps>>>;
   readonly mechanismPins?: Readonly<Partial<{
     gasless: Readonly<{ provider: string; reference: string }>;
     x402: Readonly<{ provider: string; reference: string }>;
@@ -53,7 +58,7 @@ export interface AssetPolicyChain {
 }
 
 export interface AssetPolicyRegistry {
-  readonly schemaVersion: typeof ASSET_POLICY_REGISTRY_SCHEMA;
+  readonly schemaVersion: AssetPolicyRegistrySchema;
   readonly registryVersion: string;
   readonly publishedAt: string;
   readonly effectiveDate: string;
@@ -88,6 +93,8 @@ export interface AssetPolicyAdmission {
   readonly family: AssetPolicyChainFamily;
   readonly asset: AssetPolicyRow;
   readonly rail: AssetPolicyRail;
+  /** The exact cap pair applied to this rail. */
+  readonly caps: AssetAtomicCaps;
   readonly amountAtomic: string;
   readonly dailyUsageAtomic: string;
   readonly dailyRemainingAtomic: string;
@@ -95,7 +102,7 @@ export interface AssetPolicyAdmission {
 
 export function assetPolicyDigest(value: UnsignedAssetPolicyRegistry): string {
   validateRegistryBody(value);
-  return domainHash(POLICY_DIGEST_DOMAIN, canonicalJson(value));
+  return domainHash(value.schemaVersion, canonicalJson(value));
 }
 
 export function sealAssetPolicyRegistry(value: UnsignedAssetPolicyRegistry): AssetPolicyRegistry {
@@ -110,7 +117,7 @@ export function validateAssetPolicyRegistry(value: unknown): AssetPolicyRegistry
   const { policyDigest, ...body } = value;
   validateRegistryBody(body);
   if (typeof policyDigest !== "string" || !/^[a-f0-9]{64}$/u.test(policyDigest) ||
-      domainHash(POLICY_DIGEST_DOMAIN, canonicalJson(body)) !== policyDigest) {
+      domainHash(body.schemaVersion, canonicalJson(body)) !== policyDigest) {
     invalid("The asset policy registry digest is invalid.");
   }
   return value as unknown as AssetPolicyRegistry;
@@ -138,10 +145,13 @@ export function evaluateAssetPolicy(registryValue: unknown, input: AssetPolicyEv
   const asset = chain.assets.find((row) => row.kind === input.asset.kind && row.identifier === identifier);
   if (asset === undefined) denied("The asset is not listed for this network.");
   if (!asset.rails[rail]) denied("The selected rail is not admitted for this network and asset.");
+  // Version 2 caps are per rail; the caller's daily usage stays the asset's combined usage, so a rail cap is never widened.
+  const caps = registry.schemaVersion === ASSET_POLICY_REGISTRY_SCHEMA_V2 ? asset.railCaps?.[rail] : asset.caps;
+  if (caps === undefined) invalid("The asset policy registry lacks caps for the admitted rail.");
   const amount = atomic(input.amountAtomic, true, "Transfer amount");
   const usage = atomic(input.dailyUsageAtomic, false, "Daily usage");
-  const perTransfer = BigInt(asset.caps.maximumPerTransferAtomic);
-  const dailyLimit = BigInt(asset.caps.dailyLimitAtomic);
+  const perTransfer = BigInt(caps.maximumPerTransferAtomic);
+  const dailyLimit = BigInt(caps.dailyLimitAtomic);
   if (amount > perTransfer) denied("The transfer exceeds the asset policy per-transfer cap.");
   if (usage > dailyLimit || usage + amount > dailyLimit) denied("The transfer exceeds the asset policy daily cap.");
   return {
@@ -153,6 +163,7 @@ export function evaluateAssetPolicy(registryValue: unknown, input: AssetPolicyEv
     family: chain.family,
     asset,
     rail,
+    caps: { maximumPerTransferAtomic: caps.maximumPerTransferAtomic, dailyLimitAtomic: caps.dailyLimitAtomic },
     amountAtomic: amount.toString(),
     dailyUsageAtomic: usage.toString(),
     dailyRemainingAtomic: (dailyLimit - usage - amount).toString(),
@@ -173,7 +184,7 @@ function validateEvaluationInput(value: unknown): asserts value is AssetPolicyEv
 function validateRegistryBody(value: unknown): asserts value is UnsignedAssetPolicyRegistry {
   if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "registryVersion", "publishedAt", "effectiveDate",
     ...(value.effectiveAt === undefined ? [] : ["effectiveAt"]), ...(value.expiresAt === undefined ? [] : ["expiresAt"]), "chains"]) ||
-      value.schemaVersion !== ASSET_POLICY_REGISTRY_SCHEMA ||
+      (value.schemaVersion !== ASSET_POLICY_REGISTRY_SCHEMA && value.schemaVersion !== ASSET_POLICY_REGISTRY_SCHEMA_V2) ||
       typeof value.registryVersion !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value.registryVersion) ||
       typeof value.publishedAt !== "string" || !isIsoInstant(value.publishedAt)) {
     invalid("The asset policy registry metadata is invalid.");
@@ -190,13 +201,13 @@ function validateRegistryBody(value: unknown): asserts value is UnsignedAssetPol
   }
   const identities = new Set<string>();
   for (const chain of value.chains) {
-    validateChain(chain);
+    validateChain(chain, value.schemaVersion);
     if (identities.has(chain.chain)) invalid("The asset policy registry contains a duplicate chain identity.");
     identities.add(chain.chain);
   }
 }
 
-function validateChain(value: unknown): asserts value is AssetPolicyChain {
+function validateChain(value: unknown, schema: AssetPolicyRegistrySchema): asserts value is AssetPolicyChain {
   if (!isPlainRecord(value) || !exactKeys(value, ["chain", "family", "name", "assets"]) ||
       (value.family !== "evm" && value.family !== "solana" && value.family !== "tron") ||
       typeof value.name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9 .()/-]{0,63}$/u.test(value.name) ||
@@ -206,15 +217,16 @@ function validateChain(value: unknown): asserts value is AssetPolicyChain {
   }
   const identities = new Set<string>();
   for (const asset of value.assets) {
-    validateAsset(value.family, asset);
+    validateAsset(value.family, asset, schema);
     const identity = asset.kind === "native" ? "native" : `token:${asset.identifier}`;
     if (identities.has(identity)) invalid("An asset policy chain contains a duplicate asset identity.");
     identities.add(identity);
   }
 }
 
-function validateAsset(family: AssetPolicyChainFamily, value: unknown): asserts value is AssetPolicyRow {
-  if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", "caps",
+function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: AssetPolicyRegistrySchema): asserts value is AssetPolicyRow {
+  const perRail = schema === ASSET_POLICY_REGISTRY_SCHEMA_V2;
+  if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", perRail ? "railCaps" : "caps",
     ...(value.mechanismPins === undefined ? [] : ["mechanismPins"])]) ||
       (value.kind !== "native" && value.kind !== "token") ||
       typeof value.symbol !== "string" || !/^[A-Z0-9][A-Z0-9._-]{0,15}$/u.test(value.symbol) ||
@@ -227,7 +239,8 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown): asserts 
     invalid("A token must use its canonical contract or mint address.");
   }
   validateRails(value.rails);
-  validateCaps(value.caps);
+  if (perRail) validateRailCaps(value.rails, value.railCaps);
+  else validateCaps(value.caps);
   if (value.mechanismPins !== undefined) validateMechanismPins(value.mechanismPins);
   const mechanismPins = value.mechanismPins as Record<string, unknown> | undefined;
   const swapPin = mechanismPins?.swap;
@@ -252,6 +265,14 @@ function validateRails(value: unknown): asserts value is AssetRailAdmission {
       Object.values(value).some((admitted) => typeof admitted !== "boolean")) {
     invalid("Asset rail admission flags are invalid.");
   }
+}
+
+function validateRailCaps(rails: AssetRailAdmission, value: unknown): void {
+  const admitted = (Object.keys(rails) as AssetPolicyRail[]).filter((rail) => rails[rail]);
+  if (admitted.length === 0 || !isPlainRecord(value) || !exactKeys(value, admitted)) {
+    invalid("Per-rail caps must exist for exactly the admitted rails.");
+  }
+  for (const rail of admitted) validateCaps(value[rail]);
 }
 
 function validateCaps(value: unknown): asserts value is AssetAtomicCaps {

@@ -1,4 +1,8 @@
+import { type SwapMechanismPin } from "./swap/pin.js";
 export declare const ASSET_POLICY_REGISTRY_SCHEMA: "apn.asset-policy-registry.v1";
+/** Version 2 replaces the single asset cap pair with exactly one owner cap pair per admitted rail. */
+export declare const ASSET_POLICY_REGISTRY_SCHEMA_V2: "apn.asset-policy-registry.v2";
+export type AssetPolicyRegistrySchema = typeof ASSET_POLICY_REGISTRY_SCHEMA | typeof ASSET_POLICY_REGISTRY_SCHEMA_V2;
 export type AssetPolicyChainFamily = "evm" | "solana" | "tron";
 export type AssetPolicyRail = "direct" | "gasless" | "x402" | "bridge" | "swap";
 export interface AssetRailAdmission {
@@ -19,11 +23,25 @@ export interface AssetPolicyRow {
     readonly symbol: string;
     readonly decimals: number;
     readonly rails: AssetRailAdmission;
-    readonly caps: AssetAtomicCaps;
-    readonly mechanismPins?: Readonly<Partial<Record<"gasless" | "x402" | "bridge", Readonly<{
-        provider: string;
-        reference: string;
-    }>>>>;
+    /** Version 1 only: one cap pair shared by every admitted rail. */
+    readonly caps?: AssetAtomicCaps;
+    /** Version 2 only: exactly one cap pair for each admitted rail and no other rail. */
+    readonly railCaps?: Readonly<Partial<Record<AssetPolicyRail, AssetAtomicCaps>>>;
+    readonly mechanismPins?: Readonly<Partial<{
+        gasless: Readonly<{
+            provider: string;
+            reference: string;
+        }>;
+        x402: Readonly<{
+            provider: string;
+            reference: string;
+        }>;
+        bridge: Readonly<{
+            provider: string;
+            reference: string;
+        }>;
+        swap: SwapMechanismPin;
+    }>>;
 }
 export interface AssetPolicyChain {
     /** Exact network identity: eip155 chain ID, Solana genesis hash, or TRON genesis block ID. */
@@ -33,7 +51,7 @@ export interface AssetPolicyChain {
     readonly assets: readonly AssetPolicyRow[];
 }
 export interface AssetPolicyRegistry {
-    readonly schemaVersion: typeof ASSET_POLICY_REGISTRY_SCHEMA;
+    readonly schemaVersion: AssetPolicyRegistrySchema;
     readonly registryVersion: string;
     readonly publishedAt: string;
     readonly effectiveDate: string;
@@ -71,6 +89,8 @@ export interface AssetPolicyAdmission {
     readonly family: AssetPolicyChainFamily;
     readonly asset: AssetPolicyRow;
     readonly rail: AssetPolicyRail;
+    /** The exact cap pair applied to this rail. */
+    readonly caps: AssetAtomicCaps;
     readonly amountAtomic: string;
     readonly dailyUsageAtomic: string;
     readonly dailyRemainingAtomic: string;

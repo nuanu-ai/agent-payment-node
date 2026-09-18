@@ -20,6 +20,7 @@ export class RuntimeContext {
     chainAccounts;
     railApproval;
     chainPolicyApproval;
+    allowlistPolicyApproval;
     state;
     native;
     keychainProbe;
@@ -75,6 +76,8 @@ export class RuntimeContext {
             this.railApproval = dependencies.railApproval;
         if (dependencies.chainPolicyApproval !== undefined)
             this.chainPolicyApproval = dependencies.chainPolicyApproval;
+        if (dependencies.allowlistPolicyApproval !== undefined)
+            this.allowlistPolicyApproval = dependencies.allowlistPolicyApproval;
         this.state = dependencies.state;
         if (dependencies.native !== undefined)
             this.native = dependencies.native;

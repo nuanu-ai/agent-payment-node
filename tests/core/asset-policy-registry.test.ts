@@ -44,7 +44,7 @@ test("asset registry seals a deterministic versioned and dated policy digest", (
     effectiveDate: unsigned.effectiveDate,
     chains: unsigned.chains.map((chain) => ({
       assets: chain.assets.map((asset) => ({
-        caps: { dailyLimitAtomic: asset.caps.dailyLimitAtomic, maximumPerTransferAtomic: asset.caps.maximumPerTransferAtomic },
+        caps: { dailyLimitAtomic: asset.caps!.dailyLimitAtomic, maximumPerTransferAtomic: asset.caps!.maximumPerTransferAtomic },
         rails: { swap: asset.rails.swap, bridge: asset.rails.bridge, x402: asset.rails.x402,
           gasless: asset.rails.gasless, direct: asset.rails.direct },
         decimals: asset.decimals, symbol: asset.symbol, identifier: asset.identifier, kind: asset.kind,
