@@ -49,7 +49,8 @@ export async function validateFinalizedJupiterReceipt(reader: SolanaProofReaderP
   if (integer(statusContext.slot) < slot) invalid("Jupiter status context is older than the finalized transaction.");
   const transactionParams = [expected.signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }] as const;
   const response = record(await reader.call("getTransaction", transactionParams), "Jupiter finalized transaction");
-  if (integer(response.slot) !== slot || response.version !== 0) invalid("Jupiter finalized transaction slot or version changed.");
+  // The Solana transport parses every JSON number as a bigint, so the v0 marker arrives as 0n.
+  if (integer(response.slot) !== slot || integer(response.version) !== 0) invalid("Jupiter finalized transaction slot or version changed.");
   const meta = record(response.meta, "Jupiter transaction meta");
   if (meta.err !== null) invalid("Jupiter finalized transaction failed.");
   const encoded = array(response.transaction, 2);

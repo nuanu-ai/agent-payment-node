@@ -4,7 +4,7 @@ import { bridgeRpcCall } from "../../lifi/rpc.js";
 import { SwapOperationRepository } from "../repository.js";
 import { GuardedSwapApprovalRepository, GuardedSwapRuntime } from "../runtime.js";
 import { GuardedSwapService } from "../service.js";
-import { EncryptedUniswapExecutionEffectStore, LocalUniswapEthereumSigner, UniswapEthereumExecutionDriver, UniswapEthereumReceiptObserver, UniswapExecutionBindingStore, UniswapExecutionGuard, UniswapSingleSendAdapter } from "../uniswap-ethereum/execution/index.js";
+import { EncryptedUniswapExecutionEffectStore, LocalUniswapEthereumSigner, UniswapBalanceEvidenceStore, UniswapEthereumExecutionDriver, UniswapEthereumReceiptObserver, UniswapExecutionBindingStore, UniswapExecutionGuard, UniswapSingleSendAdapter } from "../uniswap-ethereum/execution/index.js";
 import { UniswapLocalOwnerAdmission } from "./admission.js";
 import { KeylessUniswapQuoteBuilder } from "./builder.js";
 import { SavedUniswapQuoteStore } from "./material.js";
@@ -26,7 +26,7 @@ export function createUniswapKeylessRuntime(options) {
     const quotes = new SavedUniswapQuoteStore(root), operations = new SwapOperationRepository(root), usage = new AssetUsageLedger(root);
     const effects = new EncryptedUniswapExecutionEffectStore(state, wrapping), admission = new UniswapLocalOwnerAdmission(state, options.policy);
     const signer = new LocalUniswapEthereumSigner(state, wrapping, effects), sender = new UniswapSingleSendAdapter(effects, call);
-    const observer = new UniswapEthereumReceiptObserver(call, () => clock.now());
+    const observer = new UniswapEthereumReceiptObserver(call, () => clock.now(), new UniswapBalanceEvidenceStore(root));
     const execution = new UniswapEthereumExecutionDriver({ core: new GuardedSwapService(operations, usage),
         protocolRegistry: UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, admission, guard: new UniswapExecutionGuard(call, clock, options.verifyPins),
         bindings: new UniswapExecutionBindingStore(root), signer, sender, observer, effects, clock });

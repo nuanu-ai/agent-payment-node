@@ -4,6 +4,7 @@ export { UniswapExecutionGuard } from "./guard.js";
 export { assertInjectedProtocol, createUniswapApprovalRequest, createUniswapExecutionBinding, validateFreshness, validateUniswapExecutionBinding, verifySignedUniswapTransaction } from "./binding.js";
 export { EncryptedUniswapExecutionEffectStore, newUniswapExecutionEffect, validateEffect } from "./effect-store.js";
 export { UniswapEthereumReceiptObserver, type UniswapObservedOutcome } from "./observer.js";
+export { UniswapBalanceEvidenceStore, sealUniswapBalanceEvidence, validateUniswapBalanceEvidence, type UniswapBalanceEvidence, type UniswapBalanceEvidencePort } from "./evidence-store.js";
 export { UniswapSingleSendAdapter } from "./sender.js";
 export { LocalUniswapEthereumSigner } from "./signer.js";
 export type * from "./types.js";

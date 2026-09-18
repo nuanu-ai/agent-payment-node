@@ -173,3 +173,11 @@ test("runtime and CLI inputs reject prototypes, excess fields, noncanonical inte
   assert.throws(() => bindArgv(args), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bindArgv(["swap", "ethereum", "uniswap", "status", "--operation", H("A")]), { code: "APN_INVALID_INPUT" });
 });
+
+test("slippage above the owner cap is refused with its reason and both values", () => {
+  const args = ["swap", "ethereum", "uniswap", "quote", "--profile", "swap-test", "--account", ACCOUNT, "--to", RECIPIENT,
+    "--output-token", UNISWAP_USDC, "--amount", input, "--slippage-bps", "200", "--owner-slippage-cap-bps", "100", "--deadline", String(deadline),
+    "--max-gas-limit", "150000", "--max-fee-per-gas", "2000000000", "--max-priority-fee-per-gas", "100000000"];
+  assert.throws(() => bindArgv(args), { code: "APN_INVALID_INPUT", message: "Uniswap slippage 200 bps exceeds the owner cap of 100 bps.",
+    details: { reason: "swap_slippage_above_owner_cap", slippage_bps: "200", owner_slippage_cap_bps: "100" } });
+});

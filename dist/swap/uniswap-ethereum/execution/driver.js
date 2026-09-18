@@ -56,7 +56,7 @@ export class UniswapEthereumExecutionDriver {
         }
         const accepted = sent !== null && sent.kind === "submitted" && sent.transactionHash === transactionHash;
         operation = await this.d.core.recordPossibleSend(operation, accepted ? "submitted" : "unknown_finality", this.d.clock.now());
-        return await this.observeExact(operation, binding, transactionHash);
+        return await this.observeExact(operation, binding, transactionHash, false);
     }
     async observe(input) {
         let operation = validateSwapOperation(input.operation);
@@ -74,14 +74,20 @@ export class UniswapEthereumExecutionDriver {
         }
         if (operation.state === "submitting")
             operation = await this.d.core.recordPossibleSend(operation, effect.phase === "send_accepted" ? "submitted" : "unknown_finality", this.d.clock.now());
-        return await this.observeExact(operation, binding, effect.transactionHash);
+        return await this.observeExact(operation, binding, effect.transactionHash, true);
     }
-    async observeExact(operation, binding, transactionHash) {
+    /**
+     * Right after the single send an observation failure must not hide the recorded send, so it returns the operation. A status
+     * or resume call surfaces the failure instead: the state stays durable and the caller sees why it did not advance.
+     */
+    async observeExact(operation, binding, transactionHash, surfaceFailure) {
         let outcome;
         try {
             outcome = await this.d.observer.observeOutcome(operation, binding, transactionHash);
         }
-        catch {
+        catch (error) {
+            if (surfaceFailure)
+                throw error;
             return operation;
         }
         if (outcome === null || (operation.state !== "submitted" && operation.state !== "unknown_finality"))
