@@ -6,8 +6,10 @@ import { ApnError } from "../errors.js";
 import { protocolFailure, rpcArray, rpcAtomic, rpcRecord, solanaAddress, type SolanaRpcPort } from "./rpc.js";
 
 export interface SolanaAccountInfo { readonly owner: string; readonly lamports: bigint; readonly data: Buffer; readonly executable: boolean }
-export async function associatedUsdc(owner: string): Promise<string> {
-  const [ata] = await findAssociatedTokenPda({ owner: address(solanaAddress(owner)), mint: address(SOLANA_USDC), tokenProgram: TOKEN_PROGRAM_ADDRESS });
+export async function associatedUsdc(owner: string): Promise<string> { return await associatedToken(owner, SOLANA_USDC); }
+/** The classic SPL associated token account of one owner for one pinned mint. */
+export async function associatedToken(owner: string, mint: string): Promise<string> {
+  const [ata] = await findAssociatedTokenPda({ owner: address(solanaAddress(owner)), mint: address(solanaAddress(mint)), tokenProgram: TOKEN_PROGRAM_ADDRESS });
   return ata;
 }
 export async function readAccounts(rpc: SolanaRpcPort, addresses: readonly string[]): Promise<{ readonly slot: bigint; readonly accounts: readonly (SolanaAccountInfo | null)[] }> {
@@ -26,11 +28,13 @@ export function requireNativeAccount(account: SolanaAccountInfo | null): bigint 
   if (account.owner !== SYSTEM_PROGRAM_ADDRESS || account.data.length !== 0 || account.executable) protocolFailure();
   return account.lamports;
 }
-export function requireUsdcMint(account: SolanaAccountInfo | null): void {
+export function requireUsdcMint(account: SolanaAccountInfo | null): void { requireTokenMint(account, 6); }
+/** A pinned mint must be an initialized classic SPL mint with exactly the pinned decimals. */
+export function requireTokenMint(account: SolanaAccountInfo | null, decimals: number): void {
   if (account === null || account.owner !== TOKEN_PROGRAM_ADDRESS || account.executable || account.data.length !== 82) protocolFailure();
   try {
     const mint = getMintDecoder().decode(account.data);
-    if (!mint.isInitialized || mint.decimals !== 6) protocolFailure();
+    if (!mint.isInitialized || mint.decimals !== decimals) protocolFailure();
   } catch { protocolFailure(); }
 }
 export function usdcAmount(account: SolanaAccountInfo | null, owner: string): bigint {
@@ -47,7 +51,7 @@ export function tokenAccountAmount(account: SolanaAccountInfo | null, owner: str
   } catch { return protocolFailure(); }
 }
 export function requireSolanaFunds(nativeBalance: bigint, tokenBalance: bigint, amount: bigint, feeAndRent: bigint, native: boolean): void {
-  if (!native && tokenBalance < amount) throw new ApnError("APN_INSUFFICIENT_ASSET", "The Solana USDC balance cannot cover the transfer.");
+  if (!native && tokenBalance < amount) throw new ApnError("APN_INSUFFICIENT_ASSET", "The Solana token balance cannot cover the transfer.");
   if (nativeBalance < feeAndRent + (native ? amount : 0n)) throw new ApnError("APN_INSUFFICIENT_GAS", "The SOL balance cannot cover principal and the approved fee/rent reserve.");
 }
 function decodeAccount(value: unknown): SolanaAccountInfo {

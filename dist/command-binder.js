@@ -272,8 +272,8 @@ function bindParsedCatalog(parsed) {
 }
 function solanaAsset(options) {
     const asset = value(options, "--asset");
-    if (asset !== "sol" && asset !== "usdc")
-        throw new ApnError("APN_INVALID_INPUT", "Select the explicit sol or usdc asset alias.");
+    if (asset !== "sol" && asset !== "usdc" && asset !== "usdt")
+        throw new ApnError("APN_INVALID_INPUT", "Select the explicit sol, usdc or usdt asset alias.");
     return asset;
 }
 function tronAsset(options) {

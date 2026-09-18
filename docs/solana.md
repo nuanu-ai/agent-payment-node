@@ -1,7 +1,7 @@
 # Solana mainnet direct transfers
 
-This APN 0.5.21 package includes local SOL and canonical USDC transfers on
-Solana mainnet. Package availability, clean installation and live mainnet
+This APN 0.5.21 package includes local SOL, canonical USDC and pinned USDT
+transfers on Solana mainnet. Package availability, clean installation and live mainnet
 payment acceptance require separate evidence.
 
 | Profile | Account and balance | Direct transfer |
@@ -50,10 +50,13 @@ apn wallet balance-solana --profile solana-local --asset sol
 apn wallet balance-solana --profile solana-local --asset usdc
 ```
 
-The only assets are native SOL (9 decimals) and Circle USDC mint
-`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` (6 decimals). USDC uses the
-canonical SPL Token program and associated token accounts. Arbitrary mints,
-Token-2022 assets and self-transfers are outside this bounded direct journey.
+The only assets are native SOL (9 decimals), Circle USDC mint
+`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` (6 decimals) and the frozen
+allowlist's USDT mint `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`
+(`--asset usdt`, 6 decimals). Both tokens use the canonical SPL Token program
+and associated token accounts, with the same mint, decimals and balance-delta
+evidence checks. Arbitrary mints, Token-2022 assets and self-transfers are
+outside this bounded direct journey. The Coinbase `awal` route has no USDT path.
 
 ## Policy, preparation and approval
 

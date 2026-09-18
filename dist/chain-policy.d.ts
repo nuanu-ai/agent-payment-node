@@ -2,6 +2,8 @@ import type { ChainAccount, ChainAsset, ChainAssetAlias, DirectRailName } from "
 import type { RailOperationRecord } from "./rail-operation-model.js";
 export declare const SOLANA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export declare const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+/** The frozen allowlist's pinned Solana USDT mint (classic SPL Token, six decimals). */
+export declare const SOLANA_USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 export interface ChainPolicy {
     readonly schemaVersion: "apn.chain-policy.v1";
     readonly account: ChainAccount;

@@ -7,9 +7,12 @@ import { TRON_GENESIS } from "./tron/constants.js";
 
 export const SOLANA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+/** The frozen allowlist's pinned Solana USDT mint (classic SPL Token, six decimals). */
+export const SOLANA_USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const ASSETS: readonly ChainAsset[] = [
   { rail: "solana", network: "mainnet", alias: "sol", kind: "native", identifier: "native:sol", symbol: "SOL", decimals: 9 },
   { rail: "solana", network: "mainnet", alias: "usdc", kind: "token", identifier: SOLANA_USDC, symbol: "USDC", decimals: 6 },
+  { rail: "solana", network: "mainnet", alias: "usdt", kind: "token", identifier: SOLANA_USDT, symbol: "USDT", decimals: 6 },
   { rail: "tron", network: "mainnet", alias: "trx", kind: "native", identifier: "native:trx", symbol: "TRX", decimals: 6 },
   { rail: "tron", network: "mainnet", alias: "usdt", kind: "token", identifier: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", symbol: "USDT", decimals: 6 },
 ];

@@ -1,9 +1,9 @@
 import { address, getBase58Decoder, getBase64EncodedWireTransaction, getCompiledTransactionMessageDecoder, getPublicKeyFromAddress, getSignatureFromTransaction, getTransactionDecoder, verifySignature } from "@solana/kit";
 import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { atomic, SOLANA_USDC } from "../chain-policy.js";
+import { atomic } from "../chain-policy.js";
 import { railSendLifetime } from "../rail-send-binding.js";
-import { associatedUsdc } from "./accounts.js";
+import { associatedToken } from "./accounts.js";
 import { solanaTransferInstructions, validateSolanaMessage } from "./message.js";
 import { assertSolanaNetwork, protocolFailure, rpcArray, rpcAtomic, rpcRecord, solanaAddress, solanaSignature } from "./rpc.js";
 const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
@@ -62,9 +62,9 @@ export async function inspectSolana(rpc, account, prepared, transactionId, now, 
     if (fee > atomic(prepared.economics.networkFeeMaximumAtomic))
         protocolFailure();
     let rent = 0n;
-    if (success && prepared.asset.alias === "usdc") {
-        const source = await associatedUsdc(prepared.sender);
-        const destination = await associatedUsdc(prepared.recipient);
+    if (success && prepared.asset.kind === "token") {
+        const source = await associatedToken(prepared.sender, prepared.asset.identifier);
+        const destination = await associatedToken(prepared.recipient, prepared.asset.identifier);
         if (source !== prepared.sourceTokenAccount || destination !== prepared.destinationTokenAccount)
             protocolFailure();
         const before = tokenAmounts(meta.preTokenBalances, keys, prepared, prepared.createsRecipientAccount);
@@ -188,14 +188,14 @@ async function verifyInstructions(value, prepared) {
                 protocolFailure();
             transfers += 1;
         }
-        else if (prepared.asset.alias === "usdc" && instruction.programId === TOKEN_PROGRAM_ADDRESS && parsed.type === "transferChecked") {
+        else if (prepared.asset.kind === "token" && instruction.programId === TOKEN_PROGRAM_ADDRESS && parsed.type === "transferChecked") {
             const amount = rpcRecord(info.tokenAmount);
-            if (info.source !== prepared.sourceTokenAccount || info.destination !== prepared.destinationTokenAccount || info.authority !== prepared.sender || info.mint !== SOLANA_USDC || amount.amount !== prepared.amountAtomic || rpcAtomic(amount.decimals) !== 6n)
+            if (info.source !== prepared.sourceTokenAccount || info.destination !== prepared.destinationTokenAccount || info.authority !== prepared.sender || info.mint !== prepared.asset.identifier || amount.amount !== prepared.amountAtomic || rpcAtomic(amount.decimals) !== BigInt(prepared.asset.decimals))
                 protocolFailure();
             transfers += 1;
         }
-        else if (prepared.asset.alias === "usdc" && instruction.programId === ASSOCIATED_TOKEN_PROGRAM_ADDRESS && parsed.type === "createIdempotent") {
-            if (!prepared.createsRecipientAccount || info.source !== prepared.economics.rentPayer || info.account !== prepared.destinationTokenAccount || info.wallet !== prepared.recipient || info.mint !== SOLANA_USDC || info.systemProgram !== SYSTEM_PROGRAM_ADDRESS || info.tokenProgram !== TOKEN_PROGRAM_ADDRESS)
+        else if (prepared.asset.kind === "token" && instruction.programId === ASSOCIATED_TOKEN_PROGRAM_ADDRESS && parsed.type === "createIdempotent") {
+            if (!prepared.createsRecipientAccount || info.source !== prepared.economics.rentPayer || info.account !== prepared.destinationTokenAccount || info.wallet !== prepared.recipient || info.mint !== prepared.asset.identifier || info.systemProgram !== SYSTEM_PROGRAM_ADDRESS || info.tokenProgram !== TOKEN_PROGRAM_ADDRESS)
                 protocolFailure();
             creates += 1;
         }
@@ -213,7 +213,7 @@ function tokenAmounts(value, keys, prepared, allowMissingRecipient) {
         const index = rpcAtomic(record.accountIndex);
         const amount = rpcRecord(record.uiTokenAmount);
         const key = keys[Number(index)];
-        if (record.mint !== SOLANA_USDC || record.programId !== TOKEN_PROGRAM_ADDRESS || rpcAtomic(amount.decimals) !== 6n)
+        if (record.mint !== prepared.asset.identifier || record.programId !== TOKEN_PROGRAM_ADDRESS || rpcAtomic(amount.decimals) !== BigInt(prepared.asset.decimals))
             protocolFailure();
         if (key === prepared.sourceTokenAccount && record.owner === prepared.sender && source === undefined)
             source = atomic(amount.amount);

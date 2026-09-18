@@ -5,16 +5,18 @@ import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { loadActiveAssetPolicyRegistry } from "../../src/allowlist-active-policy.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { chainAsset } from "../../src/chain-policy.js";
+import { chainAsset, SOLANA_USDT } from "../../src/chain-policy.js";
+import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { DIRECT_ALLOWLIST_SCHEMA, DirectAllowlistGate, requireListedDirectAsset, type DirectAllowlistSubject } from "../../src/direct-allowlist-gate.js";
 import type { DirectAssetUsageLease } from "../../src/direct-asset-usage.js";
 import type { DirectRailPort } from "../../src/direct-rail-ports.js";
 import { createMcpServer } from "../../src/mcp-server.js";
+import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import { requireListedRailAsset } from "../../src/rail-direct-allowlist.js";
 import { newRailOperation, type RailOperationRecord } from "../../src/rail-operation-model.js";
-import { SOLANA_CHAIN, TRON_CHAIN, directUsage, reserveRailLease, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
+import { SOLANA_CHAIN, TRON_CHAIN, activateDirectPolicy, directAdmission, directUsage, reserveRailLease, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 import { TRON_RECIPIENT, tronFixture } from "./tron-helpers.js";
@@ -47,7 +49,7 @@ async function seedUsage(root: string, s: Fixture, chain: string, amountAtomic: 
 }
 
 test("every TRON and Solana alias resolves on the frozen list; unlisted networks and token identities are refused", () => {
-  for (const [rail, alias] of [["tron", "trx"], ["tron", "usdt"], ["solana", "sol"], ["solana", "usdc"]] as const) requireListedRailAsset(chainAsset(rail, alias));
+  for (const [rail, alias] of [["tron", "trx"], ["tron", "usdt"], ["solana", "sol"], ["solana", "usdc"], ["solana", "usdt"]] as const) requireListedRailAsset(chainAsset(rail, alias));
   const reason = (reasonName: string) => (error: unknown) => (error as { code?: string; details?: { reason?: string } }).code === "APN_ALLOWLIST_REFUSED" &&
     (error as { details: { reason: string } }).details.reason === reasonName;
   assert.throws(() => requireListedDirectAsset(`tron:${"1".repeat(64)}`, { kind: "native", identifier: null }), reason("allowlist_network_unlisted"));
@@ -157,4 +159,32 @@ test("SOL owner caps refuse per operation and per day; the Solana lease is durab
   const lease = (await s.core.rails.records.findOperation(id))!.allowlistLease!;
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease.reservation, lease.reservation.reservationId))?.state, "finalized");
   assert.equal(await directUsage(temporary.root, s.account.address, SOLANA_CHAIN, null, s.now), "2000001000");
+});
+
+test("Solana USDT uses its pinned mint beside USDC: CLI and MCP bind it, owner caps apply, and it completes with the lease finalized", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await solanaFixture(temporary.root); await s.rpc.useMint(SOLANA_USDT);
+  const input = { profile: s.account.profile, asset: "usdt", to: SOL_RECIPIENT, amount: "1.25", max_fee_sol: "0.003", idempotency_key: "solana-usdt-bind-0001" };
+  const tool = MCP_TOOLS.find((entry) => entry.name === "apn_pay_transfer_prepare_solana")!;
+  const argv = ["pay", "transfer", "prepare-solana", ...Object.entries(input).flatMap(([name, value]) => [`--${name.replaceAll("_", "-")}`, value])];
+  assert.deepEqual(bindArgv(argv), bindMcpInput(tool.command, input));
+  const balance = await s.core.execute({ command: "wallet.balance-solana", profile: s.account.profile, asset: "usdt" });
+  assert.equal(balance.ok, true, balance.error?.message);
+  const admitted = await s.core.execute({ command: "policy.admit-solana", profile: s.account.profile, asset: "usdt", maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "0.003" });
+  assert.equal(admitted.ok, true, admitted.error?.message);
+  const prepare = async (amount: string, idempotencyKey: string) => await s.core.execute({ command: "transfer.prepare-solana", profile: s.account.profile,
+    asset: "usdt", recipient: SOL_RECIPIENT, amount, maximumFee: "0.003", idempotencyKey });
+  refusal(await prepare("1", "solana-usdt-0001"), "allowlist_direct_not_admitted");
+  await activateDirectPolicy(temporary.root, s.account.profile, { accounts: { solana: s.account.address }, now: s.now,
+    admissions: [directAdmission(SOLANA_CHAIN, SOLANA_USDT, { maximumPerTransferAtomic: "3000000", dailyLimitAtomic: "10000000" })] });
+  refusal(await prepare("3.5", "solana-usdt-0002"), "allowlist_per_transfer_cap_exceeded");
+  const prepared = await prepare("1.25", "solana-usdt-0003"); assert.equal(prepared.ok, true, prepared.error?.message);
+  const id = (prepared.operation as { operation_id: string }).operation_id;
+  const record = (await s.core.rails.records.findOperation(id))!; s.rpc.prepared = record.prepared;
+  assert.equal(record.prepared.asset.identifier, SOLANA_USDT); assert.equal(record.prepared.sourceTokenAccount, s.rpc.sourceAta);
+  const approved = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(approved.ok, true, approved.error?.message);
+  assert.equal((approved.operation as { state: string }).state, "completed");
+  const lease = (await s.core.rails.records.findOperation(id))!.allowlistLease!;
+  assert.equal((await new AssetUsageLedger(temporary.root).load(lease.reservation, lease.reservation.reservationId))?.state, "finalized");
+  assert.equal(await directUsage(temporary.root, s.account.address, SOLANA_CHAIN, SOLANA_USDT, s.now), "1250000");
 });

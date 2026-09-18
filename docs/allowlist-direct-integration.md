@@ -25,6 +25,7 @@ Example direct admissions, using the owner's example caps:
 - **No active policy means no direct transfer.** EVM direct transfers used to have no amount cap, only `--max-fee-wei`. They now refuse with `allowlist_policy_required` until the owner activates a policy that admits the asset on the direct rail.
 - EVM accepts only frozen-list contracts. The arbitrary ERC-20 address path is gone, and decimals come from the list row. A supplied `--decimals` must equal the list row, and a contract that reports other decimals is refused with `APN_ASSET_MISMATCH`.
 - EVM direct transfers remain enabled only on Base, Ethereum and Arbitrum One. The other listed EVM networks refuse with `allowlist_network_not_enabled`.
+- Solana gains the list's USDT as `--asset usdt`. It uses pinned mint `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB` and follows the same SPL token path and evidence checks as USDC. Admit it with its own chain policy (`policy admit-solana --asset usdt`) and a direct allowlist admission.
 - Records prepared before this gate still read, validate and resume. Approving one is refused with `allowlist_binding_missing` and ends it before effect. Prepare it again.
 
 ## Refusals
