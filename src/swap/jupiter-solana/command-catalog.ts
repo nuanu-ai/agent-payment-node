@@ -3,6 +3,7 @@ import type { CommandRequest } from "../../commands.js";
 import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { solanaAddress } from "../../solana/rpc.js";
+import { slippageAboveCap } from "../slippage-refusal.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
   ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
@@ -57,7 +58,7 @@ export function bindJupiterCommand(path: string, options: Readonly<Record<string
   if (action === "quote") {
     exact(options, ["--profile", "--account", "--to", "--amount", "--slippage-bps", "--owner-slippage-cap-bps"]);
     const slippageBps = basisPoints(options["--slippage-bps"]), ownerSlippageCapBps = basisPoints(options["--owner-slippage-cap-bps"]);
-    if (slippageBps > ownerSlippageCapBps) invalid("Jupiter slippage exceeds the owner cap.");
+    if (slippageBps > ownerSlippageCapBps) slippageAboveCap("Jupiter", slippageBps, ownerSlippageCapBps);
     return { command: "swap.jupiter.quote", profile: options["--profile"]!, account: solanaAddress(options["--account"]!),
       recipient: solanaAddress(options["--to"]!), amountAtomic: positiveAtomic(options["--amount"]), slippageBps, ownerSlippageCapBps };
   }

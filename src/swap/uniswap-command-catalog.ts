@@ -3,6 +3,7 @@ import type { CommandRequest } from "../commands.js";
 import { exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { getAddress } from "viem";
+import { slippageAboveCap } from "./slippage-refusal.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
   ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
@@ -56,7 +57,8 @@ export function bindUniswapCommand(path: string, o: Readonly<Record<string, stri
   exact(o, ["--profile", "--account", "--to", "--output-token", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--deadline",
     "--max-gas-limit", "--max-fee-per-gas", "--max-priority-fee-per-gas"]);
   const slippageBps = safeInteger(o["--slippage-bps"]), ownerSlippageCapBps = safeInteger(o["--owner-slippage-cap-bps"]);
-  if (slippageBps > ownerSlippageCapBps || ownerSlippageCapBps > 10_000) invalid("Uniswap slippage exceeds the owner cap.");
+  if (ownerSlippageCapBps > 10_000) invalid("Uniswap owner slippage cap must be at most 10000 bps.");
+  if (slippageBps > ownerSlippageCapBps) slippageAboveCap("Uniswap", slippageBps, ownerSlippageCapBps);
   return { command: "swap.uniswap.quote", profile: o["--profile"]!, account: evmAddress(o["--account"]), recipient: evmAddress(o["--to"]),
     outputToken: evmAddress(o["--output-token"]), amountAtomic: o["--amount"]!,
     slippageBps, ownerSlippageCapBps,
