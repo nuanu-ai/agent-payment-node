@@ -331,6 +331,8 @@ export type CommandRequest = {
     readonly amount: string;
     readonly asset?: EvmAssetSelection;
     readonly maxFeeWei?: string;
+    /** Owner tip per gas; replaces the RPC suggestion. */
+    readonly priorityFeeWei?: string;
 } | {
     readonly command: "transfer.approve";
     readonly operationId: string;

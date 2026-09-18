@@ -602,7 +602,7 @@ cache: every run reads the chains.
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
 apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>]
-apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] --to <address> --amount <decimal> --max-fee-wei <wei> --idempotency-key <key>
+apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] --to <address> --amount <decimal> --max-fee-wei <wei> [--priority-fee-wei <wei>] --idempotency-key <key>
 apn --version
 apn mcp serve
 apn mcp config
