@@ -58,6 +58,15 @@ export function validateEnergyBounds(input: SunSwapTransactionBounds & { readonl
   if (fee > maximum || energy * price > fee) throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "SunSwap energy or fee_limit exceeds the frozen budget.");
 }
 export function sunSwapUnsignedPayloadHash(transaction: SunSwapUnsignedTransaction): string { return sha256(canonicalJson(transaction)); }
+/**
+ * Bandwidth java-tron charges for the signed transaction: the serialized Transaction (raw_data field and one
+ * 65-byte signature field) plus the 64-byte MAX_RESULT_SIZE_IN_TX reserved for contract transactions.
+ */
+export function sunSwapMaximumBandwidthBytes(transaction: SunSwapUnsignedTransaction): bigint {
+  const raw = BigInt(transaction.raw_data_hex.length / 2);
+  let lengthBytes = 1n; for (let value = raw >> 7n; value > 0n; value >>= 7n) lengthBytes++;
+  return 1n + lengthBytes + raw + 1n + 1n + 65n + 64n;
+}
 function positive(value: string): bigint { if (!/^[1-9][0-9]{0,77}$/u.test(value)) invalid(); return BigInt(value); }
 function safe(value: string): number { const number = positive(value); if (number > BigInt(Number.MAX_SAFE_INTEGER)) invalid(); return Number(number); }
 function invalid(): never { throw new ApnError("APN_INVALID_INPUT", "SunSwap unsigned transaction or resource bounds are invalid."); }

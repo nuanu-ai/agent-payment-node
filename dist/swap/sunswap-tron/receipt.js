@@ -16,12 +16,14 @@ export async function observeSunSwapReceipt(rpc, expected) {
     return validateSunSwapReceipt(transaction, info, solid.toString(), expected);
 }
 /**
- * Proves one solidified successful V2 swap: exact txid and bytes, owner debit = call_value (input) + fee, one WTRX
- * deposit of the input by the router, one pair Swap to the owner, and one USDT Transfer from the pair to the owner >= minOut.
+ * Proves one solidified successful V2 swap: exact txid and bytes, owner debit = call_value (input) + fee where
+ * fee = energy_fee (<= fee_limit) + net_fee (<= bandwidth budget), one WTRX deposit of the input by the router, one pair
+ * Swap to the owner, and one USDT Transfer from the pair to the owner >= minOut.
  */
 export function validateSunSwapReceipt(transactionValue, infoValue, solidifiedHeadNumber, expected) {
     if (!isPlainRecord(expected) || !exactKeys(expected, ["transactionHash", "recipient", "inputAmountAtomic", "minimumOutputAtomic",
-        "unsignedRawDataHex", "maximumFeeSun"]) || !/^[a-f0-9]{64}$/u.test(expected.transactionHash) ||
+        "unsignedRawDataHex", "maximumFeeSun", "maximumBandwidthFeeSun"]) || !/^[a-f0-9]{64}$/u.test(expected.transactionHash) ||
+        typeof expected.maximumBandwidthFeeSun !== "string" || !/^[1-9][0-9]{0,77}$/u.test(expected.maximumBandwidthFeeSun) ||
         !/^[1-9][0-9]{0,15}$/u.test(expected.inputAmountAtomic) || !/^[1-9][0-9]{0,77}$/u.test(expected.minimumOutputAtomic) ||
         !/^[1-9][0-9]{0,77}$/u.test(expected.maximumFeeSun) || !/^[a-f0-9]+$/u.test(expected.unsignedRawDataHex) ||
         expected.unsignedRawDataHex.length % 2 !== 0 || typeof expected.recipient !== "string" || canonical(expected.recipient) !== expected.recipient)
@@ -40,8 +42,10 @@ export function validateSunSwapReceipt(transactionValue, infoValue, solidifiedHe
     const receipt = record(info.receipt);
     if (receipt.result !== "SUCCESS")
         fail();
-    const block = integer(info.blockNumber), solid = integer(solidifiedHeadNumber), fee = info.fee === undefined ? 0n : integer(info.fee);
-    if (block <= 0n || solid < block || fee > BigInt(expected.maximumFeeSun))
+    const block = integer(info.blockNumber), solid = integer(solidifiedHeadNumber), fee = optional(info.fee);
+    const energyFee = optional(receipt.energy_fee), bandwidthFee = optional(receipt.net_fee);
+    if (block <= 0n || solid < block || fee !== energyFee + bandwidthFee || energyFee > BigInt(expected.maximumFeeSun) ||
+        bandwidthFee > BigInt(expected.maximumBandwidthFeeSun))
         fail();
     const input = BigInt(expected.inputAmountAtomic), owner = word(expected.recipient), router = word(SUNSWAP_V2_ROUTER);
     const logs = array(info.log, 64);
@@ -95,6 +99,7 @@ function array(value, maximum) {
             fail();
     return value;
 }
+function optional(value) { return value === undefined ? 0n : integer(value); }
 function integer(value) {
     if (typeof value === "number" && !Number.isSafeInteger(value))
         fail();

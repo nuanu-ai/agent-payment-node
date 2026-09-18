@@ -100,7 +100,7 @@ test("simulation runs the exact unsigned call from the owner, bound to the recor
   high.calldata = encodeSunSwapCalldata({ owner: OWNER, recipient: OWNER, inputAmountAtomic: "1000000",
     minimumOutputAtomic: high.minimumOutputAtomic, deadlineSeconds: frozen.deadlineSeconds });
   await assert.rejects(simulateSunSwapTransaction(new FakeSunSwapRpc(), buildSunSwapUnsignedTransaction(high), high),
-    { code: "APN_OPERATION_BLOCKED", details: { reason: "sunswap_simulated_output_below_minimum" } });
+    { code: "APN_OPERATION_BLOCKED", details: { reason: "sunswap_output_below_minimum" } });
   const drifted: any = structuredClone(tx); drifted.raw_data.fee_limit--;
   await assert.rejects(simulateSunSwapTransaction(new FakeSunSwapRpc(), drifted, frozen), { code: "APN_WALLET_MISMATCH" });
 });
@@ -124,7 +124,7 @@ test("quote snapshot binds on-chain market evidence and the simulation to the re
 test("V2 receipt proves solidified success, exact debit, WTRX deposit, pair swap and USDT output to the owner", async () => {
   const tx = buildSunSwapUnsignedTransaction(unsignedIntent());
   const expected = { transactionHash: tx.txID, recipient: OWNER, inputAmountAtomic: "1000000", minimumOutputAtomic: "300000",
-    unsignedRawDataHex: tx.raw_data_hex, maximumFeeSun: "30000000" };
+    unsignedRawDataHex: tx.raw_data_hex, maximumFeeSun: "30000000", maximumBandwidthFeeSun: "512000" };
   const fixture = v2Receipt(tx, OWNER, 1_000_000n, 334_314n);
   const proof = validateSunSwapReceipt(fixture.transaction, fixture.info, fixture.solid, expected);
   assert.equal(proof.outputAmountAtomic, "334314"); assert.equal(proof.feeSun, "12345"); assert.equal(proof.trxDebitSun, "1012345");
@@ -146,6 +146,19 @@ test("V2 receipt proves solidified success, exact debit, WTRX deposit, pair swap
     (v: any) => { v.info.id = "0".repeat(64); }, (v: any) => { v.info.log[2].address = v.info.log[2].address.toUpperCase(); },
   ]) { const value: any = v2Receipt(tx, OWNER, 1_000_000n, 334_314n); mutate(value);
     assert.throws(() => validateSunSwapReceipt(value.transaction, value.info, value.solid, expected), { code: "APN_RPC_PROTOCOL" }); }
-  const noFee: any = v2Receipt(tx, OWNER, 1_000_000n, 334_314n); delete noFee.info.fee;
+  const noFee: any = v2Receipt(tx, OWNER, 1_000_000n, 334_314n, {}); delete noFee.info.fee;
   assert.equal(validateSunSwapReceipt(noFee.transaction, noFee.info, noFee.solid, expected).trxDebitSun, "1000000");
+  // Mainnet shapes (tx 83b46330..., 1936fbed...): staked energy burns only 512000 SUN bandwidth; free bandwidth burns only energy.
+  const bandwidthOnly = v2Receipt(tx, OWNER, 1_000_000n, 334_314n, { net: 512_000n });
+  assert.equal(validateSunSwapReceipt(bandwidthOnly.transaction, bandwidthOnly.info, "124", expected).trxDebitSun, "1512000");
+  const both = v2Receipt(tx, OWNER, 1_000_000n, 334_314n, { energy: 30_000_000n, net: 512_000n });
+  assert.equal(validateSunSwapReceipt(both.transaction, both.info, "124", expected).feeSun, "30512000");
+  for (const fees of [{ energy: 30_000_001n }, { net: 512_001n }, { energy: 30_000_000n, net: 512_001n }]) {
+    const over = v2Receipt(tx, OWNER, 1_000_000n, 334_314n, fees);
+    assert.throws(() => validateSunSwapReceipt(over.transaction, over.info, "124", expected), { code: "APN_RPC_PROTOCOL" });
+  }
+  const unexplained: any = v2Receipt(tx, OWNER, 1_000_000n, 334_314n); unexplained.info.fee = "12346";
+  assert.throws(() => validateSunSwapReceipt(unexplained.transaction, unexplained.info, "124", expected), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => validateSunSwapReceipt(fixture.transaction, fixture.info, "124", { ...expected, maximumBandwidthFeeSun: "0" }),
+    { code: "APN_RPC_PROTOCOL" });
 });

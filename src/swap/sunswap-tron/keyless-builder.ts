@@ -10,7 +10,9 @@ import { priceSunSwapV2Market, readSunSwapV2Market } from "./market.js";
 import { SUNSWAP_EXECUTION_MATERIAL_SCHEMA, sunSwapGasOrEnergy, type SunSwapPreparedMaterial, type SunSwapPreparedMaterialPort } from "./prepared.js";
 import { createSunSwapQuoteSnapshot } from "./quote.js";
 import { simulateSunSwapTransaction } from "./simulation.js";
-import { buildSunSwapUnsignedTransaction, sunSwapUnsignedPayloadHash, type SunSwapUnsignedIntent } from "./transaction.js";
+import {
+  buildSunSwapUnsignedTransaction, sunSwapMaximumBandwidthBytes, sunSwapUnsignedPayloadHash, type SunSwapUnsignedIntent,
+} from "./transaction.js";
 
 /** Mirrors the generic guarded-swap read-only builder contract; the sibling runtime owns the canonical declaration. */
 export interface SunSwapGuardedPreparedMaterial {
@@ -58,14 +60,16 @@ export class SunSwapKeylessQuoteBuilder implements SunSwapGuardedReadOnlyBuilder
       maximumFeeLimitSun: request.feeLimitSun };
     const transaction = buildSunSwapUnsignedTransaction(intent);
     const simulation = await simulateSunSwapTransaction(this.rpc, transaction, intent);
-    await assertOwnerFunding(this.rpc, request.account, BigInt(request.amountAtomic) + BigInt(request.feeLimitSun));
+    const bandwidthFeeSun = sunSwapMaximumBandwidthBytes(transaction) * parameters.bandwidthPriceSun;
+    await assertOwnerFunding(this.rpc, request.account, BigInt(request.amountAtomic) + BigInt(request.feeLimitSun) + bandwidthFeeSun);
     const { energyRequired: _energy, feeLimitSun: _fee, ...proof } = simulation;
     const quote = createSunSwapQuoteSnapshot({ profile: request.profile, account: request.account, recipient: request.recipient,
       slippageBps: request.slippageBps, ownerSlippageCapBps: request.ownerSlippageCapBps, effectiveAt: request.now.toISOString(),
       expiresAt: new Date(Number(intent.expirationMs)).toISOString(), unsignedTransactionPayloadHash: sunSwapUnsignedPayloadHash(transaction),
       market, simulation: proof });
-    return await this.store.save({ quote, approvalCapAtomic: "0", gasOrEnergy: sunSwapGasOrEnergy(intent, simulation, transaction),
-      execution: { schemaVersion: SUNSWAP_EXECUTION_MATERIAL_SCHEMA, intent, transaction, simulation, market, pricing } });
+    const bandwidthPriceSun = parameters.bandwidthPriceSun.toString();
+    return await this.store.save({ quote, approvalCapAtomic: "0", gasOrEnergy: sunSwapGasOrEnergy(intent, simulation, transaction, bandwidthPriceSun),
+      execution: { schemaVersion: SUNSWAP_EXECUTION_MATERIAL_SCHEMA, intent, transaction, simulation, market, pricing, bandwidthPriceSun } });
   }
 
   async load(quoteHash: string): Promise<SunSwapPreparedMaterial | null> {
@@ -78,7 +82,11 @@ export class SunSwapKeylessQuoteBuilder implements SunSwapGuardedReadOnlyBuilder
 
 function validateRequest(input: SunSwapKeylessQuoteRequest & { readonly now: Date }) {
   if (!isPlainRecord(input) || !exactKeys(input, ["command", "profile", "account", "recipient", "amountAtomic", "slippageBps",
-    "ownerSlippageCapBps", "feeLimitSun", "deadline", "now"]) || input.command !== "swap.sunswap.quote" ||
+    "ownerSlippageCapBps", "feeLimitSun", "deadline", "now"])) {
+    invalid("SunSwap V2 quote requires exactly command, profile, account, recipient, amountAtomic, slippageBps, " +
+      "ownerSlippageCapBps, feeLimitSun, deadline and now; fee_limit and deadline have no default.");
+  }
+  if (input.command !== "swap.sunswap.quote" ||
       typeof input.profile !== "string" || !PROFILE.test(input.profile) || typeof input.account !== "string" ||
       tronAddress(input.account) !== input.account || input.recipient !== input.account) {
     invalid("SunSwap V2 quote requires a canonical owner account that is also the recipient.");
@@ -98,7 +106,8 @@ function validateRequest(input: SunSwapKeylessQuoteRequest & { readonly now: Dat
   return input;
 }
 
-async function chainParameters(rpc: TronRpcPort): Promise<{ readonly energyPriceSun: bigint; readonly maximumFeeLimitSun: bigint }> {
+interface SunSwapChainParameters { readonly energyPriceSun: bigint; readonly maximumFeeLimitSun: bigint; readonly bandwidthPriceSun: bigint }
+async function chainParameters(rpc: TronRpcPort): Promise<SunSwapChainParameters> {
   let value: unknown;
   try { value = await rpc.call("wallet/getchainparameters", {}); } catch (error) { return unavailable(error); }
   if (!isPlainRecord(value) || !Array.isArray(value.chainParameter) || value.chainParameter.length > 512) protocol();
@@ -107,10 +116,10 @@ async function chainParameters(rpc: TronRpcPort): Promise<{ readonly energyPrice
     if (rows.length !== 1) protocol();
     const amount = tronAtomic((rows[0] as Record<string, unknown>).value); if (amount <= 0n) protocol(); return amount;
   };
-  return { energyPriceSun: read("getEnergyFee"), maximumFeeLimitSun: read("getMaxFeeLimit") };
+  return { energyPriceSun: read("getEnergyFee"), maximumFeeLimitSun: read("getMaxFeeLimit"), bandwidthPriceSun: read("getTransactionFee") };
 }
 
-/** Economic guard: the owner must hold the exact call value plus the full owner fee_limit before any signing exists. */
+/** Economic guard: the owner must hold the call value, the full fee_limit and the full bandwidth burn before any signing exists. */
 async function assertOwnerFunding(rpc: TronRpcPort, owner: string, requiredSun: bigint): Promise<void> {
   let value: unknown;
   try { value = await rpc.call("wallet/getaccount", { address: tronHex(owner), visible: false }); } catch (error) { return unavailable(error); }
@@ -120,7 +129,7 @@ async function assertOwnerFunding(rpc: TronRpcPort, owner: string, requiredSun: 
   }
   if (value.address !== tronHex(owner)) protocol();
   if (tronAtomic(value.balance, true) < requiredSun) {
-    throw new ApnError("APN_INSUFFICIENT_ASSET", "Owner TRX cannot cover the exact call value plus the owner fee_limit.",
+    throw new ApnError("APN_INSUFFICIENT_ASSET", "Owner TRX cannot cover the call value plus the owner fee_limit and bandwidth budget.",
       { reason: "sunswap_owner_trx_insufficient" });
   }
 }

@@ -35,8 +35,8 @@ recipient, a positive SUN amount, `slippageBps <= ownerSlippageCapBps`, an
 explicit owner `feeLimitSun`, and a router `deadline` within the next ten
 minutes. Nothing is defaulted. The builder then:
 
-1. proves the RPC serves TRON mainnet genesis and reads the energy price and
-   maximum fee limit from `wallet/getchainparameters`;
+1. proves the RPC serves TRON mainnet genesis and reads the energy price,
+   bandwidth price and maximum fee limit from `wallet/getchainparameters`;
 2. records the head block, re-verifies all five code hashes, reads
    `getAmountsOut(amount, [WTRX, USDT])` and `getReserves()`, and requires the
    next head to stay within 10 blocks of the recorded block;
@@ -50,10 +50,16 @@ minutes. Nothing is defaulted. The builder then:
    recorded block;
 6. simulates that exact call from the owner and rechecks the head drift. A
    missing or underfunded owner account is an economic refusal
-   (`APN_INSUFFICIENT_ASSET`), a revert is `APN_OPERATION_BLOCKED`, and energy
-   above the fee limit is `APN_FEE_BUDGET_EXCEEDED`;
-7. requires the owner balance to cover `amount + feeLimitSun`;
-8. persists the prepared material (quote, `approvalCapAtomic: "0"`, energy
+   (`APN_INSUFFICIENT_ASSET`); a revert is `APN_OPERATION_BLOCKED`
+   (`sunswap_output_below_minimum`, `sunswap_deadline_expired`, or
+   `sunswap_constant_call_reverted` with the decoded reason); energy above the
+   fee limit is `APN_FEE_BUDGET_EXCEEDED`; a dust input that yields no USDT is
+   `sunswap_zero_output`;
+7. requires the owner balance to cover `amount + feeLimitSun + bandwidth
+   budget`, where the budget is the signed transaction size (serialized
+   transaction plus 64 result bytes, 512 bytes for this call) times the
+   bandwidth price, because `fee_limit` caps only energy;
+8. persists the prepared material (quote, `approvalCapAtomic: "0"`, energy and bandwidth
    display, unsigned transaction, simulation, market evidence) keyed by
    `quoteHash`. `load(quoteHash)` re-derives every binding and reports
    `APN_STATE_CORRUPT` on any drift.
@@ -68,10 +74,16 @@ mechanism. Native TRX has no TRC20 or Permit2 approval, so `approve` always
 returns `sunswap_native_no_approval`. `execute` returns
 `sunswap_execution_dormant`; the signer, single-send and observer adapters stay
 unwired. The receipt proof requires full-node and solidified history to agree,
-`SUCCESS`, the exact transaction bytes, owner debit `= amount + fee` with the
-fee within the fee limit, one WTRX `Deposit` of the amount by the router, one
+`SUCCESS`, the exact transaction bytes, owner debit `= amount + fee` where
+`fee = energy_fee + net_fee`, `energy_fee <= fee_limit` and `net_fee <=` the
+frozen bandwidth budget, one WTRX `Deposit` of the amount by the router, one
 pair `Swap` to the owner, and one USDT `Transfer` from the pair to the owner of
-at least the minimum output.
+at least the minimum output. Three real mainnet `swapExactETHForTokens`
+receipts pass this validator through the production RPC transport.
+
+The simulated energy includes the current dynamic-energy penalty of the pinned
+contracts, which TRON recalculates every maintenance cycle (observed 157,354
+to 223,354 energy for this call). Owners should set `fee_limit` with headroom.
 
 ## RPC
 

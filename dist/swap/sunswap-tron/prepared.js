@@ -5,14 +5,20 @@ import { validateSwapQuote } from "../quote.js";
 import { SUNSWAP_MAX_HEAD_DRIFT_BLOCKS, SUNSWAP_TRON_CHAIN, SUNSWAP_USDT } from "./catalog.js";
 import { priceSunSwapV2Market, validateSunSwapV2Market } from "./market.js";
 import { sunSwapOnChainEvidenceHash } from "./quote.js";
-import { sunSwapUnsignedPayloadHash, validateEnergyBounds, validateSunSwapUnsignedTransaction, } from "./transaction.js";
+import { sunSwapMaximumBandwidthBytes, sunSwapUnsignedPayloadHash, validateEnergyBounds, validateSunSwapUnsignedTransaction, } from "./transaction.js";
 export const SUNSWAP_EXECUTION_MATERIAL_SCHEMA = "apn.sunswap-tron-v2-execution-material.v1";
-/** Display of the TRON resource bound; every value is derived from the frozen intent and the exact simulation. */
-export function sunSwapGasOrEnergy(intent, simulation, transaction) {
+/**
+ * Display of the TRON resource bound; every value derives from the frozen intent, the exact simulation and the chain
+ * bandwidth price. fee_limit caps only energy, so the worst-case debit also carries the full bandwidth burn.
+ */
+export function sunSwapGasOrEnergy(intent, simulation, transaction, bandwidthPriceSun) {
     const energy = BigInt(simulation.energyRequired), price = BigInt(intent.energyPriceSun);
-    return { resource: "tron_energy", energyUsed: energy.toString(), energyPriceSun: price.toString(),
+    const bandwidthBytes = sunSwapMaximumBandwidthBytes(transaction), bandwidthFee = bandwidthBytes * BigInt(bandwidthPriceSun);
+    return { resource: "tron_energy_and_bandwidth", energyUsed: energy.toString(), energyPriceSun: price.toString(),
         estimatedEnergyFeeSun: (energy * price).toString(), feeLimitSun: intent.feeLimitSun, maximumEnergy: intent.maximumEnergy,
-        callValueSun: intent.callValueAtomic, maximumTrxDebitSun: (BigInt(intent.callValueAtomic) + BigInt(intent.feeLimitSun)).toString(),
+        bandwidthPriceSun, maximumBandwidthBytes: bandwidthBytes.toString(), maximumBandwidthFeeSun: bandwidthFee.toString(),
+        callValueSun: intent.callValueAtomic,
+        maximumTrxDebitSun: (BigInt(intent.callValueAtomic) + BigInt(intent.feeLimitSun) + bandwidthFee).toString(),
         rawDataBytes: (transaction.raw_data_hex.length / 2).toString() };
 }
 /** Re-derives every binding between quote, market, pricing, unsigned transaction, simulation and resource display. */
@@ -29,8 +35,9 @@ export function validateSunSwapPreparedMaterial(value, mode) {
 }
 function validateMaterial(value, mode) {
     if (!isPlainRecord(value) || !exactKeys(value, ["quote", "approvalCapAtomic", "gasOrEnergy", "execution"]) ||
-        value.approvalCapAtomic !== "0" || !isPlainRecord(value.execution) || !exactKeys(value.execution, ["schemaVersion", "intent", "transaction", "simulation", "market", "pricing"]) ||
-        value.execution.schemaVersion !== SUNSWAP_EXECUTION_MATERIAL_SCHEMA || !isPlainRecord(value.execution.pricing))
+        value.approvalCapAtomic !== "0" || !isPlainRecord(value.execution) || !exactKeys(value.execution, ["schemaVersion", "intent", "transaction", "simulation", "market", "pricing", "bandwidthPriceSun"]) ||
+        value.execution.schemaVersion !== SUNSWAP_EXECUTION_MATERIAL_SCHEMA || !isPlainRecord(value.execution.pricing) ||
+        typeof value.execution.bandwidthPriceSun !== "string" || !/^[1-9][0-9]{0,15}$/u.test(value.execution.bandwidthPriceSun))
         mismatch();
     const quote = validateSwapQuote(value.quote, mode), execution = value.execution;
     const market = validateSunSwapV2Market(execution.market, mode);
@@ -66,7 +73,8 @@ function validateMaterial(value, mode) {
         !/^[1-9][0-9]{0,15}$/u.test(simulation.energyRequired) || BigInt(simulation.energyRequired) > BigInt(intent.maximumEnergy) ||
         BigInt(simulation.energyRequired) * BigInt(intent.energyPriceSun) > BigInt(intent.feeLimitSun))
         mismatch();
-    if (!isPlainRecord(value.gasOrEnergy) || canonicalJson(value.gasOrEnergy) !== canonicalJson(sunSwapGasOrEnergy(intent, simulation, transaction)))
+    if (!isPlainRecord(value.gasOrEnergy) || canonicalJson(value.gasOrEnergy) !==
+        canonicalJson(sunSwapGasOrEnergy(intent, simulation, transaction, execution.bandwidthPriceSun)))
         mismatch();
     return value;
 }

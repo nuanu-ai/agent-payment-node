@@ -121,7 +121,7 @@ async function verifyPinnedCode(rpc, address, expected) {
 function decodeAmounts(hex, mode) {
     try {
         const amounts = decodeFunctionResult({ abi: ABI, functionName: "getAmountsOut", data: `0x${hex}` });
-        if (hex.length !== 256 || amounts.length !== 2 || amounts[1] <= 0n)
+        if (hex.length !== 256 || amounts.length !== 2)
             throw new Error();
         return [amounts[0].toString(), amounts[1].toString()];
     }

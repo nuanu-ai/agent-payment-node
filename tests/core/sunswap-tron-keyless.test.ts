@@ -5,8 +5,8 @@ import test from "node:test";
 import {
   SUNSWAP_USDT, SUNSWAP_V2_CODE_HASHES, SUNSWAP_V2_ROUTER, SUNSWAP_WTRX, SunSwapKeylessQuoteBuilder,
   SunSwapPreparedMaterialStore, buildSunSwapUnsignedTransaction, encodeSunSwapCalldata, observeSunSwapFinality,
-  parseSunSwapV2SwapCall, priceSunSwapV2Market, readSunSwapV2Market, validateSunSwapPreparedMaterial, validateSunSwapV2Market,
-  type SunSwapKeylessQuoteRequest, type SunSwapObservationRpcPort,
+  parseSunSwapV2SwapCall, priceSunSwapV2Market, readSunSwapV2Market, sunSwapMaximumBandwidthBytes, validateSunSwapPreparedMaterial,
+  validateSunSwapV2Market, type SunSwapKeylessQuoteRequest, type SunSwapObservationRpcPort, type SunSwapReadOnlyQuoteBuilder,
 } from "../../src/core.js";
 import { TronRpc, type TronMethod } from "../../src/tron/rpc.js";
 import { tronHex } from "../../src/tron/codec.js";
@@ -57,7 +57,7 @@ test("the production TRON RPC now serves the observer's full-node and solidified
   };
   const port: SunSwapObservationRpcPort = new TronRpc("https://rpc.example", fetcher);
   const proof = await observeSunSwapFinality(port, { transactionHash: tx.txID, recipient: OWNER, inputAmountAtomic: "5000000",
-    minimumOutputAtomic: "1663220", unsignedRawDataHex: tx.raw_data_hex, maximumFeeSun: "30000000" });
+    minimumOutputAtomic: "1663220", unsignedRawDataHex: tx.raw_data_hex, maximumFeeSun: "30000000", maximumBandwidthFeeSun: "512000" });
   assert.equal(proof.outputAmountAtomic, "1671577"); assert.equal(proof.trxDebitSun, "5012345"); assert.equal(proof.solidifiedHeadNumber, "124");
   assert.deepEqual(paths.sort(), ["/wallet/gettransactionbyid", "/wallet/gettransactioninfobyid", "/walletsolidity/getnowblock",
     "/walletsolidity/gettransactionbyid", "/walletsolidity/gettransactioninfobyid"]);
@@ -120,9 +120,13 @@ test("keyless builder persists exact prepared material by quoteHash and load re-
   assert.equal(material.quote.expectedOutputAtomic, "1671577"); assert.equal(material.quote.minimumOutputAtomic, "1663220");
   assert.equal(material.quote.recipient, OWNER); assert.equal(material.quote.destinationAsset.identifier, SUNSWAP_USDT);
   assert.equal(material.quote.simulation.blockNumber, "86344586"); assert.equal(material.quote.simulation.headBlockNumber, "86344589");
-  assert.deepEqual(material.gasOrEnergy, { resource: "tron_energy", energyUsed: "157354", energyPriceSun: "100",
-    estimatedEnergyFeeSun: "15735400", feeLimitSun: "30000000", maximumEnergy: "300000", callValueSun: "5000000",
-    maximumTrxDebitSun: "35000000", rawDataBytes: (material.execution.transaction.raw_data_hex.length / 2).toString() });
+  const rawBytes = BigInt(material.execution.transaction.raw_data_hex.length / 2), bandwidth = sunSwapMaximumBandwidthBytes(material.execution.transaction);
+  assert.equal(bandwidth, 1n + (rawBytes >= 128n ? 2n : 1n) + rawBytes + 67n + 64n);
+  assert.deepEqual(material.gasOrEnergy, { resource: "tron_energy_and_bandwidth", energyUsed: "157354", energyPriceSun: "100",
+    estimatedEnergyFeeSun: "15735400", feeLimitSun: "30000000", maximumEnergy: "300000", bandwidthPriceSun: "1000",
+    maximumBandwidthBytes: bandwidth.toString(), maximumBandwidthFeeSun: (bandwidth * 1000n).toString(), callValueSun: "5000000",
+    maximumTrxDebitSun: (35_000_000n + bandwidth * 1000n).toString(), rawDataBytes: rawBytes.toString() });
+  assert.equal(material.execution.bandwidthPriceSun, "1000");
   const value = material.execution.transaction.raw_data.contract[0].parameter.value;
   assert.equal(value.contract_address, tronHex(SUNSWAP_V2_ROUTER)); assert.equal(value.call_value, 5_000_000);
   assert.equal(material.execution.transaction.raw_data.fee_limit, 30_000_000);
@@ -142,7 +146,8 @@ test("keyless builder persists exact prepared material by quoteHash and load re-
     (v: any) => { v.execution.transaction.raw_data.fee_limit = 40_000_000; }, (v: any) => { v.execution.intent.minimumOutputAtomic = "1"; },
     (v: any) => { v.gasOrEnergy.feeLimitSun = "1"; }, (v: any) => { v.approvalCapAtomic = "1"; },
     (v: any) => { v.execution.market.reserveOutAtomic = "1"; }, (v: any) => { v.execution.simulation.energyRequired = "157355"; },
-    (v: any) => { v.execution.pricing.priceImpactBps = "0"; },
+    (v: any) => { v.execution.pricing.priceImpactBps = "0"; }, (v: any) => { v.execution.bandwidthPriceSun = "999"; },
+    (v: any) => { v.gasOrEnergy.maximumTrxDebitSun = "35000000"; },
   ]) {
     const tampered = structuredClone(stored); mutate(tampered);
     assert.throws(() => validateSunSwapPreparedMaterial(tampered, "stored"), { code: "APN_STATE_CORRUPT" });
@@ -158,14 +163,25 @@ test("owner economics refuse before any material exists: unactivated, underfunde
   await assert.rejects(quote(unactivated), { code: "APN_INSUFFICIENT_ASSET", details: { reason: "sunswap_owner_not_activated" } });
   const poor = funded(new FakeSunSwapRpc()); poor.simulation = "insufficient";
   await assert.rejects(quote(poor), { code: "APN_INSUFFICIENT_ASSET", details: { reason: "sunswap_owner_trx_insufficient" } });
-  await assert.rejects(quote(funded(new FakeSunSwapRpc(), "34999999")),
+  const other = await temporaryState(); t.after(other.cleanup);
+  const boundary = (balance: string) => new SunSwapKeylessQuoteBuilder(funded(new FakeSunSwapRpc(), balance),
+    new SunSwapPreparedMaterialStore(other.root)).quote(request());
+  const worstCase = (await boundary("100000000")).gasOrEnergy.maximumTrxDebitSun!;
+  assert.equal(BigInt(worstCase) > 35_000_000n, true);
+  await assert.rejects(boundary((BigInt(worstCase) - 1n).toString()),
     { code: "APN_INSUFFICIENT_ASSET", details: { reason: "sunswap_owner_trx_insufficient" } });
+  assert.equal((await boundary(worstCase)).gasOrEnergy.maximumTrxDebitSun, worstCase);
   await assert.rejects(quote(new FakeSunSwapRpc()), { code: "APN_INSUFFICIENT_ASSET", details: { reason: "sunswap_owner_not_activated" } });
   await assert.rejects(quote(funded(new FakeSunSwapRpc()), { feeLimitSun: "15735399" }),
     { code: "APN_FEE_BUDGET_EXCEEDED", details: { reason: "sunswap_fee_limit_exceeded" } });
-  const reverted = funded(new FakeSunSwapRpc()); reverted.simulation = "revert";
-  await assert.rejects(quote(reverted), { code: "APN_OPERATION_BLOCKED",
-    details: { reason: "sunswap_constant_call_reverted", revertReason: "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT" } });
+  for (const [revertReason, reason] of [["UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT", "sunswap_output_below_minimum"],
+    ["UniswapV2Router: EXPIRED", "sunswap_deadline_expired"], ["TransferHelper: ETH_TRANSFER_FAILED", "sunswap_constant_call_reverted"]]) {
+    const reverted = funded(new FakeSunSwapRpc()); reverted.simulation = "revert"; reverted.revertReason = revertReason!;
+    await assert.rejects(quote(reverted), { code: "APN_OPERATION_BLOCKED", details: { reason, revertReason } });
+  }
+  for (const amountAtomic of ["1", "2"]) {
+    await assert.rejects(quote(funded(new FakeSunSwapRpc()), { amountAtomic }), { code: "APN_OPERATION_BLOCKED", details: { reason: "sunswap_zero_output" } });
+  }
   const capped = funded(new FakeSunSwapRpc()); capped.maxFeeLimit = 29_999_999n;
   await assert.rejects(quote(capped), { code: "APN_INVALID_INPUT" });
   const testnet = funded(new FakeSunSwapRpc()); testnet.genesis = `0000000000000000${"d".repeat(48)}`;
@@ -175,6 +191,12 @@ test("owner economics refuse before any material exists: unactivated, underfunde
     const rpc = funded(new FakeSunSwapRpc());
     await assert.rejects(quote(rpc, overrides as Partial<SunSwapKeylessQuoteRequest>), { code: "APN_INVALID_INPUT" }); assert.equal(rpc.calls.length, 0);
   }
+  const legacy: any = { ...request() }; delete legacy.feeLimitSun; delete legacy.deadline;
+  await assert.rejects(new SunSwapKeylessQuoteBuilder(funded(new FakeSunSwapRpc()), new SunSwapPreparedMaterialStore(temp.root)).quote(legacy),
+    { code: "APN_INVALID_INPUT", message: /feeLimitSun, deadline and now; fee_limit and deadline have no default/u });
+  // @ts-expect-error the keyless builder needs feeLimitSun and deadline, so the legacy CLI quote port must reject it at compile time
+  const legacyPort: SunSwapReadOnlyQuoteBuilder = new SunSwapKeylessQuoteBuilder(new FakeSunSwapRpc(), new SunSwapPreparedMaterialStore(temp.root));
+  void legacyPort;
   const extra: any = { ...request(), feeLimit: "30000000" };
   await assert.rejects(new SunSwapKeylessQuoteBuilder(funded(new FakeSunSwapRpc()), new SunSwapPreparedMaterialStore(temp.root)).quote(extra), { code: "APN_INVALID_INPUT" });
   assert.deepEqual(await readdir(join(temp.root, "sunswap-tron-prepared")).catch(() => []), []);

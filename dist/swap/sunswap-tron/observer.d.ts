@@ -11,8 +11,9 @@ export declare class SunSwapSolidifiedObserver implements SwapChainObserverPort 
     private readonly expectedOperation;
     private readonly binding;
     private readonly maximumFeeSun;
+    private readonly maximumBandwidthFeeSun;
     private readonly now;
-    constructor(rpc: SunSwapObservationRpcPort, expectedOperation: SwapOperationRecord, binding: SunSwapExecutionBinding, maximumFeeSun: string, now?: () => Date);
+    constructor(rpc: SunSwapObservationRpcPort, expectedOperation: SwapOperationRecord, binding: SunSwapExecutionBinding, maximumFeeSun: string, maximumBandwidthFeeSun: string, now?: () => Date);
     observe(operationValue: SwapOperationRecord): Promise<SwapReceiptProof | null>;
 }
 export declare function observeSunSwapFinality(rpc: SunSwapObservationRpcPort, expected: SunSwapReceiptExpectation): Promise<SunSwapReceiptValidation>;

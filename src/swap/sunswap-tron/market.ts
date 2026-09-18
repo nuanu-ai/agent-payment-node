@@ -147,7 +147,7 @@ async function verifyPinnedCode(rpc: TronRpcPort, address: string, expected: str
 function decodeAmounts(hex: string, mode: "input" | "stored"): readonly [string, string] {
   try {
     const amounts = decodeFunctionResult({ abi: ABI, functionName: "getAmountsOut", data: `0x${hex}` as Hex });
-    if (hex.length !== 256 || amounts.length !== 2 || amounts[1]! <= 0n) throw new Error();
+    if (hex.length !== 256 || amounts.length !== 2) throw new Error();
     return [amounts[0]!.toString(), amounts[1]!.toString()];
   } catch { return failure(mode); }
 }

@@ -7,7 +7,7 @@ import { priceSunSwapV2Market, validateSunSwapV2Market, type SunSwapV2Market, ty
 import { sunSwapOnChainEvidenceHash } from "./quote.js";
 import type { SunSwapSimulationProof } from "./simulation.js";
 import {
-  sunSwapUnsignedPayloadHash, validateEnergyBounds, validateSunSwapUnsignedTransaction,
+  sunSwapMaximumBandwidthBytes, sunSwapUnsignedPayloadHash, validateEnergyBounds, validateSunSwapUnsignedTransaction,
   type SunSwapUnsignedIntent, type SunSwapUnsignedTransaction,
 } from "./transaction.js";
 
@@ -20,6 +20,8 @@ export interface SunSwapKeylessExecutionMaterial {
   readonly simulation: SunSwapSimulationProof;
   readonly market: SunSwapV2Market;
   readonly pricing: SunSwapV2Pricing;
+  /** Chain getTransactionFee (SUN per bandwidth byte) read at quote time; it prices the bandwidth budget. */
+  readonly bandwidthPriceSun: string;
 }
 /** Structurally a GuardedSwapPreparedMaterial: native TRX input needs no token approval, so the cap is always "0". */
 export interface SunSwapPreparedMaterial {
@@ -33,13 +35,19 @@ export interface SunSwapPreparedMaterialPort {
   load(quoteHash: string): Promise<SunSwapPreparedMaterial | null>;
 }
 
-/** Display of the TRON resource bound; every value is derived from the frozen intent and the exact simulation. */
+/**
+ * Display of the TRON resource bound; every value derives from the frozen intent, the exact simulation and the chain
+ * bandwidth price. fee_limit caps only energy, so the worst-case debit also carries the full bandwidth burn.
+ */
 export function sunSwapGasOrEnergy(intent: SunSwapUnsignedIntent, simulation: SunSwapSimulationProof,
-  transaction: SunSwapUnsignedTransaction): Readonly<Record<string, string>> {
+  transaction: SunSwapUnsignedTransaction, bandwidthPriceSun: string): Readonly<Record<string, string>> {
   const energy = BigInt(simulation.energyRequired), price = BigInt(intent.energyPriceSun);
-  return { resource: "tron_energy", energyUsed: energy.toString(), energyPriceSun: price.toString(),
+  const bandwidthBytes = sunSwapMaximumBandwidthBytes(transaction), bandwidthFee = bandwidthBytes * BigInt(bandwidthPriceSun);
+  return { resource: "tron_energy_and_bandwidth", energyUsed: energy.toString(), energyPriceSun: price.toString(),
     estimatedEnergyFeeSun: (energy * price).toString(), feeLimitSun: intent.feeLimitSun, maximumEnergy: intent.maximumEnergy,
-    callValueSun: intent.callValueAtomic, maximumTrxDebitSun: (BigInt(intent.callValueAtomic) + BigInt(intent.feeLimitSun)).toString(),
+    bandwidthPriceSun, maximumBandwidthBytes: bandwidthBytes.toString(), maximumBandwidthFeeSun: bandwidthFee.toString(),
+    callValueSun: intent.callValueAtomic,
+    maximumTrxDebitSun: (BigInt(intent.callValueAtomic) + BigInt(intent.feeLimitSun) + bandwidthFee).toString(),
     rawDataBytes: (transaction.raw_data_hex.length / 2).toString() };
 }
 
@@ -54,8 +62,9 @@ export function validateSunSwapPreparedMaterial(value: unknown, mode: "input" | 
 function validateMaterial(value: unknown, mode: "input" | "stored"): SunSwapPreparedMaterial {
   if (!isPlainRecord(value) || !exactKeys(value, ["quote", "approvalCapAtomic", "gasOrEnergy", "execution"]) ||
       value.approvalCapAtomic !== "0" || !isPlainRecord(value.execution) || !exactKeys(value.execution,
-      ["schemaVersion", "intent", "transaction", "simulation", "market", "pricing"]) ||
-      value.execution.schemaVersion !== SUNSWAP_EXECUTION_MATERIAL_SCHEMA || !isPlainRecord(value.execution.pricing)) mismatch();
+      ["schemaVersion", "intent", "transaction", "simulation", "market", "pricing", "bandwidthPriceSun"]) ||
+      value.execution.schemaVersion !== SUNSWAP_EXECUTION_MATERIAL_SCHEMA || !isPlainRecord(value.execution.pricing) ||
+      typeof value.execution.bandwidthPriceSun !== "string" || !/^[1-9][0-9]{0,15}$/u.test(value.execution.bandwidthPriceSun)) mismatch();
   const quote = validateSwapQuote(value.quote, mode), execution = value.execution as unknown as SunSwapKeylessExecutionMaterial;
   const market = validateSunSwapV2Market(execution.market, mode);
   const pricing = priceSunSwapV2Market(market, quote.slippageBps, execution.pricing.ownerSlippageCapBps, mode);
@@ -86,7 +95,8 @@ function validateMaterial(value: unknown, mode: "input" | "stored"): SunSwapPrep
       simulation.maxHeadDrift !== SUNSWAP_MAX_HEAD_DRIFT_BLOCKS || typeof simulation.energyRequired !== "string" ||
       !/^[1-9][0-9]{0,15}$/u.test(simulation.energyRequired) || BigInt(simulation.energyRequired) > BigInt(intent.maximumEnergy) ||
       BigInt(simulation.energyRequired) * BigInt(intent.energyPriceSun) > BigInt(intent.feeLimitSun)) mismatch();
-  if (!isPlainRecord(value.gasOrEnergy) || canonicalJson(value.gasOrEnergy) !== canonicalJson(sunSwapGasOrEnergy(intent, simulation, transaction))) mismatch();
+  if (!isPlainRecord(value.gasOrEnergy) || canonicalJson(value.gasOrEnergy) !==
+      canonicalJson(sunSwapGasOrEnergy(intent, simulation, transaction, execution.bandwidthPriceSun))) mismatch();
   return value as unknown as SunSwapPreparedMaterial;
 }
 

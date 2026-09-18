@@ -8,15 +8,18 @@ export class SunSwapSolidifiedObserver {
     expectedOperation;
     binding;
     maximumFeeSun;
+    maximumBandwidthFeeSun;
     now;
-    constructor(rpc, expectedOperation, binding, maximumFeeSun, now = () => new Date()) {
+    constructor(rpc, expectedOperation, binding, maximumFeeSun, maximumBandwidthFeeSun, now = () => new Date()) {
         this.rpc = rpc;
         this.expectedOperation = expectedOperation;
         this.binding = binding;
         this.maximumFeeSun = maximumFeeSun;
+        this.maximumBandwidthFeeSun = maximumBandwidthFeeSun;
         this.now = now;
         validateSunSwapExecutionBinding(expectedOperation, binding);
-        if (maximumFeeSun !== binding.intent.feeLimitSun)
+        if (maximumFeeSun !== binding.intent.feeLimitSun || typeof maximumBandwidthFeeSun !== "string" ||
+            !/^[1-9][0-9]{0,15}$/u.test(maximumBandwidthFeeSun))
             conflict();
     }
     async observe(operationValue) {
@@ -28,7 +31,8 @@ export class SunSwapSolidifiedObserver {
         const receipt = await observeSunSwapFinality(this.rpc, { transactionHash: this.binding.transaction.txID,
             recipient: operation.quote.recipient, inputAmountAtomic: operation.quote.inputAmountAtomic,
             minimumOutputAtomic: operation.quote.minimumOutputAtomic,
-            unsignedRawDataHex: this.binding.transaction.raw_data_hex, maximumFeeSun: this.maximumFeeSun });
+            unsignedRawDataHex: this.binding.transaction.raw_data_hex, maximumFeeSun: this.maximumFeeSun,
+            maximumBandwidthFeeSun: this.maximumBandwidthFeeSun });
         const observedAt = this.now();
         if (!Number.isFinite(observedAt.getTime()))
             conflict();
