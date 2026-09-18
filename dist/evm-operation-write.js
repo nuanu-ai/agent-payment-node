@@ -19,6 +19,12 @@ export function validateEvmOperationWrite(next, previousValue) {
         previous.requestHash !== next.requestHash || previous.operationId !== next.operationId || previous.profileHash !== next.profileHash ||
         previous.idempotencyHash !== next.idempotencyHash || previous.preparedBlockNumberAtomic !== next.preparedBlockNumberAtomic ||
         (previous.transactionHash !== undefined && (previous.transactionHash !== next.transactionHash || previous.rawTransactionHash !== next.rawTransactionHash)) ||
+        // The custody signer recomputes the fingerprint without it, so the prepare-time allowlist binding is frozen here instead.
+        (previous.allowlist === undefined) !== (next.allowlist === undefined) ||
+        (previous.allowlist !== undefined && canonicalJson(previous.allowlist) !== canonicalJson(next.allowlist)) ||
+        // The usage lease is written once, before signing, and can never be restated or dropped.
+        (previous.allowlistLease !== undefined && (next.allowlistLease === undefined ||
+            canonicalJson(previous.allowlistLease) !== canonicalJson(next.allowlistLease))) ||
         next.transitions.length < previous.transitions.length ||
         canonicalJson(next.transitions.slice(0, previous.transitions.length)) !== canonicalJson(previous.transitions) ||
         (next.transitions.length === previous.transitions.length && previous.integrityHash !== next.integrityHash) ||

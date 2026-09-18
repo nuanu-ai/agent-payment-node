@@ -1,4 +1,6 @@
 import type { ChainAccount, RailFinalEvidence, RailPreparedTransfer, RailSendBinding } from "./direct-rail-ports.js";
+import { type DirectAllowlistBinding } from "./direct-allowlist-gate.js";
+import type { DirectAssetUsageLease } from "./direct-asset-usage.js";
 export type RailState = "awaiting_approval" | "signing_started" | "signed_not_submitted" | "submitting" | "submitted_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert" | "abandoned_unknown";
 interface RailTransition {
     readonly state: RailState;
@@ -22,6 +24,8 @@ interface RailIntent {
     readonly account: ChainAccount;
     readonly prepared: RailPreparedTransfer;
     readonly policyHash: string;
+    /** Owner allowlist revision frozen at prepare, inside the fingerprint. Absent on records written before the gate. */
+    readonly allowlist?: DirectAllowlistBinding;
 }
 export interface RailOperationRecord extends RailIntent {
     readonly fingerprint: string;
@@ -31,6 +35,8 @@ export interface RailOperationRecord extends RailIntent {
      * intent the owner approved. Omitted entirely on every record that never re-bound.
      */
     readonly send?: RailSendBinding;
+    /** The shared usage reservation, written once with the first signing or send transition. Outside the fingerprint. */
+    readonly allowlistLease?: DirectAssetUsageLease;
     readonly state: RailState;
     readonly terminal: boolean;
     readonly reason: string;
@@ -54,6 +60,7 @@ export declare function transitionRail(operation: RailOperationRecord, input: {
     readonly rawPayloadHash?: string;
     readonly evidence?: RailFinalEvidence;
     readonly send?: RailSendBinding;
+    readonly allowlistLease?: DirectAssetUsageLease;
 }): RailOperationRecord;
 export declare function validateRailContinuity(previous: RailOperationRecord, next: RailOperationRecord): void;
 export declare function validateRailOperation(value: unknown): RailOperationRecord;
@@ -71,15 +78,6 @@ export declare function publicRailOperation(operation: RailOperationRecord): {
     updated_at: string;
     next_actions: readonly string[];
     send_binding?: RailSendBinding;
-    kind: "rail_transfer";
-    schema_version: "apn.rail-operation.v1";
-    operation_id: string;
-    profile: string;
-    provider: import("./direct-rail-ports.js").ChainProvider;
-    custody: "local_software" | "provider_managed";
-    account: string;
-    fingerprint: string;
-    policy_hash: string;
     transfer: {
         rail: import("./direct-rail-ports.js").DirectRailName;
         networkIdentity: string;
@@ -98,6 +96,16 @@ export declare function publicRailOperation(operation: RailOperationRecord): {
         createsRecipientAccount: boolean;
         resources?: import("./tron/model.js").TronResourceSnapshot;
     };
+    allowlist?: unknown;
+    kind: "rail_transfer";
+    schema_version: "apn.rail-operation.v1";
+    operation_id: string;
+    profile: string;
+    provider: import("./direct-rail-ports.js").ChainProvider;
+    custody: "local_software" | "provider_managed";
+    account: string;
+    fingerprint: string;
+    policy_hash: string;
 };
 export declare function railNextActions(operation: RailOperationRecord): readonly string[];
 export declare function railReceipt(operation: RailOperationRecord): {
@@ -114,14 +122,6 @@ export declare function railReceipt(operation: RailOperationRecord): {
     updated_at: string;
     next_actions: readonly string[];
     send_binding?: RailSendBinding;
-    kind: "rail_transfer";
-    operation_id: string;
-    profile: string;
-    provider: import("./direct-rail-ports.js").ChainProvider;
-    custody: "local_software" | "provider_managed";
-    account: string;
-    fingerprint: string;
-    policy_hash: string;
     transfer: {
         rail: import("./direct-rail-ports.js").DirectRailName;
         networkIdentity: string;
@@ -140,6 +140,15 @@ export declare function railReceipt(operation: RailOperationRecord): {
         createsRecipientAccount: boolean;
         resources?: import("./tron/model.js").TronResourceSnapshot;
     };
+    allowlist?: unknown;
+    kind: "rail_transfer";
+    operation_id: string;
+    profile: string;
+    provider: import("./direct-rail-ports.js").ChainProvider;
+    custody: "local_software" | "provider_managed";
+    account: string;
+    fingerprint: string;
+    policy_hash: string;
 };
 export declare function railHistoricalReceipt(operation: RailOperationRecord, transitionIndex: number): RailReceipt;
 export {};

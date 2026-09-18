@@ -33,6 +33,7 @@ import { LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 import { TestHttp } from "./x402-helpers.js";
 import { X402_URL } from "./x402-vectors.js";
+import { activateDirectPolicy, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 
 const MASTER = Buffer.from("6d".repeat(32), "hex");
 const PREPARED = "2026-09-09T00:00:00.000Z";
@@ -150,6 +151,7 @@ test("gasless repository initialization preserves local-wallet, provider-authori
   t.after(temporary.cleanup);
   const gasless = await gaslessCoreFixture(temporary.root);
   const direct = evmCore(temporary.root, undefined, gasless.wrapping);
+  await activateDirectPolicy(temporary.root, gasless.profile, { accounts: { evm: gasless.account.address }, admissions: evmDirectAdmissions(), now: direct.clock.now() });
   const directResult = await direct.core.execute({
     ...EVM_REQUEST,
     profile: gasless.profile,
@@ -234,6 +236,7 @@ test("concurrent direct and gasless prepares serialize one shared idempotency id
   t.after(temporary.cleanup);
   const gasless = await gaslessCoreFixture(temporary.root);
   const direct = evmCore(temporary.root, undefined, gasless.wrapping);
+  await activateDirectPolicy(temporary.root, gasless.profile, { accounts: { evm: gasless.account.address }, admissions: evmDirectAdmissions(), now: direct.clock.now() });
   const idempotencyKey = "cross-family-concurrent-0001";
   const [gaslessResult, directResult] = await Promise.all([
     gasless.core.execute({
@@ -435,6 +438,7 @@ test("concurrent legacy direct and gasless preparation preserves the same-profil
   for (const first of ["gasless", "direct"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const gasless = await gaslessCoreFixture(temporary.root), direct = evmCore(temporary.root, undefined, gasless.wrapping);
+    await activateDirectPolicy(temporary.root, gasless.profile, { accounts: { evm: gasless.account.address }, admissions: evmDirectAdmissions(), now: direct.clock.now() });
     const profileHash = gasless.state.profileHash(gasless.profile), gate = new BoundaryGate();
     const loserState = new LockObservedState(temporary.root, `profile:${profileHash}`);
     const gaslessCore = new ApnCore({ state: first === "gasless" ? gasless.state : loserState,

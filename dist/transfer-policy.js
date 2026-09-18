@@ -5,6 +5,7 @@ import { ApnError, assertInput } from "./errors.js";
 import { MAX_DIRECT_TRANSACTION_BYTES, publicEvmAsset } from "./evm-asset.js";
 import { multiplyAtomic, parseAtomic } from "./money.js";
 import { canonicalAddress, validateBalance } from "./wallet-policy.js";
+import { publicDirectAllowlist } from "./direct-allowlist-gate.js";
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const HEX = /^0x(?:[0-9a-fA-F]{2})+$/;
@@ -129,6 +130,7 @@ export function publicOperation(operation) {
         ...(operation.evm === undefined ? {} : { asset: publicEvmAsset(operation.evm.asset), fee_budget: {
                 max_fee_wei: operation.evm.maxFeeWei, enforcement: "pre_submission_quote", quote: operation.evm.feeQuote,
             }, policy: { identity: "apn.direct.foreground-approval.v1", chain: `eip155:${operation.chainId}`, asset: publicEvmAsset(operation.evm.asset), amount_atomic: operation.amountAtomic, foreground_approval_required: true } }),
+        ...(operation.allowlist === undefined ? {} : { allowlist: publicDirectAllowlist(operation.allowlist, operation.allowlistLease) }),
         wallet_address: operation.walletAddress,
         recipient: operation.recipient,
         amount: { atomic: operation.amountAtomic, decimal: operation.amountDecimal, decimals: operation.evm?.asset.decimals ?? USDC_DECIMALS },

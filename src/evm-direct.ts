@@ -6,6 +6,7 @@ import type { EvmBalanceSnapshot, EvmFeeQuote, EvmRpcPort, EvmTransactionInput }
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
 import { canonicalAddress } from "./wallet-policy.js";
+import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 
 export interface EvmDirectBinding {
   readonly schemaVersion: "apn.evm-direct.v1";
@@ -91,6 +92,7 @@ export function validateEvmOperation(operation: OperationRecord): void {
     throw new ApnError("APN_STATE_CORRUPT", "Frozen EVM transaction economics exceed the supported signing bounds.");
   }
   evmUint(operation.preparedBlockNumberAtomic);
+  validateEvmAllowlist(operation);
   if (operation.providerDirect !== undefined || operation.chainId !== binding.asset.chainId || operation.token !== binding.asset.address ||
       operation.transactionData !== transaction.data || binding.transactionTo !== transaction.to || binding.valueAtomic !== transaction.valueAtomic ||
       operation.economics === undefined || operation.economics.maximumGasCostAtomic !==

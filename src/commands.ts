@@ -64,10 +64,10 @@ export type CommandRequest =
   | { readonly command: "policy.admit-tron"; readonly profile: string; readonly asset: "trx" | "usdt"; readonly maximumPerTransfer: string; readonly dailyLimit: string; readonly maximumFee: string }
   | { readonly command: "transfer.prepare-tron"; readonly profile: string; readonly asset: "trx" | "usdt"; readonly recipient: string; readonly amount: string; readonly maximumFee: string; readonly idempotencyKey: string }
   | { readonly command: "wallet.ensure-solana"; readonly profile: string; readonly provider: ChainProvider; readonly acceptRisk: boolean }
-  | { readonly command: "wallet.balance-solana"; readonly profile: string; readonly asset: "sol" | "usdc" }
+  | { readonly command: "wallet.balance-solana"; readonly profile: string; readonly asset: "sol" | "usdc" | "usdt" }
   | { readonly command: "wallet.capabilities-solana"; readonly profile?: string }
-  | { readonly command: "policy.admit-solana"; readonly profile: string; readonly asset: "sol" | "usdc"; readonly maximumPerTransfer: string; readonly dailyLimit: string; readonly maximumFee: string }
-  | { readonly command: "transfer.prepare-solana"; readonly profile: string; readonly asset: "sol" | "usdc"; readonly recipient: string; readonly amount: string; readonly maximumFee: string; readonly idempotencyKey: string }
+  | { readonly command: "policy.admit-solana"; readonly profile: string; readonly asset: "sol" | "usdc" | "usdt"; readonly maximumPerTransfer: string; readonly dailyLimit: string; readonly maximumFee: string }
+  | { readonly command: "transfer.prepare-solana"; readonly profile: string; readonly asset: "sol" | "usdc" | "usdt"; readonly recipient: string; readonly amount: string; readonly maximumFee: string; readonly idempotencyKey: string }
   | { readonly command: "version" }
   | { readonly command: "doctor.keychain" }
   | { readonly command: "wallet.ensure"; readonly profile: string }

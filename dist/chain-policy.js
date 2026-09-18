@@ -4,9 +4,12 @@ import { ApnError } from "./errors.js";
 import { TRON_GENESIS } from "./tron/constants.js";
 export const SOLANA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+/** The frozen allowlist's pinned Solana USDT mint (classic SPL Token, six decimals). */
+export const SOLANA_USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const ASSETS = [
     { rail: "solana", network: "mainnet", alias: "sol", kind: "native", identifier: "native:sol", symbol: "SOL", decimals: 9 },
     { rail: "solana", network: "mainnet", alias: "usdc", kind: "token", identifier: SOLANA_USDC, symbol: "USDC", decimals: 6 },
+    { rail: "solana", network: "mainnet", alias: "usdt", kind: "token", identifier: SOLANA_USDT, symbol: "USDT", decimals: 6 },
     { rail: "tron", network: "mainnet", alias: "trx", kind: "native", identifier: "native:trx", symbol: "TRX", decimals: 6 },
     { rail: "tron", network: "mainnet", alias: "usdt", kind: "token", identifier: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", symbol: "USDT", decimals: 6 },
 ];
@@ -105,6 +108,14 @@ export function assertChainPolicy(policy, account, asset, amount, maximumFee, op
         denied();
     const usage = chainUsage(policy, operations, now, excluding);
     if (BigInt(usage.principalAtomic) + atomic(amount) > atomic(policy.dailyLimitAtomic))
+        denied();
+}
+/** Direct rails keep chain policies only for the native fee, rent and resource cap; owner amount caps live in the allowlist policy. */
+export function assertChainFeePolicy(policy, account, asset, maximumFee) {
+    validateChainPolicy(policy);
+    if (canonicalJson(policy.account) !== canonicalJson(account) || canonicalJson(policy.asset) !== canonicalJson(asset))
+        denied();
+    if (atomic(maximumFee, true) > atomic(policy.maximumNativeFeeAtomic))
         denied();
 }
 function denied() { throw new ApnError("APN_OPERATION_BLOCKED", "The chain asset policy or spending limit does not authorize this transfer."); }

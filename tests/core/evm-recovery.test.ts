@@ -15,7 +15,8 @@ import type { OperationRecord } from "../../src/model.js";
 import { parseEvmNativeIntent } from "../../src/evm-native-intent.js";
 import type { ProviderProfileRecord } from "../../src/provider-profile.js";
 import { sealOperation, validateOperation } from "../../src/state-integrity.js";
-import { EVM_REQUEST, EVM_TOKEN, evmCore } from "./evm-helpers.js";
+import { EVM_REQUEST, EVM_TOKEN, ensureDirectWallet, evmCore } from "./evm-helpers.js";
+import { EVM_USDC } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
@@ -23,7 +24,7 @@ const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
 
 for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process resumes exactly once without signing`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root); await setup.core.wallet.ensure("default");
+  const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
   setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { ...EVM_REQUEST.asset, chainId } }) as { operation_id: string };
@@ -39,10 +40,11 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real 
   assert.equal(replay.status, 0, replay.stderr); assert.equal(JSON.parse(replay.stdout).submissions, 0);
 });
 
-for (const chainId of [8453, 1, 42161] as const) for (const asset of ["native", EVM_TOKEN] as const) test(`MCP ${chainId}/${asset} prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "usdc"] as const) test(`MCP ${chainId}/${kind} prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation`, async (context) => {
+  const asset = kind === "native" ? "native" : EVM_USDC[chainId];
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
-  setup.rpc.sender = (await setup.core.wallet.ensure("default") as { address: `0x${string}` }).address;
+  setup.rpc.sender = (await ensureDirectWallet(setup)).address;
   setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   const server = createMcpServer({ stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping });
@@ -73,17 +75,17 @@ for (const chainId of [8453, 1, 42161] as const) for (const asset of ["native", 
 
 test("parallel duplicate generic prepares serialize and other asset or kind cannot bypass profile exclusion", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root); await setup.core.wallet.ensure("default");
+  const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
   const [first, second] = await Promise.all([setup.core.transfer.prepare(EVM_REQUEST), setup.core.transfer.prepare(EVM_REQUEST)]);
   assert.deepEqual(first, second); assert.equal(setup.rpc.genericBalanceCalls, 1);
-  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 8453, token: EVM_TOKEN }, idempotencyKey: "evm-other-token-001" }), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 8453, token: EVM_USDC[8453] }, idempotencyKey: "evm-other-token-001" }), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(setup.core.transfer.prepare({ command: "transfer.prepare", profile: "default", recipient: EVM_REQUEST.recipient, amount: "1", idempotencyKey: EVM_REQUEST.idempotencyKey }), { code: "APN_IDEMPOTENCY_CONFLICT" });
   assert.equal(setup.rpc.genericBalanceCalls, 1);
 });
 
 test("generic external profiles fail before RPC, signing or provider calls", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root); await setup.core.wallet.ensure("default");
+  const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
   for (const providerId of ["coinbase-agentic-wallet", "metamask-agent-wallet", "metamask-smart-account"]) {
     const core = new ApnCore({ state: setup.state, rpc: setup.rpc, native: setup.local, profileRepository: {
       load: async () => ({ provider_id: providerId }) as ProviderProfileRecord,
@@ -102,7 +104,7 @@ test("generic external profiles fail before RPC, signing or provider calls", asy
 
 test("frozen custody fields cannot authorize another effect and state writes cannot rewind or rebind", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root); await setup.core.wallet.ensure("default");
+  const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
   const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
   const original = (await setup.state.findOperation(prepared.operation_id))!;
   const payload = evmCustodyPayload(original);

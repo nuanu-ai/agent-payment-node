@@ -2,6 +2,8 @@ import type { ChainAccount, ChainAsset, ChainAssetAlias, DirectRailName } from "
 import type { RailOperationRecord } from "./rail-operation-model.js";
 export declare const SOLANA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export declare const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+/** The frozen allowlist's pinned Solana USDT mint (classic SPL Token, six decimals). */
+export declare const SOLANA_USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 export interface ChainPolicy {
     readonly schemaVersion: "apn.chain-policy.v1";
     readonly account: ChainAccount;
@@ -30,3 +32,5 @@ export declare function chainUsage(policy: ChainPolicy, operations: readonly Rai
     nativeFeeAtomic: string;
 };
 export declare function assertChainPolicy(policy: ChainPolicy, account: ChainAccount, asset: ChainAsset, amount: string, maximumFee: string, operations: readonly RailOperationRecord[], now: Date, excluding?: string): void;
+/** Direct rails keep chain policies only for the native fee, rent and resource cap; owner amount caps live in the allowlist policy. */
+export declare function assertChainFeePolicy(policy: ChainPolicy, account: ChainAccount, asset: ChainAsset, maximumFee: string): void;

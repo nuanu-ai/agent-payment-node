@@ -1,6 +1,8 @@
 import type { EvmChainId } from "./evm-asset.js";
 import type { EvmDirectBinding } from "./evm-direct.js";
 import type { EvmTransferEvidence } from "./evm-ports.js";
+import type { DirectAllowlistBinding } from "./direct-allowlist-gate.js";
+import type { DirectAssetUsageLease } from "./direct-asset-usage.js";
 
 export type Address = `0x${string}`;
 export type Hex = `0x${string}`;
@@ -156,6 +158,10 @@ export interface OperationRecord {
   readonly chainId: EvmChainId;
   readonly token: Address;
   readonly evm?: EvmDirectBinding;
+  /** Owner allowlist revision frozen at prepare; writes can never add, change or drop it. Absent on records written before the gate. */
+  readonly allowlist?: DirectAllowlistBinding;
+  /** The shared usage reservation, written once with `started` before anything is signed. */
+  readonly allowlistLease?: DirectAssetUsageLease;
   readonly transactionData?: Hex;
   readonly economics?: Economics;
   readonly providerDirect?: ProviderDirectBinding;

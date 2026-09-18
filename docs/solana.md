@@ -1,7 +1,7 @@
 # Solana mainnet direct transfers
 
-This APN 0.5.21 package includes local SOL and canonical USDC transfers on
-Solana mainnet. Package availability, clean installation and live mainnet
+This APN 0.5.21 package includes local SOL, canonical USDC and pinned USDT
+transfers on Solana mainnet. Package availability, clean installation and live mainnet
 payment acceptance require separate evidence.
 
 | Profile | Account and balance | Direct transfer |
@@ -50,16 +50,22 @@ apn wallet balance-solana --profile solana-local --asset sol
 apn wallet balance-solana --profile solana-local --asset usdc
 ```
 
-The only assets are native SOL (9 decimals) and Circle USDC mint
-`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` (6 decimals). USDC uses the
-canonical SPL Token program and associated token accounts. Arbitrary mints,
-Token-2022 assets and self-transfers are outside this bounded direct journey.
+The only assets are native SOL (9 decimals), Circle USDC mint
+`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` (6 decimals) and the frozen
+allowlist's USDT mint `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`
+(`--asset usdt`, 6 decimals). Both tokens use the canonical SPL Token program
+and associated token accounts, with the same mint, decimals and balance-delta
+evidence checks. Arbitrary mints, Token-2022 assets and self-transfers are
+outside this bounded direct journey. The Coinbase `awal` route has no USDT path.
 
 ## Policy, preparation and approval
 
-Both assets start denied. A human must admit each asset in a foreground terminal
-with principal limits in the selected asset and a separate fee/rent cap in SOL.
-These example limits illustrate the syntax; choose the intended spending bounds.
+Both assets start denied. Two owner decisions are needed. The owner allowlist
+policy must admit the asset on the `direct` rail; its per-operation and daily
+caps are the only principal caps (see `docs/allowlist-direct-integration.md`).
+The chain policy below, admitted in a foreground terminal, now caps only the
+fee and rent in SOL; its principal flags are still required by the command but
+are not enforced. These example limits illustrate the syntax.
 
 ```sh
 apn policy admit-solana --profile solana-local --asset usdc \
@@ -75,8 +81,8 @@ Amounts must be positive canonical decimal strings: `1`, `1.25` and `0.000001`
 are accepted at the applicable precision. Signs, exponent notation, whitespace,
 leading zeroes, trailing fractional zeroes and excess precision are refused.
 USDC principal is never added to SOL fees as if they were the same currency.
-Daily principal usage follows UTC; unresolved reservations continue to count
-across midnight. A confirmed revert charges actual network fees and no delivered
+Daily principal usage follows UTC in the shared allowlist usage ledger;
+unresolved reservations continue to count across midnight. A confirmed revert charges actual network fees and no delivered
 principal. Timeouts do not release unknown reservations.
 
 ```sh
