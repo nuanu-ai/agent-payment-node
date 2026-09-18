@@ -34,7 +34,8 @@ export class OrcaReceiptObserver {
     const raw = await this.rpc.call("getTransaction", transactionParams);
     if (raw === null) return null;
     const response = rpcRecord(raw), meta = rpcRecord(response.meta);
-    if (rpcAtomic(response.slot) !== slot || response.version !== 0) conflict();
+    // The Solana transport parses every JSON number as a bigint, so the v0 marker arrives as 0n.
+    if (rpcAtomic(response.slot) !== slot || rpcAtomic(response.version) !== 0n) conflict();
     const encoded = rpcArray(response.transaction, 2);
     if (encoded.length !== 2 || encoded[1] !== "base64" || typeof encoded[0] !== "string" || encoded[0].length > 4_096) conflict();
     let wire: ReturnType<ReturnType<typeof getTransactionDecoder>["decode"]>;
