@@ -3,7 +3,8 @@ import type { CommandRequest } from "./commands.js";
 import { APPROVAL_WINDOW_MS, STATE_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
-import { evmAmount, evmDecimals, evmUint, type EvmAssetSelection } from "./evm-asset.js";
+import { EVM_NETWORKS, evmAmount, evmDecimals, evmUint, type EvmAssetSelection, type EvmChainId } from "./evm-asset.js";
+import type { DirectEvmChainId } from "./evm-direct-networks.js";
 import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { evmDirectFingerprint, evmTransaction, requireEvmFunding, requireEvmRpc, type EvmDirectBinding } from "./evm-direct.js";
 import type { OperationRecord } from "./model.js";
@@ -12,6 +13,20 @@ import type { RuntimeContext } from "./runtime.js";
 import { appendTransition, sealOperation } from "./state-integrity.js";
 import { canonicalIdempotencyKey, publicOperation, validateEconomics } from "./transfer-policy.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
+import { assertLocalNetworkProfile } from "./x402-network.js";
+
+/** The shared networks keep their existing profile rule; a direct-only network is local-wallet only. */
+export async function assertDirectEvmProfile(context: RuntimeContext, profile: string, chainId: DirectEvmChainId | undefined): Promise<void> {
+  if (chainId === undefined || isSharedEvmChain(chainId)) return await assertLocalNetworkProfile(context, profile, chainId);
+  const provider = await context.profileRepository?.load(context.state.profileHash(canonicalProfile(profile)));
+  if (provider !== undefined && provider !== null && provider.provider_id !== "local") {
+    throw new ApnError("APN_PROVIDER_UNAVAILABLE", "Direct transfers on this network use only a local wallet profile.");
+  }
+}
+
+function isSharedEvmChain(chainId: DirectEvmChainId): chainId is EvmChainId {
+  return EVM_NETWORKS.some((network) => network.chainId === chainId);
+}
 
 export async function prepareEvmTransfer(
   context: RuntimeContext,
@@ -51,6 +66,8 @@ export async function prepareEvmTransfer(
         (selection.token === "native" ? balance.asset.kind !== "native" : balance.asset.address !== selection.token)) {
       throw new ApnError("APN_ASSET_MISMATCH", "Balance does not belong to the exact selected wallet, network and asset.");
     }
+    // An amount above the balance is an economic refusal before any gas estimate, which would fail on the same shortfall.
+    if (evmUint(balance.assetAtomic) < BigInt(amount.atomic)) throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
     const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
     const [nonce, fees] = await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]);
     const economics = validateEconomics(nonce, fees);

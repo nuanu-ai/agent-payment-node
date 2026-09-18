@@ -1,7 +1,8 @@
 import { encodeFunctionData } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { evmChain, evmUint, validateEvmAmount, validateEvmAsset, type EvmAsset } from "./evm-asset.js";
+import { evmUint, validateEvmAmount, validateEvmAsset, type EvmAsset } from "./evm-asset.js";
+import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel } from "./evm-direct-networks.js";
 import type { EvmBalanceSnapshot, EvmFeeQuote, EvmRpcPort, EvmTransactionInput } from "./evm-ports.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
@@ -49,12 +50,12 @@ export function validateEvmFeeQuote(value: unknown, economics?: Economics): EvmF
     "blockNumberAtomic", "blockHash", "rpcOrigin", "observedAt", ...(value.feeModel === undefined ? [] : ["feeModel"]),
   ])) throw new ApnError("APN_STATE_CORRUPT", "EVM fee quote schema is invalid.");
   const quote = value as unknown as EvmFeeQuote;
-  evmChain(quote.chainId);
+  const chainId = directEvmChain(quote.chainId);
   const execution = evmUint(quote.maximumExecutionFeeWei, true);
   const total = execution + evmUint(quote.l1DataFeeUpperWei) + evmUint(quote.operatorFeeUpperWei);
   if (evmUint(quote.totalQuoteWei, true) !== total || quote.totalFeeEnforcedOnchain !== false ||
-      (quote.chainId !== 8453 && (quote.l1DataFeeUpperWei !== "0" || quote.operatorFeeUpperWei !== "0")) ||
-      (quote.chainId === 42161 ? quote.feeModel !== "arbitrum-inclusive" : quote.feeModel !== undefined) ||
+      (directEvmNetwork(chainId).feeModel !== "op-stack" && (quote.l1DataFeeUpperWei !== "0" || quote.operatorFeeUpperWei !== "0")) ||
+      quote.feeModel !== directEvmQuoteFeeModel(chainId) ||
       (economics !== undefined && economics.maximumGasCostAtomic !== quote.maximumExecutionFeeWei) ||
       typeof quote.blockHash !== "string" || !/^0x[0-9a-f]{64}$/u.test(quote.blockHash) ||
       quote.blockHash === `0x${"0".repeat(64)}` ||
@@ -131,5 +132,5 @@ export function requireEvmFunding(balance: EvmBalanceSnapshot, amountAtomic: str
   if (evmUint(quote.totalQuoteWei, true) > evmUint(maximumFeeWei, true)) throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "The current total fee quote exceeds the caller's pre-submission budget.");
   if (evmUint(balance.assetAtomic) < evmUint(amountAtomic, true)) throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
   const required = evmUint(quote.totalQuoteWei) + (balance.asset.kind === "native" ? evmUint(amountAtomic) : 0n);
-  if (evmUint(balance.nativeAtomic) < required) throw new ApnError("APN_INSUFFICIENT_GAS", "Native ETH cannot cover the transfer value plus the current total fee quote.");
+  if (evmUint(balance.nativeAtomic) < required) throw new ApnError("APN_INSUFFICIENT_GAS", "The native coin balance cannot cover the transfer value plus the current total fee quote.");
 }
