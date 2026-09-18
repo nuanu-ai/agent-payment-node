@@ -39,6 +39,11 @@ export async function sponsorUsdtOperation(sponsor, plan, account, nowSeconds) {
  */
 export async function approveAndSendUsdtGasless(ports, plan, nowSeconds) {
     await ports.chain.verifyPins();
+    // The frozen prices must still clear the bundler's current floor; a rise refuses here, before any signature.
+    const { slow } = validateUsdtGasPrice(await ports.sponsor.gasPrice());
+    if (plan.price.maxFeePerGas < slow.maxFeePerGas || plan.price.maxPriorityFeePerGas < slow.maxPriorityFeePerGas) {
+        usdtFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_usdt_price_drift", "Gas prices rose above the prepared offer; prepare a new transfer.");
+    }
     const account = await ports.chain.account(plan.request.sender);
     assertUsdtFunding(plan, account);
     const paymasterData = await sponsorUsdtOperation(ports.sponsor, plan, account, nowSeconds);
@@ -67,9 +72,15 @@ export async function approveAndSendUsdtGasless(ports, plan, nowSeconds) {
     await ports.journal.markSent(userOpHash, "accepted");
     return { state: "sent", userOpHash };
 }
-/** Status observes only: one canonical receipt read and its proof. It never signs, discloses or sends. */
-export async function observeUsdtGasless(chain, plan, userOpHash) {
-    const receipt = await chain.receiptFor(userOpHash);
+/**
+ * Status observes only: the bundler names a candidate transaction, the canonical RPC proves it at the safe head. It never
+ * signs, discloses or sends, and absence proves nothing.
+ */
+export async function observeUsdtGasless(ports, plan, userOpHash) {
+    const locator = await ports.sponsor.receiptLocator(userOpHash);
+    if (locator === null)
+        return { state: "pending" };
+    const receipt = await ports.chain.receiptAt(locator);
     if (receipt === null)
         return { state: "pending" };
     return { state: "completed", settlement: verifyUsdtReceipt(plan, userOpHash, receipt) };
