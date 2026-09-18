@@ -11,6 +11,7 @@ import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
 import { evmWalletBalance } from "./evm-wallet-balance.js";
+import { assertDirectEvmProfile } from "./evm-transfer-prepare.js";
 import { readProfilePortfolio } from "./portfolio/command.js";
 import { ProviderWalletService } from "./provider-wallet-service.js";
 import { ProviderX402TransactionRecoveryService } from "./provider-x402-transaction-recovery.js";
@@ -249,7 +250,7 @@ export class ApnCore {
                 });
             }
             case "transfer.prepare": {
-                await assertLocalNetworkProfile(this.context, request.profile, request.asset?.chainId);
+                await assertDirectEvmProfile(this.context, request.profile, request.asset?.chainId);
                 if ((request.asset?.chainId ?? 8453) === 8453)
                     await this.providerWallet.assertPaymentAvailable(request.profile, "direct", request.idempotencyKey);
                 return operationOutcome(await this.transfer.prepare(request));
