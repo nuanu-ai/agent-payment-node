@@ -1,5 +1,5 @@
 import { hashObject } from "../canonical.js";
-import { BRIDGE_ASSET_REGISTRY, bridgeTokenRow } from "./asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeNativePrincipal } from "./asset-registry.js";
 import { validateBridgeOperation } from "./operation-validation.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY } from "./validation.js";
 export function bridgeNextActions(op) {
@@ -42,7 +42,7 @@ export function publicBridgeOperation(op) {
             materialized_step_hash: m.materializedStepHash, transaction_digest: m.transactionDigest,
             lifi_transaction_id: i.decoded.transactionId, included_step_identities: m.includedStepIdentities },
         asset: { from: assetProjection(m.request.fromChainId, m.request.fromToken),
-            to: assetProjection(m.request.toChainId, m.request.toToken), native_principal_admitted: false },
+            to: assetProjection(m.request.toChainId, m.request.toToken), native_principal_admitted: bridgeNativePrincipal(m.request) },
         transfer: { ...m.request, sender: m.sender, quoted_output_atomic: m.quotedOutputAtomic,
             minimum_output_atomic: m.minimumOutputAtomic, actual_source_atomic: op.sourceProof?.sourceAmountAtomic ?? null,
             actual_output_atomic: op.destinationProof?.amountAtomic ?? null, allowance_atomic_at_prepare: i.sourceAccount.allowanceAtomic,
@@ -70,9 +70,10 @@ export function publicBridgeOperation(op) {
     };
 }
 function assetProjection(chainId, token) {
-    const row = BRIDGE_ASSET_REGISTRY[chainId], asset = bridgeTokenRow(chainId, token, "APN_STATE_CORRUPT");
-    return { chain: row.caip2, token: asset.address, symbol: asset.symbol, coin_key: asset.coinKey,
-        decimals: asset.decimals, upgradeability: asset.code.upgradeability,
+    const row = BRIDGE_ASSET_REGISTRY[chainId], asset = bridgeAssetRow(chainId, token, "APN_STATE_CORRUPT");
+    return { chain: row.caip2, token: asset.kind === "native" ? "native" : asset.address, symbol: asset.symbol, coin_key: asset.coinKey,
+        decimals: asset.decimals, upgradeability: asset.kind === "native" ? "native_coin" : asset.code.upgradeability,
+        approval: asset.kind === "native" ? "none_value_transfer" : asset.approval,
         native_coin: { symbol: row.nativeCoin.symbol, decimals: row.nativeCoin.decimals } };
 }
 export function bridgeReceipt(op) {

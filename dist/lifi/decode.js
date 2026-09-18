@@ -1,7 +1,7 @@
 import { decodeFunctionData, encodeFunctionData, getAddress } from "viem";
 import { sha256 } from "../canonical.js";
-import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, STARGATE_SELECTOR, stargateBridgeAbi } from "./abi.js";
-import { validateBridgeRequest } from "./asset-registry.js";
+import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER, FEE_FORWARDER_NATIVE_SELECTOR, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, STARGATE_SELECTOR, stargateBridgeAbi } from "./abi.js";
+import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeFeeAsset, bridgeNativePrincipal, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 export function decodeBridgeCall(materialization) {
     const request = validateBridgeRequest(materialization.request);
@@ -12,10 +12,11 @@ export function decodeBridgeCall(materialization) {
     const minimumOutput = bridgeUint(materialization.minimumOutputAtomic, true);
     const value = bridgeUint(tx.valueAtomic, false);
     const gas = bridgeUint(tx.gasLimitAtomic, true);
+    // A native principal is the transaction value itself and is bound by the amount; the native debit cap bounds fees.
     if (gas > BRIDGE_MAX_GAS || tx.chainId !== request.fromChainId || tx.from !== materialization.sender ||
         bridgeAddress(tx.from) !== tx.from || tx.to !== BRIDGE_DIAMOND || materialization.approvalAddress !== BRIDGE_DIAMOND ||
         materialization.sender !== bridgeAddress(materialization.sender) || materialization.sender === BRIDGE_ZERO_ADDRESS ||
-        value > BigInt(request.maxNativeDebitWei))
+        (bridgeNativePrincipal(request) ? value !== sourceAmount : value > BigInt(request.maxNativeDebitWei)))
         fail("transaction_envelope");
     if (quotedOutput < minimumOutput || minimumOutput < BigInt(request.minOutputAtomic) || sourceAmount < quotedOutput ||
         sourceAmount - minimumOutput > BigInt(request.maxRouteFeeAtomic) ||
@@ -48,8 +49,11 @@ export function decodeBridgeCall(materialization) {
 function decodeAcross(m, bridge, swaps, across, data, sourceAmount, minimum, value) {
     const common = decodeCommon(m, bridge, swaps, sourceAmount);
     const receiverWord = addressWord(m.request.recipient), senderWord = addressWord(m.sender);
-    const inputWord = addressWord(m.request.fromToken), outputWord = addressWord(m.request.toToken);
-    if (value !== 0n || across.receiverAddress.toLowerCase() !== receiverWord || across.refundAddress.toLowerCase() !== senderWord ||
+    // Across carries a native leg as the chain's pinned wrapped-native token: the facet deposits it, the fill unwraps it.
+    const native = bridgeNativePrincipal(m.request);
+    const inputWord = addressWord(native ? BRIDGE_ASSET_REGISTRY[m.request.fromChainId].nativeCoin.wrapped.address : m.request.fromToken);
+    const outputWord = addressWord(native ? BRIDGE_ASSET_REGISTRY[m.request.toChainId].nativeCoin.wrapped.address : m.request.toToken);
+    if (value !== (native ? sourceAmount : 0n) || across.receiverAddress.toLowerCase() !== receiverWord || across.refundAddress.toLowerCase() !== senderWord ||
         across.sendingAssetId.toLowerCase() !== inputWord || across.receivingAssetId.toLowerCase() !== outputWord ||
         across.exclusiveRelayer.toLowerCase() !== BRIDGE_ZERO_WORD || across.exclusivityParameter !== 0 || across.message !== "0x" ||
         across.outputAmountMultiplier <= 0n || across.outputAmountMultiplier > 1000000000000000000n ||
@@ -63,9 +67,11 @@ function decodeAcross(m, bridge, swaps, across, data, sourceAmount, minimum, val
         outputAmountAtomic: across.outputAmount.toString(), outputAmountMultiplier: across.outputAmountMultiplier.toString(),
         exclusiveRelayer: bridgeHex(across.exclusiveRelayer, 32, 32), quoteTimestamp: String(across.quoteTimestamp),
         fillDeadline: String(across.fillDeadline), exclusivityParameter: String(across.exclusivityParameter), message: "0x",
-    }, common.bridgeAmount, "0");
+    }, common.bridgeAmount, value.toString());
 }
 function decodeStargate(m, bridge, swaps, stargate, data, sourceAmount, minimum, value) {
+    if (bridgeNativePrincipal(m.request))
+        fail("stargate_native_principal_unreviewed");
     const common = decodeCommon(m, bridge, swaps, sourceAmount);
     const expectedEid = destinationEid(m.request.toChainId);
     const p = stargate.sendParams;
@@ -90,8 +96,9 @@ function decodeCommon(m, bridge, swaps, sourceAmount) {
     if (swap.callTo !== FEE_FORWARDER || swap.approveTo !== FEE_FORWARDER || swap.sendingAssetId !== request.fromToken ||
         swap.receivingAssetId !== request.fromToken || swap.fromAmount !== sourceAmount || !swap.requiresDeposit)
         fail("fee_swap");
-    const callData = bridgeHex(swap.callData);
-    if (callData.slice(0, 10) !== FEE_FORWARDER_SELECTOR)
+    // The fee forwarder takes the principal in its own kind: `forwardNativeFees` for the native coin, else the token call.
+    const native = bridgeNativePrincipal(request), callData = bridgeHex(swap.callData);
+    if (callData.slice(0, 10) !== (native ? FEE_FORWARDER_NATIVE_SELECTOR : FEE_FORWARDER_SELECTOR))
         fail("fee_selector");
     let inner;
     try {
@@ -100,9 +107,10 @@ function decodeCommon(m, bridge, swaps, sourceAmount) {
     catch {
         return fail("fee_ABI");
     }
-    if (inner.functionName !== "forwardERC20Fees" || canonicalData(feeForwarderAbi, inner.functionName, inner.args) !== callData)
+    if (inner.functionName !== (native ? "forwardNativeFees" : "forwardERC20Fees") ||
+        canonicalData(feeForwarderAbi, inner.functionName, inner.args) !== callData)
         fail("fee_noncanonical");
-    const [token, distributions] = inner.args;
+    const [token, distributions] = (native ? [BRIDGE_ZERO_ADDRESS, inner.args[0]] : inner.args);
     const fee = sourceAmount - bridge.minAmount;
     if (token !== request.fromToken || distributions.length !== 1 || distributions[0].recipient !== FEE_RECIPIENT || distributions[0].amount !== fee || fee <= 0n)
         fail("fee_distribution");
@@ -110,15 +118,17 @@ function decodeCommon(m, bridge, swaps, sourceAmount) {
 }
 function validateFeeRows(m, forwardedFee, value, tool) {
     let included = 0n, fixed = 0, native = 0;
+    const sourceAsset = bridgeFeeAsset(bridgeAssetRow(m.request.fromChainId, m.request.fromToken));
+    const destinationAsset = bridgeFeeAsset(bridgeAssetRow(m.request.toChainId, m.request.toToken));
     for (const fee of m.feeCosts) {
         const amount = bridgeUint(fee.amountAtomic, false);
         if (fee.included) {
             if (fee.chainId !== m.request.fromChainId && fee.chainId !== m.request.toChainId)
                 fail("included_fee_asset");
-            if (fee.asset !== (fee.chainId === m.request.fromChainId ? m.request.fromToken : m.request.toToken))
+            if (fee.asset !== (fee.chainId === m.request.fromChainId ? sourceAsset : destinationAsset))
                 fail("included_fee_asset");
             included += amount;
-            if (fee.name === "LIFI Fixed Fee" && fee.chainId === m.request.fromChainId && fee.asset === m.request.fromToken && amount === forwardedFee)
+            if (fee.name === "LIFI Fixed Fee" && fee.chainId === m.request.fromChainId && fee.asset === sourceAsset && amount === forwardedFee)
                 fixed += 1;
         }
         else {
