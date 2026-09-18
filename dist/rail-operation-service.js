@@ -73,6 +73,9 @@ export class RailOperationService {
                 throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "A foreground terminal is required for direct-rail approval.");
             const adapter = this.adapter(operation);
             try {
+                // A record prepared before the owner allowlist gate is refused before the owner is asked to approve it.
+                if (operation.allowlist === undefined)
+                    refuse("allowlist_binding_missing", "This transfer was prepared before the owner allowlist gate; prepare a new transfer.");
                 await this.revalidate(operation, adapter);
                 await approval.approve({ account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, policyHash: operation.policyHash, prepared: operation.prepared });
                 await this.revalidate(operation, adapter);
