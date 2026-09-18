@@ -111,7 +111,7 @@ export class FakeOrcaRpc implements SolanaRpcPort {
     post[0] = this.ownerLamports - this.fee - (failed ? 0n : AMOUNT_IN + (this.usdcBefore === null ? this.rent : 0n));
     const balance = (amount: bigint) => ({ accountIndex: usdcIndex, mint: USDC_MINT, owner: this.owner, programId: TOKEN_PROGRAM,
       uiTokenAmount: { amount: amount.toString(), decimals: 6, uiAmount: null, uiAmountString: "0" } });
-    return { slot: this.slot + 5n, version: 0, blockTime: 1, transaction: [raw, "base64"], meta: { err: failed ? { InstructionError: [6, { Custom: 6036 }] } : null,
+    return { slot: this.slot + 5n, version: 0n, blockTime: 1n, transaction: [raw, "base64"], meta: { err: failed ? { InstructionError: [6, { Custom: 6036 }] } : null,
       fee: this.fee, preBalances: pre, postBalances: post, loadedAddresses: { writable: [], readonly: [] },
       preTokenBalances: this.usdcBefore === null ? [] : [balance(this.usdcBefore)],
       postTokenBalances: [balance((this.usdcBefore ?? 0n) + (failed ? 0n : this.simulatedOut))] } };
