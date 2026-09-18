@@ -21,7 +21,9 @@ import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.
 import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
+import type { PortfolioDependencies } from "./portfolio/command.js";
 export interface CoreDependencies {
+    readonly portfolio?: PortfolioDependencies;
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -60,6 +62,7 @@ export interface CoreDependencies {
     readonly operationAbandonApproval?: OperationAbandonApprovalPort;
 }
 export declare class RuntimeContext {
+    readonly portfolio?: PortfolioDependencies;
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;

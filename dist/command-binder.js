@@ -197,6 +197,7 @@ function bindParsedCatalog(parsed) {
             request: { command: "wallet.balance", profile: value(options, "--profile") },
             rpcUrl: value(options, "--rpc-url"),
         };
+        case "wallet portfolio": return { request: { command: "wallet.portfolio", profile: value(options, "--profile") } };
         case "wallet balance-asset": return {
             request: { command: "wallet.balance", profile: value(options, "--profile"), asset: bindAsset(options) },
             rpcUrl: value(options, "--rpc-url"),

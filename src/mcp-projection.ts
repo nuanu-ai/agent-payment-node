@@ -29,6 +29,7 @@ const SELECTED_PATHS = [
   "wallet status",
   "wallet balance",
   "wallet balance-asset",
+  "wallet portfolio",
   "wallet ensure-solana",
   "wallet balance-solana",
   "wallet capabilities-solana",

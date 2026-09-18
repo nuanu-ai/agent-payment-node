@@ -262,6 +262,9 @@ export type CommandRequest = {
     readonly profile: string;
     readonly asset?: EvmAssetSelection;
 } | {
+    readonly command: "wallet.portfolio";
+    readonly profile: string;
+} | {
     readonly command: "wallet.policy.show";
     readonly profile: string;
     readonly chainId?: EvmChainId;

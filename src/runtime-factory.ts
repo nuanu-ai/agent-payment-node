@@ -92,8 +92,11 @@ import { TtyFacilitatorApproval } from "./facilitator-gasless/tty.js";
 import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
+import { portfolioPause, type PortfolioDependencies } from "./portfolio/command.js";
+import { PortfolioHttps } from "./portfolio/https.js";
 
 export interface RuntimeFactoryOptions {
+  readonly portfolio?: PortfolioDependencies;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -234,6 +237,10 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   );
   return new ApnCore({
     state,
+    // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
+    ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
+      portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
+    } : {}),
     ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
     ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
     ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),

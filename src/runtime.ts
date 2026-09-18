@@ -30,8 +30,10 @@ import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.
 import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
+import type { PortfolioDependencies } from "./portfolio/command.js";
 
 export interface CoreDependencies {
+  readonly portfolio?: PortfolioDependencies;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -71,6 +73,7 @@ export interface CoreDependencies {
 }
 
 export class RuntimeContext {
+  readonly portfolio?: PortfolioDependencies;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -111,6 +114,7 @@ export class RuntimeContext {
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
+    if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;
     if (dependencies.uniswap !== undefined) this.uniswap = dependencies.uniswap;
     if (dependencies.sunswap !== undefined) this.sunswap = dependencies.sunswap;
     if (dependencies.jupiter !== undefined) this.jupiter = dependencies.jupiter;
