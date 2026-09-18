@@ -12,6 +12,7 @@ import type { DirectRailPort } from "../../src/direct-rail-ports.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { makeCore, temporaryState, TestNative, TestRpc } from "./helpers.js";
 import { solanaFixture, SOL_RECIPIENT } from "./solana-helpers.js";
+import { SOLANA_CHAIN, activateDirectPolicy, directAdmission, reserveRailLease } from "./direct-allowlist-helpers.js";
 
 test("restart after custody saved an effect recovers the same signature without another approval or signing", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root); const id = await s.prepare();
@@ -68,13 +69,15 @@ test("operation-first receipt crash preserves submission boundary and resume rep
 test("trusted missing effect can end interrupted local signing, while missing committed effect is corruption", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root); const id = await s.prepare();
   const initial = (await s.core.rails.records.findOperation(id))!;
-  await s.core.rails.records.persist(transitionRail(initial, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect" }));
+  await s.core.rails.records.persist(transitionRail(initial, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect",
+    allowlistLease: await reserveRailLease(temporary.root, s.now, initial) }));
   const result = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal((result.operation as { state: string }).state, "failed_before_effect"); assert.equal(s.rpc.submissions.length, 0);
   const nextId = await s.prepare("sol", "solana-missing-effect-0002");
   let next = (await s.core.rails.records.findOperation(nextId))!;
   const send = await s.adapter.bindSend(next.account, next.prepared);
-  next = transitionRail(next, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect", send });
+  next = transitionRail(next, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect", send,
+    allowlistLease: await reserveRailLease(temporary.root, s.now, next) });
   await s.core.rails.records.persist(next);
   const effect = await s.adapter.sign({ account: next.account, prepared: next.prepared, operationId: next.operationId, fingerprint: next.fingerprint, send });
   next = transitionRail(next, { state: "signed_not_submitted", at: s.now.toISOString(), reason: "encrypted_effect_bound", proofClass: "durable_signed_effect", transactionId: effect.transactionId, rawPayloadHash: effect.rawPayloadHash });
@@ -156,6 +159,7 @@ test("provider invocation is durable before launch and an ambiguous result witho
   core = new ApnCore({ state: s.core.context.state, chainAccounts: s.storage, directRails: [adapter], clock: { now: () => s.now },
     railApproval: s.approval, chainPolicyApproval: { approve: async () => {} } });
   assert.equal((await core.execute({ command: "policy.admit-solana", profile: account.profile, asset: "sol", maximumPerTransfer: "1", dailyLimit: "2", maximumFee: "0.003" })).ok, true);
+  await activateDirectPolicy(temporary.root, account.profile, { accounts: { solana: account.address }, now: s.now, admissions: [directAdmission(SOLANA_CHAIN, null)] });
   const prepared = await core.execute({ command: "transfer.prepare-solana", profile: account.profile, asset: "sol", recipient: s.account.address, amount: "0.000001", maximumFee: "0.003", idempotencyKey: "solana-provider-0001" });
   assert.equal(prepared.ok, true, prepared.error?.message); const id = (prepared.operation as { operation_id: string }).operation_id;
   const result = await core.execute({ command: "transfer.approve", operationId: id });

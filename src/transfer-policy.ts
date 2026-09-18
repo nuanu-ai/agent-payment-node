@@ -8,6 +8,7 @@ import { multiplyAtomic, parseAtomic } from "./money.js";
 import type { Address, Economics, Hex, OperationRecord, ReceiptRecord } from "./model.js";
 import type { BalanceSnapshot, FeeEstimate, RpcReceipt } from "./ports.js";
 import { canonicalAddress, validateBalance } from "./wallet-policy.js";
+import { publicDirectAllowlist } from "./direct-allowlist-gate.js";
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/;
 const HASH = /^[a-f0-9]{64}$/;
@@ -149,6 +150,7 @@ export function publicOperation(operation: OperationRecord): unknown {
     ...(operation.evm === undefined ? {} : { asset: publicEvmAsset(operation.evm.asset), fee_budget: {
       max_fee_wei: operation.evm.maxFeeWei, enforcement: "pre_submission_quote", quote: operation.evm.feeQuote,
     }, policy: { identity: "apn.direct.foreground-approval.v1", chain: `eip155:${operation.chainId}`, asset: publicEvmAsset(operation.evm.asset), amount_atomic: operation.amountAtomic, foreground_approval_required: true } }),
+    ...(operation.allowlist === undefined ? {} : { allowlist: publicDirectAllowlist(operation.allowlist, operation.allowlistLease) }),
     wallet_address: operation.walletAddress,
     recipient: operation.recipient,
     amount: { atomic: operation.amountAtomic, decimal: operation.amountDecimal, decimals: operation.evm?.asset.decimals ?? USDC_DECIMALS },

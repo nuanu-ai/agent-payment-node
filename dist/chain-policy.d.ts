@@ -30,3 +30,5 @@ export declare function chainUsage(policy: ChainPolicy, operations: readonly Rai
     nativeFeeAtomic: string;
 };
 export declare function assertChainPolicy(policy: ChainPolicy, account: ChainAccount, asset: ChainAsset, amount: string, maximumFee: string, operations: readonly RailOperationRecord[], now: Date, excluding?: string): void;
+/** Direct rails keep chain policies only for the native fee, rent and resource cap; owner amount caps live in the allowlist policy. */
+export declare function assertChainFeePolicy(policy: ChainPolicy, account: ChainAccount, asset: ChainAsset, maximumFee: string): void;

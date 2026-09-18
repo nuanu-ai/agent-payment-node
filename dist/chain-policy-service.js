@@ -1,5 +1,5 @@
 import { canonicalJson } from "./canonical.js";
-import { assertChainPolicy, chainAsset, chainDecimal, chainUsage, sealChainPolicy } from "./chain-policy.js";
+import { assertChainFeePolicy, chainAsset, chainDecimal, chainUsage, sealChainPolicy } from "./chain-policy.js";
 import { ChainPolicyStore } from "./chain-policy-store.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
@@ -100,9 +100,10 @@ export class ChainPolicyService {
             throw new ApnError("APN_WALLET_POLICY_REQUIRED", "This mainnet asset is denied until foreground policy admission.");
         return policy;
     }
-    async authorize(account, alias, amount, maximumFee, excluding) {
+    /** The chain policy caps only native fees, rent and resources; the owner allowlist policy caps the amount (one counter, no double count). */
+    async authorize(account, alias, maximumFee) {
         const policy = await this.requiredPolicy(account, alias);
-        assertChainPolicy(policy, account, chainAsset(account.rail, alias), amount, maximumFee, await this.records.listOperations(account.profileHash), this.context.clock.now(), excluding);
+        assertChainFeePolicy(policy, account, chainAsset(account.rail, alias), maximumFee);
         return policy;
     }
 }

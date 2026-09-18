@@ -28,7 +28,7 @@ export class AssetUsageLedger extends SecureStateStore {
         const account = canonicalAccount(initial.chain, input.account, false);
         const idempotencyHash = idempotency(input.idempotencyKey);
         const identity = { account, chain: initial.chain, asset: exactAsset(initial.asset) };
-        const reservationId = domainHash(RESERVATION_DIGEST_DOMAIN, canonicalJson({ ...identity, idempotencyHash }));
+        const reservationId = reservationIdFor(identity, idempotencyHash);
         await this.ready();
         return await this.withLocks([this.bucketLock(identity)], async () => {
             const reservations = await this.loadBucket(identity);
@@ -165,6 +165,10 @@ export class AssetUsageLedger extends SecureStateStore {
         return `asset-usage:${domainHash("apn.asset-usage-lock.v1", canonicalJson(identity))}`;
     }
 }
+/** The reservation id that `reserve` creates or replays for this exact identity and idempotency key. */
+export function assetUsageReservationId(identityValue, idempotencyKey) {
+    return reservationIdFor(validateIdentity(identityValue), idempotency(idempotencyKey));
+}
 export function validateAssetUsageReservation(value) {
     if (!isPlainRecord(value) || !exactKeys(value, [
         "schemaVersion", "reservationId", "idempotencyHash", "policyDigest", "registryVersion", "account", "chain",
@@ -216,6 +220,9 @@ function expectedStates(value) {
         throw invalid("Expected usage reservation source states are invalid.");
     }
     return [...new Set(value)];
+}
+function reservationIdFor(identity, idempotencyHash) {
+    return domainHash(RESERVATION_DIGEST_DOMAIN, canonicalJson({ ...exactIdentity(identity), idempotencyHash }));
 }
 function seal(body) {
     return validateAssetUsageReservation({ ...body, reservationDigest: domainHash(RESERVATION_DIGEST_DOMAIN, canonicalJson(body)) });

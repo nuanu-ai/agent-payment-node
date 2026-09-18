@@ -10,12 +10,17 @@ import { RAIL_PRESEND_ATTEMPTS, RAIL_PRESEND_MIN_REMAINING_MS, RAIL_PRESEND_RETR
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
+import type { DirectAssetUsageLease } from "./direct-asset-usage.js";
+import { railAllowlistSubject, railUsageTarget, requireListedRailAsset } from "./rail-direct-allowlist.js";
 
 export class RailOperationService {
   readonly records: RailOperationRepository;
   readonly policies: ChainPolicyService;
   private readonly operations: OperationService;
+  private readonly allowlist: DirectAllowlistGate;
   constructor(private readonly context: RuntimeContext) {
+    this.allowlist = new DirectAllowlistGate(context);
     this.records = new RailOperationRepository(context.state.root);
     this.policies = new ChainPolicyService(context);
     this.operations = new OperationService(context.state, context.providerX402Repository, this.records);
@@ -25,6 +30,7 @@ export class RailOperationService {
     readonly recipient: string; readonly amount: string; readonly maximumFee: string; readonly idempotencyKey: string;
   }): Promise<unknown> {
     const profile = canonicalProfile(input.profile); const asset = chainAsset(input.rail, input.asset);
+    requireListedRailAsset(asset);
     const amountAtomic = chainDecimal(input.amount, asset.decimals);
     const maximumFeeAtomic = chainDecimal(input.maximumFee, input.rail === "solana" ? 9 : 6);
     const key = canonicalIdempotencyKey(input.idempotencyKey); const state = this.context.state;
@@ -42,12 +48,14 @@ export class RailOperationService {
         return publicRailOperation(existing.record);
       }
       await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
-      const policy = await this.policies.authorize(account, input.asset, amountAtomic, maximumFeeAtomic);
+      const policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
+      // Owner amount caps: the active allowlist policy and the shared usage ledger, checked before any RPC call.
+      const allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic } }));
       const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
       validateRailPrepared(prepared, account);
       if (prepared.recipient !== recipient || prepared.amountAtomic !== amountAtomic || prepared.maximumFeeAtomic !== maximumFeeAtomic || canonicalJson(prepared.asset) !== canonicalJson(asset) || prepared.networkIdentity !== policy.networkIdentity) corrupt();
       const operation = newRailOperation({ schemaVersion: "apn.rail-operation.v1", kind: "rail_transfer", operationId,
-        profile, profileHash, idempotencyHash, requestHash, account, prepared, policyHash: policy.policyHash });
+        profile, profileHash, idempotencyHash, requestHash, account, prepared, policyHash: policy.policyHash, allowlist });
       await this.records.persist(operation);
       return publicRailOperation(operation);
     });
@@ -67,7 +75,7 @@ export class RailOperationService {
         await this.move(operation, "failed_before_effect", "approval_or_pre_effect_validation_refused", "durable_pre_effect");
         throw error;
       }
-      if (adapter.execution === "provider_atomic") return await this.submit(operation, adapter, null);
+      if (adapter.execution === "provider_atomic") return await this.submit(operation, adapter, null, await this.reserveUsage(operation));
       let send: RailSendBinding | undefined;
       if (adapter.bindSend !== undefined) {
         try { send = await this.patientBind(operation, adapter.bindSend.bind(adapter)); }
@@ -76,7 +84,8 @@ export class RailOperationService {
           throw error;
         }
       }
-      operation = await this.move(operation, "signing_started", "foreground_signing_started", "durable_pre_effect", undefined, send);
+      const allowlistLease = await this.reserveUsage(operation);
+      operation = await this.move(operation, "signing_started", "foreground_signing_started", "durable_pre_effect", undefined, send, allowlistLease);
       let effect: RailSignedEffect;
       try { effect = await adapter.sign(binding(operation)); }
       catch (error) {
@@ -117,6 +126,7 @@ export class RailOperationService {
     return await this.context.state.withLocks([`profile:${found.profileHash}`, `operation:${operationId}`], async () => {
       const operation = await this.required(operationId);
       await this.records.repairReceipt(operation);
+      await this.followUsage(operation);
       return publicRailOperation(await action(operation));
     });
   }
@@ -146,8 +156,9 @@ export class RailOperationService {
     if (this.context.clock.now().getTime() >= Date.parse(operation.prepared.expiresAt)) throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen direct-rail approval expired.");
     const current = await this.policies.account(operation.profile, operation.account.rail);
     if (canonicalJson(current) !== canonicalJson(operation.account)) throw new ApnError("APN_PROFILE_DRIFT", "The direct-rail account changed.");
-    const policy = await this.policies.authorize(current, operation.prepared.asset.alias, operation.prepared.amountAtomic, operation.prepared.maximumFeeAtomic, operation.operationId);
+    const policy = await this.policies.authorize(current, operation.prepared.asset.alias, operation.prepared.maximumFeeAtomic);
     if (policy.policyHash !== operation.policyHash) throw new ApnError("APN_PROFILE_DRIFT", "The chain policy changed after preparation.");
+    if (operation.allowlist !== undefined) await this.allowlist.confirm(railAllowlistSubject(operation), operation.allowlist);
     await adapter.revalidate(current, operation.prepared, operation.send ?? null);
   }
   private async firstLocalSubmit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect): Promise<RailOperationRecord> {
@@ -157,9 +168,10 @@ export class RailOperationService {
     }
     return await this.submit(operation, adapter, effect);
   }
-  private async submit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect | null): Promise<RailOperationRecord> {
+  private async submit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect | null,
+    allowlistLease?: DirectAssetUsageLease): Promise<RailOperationRecord> {
     // This durable write is outside the catch: no invocation follows a failed write.
-    operation = await this.move(operation, "submitting", "submission_intent_persisted", "effect_outcome_unknown");
+    operation = await this.move(operation, "submitting", "submission_intent_persisted", "effect_outcome_unknown", undefined, undefined, allowlistLease);
     let transactionId: string;
     try {
       const result = await adapter.submit(binding(operation), effect);
@@ -182,7 +194,7 @@ export class RailOperationService {
     const next = transitionRail(operation, { state: result.status, at: this.context.clock.now().toISOString(),
       reason: result.status === "completed" ? "exact_finalized_transfer_verified" : "exact_finalized_revert_verified",
       proofClass: operation.account.rail === "solana" ? "solana_finalized_transaction_effect" : "tron_solidified_transaction_effect", evidence: result.evidence });
-    await this.records.persist(next); return next;
+    await this.records.persist(next); return await this.followUsage(next);
   }
   private assertEffect(operation: RailOperationRecord, effect: RailSignedEffect): void {
     validateRailTransactionId(effect.transactionId, operation.account.rail);
@@ -192,9 +204,29 @@ export class RailOperationService {
   }
   private async move(operation: RailOperationRecord, state: RailState, reason: string, proofClass: string,
     effect: { readonly transactionId: string; readonly rawPayloadHash?: string } | undefined = undefined,
-    send: RailSendBinding | undefined = undefined): Promise<RailOperationRecord> {
-    const next = transitionRail(operation, { state, at: this.context.clock.now().toISOString(), reason, proofClass, ...effect, ...(send === undefined ? {} : { send }) });
-    await this.records.persist(next); return next;
+    send: RailSendBinding | undefined = undefined, allowlistLease: DirectAssetUsageLease | undefined = undefined): Promise<RailOperationRecord> {
+    const next = transitionRail(operation, { state, at: this.context.clock.now().toISOString(), reason, proofClass, ...effect,
+      ...(send === undefined ? {} : { send }), ...(allowlistLease === undefined ? {} : { allowlistLease }) });
+    await this.records.persist(next); return await this.followUsage(next);
+  }
+  /** After the foreground decision and every pre-send check, before signing or a provider send. Refusals end the operation. */
+  private async reserveUsage(operation: RailOperationRecord): Promise<DirectAssetUsageLease> {
+    try {
+      if (operation.allowlist === undefined) {
+        refuse("allowlist_binding_missing", "This transfer was prepared before the owner allowlist gate; prepare a new transfer.");
+      }
+      return await this.allowlist.reserve(railAllowlistSubject(operation), operation.allowlist);
+    } catch (error) {
+      await this.move(operation, "failed_before_effect", "allowlist_refused_at_approval", "durable_pre_effect");
+      throw error;
+    }
+  }
+  /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently. */
+  private async followUsage(operation: RailOperationRecord): Promise<RailOperationRecord> {
+    if (operation.allowlist !== undefined) {
+      await this.allowlist.follow(railAllowlistSubject(operation), railUsageTarget(operation.state), operation.transitions.at(-1)!.transitionHash);
+    }
+    return operation;
   }
 }
 function binding(operation: RailOperationRecord): RailEffectBinding { return { account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, prepared: operation.prepared, send: operation.send ?? null }; }

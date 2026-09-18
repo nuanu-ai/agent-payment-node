@@ -3,6 +3,7 @@ import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { evmChain, evmUint, validateEvmAmount, validateEvmAsset } from "./evm-asset.js";
 import { canonicalAddress } from "./wallet-policy.js";
+import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 export function requireEvmRpc(rpc) {
     if (rpc.evm === undefined)
         throw new ApnError("APN_RPC_CONFIG", "RPC adapter does not implement explicit EVM assets.");
@@ -72,6 +73,7 @@ export function validateEvmOperation(operation) {
         throw new ApnError("APN_STATE_CORRUPT", "Frozen EVM transaction economics exceed the supported signing bounds.");
     }
     evmUint(operation.preparedBlockNumberAtomic);
+    validateEvmAllowlist(operation);
     if (operation.providerDirect !== undefined || operation.chainId !== binding.asset.chainId || operation.token !== binding.asset.address ||
         operation.transactionData !== transaction.data || binding.transactionTo !== transaction.to || binding.valueAtomic !== transaction.valueAtomic ||
         operation.economics === undefined || operation.economics.maximumGasCostAtomic !==

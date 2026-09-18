@@ -15,6 +15,7 @@ import { StateStore } from "../../src/state.js";
 import { associatedUsdc } from "../../src/solana/accounts.js";
 import { SolanaLocalAdapter } from "../../src/solana/local-adapter.js";
 import type { SolanaMethod, SolanaRpcPort } from "../../src/solana/rpc.js";
+import { SOLANA_CHAIN, activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 
 export const SOL_RECIPIENT = "So11111111111111111111111111111111111111112";
 export const SOL_BLOCKHASH = "11111111111111111111111111111111";
@@ -152,9 +153,15 @@ export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc
   const adapter = new SolanaLocalAdapter(storage, rpc, clock.now); const approval = options.approval ?? new SolanaApproval();
   const core = new ApnCore({ state: new StateStore(root), chainAccounts: storage, directRails: [adapter], railApproval: approval,
     chainPolicyApproval: { approve: async () => {} }, clock, wait, ...(options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {}) });
-  if (options.admit !== false) for (const asset of ["sol", "usdc"] as const) {
-    const admitted = await core.execute({ command: "policy.admit-solana", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "0.003" });
-    assert.equal(admitted.ok, true, admitted.error?.message);
+  if (options.admit !== false) {
+    for (const asset of ["sol", "usdc"] as const) {
+      const admitted = await core.execute({ command: "policy.admit-solana", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "0.003" });
+      assert.equal(admitted.ok, true, admitted.error?.message);
+    }
+    // The chain policy now caps only fees and rent; the owner's amount caps come from the activated allowlist policy.
+    await activateDirectPolicy(root, account.profile, { accounts: { solana: account.address }, now: clock.now(), admissions: [
+      directAdmission(SOLANA_CHAIN, null, { maximumPerTransferAtomic: "2000000000", dailyLimitAtomic: "3000000000" }),
+      directAdmission(SOLANA_CHAIN, SOLANA_USDC, { maximumPerTransferAtomic: "2000000", dailyLimitAtomic: "3000000" })] });
   }
   const prepare = async (asset: "sol" | "usdc" = "sol", idempotencyKey = "solana-fixture-0001") => {
     const result = await core.execute({ command: "transfer.prepare-solana", profile: account.profile, asset,

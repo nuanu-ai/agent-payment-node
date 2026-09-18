@@ -31,14 +31,19 @@ import { canonicalProfile } from "./wallet-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-recovery.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
+import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
+import type { DirectAssetUsageLease } from "./direct-asset-usage.js";
+import { evmAllowlistSubject, evmUsageTarget } from "./evm-direct-allowlist.js";
 
 export class TransferService {
   private readonly operations: OperationService;
   private readonly providerDirect: ProviderDirectTransferService;
   private readonly providerDirectRecovery: ProviderDirectRequestRecoveryService;
+  private readonly allowlist: DirectAllowlistGate;
 
   constructor(private readonly context: RuntimeContext) {
     this.operations = new OperationService(context.state);
+    this.allowlist = new DirectAllowlistGate(context);
     this.providerDirect = new ProviderDirectTransferService(context);
     this.providerDirectRecovery = new ProviderDirectRequestRecoveryService(context);
   }
@@ -161,7 +166,7 @@ export class TransferService {
     const { profile, profileHash } = localFound;
     return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
       let operation = requiredLocal(await this.requiredOperation(operationId));
-      if (operation.terminal) return publicOperation(operation);
+      if (operation.terminal) return publicOperation(await this.followUsage(operation));
       if (operation.state !== "awaiting_approval") {
         throw new ApnError("APN_OPERATION_BLOCKED", "Operation is already signed; use operation resume.");
       }
@@ -170,7 +175,11 @@ export class TransferService {
       }
       const rpc = this.context.requireRpc();
       await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason));
-      if (operation.evm !== undefined) operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect");
+      if (operation.evm !== undefined) {
+        // The native signer approves and signs in one call, so the reservation is durable in both stores before it.
+        const allowlistLease = await this.reserveUsage(operation);
+        operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect", { allowlistLease });
+      }
       const effect = parseEffect(await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", operation.evm === undefined ? {
         profile,
         operationId: operation.operationId,
@@ -221,8 +230,9 @@ export class TransferService {
     const { profile, profileHash } = localFound;
     return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
       let operation = requiredLocal(await this.requiredOperation(operationId));
-      if (operation.terminal) return publicOperation(operation);
+      if (operation.terminal) return publicOperation(await this.followUsage(operation));
       if (operation.evm !== undefined) {
+        await this.followUsage(operation);
         await requireEvmRpc(this.context.requireRpc()).assertChain(operation.chainId);
         if (operation.state === "started") {
           const stored = await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
@@ -384,6 +394,29 @@ export class TransferService {
     })));
   }
 
+  /** After every approval pre-check and before the native approve-and-sign call; refusals end the operation before effect. */
+  private async reserveUsage(operation: LocalOperationRecord): Promise<DirectAssetUsageLease> {
+    try {
+      if (operation.allowlist === undefined) {
+        refuse("allowlist_binding_missing", "This transfer was prepared before the owner allowlist gate; prepare a new transfer.");
+      }
+      return await this.allowlist.reserve(evmAllowlistSubject(operation), operation.allowlist);
+    } catch (error) {
+      if (error instanceof ApnError && error.code === "APN_ALLOWLIST_REFUSED") {
+        await this.transition(operation, "failed_before_effect", true, "allowlist_refused_at_approval", "durable_pre_effect_failure");
+      }
+      throw error;
+    }
+  }
+
+  /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently, after each durable write. */
+  private async followUsage<T extends OperationRecord>(operation: T): Promise<T> {
+    if (operation.allowlist !== undefined) {
+      await this.allowlist.follow(evmAllowlistSubject(operation), evmUsageTarget(operation.state), operation.transitions.at(-1)!.hash);
+    }
+    return operation;
+  }
+
   private async failBeforeEffect(operation: LocalOperationRecord, reason: string): Promise<never> {
     await this.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
     throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen transfer inputs changed before approval; prepare a new operation.");
@@ -395,7 +428,7 @@ export class TransferService {
     terminal: boolean,
     reason: string,
     proofClass: string,
-    extra: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt">> = {},
+    extra: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt" | "allowlistLease">> = {},
     rpcReceipt?: RpcReceipt,
   ): Promise<LocalOperationRecord> {
     const at = this.context.clock.now().toISOString();
@@ -403,7 +436,7 @@ export class TransferService {
     const { integrityHash: _previousIntegrityHash, ...base } = operation;
     const updated = sealOperation({ ...base, ...extra, state, terminal, reason, proofClass, transitions }) as LocalOperationRecord;
     await this.persist(updated, rpcReceipt);
-    return updated;
+    return await this.followUsage(updated);
   }
 
   private async persist(operation: OperationRecord, rpcReceipt?: RpcReceipt): Promise<void> {
