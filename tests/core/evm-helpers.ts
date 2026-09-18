@@ -11,6 +11,7 @@ import type { NativePort } from "../../src/ports.js";
 import { StateStore } from "../../src/state.js";
 import type { TransferApprovalIntent, TransferApprovalPort } from "../../src/tty-approval.js";
 import { RECIPIENT, TestClock, TestRpc } from "./helpers.js";
+import { activateDirectPolicy, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 
 const { ApnError } = await testRuntime(errorRuntime, "errors.js");
 const { ApnCore } = await testRuntime(coreRuntime, "core.js");
@@ -42,7 +43,7 @@ export class EvmApproval implements TransferApprovalPort {
 export class EvmTestRpc extends TestRpc {
   assetAtomic = "100000000000000000000";
   nativeAtomic = "1000000000000000000";
-  decimals: number | undefined = 8;
+  decimals: number | undefined = 6;
   l1Fee = 1000n;
   operatorFee = 100n;
   genericBalanceCalls = 0;
@@ -99,4 +100,11 @@ export function evmCore(root: string, rpc = new EvmTestRpc(), wrapping = new Evm
   const native = wrapNative?.(local) ?? local;
   const core = new ApnCore({ state, rpc, native, clock });
   return { core, state, rpc, wrapping, approval, local, clock };
+}
+
+/** A local wallet whose owner has activated direct caps for native and USDC on every enabled EVM network. */
+export async function ensureDirectWallet(setup: ReturnType<typeof evmCore>, profile = "default"): Promise<{ readonly address: Address }> {
+  const wallet = await setup.core.wallet.ensure(profile) as { address: Address };
+  await activateDirectPolicy(setup.state.root, profile, { accounts: { evm: wallet.address }, admissions: evmDirectAdmissions(), now: setup.clock.now() });
+  return wallet;
 }

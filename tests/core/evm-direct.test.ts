@@ -9,16 +9,17 @@ import { evmAmount, MAX_EVM_UINT, resolveEvmAsset } from "../../src/evm-asset.js
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import type { Address } from "../../src/model.js";
 import { sealReceipt } from "../../src/state-integrity.js";
-import { EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, evmCore } from "./evm-helpers.js";
+import { EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, ensureDirectWallet, evmCore } from "./evm-helpers.js";
+import { EVM_USDC } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 test("generic CLI and MCP bind the same explicit core request without changing legacy commands", () => {
-  const input = { profile: "default", chain: "eip155:8453", asset: EVM_TOKEN, decimals: "8", rpc_url: "https://rpc.example", to: EVM_REQUEST.recipient, amount: "1.25", max_fee_wei: EVM_REQUEST.maxFeeWei, idempotency_key: EVM_REQUEST.idempotencyKey };
+  const input = { profile: "default", chain: "eip155:8453", asset: EVM_USDC[8453], decimals: "6", rpc_url: "https://rpc.example", to: EVM_REQUEST.recipient, amount: "1.25", max_fee_wei: EVM_REQUEST.maxFeeWei, idempotency_key: EVM_REQUEST.idempotencyKey };
   const tool = MCP_TOOLS.find((entry) => entry.name === "apn_pay_transfer_prepare_asset")!;
   const argv = ["pay", "transfer", "prepare-asset", ...Object.entries(input).flatMap(([name, value]) => [`--${name.replaceAll("_", "-")}`, value])];
   assert.deepEqual(bindArgv(argv), bindMcpInput(tool.command, input));
   assert.equal(bindArgv(argv).request.command, "transfer.prepare");
-  assert.throws(() => bindMcpInput(tool.command, { ...input, chain: "eip155:42170" }), { code: "APN_INVALID_INPUT" });
+  assert.throws(() => bindMcpInput(tool.command, { ...input, chain: "eip155:42170" }), { code: "APN_ALLOWLIST_REFUSED" });
   assert.throws(() => bindMcpInput(tool.command, { ...input, decimals: "256" }), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bindArgv(["pay", "transfer", "prepare", "--profile", "default"]));
   assert.ok(MCP_TOOLS.some((entry) => entry.name === "apn_wallet_balance_asset"));
@@ -36,13 +37,14 @@ test("EVM amount handling preserves 0..255 decimals and uint256 without implicit
   assert.equal(resolveEvmAsset({ chainId: 8453, token: EVM_TOKEN, decimals: 0 }).decimalsSource, "caller");
 });
 
-for (const chainId of [8453, 1, 42161] as const) for (const asset of ["native", EVM_TOKEN] as const) test(`Chain ${chainId} ${asset === "native" ? "ETH" : "arbitrary ERC-20"} completes through encrypted custody and durable status/receipt`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "usdc"] as const) test(`Chain ${chainId} ${kind === "native" ? "ETH" : "list USDC"} completes through encrypted custody and durable status/receipt`, async (context) => {
+  const asset: "native" | Address = kind === "native" ? "native" : EVM_USDC[chainId];
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
   setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   if (chainId === 42161) setup.rpc.fees = { ...setup.rpc.fees, maxPriorityFeePerGasAtomic: "0" };
-  const wallet = await setup.core.wallet.ensure("default") as { address: Address };
+  const wallet = await ensureDirectWallet(setup);
   setup.rpc.sender = wallet.address;
   const request = { ...EVM_REQUEST, asset: { chainId, token: asset }, amount: asset === "native" ? "0.000001" : "1.25" };
   const prepared = await setup.core.transfer.prepare(request) as { operation_id: string; state: string };
@@ -76,7 +78,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const asset of ["native", 
 test("fee/value funding and chain mismatch fail before approval or signature", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, maxFeeWei: "1" }), { code: "APN_FEE_BUDGET_EXCEEDED" });
   setup.rpc.nativeAtomic = "1000000000000";
   await assert.rejects(setup.core.transfer.prepare(EVM_REQUEST), { code: "APN_INSUFFICIENT_GAS" });
@@ -91,7 +93,7 @@ test("Arbitrum signs the frozen fee envelope when the fresh gas estimate and sug
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
   setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   const frozenFees = setup.rpc.fees;
   const prepared = await setup.core.transfer.prepare({
     ...EVM_REQUEST,
@@ -129,7 +131,7 @@ test("EVM approval rejects only a changed nonce, insufficient frozen gas, or a b
     try {
       const setup = evmCore(temporary.root);
       setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
-      await setup.core.wallet.ensure("default");
+      await ensureDirectWallet(setup);
       const prepared = await setup.core.transfer.prepare({
         ...EVM_REQUEST,
         idempotencyKey: `arbitrum-drift-${scenario.name.replaceAll(" ", "-")}`,
@@ -161,7 +163,7 @@ test("all EVM chains keep the frozen signed envelope across harmless live fee an
       const setup = evmCore(temporary.root);
       setup.rpc.chainId = chainId;
       if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
-      await setup.core.wallet.ensure("default");
+      await ensureDirectWallet(setup);
       const prepared = await setup.core.transfer.prepare({
         ...EVM_REQUEST,
         idempotencyKey: `live-envelope-${chainId}`,
@@ -189,7 +191,7 @@ test("fresh custody recovers the encrypted signature after process loss before p
     if (request.operation === "directTransfer.approveAndSign") throw new Error("simulated process loss after encrypted save");
     return result;
   } }));
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
   await assert.rejects(setup.core.transfer.approve(prepared.operation_id), /simulated process loss/u);
   assert.equal((await setup.core.transfer.status(prepared.operation_id) as { state: string }).state, "started");
@@ -204,7 +206,7 @@ test("refused foreground approval never loads the key and missing signature reco
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const approval = new EvmApproval(); approval.rejection = new ApnError("APN_OPERATION_BLOCKED", "refused");
   const setup = evmCore(temporary.root, new EvmTestRpc(), new EvmWrappingSecret(), approval);
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
   const loads = setup.wrapping.loads;
   await assert.rejects(setup.core.transfer.approve(prepared.operation_id), /refused/u);
@@ -217,7 +219,7 @@ test("refused foreground approval never loads the key and missing signature reco
 test("ambiguous broadcast reuses identical bytes and blocks retry when fee budget has risen", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   setup.rpc.submitError = new Error("timeout"); setup.rpc.receiptEnabled = false;
   const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "unknown_finality");
@@ -236,8 +238,8 @@ test("ambiguous broadcast reuses identical bytes and blocks retry when fee budge
 test("ERC-20 receipt success is insufficient without exact log AND balance deltas", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
-  const wallet = await setup.core.wallet.ensure("default") as { address: Address }; setup.rpc.sender = wallet.address;
-  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 8453, token: EVM_TOKEN }, amount: "1" }) as { operation_id: string };
+  const wallet = await ensureDirectWallet(setup); setup.rpc.sender = wallet.address;
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 8453, token: EVM_USDC[8453] }, amount: "1" }) as { operation_id: string };
   setup.rpc.deltasVerified = false;
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "unknown_finality");
   setup.rpc.deltasVerified = true; setup.rpc.transferLogEnabled = false;
@@ -248,7 +250,7 @@ test("ERC-20 receipt success is insufficient without exact log AND balance delta
 
 test("terminal EVM operation with missing or forged receipt fails closed even when hashes are resealed", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root); await setup.core.wallet.ensure("default");
+  const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
   const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
   await setup.core.transfer.approve(prepared.operation_id);
   const path = join(temporary.root, "receipts", setup.state.profileHash("default"), `${prepared.operation_id}.json`);
@@ -263,7 +265,7 @@ test("terminal EVM operation with missing or forged receipt fails closed even wh
 test("Arbitrum receipt without safe proof stays nonterminal and resumes without another signature or submission", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   const evidence = setup.rpc.evm.evidence;
   setup.rpc.evm.evidence = async (...args) => {
     const { safeBlockNumberAtomic: _number, safeBlockHash: _hash, ...latestOnly } = await evidence(...args);
@@ -294,7 +296,7 @@ test("Arbitrum increasing inclusive gas after signing prevents first submission 
     return result;
   } }));
   setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   const previousFees = setup.rpc.fees;
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
   await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_FEE_BUDGET_EXCEEDED" });
@@ -322,7 +324,7 @@ test("Arbitrum base fee above the frozen signed ceiling retains and later submit
     return result;
   } }));
   setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   const frozenFees = setup.rpc.fees;
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
   await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_FEE_BUDGET_EXCEEDED" });
@@ -344,12 +346,17 @@ test("Arbitrum base fee above the frozen signed ceiling retains and later submit
   assert.equal(stillBlocked.approval.intents.length, 0); assert.equal(setup.rpc.broadcastCount, 1);
 });
 
-for (const chainId of [8453, 1, 42161] as const) for (const decimals of [6, 18]) test(`chain ${chainId} arbitrary ERC20 with ${decimals} decimals preserves exact accounting`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) for (const decimals of [6, 18]) test(`chain ${chainId} list USDC keeps the list's decimals; a contract reporting ${decimals} decimals ${decimals === 6 ? "preserves exact accounting" : "is refused"}`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = chainId; setup.rpc.decimals = decimals;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
-  setup.rpc.sender = (await setup.core.wallet.ensure("default") as { address: Address }).address;
-  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: EVM_TOKEN }, amount: "1.000001" }) as { operation_id: string };
+  setup.rpc.sender = (await ensureDirectWallet(setup)).address;
+  const request = { ...EVM_REQUEST, asset: { chainId, token: EVM_USDC[chainId] }, amount: "1.000001" };
+  if (decimals !== 6) {
+    await assert.rejects(setup.core.transfer.prepare(request), { code: "APN_ASSET_MISMATCH" });
+    assert.equal(setup.rpc.submissions.length, 0); return;
+  }
+  const prepared = await setup.core.transfer.prepare(request) as { operation_id: string };
   const operation = (await setup.state.findOperation(prepared.operation_id))!;
   const atomic = decimals === 6 ? "1000001" : "1000001000000000000";
   assert.equal(operation.amountAtomic, atomic); assert.equal(operation.evm?.asset.decimals, decimals);
@@ -361,7 +368,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const decimals of [6, 18])
 test("Arbitrum foreground approval explicitly labels inclusive fees without claiming free L1 posting", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
-  await setup.core.wallet.ensure("default");
+  await ensureDirectWallet(setup);
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
   await setup.core.transfer.approve(prepared.operation_id);
   const { TtyTransferApproval, transferApprovalPhrase } = await import("../../src/tty-approval.js");

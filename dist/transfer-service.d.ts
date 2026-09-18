@@ -5,6 +5,7 @@ export declare class TransferService {
     private readonly operations;
     private readonly providerDirect;
     private readonly providerDirectRecovery;
+    private readonly allowlist;
     constructor(context: RuntimeContext);
     prepare(request: Extract<CommandRequest, {
         command: "transfer.prepare";
@@ -22,6 +23,10 @@ export declare class TransferService {
     private proveSuperseding;
     private requiredOperation;
     private effectFor;
+    /** After every approval pre-check and before the native approve-and-sign call; refusals end the operation before effect. */
+    private reserveUsage;
+    /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently, after each durable write. */
+    private followUsage;
     private failBeforeEffect;
     private transition;
     private persist;

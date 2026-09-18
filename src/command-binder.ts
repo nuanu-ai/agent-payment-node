@@ -8,6 +8,7 @@ import {
 import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
 import { evmChain, evmDecimals, evmToken, type EvmAssetSelection } from "./evm-asset.js";
+import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
 import { chainDecimal } from "./chain-policy.js";
 import { solanaAddress } from "./solana/rpc.js";
@@ -215,7 +216,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     };
     case "pay transfer prepare-asset": return {
       request: {
-        command: "transfer.prepare", profile: value(options, "--profile"), asset: bindAsset(options),
+        command: "transfer.prepare", profile: value(options, "--profile"), asset: bindListedAsset(options),
         recipient: value(options, "--to"), amount: value(options, "--amount"), maxFeeWei: value(options, "--max-fee-wei"),
         idempotencyKey: value(options, "--idempotency-key"),
       },
@@ -281,12 +282,22 @@ function bindNetwork(options: Readonly<Record<string, string>>) {
 }
 
 function bindAsset(options: Readonly<Record<string, string>>): EvmAssetSelection {
-  const decimals = options["--decimals"];
-  if (decimals !== undefined && !/^(?:0|[1-9][0-9]{0,2})$/u.test(decimals)) throw new ApnError("APN_INVALID_INPUT", "Asset decimals must be a canonical integer from 0 through 255.");
+  const decimals = bindDecimals(options);
   return {
     chainId: evmChain(value(options, "--chain")), token: evmToken(value(options, "--asset")),
-    ...(decimals === undefined ? {} : { decimals: evmDecimals(Number(decimals)) }),
+    ...(decimals === undefined ? {} : { decimals }),
   };
+}
+
+function bindDecimals(options: Readonly<Record<string, string>>): number | undefined {
+  const decimals = options["--decimals"];
+  if (decimals !== undefined && !/^(?:0|[1-9][0-9]{0,2})$/u.test(decimals)) throw new ApnError("APN_INVALID_INPUT", "Asset decimals must be a canonical integer from 0 through 255.");
+  return decimals === undefined ? undefined : evmDecimals(Number(decimals));
+}
+
+/** Direct transfers bind only frozen-list networks and pinned contracts; balance reads keep the open selector. */
+function bindListedAsset(options: Readonly<Record<string, string>>): EvmAssetSelection {
+  return listedEvmAsset(value(options, "--chain"), value(options, "--asset"), bindDecimals(options)).selection;
 }
 
 function value(options: Readonly<Record<string, string>>, name: string): string {

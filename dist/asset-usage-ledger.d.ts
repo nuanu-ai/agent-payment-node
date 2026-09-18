@@ -73,4 +73,6 @@ export declare class AssetUsageLedger extends SecureStateStore {
     private recordPath;
     private bucketLock;
 }
+/** The reservation id that `reserve` creates or replays for this exact identity and idempotency key. */
+export declare function assetUsageReservationId(identityValue: AssetUsageIdentity, idempotencyKey: string): string;
 export declare function validateAssetUsageReservation(value: unknown): AssetUsageReservation;

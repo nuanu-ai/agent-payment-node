@@ -11,6 +11,7 @@ import { TronLocalAdapter } from "../../src/tron/local-adapter.js";
 import { TRON_GENESIS, TRON_TRANSFER_TOPIC, TRON_USDT_HEX, tronHex, tronWord } from "../../src/tron/codec.js";
 import type { TronMethod, TronRpcPort } from "../../src/tron/rpc.js";
 import type { TronTransaction } from "../../src/tron/transaction.js";
+import { TRON_CHAIN, TRON_USDT, activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 
 export const TRON_RECIPIENT = utils.crypto.getBase58CheckAddress(utils.crypto.getAddressFromPriKey(Array(32).fill(48)));
 export const tronTestBlockId = (number: bigint) => number.toString(16).padStart(16, "0") + "ab".repeat(24);
@@ -146,9 +147,15 @@ export async function tronFixture(root: string, options: { rpc?: TronTestRpc; wr
   const adapter = new TronLocalAdapter(storage, rpc, clock.now); const approval = options.approval ?? new TronApproval();
   const core = new ApnCore({ state: new StateStore(root), chainAccounts: storage, directRails: [adapter], railApproval: approval,
     chainPolicyApproval: { approve: async () => {} }, clock, ...(options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {}) });
-  if (options.admit !== false) for (const asset of ["trx", "usdt"] as const) {
-    const result = await core.execute({ command: "policy.admit-tron", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "30" });
-    assert.equal(result.ok, true, result.error?.message);
+  if (options.admit !== false) {
+    for (const asset of ["trx", "usdt"] as const) {
+      const result = await core.execute({ command: "policy.admit-tron", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "30" });
+      assert.equal(result.ok, true, result.error?.message);
+    }
+    // The chain policy now caps only fees and resources; the owner's amount caps come from the activated allowlist policy.
+    const caps = { maximumPerTransferAtomic: "2000000", dailyLimitAtomic: "3000000" };
+    await activateDirectPolicy(root, account.profile, { accounts: { tron: account.address }, now: new Date(now),
+      admissions: [directAdmission(TRON_CHAIN, null, caps), directAdmission(TRON_CHAIN, TRON_USDT, caps)] });
   }
   const prepare = async (asset: "trx" | "usdt" = "trx", idempotencyKey = "tron-fixture-0001", maximumFee = "30") => {
     const result = await core.execute({ command: "transfer.prepare-tron", profile: account.profile, asset, recipient: TRON_RECIPIENT,

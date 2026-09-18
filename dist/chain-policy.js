@@ -107,6 +107,14 @@ export function assertChainPolicy(policy, account, asset, amount, maximumFee, op
     if (BigInt(usage.principalAtomic) + atomic(amount) > atomic(policy.dailyLimitAtomic))
         denied();
 }
+/** Direct rails keep chain policies only for the native fee, rent and resource cap; owner amount caps live in the allowlist policy. */
+export function assertChainFeePolicy(policy, account, asset, maximumFee) {
+    validateChainPolicy(policy);
+    if (canonicalJson(policy.account) !== canonicalJson(account) || canonicalJson(policy.asset) !== canonicalJson(asset))
+        denied();
+    if (atomic(maximumFee, true) > atomic(policy.maximumNativeFeeAtomic))
+        denied();
+}
 function denied() { throw new ApnError("APN_OPERATION_BLOCKED", "The chain asset policy or spending limit does not authorize this transfer."); }
 function invalidAmount() { throw new ApnError("APN_INVALID_INPUT", "Use a positive canonical decimal amount within the asset precision and integer range."); }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "The chain policy, asset or atomic value is invalid."); }

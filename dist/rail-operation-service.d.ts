@@ -7,6 +7,7 @@ export declare class RailOperationService {
     readonly records: RailOperationRepository;
     readonly policies: ChainPolicyService;
     private readonly operations;
+    private readonly allowlist;
     constructor(context: RuntimeContext);
     prepare(input: {
         readonly profile: string;
@@ -35,4 +36,8 @@ export declare class RailOperationService {
     private inspect;
     private assertEffect;
     private move;
+    /** After the foreground decision and every pre-send check, before signing or a provider send. Refusals end the operation. */
+    private reserveUsage;
+    /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently. */
+    private followUsage;
 }
