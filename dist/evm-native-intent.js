@@ -1,7 +1,8 @@
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import { APPROVAL_WINDOW_MS } from "./constants.js";
 import { ApnError } from "./errors.js";
-import { evmChain, evmUint, validateEvmAmount } from "./evm-asset.js";
+import { evmUint, validateEvmAmount } from "./evm-asset.js";
+import { directEvmChain } from "./evm-direct-networks.js";
 import { evmDirectFingerprint, evmTransaction, validateEvmDirectBinding } from "./evm-direct.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 export function parseEvmNativeIntent(payload) {
@@ -10,7 +11,7 @@ export function parseEvmNativeIntent(payload) {
         !isPlainRecord(payload.approval) || !exactKeys(payload.approval, ["recipient", "amountAtomic", "amountDecimal", "expiresAt"]))
         invalid();
     const profile = canonicalProfile(payload.profile), walletAddress = canonicalAddress(payload.walletAddress);
-    const operationId = hash(payload.operationId), fingerprint = hash(payload.fingerprint), chainId = evmChain(payload.chainId);
+    const operationId = hash(payload.operationId), fingerprint = hash(payload.fingerprint), chainId = directEvmChain(payload.chainId);
     const transaction = payload.transaction, approval = payload.approval;
     const recipient = canonicalAddress(approval.recipient), amountAtomic = evmUint(approval.amountAtomic, true).toString();
     const nonceAtomic = evmUint(transaction.nonceAtomic).toString(), gasLimitAtomic = evmUint(transaction.gasLimitAtomic, true).toString();

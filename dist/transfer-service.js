@@ -4,6 +4,7 @@ import { ApnError } from "./errors.js";
 import { hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
 import { prepareEvmTransfer } from "./evm-transfer-prepare.js";
 import { requireEvmRpc } from "./evm-direct.js";
+import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { checkEvmTransferFunding, evmCustodyPayload } from "./evm-transfer-approval.js";
 import { checkTransferApproval } from "./transfer-approval-check.js";
 import { parseAtomic, parseDecimal } from "./money.js";
@@ -321,8 +322,8 @@ export class TransferService {
         if (operation.evm !== undefined) {
             try {
                 receipt = { ...receipt, evmEvidence: await requireEvmRpc(rpc).evidence(operation, receipt) };
-                if (operation.chainId === 42161 && !hasSafeEvmInclusion(receipt.evmEvidence, receipt.blockNumberAtomic)) {
-                    throw new ApnError("APN_RPC_PROTOCOL", "Arbitrum receipt lacks selected RPC safe inclusion evidence.");
+                if (directEvmRequiresSafeHead(operation.chainId) && !hasSafeEvmInclusion(receipt.evmEvidence, receipt.blockNumberAtomic)) {
+                    throw new ApnError("APN_RPC_PROTOCOL", "The receipt lacks selected RPC safe inclusion evidence.");
                 }
             }
             catch {

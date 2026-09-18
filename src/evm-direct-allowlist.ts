@@ -1,6 +1,7 @@
 import { refuse, requireListedDirectAsset, validateDirectAllowlistBinding, validateDirectAllowlistLease, type DirectAllowlistSubject, type DirectUsageTarget } from "./direct-allowlist-gate.js";
 import { ApnError } from "./errors.js";
-import { EVM_NETWORKS, evmToken, type EvmAssetSelection } from "./evm-asset.js";
+import { evmToken, type EvmAssetSelection } from "./evm-asset.js";
+import { directEvmListRows, directEvmNetworkByCaip2 } from "./evm-direct-networks.js";
 import type { OperationRecord, OperationState } from "./model.js";
 
 export interface ListedEvmAsset {
@@ -24,10 +25,12 @@ export function listedEvmAsset(chainValue: unknown, tokenValue: unknown, decimal
     refuse("allowlist_decimals_mismatch", "The supplied decimals differ from the frozen allowlist row for this asset.",
       { chain, decimals: String(row.decimals) });
   }
-  const network = EVM_NETWORKS.find((entry) => entry.caip2 === chain);
+  const network = directEvmNetworkByCaip2(chain);
   if (network === undefined) {
     refuse("allowlist_network_not_enabled", "The network is on the frozen allowlist, but APN direct EVM transfers are not enabled on it yet.", { chain });
   }
+  // The registry's native coin is cross-checked against the list on every selection, never assumed.
+  directEvmListRows(network.chainId);
   return { selection: { chainId: network.chainId, token, ...(decimals === undefined ? {} : { decimals }) }, decimals: row.decimals };
 }
 

@@ -1,4 +1,5 @@
-import type { EvmAsset, EvmAssetSelection, EvmChainId } from "./evm-asset.js";
+import type { EvmAsset, EvmAssetSelection } from "./evm-asset.js";
+import type { DirectEvmChainId, DirectEvmQuoteFeeModel } from "./evm-direct-networks.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcProvenance, RpcReceipt } from "./ports.js";
 
@@ -10,8 +11,8 @@ export interface EvmBalanceSnapshot extends RpcProvenance {
 }
 
 export interface EvmFeeQuote extends RpcProvenance {
-  readonly chainId: EvmChainId;
-  readonly feeModel?: "arbitrum-inclusive";
+  readonly chainId: DirectEvmChainId;
+  readonly feeModel?: DirectEvmQuoteFeeModel;
   readonly l1DataFeeUpperWei: string;
   readonly operatorFeeUpperWei: string;
   readonly maximumExecutionFeeWei: string;
@@ -30,7 +31,7 @@ export interface EvmTransferEvidence {
 }
 
 export interface EvmTransactionInput {
-  readonly chainId: EvmChainId;
+  readonly chainId: DirectEvmChainId;
   readonly from: Address;
   readonly to: Address;
   readonly valueAtomic: string;
@@ -38,14 +39,14 @@ export interface EvmTransactionInput {
 }
 
 export interface EvmRpcPort {
-  assertChain(chainId: EvmChainId): Promise<void>;
+  assertChain(chainId: DirectEvmChainId): Promise<void>;
   balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
-  nonce(chainId: EvmChainId, address: Address, tag: "pending" | "latest"): Promise<string>;
+  nonce(chainId: DirectEvmChainId, address: Address, tag: "pending" | "latest"): Promise<string>;
   estimate(input: EvmTransactionInput): Promise<FeeEstimate>;
-  feeQuote(chainId: EvmChainId, economics: Economics): Promise<EvmFeeQuote>;
-  receipt(chainId: EvmChainId, transactionHash: Hex): Promise<RpcReceipt | null>;
+  feeQuote(chainId: DirectEvmChainId, economics: Economics): Promise<EvmFeeQuote>;
+  receipt(chainId: DirectEvmChainId, transactionHash: Hex): Promise<RpcReceipt | null>;
   evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence>;
-  confirmedAtNonce(chainId: EvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null>;
+  confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null>;
 }
 
 export type EvmRpcCall = (method: string, params: readonly unknown[]) => Promise<unknown>;

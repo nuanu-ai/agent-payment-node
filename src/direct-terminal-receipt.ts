@@ -1,6 +1,7 @@
 import { canonicalJson, exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { evmUint } from "./evm-asset.js";
+import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import type { EvmTransferEvidence } from "./evm-ports.js";
 import type { OperationRecord, ReceiptRecord } from "./model.js";
 import { assertProviderTerminalReceiptAuthority } from "./provider-direct-receipt.js";
@@ -41,7 +42,7 @@ export function assertDirectTerminalReceiptAuthority(operation: OperationRecord,
     const evidence = validateEvmTransferEvidence(receipt.evmEvidence);
     if (!evidence.transactionVerified || receipt.blockNumberAtomic === undefined) corrupt();
     evmUint(receipt.blockNumberAtomic);
-    if (operation.chainId === 42161 ? !hasSafeEvmInclusion(evidence, receipt.blockNumberAtomic) : evidence.safeBlockNumberAtomic !== undefined) corrupt();
+    if (directEvmRequiresSafeHead(operation.chainId) ? !hasSafeEvmInclusion(evidence, receipt.blockNumberAtomic) : evidence.safeBlockNumberAtomic !== undefined) corrupt();
     if (operation.state === "failed_confirmed_revert") {
       if (operation.reason !== "confirmed_receipt_revert" || operation.proofClass !== "confirmed_receipt") corrupt();
     } else if (operation.evm.asset.kind === "native") {

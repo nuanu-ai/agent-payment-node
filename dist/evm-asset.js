@@ -2,6 +2,7 @@ import { getAddress } from "viem";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { formatAtomic, parseAtomic, parseDecimal } from "./money.js";
+import { directEvmChain, directEvmNetwork } from "./evm-direct-networks.js";
 export const EVM_NETWORKS = [
     { chainId: 8453, name: "Base", caip2: "eip155:8453" },
     { chainId: 1, name: "Ethereum", caip2: "eip155:1" },
@@ -55,14 +56,15 @@ export function evmAmount(value, decimals) {
     return result;
 }
 export function resolveEvmAsset(selection, observedDecimals) {
-    const chainId = evmChain(selection.chainId);
+    const chainId = directEvmChain(selection.chainId);
     const token = evmToken(selection.token);
     if (selection.decimals !== undefined)
         evmDecimals(selection.decimals);
     if (token === "native") {
-        if (selection.decimals !== undefined && selection.decimals !== 18)
-            throw new ApnError("APN_INVALID_INPUT", "Native ETH has exactly 18 decimals.");
-        return { schemaVersion: "apn.evm-asset.v1", chainId, kind: "native", address: NATIVE_ASSET_ADDRESS, decimals: 18, decimalsSource: "native" };
+        const decimals = directEvmNetwork(chainId).nativeDecimals;
+        if (selection.decimals !== undefined && selection.decimals !== decimals)
+            throw new ApnError("APN_INVALID_INPUT", `The native coin has exactly ${decimals} decimals.`);
+        return { schemaVersion: "apn.evm-asset.v1", chainId, kind: "native", address: NATIVE_ASSET_ADDRESS, decimals, decimalsSource: "native" };
     }
     if (observedDecimals !== undefined)
         evmDecimals(observedDecimals);
@@ -80,7 +82,7 @@ export function validateEvmAsset(value) {
     }
     const asset = value;
     try {
-        evmChain(asset.chainId);
+        directEvmChain(asset.chainId);
         evmDecimals(asset.decimals);
         if (asset.schemaVersion !== "apn.evm-asset.v1")
             throw new Error("version");

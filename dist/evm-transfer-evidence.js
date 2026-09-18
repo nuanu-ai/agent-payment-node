@@ -1,5 +1,6 @@
 import { ApnError } from "./errors.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmTokenBalance, recheckEvmBlock } from "./evm-rpc-codec.js";
+import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 export async function observeEvmTransfer(call, operation, receipt) {
     const binding = operation.evm;
     if (binding === undefined || operation.transactionHash === undefined || operation.economics === undefined || receipt.blockHash === undefined) {
@@ -8,9 +9,9 @@ export async function observeEvmTransfer(call, operation, receipt) {
     const block = await evmRpcBlock(call, `0x${BigInt(receipt.blockNumberAtomic).toString(16)}`);
     if (block.hash !== receipt.blockHash)
         throw new ApnError("APN_RPC_PROTOCOL", "Transfer receipt is not on the observed canonical block.");
-    const safe = operation.chainId === 42161 ? await evmRpcBlock(call, "safe") : undefined;
+    const safe = directEvmRequiresSafeHead(operation.chainId) ? await evmRpcBlock(call, "safe") : undefined;
     if (safe !== undefined && (BigInt(safe.number) < BigInt(block.number) || (safe.number === block.number && safe.hash !== block.hash))) {
-        throw new ApnError("APN_RPC_PROTOCOL", "Arbitrum receipt has not reached the selected RPC canonical safe head.");
+        throw new ApnError("APN_RPC_PROTOCOL", "The receipt has not reached the selected RPC canonical safe head.");
     }
     const safeEvidence = safe === undefined ? {} : { safeBlockNumberAtomic: safe.number, safeBlockHash: safe.hash };
     const recheck = async () => {
@@ -19,7 +20,7 @@ export async function observeEvmTransfer(call, operation, receipt) {
             await recheckEvmBlock(call, safe);
             const current = await evmRpcBlock(call, "safe");
             if (BigInt(current.number) < BigInt(safe.number) || (current.number === safe.number && current.hash !== safe.hash)) {
-                throw new ApnError("APN_RPC_PROTOCOL", "Arbitrum safe-head evidence changed during receipt verification.");
+                throw new ApnError("APN_RPC_PROTOCOL", "Safe-head evidence changed during receipt verification.");
             }
         }
     };
