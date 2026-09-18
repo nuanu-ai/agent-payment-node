@@ -2,6 +2,7 @@ import type { Address, Hex } from "../model.js";
 export declare const ACROSS_SELECTOR: Hex;
 export declare const STARGATE_SELECTOR: Hex;
 export declare const FEE_FORWARDER_SELECTOR: Hex;
+export declare const FEE_FORWARDER_NATIVE_SELECTOR: Hex;
 export declare const FEE_FORWARDER: Address;
 export declare const FEE_RECIPIENT: Address;
 export declare const LAYER_ZERO_ENDPOINT: `0x${string}`;
@@ -227,6 +228,22 @@ export declare const feeForwarderAbi: readonly [{
         readonly type: "address";
         readonly name: "token";
     }, {
+        readonly type: "tuple[]";
+        readonly components: readonly [{
+            readonly type: "address";
+            readonly name: "recipient";
+        }, {
+            readonly type: "uint256";
+            readonly name: "amount";
+        }];
+        readonly name: "distributions";
+    }];
+    readonly outputs: readonly [];
+}, {
+    readonly name: "forwardNativeFees";
+    readonly type: "function";
+    readonly stateMutability: "payable";
+    readonly inputs: readonly [{
         readonly type: "tuple[]";
         readonly components: readonly [{
             readonly type: "address";
@@ -482,6 +499,28 @@ export declare const bridgeEventsAbi: readonly [{
         readonly type: "uint256";
         readonly name: "value";
     }];
+}, {
+    readonly name: "Deposit";
+    readonly type: "event";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "dst";
+        readonly indexed: true;
+    }, {
+        readonly type: "uint256";
+        readonly name: "wad";
+    }];
+}, {
+    readonly name: "Withdrawal";
+    readonly type: "event";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "src";
+        readonly indexed: true;
+    }, {
+        readonly type: "uint256";
+        readonly name: "wad";
+    }];
 }];
 export declare const EVENT_TOPICS: {
     readonly lifiTransferStarted: "0xcba69f43792f9f399347222505213b55af8e0b0b54b893085c2e27ecbe1644f1";
@@ -492,6 +531,8 @@ export declare const EVENT_TOPICS: {
     readonly oftReceived: "0xefed6d3500546b29533b128a29e3a94d70788727f0507505ac12eaf2e578fd9c";
     readonly unreceivedTokenCached: "0x007c17198cd078035dc663f9a0961f84cb6265411d0b4c793f96d432f6af4b55";
     readonly transfer: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+    readonly wrappedDeposit: "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c";
+    readonly wrappedWithdrawal: "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65";
 };
 export declare const deploymentAbi: readonly [{
     readonly name: "facetAddress";
@@ -670,5 +711,29 @@ export declare const deploymentAbi: readonly [{
     }, {
         readonly type: "address";
         readonly name: "lzToken";
+    }];
+}, {
+    readonly name: "basisPointsRate";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "uint256";
+    }];
+}, {
+    readonly name: "maximumFee";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "uint256";
+    }];
+}, {
+    readonly name: "deprecated";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "bool";
     }];
 }];

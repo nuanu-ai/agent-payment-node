@@ -1,15 +1,28 @@
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
-import { bridgeChain, bridgeNativeCoin, bridgeTokenRow } from "./asset-registry.js";
+import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeFeeAsset, bridgeNativeCoin, bridgeNativePrincipal } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeSame, bridgeUint } from "./validation.js";
 /** The admitted row for the leg of the request that this chain identifies. Both chains are distinct by construction. */
 function requestAsset(request, chainId) {
     if (chainId === request.fromChainId)
-        return bridgeTokenRow(chainId, request.fromToken);
+        return bridgeAssetRow(chainId, request.fromToken);
     if (chainId === request.toChainId)
-        return bridgeTokenRow(chainId, request.toToken);
+        return bridgeAssetRow(chainId, request.toToken);
     return bridgeFailure("APN_PROVIDER_PROTOCOL", "route_chain_identity");
+}
+/** A tool is preparable only when both legs are reviewed for it: a native principal has no reviewed Stargate pool. */
+function toolGate(tool, request) {
+    if (tool !== "across" && tool !== "stargateV2")
+        return "finite_decoder_and_correlated_evidence_unavailable";
+    try {
+        bridgeAssetTool(requestAsset(request, request.fromChainId), tool);
+        bridgeAssetTool(requestAsset(request, request.toChainId), tool);
+    }
+    catch {
+        return "asset_tool_unreviewed";
+    }
+    return null;
 }
 export function parseBridgeRoutes(response, request, sender) {
     if (response.status !== 200)
@@ -26,11 +39,11 @@ export function parseBridgeRoutes(response, request, sender) {
         const estimate = bridgeRecord(step.estimate), output = bridgeUint(estimate.toAmount, true).toString(), minimum = bridgeUint(estimate.toAmountMin, true).toString();
         if (route.toAmount !== output || route.toAmountMin !== minimum)
             bridgeFailure("APN_PROVIDER_PROTOCOL", "route_step_output_identity");
-        const tool = bridgeOpaque(step.tool), admitted = tool === "across" || tool === "stargateV2";
+        const tool = bridgeOpaque(step.tool), gate = toolGate(tool, request);
         // These rows are candidates for finite materialization, never final execution authority.
         return { route, step, choice: { routeId, stepId: bridgeOpaque(step.id), tool, quotedOutputAtomic: output, minimumOutputAtomic: minimum,
                 routeHash: hashObject(route), stepHash: hashObject(step), stepIdentityHash: hashObject(stepIdentity(step)),
-                preparable: admitted, unavailableReason: admitted ? null : "finite_decoder_and_correlated_evidence_unavailable" } };
+                preparable: gate === null, unavailableReason: gate } };
     });
     if (new Set(results.map((r) => r.choice.routeId)).size !== results.length || new Set(results.map((r) => r.choice.stepId)).size !== results.length)
         bridgeFailure("APN_PROVIDER_PROTOCOL", "duplicate_route_identity");
@@ -90,7 +103,7 @@ export function validateRouteEconomics(m) {
     const additional = [];
     for (const fee of m.feeCosts) {
         if (fee.included) {
-            if ((fee.chainId !== r.fromChainId && fee.chainId !== r.toChainId) || fee.asset !== requestAsset(r, fee.chainId).address)
+            if ((fee.chainId !== r.fromChainId && fee.chainId !== r.toChainId) || fee.asset !== bridgeFeeAsset(requestAsset(r, fee.chainId)))
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "included_fee_asset");
             included += bridgeUint(fee.amountAtomic);
         }
@@ -99,7 +112,8 @@ export function validateRouteEconomics(m) {
     }
     if (included + output > amount)
         bridgeFailure("APN_PROVIDER_PROTOCOL", "token_fee_double_count");
-    if (m.tool === "across" ? additional.length !== 0 || m.transaction.valueAtomic !== "0" :
+    // A native principal travels as the bridge transaction's value; an ERC-20 principal never carries value on Across.
+    if (m.tool === "across" ? additional.length !== 0 || m.transaction.valueAtomic !== (bridgeNativePrincipal(r) ? r.amountAtomic : "0") :
         additional.length !== 1 || additional[0].chainId !== r.fromChainId || additional[0].asset !== "native" ||
             additional[0].amountAtomic !== m.transaction.valueAtomic)
         bridgeFailure("APN_PROVIDER_PROTOCOL", "native_fee_identity");
@@ -114,13 +128,16 @@ function assertStep(step, request, sender) {
     rejectExecutionExtensions(step);
     const action = bridgeRecord(step.action);
     assertTuple(action, request, sender, true);
-    const estimate = bridgeRecord(step.estimate);
-    if (estimate.tool !== step.tool || estimate.fromAmount !== request.amountAtomic ||
-        bridgeAddress(estimate.approvalAddress) !== BRIDGE_DIAMOND || estimate.approvalReset === true || estimate.skipApproval === true)
-        bridgeFailure("APN_PROVIDER_PROTOCOL", "approval_semantics");
+    const estimate = bridgeRecord(step.estimate), source = requestAsset(request, request.fromChainId);
     for (const key of ["approvalReset", "skipApproval", "skipPermit"])
         if (estimate[key] !== undefined && typeof estimate[key] !== "boolean")
             bridgeFailure("APN_PROVIDER_PROTOCOL", "approval_flag");
+    // A native principal needs no approval and the provider must say so. A token never skips one, and only a zero-first
+    // row (Tether) may carry the provider's reset flag: APN approves from zero or uses an exact allowance, never resets.
+    if (estimate.tool !== step.tool || estimate.fromAmount !== request.amountAtomic || bridgeAddress(estimate.approvalAddress) !== BRIDGE_DIAMOND ||
+        (source.kind === "native" ? estimate.skipApproval !== true || estimate.approvalReset === true
+            : estimate.skipApproval === true || (estimate.approvalReset === true && source.approval !== "zero_first")))
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "approval_semantics");
     bridgeUint(estimate.toAmount, true);
     bridgeUint(estimate.toAmountMin, true);
     parseFees(estimate.feeCosts, request);
@@ -184,7 +201,7 @@ function includedActionKeys(a) {
 function assertToken(value, chainId, request) {
     const token = bridgeRecord(value), asset = requestAsset(request, chainId);
     if (token.chainId !== chainId || token.decimals !== asset.decimals ||
-        bridgeAddress(token.address) !== asset.address)
+        bridgeAddress(token.address) !== bridgeAssetAddress(asset))
         bridgeFailure("APN_PROVIDER_PROTOCOL", "admitted_asset_metadata");
 }
 function parseFees(value, request) {
@@ -193,12 +210,14 @@ function parseFees(value, request) {
         if (typeof fee.included !== "boolean" || typeof fee.name !== "string" || fee.name.length < 1 || fee.name.length > 192 || /[\u0000-\u001f\u007f]/u.test(fee.name))
             bridgeFailure("APN_PROVIDER_PROTOCOL", "fee_semantics");
         // An included fee must be the admitted asset on one of the two route chains; anything else is the native coin.
+        // For a native principal the included asset is itself the native coin, recorded as "native", never the sentinel.
         const onPair = [request.fromChainId, request.toChainId].includes(chainId);
-        if (fee.included ? !onPair || token.decimals !== requestAsset(request, chainId).decimals || address !== requestAsset(request, chainId).address
+        if (fee.included ? !onPair || token.decimals !== requestAsset(request, chainId).decimals || address !== bridgeAssetAddress(requestAsset(request, chainId))
             : token.decimals !== bridgeNativeCoin(request.fromChainId).decimals || address !== BRIDGE_ZERO_ADDRESS ||
                 chainId !== request.fromChainId)
             bridgeFailure("APN_PROVIDER_PROTOCOL", "fee_asset");
-        return { name: fee.name, chainId, asset: fee.included ? address : "native", amountAtomic: bridgeUint(fee.amount).toString(), included: fee.included };
+        return { name: fee.name, chainId, asset: fee.included ? bridgeFeeAsset(requestAsset(request, chainId)) : "native",
+            amountAtomic: bridgeUint(fee.amount).toString(), included: fee.included };
     });
 }
 function stepIdentity(step, included = false) {

@@ -39,6 +39,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         codeHash: string;
         configurationHash: string;
     }>;
+    /** A native principal's balance is the native balance itself and its allowance is the constant zero: nothing is approved. */
     account(owner: Address, spender: Address, token: Address): Promise<{
         chainId: 1 | 8453 | 42161;
         rpcOrigin: string;

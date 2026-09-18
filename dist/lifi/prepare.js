@@ -3,7 +3,7 @@ import { OperationService } from "../operation-service.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { decodeBridgeCall } from "./decode.js";
-import { bridgeExpiry, freezeBridgeEnvelopes } from "./economics.js";
+import { bridgeApprovalRequired, bridgeExpiry, freezeBridgeEnvelopes } from "./economics.js";
 import { newBridgeEffect } from "./operation-model.js";
 import { BridgeOperationRepository } from "./operation-repository.js";
 import { assertBridgeOwner, bridgeOwner } from "./owner.js";
@@ -59,7 +59,7 @@ export class BridgePreparation {
                 source.deployment(m.tool, m.request.toChainId, m.request.fromToken), destination.deployment(m.tool, m.request.fromChainId, m.request.toToken),
                 source.account(m.sender, m.approvalAddress, m.request.fromToken), destination.block("safe"),
             ]);
-            if (parsed.providerNonceAtomic !== null && parsed.providerNonceAtomic !== (BigInt(sourceAccount.latestNonceAtomic) + (sourceAccount.allowanceAtomic === "0" ? 1n : 0n)).toString())
+            if (parsed.providerNonceAtomic !== null && parsed.providerNonceAtomic !== (BigInt(sourceAccount.latestNonceAtomic) + (bridgeApprovalRequired(m.request, sourceAccount.allowanceAtomic) ? 1n : 0n)).toString())
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "provider_nonce_conflict");
             const envelopes = await freezeBridgeEnvelopes(m, sourceAccount, source);
             const expiresAt = bridgeExpiry(m, decoded, sourceAccount, preparedAt, this.o.now());

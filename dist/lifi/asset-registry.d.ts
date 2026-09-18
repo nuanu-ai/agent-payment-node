@@ -8,20 +8,18 @@ import type { BridgeRouteRequest, BridgeTool } from "./model.js";
  * copy. A row exists only when its on-chain identity can be pinned the way canonical USDC already is.
  */
 export declare const BRIDGE_CHAINS: readonly [1, 8453, 42161];
-/** Native coins are first class: the provider's zero-address sentinel is never an admitted asset. */
-export interface BridgeNativeCoin {
-    readonly kind: "native";
-    readonly chainId: EvmChainId;
-    readonly symbol: string;
-    readonly coinKey: string;
-    readonly decimals: 18;
-}
 /** Each upgradeability shape is pinned explicitly; there is no default shape for an unreviewed proxy. */
 export type BridgeTokenCode = {
     readonly upgradeability: "immutable";
     readonly codeHash: Hex;
 } | {
     readonly upgradeability: "legacy_proxy";
+    readonly codeHash: Hex;
+    readonly implementation: Address;
+    readonly implementationCodeHash: Hex;
+    readonly admin: Address;
+} | {
+    readonly upgradeability: "eip1967_proxy";
     readonly codeHash: Hex;
     readonly implementation: Address;
     readonly implementationCodeHash: Hex;
@@ -41,6 +39,33 @@ export interface BridgeStargatePool {
     readonly sharedDecimals: number;
     readonly addressConfig: readonly [Address, Address, Address, Address, Address, Address];
 }
+/**
+ * The wrapped-native contract Across wraps a native deposit into and unwraps a native fill from. Its event shape is
+ * pinned per chain: WETH9 emits `Deposit`/`Withdrawal`; Arbitrum's aeWETH mints and burns with `Transfer` logs.
+ */
+export interface BridgeWrappedNative {
+    readonly address: Address;
+    readonly code: BridgeTokenCode;
+    readonly events: "weth9" | "erc20_mint_burn";
+}
+/**
+ * Native coins are first class. The provider's zero-address wire sentinel names the native coin as a route leg and
+ * is never a token. A native principal is carried by Across only: its deposit wraps into the pinned wrapped-native
+ * contract and its fill unwraps from it, so both movements are provable by exact logs of that contract.
+ */
+export interface BridgeNativeCoin {
+    readonly kind: "native";
+    readonly chainId: EvmChainId;
+    readonly symbol: string;
+    readonly coinKey: string;
+    readonly decimals: 18;
+    readonly pairKey: "eth";
+    readonly acrossSupported: true;
+    readonly stargate: null;
+    readonly peers: readonly EvmChainId[];
+    readonly wrapped: BridgeWrappedNative;
+    readonly listing: "frozen_list";
+}
 export interface BridgeTokenAsset {
     readonly kind: "erc20";
     readonly chainId: EvmChainId;
@@ -54,6 +79,12 @@ export interface BridgeTokenAsset {
     readonly acrossSupported: boolean;
     readonly stargate: BridgeStargatePool | null;
     readonly peers: readonly EvmChainId[];
+    /** `zero_first`: a nonzero approve over a nonzero allowance reverts and `approve` returns no value (Tether). */
+    readonly approval: "standard" | "zero_first";
+    /** `tether_fee_zero`: the owner-settable transfer fee, its cap and the deprecation forward are pinned at zero. */
+    readonly transferFee: "none" | "tether_fee_zero";
+    /** `frozen_list` rows must equal the frozen allowlist identity; `legacy_pinned` rows predate it and stay as pinned. */
+    readonly listing: "frozen_list" | "legacy_pinned";
 }
 export type BridgeAsset = BridgeNativeCoin | BridgeTokenAsset;
 export interface BridgeChainRow {
@@ -69,16 +100,26 @@ export declare function bridgeChain(value: unknown, code?: ErrorCode): EvmChainI
 export declare function bridgeCaip2(value: unknown): EvmChainId;
 export declare function bridgeChainRow(value: unknown, code?: ErrorCode): BridgeChainRow;
 export declare function bridgeNativeCoin(chainId: unknown, code?: ErrorCode): BridgeNativeCoin;
-/** The one admission point for a bridgeable asset. The zero address is the native sentinel and is never a token. */
+/** The one admission point for a bridgeable token. The zero address is the native sentinel and is never a token. */
 export declare function bridgeTokenRow(chainId: unknown, address: unknown, code?: ErrorCode): BridgeTokenAsset;
-/** Native principal is not admitted: the fee forwarder, allowance and Transfer-log evidence are all ERC-20 shaped. */
+/**
+ * The one admission point for a route leg. The zero address names the chain's native coin; any other address must be
+ * a registry row. An address the frozen list does not name is refused as unlisted, never matched by symbol.
+ */
+export declare function bridgeAssetRow(chainId: unknown, address: unknown, code?: ErrorCode): BridgeAsset;
+/** The wire identity of a route leg: the token contract, or the provider's zero-address sentinel for the native coin. */
+export declare function bridgeAssetAddress(asset: BridgeAsset): Address;
+/** The identity a declared fee row carries for this asset: `"native"` for the native coin, else the token contract. */
+export declare function bridgeFeeAsset(asset: BridgeAsset): Address | "native";
+export declare function bridgeNativePrincipal(request: Pick<BridgeRouteRequest, "fromToken">): boolean;
+/** Both legs must share a pair key, decimals and each other's chain as a peer: native pairs with native, a token with its own. */
 export declare function bridgeAssetPair(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">, code?: ErrorCode): {
-    readonly from: BridgeTokenAsset;
-    readonly to: BridgeTokenAsset;
+    readonly from: BridgeAsset;
+    readonly to: BridgeAsset;
 };
 /** The peer chain's row for the same pair key, which is what a cross-chain tool pin and a route pair must agree on. */
 export declare function bridgePeerToken(asset: BridgeTokenAsset, peerChainId: EvmChainId, code?: ErrorCode): BridgeTokenAsset;
-export declare function bridgeAssetTool(asset: BridgeTokenAsset, tool: BridgeTool, code?: ErrorCode): BridgeStargatePool | null;
+export declare function bridgeAssetTool(asset: BridgeAsset, tool: BridgeTool, code?: ErrorCode): BridgeStargatePool | null;
 /** Parses one decimal amount at the admitted asset's exact precision. */
 export declare function bridgeDecimal(value: unknown, decimals: number, positive?: boolean): string;
 export declare function validateBridgeRequest(value: unknown, code?: ErrorCode): BridgeRouteRequest;
