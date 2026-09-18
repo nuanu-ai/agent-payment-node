@@ -1,6 +1,7 @@
 import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { solanaAddress } from "../../solana/rpc.js";
+import { slippageAboveCap } from "../slippage-refusal.js";
 const option = (name, type, constraints) => ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
     success: "Pinned Orca inventory, unsigned simulated quote, prepared operation, or durable status.",
@@ -50,7 +51,7 @@ export function bindOrcaCommand(path, options) {
     exact(options, ["--profile", "--account", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--compute-unit-limit", "--compute-unit-price"]);
     const slippageBps = integer(options["--slippage-bps"], 10_000), ownerSlippageCapBps = integer(options["--owner-slippage-cap-bps"], 10_000);
     if (slippageBps > ownerSlippageCapBps)
-        invalid("Orca slippage exceeds the owner cap.");
+        slippageAboveCap("Orca", slippageBps, ownerSlippageCapBps);
     const amount = options["--amount"], price = options["--compute-unit-price"];
     if (amount === undefined || !/^[1-9][0-9]{0,19}$/u.test(amount))
         invalid("Orca amount must be positive canonical lamports.");

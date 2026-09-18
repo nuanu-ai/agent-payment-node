@@ -3,6 +3,7 @@ import type { CommandRequest } from "../../commands.js";
 import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { solanaAddress } from "../../solana/rpc.js";
+import { slippageAboveCap } from "../slippage-refusal.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
   ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
@@ -57,7 +58,7 @@ export function bindOrcaCommand(path: string, options: Readonly<Record<string, s
   if (action !== "quote") invalid("Unsupported Orca action.");
   exact(options, ["--profile", "--account", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--compute-unit-limit", "--compute-unit-price"]);
   const slippageBps = integer(options["--slippage-bps"], 10_000), ownerSlippageCapBps = integer(options["--owner-slippage-cap-bps"], 10_000);
-  if (slippageBps > ownerSlippageCapBps) invalid("Orca slippage exceeds the owner cap.");
+  if (slippageBps > ownerSlippageCapBps) slippageAboveCap("Orca", slippageBps, ownerSlippageCapBps);
   const amount = options["--amount"], price = options["--compute-unit-price"];
   if (amount === undefined || !/^[1-9][0-9]{0,19}$/u.test(amount)) invalid("Orca amount must be positive canonical lamports.");
   if (price === undefined || !/^(?:0|[1-9][0-9]{0,15})$/u.test(price)) invalid("Orca compute unit price must be canonical micro-lamports.");
