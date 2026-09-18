@@ -1,0 +1,156 @@
+{
+  "observedAt": "2026-09-18T07:39:07.154Z",
+  "note": "PUSH4 (0x63) selector presence in dispatcher; read-only",
+  "summary": {
+    "ethereum": {
+      "token": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "eip1967Implementation": null,
+      "codeInspected": "token",
+      "codeBytes": 11075,
+      "selectors": {
+        "permit(address,address,uint256,uint256,uint8,bytes32,bytes32)": {
+          "selector": "0xd505accf",
+          "pushedInBytecode": false
+        },
+        "transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)": {
+          "selector": "0xe3ee160e",
+          "pushedInBytecode": false
+        },
+        "transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,bytes)": {
+          "selector": "0xcf092995",
+          "pushedInBytecode": false
+        },
+        "receiveWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)": {
+          "selector": "0xef55bec6",
+          "pushedInBytecode": false
+        },
+        "authorizationState(address,bytes32)": {
+          "selector": "0xe94a0102",
+          "pushedInBytecode": false
+        },
+        "approve(address,uint256)": {
+          "selector": "0x095ea7b3",
+          "pushedInBytecode": true
+        },
+        "transferFrom(address,address,uint256)": {
+          "selector": "0x23b872dd",
+          "pushedInBytecode": true
+        }
+      }
+    },
+    "avalanche": {
+      "token": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+      "eip1967Implementation": "0xba2a995bd4ab9e605454ccef88169352cd5f75a6",
+      "codeInspected": "implementation",
+      "codeBytes": 8692,
+      "selectors": {
+        "permit(address,address,uint256,uint256,uint8,bytes32,bytes32)": {
+          "selector": "0xd505accf",
+          "pushedInBytecode": true
+        },
+        "transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)": {
+          "selector": "0xe3ee160e",
+          "pushedInBytecode": false
+        },
+        "transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,bytes)": {
+          "selector": "0xcf092995",
+          "pushedInBytecode": false
+        },
+        "receiveWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)": {
+          "selector": "0xef55bec6",
+          "pushedInBytecode": false
+        },
+        "authorizationState(address,bytes32)": {
+          "selector": "0xe94a0102",
+          "pushedInBytecode": false
+        },
+        "approve(address,uint256)": {
+          "selector": "0x095ea7b3",
+          "pushedInBytecode": true
+        },
+        "transferFrom(address,address,uint256)": {
+          "selector": "0x23b872dd",
+          "pushedInBytecode": true
+        }
+      }
+    }
+  },
+  "log": [
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getStorageAt",
+        "params": [
+          "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+          "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+          "latest"
+        ]
+      },
+      "responseDigest": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "chain": "ethereum",
+      "endpoint": "https://ethereum-rpc.publicnode.com",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "eth_getCode",
+        "params": [
+          "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+          "latest"
+        ]
+      },
+      "responseDigest": {
+        "bytes": 11075,
+        "keccak256": "0xb44fb4e949d0f78f87f79ee46428f23a2a5713ce6fc6e0beb3dda78c2ac1ea55"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "eth_getStorageAt",
+        "params": [
+          "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+          "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+          "latest"
+        ]
+      },
+      "responseDigest": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": "0x000000000000000000000000ba2a995bd4ab9e605454ccef88169352cd5f75a6"
+      }
+    },
+    {
+      "chain": "avalanche",
+      "endpoint": "https://api.avax.network/ext/bc/C/rpc",
+      "status": 200,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "eth_getCode",
+        "params": [
+          "0xba2a995bd4ab9e605454ccef88169352cd5f75a6",
+          "latest"
+        ]
+      },
+      "responseDigest": {
+        "bytes": 8692,
+        "keccak256": "0x48e8de4f461df8825adf6a95d8961532f1845662de2c6c92868dc5b473124b54"
+      }
+    }
+  ]
+}
