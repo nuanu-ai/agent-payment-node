@@ -120,7 +120,8 @@ Nothing in this change is reachable from the CLI or MCP. No path can sign or sen
    than bending the EIP-3009 state machine. The order is: decode the 402 with `x402-codec.ts`, select, admit, read
    (balance, allowance, `nonces`, proxy code hash, token separator, finalized block), plan, show the screen, reserve,
    sign, send the paid request once, verify the PAYMENT-RESPONSE transaction on a finalized block, and follow the
-   ledger to `finalized`.
+   ledger to `finalized`. The approval fingerprint covers the plan, including its deadline, so `approveBefore` must
+   end well before that deadline. PayAI refuses a Permit2 deadline less than 6 seconds away.
 3. **Recovery.** If the response is lost, read the nonce bitmap. A consumed nonce means finding the Transfer receipt
    inside the deadline window. An unconsumed nonce after the deadline on a finalized block means the authorization
    expired unused. The ledger mapping for "expired after exposure" must be decided with the owner.
