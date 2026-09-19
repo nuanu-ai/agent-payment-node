@@ -11,7 +11,7 @@ export declare class UsdtJsonRpc {
 }
 /**
  * The keyless sponsor is the mechanism itself: Pimlico's public endpoint for chain 1, fixed, never configurable, so the
- * paymaster that signs is the one the owner's allowlist pin names.
+ * paymaster named by the capability registry is the one the owner's allowlist pin names.
  */
 export declare function usdtSponsorPort(transport: GaslessTransport): UsdtSponsorPort;
 /** Canonical Ethereum reads through the owner's explicit `APN_ETHEREUM_RPC_URL`; no default endpoint exists. */

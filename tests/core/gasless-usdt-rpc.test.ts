@@ -29,14 +29,11 @@ test("the sponsor is the fixed keyless Pimlico endpoint and its refusals are cla
   const sponsor = usdtSponsorPort(transport({ pimlico_getTokenQuotes: (params: readonly unknown[]) => {
     assert.deepEqual(params, [{ tokens: [USDT_GASLESS.token] }, USDT_GASLESS.entryPoint, "0x1"]); return { quotes: [] };
   }, pm_getPaymasterData: { error: { code: -32500, message: "AA50 PostOp Reverted: UserOperation reverted during simulation with reason: 0x5a154675" } },
-  eth_sendUserOperation: { error: { code: -32602, message: "Invalid EIP-7702 authorization" } } }, seen));
+  }, seen));
   assert.deepEqual(await sponsor.tokenQuote(), { quotes: [] });
   await assert.rejects(sponsor.paymasterData({} as never), (error: { code: string; details: { reason: string } }) =>
     error.code === "APN_PROVIDER_EFFECT_UNAVAILABLE" && error.details.reason === "gasless_usdt_sponsor_simulation_refused");
-  await assert.rejects(sponsor.send({} as never), (error: { code: string; details: { reason: string } }) =>
-    error.code === "APN_PROVIDER_PROTOCOL" && error.details.reason === "gasless_usdt_sponsor_refused");
-  assert.deepEqual(seen, [`${USDT_GASLESS.bundlerUrl} pimlico_getTokenQuotes`, `${USDT_GASLESS.bundlerUrl} pm_getPaymasterData`,
-    `${USDT_GASLESS.bundlerUrl} eth_sendUserOperation`]);
+  assert.deepEqual(seen, [`${USDT_GASLESS.bundlerUrl} pimlico_getTokenQuotes`, `${USDT_GASLESS.bundlerUrl} pm_getPaymasterData`]);
   const skewed = usdtSponsorPort(transport({ pimlico_getUserOperationGasPrice: {} }, [], 1));
   await assert.rejects(skewed.gasPrice(), /gasless_usdt_rpc_envelope/u);
 });

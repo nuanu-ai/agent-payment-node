@@ -2,7 +2,7 @@ import { type ErrorCode } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 /**
  * Local-wallet gasless USDT on Ethereum through Pimlico's ERC-20 paymaster, reached through the keyless public endpoint.
- * Every identity below was read from Ethereum mainnet on 2026-09-18 (block 26002950) and is re-asserted before an effect.
+ * Every identity below was read from Ethereum mainnet on 2026-09-18 (block 26002950) and is exposed as a read-only capability registry; this foundation performs no effect.
  * The sponsor charges its fee in the same token, in postOp, from the sender to the pinned treasury.
  */
 export declare const USDT_GASLESS: Readonly<{
@@ -50,7 +50,7 @@ export type UsdtGaslessGas = typeof USDT_GASLESS_GAS;
 /** Bounds the provider quote must stay inside; anything outside refuses instead of being clamped. */
 export declare const USDT_POST_OP_GAS_MAX = 100000n;
 export declare const USDT_EXCHANGE_RATE_MAX: bigint;
-/** The signed payload must be valid for at least this long and at most this long after the check. */
+/** A sponsor payload must be valid for at least this long and at most this long after the check. */
 export declare const USDT_PAYMASTER_MIN_VALIDITY_S = 60n;
 export declare const USDT_PAYMASTER_MAX_VALIDITY_S = 3600n;
 export interface UsdtTokenQuote {
@@ -72,7 +72,7 @@ export interface UsdtTransferRequest {
     readonly maxFeeAtomic: bigint;
     readonly minReceivedAtomic: bigint;
 }
-/** Everything the approval screen shows and the signature later commits to. */
+/** Every value that a future caller must bind before any authorization. */
 export interface UsdtTransferPlan {
     readonly request: UsdtTransferRequest;
     /** F: the fee budget and the exact paymaster allowance the batch grants. */
