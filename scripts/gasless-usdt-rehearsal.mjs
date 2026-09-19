@@ -12,8 +12,12 @@ const { GaslessHttps } = await import(join(dist, "gasless/https.js"));
 const { gaslessAddress, gaslessDecimal } = await import(join(dist, "gasless/validation.js"));
 const { assertUsdtFunding, quoteUsdtGasless, sponsorUsdtOperation } = await import(join(dist, "gasless-usdt/engine.js"));
 const { USDT_GASLESS } = await import(join(dist, "gasless-usdt/model.js"));
-const { usdtDisplay } = await import(join(dist, "gasless-usdt/approval.js"));
 const { usdtChainPort, usdtSponsorPort } = await import(join(dist, "gasless-usdt/rpc.js"));
+
+const usdtDisplay = (atomic) => {
+  const scale = 10n ** BigInt(USDT_GASLESS.decimals), whole = atomic / scale, fraction = (atomic % scale).toString().padStart(USDT_GASLESS.decimals, "0").replace(/0+$/u, "");
+  return fraction === "" ? whole.toString() : `${whole}.${fraction}`;
+};
 
 const FLAGS = ["--sender", "--to", "--amount", "--max-fee", "--min-received"];
 const args = process.argv.slice(2), options = {};
