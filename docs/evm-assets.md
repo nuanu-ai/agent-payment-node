@@ -1,5 +1,7 @@
 # Explicit EVM assets
 
+Owner acceptance runbook: [direct EVM live proofs](evm-direct-live-acceptance-2026-09-19.md).
+
 The APN 0.5.24 package retains the released 0.5.10 EVM support for exactly
 Base (`eip155:8453`), Ethereum mainnet (`eip155:1`) and Arbitrum One
 (`eip155:42161`) for the local encrypted disposable wallet. Direct transfers
