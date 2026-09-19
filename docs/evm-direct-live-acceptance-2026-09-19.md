@@ -1,7 +1,7 @@
 # Direct EVM acceptance runbook (2026-09-19)
 
 This is the owner handoff for the remaining direct EVM proofs. It is pinned to
-`origin/main` commit `5c619ef7926ce219cf506e221d55780109b693ca` and the frozen
+`origin/main` commit `5e5dbefc8bb37026563bbc6cfc91ed2850d11fc7` and the frozen
 allowlist dataset
 [`data/allowlist/2026-09-17/dataset.json`](../data/allowlist/2026-09-17/dataset.json).
 The commands below stop at `prepare`; they do not approve, sign, submit, resume,
@@ -11,9 +11,8 @@ Authoritative implementation references are the [direct network registry](../src
 [CLI command catalog](../src/evm-command-catalog.ts),
 [asset behavior](evm-assets.md), and
 [direct policy integration](allowlist-direct-integration.md). The current
-owner report is retained at
-`/Users/tony/Downloads/TONY_SPRINT_APN_RUNTIME_2026-09-14/APN_SPRINT_TOTAL_2026-09-18.html`;
-do not copy wallet values from it into evidence or source.
+owner report is historical context only; do not copy wallet values from it into
+evidence or source.
 
 ## Proof boundary
 
