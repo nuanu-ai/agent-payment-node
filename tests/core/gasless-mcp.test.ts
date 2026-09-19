@@ -20,6 +20,8 @@ import { GASLESS_TEST_RECIPIENT, gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 const GASLESS_TOOL_NAMES = [
+  "apn_gasless_usdt_status",
+  "apn_gasless_usdt_resume",
   "apn_gasless_capabilities",
   "apn_gasless_balance",
   "apn_gasless_transfer_prepare",
@@ -42,7 +44,7 @@ test("CLI and MCP discovery expose the terminal permission-invalidation recovery
   }
 });
 
-test("gasless CLI and MCP project the same four strict tools and canonical inputs", () => {
+test("gasless CLI and MCP project the same six strict tools and canonical inputs", () => {
   const tools = projectMcpTools().filter((item) => item.name.startsWith("apn_gasless_"));
   assert.deepEqual(tools.map((item) => item.name), GASLESS_TOOL_NAMES);
   assert.deepEqual(tools.map((item) => ({
@@ -51,12 +53,16 @@ test("gasless CLI and MCP project the same four strict tools and canonical input
     required: item.inputSchema.required,
     additionalProperties: item.inputSchema.additionalProperties,
   })), [
+    { name: "apn_gasless_usdt_status", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], additionalProperties: false },
+    { name: "apn_gasless_usdt_resume", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], additionalProperties: false },
     { name: "apn_gasless_capabilities", properties: ["profile"], required: [], additionalProperties: false },
     { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], additionalProperties: false },
     { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"],
       required: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], additionalProperties: false },
     { name: "apn_gasless_transfer_approve", properties: ["operation"], required: ["operation"], additionalProperties: false },
   ]);
+  assert.equal((requiredTool(tools, "apn_gasless_usdt_status").inputSchema.properties.profile_hash as { pattern?: unknown }).pattern, "^[a-f0-9]{64}$");
+  assert.equal((requiredTool(tools, "apn_gasless_usdt_resume").inputSchema.properties.profile_hash as { pattern?: unknown }).pattern, "^[a-f0-9]{64}$");
   assert.match(requiredTool(tools, "apn_gasless_transfer_approve").description, /MCP always returns a CLI handoff/u);
 
   const input = prepareInput({ max_fee: "0", min_received: "10" });
