@@ -122,7 +122,6 @@ const httpOptions = [
   option("--body-base64", "base64", false, noDefault, ["maximum_65536_decoded_bytes", "empty_is_present_zero_bytes", "omission_is_absent"], "operator_input"),
 ];
 const httpSynopsis = " [--method <method>] [--headers-json <json>] [--body-base64 <base64>]";
-
 export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_GROUPS,
   ...SUNSWAP_COMMAND_GROUPS, ...JUPITER_COMMAND_GROUPS, ...ORCA_COMMAND_GROUPS,
   { path: ["gasless"], summary: "Transfer USDC with gas paid from the total USDC budget.", kind: "group" },
@@ -274,8 +273,9 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
     [],
     ["apn wallet policy set --profile default --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>"],
   ),
-  command(["x402", "inspect"], "apn x402 inspect --url <https-url>" + httpSynopsis, "Inspect supported offers using an unpaid request; a seller may still process its application payload.", [
+  command(["x402", "inspect"], "apn x402 inspect --url <https-url>" + httpSynopsis + " [--payer <address>]", "Inspect supported offers using an unpaid request; a seller may still process its application payload.", [
     ...httpOptions,
+    option("--payer", "address", false, noDefault, ["canonical_evm_address"], "public"),
     option("--url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "maximum_2048_utf8_bytes", "canonical_whatwg_serialization", "public_target_required_at_runtime"], "public"),
   ], "network_request", "Performs one unpaid HTTPS request; application side effects depend on the seller.", "none", "Never signs or pays; caller must authorize the application request.", completedStates, [], ["apn x402 inspect --url https://seller.example/resource"]),
   command(

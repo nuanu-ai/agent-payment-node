@@ -1,5 +1,6 @@
 import type { X402Network } from "./x402-network.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
+import type { Permit2OfferInspection } from "./x402-permit2/inspection.js";
 export interface HttpGetRequest {
     readonly url: string;
     readonly httpRequest?: X402HttpRequestV1;
@@ -64,5 +65,6 @@ export interface InspectResult {
         readonly urlHash: string;
     };
     readonly candidates: readonly InspectCandidate[];
+    readonly permit2?: Permit2OfferInspection;
 }
 export {};

@@ -192,7 +192,13 @@ function bindParsedCatalog(parsed) {
             },
         };
         case "x402 inspect-network":
-        case "x402 inspect": return { request: { command: "x402.inspect", url: value(options, "--url"), ...bindX402HttpRequest(options), ...bindNetwork(options) } };
+        case "x402 inspect": return { request: {
+                command: "x402.inspect",
+                url: value(options, "--url"),
+                ...bindX402HttpRequest(options),
+                ...bindNetwork(options),
+                ...(options["--payer"] === undefined ? {} : { payer: options["--payer"] }),
+            } };
         case "x402 fetch prepare-network":
         case "x402 fetch prepare": return {
             request: {

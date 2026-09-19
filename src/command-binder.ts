@@ -6,6 +6,7 @@ import {
   type ParsedCatalogCommand,
 } from "./command-catalog.js";
 import type { CommandRequest } from "./commands.js";
+import type { Address } from "./model.js";
 import { ApnError } from "./errors.js";
 import { evmChain, evmDecimals, evmToken, type EvmAssetSelection } from "./evm-asset.js";
 import { listedEvmAsset } from "./evm-direct-allowlist.js";
@@ -186,7 +187,13 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
       },
     };
     case "x402 inspect-network":
-    case "x402 inspect": return { request: { command: "x402.inspect", url: value(options, "--url"), ...bindX402HttpRequest(options), ...bindNetwork(options) } };
+    case "x402 inspect": return { request: {
+      command: "x402.inspect",
+      url: value(options, "--url"),
+      ...bindX402HttpRequest(options),
+      ...bindNetwork(options),
+      ...(options["--payer"] === undefined ? {} : { payer: options["--payer"] as Address }),
+    } };
     case "x402 fetch prepare-network":
     case "x402 fetch prepare": return {
       request: {

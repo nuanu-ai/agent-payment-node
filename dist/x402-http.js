@@ -8,6 +8,7 @@ import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress,
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader, inspectCandidates, } from "./x402-codec.js";
 import { decodeX402RequestBody, optionalX402HttpRequest } from "./x402-http-request.js";
 import { opaqueHttpResult, parseResultMediaType } from "./x402-opaque-result.js";
+import { inspectPermit2Offer } from "./x402-permit2/inspection.js";
 const MAX_HEADER_PAIRS = 64;
 const MAX_HEADER_NAME_BYTES = 256;
 const MAX_CONTROL_VALUE_BYTES = 64 * 1024;
@@ -44,7 +45,7 @@ export class HttpsX402Http {
         return await getOnce(endpoint, addresses, request.paymentSignature, httpRequest, deadlineMs, this.nowMs, this.request, this.scheduleDeadline, this.cancelDeadline);
     }
 }
-export async function inspectX402(http, value, request, chainId = 8453) {
+export async function inspectX402(http, value, request, chainId = 8453, payer) {
     const endpoint = parsePublicHttpsUrl(value, "APN_HTTP_CONFIG", "Seller URL", 2048);
     const canonicalUrl = endpoint.toString();
     if (canonicalUrl !== value)
@@ -53,9 +54,11 @@ export async function inspectX402(http, value, request, chainId = 8453) {
     const observation = await http.get({ url: canonicalUrl, ...(httpRequest === undefined ? {} : { httpRequest }) });
     validateInspectObservation(observation, endpoint);
     const paymentRequired = decodePaymentRequiredHeader(singleControlHeader(observation.rawHeaderPairs, "payment-required"));
+    const permit2 = payer === undefined ? undefined : inspectPermit2Offer({ accepts: paymentRequired.accepts, payer });
     const candidates = inspectCandidates(paymentRequired, canonicalUrl, chainId);
-    if (candidates.length === 0)
+    if (candidates.length === 0 && permit2 === undefined) {
         throw httpError("APN_X402_UNSUPPORTED_OFFER", "Seller challenge has no supported x402 offer.");
+    }
     return {
         kind: "x402_inspection",
         x402Version: "2",
@@ -65,6 +68,7 @@ export async function inspectX402(http, value, request, chainId = 8453) {
             urlHash: sha256(canonicalUrl),
         },
         candidates,
+        ...(permit2 === undefined ? {} : { permit2 }),
     };
 }
 export function observePaidX402Response(raw, input) {
