@@ -26,18 +26,19 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
     if (endpoint.search !== "")
         bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_query_forbidden");
     const archive = bridgeArchiveEndpoint(chainId, environment);
-    let sequence = 0n, archiveChain = false;
+    let sequence = 0n, archiveChain;
     const call = async (method, params) => {
         if (!READ_METHODS.has(method))
             bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
         if (archive === null || !isHistoricalStateRead(method, params))
             return await exchange(endpoint, method, params);
         // Only an explicitly named archive reader answers block-pinned state reads, after it proves the same chain once.
-        if (!archiveChain) {
-            if (evmRpcQuantity(await exchange(archive, "eth_chainId", [])) !== BigInt(chainId))
-                bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
-            archiveChain = true;
-        }
+        if (archiveChain === undefined)
+            archiveChain = (async () => {
+                if (evmRpcQuantity(await exchange(archive, "eth_chainId", [])) !== BigInt(chainId))
+                    bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
+            })();
+        await archiveChain;
         return await exchange(archive, method, params);
     };
     const exchange = async (target, method, params) => {

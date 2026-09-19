@@ -1,5 +1,6 @@
 import type { EvmChainId } from "../evm-asset.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
+import { bridgeChain } from "./asset-registry.js";
 import { bridgeFailure } from "./validation.js";
 
 /**
@@ -17,6 +18,7 @@ export const BRIDGE_ARCHIVE_RPC_ENV = {
 const TAG_INDEX: Readonly<Record<string, number>> = { eth_getCode: 1, eth_getStorageAt: 2, eth_call: 1 };
 
 export function bridgeArchiveEndpoint(chainId: EvmChainId, environment: Readonly<Record<string, string | undefined>>): URL | null {
+  bridgeChain(chainId, "APN_RPC_CONFIG");
   const name = BRIDGE_ARCHIVE_RPC_ENV[chainId];
   const value = environment[name];
   if (value === undefined || value.length === 0) return null;
@@ -32,5 +34,7 @@ export function isHistoricalStateRead(method: string, params: readonly unknown[]
   const tag = params[index];
   if (typeof tag === "string") return /^0x(?:0|[1-9a-f][0-9a-f]*)$/u.test(tag);
   return typeof tag === "object" && tag !== null && !Array.isArray(tag) &&
-    typeof (tag as { readonly blockHash?: unknown }).blockHash === "string";
+    isBlockHash((tag as { readonly blockHash?: unknown }).blockHash);
 }
+
+function isBlockHash(value: unknown): boolean { return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/u.test(value); }

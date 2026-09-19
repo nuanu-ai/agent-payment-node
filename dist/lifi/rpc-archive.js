@@ -1,4 +1,5 @@
 import { parsePublicHttpsUrl } from "../network-policy.js";
+import { bridgeChain } from "./asset-registry.js";
 import { bridgeFailure } from "./validation.js";
 /**
  * Owner-named archive endpoints. Public full nodes prune historical state, so re-verifying an older bridge operation's
@@ -13,6 +14,7 @@ export const BRIDGE_ARCHIVE_RPC_ENV = {
 };
 const TAG_INDEX = { eth_getCode: 1, eth_getStorageAt: 2, eth_call: 1 };
 export function bridgeArchiveEndpoint(chainId, environment) {
+    bridgeChain(chainId, "APN_RPC_CONFIG");
     const name = BRIDGE_ARCHIVE_RPC_ENV[chainId];
     const value = environment[name];
     if (value === undefined || value.length === 0)
@@ -31,6 +33,7 @@ export function isHistoricalStateRead(method, params) {
     if (typeof tag === "string")
         return /^0x(?:0|[1-9a-f][0-9a-f]*)$/u.test(tag);
     return typeof tag === "object" && tag !== null && !Array.isArray(tag) &&
-        typeof tag.blockHash === "string";
+        isBlockHash(tag.blockHash);
 }
+function isBlockHash(value) { return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/u.test(value); }
 //# sourceMappingURL=rpc-archive.js.map
