@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -12,7 +12,7 @@ import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { SUNSWAP_V2_KEYLESS_MECHANISM_PIN } from "../../src/swap/sunswap-tron/mechanism.js";
 import { REFUSING_SWAP_APPROVAL } from "../../src/swap/uniswap-v3/runtime-factory.js";
 import { temporaryState } from "./helpers.js";
-import { AMOUNT, PROFILE, sunSwapFlow, sunSwapPolicy } from "./sunswap-tron-runtime-helpers.js";
+import { AMOUNT, OWNER, PROFILE, sunSwapFlow, sunSwapPolicy } from "./sunswap-tron-runtime-helpers.js";
 
 const prepare = async (f: Awaited<ReturnType<typeof sunSwapFlow>>, key: string) =>
   await f.runtime.prepare({ profile: PROFILE, quoteHash: (await f.quote()).quoteHash, idempotencyKey: key }, f.clock.now());
@@ -133,6 +133,68 @@ test("per-operation and daily caps come from the owner policy and the shared usa
   await assert.rejects(daily.runtime.approveAndExecute(second.operationId, daily.clock.now()), { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await new SwapOperationRepository(other.root).loadAny(second.operationId))?.state, "awaiting_approval");
   assert.equal(daily.rpc.broadcasts.length, 1); assert.equal(await daily.usage(), AMOUNT);
+});
+
+test("the actual CLI prepare path refuses an amount above the owner cap before reserving or signing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await sunSwapFlow(temporary.root, { caps: { trx: "4999999", trxDaily: "10000000" } });
+  const quote = await f.quote();
+  const bound = bindArgv(["swap", "tron", "sunswap", "prepare", "--profile", PROFILE, "--quote", quote.quoteHash,
+    "--idempotency-key", "sunswap-cli-cap-0001"]);
+  const core = createApnCore(bound, { stateRoot: temporary.root, sunswapRuntime: f.runtime, clock: f.clock });
+  const result = await core.execute(bound.request);
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(result.error?.details?.reason, undefined);
+  assert.match(result.error?.message ?? "", /asset policy per-transfer cap/u);
+  assert.equal(await f.usage(), "0");
+  assert.equal(f.rpc.broadcasts.length, 0);
+});
+
+test("MCP quote and prepare match the CLI runtime, while status on a fresh root is read-only", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await sunSwapFlow(temporary.root);
+  const quoteRequest = { command: "swap.sunswap.quote" as const, profile: PROFILE, account: OWNER, recipient: OWNER,
+    amountAtomic: AMOUNT, slippageBps: 50, ownerSlippageCapBps: 50, feeLimitSun: "30000000", deadline: f.deadline };
+  const cliCore = createApnCore(bindArgv(["swap", "tron", "sunswap", "quote", "--profile", PROFILE, "--account", OWNER,
+    "--to", OWNER, "--amount", AMOUNT, "--slippage-bps", "50", "--owner-slippage-cap-bps", "50", "--fee-limit-sun", "30000000",
+    "--deadline", String(f.deadline)]), { stateRoot: temporary.root, sunswapRuntime: f.runtime, clock: f.clock });
+  const cliQuote = await cliCore.execute(quoteRequest);
+  assert.equal(cliQuote.ok, true);
+  const server = createMcpServer({ stateRoot: temporary.root, sunswapRuntime: f.runtime });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "apn-sunswap-mcp-parity", version: "1.0.0" });
+  await server.connect(serverTransport); await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const call = async (name: string, args: Record<string, unknown>): Promise<OutputEnvelope> => {
+    const result = await client.callTool({ name, arguments: args }), content = result.content[0];
+    if (content?.type !== "text") throw new Error("expected text");
+    return JSON.parse(content.text) as OutputEnvelope;
+  };
+  const mcpQuote = await call("apn_swap_tron_sunswap_quote", { profile: PROFILE, account: OWNER, to: OWNER,
+    amount: AMOUNT, slippage_bps: "50", owner_slippage_cap_bps: "50", fee_limit_sun: "30000000", deadline: String(f.deadline) });
+  assert.equal(mcpQuote.ok, cliQuote.ok);
+  assert.equal(mcpQuote.proof_class, cliQuote.proof_class);
+  assert.equal((mcpQuote.data as any).quote.inputAmountAtomic, (cliQuote.data as any).quote.inputAmountAtomic);
+  assert.equal((mcpQuote.data as any).quote.minimumOutputAtomic, (cliQuote.data as any).quote.minimumOutputAtomic);
+  assert.equal((mcpQuote.data as any).signed, false); assert.equal((mcpQuote.data as any).broadcast, false);
+  const cliPrepare = await cliCore.execute({ command: "swap.sunswap.prepare", profile: PROFILE, quoteHash: (cliQuote.data as any).quoteHash,
+    idempotencyKey: "sunswap-mcp-parity-0001" });
+  const mcpPrepare = await call("apn_swap_tron_sunswap_prepare", { profile: PROFILE, quote: (cliQuote.data as any).quoteHash,
+    idempotency_key: "sunswap-mcp-parity-0001" });
+  assert.equal(mcpPrepare.ok, cliPrepare.ok);
+  assert.equal(mcpPrepare.proof_class, cliPrepare.proof_class);
+  assert.equal((mcpPrepare.operation as any)?.operationId, (cliPrepare.operation as any)?.operationId);
+  const fresh = await temporaryState(); t.after(fresh.cleanup);
+  const freshServer = createMcpServer({ stateRoot: fresh.root });
+  const [freshClientTransport, freshServerTransport] = InMemoryTransport.createLinkedPair();
+  const freshClient = new Client({ name: "apn-sunswap-mcp-status-read", version: "1.0.0" });
+  await freshServer.connect(freshServerTransport); await freshClient.connect(freshClientTransport);
+  const missing = await freshClient.callTool({ name: "apn_swap_tron_sunswap_status", arguments: { operation: "c".repeat(64) } });
+  const missingText = missing.content[0]; if (missingText?.type !== "text") throw new Error("expected text");
+  assert.equal((JSON.parse(missingText.text) as OutputEnvelope).error?.code, "APN_OPERATION_NOT_FOUND");
+  await freshClient.close(); await freshServer.close();
+  await assert.rejects(lstat(fresh.root), { code: "ENOENT" });
 });
 
 test("the installed factory wires the keyless runtime and MCP hands approve and execute to the foreground CLI", async (t) => {
