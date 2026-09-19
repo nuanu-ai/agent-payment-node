@@ -219,9 +219,9 @@ export class ApnCore {
       }
       case "gasless.transfer.prepare": return operationOutcome(await this.prepareGasless(request));
       case "gasless.usdt.status": case "gasless.usdt.resume":
-        throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
-          "Gasless USDT operation command runtime is not wired yet; no journal access was attempted.",
-          { reason: "gasless_usdt_command_runtime_unavailable", profileHash: request.profileHash });
+        if (this.context.gaslessUsdt === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+          "Gasless USDT operation command runtime is unavailable.", { reason: "gasless_usdt_command_runtime_unavailable" });
+        return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash)[request.command.endsWith("status") ? "status" : "resume"](request.operationId));
       case "gasless.transfer.approve": {
         const stored = await this.operations.required(request.operationId), { kind } = stored;
         if (kind === "direct_transfer" && stored.record.providerDirect?.coinbaseGasless !== undefined) {
