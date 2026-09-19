@@ -2,7 +2,7 @@
 
 This package is a no-money foundation for Ethereum USDT gasless capability checks. It contains the exact asset, chain and sponsor registry; quote, paymaster, UserOperation and receipt codecs; nonce, balance and allowance-slot reads; stable refusal classification; and a read-only rehearsal fixture.
 
-It is foundation-only: **no signing, no custody, no settlement, no payment response, no operation journal, no reservation or dispatch, no CLI or MCP command, and no `eth_sendUserOperation` path**. The exported engine can quote, validate sponsor data, and observe canonical evidence only. The rehearsal loads no key, signs nothing and sends nothing.
+It is foundation-only: **no signing, no custody, no settlement, no payment response, no reservation or dispatch, no CLI or MCP command, and no `eth_sendUserOperation` path**. A dormant local operation journal boundary persists and validates prepared records for status and read-only recovery classification; it does not sign, dispatch, or settle. The exported engine can quote, validate sponsor data, and observe canonical evidence only. The rehearsal loads no key, signs nothing and sends nothing.
 
 Every request is bound to Ethereum chain 1, the pinned USDT contract, EntryPoint, delegate, paymaster and treasury, exact sender/recipient, gross amount, fee cap, minimum received amount, quote storage layout, gas price and paymaster validity. Any identity, chain, amount, expiry, prototype or excess mismatch fails closed with a stable `capability unavailable` or typed refusal reason. Provider text is bounded and never returned as a secret.
 
