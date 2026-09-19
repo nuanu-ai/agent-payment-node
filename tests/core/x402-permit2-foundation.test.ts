@@ -32,6 +32,15 @@ test("unsupported offers and missing allowance refuse with stable reasons", () =
   assert.throws(() => planPermit2Authorization(selection, { payer, nowSeconds: 1, nonce: 1n, permit2AllowanceAtomic: "0", eip2612Nonce: null, sellerSponsorsEip2612: false }), (e: unknown) => e instanceof ApnError && e.details?.reason === "x402_permit2_allowance_required");
 });
 
+test("signing plan rejects forged selections and unsafe deadlines", () => {
+  const selection = selectPermit2Offer(accepts, payer);
+  const forged = { ...selection, amountAtomic: "2", requirement: { ...selection.requirement, amount: "2" } };
+  assert.throws(() => planPermit2Authorization(forged, { payer, nowSeconds: 1, nonce: 1n, permit2AllowanceAtomic: "2", eip2612Nonce: null, sellerSponsorsEip2612: false }),
+    (e: unknown) => e instanceof ApnError && e.code === "APN_STATE_CORRUPT");
+  assert.throws(() => planPermit2Authorization(selection, { payer, nowSeconds: Number.MAX_SAFE_INTEGER, nonce: 1n, permit2AllowanceAtomic: "10000", eip2612Nonce: null, sellerSponsorsEip2612: false }),
+    (e: unknown) => e instanceof ApnError && e.code === "APN_INVALID_INPUT");
+});
+
 test("read-only nonce probe is exact and receipt evidence is independently validated", () => {
   const call = permit2NonceBitmapCall(payer, "259");
   assert.equal(call.to, PERMIT2_ADDRESS);
