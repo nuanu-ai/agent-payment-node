@@ -6,9 +6,12 @@ import { ApnError } from "../../src/errors.js";
 import type { Address } from "../../src/model.js";
 import {
   TTY_APPROVAL_DEADLINE_MS,
+  TtyRailApproval,
   TtyTransferApproval,
+  transferApprovalPhrase,
   type TransferApprovalIntent,
 } from "../../src/tty-approval.js";
+import type { RailApprovalPort } from "../../src/direct-rail-ports.js";
 
 const INTENT: TransferApprovalIntent = {
   profile: "default",
@@ -89,6 +92,44 @@ test("TTY input errors fail closed and close the terminal", async () => {
     return true;
   });
   assert.equal(closed, 1);
+});
+
+const RAIL_FINGERPRINT = "c".repeat(64);
+const RAIL_EXPIRES_AT = new Date(Date.now() + 60_000).toISOString();
+const RAIL_APPROVAL_INPUT: Parameters<RailApprovalPort["approve"]>[0] = {
+  account: {
+    schemaVersion: "apn.chain-account.v1", profile: "tty-test", profileHash: "d".repeat(64), rail: "solana", network: "mainnet",
+    provider: "local", custody: "local_software", address: "tty-owner", createdAt: "2026-09-20T00:00:00.000Z", identityHash: "e".repeat(64),
+  },
+  operationId: "a".repeat(64), fingerprint: RAIL_FINGERPRINT, policyHash: "f".repeat(64),
+  prepared: {
+    rail: "solana", networkIdentity: "solana:mainnet",
+    asset: { rail: "solana", network: "mainnet", alias: "sol", kind: "native", identifier: "native", symbol: "SOL", decimals: 9 },
+    sender: "tty-owner", recipient: "tty-recipient", amountAtomic: "1000000000", maximumFeeAtomic: "5000",
+    economics: { networkFeeMaximumAtomic: "5000", recipientRentAtomic: "0", maximumNativeDebitAtomic: "5000", networkFeePayer: "sender", rentPayer: null, feeControl: "signed_message" },
+    preparedAt: "2026-09-20T00:00:00.000Z", expiresAt: RAIL_EXPIRES_AT, blockReference: "tty-block", lastValidBlockHeight: "10",
+    unsignedPayload: null, sourceTokenAccount: null, destinationTokenAccount: null, createsRecipientAccount: false,
+  },
+  allowlist: { schemaVersion: "apn.direct-allowlist.v1", policyDigest: "1".repeat(64), policyRevision: 7 },
+};
+
+test("direct-rail TTY approval shows frozen owner allowlist binding beside the chain policy hash", async () => {
+  let written = "";
+  const approval = new TtyRailApproval({
+    deadlineMs: 1_000,
+    isTerminal: () => true,
+    openTerminal: async () => ({
+      fd: 123,
+      write: async (contents) => { written += contents; },
+      read: async function* () { yield Buffer.from(`${transferApprovalPhrase(RAIL_FINGERPRINT)}\n`); },
+      close: async () => {},
+    }),
+  });
+
+  await approval.approve(RAIL_APPROVAL_INPUT);
+  assert.ok(written.includes(`Frozen owner allowlist: policyDigest ${"1".repeat(64)}; policyRevision 7`));
+  assert.ok(written.includes(`Policy: ${"f".repeat(64)}`));
+  assert.equal(written.split("\n").filter((line) => line.startsWith("Policy:")).length, 1);
 });
 
 test("real macOS PTY approval returns after one exact line without waiting for another byte", {

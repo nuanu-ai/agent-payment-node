@@ -8,6 +8,7 @@ import { ChainAccountStore } from "../../src/chain-account-store.js";
 import { SOLANA_GENESIS, SOLANA_USDC } from "../../src/chain-policy.js";
 import { sha256 } from "../../src/canonical.js";
 import type { RailApprovalPort, RailPreparedTransfer } from "../../src/direct-rail-ports.js";
+import type { DirectAllowlistBinding } from "../../src/direct-allowlist-gate.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { WaitPort } from "../../src/ports.js";
 import { ApnError } from "../../src/errors.js";
@@ -26,11 +27,12 @@ export class SolanaWrapping implements WrappingSecretPort {
 }
 export class SolanaApproval implements RailApprovalPort {
   calls: Parameters<RailApprovalPort["approve"]>[0][] = [];
+  allowlistBindings: (DirectAllowlistBinding | undefined)[] = [];
   refuse = false;
   /** Stands in for the time the owner spends reading the screen. */
   onApprove: (() => void) | undefined;
   async approve(input: Parameters<RailApprovalPort["approve"]>[0]): Promise<void> {
-    this.calls.push(input); this.onApprove?.(); if (this.refuse) throw new Error("synthetic approval refusal");
+    this.calls.push(input); this.allowlistBindings.push(input.allowlist); this.onApprove?.(); if (this.refuse) throw new Error("synthetic approval refusal");
   }
 }
 export class SolanaWait implements WaitPort {
