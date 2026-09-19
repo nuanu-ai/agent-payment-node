@@ -1,5 +1,5 @@
 import type { Address, Hex } from "../model.js";
-import type { Permit2OfferSelection } from "./offer.js";
+import { type Permit2OfferSelection } from "./offer.js";
 export declare const EIP2612_GAS_SPONSORING: "eip2612GasSponsoring";
 /** Must equal the x402 exact proxy's witness layout; the test suite cross-checks it against @x402/evm. */
 export declare const PERMIT2_WITNESS_TYPES: {

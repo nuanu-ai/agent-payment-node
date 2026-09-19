@@ -1,8 +1,8 @@
-import { recoverTypedDataAddress } from "viem";
+import { getAddress, isAddress, recoverTypedDataAddress } from "viem";
 import { canonicalJson, domainHash } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import type { Address, Hex } from "../model.js";
-import type { Permit2OfferSelection } from "./offer.js";
+import { validatePermit2Selection, type Permit2OfferSelection } from "./offer.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY } from "./registry.js";
 
 const PLAN_DOMAIN = "apn.x402-permit2.plan.v1";
@@ -65,10 +65,19 @@ export interface Permit2PlanInput {
 }
 
 export function planPermit2Authorization(selection: Permit2OfferSelection, input: Permit2PlanInput): Permit2SigningPlan {
-  if (typeof input.payer !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(input.payer) || input.payer.toLowerCase() === selection.payTo.toLowerCase()) {
+  if (typeof input.payer !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(input.payer)) {
     invalid("The payer must be an exact EVM address other than the payee.");
   }
+  const payerHex = input.payer.slice(2), payerUnchecksummed = payerHex === payerHex.toLowerCase() || payerHex === payerHex.toUpperCase();
+  if (!payerUnchecksummed && !isAddress(input.payer, { strict: true })) invalid("The payer must be an exact EVM address other than the payee.");
+  const payer = getAddress(input.payer.toLowerCase()) as Address;
+  // Revalidate the frozen seller offer at the signing boundary. A caller must not
+  // be able to forge token, chain, payee, amount, timeout, or extension fields by
+  // constructing a selection object instead of using selectPermit2Offer().
+  selection = validatePermit2Selection(selection, input.payer);
+  if (payer.toLowerCase() === selection.payTo.toLowerCase()) invalid("The payer must be an exact EVM address other than the payee.");
   if (!Number.isSafeInteger(input.nowSeconds) || input.nowSeconds < 1) invalid("The signing instant is invalid.");
+  if (input.nowSeconds > Number.MAX_SAFE_INTEGER - selection.maxTimeoutSeconds) invalid("The signing deadline is out of range.");
   if (typeof input.nonce !== "bigint" || input.nonce < 0n || input.nonce > MAX_UINT256) invalid("The Permit2 nonce is invalid.");
   if (!/^(0|[1-9][0-9]{0,77})$/u.test(input.permit2AllowanceAtomic)) invalid("The observed Permit2 allowance is invalid.");
   const { listAsset } = selection;
