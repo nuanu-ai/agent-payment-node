@@ -22,12 +22,11 @@ test("gasless USDT status/resume catalog entries are local-read and non-approval
   }
 });
 
-test("gasless USDT command cases refuse before runtime wiring and do not create state", async t => {
+test("gasless USDT command cases read the isolated journal and do not create missing state", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   for (const action of ["status", "resume"] as const) {
     const bound = bindArgv(["gasless", "usdt", action, "--profile-hash", HASH, "--operation", OP]);
     const result = await createApnCore(bound, { stateRoot: temporary.root }).execute(bound.request);
-    assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-    assert.equal(result.error?.details?.reason, "gasless_usdt_command_runtime_unavailable");
+    assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_NOT_FOUND");
   }
 });
