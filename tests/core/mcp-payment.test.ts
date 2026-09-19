@@ -16,7 +16,7 @@ import {
   X402_TEST_ACCOUNT,
   challengeObservation,
 } from "./x402-helpers.js";
-import { X402_URL } from "./x402-vectors.js";
+import { X402_PAYER, X402_URL } from "./x402-vectors.js";
 
 const MASTER = Buffer.from("66".repeat(32), "hex");
 
@@ -65,6 +65,9 @@ test("all ten payment tools bind through the shared catalog binder", () => {
   };
   assert.deepEqual(bind("apn_x402_inspect", { url: X402_URL }), {
     request: { command: "x402.inspect", url: X402_URL },
+  });
+  assert.deepEqual(bind("apn_x402_inspect", { url: X402_URL, payer: X402_PAYER }), {
+    request: { command: "x402.inspect", url: X402_URL, payer: X402_PAYER },
   });
   assert.deepEqual(bind("apn_x402_fetch_prepare", {
     profile: "default", url: X402_URL, idempotency_key: "x402-bind-001",

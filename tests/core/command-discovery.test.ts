@@ -81,6 +81,7 @@ const EXPECTED_COMMANDS = [
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
   "circle approval prepare", "circle approval execute", "circle approval status", "circle source submit",
   "oneclick source submit", "oneclick source status",
+  "gasless usdt status", "gasless usdt resume",
   "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
   "allowlist inventory", "allowlist resolve", "allowlist policy prepare", "allowlist policy stage", "allowlist policy activate",
   "allowlist policy revoke", "allowlist policy status",
