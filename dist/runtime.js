@@ -15,6 +15,7 @@ export class RuntimeContext {
     smartAccountGasless;
     metaMaskGasless;
     gasless;
+    gaslessUsdt;
     bridge;
     circleApproval;
     circleSource;
@@ -70,6 +71,8 @@ export class RuntimeContext {
             this.metaMaskGasless = dependencies.metaMaskGasless;
         if (dependencies.gasless !== undefined)
             this.gasless = dependencies.gasless;
+        if (dependencies.gaslessUsdt !== undefined)
+            this.gaslessUsdt = dependencies.gaslessUsdt;
         if (dependencies.bridge !== undefined)
             this.bridge = dependencies.bridge;
         if (dependencies.circleApproval !== undefined)

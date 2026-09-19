@@ -19,6 +19,7 @@ import type { CircleV2ApprovalExecutor as CircleApprovalService } from "./lifi/c
 import { OneClickSourceService } from "./lifi/near-oneclick-source-service.js";
 import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
+import { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 import { type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
@@ -49,6 +50,7 @@ export interface RuntimeFactoryOptions {
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
     readonly gasless?: GaslessDependencies;
+    readonly gaslessUsdt?: GaslessUsdtOperationService;
     readonly bridge?: BridgeDependencies;
     readonly circleApproval?: CircleApprovalService;
     readonly circleSource?: CircleV2SourceService;

@@ -73,6 +73,8 @@ import { OneClickSourceService } from "./lifi/near-oneclick-source-service.js";
 import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
 import type { GaslessDependencies } from "./gasless/service.js";
+import { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
+import { UsdtOperationRepository } from "./gasless-usdt/operation.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
 import { gaslessObservationRpcFactory } from "./gasless/observation-rpc.js";
@@ -119,6 +121,7 @@ export interface RuntimeFactoryOptions {
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
   readonly gasless?: GaslessDependencies;
+  readonly gaslessUsdt?: GaslessUsdtOperationService;
   readonly bridge?: BridgeDependencies;
   readonly circleApproval?: CircleApprovalService;
   readonly circleSource?: CircleV2SourceService;
@@ -312,6 +315,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       observationRpcFor: gaslessObservationRpcFactory(process.env),
       custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
       ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyGaslessApproval() } : {}) },
+    ...(bound.request.command.startsWith("gasless.usdt.") || options.gaslessUsdt !== undefined ? {
+      gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)),
+    } : {}),
     bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
       custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
       ...(bound.request.command === "bridge.approve" ? { approval: new TtyBridgeApproval() } : {}) },
