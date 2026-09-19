@@ -64,6 +64,7 @@ const SELECTED_PATHS = [
   "x402 inspect-network",
   "x402 fetch prepare-network",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
+  "gasless usdt status", "gasless usdt resume",
   "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
   "oneclick source submit", "oneclick source status",
 ] as const;
@@ -145,7 +146,7 @@ function optionSchema(option: CommandOption): { [key: string]: JsonValue } {
   if (!new Set(["public", "operator_input"]).has(option.sensitivity)) {
     throw projectionFailure("A selected command uses unsupported MCP sensitivity metadata.");
   }
-  const pattern = scalarPattern(option.type);
+  const pattern = scalarPattern(option);
   return {
     type: "string",
     description: `Catalog type ${option.type}; constraints ${option.constraints.join(", ") || "none"}; sensitivity ${option.sensitivity}.`,
@@ -154,8 +155,11 @@ function optionSchema(option: CommandOption): { [key: string]: JsonValue } {
   };
 }
 
-function scalarPattern(type: CommandOption["type"]): string | undefined {
-  switch (type) {
+function scalarPattern(option: CommandOption): string | undefined {
+  if (option.type === "string" && option.constraints.includes("64_lowercase_hex_characters")) {
+    return "^[a-f0-9]{64}$";
+  }
+  switch (option.type) {
     case "profile": return "^[a-z0-9][a-z0-9._-]{0,63}$";
     case "provider_id": return "^[a-z0-9][a-z0-9._-]{0,63}$";
     case "provider_auth_method": return "^[a-z][a-z0-9-]{0,31}$";
