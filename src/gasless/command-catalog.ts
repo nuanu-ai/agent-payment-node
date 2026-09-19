@@ -14,6 +14,7 @@ const option = (name: CommandOption["name"], type: CommandOption["type"], constr
 const profile = option("--profile", "profile", ["existing_bound_profile_required_for_balance_and_prepare"]);
 const chain = option("--chain", "string", ["numeric_mainnet_id_1_10_130_137_143_1329_8453_42161_43114_59144", "provider_specific_chain_admission"]);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
+const profileHash = option("--profile-hash", "string", ["64_lowercase_hex_characters"]);
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
   success: "USDC gross, fee budget, recipient amount, permission state and independently verified settlement.",
   failures: ["Classified APN error with no automatic fallback or replacement signature."] } as const;
@@ -25,6 +26,14 @@ const states = { terminal: [...new Set([...GASLESS_TERMINAL, ...SA_TERMINAL, ...
 const readApproval = { class: "none", when: "Never signs or submits." } as const;
 const done = { terminal: ["completed", "classified_failure"], non_terminal: [] };
 export const GASLESS_COMMANDS: readonly CommandDefinition[] = [
+  { path: ["gasless", "usdt", "status"], synopsis: "apn gasless usdt status --profile-hash <hash> --operation <operation-id>",
+    summary: "Read a saved gasless USDT operation without creating or changing state.", options: [profileHash, operation],
+    effect: { class: "local_read", summary: "Reads the explicitly bound gasless USDT journal; never signs or submits." }, approval: readApproval, output,
+    states: done, recovery: [], examples: ["apn gasless usdt status --profile-hash <hash> --operation <operation-id>"] },
+  { path: ["gasless", "usdt", "resume"], synopsis: "apn gasless usdt resume --profile-hash <hash> --operation <operation-id>",
+    summary: "Re-read a saved gasless USDT operation; no state transition is performed.", options: [profileHash, operation],
+    effect: { class: "local_read", summary: "Reads the explicitly bound gasless USDT journal; never signs or submits." }, approval: readApproval, output,
+    states: done, recovery: [], examples: ["apn gasless usdt resume --profile-hash <hash> --operation <operation-id>"] },
   { path: ["gasless", "capabilities"], synopsis: "apn gasless capabilities [--profile <profile>]",
     summary: "Show exact mainnet USDC fee-transfer adapters and separate acceptance for all four profile types.",
     options: [{ ...profile, required: false }], effect: { class: "none", summary: "Static discovery; no wallet, state, Keychain, RPC or provider access." },
@@ -76,6 +85,12 @@ function commandDecimals(chainId: GaslessCommandChainId): number {
 }
 export function bindGaslessCommand(path: string, o: Readonly<Record<string, string>>): CommandRequest {
   if (path === "gasless capabilities") return { command: "gasless.capabilities", ...(o["--profile"] === undefined ? {} : { profile: o["--profile"] }) };
+  if (path === "gasless usdt status" || path === "gasless usdt resume") {
+    const profileHash = o["--profile-hash"]!;
+    if (!/^[a-f0-9]{64}$/u.test(profileHash)) gaslessFailure("APN_INVALID_INPUT", "gasless_usdt_profile_hash");
+    return { command: path.endsWith("status") ? "gasless.usdt.status" : "gasless.usdt.resume", profileHash,
+      operationId: o["--operation"]! };
+  }
   if (path === "gasless transfer approve") return { command: "gasless.transfer.approve", operationId: o["--operation"]! };
   if (!/^[1-9][0-9]{0,5}$/u.test(o["--chain"] ?? "")) gaslessFailure("APN_INVALID_INPUT", "gasless_chain_identity");
   const chainId = gaslessCommandChain(Number(o["--chain"]));
