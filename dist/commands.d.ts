@@ -178,6 +178,10 @@ export type CommandRequest = {
     readonly command: "gasless.transfer.approve";
     readonly operationId: string;
 } | {
+    readonly command: "gasless.usdt.status" | "gasless.usdt.resume";
+    readonly profileHash: string;
+    readonly operationId: string;
+} | {
     readonly command: "bridge.capabilities";
     readonly profile?: string;
 } | {
