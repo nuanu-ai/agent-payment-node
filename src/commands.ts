@@ -99,7 +99,7 @@ export type CommandRequest =
     readonly maxX402AmountAtomic: string;
     readonly maxBalanceEthWei?: string;
   }
-  | { readonly command: "x402.inspect"; readonly url: string; readonly httpRequest?: X402HttpRequestV1; readonly chainId?: EvmChainId }
+  | { readonly command: "x402.inspect"; readonly url: string; readonly httpRequest?: X402HttpRequestV1; readonly chainId?: EvmChainId; readonly payer?: Address }
   | {
     readonly command: "x402.fetch.prepare";
     readonly chainId?: EvmChainId;
