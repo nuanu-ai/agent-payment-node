@@ -90,6 +90,7 @@ const TOOL_NAMES = [
   "apn_x402_inspect_network",
   "apn_x402_fetch_prepare_network",
   "apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare", "apn_bridge_approve",
+  "apn_gasless_usdt_status", "apn_gasless_usdt_resume",
   "apn_gasless_capabilities", "apn_gasless_balance", "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve",
   "apn_oneclick_source_submit", "apn_oneclick_source_status",
 ] as const;
