@@ -95,6 +95,19 @@ test("exact simulation binds safe block, eth_call, estimateGas and bounded head 
   await assert.rejects(new UniswapEvmSimulator(driftRpc, 2).simulate(envelope()), { code: "APN_OPERATION_BLOCKED" });
 });
 
+test("token input approval is refused explicitly before any approval or send path", async () => {
+  const tokenInput = structuredClone(quoteResponse()) as any;
+  tokenInput.quote.input.token = UNISWAP_USDC;
+  tokenInput.quote.output.token = WETH;
+  tokenInput.isTokenApprovalApplicable = true;
+  tokenInput.permitData = { type: "permit2" };
+  assert.throws(() => decodeUniswapQuoteResponse(tokenInput, quoteRequest()), { code: "APN_PROVIDER_PROTOCOL" });
+  let sends = 0;
+  const api = new UniswapTradingApi("test-api-key", { post: async () => { sends++; throw new Error("send path must not run"); } });
+  assert.throws(() => api.checkApproval(), { code: "APN_OPERATION_BLOCKED", message: /Native ETH input has no token or Permit2 approval operation/u });
+  assert.equal(sends, 0);
+});
+
 test("Trading API retries only bounded unsigned reads and native approval is impossible", async () => {
   let calls = 0; const api = new UniswapTradingApi("test-api-key", { post: async (_url, headers) => {
     calls++; assert.equal(headers["x-universal-router-version"], "2.2.0"); return calls === 1 ? { status: 503, body: "{}" } : { status: 200, body: JSON.stringify(quoteResponse()) }; } }, 500, 1);
