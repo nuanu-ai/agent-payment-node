@@ -5,6 +5,7 @@ import { ApnCore } from "../../src/core.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
 import { sha256 } from "../../src/canonical.js";
 import type { RailApprovalPort, RailPreparedTransfer } from "../../src/direct-rail-ports.js";
+import type { DirectAllowlistBinding } from "../../src/direct-allowlist-gate.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { StateStore } from "../../src/state.js";
 import { TronLocalAdapter } from "../../src/tron/local-adapter.js";
@@ -22,8 +23,9 @@ export class TronWrapping implements WrappingSecretPort {
 }
 export class TronApproval implements RailApprovalPort {
   calls: Parameters<RailApprovalPort["approve"]>[0][] = [];
+  allowlistBindings: (DirectAllowlistBinding | undefined)[] = [];
   refuse = false;
-  async approve(input: Parameters<RailApprovalPort["approve"]>[0]): Promise<void> { this.calls.push(input); if (this.refuse) throw new Error("synthetic approval refusal"); }
+  async approve(input: Parameters<RailApprovalPort["approve"]>[0]): Promise<void> { this.calls.push(input); this.allowlistBindings.push(input.allowlist); if (this.refuse) throw new Error("synthetic approval refusal"); }
 }
 export class TronTestRpc implements TronRpcPort {
   readonly originHash = sha256("synthetic_tron_rpc");

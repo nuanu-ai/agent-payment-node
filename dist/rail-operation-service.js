@@ -77,7 +77,8 @@ export class RailOperationService {
                 if (operation.allowlist === undefined)
                     refuse("allowlist_binding_missing", "This transfer was prepared before the owner allowlist gate; prepare a new transfer.");
                 await this.revalidate(operation, adapter);
-                await approval.approve({ account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, policyHash: operation.policyHash, prepared: operation.prepared });
+                await approval.approve({ account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, policyHash: operation.policyHash,
+                    prepared: operation.prepared, allowlist: operation.allowlist });
                 await this.revalidate(operation, adapter);
             }
             catch (error) {

@@ -82,4 +82,4 @@ These paths are not gated yet and keep their existing controls:
 - provider-direct routes (Coinbase Agentic Wallet, MetaMask);
 - gasless, x402 and bridge.
 
-The TRON and Solana approval screens do not yet show the allowlist policy digest.
+The TRON and Solana approval screens show the frozen owner allowlist `policyDigest` and `policyRevision` on a separate line. The chain `Policy` hash remains shown separately.

@@ -1,4 +1,5 @@
 import type { TronFinalResources, TronResourceSnapshot } from "./tron/model.js";
+import type { DirectAllowlistBinding } from "./direct-allowlist-gate.js";
 
 /** Finite direct-payment rails. This does not expose arbitrary signing. */
 export type DirectRailName = "solana" | "tron";
@@ -205,5 +206,7 @@ export interface RailApprovalPort {
     readonly fingerprint: string;
     readonly policyHash: string;
     readonly prepared: RailPreparedTransfer;
+    /** The frozen owner allowlist admission, when this record was prepared after the gate. */
+    readonly allowlist?: DirectAllowlistBinding;
   }): Promise<void>;
 }

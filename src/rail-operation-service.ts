@@ -71,7 +71,8 @@ export class RailOperationService {
         // A record prepared before the owner allowlist gate is refused before the owner is asked to approve it.
         if (operation.allowlist === undefined) refuse("allowlist_binding_missing", "This transfer was prepared before the owner allowlist gate; prepare a new transfer.");
         await this.revalidate(operation, adapter);
-        await approval.approve({ account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, policyHash: operation.policyHash, prepared: operation.prepared });
+        await approval.approve({ account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, policyHash: operation.policyHash,
+          prepared: operation.prepared, allowlist: operation.allowlist });
         await this.revalidate(operation, adapter);
       } catch (error) {
         await this.move(operation, "failed_before_effect", "approval_or_pre_effect_validation_refused", "durable_pre_effect");
