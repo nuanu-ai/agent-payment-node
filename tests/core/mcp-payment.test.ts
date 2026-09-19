@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { bindMcpInput } from "../../src/command-binder.js";
@@ -8,15 +9,18 @@ import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { createMcpServer, type McpRuntimeOptions } from "../../src/mcp-server.js";
 import type { ProfilePolicyApprovalPort } from "../../src/policy-approval.js";
+import type { NativePort, NativeRequest, RpcPort } from "../../src/ports.js";
+import type { InspectResult } from "../../src/x402-model.js";
 import { RECIPIENT, TestClock, temporaryState } from "./helpers.js";
 import {
   ExactX402Native,
   QueuedHttp,
   RecoveryRpc,
+  TestHttp,
   X402_TEST_ACCOUNT,
   challengeObservation,
 } from "./x402-helpers.js";
-import { X402_PAYER, X402_URL } from "./x402-vectors.js";
+import { canonicalPaymentRequiredHeader, X402_PAYER, X402_PAYMENT_REQUIRED, X402_URL } from "./x402-vectors.js";
 
 const MASTER = Buffer.from("66".repeat(32), "hex");
 
@@ -26,6 +30,24 @@ class FixedWrappingSecret implements WrappingSecretPort {
 }
 
 const ALLOW_POLICY: ProfilePolicyApprovalPort = { approve: async () => {} };
+
+function neverNative(calls: NativeRequest[]): NativePort {
+  return {
+    async request(request) {
+      calls.push(request);
+      throw new Error("MCP x402 inspection must not call native signing");
+    },
+  };
+}
+
+function neverRpc(calls: string[]): RpcPort {
+  return new Proxy({}, {
+    get(_target, property) {
+      calls.push(String(property));
+      throw new Error("MCP x402 inspection must not access RPC");
+    },
+  }) as RpcPort;
+}
 
 test("payment MCP schemas project the existing catalog scalar contracts", () => {
   const tools = new Map(projectMcpTools().map((tool) => [tool.name, tool.inputSchema.properties]));
@@ -119,6 +141,96 @@ test("all ten payment tools bind through the shared catalog binder", () => {
   assert.deepEqual(bind("apn_receipt_get", { operation }), {
     request: { command: "receipt.get", operationId: operation },
   });
+});
+
+test("MCP x402 inspect with payer returns Permit2 metadata beside the Base candidate without payment effects", async (t) => {
+  const state = await temporaryState();
+  t.after(state.cleanup);
+  const fixture = JSON.parse(await readFile("tests/fixtures/x402-permit2/payment-required-accepts.json", "utf8")) as {
+    accepts: readonly Record<string, unknown>[];
+  };
+  const paymentRequiredHeader = canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: fixture.accepts });
+  const response = challengeObservation({ header: paymentRequiredHeader });
+  const http = new TestHttp(response);
+  const nativeCalls: NativeRequest[] = [];
+  const rpcCalls: string[] = [];
+  const connection = await connectMcp({
+    stateRoot: state.root,
+    http,
+    native: neverNative(nativeCalls),
+    rpc: neverRpc(rpcCalls),
+  });
+  t.after(connection.close);
+
+  const envelope = decode(await connection.client.callTool({
+    name: "apn_x402_inspect",
+    arguments: { url: X402_URL, payer: X402_PAYER },
+  }));
+  assert.equal(envelope.ok, true, JSON.stringify(envelope));
+  assert.equal(envelope.operation, null);
+  assert.equal(envelope.receipt, null);
+  const result = envelope.data as InspectResult;
+  assert.deepEqual(result.candidates.map((candidate) => candidate.index), ["0"]);
+  assert.deepEqual(result.permit2 && {
+    index: result.permit2.index,
+    requirement: result.permit2.requirement,
+    network: result.permit2.network,
+    asset: result.permit2.asset,
+    amountAtomic: result.permit2.amountAtomic,
+    payTo: result.permit2.payTo,
+    maxTimeoutSeconds: result.permit2.maxTimeoutSeconds,
+  }, {
+    index: 1,
+    requirement: fixture.accepts[1],
+    network: "eip155:43114",
+    asset: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+    amountAtomic: "10000",
+    payTo: "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+    maxTimeoutSeconds: 60,
+  });
+  assert.ok(result.permit2);
+  assert.match(result.permit2.offerHash, /^[a-f0-9]{64}$/u);
+  assert.deepEqual(http.calls, [{ url: X402_URL }]);
+  assert.deepEqual(response.rawHeaderPairs, [["PAYMENT-REQUIRED", paymentRequiredHeader]]);
+  assert.deepEqual(nativeCalls, []);
+  assert.deepEqual(rpcCalls, []);
+  await assert.rejects(access(state.root));
+});
+
+test("MCP x402 inspect without payer omits Permit2 metadata and remains a single unpaid read", async (t) => {
+  const state = await temporaryState();
+  t.after(state.cleanup);
+  const fixture = JSON.parse(await readFile("tests/fixtures/x402-permit2/payment-required-accepts.json", "utf8")) as {
+    accepts: readonly Record<string, unknown>[];
+  };
+  const paymentRequiredHeader = canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: fixture.accepts });
+  const response = challengeObservation({ header: paymentRequiredHeader });
+  const http = new TestHttp(response);
+  const nativeCalls: NativeRequest[] = [];
+  const rpcCalls: string[] = [];
+  const connection = await connectMcp({
+    stateRoot: state.root,
+    http,
+    native: neverNative(nativeCalls),
+    rpc: neverRpc(rpcCalls),
+  });
+  t.after(connection.close);
+
+  const envelope = decode(await connection.client.callTool({
+    name: "apn_x402_inspect",
+    arguments: { url: X402_URL },
+  }));
+  assert.equal(envelope.ok, true, JSON.stringify(envelope));
+  assert.equal(envelope.operation, null);
+  assert.equal(envelope.receipt, null);
+  const result = envelope.data as InspectResult;
+  assert.deepEqual(result.candidates.map((candidate) => candidate.index), ["0"]);
+  assert.equal(Object.hasOwn(result, "permit2"), false);
+  assert.deepEqual(http.calls, [{ url: X402_URL }]);
+  assert.deepEqual(response.rawHeaderPairs, [["PAYMENT-REQUIRED", paymentRequiredHeader]]);
+  assert.deepEqual(nativeCalls, []);
+  assert.deepEqual(rpcCalls, []);
+  await assert.rejects(access(state.root));
 });
 
 test("MCP x402 uses prior policy and preserves durable idempotency, ambiguity, status, resume and restart", async (t) => {
