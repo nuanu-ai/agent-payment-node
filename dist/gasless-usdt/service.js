@@ -7,14 +7,23 @@ export class GaslessUsdtOperationService {
         this.repository = repository;
         this.profileHash = profileHash;
     }
+    /** Bind an explicit persisted profile hash; profile names are never interpreted as hashes. */
+    forProfile(profileHash) {
+        return new GaslessUsdtOperationService(this.repository, profileHash);
+    }
+    boundProfile() {
+        if (this.profileHash === undefined)
+            throw new Error("Gasless USDT operation profile binding is required.");
+        return this.profileHash;
+    }
     async prepare(input, idempotencyKey) {
-        return prepareUsdtOperation(this.repository, { ...input, profileHash: this.profileHash }, idempotencyKey);
+        return prepareUsdtOperation(this.repository, { ...input, profileHash: this.boundProfile() }, idempotencyKey);
     }
     async status(operationId) {
-        return statusUsdtOperation(this.repository, this.profileHash, operationId);
+        return statusUsdtOperation(this.repository, this.boundProfile(), operationId);
     }
     async resume(operationId) {
-        return resumeUsdtOperation(this.repository, this.profileHash, operationId);
+        return resumeUsdtOperation(this.repository, this.boundProfile(), operationId);
     }
     approve() { return refuseUsdtApproval("approve"); }
     execute() { return refuseUsdtApproval("execute"); }
