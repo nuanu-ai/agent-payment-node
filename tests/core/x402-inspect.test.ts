@@ -502,6 +502,80 @@ test("inspect performs one unpaid GET, preserves compatible seller order, and ha
     });
   }
   assert.deepEqual(http.calls, [{ url: X402_URL }]);
+  assert.equal(Object.hasOwn(result, "permit2"), false);
+  await assert.rejects(access(state.root));
+});
+
+test("inspect with an explicit payer returns Permit2 metadata beside compatible offers without state or payment effects", async (t) => {
+  const state = await temporaryState();
+  t.after(state.cleanup);
+  const fixture = JSON.parse(await readFile("tests/fixtures/x402-permit2/payment-required-accepts.json", "utf8")) as {
+    accepts: readonly Record<string, unknown>[];
+  };
+  const http = new TestHttp(challengeObservation({
+    header: canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: fixture.accepts }),
+  }));
+  const core = new ApnCore({
+    state: new StateStore(state.root),
+    http,
+    native: NEVER_NATIVE,
+    rpc: NEVER_RPC,
+    ids: { next: () => "12345678-1234-4234-8234-123456789abc" },
+  });
+
+  const envelope = await core.execute({
+    command: "x402.inspect",
+    url: X402_URL,
+    payer: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+  });
+  assert.equal(envelope.ok, true, JSON.stringify(envelope));
+  assert.equal(envelope.operation, null);
+  assert.equal(envelope.receipt, null);
+  const result = envelope.data as InspectResult;
+  assert.deepEqual(result.candidates.map((candidate) => candidate.index), ["0"]);
+  const permit2 = result.permit2;
+  assert.ok(permit2);
+  assert.deepEqual(permit2, {
+    index: 1,
+    requirement: fixture.accepts[1],
+    network: "eip155:43114",
+    asset: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+    amountAtomic: "10000",
+    payTo: "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+    maxTimeoutSeconds: 60,
+    offerHash: permit2.offerHash,
+  });
+  assert.match(permit2.offerHash, /^[a-f0-9]{64}$/u);
+  assert.deepEqual(http.calls, [{ url: X402_URL }]);
+  await assert.rejects(access(state.root));
+});
+
+test("inspect with an explicit payer admits a Permit2-only challenge while preserving canonical refusal reasons", async (t) => {
+  const state = await temporaryState();
+  t.after(state.cleanup);
+  const fixture = JSON.parse(await readFile("tests/fixtures/x402-permit2/payment-required-accepts.json", "utf8")) as {
+    accepts: readonly Record<string, unknown>[];
+  };
+  const payer = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4" as const;
+  const http = new TestHttp(challengeObservation({
+    header: canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [fixture.accepts[1]] }),
+  }));
+  const core = new ApnCore({ state: new StateStore(state.root), http, native: NEVER_NATIVE, rpc: NEVER_RPC });
+  const envelope = await core.execute({ command: "x402.inspect", url: X402_URL, payer });
+  assert.equal(envelope.ok, true, JSON.stringify(envelope));
+  assert.deepEqual((envelope.data as InspectResult).candidates, []);
+  assert.equal((envelope.data as InspectResult).permit2?.index, 0);
+  assert.deepEqual(http.calls, [{ url: X402_URL }]);
+
+  const unsupportedHttp = new TestHttp(challengeObservation({
+    header: canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, network: "eip155:1" }] }),
+  }));
+  const unsupported = await new ApnCore({ state: new StateStore(state.root), http: unsupportedHttp, native: NEVER_NATIVE, rpc: NEVER_RPC })
+    .execute({ command: "x402.inspect", url: X402_URL, payer });
+  assert.equal(unsupported.ok, false);
+  assert.equal(unsupported.error?.code, "APN_X402_UNSUPPORTED_OFFER");
+  assert.equal(unsupported.error?.details?.reason, "x402_permit2_no_listed_offer");
+  assert.deepEqual(unsupportedHttp.calls, [{ url: X402_URL }]);
   await assert.rejects(access(state.root));
 });
 
@@ -568,6 +642,9 @@ test("CLI inspection accepts HTTP methods but no RPC, cap or unsafe tunnel contr
   const { parseArgv } = await import("../../src/cli.js");
   assert.deepEqual(parseArgv(["x402", "inspect", "--url", X402_URL]), {
     request: { command: "x402.inspect", url: X402_URL },
+  });
+  assert.deepEqual(parseArgv(["x402", "inspect", "--url", X402_URL, "--payer", X402_PAYER]), {
+    request: { command: "x402.inspect", url: X402_URL, payer: X402_PAYER },
   });
   assert.throws(() => parseArgv(["x402", "inspect", "--url", X402_URL, "--rpc-url", "https://rpc.example"]), ApnError);
   assert.throws(() => parseArgv(["x402", "inspect", "--url", X402_URL, "--max-amount-atomic", "1"]), ApnError);
