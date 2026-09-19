@@ -10,6 +10,9 @@ the admitted sprint commands with APN 0.5.10 EVM fee-envelope corrections.
 GitHub publication and the Homebrew Formula remain separate release gates; use
 only an exact verified 0.5.24 archive or installation for the new commands.
 
+The current platform boundary and the required work for future Linux or
+Windows support are recorded in the [platform support matrix](docs/platform-support.md).
+
 APN 0.5.12 includes [explicit observation RPC recovery](docs/gasless.md#explicit-observation-rpc-recovery)
 for saved Local gasless operations whose original RPC cannot serve historical
 reads. The published 0.5.11 binary does not provide this option.
