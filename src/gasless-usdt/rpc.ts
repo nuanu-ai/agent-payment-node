@@ -11,7 +11,7 @@ import type { UsdtUserOperation } from "./userop.js";
 
 const MAX_RESPONSE = 1024 * 1024;
 const SPONSOR_METHODS = new Set(["pimlico_getTokenQuotes", "pimlico_getUserOperationGasPrice", "pm_getPaymasterData",
-  "eth_sendUserOperation", "eth_getUserOperationReceipt"]);
+  "eth_getUserOperationReceipt"]);
 const CHAIN_METHODS = new Set(["eth_chainId", "eth_getCode", "eth_call", "eth_getTransactionCount", "eth_getTransactionReceipt",
   "eth_getBlockByNumber"]);
 const READS = parseAbi(["function basisPointsRate() view returns (uint256)", "function maximumFee() view returns (uint256)",
@@ -47,7 +47,7 @@ export class UsdtJsonRpc {
 
 /**
  * The keyless sponsor is the mechanism itself: Pimlico's public endpoint for chain 1, fixed, never configurable, so the
- * paymaster that signs is the one the owner's allowlist pin names.
+ * paymaster named by the capability registry is the one the owner's allowlist pin names.
  */
 export function usdtSponsorPort(transport: GaslessTransport): UsdtSponsorPort {
   const rpc = new UsdtJsonRpc(transport, USDT_GASLESS.bundlerUrl, SPONSOR_METHODS);
@@ -56,7 +56,6 @@ export function usdtSponsorPort(transport: GaslessTransport): UsdtSponsorPort {
     gasPrice: async () => await rpc.call("pimlico_getUserOperationGasPrice", []),
     paymasterData: async (op: UsdtUserOperation) => await rpc.call("pm_getPaymasterData",
       [op, USDT_GASLESS.entryPoint, "0x1", { token: USDT_GASLESS.token }]),
-    send: async (op: UsdtUserOperation) => await rpc.call("eth_sendUserOperation", [op, USDT_GASLESS.entryPoint]),
     receiptLocator: async (userOpHash: Hex) => {
       const value = await rpc.call("eth_getUserOperationReceipt", [userOpHash]);
       if (value === null) return null;

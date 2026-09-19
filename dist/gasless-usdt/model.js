@@ -2,7 +2,7 @@ import { getAddress } from "viem";
 import { ApnError } from "../errors.js";
 /**
  * Local-wallet gasless USDT on Ethereum through Pimlico's ERC-20 paymaster, reached through the keyless public endpoint.
- * Every identity below was read from Ethereum mainnet on 2026-09-18 (block 26002950) and is re-asserted before an effect.
+ * Every identity below was read from Ethereum mainnet on 2026-09-18 (block 26002950) and is exposed as a read-only capability registry; this foundation performs no effect.
  * The sponsor charges its fee in the same token, in postOp, from the sender to the pinned treasury.
  */
 export const USDT_GASLESS = Object.freeze({
@@ -46,7 +46,7 @@ export const USDT_GASLESS_GAS = Object.freeze({
 /** Bounds the provider quote must stay inside; anything outside refuses instead of being clamped. */
 export const USDT_POST_OP_GAS_MAX = 100000n;
 export const USDT_EXCHANGE_RATE_MAX = 1n << 128n;
-/** The signed payload must be valid for at least this long and at most this long after the check. */
+/** A sponsor payload must be valid for at least this long and at most this long after the check. */
 export const USDT_PAYMASTER_MIN_VALIDITY_S = 60n;
 export const USDT_PAYMASTER_MAX_VALIDITY_S = 3600n;
 export function usdtFailure(code, reason, message = `Gasless USDT refused: ${reason}.`) {
