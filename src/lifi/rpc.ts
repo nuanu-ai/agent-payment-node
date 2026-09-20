@@ -16,6 +16,7 @@ import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
 import { BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
+import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbPoolConfiguration } from "./bnb-composite.js";
 
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }] as const;
@@ -114,6 +115,16 @@ export class BridgeRpc implements BridgeRpcPort {
       if (observed !== row.expected) bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_configuration_changed");
       configuration.push({ ...row, expected: observed });
     }
+    if (this.chainId === 56 && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
+      const [registrationRaw, tokensRaw] = await Promise.all([
+        this.call("eth_call", [{ to: BNB_COMPOSITE.vault, data: bnbPoolReadData.registration }, tag]),
+        this.call("eth_call", [{ to: BNB_COMPOSITE.vault, data: bnbPoolReadData.tokens }, tag]),
+      ]);
+      const pool = verifyBnbPoolConfiguration(bridgeHex(registrationRaw, 256, undefined, "APN_RPC_PROTOCOL"),
+        bridgeHex(tokensRaw, 2048, undefined, "APN_RPC_PROTOCOL"));
+      configuration.push({ kind: "pool", address: BNB_COMPOSITE.vault, data: bnbPoolReadData.tokens,
+        expected: `0x${Buffer.from(canonicalJson(pool)).toString("hex")}` as Hex });
+    }
     if ((this.chainId === 143 || this.chainId === 59144) && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
       const probe = this.chainId === 143 ? {
         transaction: MONAD_TRACE_PROBE_TRANSACTION,
@@ -171,7 +182,7 @@ export class BridgeRpc implements BridgeRpcPort {
     if (hash !== keccak256(raw)) bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
     return hash;
   }
-  async observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic: string }>): Promise<{ transaction: BridgeTransactionProof; receipt: BridgeProtocolReceipt } | null> {
+  async observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string }>): Promise<{ transaction: BridgeTransactionProof; receipt: BridgeProtocolReceipt } | null> {
     await this.assertChain(); bridgeHex(hash, 32, 32, "APN_RPC_PROTOCOL");
     const [rawTx, rawReceipt] = await Promise.all([this.call("eth_getTransactionByHash", [hash]), this.call("eth_getTransactionReceipt", [hash])]);
     if (rawTx === null || rawReceipt === null) return null;
@@ -232,12 +243,14 @@ export class BridgeRpc implements BridgeRpcPort {
     if (!bridgeSame(await this.block(block.numberAtomic), block)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
   }
 }
-function exactNativeTransfer(value: unknown, transactionHash: Hex, expected: Readonly<{ recipient: Address; from: Address; amountAtomic: string }>) {
+function exactNativeTransfer(value: unknown, transactionHash: Hex, expected: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string }>) {
+  if ((expected.amountAtomic === undefined) === (expected.minimumAmountAtomic === undefined)) bridgeFailure("APN_INTERNAL", "native_transfer_bound");
   const rows: Array<{ type: "CALL"; from: Address; to: Address; valueAtomic: string; path: string }> = [];
   const visit = (raw: unknown, path: string, depth: number): void => {
     if (depth > 32 || rows.length > 1024) bridgeFailure("APN_RPC_PROTOCOL", "native_trace_bound");
     const call = evmRpcRecord(raw), from = evmRpcAddress(call.from), to = evmRpcAddress(call.to), valueAtomic = evmRpcQuantity(call.value ?? "0x0").toString();
-    if (call.type === "CALL" && call.error === undefined && from === expected.from && to === expected.recipient && valueAtomic === expected.amountAtomic) {
+    const bounded = expected.amountAtomic === undefined ? BigInt(valueAtomic) >= BigInt(expected.minimumAmountAtomic!) : valueAtomic === expected.amountAtomic;
+    if (call.type === "CALL" && call.error === undefined && from === expected.from && to === expected.recipient && bounded) {
       rows.push({ type: "CALL", from, to, valueAtomic, path });
     }
     if (call.calls !== undefined) {
@@ -247,7 +260,7 @@ function exactNativeTransfer(value: unknown, transactionHash: Hex, expected: Rea
   };
   visit(value, "0", 0);
   if (rows.length !== 1) bridgeFailure("APN_RPC_PROTOCOL", "native_destination_transfer");
-  return { transactionHash, from: expected.from, to: expected.recipient, valueAtomic: expected.amountAtomic,
+  return { transactionHash, from: expected.from, to: expected.recipient, valueAtomic: rows[0]!.valueAtomic,
     traceHash: hashObject({ transactionHash, delivery: rows[0] }) };
 }
 function quantity(n: bigint): Hex { return `0x${n.toString(16)}`; }

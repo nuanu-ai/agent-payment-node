@@ -76,7 +76,7 @@ export interface AcrossCall {
   readonly quoteTimestamp: string;
   readonly fillDeadline: string;
   readonly exclusivityParameter: string;
-  readonly message: "0x";
+  readonly message: Hex;
 }
 export interface StargateCall {
   readonly kind: "stargateV2";
@@ -113,6 +113,8 @@ export interface DecodedBridgeCall {
   readonly sourceValueAtomic: string;
   readonly dataHash: string;
   readonly protocol: AcrossCall | StargateCall;
+  /** Present only for the reviewed Ethereum native -> BNB native Across/Fly composite lane. */
+  readonly composite?: import("./bnb-composite.js").BnbCompositeCall;
 }
 
 export interface BridgeBlock {
@@ -195,7 +197,7 @@ export interface AcrossCorrelation {
   readonly quoteTimestamp: string;
   readonly fillDeadline: string;
   readonly exclusivityDeadline: string;
-  readonly message: "0x";
+  readonly message: Hex;
 }
 export interface StargateCorrelation {
   readonly kind: "stargateV2";

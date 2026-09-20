@@ -262,17 +262,18 @@ test("Linea native completion refuses missing or misbound trace delivery and cor
   }
 });
 
-test("BNB native stays LI.FI-local quote-only and cannot enter the execution destination set", () => {
-  assert.equal(bridgeExecutionDestination(56), false);
+test("BNB native is admitted only through the pinned Ethereum Across/Fly composite deployment", () => {
+  assert.equal(bridgeExecutionDestination(56), true);
   assert.equal(bridgeExecutionDestination(59144), true);
-  assert.throws(() => bridgeDeployment(1, 56, "across", BRIDGE_ZERO_ADDRESS), /bnb_composite_execution_unreviewed/u);
-  assert.throws(() => bridgeDeployment(56, 1, "across", BRIDGE_ZERO_ADDRESS), /bnb_composite_execution_unreviewed/u);
+  assert.equal(bridgeDeployment(1, 56, "across", BRIDGE_ZERO_ADDRESS).protocolEmitter, "0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5");
+  assert.equal(bridgeDeployment(56, 1, "across", BRIDGE_ZERO_ADDRESS).protocolEmitter, "0x4e8E101924eDE233C13e2D8622DC8aED2872d505");
+  assert.throws(() => bridgeDeployment(56, 8453, "across", BRIDGE_ZERO_ADDRESS), /bnb_composite_finite_direction/u);
   const capabilities = bridgeCapabilities();
   const bnb = capabilities.chains.find((row) => row.chain === "eip155:56")!;
   const linea = capabilities.chains.find((row) => row.chain === "eip155:59144")!;
   assert.deepEqual({ bridgeable: bnb.native_coin.bridgeable_principal, quoteOnly: bnb.native_coin.quote_only },
-    { bridgeable: false, quoteOnly: true });
+    { bridgeable: true, quoteOnly: false });
   assert.deepEqual({ bridgeable: linea.native_coin.bridgeable_principal, quoteOnly: linea.native_coin.quote_only },
     { bridgeable: true, quoteOnly: false });
-  assert.ok(capabilities.inventory_only.some((row) => "asset" in row && row.asset === "native_BNB_eip155:56"));
+  assert.ok(!capabilities.inventory_only.some((row) => "asset" in row && row.asset === "native_BNB_eip155:56"));
 });

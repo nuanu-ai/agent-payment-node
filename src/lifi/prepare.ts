@@ -18,6 +18,7 @@ import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
 import type { StoredBridgeOperationRecord } from "./legacy-operation.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
+import { BNB_COMPOSITE, verifyFlyHeaderSignature } from "./bnb-composite.js";
 
 export interface BridgePreparationOptions {
   readonly state: StateStore; readonly records: BridgeOperationRepository; readonly quotes: BridgeQuoteRepository;
@@ -64,6 +65,7 @@ export class BridgePreparation {
       await Promise.all([source.assertChain(), destination.assertChain()]);
       const response = await this.o.provider.materialize(selected.step), preparedAt = new Date(this.o.now()).toISOString();
       const parsed = materializeBridgeRoute(selected, response, quote.request, quote.owner.address), m = parsed.materialization, decoded = decodeBridgeCall(m);
+      if (decoded.composite !== undefined) await verifyFlyHeaderSignature(decoded.composite, BNB_COMPOSITE.signer);
       const [sourceDeployment, destinationDeployment, sourceAccount, destinationStartBlock] = await Promise.all([
         source.deployment(m.tool, m.request.toChainId, m.request.fromToken), destination.deployment(m.tool, m.request.fromChainId, m.request.toToken),
         source.account(m.sender, m.approvalAddress, m.request.fromToken), destination.block("safe"),

@@ -80,7 +80,7 @@ export const txProofSchema = z.strictObject({ chainId: chainSchema, transactionH
 const acrossCorrelationSchema = z.strictObject({ kind: z.literal("across"), depositId: uintSchema, originChainId: chainSchema,
     destinationChainId: chainSchema, inputToken: wordSchema, outputToken: wordSchema, inputAmountAtomic: uintSchema,
     outputAmountAtomic: uintSchema, depositor: wordSchema, recipient: wordSchema, exclusiveRelayer: wordSchema,
-    quoteTimestamp: uintSchema, fillDeadline: uintSchema, exclusivityDeadline: uintSchema, message: z.literal("0x") });
+    quoteTimestamp: uintSchema, fillDeadline: uintSchema, exclusivityDeadline: uintSchema, message: hexSchema });
 const stargateCorrelationSchema = z.strictObject({ kind: z.literal("stargateV2"), guid: wordSchema,
     sourceEid: z.number().int().positive().safe(), destinationEid: z.number().int().positive().safe(), sender: addressSchema,
     recipient: addressSchema, amountSentAtomic: uintSchema, amountReceivedAtomic: uintSchema });

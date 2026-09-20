@@ -81,7 +81,7 @@ test("the bridge registry is the frozen list's exact identities; WBTC stays a le
   assert.equal(usdt.code.upgradeability, "immutable");
   const capabilities = bridgeCapabilities();
   assert.ok(capabilities.chains.every((row) => row.native_coin.tools.join() === "across"));
-  assert.equal(capabilities.chains.find((row) => row.chain === "eip155:56")?.native_coin.bridgeable_principal, false);
+  assert.equal(capabilities.chains.find((row) => row.chain === "eip155:56")?.native_coin.bridgeable_principal, true);
   assert.equal(capabilities.chains.find((row) => row.chain === "eip155:59144")?.native_coin.bridgeable_principal, true);
 });
 
