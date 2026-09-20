@@ -11,6 +11,7 @@ export const uintSchema = z.string().refine((v) => { try { return bridgeUint(v) 
 export const addressSchema = z.string().refine((v) => { try { return bridgeAddress(v) === v; } catch { return false; } });
 export const isoSchema = z.string().refine((v) => { try { return bridgeIso(v) === v; } catch { return false; } });
 export const chainSchema = z.union([z.literal(1), z.literal(8453), z.literal(42161)]);
+export const destinationChainSchema = z.union([chainSchema, z.literal(10), z.literal(137), z.literal(43114), z.literal(130)]);
 export const toolSchema = z.enum(["across", "stargateV2"]);
 export const opaqueSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$/u);
 export const reasonSchema = z.string().regex(/^[a-z][a-z0-9_]{0,95}$/u);
@@ -19,7 +20,7 @@ export const blockSchema = z.strictObject({ numberAtomic: uintSchema, hash: word
 export const ownerSchema = z.strictObject({ profile: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/u), profileHash: hashSchema,
   address: addressSchema, walletBindingHash: hashSchema, walletCreatedAt: isoSchema });
 export const providerBindingSchema = z.strictObject({ providerId: z.literal("local"), accountBindingHash: hashSchema, capabilityHash: hashSchema, revision: z.number().int().positive().safe() });
-export const requestSchema = z.strictObject({ fromChainId: chainSchema, toChainId: chainSchema, fromToken: addressSchema,
+export const requestSchema = z.strictObject({ fromChainId: chainSchema, toChainId: destinationChainSchema, fromToken: addressSchema,
   toToken: addressSchema, amountAtomic: uintSchema, recipient: addressSchema, minOutputAtomic: uintSchema,
   maxNativeDebitWei: uintSchema, maxRouteFeeAtomic: uintSchema, slippageBps: z.number().int().min(0).max(1000) });
 export const feeSchema = z.strictObject({ name: z.string().min(1).max(192), chainId: chainSchema,

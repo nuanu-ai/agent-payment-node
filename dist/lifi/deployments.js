@@ -1,6 +1,6 @@
 import { encodeAbiParameters, encodeFunctionData, getAddress, parseAbiParameters } from "viem";
 import { ACROSS_SELECTOR, deploymentAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, LAYER_ZERO_ENDPOINT, STARGATE_SELECTOR } from "./abi.js";
-import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeAssetTool, bridgePeerToken, bridgeTokenRow } from "./asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgePeerToken, bridgeTokenRow } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, bridgeFailure } from "./validation.js";
 const EIP1967_IMPLEMENTATION = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 const EIP1967_BEACON = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50";
@@ -43,6 +43,8 @@ const STARGATE = {
  * A native leg pins the wrapped-native contract whose logs prove the wrap and the unwrap instead of a token contract.
  */
 export function bridgeDeployment(chainId, peerChainId, tool, token) {
+    bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+    bridgeChain(peerChainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
     if (chainId === peerChainId)
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_direction");
     if (tool !== "across" && tool !== "stargateV2")
@@ -105,6 +107,7 @@ export function bridgeDeployment(chainId, peerChainId, tool, token) {
     };
 }
 export function bridgeProtocolEmitter(chainId, tool, token) {
+    bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
     if (tool === "across")
         return ACROSS[chainId].spoke.address;
     const pool = bridgeAssetTool(bridgeTokenRow(chainId, token, "APN_PROVIDER_CAPABILITY_UNAVAILABLE"), tool);
@@ -112,7 +115,7 @@ export function bridgeProtocolEmitter(chainId, tool, token) {
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_pool_asset_unreviewed");
     return pool.router;
 }
-export function bridgeEndpointId(chainId) { return STARGATE[chainId].localEid; }
+export function bridgeEndpointId(chainId) { return STARGATE[bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")].localEid; }
 function proxyCode(address, c) {
     const proxy = code(address, c.codeHash);
     if (c.upgradeability === "immutable")

@@ -8,6 +8,42 @@ import type { BridgeRouteRequest, BridgeTool } from "./model.js";
  * copy. A row exists only when its on-chain identity can be pinned the way canonical USDC already is.
  */
 export declare const BRIDGE_CHAINS: readonly [1, 8453, 42161];
+/**
+ * Quote-only destinations whose exact allowlist USDC identity and LI.FI calldata shape were captured from the
+ * public quote API. They may be discovered and decoded, but are deliberately absent from `BRIDGE_CHAINS`: no RPC,
+ * deployment proof, destination observation or send path may treat them as executable bridge chains.
+ */
+export declare const BRIDGE_QUOTE_DESTINATIONS: {
+    readonly 10: {
+        readonly name: "OP Mainnet";
+        readonly caip2: "eip155:10";
+        readonly token: `0x${string}`;
+        readonly tools: readonly ["across", "stargateV2"];
+        readonly endpointId: 30111;
+    };
+    readonly 137: {
+        readonly name: "Polygon PoS";
+        readonly caip2: "eip155:137";
+        readonly token: `0x${string}`;
+        readonly tools: readonly ["across"];
+        readonly endpointId: null;
+    };
+    readonly 43114: {
+        readonly name: "Avalanche C-Chain";
+        readonly caip2: "eip155:43114";
+        readonly token: `0x${string}`;
+        readonly tools: readonly ["stargateV2"];
+        readonly endpointId: 30106;
+    };
+    readonly 130: {
+        readonly name: "Unichain";
+        readonly caip2: "eip155:130";
+        readonly token: `0x${string}`;
+        readonly tools: readonly ["across"];
+        readonly endpointId: null;
+    };
+};
+export type BridgeQuoteDestinationChainId = keyof typeof BRIDGE_QUOTE_DESTINATIONS;
 /** Each upgradeability shape is pinned explicitly; there is no default shape for an unreviewed proxy. */
 export type BridgeTokenCode = {
     readonly upgradeability: "immutable";
@@ -98,6 +134,36 @@ export interface BridgeChainRow {
 export declare const BRIDGE_ASSET_REGISTRY: Readonly<Record<EvmChainId, BridgeChainRow>>;
 export declare function bridgeChain(value: unknown, code?: ErrorCode): EvmChainId;
 export declare function bridgeCaip2(value: unknown): EvmChainId;
+/** CLI/request admission for a destination. Quote-only rows are returned with the legacy type at this boundary;
+ * every execution boundary still calls `bridgeChain` and therefore refuses them. */
+export declare function bridgeDestinationCaip2(value: unknown): EvmChainId;
+export declare function bridgeQuoteDestination(value: unknown, code?: ErrorCode): {
+    readonly name: "OP Mainnet";
+    readonly caip2: "eip155:10";
+    readonly token: `0x${string}`;
+    readonly tools: readonly ["across", "stargateV2"];
+    readonly endpointId: 30111;
+} | {
+    readonly name: "Polygon PoS";
+    readonly caip2: "eip155:137";
+    readonly token: `0x${string}`;
+    readonly tools: readonly ["across"];
+    readonly endpointId: null;
+} | {
+    readonly name: "Avalanche C-Chain";
+    readonly caip2: "eip155:43114";
+    readonly token: `0x${string}`;
+    readonly tools: readonly ["stargateV2"];
+    readonly endpointId: 30106;
+} | {
+    readonly name: "Unichain";
+    readonly caip2: "eip155:130";
+    readonly token: `0x${string}`;
+    readonly tools: readonly ["across"];
+    readonly endpointId: null;
+};
+export declare function bridgeDestinationChain(value: unknown, code?: ErrorCode): EvmChainId;
+export declare function bridgeExecutionDestination(value: unknown): value is EvmChainId;
 export declare function bridgeChainRow(value: unknown, code?: ErrorCode): BridgeChainRow;
 export declare function bridgeNativeCoin(chainId: unknown, code?: ErrorCode): BridgeNativeCoin;
 /** The one admission point for a bridgeable token. The zero address is the native sentinel and is never a token. */

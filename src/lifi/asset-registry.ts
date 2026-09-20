@@ -12,6 +12,18 @@ import { BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeExact, bridgeFailure, bridgeU
  * copy. A row exists only when its on-chain identity can be pinned the way canonical USDC already is.
  */
 export const BRIDGE_CHAINS = [1, 8453, 42161] as const;
+/**
+ * Quote-only destinations whose exact allowlist USDC identity and LI.FI calldata shape were captured from the
+ * public quote API. They may be discovered and decoded, but are deliberately absent from `BRIDGE_CHAINS`: no RPC,
+ * deployment proof, destination observation or send path may treat them as executable bridge chains.
+ */
+export const BRIDGE_QUOTE_DESTINATIONS = {
+  10: { name: "OP Mainnet", caip2: "eip155:10", token: getAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"), tools: ["across", "stargateV2"], endpointId: 30111 },
+  137: { name: "Polygon PoS", caip2: "eip155:137", token: getAddress("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"), tools: ["across"], endpointId: null },
+  43114: { name: "Avalanche C-Chain", caip2: "eip155:43114", token: getAddress("0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"), tools: ["stargateV2"], endpointId: 30106 },
+  130: { name: "Unichain", caip2: "eip155:130", token: getAddress("0x078D782b760474a361dDA0AF3839290b0EF57AD6"), tools: ["across"], endpointId: null },
+} as const;
+export type BridgeQuoteDestinationChainId = keyof typeof BRIDGE_QUOTE_DESTINATIONS;
 
 /** Each upgradeability shape is pinned explicitly; there is no default shape for an unreviewed proxy. */
 export type BridgeTokenCode =
@@ -194,6 +206,27 @@ export function bridgeCaip2(value: unknown): EvmChainId {
   if (row === undefined) bridgeFailure("APN_INVALID_INPUT", "bridge_chain_CAIP2");
   return row.chainId;
 }
+/** CLI/request admission for a destination. Quote-only rows are returned with the legacy type at this boundary;
+ * every execution boundary still calls `bridgeChain` and therefore refuses them. */
+export function bridgeDestinationCaip2(value: unknown): EvmChainId {
+  const execution = BRIDGE_CHAINS.map((id) => BRIDGE_ASSET_REGISTRY[id]).find((entry) => entry.caip2 === value);
+  if (execution !== undefined) return execution.chainId;
+  const quoted = Object.entries(BRIDGE_QUOTE_DESTINATIONS).find(([, entry]) => entry.caip2 === value);
+  if (quoted === undefined) bridgeFailure("APN_INVALID_INPUT", "bridge_chain_CAIP2");
+  return Number(quoted[0]) as EvmChainId;
+}
+export function bridgeQuoteDestination(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL") {
+  if (typeof value !== "number" || !(value in BRIDGE_QUOTE_DESTINATIONS)) bridgeFailure(code, "quote_destination_chain_identity");
+  return BRIDGE_QUOTE_DESTINATIONS[value as BridgeQuoteDestinationChainId];
+}
+export function bridgeDestinationChain(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): EvmChainId {
+  if (typeof value === "number" && BRIDGE_CHAINS.includes(value as EvmChainId)) return value as EvmChainId;
+  bridgeQuoteDestination(value, code);
+  return value as EvmChainId;
+}
+export function bridgeExecutionDestination(value: unknown): value is EvmChainId {
+  return typeof value === "number" && BRIDGE_CHAINS.includes(value as EvmChainId);
+}
 export function bridgeChainRow(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeChainRow {
   return BRIDGE_ASSET_REGISTRY[bridgeChain(value, code)];
 }
@@ -202,7 +235,7 @@ export function bridgeNativeCoin(chainId: unknown, code: ErrorCode = "APN_PROVID
 }
 /** The one admission point for a bridgeable token. The zero address is the native sentinel and is never a token. */
 export function bridgeTokenRow(chainId: unknown, address: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeTokenAsset {
-  const asset = bridgeAssetRow(chainId, address, code);
+  const asset = bridgeAssetRow(bridgeChain(chainId, code), address, code);
   if (asset.kind === "native") bridgeFailure(code, "native_sentinel_is_not_a_token");
   return asset;
 }
@@ -211,6 +244,15 @@ export function bridgeTokenRow(chainId: unknown, address: unknown, code: ErrorCo
  * a registry row. An address the frozen list does not name is refused as unlisted, never matched by symbol.
  */
 export function bridgeAssetRow(chainId: unknown, address: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeAsset {
+  if (!bridgeExecutionDestination(chainId)) {
+    const row = bridgeQuoteDestination(chainId, code), token = bridgeAddress(address, code);
+    if (token !== row.token) bridgeFailure(code, bridgeTokenListed(row.caip2, token) ? "asset_listed_not_bridge_admitted" : "asset_not_on_frozen_list");
+    if (!bridgeTokenListed(row.caip2, token)) bridgeFailure("APN_INTERNAL", "bridge_quote_destination_list_drift");
+    return { kind: "erc20", chainId: chainId as EvmChainId, address: row.token, symbol: "USDC", coinKey: "USDC",
+      pairKey: "usdc", decimals: 6, acrossSupported: row.tools.includes("across" as never), stargate: null, peers: [1],
+      approval: "standard", transferFee: "none", listing: "frozen_list",
+      code: { upgradeability: "immutable", codeHash: `0x${"0".repeat(64)}` } };
+  }
   const row = bridgeChainRow(chainId, code), token = bridgeAddress(address, code);
   assertBridgeRegistryListed(BRIDGE_ASSET_REGISTRY);
   if (token === BRIDGE_ZERO_ADDRESS) return row.nativeCoin;
@@ -228,6 +270,11 @@ export function bridgeAssetPair(request: Pick<BridgeRouteRequest, "fromChainId" 
   code: ErrorCode = "APN_PROVIDER_PROTOCOL"): { readonly from: BridgeAsset; readonly to: BridgeAsset } {
   const from = bridgeAssetRow(request.fromChainId, request.fromToken, code);
   const to = bridgeAssetRow(request.toChainId, request.toToken, code);
+  if (!bridgeExecutionDestination(request.toChainId)) {
+    if (request.fromChainId !== 1 || from.kind !== "erc20" || to.kind !== "erc20" || from.symbol !== "USDC" ||
+      from.pairKey !== to.pairKey || from.decimals !== to.decimals) bridgeFailure(code, "admitted_quote_asset_pair");
+    return { from, to };
+  }
   if (from.peers.length === 0) bridgeFailure(code, "asset_has_no_listed_peer");
   if (from.chainId === to.chainId || from.kind !== to.kind || from.pairKey !== to.pairKey || from.decimals !== to.decimals ||
     !from.peers.includes(to.chainId) || !to.peers.includes(from.chainId)) bridgeFailure(code, "admitted_asset_pair");
@@ -263,7 +310,7 @@ export function bridgeDecimal(value: unknown, decimals: number, positive = false
 export function validateBridgeRequest(value: unknown, code: ErrorCode = "APN_INVALID_INPUT"): BridgeRouteRequest {
   const r = bridgeExact(value, ["fromChainId", "toChainId", "fromToken", "toToken", "amountAtomic", "recipient",
     "minOutputAtomic", "maxNativeDebitWei", "maxRouteFeeAtomic", "slippageBps"], code);
-  const pair = bridgeAssetPair({ fromChainId: bridgeChain(r.fromChainId, code), toChainId: bridgeChain(r.toChainId, code),
+  const pair = bridgeAssetPair({ fromChainId: bridgeChain(r.fromChainId, code), toChainId: bridgeDestinationChain(r.toChainId, code),
     fromToken: bridgeAddress(r.fromToken, code), toToken: bridgeAddress(r.toToken, code) }, code);
   if (r.fromToken !== bridgeAssetAddress(pair.from) || r.toToken !== bridgeAssetAddress(pair.to) ||
     bridgeAddress(r.recipient, code) !== r.recipient || r.recipient === BRIDGE_ZERO_ADDRESS) bridgeFailure(code, "canonical_addresses");
