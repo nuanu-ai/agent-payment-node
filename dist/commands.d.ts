@@ -22,6 +22,8 @@ export type CommandRequest = {
     readonly minOutputAtomic: string;
     readonly maxNativeDebitAtomic: string;
     readonly idempotencyKey: string;
+    readonly maxFeePerGasWei?: string;
+    readonly maxPriorityFeePerGasWei?: string;
 } | {
     readonly command: "stargate.token.execute" | "stargate.token.cleanup" | "stargate.token.observe" | "stargate.token.status" | "stargate.token.receipt";
     readonly operationId: string;

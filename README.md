@@ -609,7 +609,7 @@ apn stargate native execute --operation <operation-id>
 apn stargate native observe --operation <operation-id>
 apn stargate native status --operation <operation-id>
 apn stargate native receipt --operation <operation-id>
-apn stargate token prepare --profile <profile> --amount-atomic <usdc> [--native-drop-atomic <wei>] --min-output-atomic <usdc> --max-native-debit-atomic <wei> --idempotency-key <key>
+apn stargate token prepare --profile <profile> --amount-atomic <usdc> [--native-drop-atomic <wei>] --min-output-atomic <usdc> --max-native-debit-atomic <wei> [--max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei>] --idempotency-key <key>
 apn stargate token execute --operation <operation-id>
 apn stargate token cleanup --operation <operation-id>
 apn stargate token observe --operation <operation-id>

@@ -62,7 +62,9 @@ function bindParsedCatalog(parsed) {
             case "stargate token prepare": return { request: { command: "stargate.token.prepare", profile: value(options, "--profile"),
                     amountAtomic: value(options, "--amount-atomic"), nativeDropAtomic: value(options, "--native-drop-atomic"),
                     minOutputAtomic: value(options, "--min-output-atomic"), maxNativeDebitAtomic: value(options, "--max-native-debit-atomic"),
-                    idempotencyKey: value(options, "--idempotency-key") } };
+                    idempotencyKey: value(options, "--idempotency-key"),
+                    ...(options["--max-fee-per-gas-wei"] === undefined ? {} : { maxFeePerGasWei: options["--max-fee-per-gas-wei"] }),
+                    ...(options["--max-priority-fee-per-gas-wei"] === undefined ? {} : { maxPriorityFeePerGasWei: options["--max-priority-fee-per-gas-wei"] }) } };
             case "stargate token execute": return { request: { command: "stargate.token.execute", operationId: value(options, "--operation") } };
             case "stargate token cleanup": return { request: { command: "stargate.token.cleanup", operationId: value(options, "--operation") } };
             case "stargate token observe": return { request: { command: "stargate.token.observe", operationId: value(options, "--operation") } };

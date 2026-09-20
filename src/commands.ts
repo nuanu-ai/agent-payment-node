@@ -11,7 +11,8 @@ export type CommandRequest =
       readonly maxNativeDebitAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "stargate.native.execute" | "stargate.native.observe" | "stargate.native.status" | "stargate.native.receipt"; readonly operationId: string }
   | { readonly command: "stargate.token.prepare"; readonly profile: string; readonly amountAtomic: string;
-      readonly nativeDropAtomic: string; readonly minOutputAtomic: string; readonly maxNativeDebitAtomic: string; readonly idempotencyKey: string }
+      readonly nativeDropAtomic: string; readonly minOutputAtomic: string; readonly maxNativeDebitAtomic: string; readonly idempotencyKey: string;
+      readonly maxFeePerGasWei?: string; readonly maxPriorityFeePerGasWei?: string }
   | { readonly command: "stargate.token.execute" | "stargate.token.cleanup" | "stargate.token.observe" | "stargate.token.status" | "stargate.token.receipt"; readonly operationId: string }
   | { readonly command: "swap.uniswap.inventory" }
   | { readonly command: "swap.uniswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
