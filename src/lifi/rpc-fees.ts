@@ -1,6 +1,6 @@
 import { encodeAbiParameters, getAddress, keccak256, parseAbiParameters } from "viem";
 import { hashObject } from "../canonical.js";
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcWord } from "../evm-rpc-codec.js";
 import type { Hex } from "../model.js";
@@ -26,7 +26,7 @@ export const BASE_FEE_CONTRACT = {
     { kind: "call" as const, address: GPO, data: "0x105d0b81" as Hex, expected: `0x${"0".repeat(63)}1` as Hex },
   ],
 } as const;
-export async function bridgeActualFees(chainId: EvmChainId, receipt: Readonly<Record<string, unknown>>, block: BridgeBlock, call: EvmRpcCall) {
+export async function bridgeActualFees(chainId: BridgeChainId, receipt: Readonly<Record<string, unknown>>, block: BridgeBlock, call: EvmRpcCall) {
   const gas = evmRpcQuantity(receipt.gasUsed), price = evmRpcQuantity(receipt.effectiveGasPrice), type = evmRpcQuantity(receipt.type);
   if (gas > (1n << 64n) - 1n || ![0n, 1n, 2n, 3n, 4n].includes(type)) bridgeFailure("APN_RPC_PROTOCOL", "receipt_fee_shape");
   const execution = gas * price;

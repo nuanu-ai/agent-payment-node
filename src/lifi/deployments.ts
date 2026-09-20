@@ -1,5 +1,5 @@
 import { encodeAbiParameters, encodeFunctionData, getAddress, parseAbiParameters } from "viem";
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import type { Address, Hex } from "../model.js";
 import { ACROSS_SELECTOR, deploymentAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, LAYER_ZERO_ENDPOINT, STARGATE_SELECTOR } from "./abi.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgePeerToken, bridgeTokenRow, type BridgeAsset, type BridgeTokenAsset, type BridgeTokenCode } from "./asset-registry.js";
@@ -16,16 +16,16 @@ const TRUE_WORD = `0x${"0".repeat(63)}1` as Hex;
 const FEE_FORWARDER_OWNER = getAddress("0x08647cc950813966142a416d40c382e2c5db73bb");
 
 type Code = Readonly<{ address: Address; codeHash: Hex }>;
-type Across = Readonly<{ facet: Code; spoke: Code; implementation: Code }>;
+type Across = Readonly<{ facet?: Code; spoke: Code; implementation?: Code }>;
 type Stargate = Readonly<{ facet: Code; messaging: Code; endpoint: Code; localEid: number }>;
 
-const DIAMOND_HASH: Readonly<Record<EvmChainId, Hex>> = {
+const DIAMOND_HASH: Readonly<Partial<Record<BridgeChainId, Hex>>> = {
   1: "0x828f8a0694bfba25c80a406283f149d701cdc944acbbc18b57315cf157db9220",
   8453: "0x5efa2ebe1ed041ce83c069f1cedc04945f1438680dacf5f88068ef6c7d94110a",
   42161: "0x828f8a0694bfba25c80a406283f149d701cdc944acbbc18b57315cf157db9220",
 };
 
-const ACROSS: Readonly<Record<EvmChainId, Across>> = {
+const ACROSS: Readonly<Partial<Record<BridgeChainId, Across>>> = {
   1: {
     facet: code("0xAd3f1634a917924cBb54A0F76e43ca035D2B6BCd", "0x3018e22e23c2513b0a199a42882e855aa98777883cc7e68062fe3828ff6e2689"),
     spoke: code("0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
@@ -41,9 +41,12 @@ const ACROSS: Readonly<Record<EvmChainId, Across>> = {
     spoke: code("0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
     implementation: code("0xcfcda84333431bcc9155f2368b8362f0d1dff8c9", "0xa860f20748abfdf98f4e55411b5db7630457bec1abfb5d88f1ecd5f25b4ec24b"),
   },
+  59144: {
+    spoke: code("0xEf4998E4cda2232c5f1824Eac8C5060F28BfAEeC", "0x020e6beeb2805a62c4bedee022067700a57a2fa6793db6f7773ad94bb6dfb633"),
+  },
 };
 
-const STARGATE: Readonly<Record<EvmChainId, Stargate>> = {
+const STARGATE: Readonly<Partial<Record<BridgeChainId, Stargate>>> = {
   1: stargate("0xbF4aD13FA0e6E05916a78C201f147c5152dbe1C9", "0x23db18775c54e7533c4a6cc48d1dee2d2f43957a7a1ec25e48b06a519119dde7", "0x6d6620eFa72948C5f68A3C8646d58C00d3f4A980", "0xef22a8fb9189866e656f799d686af5c5cdeb0ab47e1baa4f636f6d8253af970c", "0xb747fab405fadff7fc9d8adb083d18d3454ac58ffdefe9121ed5f008f57d93e0", 30101),
   8453: stargate("0x6e378C84e657C57b2a8d183CFf30ee5CC8989b61", "0xadfcb37ab133b53cd78cd2a81d408f9317c386cd5891ce37730a755db7984113", "0x5634c4a5FEd09819E3c46D86A965Dd9447d86e47", "0x39a8d1450f34fc251bc4e7a0ca2af68a26802e21f6f8630b62bd3681d4fee784", "0x086c2e9e37f5bdaf45013882cf40f7a43b35c879302ff1ad4a4010d09b4d7237", 30184),
   42161: stargate("0x6e378C84e657C57b2a8d183CFf30ee5CC8989b61", "0x2537550abf651bb5f281dc46b99769b3e8564e43e41724a62e33c9986ad33801", "0x19cFCE47eD54a88614648DC3f19A5980097007dD", "0xb3a802ede13975c1edc960bb6e6eacbf651ee0cc8fe3d051716d93bca063cd1e", "0xab987ace8dc096407e8073f5fa459238326e8501775b320dc285d81b59e48721", 30110),
@@ -54,42 +57,50 @@ const STARGATE: Readonly<Record<EvmChainId, Stargate>> = {
  * registry row; an asset the registry does not admit, or one whose tool has not been reviewed for it, is refused.
  * A native leg pins the wrapped-native contract whose logs prove the wrap and the unwrap instead of a token contract.
  */
-export function bridgeDeployment(chainId: EvmChainId, peerChainId: EvmChainId, tool: BridgeTool, token: Address): BridgeDeploymentContract {
+export function bridgeDeployment(chainId: BridgeChainId, peerChainId: BridgeChainId, tool: BridgeTool, token: Address): BridgeDeploymentContract {
   bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE"); bridgeChain(peerChainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+  if (chainId === 56 || peerChainId === 56) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bnb_composite_execution_unreviewed");
   if (chainId === peerChainId) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_direction");
   if (tool !== "across" && tool !== "stargateV2") bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_tool");
   const asset = bridgeAssetRow(chainId, token, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
   if (!asset.peers.includes(peerChainId)) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_chain");
   const pool = bridgeAssetTool(asset, tool);
   const wrapped = BRIDGE_ASSET_REGISTRY[chainId].nativeCoin.wrapped;
-  const commonCode = [code(BRIDGE_DIAMOND, DIAMOND_HASH[chainId]),
-    code(FEE_FORWARDER, "0x7ee455a6853068874bfd201f93d6383ed6d88934a922316db5575b057e2ebe74"),
+  const destinationOnly = chainId === 59144 && peerChainId === 1 && tool === "across" && asset.kind === "native";
+  const diamondHash = DIAMOND_HASH[chainId];
+  const commonCode = [...(destinationOnly ? [] : [code(BRIDGE_DIAMOND, diamondHash ?? bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "diamond_deployment")),
+    code(FEE_FORWARDER, "0x7ee455a6853068874bfd201f93d6383ed6d88934a922316db5575b057e2ebe74")]),
     ...(asset.kind === "native" ? proxyCode(wrapped.address, wrapped.code) : proxyCode(asset.address, asset.code))];
-  const reads = [
+  const reads = [...(destinationOnly ? [] : [
     call(BRIDGE_DIAMOND, "isContractSelectorWhitelisted", [FEE_FORWARDER, FEE_FORWARDER_SELECTOR], TRUE_WORD),
     call(FEE_FORWARDER, "owner", [], wordAddress(FEE_FORWARDER_OWNER)),
-    ...assetReads(asset),
-  ];
+  ]), ...assetReads(asset)];
   if (pool === null) {
     const a = ACROSS[chainId];
+    if (a === undefined) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "across_chain_unreviewed");
+    const facet = a.facet;
     return {
       chainId, peerChainId, tool, diamond: BRIDGE_DIAMOND, feeForwarder: FEE_FORWARDER, feeRecipient: FEE_RECIPIENT,
       token: asset.kind === "native" ? BRIDGE_ZERO_ADDRESS : asset.address, protocolEmitter: a.spoke.address, endpointId: null,
       quoteTimeBufferAtomic: "3600", fillDeadlineBufferAtomic: "21600",
-      code: [...commonCode, a.facet, a.spoke, a.implementation],
+      code: [...commonCode, ...(facet === undefined ? [] : [facet]), a.spoke,
+        ...(a.implementation === undefined ? [] : [a.implementation])],
       reads: [
         ...reads,
-        call(BRIDGE_DIAMOND, "facetAddress", [ACROSS_SELECTOR], wordAddress(a.facet.address)),
-        call(a.facet.address, "SPOKEPOOL", [], wordAddress(a.spoke.address)),
-        call(a.facet.address, "WRAPPED_NATIVE", [], wordAddress(wrapped.address)),
+        ...(facet === undefined ? [] : [
+          call(BRIDGE_DIAMOND, "facetAddress", [ACROSS_SELECTOR], wordAddress(facet.address)),
+          call(facet.address, "SPOKEPOOL", [], wordAddress(a.spoke.address)),
+          call(facet.address, "WRAPPED_NATIVE", [], wordAddress(wrapped.address)),
+        ]),
         call(a.spoke.address, "depositQuoteTimeBuffer", [], wordUint(3600)),
         call(a.spoke.address, "fillDeadlineBuffer", [], wordUint(21600)),
-        storage(a.spoke.address, EIP1967_IMPLEMENTATION, wordAddress(a.implementation.address)),
+        ...(a.implementation === undefined ? [] : [storage(a.spoke.address, EIP1967_IMPLEMENTATION, wordAddress(a.implementation.address))]),
       ],
     };
   }
   if (asset.kind === "native") return bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_pool_asset_unreviewed");
   const s = STARGATE[chainId], peer = STARGATE[peerChainId];
+  if (s === undefined || peer === undefined) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_chain_unreviewed");
   const peerPool = bridgeAssetTool(bridgePeerToken(asset, peerChainId), tool);
   if (peerPool === null || peerPool.assetId !== pool.assetId) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_pool_asset_unreviewed");
   return {
@@ -113,15 +124,23 @@ export function bridgeDeployment(chainId: EvmChainId, peerChainId: EvmChainId, t
   };
 }
 
-export function bridgeProtocolEmitter(chainId: EvmChainId, tool: BridgeTool, token: Address): Address {
+export function bridgeProtocolEmitter(chainId: BridgeChainId, tool: BridgeTool, token: Address): Address {
   bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-  if (tool === "across") return ACROSS[chainId].spoke.address;
+  if (tool === "across") {
+    const across = ACROSS[chainId];
+    if (across === undefined) return bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "across_chain_unreviewed");
+    return across.spoke.address;
+  }
   const pool = bridgeAssetTool(bridgeTokenRow(chainId, token, "APN_PROVIDER_CAPABILITY_UNAVAILABLE"), tool);
   if (pool === null) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_pool_asset_unreviewed");
   return pool.router;
 }
 
-export function bridgeEndpointId(chainId: EvmChainId): number { return STARGATE[bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")].localEid; }
+export function bridgeEndpointId(chainId: BridgeChainId): number {
+  const row = STARGATE[bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")];
+  if (row === undefined) return bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_chain_unreviewed");
+  return row.localEid;
+}
 
 function proxyCode(address: Address, c: BridgeTokenCode): readonly Code[] {
   const proxy = code(address, c.codeHash);

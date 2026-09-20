@@ -9,7 +9,7 @@ export function newBridgeOperation(input: { readonly profileHash: string; readon
   const immutable = { schemaVersion: "apn.bridge-operation.v1" as const, kind: "bridge_route" as const, ...input };
   const fingerprint = hashObject(bridgeIntentBinding(immutable));
   const mutable: BridgeMutable = { state: "awaiting_approval", approval: null, effects: input.effects, sourceProof: null,
-    destinationProof: null, providerObservation: null, failure: null,
+    destinationProof: null, providerObservation: null, failure: null, usageLease: null,
     destinationScan: { startBlock: input.intent.destinationStartBlock, nextBlockAtomic: input.intent.destinationStartBlock.numberAtomic, previousEndBlock: null } };
   const transition = { ...bridgeSnapshot(mutable), at: input.intent.preparedAt, previousHash: fingerprint };
   const result = sealBridgeOperation({ ...immutable, ...mutable, fingerprint, createdAt: input.intent.preparedAt,

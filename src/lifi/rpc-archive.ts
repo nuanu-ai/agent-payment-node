@@ -1,4 +1,4 @@
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { bridgeChain } from "./asset-registry.js";
 import { bridgeFailure } from "./validation.js";
@@ -11,13 +11,15 @@ import { bridgeFailure } from "./validation.js";
  */
 export const BRIDGE_ARCHIVE_RPC_ENV = {
   1: "APN_ETHEREUM_ARCHIVE_RPC_URL",
+  56: "APN_BNB_ARCHIVE_RPC_URL",
   8453: "APN_BASE_ARCHIVE_RPC_URL",
   42161: "APN_ARBITRUM_ARCHIVE_RPC_URL",
+  59144: "APN_LINEA_ARCHIVE_RPC_URL",
 } as const;
 
 const TAG_INDEX: Readonly<Record<string, number>> = { eth_getCode: 1, eth_getStorageAt: 2, eth_call: 1 };
 
-export function bridgeArchiveEndpoint(chainId: EvmChainId, environment: Readonly<Record<string, string | undefined>>): URL | null {
+export function bridgeArchiveEndpoint(chainId: BridgeChainId, environment: Readonly<Record<string, string | undefined>>): URL | null {
   bridgeChain(chainId, "APN_RPC_CONFIG");
   const name = BRIDGE_ARCHIVE_RPC_ENV[chainId];
   const value = environment[name];

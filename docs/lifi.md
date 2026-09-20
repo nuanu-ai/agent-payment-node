@@ -162,11 +162,13 @@ not a fallback for bridge operations.
 | `eip155:1` Ethereum | `APN_ETHEREUM_RPC_URL` | ETH, 18 decimals | WETH9 `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2`, code hash |
 | `eip155:8453` Base | `APN_BASE_RPC_URL` | ETH, 18 decimals | WETH9 predeploy `0x4200000000000000000000000000000000000006`, code hash |
 | `eip155:42161` Arbitrum One | `APN_ARBITRUM_RPC_URL` | ETH, 18 decimals | aeWETH `0x82aF49447D8a07e3bd95BD0d56f35241523fBab1`, EIP-1967 implementation and admin slots |
+| `eip155:59144` Linea | `APN_LINEA_RPC_URL` | ETH, 18 decimals | WETH9 `0xe5D7C2a44FfDdF6b295A15c148167daaAf5Cf34f`, code hash; destination only from Ethereum |
 
 A native coin is a first-class registry row, not a token with a sentinel
 address. It pays gas and Stargate's LayerZero messaging fee, and since this
-change it is also a bridgeable **principal** over Across between all three
-chains. The operator names it `native` (`--from-token native --to-token
+change it is also a bridgeable **principal** over Across between Ethereum,
+Base and Arbitrum, plus the reviewed Ethereum-to-Linea self-transfer lane.
+The operator names it `native` (`--from-token native --to-token
 native`); the provider's zero-address wire sentinel is never accepted as
 operator input and is never a token. See [Native ETH principal](#native-eth-principal).
 
@@ -336,7 +338,7 @@ and Jovian configuration. A missing operator receipt field never implies zero.
 ## Native ETH principal
 
 A native principal is carried by Across V4 only, between any two of Ethereum,
-Base and Arbitrum One. There is no approval effect: the approval cap is zero,
+Base and Arbitrum One, and from Ethereum to Linea. There is no approval effect: the approval cap is zero,
 the account's allowance is the constant zero, and the principal is the bridge
 transaction's `value`. The decoder accepts exactly the call LI.FI returned in the
 read-only captures of 18 September 2026:
@@ -363,9 +365,23 @@ address on Arbitrum's aeWETH), next to the unchanged `LiFiTransferStarted`,
 Destination proof keeps the full `FilledRelay` tuple and replaces the recipient
 `Transfer` with the unwrap: exactly one log of exactly the output amount from
 the destination SpokePool (`Withdrawal(src)` from WETH9, or a `Transfer` to the
-zero address from aeWETH). The value send to the recipient has no log; the
-pinned SpokePool code performs it in the same fill, and the destination scan
-still starts at the block frozen at preparation, after the source.
+zero address from aeWETH). For Linea, the exact destination transaction must
+also expose one bounded `debug_traceTransaction` call trace from the pinned
+SpokePool to the bound profile owner for exactly the FilledRelay output. The
+safe canonical transaction and block bind that trace; the previous-block to
+receipt-block balance delta is corroborating evidence and cannot replace the
+transaction-attributable transfer. The configured public Linea endpoint was
+read-only checked on 20 September 2026 and returned `callTracer` output. Linea
+deployment verification replays a pinned safe-block trace probe, so a configured
+RPC without `debug_traceTransaction` support refuses the lane before execution.
+
+Linea execution requires an active owner allowlist admission for the Ethereum
+native asset on rail `bridge`, with mechanism `{ provider: "lifi", reference:
+"across-v4" }`. Preparation freezes the policy revision, owner, self recipient,
+asset, amount and mechanism. Foreground approval reserves the amount in the
+shared UTC-day usage ledger before signing. Submitted, ambiguous, finalized
+and confirmed-revert outcomes advance or release that one idempotent
+reservation. A changed policy or non-self recipient refuses before signing.
 
 ```sh
 apn bridge routes --profile existing-local \
@@ -384,6 +400,23 @@ wrapped native), the account read and the envelope freeze with
 `eth_estimateGas`. It produced one bridge effect with `value` 0.001 ETH, no
 approval, and a fee quote of about 0.0001 ETH under a 0.001 ETH fee cap. The
 same run refused 1 USDT Ethereum → Arbitrum as `asset_not_on_frozen_list`.
+
+The immutable 20 September 2026 Ethereum-to-Linea capture is
+`tests/core/lifi-fixtures/lifi-ethereum-linea-native-across-20260920.json`.
+It contains the anonymous read-only route request/response and exact
+step-materialization request/response with SHA-256 provenance. The captured
+0.0002 ETH route is direct Across with only FeeForwarder and Across effects,
+`value = 200000000000000`, bridge amount `199500000000000`, output
+`189197517787962`, empty message and gas limit `533000`. No signature or send
+was performed. BNB remains quote-only and outside the execution destination
+set.
+
+The matching public RPC baseline is
+`tests/core/lifi-fixtures/deployment-linea-rpc-20260920.json`. It freezes Linea
+block `32089068` (`0x313150b011d0f89dba2545a04c6f397482db04fdb82bca46ef8118d85f4dcae0`)
+and the read-only code/configuration responses for the pinned Across SpokePool,
+Linea WETH, 18 decimals, 3600-second quote-time buffer and 21600-second fill
+deadline buffer.
 
 ## USDT on Ethereum
 

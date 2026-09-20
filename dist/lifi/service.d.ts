@@ -35,6 +35,7 @@ export declare class BridgeService {
                     coin_key: string;
                     decimals: 18;
                     bridgeable_principal: boolean;
+                    quote_only: boolean;
                     role: string;
                     token: string;
                     tools: string[];
@@ -230,8 +231,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;
@@ -296,6 +297,27 @@ export declare class BridgeService {
         policy: {
             identity: string;
             policy_hash: string;
+            allowlist: {
+                schema_version: "apn.bridge-allowlist.v1";
+                policy_digest: string;
+                policy_revision: number;
+                account: string;
+                self_recipient: string;
+                chain: string;
+                asset: Readonly<{
+                    kind: "native";
+                    identifier: null;
+                } | {
+                    kind: "token";
+                    identifier: string;
+                }>;
+                amount_atomic: string;
+                mechanism: Readonly<{
+                    provider: "lifi";
+                    reference: "across-v4";
+                }>;
+                reservation_id: string | null;
+            } | null;
             approved_at: string | null;
             expiry_enforced_before_first_send: boolean;
             inclusion_deadline: string;
@@ -371,8 +393,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;
@@ -437,6 +459,27 @@ export declare class BridgeService {
         policy: {
             identity: string;
             policy_hash: string;
+            allowlist: {
+                schema_version: "apn.bridge-allowlist.v1";
+                policy_digest: string;
+                policy_revision: number;
+                account: string;
+                self_recipient: string;
+                chain: string;
+                asset: Readonly<{
+                    kind: "native";
+                    identifier: null;
+                } | {
+                    kind: "token";
+                    identifier: string;
+                }>;
+                amount_atomic: string;
+                mechanism: Readonly<{
+                    provider: "lifi";
+                    reference: "across-v4";
+                }>;
+                reservation_id: string | null;
+            } | null;
             approved_at: string | null;
             expiry_enforced_before_first_send: boolean;
             inclusion_deadline: string;
@@ -512,8 +555,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;
@@ -578,6 +621,27 @@ export declare class BridgeService {
         policy: {
             identity: string;
             policy_hash: string;
+            allowlist: {
+                schema_version: "apn.bridge-allowlist.v1";
+                policy_digest: string;
+                policy_revision: number;
+                account: string;
+                self_recipient: string;
+                chain: string;
+                asset: Readonly<{
+                    kind: "native";
+                    identifier: null;
+                } | {
+                    kind: "token";
+                    identifier: string;
+                }>;
+                amount_atomic: string;
+                mechanism: Readonly<{
+                    provider: "lifi";
+                    reference: "across-v4";
+                }>;
+                reservation_id: string | null;
+            } | null;
             approved_at: string | null;
             expiry_enforced_before_first_send: boolean;
             inclusion_deadline: string;
@@ -653,8 +717,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;
@@ -719,6 +783,27 @@ export declare class BridgeService {
         policy: {
             identity: string;
             policy_hash: string;
+            allowlist: {
+                schema_version: "apn.bridge-allowlist.v1";
+                policy_digest: string;
+                policy_revision: number;
+                account: string;
+                self_recipient: string;
+                chain: string;
+                asset: Readonly<{
+                    kind: "native";
+                    identifier: null;
+                } | {
+                    kind: "token";
+                    identifier: string;
+                }>;
+                amount_atomic: string;
+                mechanism: Readonly<{
+                    provider: "lifi";
+                    reference: "across-v4";
+                }>;
+                reservation_id: string | null;
+            } | null;
             approved_at: string | null;
             expiry_enforced_before_first_send: boolean;
             inclusion_deadline: string;
@@ -796,8 +881,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;
@@ -862,6 +947,27 @@ export declare class BridgeService {
         policy: {
             identity: string;
             policy_hash: string;
+            allowlist: {
+                schema_version: "apn.bridge-allowlist.v1";
+                policy_digest: string;
+                policy_revision: number;
+                account: string;
+                self_recipient: string;
+                chain: string;
+                asset: Readonly<{
+                    kind: "native";
+                    identifier: null;
+                } | {
+                    kind: "token";
+                    identifier: string;
+                }>;
+                amount_atomic: string;
+                mechanism: Readonly<{
+                    provider: "lifi";
+                    reference: "across-v4";
+                }>;
+                reservation_id: string | null;
+            } | null;
             approved_at: string | null;
             expiry_enforced_before_first_send: boolean;
             inclusion_deadline: string;
@@ -875,5 +981,6 @@ export declare class BridgeService {
     private preparation;
     private execution;
     private save;
+    private followUsage;
     private locked;
 }

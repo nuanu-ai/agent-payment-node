@@ -1,6 +1,6 @@
 import { getAddress } from "viem";
 import type { ErrorCode } from "../errors.js";
-import type { EvmChainId } from "../evm-asset.js";
+import { BRIDGE_CHAIN_IDS, BRIDGE_EXECUTION_CHAIN_IDS, type BridgeChainId, type BridgeExecutionChainId } from "./chains.js";
 import type { Address, Hex } from "../model.js";
 import type { BridgeRouteRequest, BridgeTool } from "./model.js";
 import { assertBridgeRegistryListed, bridgeTokenListed } from "./asset-listing.js";
@@ -11,7 +11,7 @@ import { BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeExact, bridgeFailure, bridgeU
  * decimals count and contract pin the rail trusts is a row here; nothing else in `src/lifi/**` may carry its own
  * copy. A row exists only when its on-chain identity can be pinned the way canonical USDC already is.
  */
-export const BRIDGE_CHAINS = [1, 8453, 42161] as const;
+export const BRIDGE_CHAINS = BRIDGE_CHAIN_IDS;
 /**
  * Quote-only destinations whose exact allowlist USDC identity and LI.FI calldata shape were captured from the
  * public quote API. They may be discovered and decoded, but are deliberately absent from `BRIDGE_CHAINS`: no RPC,
@@ -57,20 +57,20 @@ export interface BridgeWrappedNative {
  */
 export interface BridgeNativeCoin {
   readonly kind: "native";
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly symbol: string;
   readonly coinKey: string;
   readonly decimals: 18;
-  readonly pairKey: "eth";
+  readonly pairKey: "eth" | "bnb";
   readonly acrossSupported: true;
   readonly stargate: null;
-  readonly peers: readonly EvmChainId[];
+  readonly peers: readonly BridgeChainId[];
   readonly wrapped: BridgeWrappedNative;
   readonly listing: "frozen_list";
 }
 export interface BridgeTokenAsset {
   readonly kind: "erc20";
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly address: Address;
   readonly symbol: string;
   readonly coinKey: string;
@@ -80,7 +80,7 @@ export interface BridgeTokenAsset {
   readonly code: BridgeTokenCode;
   readonly acrossSupported: boolean;
   readonly stargate: BridgeStargatePool | null;
-  readonly peers: readonly EvmChainId[];
+  readonly peers: readonly BridgeChainId[];
   /** `zero_first`: a nonzero approve over a nonzero allowance reverts and `approve` returns no value (Tether). */
   readonly approval: "standard" | "zero_first";
   /** `tether_fee_zero`: the owner-settable transfer fee, its cap and the deprecation forward are pinned at zero. */
@@ -90,7 +90,7 @@ export interface BridgeTokenAsset {
 }
 export type BridgeAsset = BridgeNativeCoin | BridgeTokenAsset;
 export interface BridgeChainRow {
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly name: string;
   readonly caip2: string;
   readonly rpcEnvironment: string;
@@ -98,11 +98,11 @@ export interface BridgeChainRow {
   readonly tokens: readonly BridgeTokenAsset[];
 }
 
-const native = (chainId: EvmChainId, peers: readonly EvmChainId[], wrapped: BridgeWrappedNative): BridgeNativeCoin =>
-  ({ kind: "native", chainId, symbol: "ETH", coinKey: "ETH", decimals: 18, pairKey: "eth", acrossSupported: true,
+const native = (chainId: BridgeChainId, symbol: "ETH" | "BNB", peers: readonly BridgeChainId[], wrapped: BridgeWrappedNative): BridgeNativeCoin =>
+  ({ kind: "native", chainId, symbol, coinKey: symbol, decimals: 18, pairKey: symbol === "BNB" ? "bnb" : "eth", acrossSupported: true,
     stargate: null, peers, wrapped, listing: "frozen_list" });
 /** Read from mainnet: WETH9 on Ethereum and Base has no proxy slot; Arbitrum's aeWETH is an EIP-1967 transparent proxy. */
-const WRAPPED_NATIVE: Readonly<Record<EvmChainId, BridgeWrappedNative>> = {
+const WRAPPED_NATIVE: Readonly<Record<BridgeChainId, BridgeWrappedNative>> = {
   1: { address: getAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), events: "weth9",
     code: { upgradeability: "immutable", codeHash: "0xd0a06b12ac47863b5c7be4185c2deaad1c61557033f56c7d4ea74429cbb25e23" } },
   8453: { address: getAddress("0x4200000000000000000000000000000000000006"), events: "weth9",
@@ -112,6 +112,10 @@ const WRAPPED_NATIVE: Readonly<Record<EvmChainId, BridgeWrappedNative>> = {
       implementation: getAddress("0x8b194beae1d3e0788a1a35173978001acdfba668"),
       implementationCodeHash: "0x0d1c20f9ed551efe8f402bc9aa1a9b5058f925ec615284c5b4a7a4623c3b2dcd",
       admin: getAddress("0xd570ace65c43af47101fc6250fd6fc63d1c22a86") } },
+  56: { address: getAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"), events: "weth9",
+    code: { upgradeability: "immutable", codeHash: "0xb7d84205eaaf83ce7b3940c6beaad6d22790255e34a9a2b486aa8cdfff118fe6" } },
+  59144: { address: getAddress("0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f"), events: "weth9",
+    code: { upgradeability: "immutable", codeHash: "0xa670ec6c272ddec6d328d6f3d5cad65a841a6ab45e8e5cf825150eb458be4f1f" } },
 };
 const config = (values: readonly string[]): BridgeStargatePool["addressConfig"] =>
   values.map((value) => getAddress(value)) as unknown as BridgeStargatePool["addressConfig"];
@@ -188,44 +192,48 @@ const USDT_ETHEREUM: BridgeTokenAsset = {
   code: { upgradeability: "immutable", codeHash: "0xb44fb4e949d0f78f87f79ee46428f23a2a5713ce6fc6e0beb3dda78c2ac1ea55" },
 };
 
-export const BRIDGE_ASSET_REGISTRY: Readonly<Record<EvmChainId, BridgeChainRow>> = {
+export const BRIDGE_ASSET_REGISTRY: Readonly<Record<BridgeChainId, BridgeChainRow>> = {
   1: { chainId: 1, name: "Ethereum", caip2: "eip155:1", rpcEnvironment: "APN_ETHEREUM_RPC_URL",
-    nativeCoin: native(1, [8453, 42161], WRAPPED_NATIVE[1]), tokens: [USDC_ETHEREUM, USDT_ETHEREUM, WBTC_ETHEREUM] },
+    nativeCoin: native(1, "ETH", [56, 8453, 42161, 59144], WRAPPED_NATIVE[1]), tokens: [USDC_ETHEREUM, USDT_ETHEREUM, WBTC_ETHEREUM] },
+  56: { chainId: 56, name: "BNB Smart Chain", caip2: "eip155:56", rpcEnvironment: "APN_BNB_RPC_URL",
+    nativeCoin: native(56, "BNB", [1], WRAPPED_NATIVE[56]), tokens: [] },
   8453: { chainId: 8453, name: "Base", caip2: "eip155:8453", rpcEnvironment: "APN_BASE_RPC_URL",
-    nativeCoin: native(8453, [1, 42161], WRAPPED_NATIVE[8453]), tokens: [USDC_BASE] },
+    nativeCoin: native(8453, "ETH", [1, 42161], WRAPPED_NATIVE[8453]), tokens: [USDC_BASE] },
   42161: { chainId: 42161, name: "Arbitrum One", caip2: "eip155:42161", rpcEnvironment: "APN_ARBITRUM_RPC_URL",
-    nativeCoin: native(42161, [1, 8453], WRAPPED_NATIVE[42161]), tokens: [USDC_ARBITRUM, WBTC_ARBITRUM] },
+    nativeCoin: native(42161, "ETH", [1, 8453], WRAPPED_NATIVE[42161]), tokens: [USDC_ARBITRUM, WBTC_ARBITRUM] },
+  59144: { chainId: 59144, name: "Linea", caip2: "eip155:59144", rpcEnvironment: "APN_LINEA_RPC_URL",
+    nativeCoin: native(59144, "ETH", [1], WRAPPED_NATIVE[59144]), tokens: [] },
 };
 
-export function bridgeChain(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): EvmChainId {
-  if (typeof value !== "number" || !BRIDGE_CHAINS.includes(value as EvmChainId)) bridgeFailure(code, "chain_identity");
-  return value as EvmChainId;
+export function bridgeChain(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeChainId {
+  if (typeof value !== "number" || !BRIDGE_CHAINS.includes(value as BridgeChainId)) bridgeFailure(code, "chain_identity");
+  return value as BridgeChainId;
 }
-export function bridgeCaip2(value: unknown): EvmChainId {
+export function bridgeCaip2(value: unknown): BridgeChainId {
   const row = BRIDGE_CHAINS.map((id) => BRIDGE_ASSET_REGISTRY[id]).find((entry) => entry.caip2 === value);
   if (row === undefined) bridgeFailure("APN_INVALID_INPUT", "bridge_chain_CAIP2");
   return row.chainId;
 }
 /** CLI/request admission for a destination. Quote-only rows are returned with the legacy type at this boundary;
  * every execution boundary still calls `bridgeChain` and therefore refuses them. */
-export function bridgeDestinationCaip2(value: unknown): EvmChainId {
+export function bridgeDestinationCaip2(value: unknown): BridgeChainId {
   const execution = BRIDGE_CHAINS.map((id) => BRIDGE_ASSET_REGISTRY[id]).find((entry) => entry.caip2 === value);
   if (execution !== undefined) return execution.chainId;
   const quoted = Object.entries(BRIDGE_QUOTE_DESTINATIONS).find(([, entry]) => entry.caip2 === value);
   if (quoted === undefined) bridgeFailure("APN_INVALID_INPUT", "bridge_chain_CAIP2");
-  return Number(quoted[0]) as EvmChainId;
+  return Number(quoted[0]) as BridgeChainId;
 }
 export function bridgeQuoteDestination(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL") {
   if (typeof value !== "number" || !(value in BRIDGE_QUOTE_DESTINATIONS)) bridgeFailure(code, "quote_destination_chain_identity");
   return BRIDGE_QUOTE_DESTINATIONS[value as BridgeQuoteDestinationChainId];
 }
-export function bridgeDestinationChain(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): EvmChainId {
-  if (typeof value === "number" && BRIDGE_CHAINS.includes(value as EvmChainId)) return value as EvmChainId;
+export function bridgeDestinationChain(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeChainId {
+  if (typeof value === "number" && BRIDGE_CHAINS.includes(value as BridgeChainId)) return value as BridgeChainId;
   bridgeQuoteDestination(value, code);
-  return value as EvmChainId;
+  return value as BridgeChainId;
 }
-export function bridgeExecutionDestination(value: unknown): value is EvmChainId {
-  return typeof value === "number" && BRIDGE_CHAINS.includes(value as EvmChainId);
+export function bridgeExecutionDestination(value: unknown): value is BridgeExecutionChainId {
+  return typeof value === "number" && BRIDGE_EXECUTION_CHAIN_IDS.includes(value as BridgeExecutionChainId);
 }
 export function bridgeChainRow(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeChainRow {
   return BRIDGE_ASSET_REGISTRY[bridgeChain(value, code)];
@@ -244,11 +252,11 @@ export function bridgeTokenRow(chainId: unknown, address: unknown, code: ErrorCo
  * a registry row. An address the frozen list does not name is refused as unlisted, never matched by symbol.
  */
 export function bridgeAssetRow(chainId: unknown, address: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeAsset {
-  if (!bridgeExecutionDestination(chainId)) {
+  if (typeof chainId !== "number" || !BRIDGE_CHAINS.includes(chainId as BridgeChainId)) {
     const row = bridgeQuoteDestination(chainId, code), token = bridgeAddress(address, code);
     if (token !== row.token) bridgeFailure(code, bridgeTokenListed(row.caip2, token) ? "asset_listed_not_bridge_admitted" : "asset_not_on_frozen_list");
     if (!bridgeTokenListed(row.caip2, token)) bridgeFailure("APN_INTERNAL", "bridge_quote_destination_list_drift");
-    return { kind: "erc20", chainId: chainId as EvmChainId, address: row.token, symbol: "USDC", coinKey: "USDC",
+    return { kind: "erc20", chainId: chainId as BridgeChainId, address: row.token, symbol: "USDC", coinKey: "USDC",
       pairKey: "usdc", decimals: 6, acrossSupported: row.tools.includes("across" as never), stargate: null, peers: [1],
       approval: "standard", transferFee: "none", listing: "frozen_list",
       code: { upgradeability: "immutable", codeHash: `0x${"0".repeat(64)}` } };
@@ -265,23 +273,33 @@ export function bridgeAssetAddress(asset: BridgeAsset): Address { return asset.k
 /** The identity a declared fee row carries for this asset: `"native"` for the native coin, else the token contract. */
 export function bridgeFeeAsset(asset: BridgeAsset): Address | "native" { return asset.kind === "native" ? "native" : asset.address; }
 export function bridgeNativePrincipal(request: Pick<BridgeRouteRequest, "fromToken">): boolean { return request.fromToken === BRIDGE_ZERO_ADDRESS; }
+export function bridgeCrossNativeConversion(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">): boolean {
+  return request.fromChainId === 1 && request.toChainId === 56 && request.fromToken === BRIDGE_ZERO_ADDRESS && request.toToken === BRIDGE_ZERO_ADDRESS;
+}
 /** Both legs must share a pair key, decimals and each other's chain as a peer: native pairs with native, a token with its own. */
 export function bridgeAssetPair(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">,
   code: ErrorCode = "APN_PROVIDER_PROTOCOL"): { readonly from: BridgeAsset; readonly to: BridgeAsset } {
   const from = bridgeAssetRow(request.fromChainId, request.fromToken, code);
   const to = bridgeAssetRow(request.toChainId, request.toToken, code);
   if (!bridgeExecutionDestination(request.toChainId)) {
+    if (bridgeCrossNativeConversion(request)) {
+      if (from.kind !== "native" || to.kind !== "native" || !from.peers.includes(to.chainId) || !to.peers.includes(from.chainId)) {
+        bridgeFailure(code, "admitted_asset_pair");
+      }
+      return { from, to };
+    }
     if (request.fromChainId !== 1 || from.kind !== "erc20" || to.kind !== "erc20" || from.symbol !== "USDC" ||
       from.pairKey !== to.pairKey || from.decimals !== to.decimals) bridgeFailure(code, "admitted_quote_asset_pair");
     return { from, to };
   }
   if (from.peers.length === 0) bridgeFailure(code, "asset_has_no_listed_peer");
-  if (from.chainId === to.chainId || from.kind !== to.kind || from.pairKey !== to.pairKey || from.decimals !== to.decimals ||
+  const conversion = bridgeCrossNativeConversion(request);
+  if (from.chainId === to.chainId || from.kind !== to.kind || (!conversion && from.pairKey !== to.pairKey) || from.decimals !== to.decimals ||
     !from.peers.includes(to.chainId) || !to.peers.includes(from.chainId)) bridgeFailure(code, "admitted_asset_pair");
   return { from, to };
 }
 /** The peer chain's row for the same pair key, which is what a cross-chain tool pin and a route pair must agree on. */
-export function bridgePeerToken(asset: BridgeTokenAsset, peerChainId: EvmChainId,
+export function bridgePeerToken(asset: BridgeTokenAsset, peerChainId: BridgeChainId,
   code: ErrorCode = "APN_PROVIDER_CAPABILITY_UNAVAILABLE"): BridgeTokenAsset {
   if (!asset.peers.includes(peerChainId)) bridgeFailure(code, "finite_chain");
   const row = bridgeChainRow(peerChainId, code).tokens.find((entry) => entry.pairKey === asset.pairKey && entry.decimals === asset.decimals);
@@ -316,7 +334,7 @@ export function validateBridgeRequest(value: unknown, code: ErrorCode = "APN_INV
     bridgeAddress(r.recipient, code) !== r.recipient || r.recipient === BRIDGE_ZERO_ADDRESS) bridgeFailure(code, "canonical_addresses");
   const amount = bridgeUint(r.amountAtomic, true, code), minimum = bridgeUint(r.minOutputAtomic, true, code);
   bridgeUint(r.maxNativeDebitWei, true, code); bridgeUint(r.maxRouteFeeAtomic, false, code);
-  if (minimum > amount || typeof r.slippageBps !== "number" || !Number.isInteger(r.slippageBps) ||
+  if ((!bridgeCrossNativeConversion(r as unknown as BridgeRouteRequest) && minimum > amount) || typeof r.slippageBps !== "number" || !Number.isInteger(r.slippageBps) ||
     r.slippageBps < 0 || r.slippageBps > 1000) bridgeFailure(code, "output_or_slippage");
   return r as unknown as BridgeRouteRequest;
 }

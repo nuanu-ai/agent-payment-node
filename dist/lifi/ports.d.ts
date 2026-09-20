@@ -1,4 +1,4 @@
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import type { EvmFeeQuote } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import type { FeeEstimate } from "../ports.js";
@@ -15,22 +15,26 @@ export interface LifiProviderPort {
     status(input: {
         readonly transactionHash: Hex;
         readonly tool: BridgeTool;
-        readonly fromChainId: EvmChainId;
-        readonly toChainId: EvmChainId;
+        readonly fromChainId: BridgeChainId;
+        readonly toChainId: BridgeChainId;
     }): Promise<BridgeProviderObservation>;
 }
 export interface BridgeRpcPort {
-    readonly chainId: EvmChainId;
+    readonly chainId: BridgeChainId;
     readonly origin: string;
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
-    deployment(tool: BridgeTool, peerChainId: EvmChainId, token: Address, block?: BridgeBlock): Promise<BridgeDeploymentIdentity>;
+    deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<BridgeDeploymentIdentity>;
     account(owner: Address, spender: Address, token: Address): Promise<BridgeAccountSnapshot>;
     prices(): Promise<Pick<FeeEstimate, "maxFeePerGasAtomic" | "maxPriorityFeePerGasAtomic">>;
     estimate(transaction: BridgeTransaction): Promise<FeeEstimate>;
     feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<EvmFeeQuote>;
     send(rawTransaction: Hex): Promise<Hex>;
-    observe(transactionHash: Hex, expected?: BridgeEnvelope): Promise<{
+    observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{
+        recipient: Address;
+        from: Address;
+        amountAtomic: string;
+    }>): Promise<{
         readonly transaction: BridgeTransactionProof;
         readonly receipt: BridgeProtocolReceipt;
     } | null>;
@@ -45,7 +49,7 @@ export interface BridgeRpcPort {
         readonly blockHash: Hex;
     }[]>;
 }
-export type BridgeRpcFactory = (chainId: EvmChainId) => BridgeRpcPort;
+export type BridgeRpcFactory = (chainId: BridgeChainId) => BridgeRpcPort;
 export interface BridgeSealedMaterial {
     readonly schemaVersion: "apn.bridge-effect.v1";
     readonly profileHash: string;

@@ -2,7 +2,7 @@ import { encodeFunctionData, keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { EvmRpc } from "../evm-rpc.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
@@ -14,14 +14,16 @@ import { bridgeArchiveEndpoint, isHistoricalStateRead } from "./rpc-archive.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
-import { BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
+import { BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
 
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }] as const;
-const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "eth_sendRawTransaction"]);
-export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 8453: "APN_BASE_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL" } as const;
+const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction", "eth_sendRawTransaction"]);
+const LINEA_TRACE_PROBE_TRANSACTION = "0x4352433956109d31ab50db9547f16bcb90f3545f793ed40f75716ccd9a360efd" as Hex;
+export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 56: "APN_BNB_RPC_URL", 8453: "APN_BASE_RPC_URL",
+  42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" } as const;
 /** The single explicit Ethereum-family RPC reader: endpoint only from its named environment variable, public HTTPS, no query. */
-export function bridgeRpcCall(chainId: EvmChainId, environment: Readonly<Record<string, string | undefined>>, options: {
+export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Record<string, string | undefined>>, options: {
   readonly transport?: Pick<BridgeHttps, "request">;
   readonly wait?: (milliseconds: number) => Promise<void>;
 } = {}): { readonly origin: string; readonly call: EvmRpcCall } {
@@ -65,7 +67,7 @@ export function bridgeRpcFactory(environment: Readonly<Record<string, string | u
   readonly transport?: Pick<BridgeHttps, "request">;
   readonly wait?: (milliseconds: number) => Promise<void>;
 } = {}): BridgeRpcFactory {
-  const cache = new Map<EvmChainId, BridgeRpcPort>(), transport = options.transport ?? new BridgeHttps();
+  const cache = new Map<BridgeChainId, BridgeRpcPort>(), transport = options.transport ?? new BridgeHttps();
   return (chainId) => {
     bridgeChain(chainId, "APN_RPC_CONFIG");
     const existing = cache.get(chainId); if (existing !== undefined) return existing;
@@ -75,7 +77,7 @@ export function bridgeRpcFactory(environment: Readonly<Record<string, string | u
 }
 export class BridgeRpc implements BridgeRpcPort {
   private readonly evm: EvmRpc;
-  constructor(readonly chainId: EvmChainId, readonly origin: string, private readonly call: EvmRpcCall) {
+  constructor(readonly chainId: BridgeChainId, readonly origin: string, private readonly call: EvmRpcCall) {
     bridgeChain(chainId); this.evm = new EvmRpc(call, origin, 16 * 1024);
   }
   async assertChain(): Promise<void> { await this.evm.assertChain(this.chainId); }
@@ -86,7 +88,7 @@ export class BridgeRpc implements BridgeRpcPort {
     await this.assertChain();
     return { numberAtomic: b.number, hash: b.hash, timestampAtomic: evmRpcQuantity(b.raw.timestamp).toString() };
   }
-  async deployment(tool: BridgeTool, peerChainId: EvmChainId, token: Address, block?: BridgeBlock) {
+  async deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock) {
     await this.assertChain();
     const at = block ?? await this.block("safe"), contract = bridgeDeployment(this.chainId, peerChainId, tool, token), tag = quantity(BigInt(at.numberAtomic));
     const code: Array<{ address: Address; codeHash: Hex }> = [], configuration: Array<{ kind: string; address: Address; data: Hex; expected: Hex }> = [];
@@ -102,6 +104,14 @@ export class BridgeRpc implements BridgeRpcPort {
       const observed = bridgeHex(result, 64 * 1024, undefined, "APN_RPC_PROTOCOL");
       if (observed !== row.expected) bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_configuration_changed");
       configuration.push({ ...row, expected: observed });
+    }
+    if (this.chainId === 59144 && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
+      const trace = evmRpcRecord(await this.call("debug_traceTransaction", [LINEA_TRACE_PROBE_TRANSACTION,
+        { tracer: "callTracer", tracerConfig: { onlyTopCall: true, withLog: false } }]));
+      if (trace.type !== "CALL" || evmRpcAddress(trace.from).toLowerCase() !== "0x9629fe86f04e735923e8542ddd9f265f576e7421" ||
+          evmRpcAddress(trace.to).toLowerCase() !== "0xbcc016e2a79d509d2b776827ed986568d9b56d59" || evmRpcQuantity(trace.value) !== 243939205000000000n) {
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "linea_trace_capability_changed");
+      }
     }
     await this.recheck(at); await this.assertChain();
     return { chainId: this.chainId, peerChainId, tool, block: at, rpcOrigin: this.origin,
@@ -141,7 +151,7 @@ export class BridgeRpc implements BridgeRpcPort {
     if (hash !== keccak256(raw)) bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
     return hash;
   }
-  async observe(hash: Hex, expected?: BridgeEnvelope): Promise<{ transaction: BridgeTransactionProof; receipt: BridgeProtocolReceipt } | null> {
+  async observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic: string }>): Promise<{ transaction: BridgeTransactionProof; receipt: BridgeProtocolReceipt } | null> {
     await this.assertChain(); bridgeHex(hash, 32, 32, "APN_RPC_PROTOCOL");
     const [rawTx, rawReceipt] = await Promise.all([this.call("eth_getTransactionByHash", [hash]), this.call("eth_getTransactionReceipt", [hash])]);
     if (rawTx === null || rawReceipt === null) return null;
@@ -160,10 +170,27 @@ export class BridgeRpc implements BridgeRpcPort {
     if (evmRpcAddress(r.from) !== identity.from || evmRpcAddress(r.to) !== identity.to) bridgeFailure("APN_RPC_PROTOCOL", "receipt_sender_target");
     const logs = parseReceiptLogs(r.logs, hash, block, index), fees = await bridgeActualFees(this.chainId, r, block, this.call);
     if (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) || BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic)) bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
+    let nativeBalance: BridgeProtocolReceipt["nativeBalance"] = null;
+    let nativeTransfer: BridgeProtocolReceipt["nativeTransfer"] = null;
+    if (nativeDelivery !== undefined) {
+      if (number === 0n) bridgeFailure("APN_RPC_PROTOCOL", "native_balance_genesis");
+      const beforeRaw = await evmRpcBlock(this.call, quantity(number - 1n));
+      const before = { numberAtomic: (number - 1n).toString(), hash: beforeRaw.hash, timestampAtomic: evmRpcQuantity(beforeRaw.raw.timestamp).toString() };
+      const [beforeBalance, afterBalance, trace] = await Promise.all([
+        this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: before.hash, requireCanonical: true }]).then(evmRpcQuantity),
+        this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: block.hash, requireCanonical: true }]).then(evmRpcQuantity),
+        this.call("debug_traceTransaction", [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }]),
+      ]);
+      if (afterBalance < beforeBalance) bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
+      nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,
+        beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
+      nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
+      await this.recheck(before);
+    }
     await this.recheck(block); if (safeBlock !== null) await this.recheck(safeBlock); await this.assertChain();
     return { transaction: { chainId: this.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: this.origin, ...identity,
       ...fees, status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
-      receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs } };
+      receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer } };
   }
   async logs(input: Parameters<BridgeRpcPort["logs"]>[0]) {
     await this.assertChain(); const from = bridgeUint(input.fromBlockAtomic), to = bridgeUint(input.toBlockAtomic);
@@ -184,6 +211,24 @@ export class BridgeRpc implements BridgeRpcPort {
   private async recheck(block: BridgeBlock): Promise<void> {
     if (!bridgeSame(await this.block(block.numberAtomic), block)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
   }
+}
+function exactNativeTransfer(value: unknown, transactionHash: Hex, expected: Readonly<{ recipient: Address; from: Address; amountAtomic: string }>) {
+  const rows: Array<{ type: "CALL"; from: Address; to: Address; valueAtomic: string; path: string }> = [];
+  const visit = (raw: unknown, path: string, depth: number): void => {
+    if (depth > 32 || rows.length > 1024) bridgeFailure("APN_RPC_PROTOCOL", "native_trace_bound");
+    const call = evmRpcRecord(raw), from = evmRpcAddress(call.from), to = evmRpcAddress(call.to), valueAtomic = evmRpcQuantity(call.value ?? "0x0").toString();
+    if (call.type === "CALL" && call.error === undefined && from === expected.from && to === expected.recipient && valueAtomic === expected.amountAtomic) {
+      rows.push({ type: "CALL", from, to, valueAtomic, path });
+    }
+    if (call.calls !== undefined) {
+      if (!Array.isArray(call.calls) || call.calls.length > 256) bridgeFailure("APN_RPC_PROTOCOL", "native_trace_calls");
+      call.calls.forEach((child, index) => visit(child, `${path}.${index}`, depth + 1));
+    }
+  };
+  visit(value, "0", 0);
+  if (rows.length !== 1) bridgeFailure("APN_RPC_PROTOCOL", "native_destination_transfer");
+  return { transactionHash, from: expected.from, to: expected.recipient, valueAtomic: expected.amountAtomic,
+    traceHash: hashObject({ transactionHash, delivery: rows[0] }) };
 }
 function quantity(n: bigint): Hex { return `0x${n.toString(16)}`; }
 function parseReceiptLogs(value: unknown, hash: Hex, block: BridgeBlock, transactionIndex: bigint): readonly BridgeLog[] {

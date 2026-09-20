@@ -1,6 +1,6 @@
 import { sha256 } from "../canonical.js";
 import { canonicalProfile } from "../wallet-policy.js";
-import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS } from "./asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgeExecutionDestination } from "./asset-registry.js";
 import { BASE_SOLANA_CIRCLE_V2_CANDIDATE, BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "./discovery-candidates.js";
 import type { LifiResponse } from "./ports.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
@@ -11,7 +11,8 @@ export function bridgeCapabilities(profile?: string) {
       const row = BRIDGE_ASSET_REGISTRY[id];
       return { chain: row.caip2, name: row.name,
         native_coin: { symbol: row.nativeCoin.symbol, coin_key: row.nativeCoin.coinKey, decimals: row.nativeCoin.decimals,
-          bridgeable_principal: true, role: "gas_messaging_fee_and_across_principal", token: "native", tools: ["across"],
+          bridgeable_principal: bridgeExecutionDestination(id), quote_only: !bridgeExecutionDestination(id),
+          role: "gas_messaging_fee_and_across_principal", token: "native", tools: ["across"],
           wrapped_native: row.nativeCoin.wrapped.address, approval: "none_value_transfer", listing: row.nativeCoin.listing,
           peers: row.nativeCoin.peers.map((peer) => BRIDGE_ASSET_REGISTRY[peer].caip2) },
         tokens: row.tokens.map((asset) => ({ token: asset.address, symbol: asset.symbol, coin_key: asset.coinKey,
@@ -52,6 +53,7 @@ export function bridgeCapabilities(profile?: string) {
     ],
     rpc_environment: Object.fromEntries(BRIDGE_CHAINS.map((id) => [BRIDGE_ASSET_REGISTRY[id].caip2, BRIDGE_ASSET_REGISTRY[id].rpcEnvironment])),
     inventory_only: [{ tool: "polymer", reason: "protocol_unproved_unique_source_destination_correlation" },
+      { asset: "native_BNB_eip155:56", reason: "composite_Across_destination_call_and_Fly_swap_execution_unreviewed" },
       { asset: "native_principal_via_stargateV2", reason: "stargate_native_pool_not_reviewed" },
       { asset: "USDT_eip155:1", reason: "frozen_list_names_no_USDT_on_Base_or_Arbitrum_One" },
       { asset: "unlisted_token", reason: "not_on_the_frozen_allowlist_dataset" },
