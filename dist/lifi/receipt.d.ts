@@ -425,3 +425,6 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
     };
 };
 export type BridgeReceipt = ReturnType<typeof bridgeReceipt>;
+/** Exact current-v1 receipt emitted before denomination-aware asset bounds were added. */
+export declare function previousCurrentBridgeReceipt(op: BridgeOperationRecord): Record<string, unknown>;
+export declare function currentBridgeReceiptCandidates(op: BridgeOperationRecord): readonly unknown[];
