@@ -3,7 +3,7 @@ import test from "node:test";
 import { parseTransaction } from "viem";
 import { bridgeExecutionDestination } from "../../src/lifi/asset-registry.js";
 import { bridgeCapabilities } from "../../src/lifi/catalog.js";
-import { bridgeDeployment } from "../../src/lifi/deployments.js";
+import { bridgeDeployment, bridgeProtocolEmitter } from "../../src/lifi/deployments.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -19,6 +19,15 @@ import { canonicalJson, sha256 } from "../../src/canonical.js";
 import { BridgeRpc } from "../../src/lifi/rpc.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 
+function capturedRpc(capture: any, mutate?: (method: string, params: readonly unknown[], result: unknown) => unknown): EvmRpcCall {
+  const values = new Map(capture.requests.map((row: any) => [canonicalJson([row.request.method, row.request.params]), row.response.result]));
+  return async (method, params) => {
+    const key = canonicalJson([method, params]); assert.equal(values.has(key), true, key);
+    const result = structuredClone(values.get(key));
+    return mutate === undefined ? result : mutate(method, params, result);
+  };
+}
+
 test("immutable anonymous Linea capture binds the exact real quote and materialization", async () => {
   const capture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/lifi-ethereum-linea-native-across-20260920.json"), "utf8")) as any;
   assert.equal(capture.capture.mode, "anonymous_read_only_no_signing_no_send");
@@ -33,26 +42,83 @@ test("immutable anonymous Linea capture binds the exact real quote and materiali
   assert.equal(decoded.args[0].minAmount.toString(), "199500000000000"); assert.equal(decoded.args[2].message, "0x");
 });
 
-test("immutable Linea RPC baseline verifies the exact safe-block SpokePool, WETH and buffers", async () => {
-  const raw = await readFile(resolve("tests/core/lifi-fixtures/deployment-linea-rpc-20260920.json"), "utf8");
-  assert.equal(sha256(raw), "6c98ae74d2f011a07551157d5038fcd0c59fb4e8e97add08fe9bb95fc2a85d45");
+test("immutable Linea RPC baseline verifies the finalized canonical SpokePool proxy, implementation, WETH and buffers", async () => {
+  const raw = await readFile(resolve("tests/core/lifi-fixtures/deployment-linea-rpc-20260921.json"), "utf8");
+  assert.equal(sha256(raw), "d8a3fec0312a4ef503036ef3be18052e729ad2890bff2c48fb4d5e9dab173d0c");
   const capture = JSON.parse(raw) as any;
   assert.equal(capture.mode, "public_read_only_no_signing_no_send");
-  assert.deepEqual(capture.safeBlock, { number: "0x1e9a3ec",
-    hash: "0x313150b011d0f89dba2545a04c6f397482db04fdb82bca46ef8118d85f4dcae0", timestamp: "0x6aaf91b6" });
-  const values = new Map(capture.requests.map((row: any) => [canonicalJson([row.request.method, row.request.params]), row.response.result]));
-  const call: EvmRpcCall = async (method, params) => {
-    const key = canonicalJson([method, params]); assert.equal(values.has(key), true, key); return structuredClone(values.get(key));
-  };
+  assert.equal(capture.sourceOfTruth.lineaSpokePool, "0x7E63A5f1a8F0B4d0934B2f2327DAED3F6bb2ee75");
+  assert.deepEqual(capture.safeBlock, { number: "0x1e9af98",
+    hash: "0xedf04ad7bd30ee7ed745a2868a3b1698fd0e7e0f1d8abc6ba76394ec4c61b93e", timestamp: "0x6aaff588" });
+  const call = capturedRpc(capture);
   const block = { numberAtomic: BigInt(capture.safeBlock.number).toString(), hash: capture.safeBlock.hash,
     timestampAtomic: BigInt(capture.safeBlock.timestamp).toString() };
   const proof = await new BridgeRpc(59144, capture.rpcOrigin, call).deployment("across", 1, BRIDGE_ZERO_ADDRESS, block);
   assert.equal(proof.block.hash, capture.safeBlock.hash); assert.equal(proof.chainId, 59144); assert.equal(proof.peerChainId, 1);
+  assert.equal(proof.contractHash, "14e2009052caef86f6a5592d52704a63860154f0b0b051c32bfa1ad9448b265f");
+  assert.equal(proof.codeHash, "92be1364e421c29baa34aca55cac947d45f9ea91a05a16753aba3c97dc501ad0");
+  assert.equal(proof.configurationHash, "37419cf0d4a7311341ed94f791aaa187951be14730c647036c7794c61ae965de");
+  assert.equal(bridgeProtocolEmitter(59144, "across", BRIDGE_ZERO_ADDRESS), capture.sourceOfTruth.lineaSpokePool);
   const unavailable: EvmRpcCall = async (method, params) => {
     if (method === "debug_traceTransaction") throw new Error("method unavailable");
     return await call(method, params);
   };
   await assert.rejects(new BridgeRpc(59144, capture.rpcOrigin, unavailable).deployment("across", 1, BRIDGE_ZERO_ADDRESS, block));
+});
+
+test("Linea deployment identity refuses the former SpokePool, swapped proxy and implementation, wrong code and wrong configuration", async () => {
+  const current = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/deployment-linea-rpc-20260921.json"), "utf8")) as any;
+  const formerRaw = await readFile(resolve("tests/core/lifi-fixtures/deployment-linea-rpc-20260920.json"), "utf8");
+  assert.equal(sha256(formerRaw), "6c98ae74d2f011a07551157d5038fcd0c59fb4e8e97add08fe9bb95fc2a85d45");
+  const former = JSON.parse(formerRaw) as any, currentAddress = current.sourceOfTruth.lineaSpokePool;
+  const implementation = "0x263c0E973fd0Ca9dE57bb22a91C57Fc367A81915";
+  const codeResult = (capture: any, address: string) => capture.requests.find((row: any) => row.request.method === "eth_getCode" &&
+    String(row.request.params[0]).toLowerCase() === address.toLowerCase()).response.result as string;
+  const formerCode = codeResult(former, "0xEf4998E4cda2232c5f1824Eac8C5060F28BfAEeC");
+  const proxyCode = codeResult(current, currentAddress), implementationCode = codeResult(current, implementation);
+  const block = { numberAtomic: BigInt(current.safeBlock.number).toString(), hash: current.safeBlock.hash,
+    timestampAtomic: BigInt(current.safeBlock.timestamp).toString() };
+  const cases = [
+    ["former", (method: string, params: readonly unknown[], result: unknown) => method === "eth_getCode" &&
+      String(params[0]).toLowerCase() === currentAddress.toLowerCase() ? formerCode : result, /bridge_deployment_code_changed/u],
+    ["swapped", (method: string, params: readonly unknown[], result: unknown) => method !== "eth_getCode" ? result :
+      String(params[0]).toLowerCase() === currentAddress.toLowerCase() ? implementationCode :
+      String(params[0]).toLowerCase() === implementation.toLowerCase() ? proxyCode : result, /bridge_deployment_code_changed/u],
+    ["wrong-code", (method: string, params: readonly unknown[], result: unknown) => method === "eth_getCode" &&
+      String(params[0]).toLowerCase() === currentAddress.toLowerCase() ? `${proxyCode.slice(0, -1)}${proxyCode.endsWith("0") ? "1" : "0"}` : result,
+    /bridge_deployment_code_changed/u],
+    ["wrong-config", (method: string, params: readonly unknown[], result: unknown) => method === "eth_getStorageAt" &&
+      String(params[0]).toLowerCase() === currentAddress.toLowerCase() ? `0x${"0".repeat(64)}` : result,
+    /bridge_deployment_configuration_changed/u],
+  ] as const;
+  for (const [name, mutate, pattern] of cases) {
+    await assert.rejects(new BridgeRpc(59144, current.rpcOrigin, capturedRpc(current, mutate))
+      .deployment("across", 1, BRIDGE_ZERO_ADDRESS, block), pattern, name);
+  }
+});
+
+test("hard-finalized Linea fill fixture proves the canonical emitter, 63-nibble signature, unwrap, exact native call and balance delta", async () => {
+  const raw = await readFile(resolve("tests/core/lifi-fixtures/linea-native-fill-rpc-20260920.json"), "utf8");
+  assert.equal(sha256(raw), "ecc7d70307afd5d529965c5f37139df5380958408b28524b9e089917b1900b04");
+  const capture = JSON.parse(raw) as any;
+  const rawTransaction = capture.requests.find((row: any) => row.request.method === "eth_getTransactionByHash").response.result;
+  assert.equal(rawTransaction.s.length, 65); assert.equal(rawTransaction.to.toLowerCase(), capture.expected.from.toLowerCase());
+  const observed = await new BridgeRpc(59144, capture.rpcOrigin, capturedRpc(capture))
+    .observe(capture.transactionHash, undefined, capture.expected);
+  assert.notEqual(observed, null); assert.equal(observed!.transaction.status, "success");
+  assert.equal(observed!.transaction.safeBlock?.hash, capture.safeBlock.hash);
+  assert.equal(observed!.transaction.from, "0x07aE8551Be970cB1cCa11Dd7a11F47Ae82e70E67");
+  assert.deepEqual(observed!.receipt.nativeBalance, {
+    recipient: capture.expected.recipient,
+    beforeBlock: { numberAtomic: "32091739", hash: "0x99f39e6dd86d450c5d5b2a389b43f0d662aaf5ecbfca2415ceb87df7648b3a61", timestampAtomic: "1789914010" },
+    afterBlock: { numberAtomic: "32091740", hash: capture.receiptBlock.hash, timestampAtomic: "1789914016" },
+    beforeBalanceAtomic: "0", afterBalanceAtomic: capture.expected.amountAtomic, deltaAtomic: capture.expected.amountAtomic,
+  });
+  assert.equal(observed!.receipt.nativeTransfer?.from, capture.expected.from);
+  assert.equal(observed!.receipt.nativeTransfer?.to, capture.expected.recipient);
+  assert.equal(observed!.receipt.nativeTransfer?.valueAtomic, capture.expected.amountAtomic);
+  assert.equal(observed!.receipt.logs[0]?.address, capture.expected.from);
+  assert.equal(observed!.receipt.logs.filter((row) => row.address === "0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f").length, 2);
 });
 
 test("Linea native Across executes one exact EIP-1559 source effect and completes only with safe native delta proof", async (t) => {
