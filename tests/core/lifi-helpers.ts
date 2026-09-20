@@ -38,10 +38,29 @@ export class LifiApproval implements BridgeApprovalPort {
   accepted = true;
   async confirm(input: Parameters<BridgeApprovalPort["confirm"]>[0]) { this.calls.push(input); return this.accepted; }
 }
-export async function lifiSteps(pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea", now: Date): Promise<LifiJson[]> {
-  if (pair === "eth-linea") {
+export async function lifiSteps(pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad", now: Date): Promise<LifiJson[]> {
+  if (pair === "eth-linea" || pair === "eth-monad") {
     const capture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", "lifi-ethereum-linea-native-across-20260920.json"), "utf8")) as LifiJson;
-    return [structuredClone(capture.stepResponse)];
+    const step = structuredClone(capture.stepResponse);
+    if (pair === "eth-linea") return [step];
+    const output = "21000000000000000000", minimum = "20900000000000000000";
+    const mon = { ...step.action.toToken, chainId: 143, symbol: "MON", name: "MON", coinKey: "MON", priceUSD: "0" };
+    step.id = "synthetic-ethereum-monad-native-across";
+    step.action.toChainId = 143; step.action.toToken = mon;
+    step.estimate.toAmount = output; step.estimate.toAmountMin = minimum; step.estimate.toAmountUSD = "0";
+    const cross = step.includedSteps[1];
+    cross.action.toChainId = 143; cross.action.toToken = structuredClone(mon);
+    cross.estimate.toAmount = output; cross.estimate.toAmountMin = minimum;
+    const decoded = decodeFunctionData({ abi: acrossBridgeAbi, data: step.transactionRequest.data });
+    const args = structuredClone(decoded.args) as unknown as any[];
+    args[0].destinationChainId = 143n;
+    args[2].receivingAssetId = addressWord(getAddress("0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A"));
+    args[2].outputAmount = BigInt(minimum);
+    args[2].outputAmountMultiplier = (BigInt(minimum) * 1_000_000_000_000_000_000n + args[0].minAmount - 1n) / args[0].minAmount;
+    args[2].quoteTimestamp = Math.floor(now.getTime() / 1000) - 10;
+    args[2].fillDeadline = Math.floor(now.getTime() / 1000) + 3600;
+    step.transactionRequest.data = encodeFunctionData({ abi: acrossBridgeAbi, functionName: decoded.functionName, args: args as never });
+    return [step];
   }
   const steps: LifiJson[] = [];
   for (const filename of ["lifi-across-step-transactions-20260908.json", "lifi-stargate-taxi-step-transactions-20260908.json"]) {
@@ -181,12 +200,12 @@ export class LifiTestRpc implements BridgeRpcPort {
           blockHash: block.hash, requireCanonical: true as const, version: "1.6.0" as const, regime: "jovian" as const, scalarAtomic: "0", constantWei: operator.toString() } : null } };
   }
 }
-export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" = "eth-base", options: {
+export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad" = "eth-base", options: {
   now?: Date; wrapping?: LifiWrapping; provider?: LifiTestProvider; source?: LifiTestRpc; destination?: LifiTestRpc; initializeWallet?: boolean;
   policy?: false | { readonly maximumPerTransferAtomic?: string; readonly dailyLimitAtomic?: string;
     readonly provider?: string; readonly reference?: string };
 } = {}) {
-  const now = options.now ?? new Date(pair === "eth-linea" ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z"), state = new StateStore(root), profile = "lifi-local";
+  const now = options.now ?? new Date(pair === "eth-linea" || pair === "eth-monad" ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z"), state = new StateStore(root), profile = "lifi-local";
   const wrapping = options.wrapping ?? new LifiWrapping(), wallets = new EncryptedWalletStore(state, wrapping);
   await state.initialize();
   if (options.initializeWallet !== false) {
@@ -201,7 +220,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
     capturedRoutes = capture.routeResponse;
   }
   const provider = options.provider ?? new LifiTestProvider(await lifiSteps(pair, now), now, capturedRoutes), a = provider.steps[0]!.action;
-  if (pair === "eth-linea" && options.initializeWallet !== false && options.policy !== false) {
+  if ((pair === "eth-linea" || pair === "eth-monad") && options.initializeWallet !== false && options.policy !== false) {
     const caps = { maximumPerTransferAtomic: options.policy?.maximumPerTransferAtomic ?? WIDE_CAPS.maximumPerTransferAtomic,
       dailyLimitAtomic: options.policy?.dailyLimitAtomic ?? WIDE_CAPS.dailyLimitAtomic };
     await activateDirectPolicy(root, profile, { accounts: { evm: LIFI_SYNTHETIC_SENDER }, now, admissions: [{
@@ -217,7 +236,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
   const core = new ApnCore({ state, bridge: dependencies, clock: { now: () => new Date(now) } });
   const native = a.fromToken.address === BRIDGE_ZERO_ADDRESS;
   const request: BridgeRouteRequest = { fromChainId: a.fromChainId, toChainId: a.toChainId, fromToken: a.fromToken.address, toToken: a.toToken.address,
-    recipient: pair === "eth-linea" ? LIFI_SYNTHETIC_SENDER : LIFI_RECIPIENT, amountAtomic: a.fromAmount, minOutputAtomic: native ? provider.steps[0]!.estimate.toAmountMin : "9000000",
+    recipient: pair === "eth-linea" || pair === "eth-monad" ? LIFI_SYNTHETIC_SENDER : LIFI_RECIPIENT, amountAtomic: a.fromAmount, minOutputAtomic: native ? provider.steps[0]!.estimate.toAmountMin : "9000000",
     maxNativeDebitWei: native ? "2000000000000000" : "20000000000000000", maxRouteFeeAtomic: native ? "100000000000000" : "1000000", slippageBps: 50 };
   const prepare = async (tool: BridgeTool = "across", key = "lifi-fixture-0001") => {
     const quotes = await core.execute({ command: "bridge.routes", profile, request }); assert.equal(quotes.ok, true, quotes.error?.message);

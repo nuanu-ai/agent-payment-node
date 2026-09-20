@@ -3,7 +3,7 @@ import { decodeBridgeCall } from "./decode.js";
 import { bridgeApprovalRequired, bridgeNativePrincipalWei } from "./economics.js";
 import { BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot } from "./operation-model.js";
 import { legacyBridgeOperationSchema, operationSchema } from "./schema.js";
-import { bridgeExecutionDestination, validateBridgeRequest } from "./asset-registry.js";
+import { bridgeExecutionDestination, bridgeNativeDenominationConversion, bridgeProviderBoundNativeDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHeadroomWei, bridgeSame, bridgeUint } from "./validation.js";
 import { approvalData } from "./transaction.js";
 import { BRIDGE_FEE_RULE_HASH } from "./rpc-fees.js";
@@ -81,7 +81,8 @@ function validateIntent(op, legacy) {
         op.requestHash !== hashObject({ profile: i.profile, quote: i.quoteHash, route: m.routeId }))
         bridgeCorrupt();
     if (!legacy) {
-        if ((r.toChainId === 59144) !== (i.allowlist !== null) || (r.toChainId === 59144 && (r.recipient !== i.owner.address || m.tool !== "across")))
+        const providerBoundNative = bridgeProviderBoundNativeDestination(r);
+        if (providerBoundNative !== (i.allowlist !== null) || (providerBoundNative && (r.recipient !== i.owner.address || m.tool !== "across")))
             bridgeCorrupt();
         const allowlist = i.allowlist === null ? null : validateBridgeAllowlistBinding(i.allowlist);
         if (allowlist !== null && (allowlist.account !== i.owner.address || allowlist.selfRecipient !== r.recipient || allowlist.chain !== `eip155:${r.fromChainId}` ||
@@ -135,7 +136,9 @@ function validateIntent(op, legacy) {
     if (native - bridgeNativePrincipalWei(r) > BigInt(r.maxNativeDebitWei) || native > BigInt(a.nativeBalanceWei))
         bridgeCorrupt();
     const included = m.feeCosts.filter((f) => f.included).reduce((sum, f) => sum + BigInt(f.amountAtomic), 0n);
-    if (included + BigInt(m.quotedOutputAtomic) + BigInt(i.implicitProtocolFeeAtomic) !== BigInt(r.amountAtomic))
+    if (bridgeNativeDenominationConversion(r)
+        ? i.implicitProtocolFeeAtomic !== "0" || included > BigInt(r.maxRouteFeeAtomic)
+        : included + BigInt(m.quotedOutputAtomic) + BigInt(i.implicitProtocolFeeAtomic) !== BigInt(r.amountAtomic))
         bridgeCorrupt();
 }
 export function validateEnvelope(e) {
@@ -217,7 +220,7 @@ function validateSnapshot(op, s, legacy) {
             (p.fillType === 2 && (p.relayerCredit !== BRIDGE_ZERO_WORD || p.repaymentChainIdAtomic !== "0"))
             : p.fillType !== null || p.relayerCredit !== null || p.repaymentChainIdAtomic !== null)
             bridgeCorrupt();
-        const providerBoundNative = m.request.toChainId === 59144;
+        const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
         if (!legacy && providerBoundNative && (s.providerObservation?.status !== "completed_observed" ||
             s.providerObservation.destinationTransactionHash !== p.transactionHash || p.nativeBalance === null || p.nativeBalance.recipient !== m.request.recipient ||
             p.nativeTransfer === null || p.nativeTransfer.transactionHash !== p.transactionHash || p.nativeTransfer.to !== m.request.recipient ||

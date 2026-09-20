@@ -160,6 +160,7 @@ not a fallback for bridge operations.
 | Chain | RPC environment variable | Native coin | Wrapped native pinned for Across |
 | --- | --- | --- | --- |
 | `eip155:1` Ethereum | `APN_ETHEREUM_RPC_URL` | ETH, 18 decimals | WETH9 `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2`, code hash |
+| `eip155:143` Monad | `APN_MONAD_RPC_URL` | MON, 18 decimals | WMON `0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A`, code hash; destination only from Ethereum |
 | `eip155:8453` Base | `APN_BASE_RPC_URL` | ETH, 18 decimals | WETH9 predeploy `0x4200000000000000000000000000000000000006`, code hash |
 | `eip155:42161` Arbitrum One | `APN_ARBITRUM_RPC_URL` | ETH, 18 decimals | aeWETH `0x82aF49447D8a07e3bd95BD0d56f35241523fBab1`, EIP-1967 implementation and admin slots |
 | `eip155:59144` Linea | `APN_LINEA_RPC_URL` | ETH, 18 decimals | WETH9 `0xe5D7C2a44FfDdF6b295A15c148167daaAf5Cf34f`, code hash; destination only from Ethereum |
@@ -167,7 +168,8 @@ not a fallback for bridge operations.
 A native coin is a first-class registry row, not a token with a sentinel
 address. It pays gas and Stargate's LayerZero messaging fee, and since this
 change it is also a bridgeable **principal** over Across between Ethereum,
-Base and Arbitrum, plus the reviewed Ethereum-to-Linea self-transfer lane.
+Base and Arbitrum, plus the reviewed Ethereum-to-Linea and
+Ethereum-to-Monad self-transfer lanes.
 The operator names it `native` (`--from-token native --to-token
 native`); the provider's zero-address wire sentinel is never accepted as
 operator input and is never a token. See [Native ETH principal](#native-eth-principal).
@@ -338,7 +340,7 @@ and Jovian configuration. A missing operator receipt field never implies zero.
 ## Native ETH principal
 
 A native principal is carried by Across V4 only, between any two of Ethereum,
-Base and Arbitrum One, and from Ethereum to Linea. There is no approval effect: the approval cap is zero,
+Base and Arbitrum One, and from Ethereum to Linea or Monad. There is no approval effect: the approval cap is zero,
 the account's allowance is the constant zero, and the principal is the bridge
 transaction's `value`. The decoder accepts exactly the call LI.FI returned in the
 read-only captures of 18 September 2026:
@@ -351,6 +353,9 @@ read-only captures of 18 September 2026:
 - Across data whose input token is the source chain's pinned wrapped native and
   whose output token is the destination chain's pinned wrapped native, with the
   same recipient, refund, output, exclusivity and message rules as ERC-20.
+  A reviewed ETH-to-MON conversion may use an output multiplier above one
+  because the units differ; the exact multiplier equation and minimum output
+  remain bound to the materialized calldata.
 
 The route estimate must state `skipApproval: true` and must not ask for an
 approval reset. Every fee row is the native coin itself (`asset: "native"`);
@@ -365,17 +370,17 @@ address on Arbitrum's aeWETH), next to the unchanged `LiFiTransferStarted`,
 Destination proof keeps the full `FilledRelay` tuple and replaces the recipient
 `Transfer` with the unwrap: exactly one log of exactly the output amount from
 the destination SpokePool (`Withdrawal(src)` from WETH9, or a `Transfer` to the
-zero address from aeWETH). For Linea, the exact destination transaction must
+zero address from aeWETH). For Linea and Monad, the exact destination transaction must
 also expose one bounded `debug_traceTransaction` call trace from the pinned
 SpokePool to the bound profile owner for exactly the FilledRelay output. The
 safe canonical transaction and block bind that trace; the previous-block to
 receipt-block balance delta is corroborating evidence and cannot replace the
-transaction-attributable transfer. The configured public Linea endpoint was
-read-only checked on 20 September 2026 and returned `callTracer` output. Linea
-deployment verification replays a pinned safe-block trace probe, so a configured
+transaction-attributable transfer. The configured public Linea and Monad
+endpoints were read-only checked on 20 September 2026 and returned `callTracer`
+output. Destination deployment verification replays a pinned safe-block trace probe, so a configured
 RPC without `debug_traceTransaction` support refuses the lane before execution.
 
-Linea execution requires an active owner allowlist admission for the Ethereum
+Linea and Monad execution require an active owner allowlist admission for the Ethereum
 native asset on rail `bridge`, with mechanism `{ provider: "lifi", reference:
 "across-v4" }`. Preparation freezes the policy revision, owner, self recipient,
 asset, amount and mechanism. Foreground approval reserves the amount in the
@@ -418,6 +423,16 @@ and the read-only code/configuration responses for the pinned Across SpokePool,
 Linea WETH, 18 decimals, 3600-second quote-time buffer and 21600-second fill
 deadline buffer.
 
+The Monad deployment baseline is
+`tests/core/lifi-fixtures/deployment-monad-rpc-20260920.json`. It freezes a
+public safe block and the read-only code and configuration responses for WMON,
+the Across SpokePool proxy and implementation, its 3600-second quote buffer,
+21600-second fill deadline buffer, and `callTracer` capability. A prior
+anonymous discovery returned a direct LI.FI/Across ETH-to-MON route, but a
+20 September refresh returned no route. The deterministic tests use a
+structurally valid synthetic route and do not claim current provider
+availability. Live acceptance therefore still requires a fresh matching quote.
+
 ## USDT on Ethereum
 
 The Tether row is pinned the same way a token is admitted, plus the storage a
@@ -435,7 +450,7 @@ needs a listed USDT destination on an admitted chain.
 ## Allowlist gate for the bridge rail
 
 The frozen list bounds which identities the bridge registry may admit. Native
-delivery to Linea requires the owner allowlist policy
+delivery to Linea or Monad requires the owner allowlist policy
 (`docs/allowlist-policy.md`, rail `bridge`) with the exact Across mechanism pin.
 Prepare freezes the policy digest and revision; approval reserves source usage
 in the shared UTC-day ledger before signing and terminal state follows that

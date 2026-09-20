@@ -1,7 +1,7 @@
 import { decodeFunctionData, encodeFunctionData, getAddress } from "viem";
 import { sha256 } from "../canonical.js";
 import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER, FEE_FORWARDER_NATIVE_SELECTOR, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, STARGATE_SELECTOR, stargateBridgeAbi } from "./abi.js";
-import { BRIDGE_ASSET_REGISTRY, BRIDGE_QUOTE_DESTINATIONS, bridgeAssetRow, bridgeFeeAsset, bridgeNativePrincipal, bridgeQuoteDestination, validateBridgeRequest } from "./asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, BRIDGE_QUOTE_DESTINATIONS, bridgeAssetRow, bridgeFeeAsset, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 export function decodeBridgeCall(materialization) {
     const request = validateBridgeRequest(materialization.request);
@@ -18,8 +18,9 @@ export function decodeBridgeCall(materialization) {
         materialization.sender !== bridgeAddress(materialization.sender) || materialization.sender === BRIDGE_ZERO_ADDRESS ||
         (bridgeNativePrincipal(request) ? value !== sourceAmount : value > BigInt(request.maxNativeDebitWei)))
         fail("transaction_envelope");
-    if (quotedOutput < minimumOutput || minimumOutput < BigInt(request.minOutputAtomic) || sourceAmount < quotedOutput ||
-        sourceAmount - minimumOutput > BigInt(request.maxRouteFeeAtomic) ||
+    const nativeConversion = bridgeNativeDenominationConversion(request);
+    if (quotedOutput < minimumOutput || minimumOutput < BigInt(request.minOutputAtomic) ||
+        (!nativeConversion && (sourceAmount < quotedOutput || sourceAmount - minimumOutput > BigInt(request.maxRouteFeeAtomic))) ||
         (quotedOutput - minimumOutput) * 10000n > quotedOutput * BigInt(request.slippageBps))
         fail("output_economics");
     const selector = data.slice(0, 10);
@@ -52,13 +53,13 @@ function decodeAcross(m, bridge, swaps, across, data, sourceAmount, minimum, val
     const common = decodeCommon(m, bridge, swaps, sourceAmount);
     const receiverWord = addressWord(m.request.recipient), senderWord = addressWord(m.sender);
     // Across carries a native leg as the chain's pinned wrapped-native token: the facet deposits it, the fill unwraps it.
-    const native = bridgeNativePrincipal(m.request);
+    const native = bridgeNativePrincipal(m.request), denominationConversion = bridgeNativeDenominationConversion(m.request);
     const inputWord = addressWord(native ? BRIDGE_ASSET_REGISTRY[m.request.fromChainId].nativeCoin.wrapped.address : m.request.fromToken);
     const outputWord = addressWord(native ? BRIDGE_ASSET_REGISTRY[m.request.toChainId].nativeCoin.wrapped.address : m.request.toToken);
     if (value !== (native ? sourceAmount : 0n) || across.receiverAddress.toLowerCase() !== receiverWord || across.refundAddress.toLowerCase() !== senderWord ||
         across.sendingAssetId.toLowerCase() !== inputWord || across.receivingAssetId.toLowerCase() !== outputWord ||
         across.exclusiveRelayer.toLowerCase() !== BRIDGE_ZERO_WORD || across.exclusivityParameter !== 0 || across.message !== "0x" ||
-        across.outputAmountMultiplier <= 0n || across.outputAmountMultiplier > 1000000000000000000n ||
+        across.outputAmountMultiplier <= 0n || (!denominationConversion && across.outputAmountMultiplier > 1000000000000000000n) ||
         across.outputAmount !== bridge.minAmount * across.outputAmountMultiplier / 1000000000000000000n ||
         across.outputAmount !== minimum || across.quoteTimestamp >= across.fillDeadline)
         fail("across_semantics");
@@ -139,7 +140,9 @@ function validateFeeRows(m, forwardedFee, value, tool) {
             native += 1;
         }
     }
-    if (fixed !== 1 || included + BigInt(m.quotedOutputAtomic) > BigInt(m.request.amountAtomic) || (tool === "across" ? native !== 0 : native !== 1))
+    if (fixed !== 1 || (!bridgeNativeDenominationConversion(m.request) &&
+        included + BigInt(m.quotedOutputAtomic) > BigInt(m.request.amountAtomic)) ||
+        (tool === "across" ? native !== 0 : native !== 1))
         fail("fee_reconciliation");
 }
 function result(m, data, selector, bridge, fee, protocol, bridgeAmount, sourceValueAtomic) {

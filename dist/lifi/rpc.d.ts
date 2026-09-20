@@ -8,6 +8,7 @@ export declare const BRIDGE_RPC_ENV: {
     readonly 1: "APN_ETHEREUM_RPC_URL";
     readonly 56: "APN_BNB_RPC_URL";
     readonly 8453: "APN_BASE_RPC_URL";
+    readonly 143: "APN_MONAD_RPC_URL";
     readonly 42161: "APN_ARBITRUM_RPC_URL";
     readonly 59144: "APN_LINEA_RPC_URL";
 };
@@ -32,8 +33,8 @@ export declare class BridgeRpc implements BridgeRpcPort {
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
     deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<{
-        chainId: 1 | 8453 | 42161 | 56 | 59144;
-        peerChainId: 1 | 8453 | 42161 | 56 | 59144;
+        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        peerChainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
         tool: BridgeTool;
         block: BridgeBlock;
         rpcOrigin: string;
@@ -43,7 +44,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
     }>;
     /** A native principal's balance is the native balance itself and its allowance is the constant zero: nothing is approved. */
     account(owner: Address, spender: Address, token: Address): Promise<{
-        chainId: 1 | 8453 | 42161 | 56 | 59144;
+        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
         rpcOrigin: string;
         block: BridgeBlock;
         owner: `0x${string}`;
