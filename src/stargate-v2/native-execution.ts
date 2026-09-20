@@ -15,8 +15,10 @@ import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "./abi.js";
+import { assertStargateV2LegacyRouteFinalityPolicy, assertStargateV2RouteFinalityPolicy, stargateV2LegacyRouteFinalityPolicy,
+  stargateV2RouteFinalityPolicy, type StargateV2FinalityPolicyProvenance, type StargateV2FinalityTag,
+  type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct, type StargateV2QuoteEvidence } from "./quote.js";
-
 const SOURCE_CHAIN = 1 as const;
 const DESTINATION_CHAIN = 130 as const;
 const SOURCE_EID = 30101 as const;
@@ -56,9 +58,11 @@ export interface StargateNativeEnvelope {
   readonly maxPriorityFeePerGasAtomic: string;
 }
 export interface StargateNativeOperation {
-  readonly schemaVersion: "apn.stargate-v2-native-operation.v1";
+  readonly schemaVersion: "apn.stargate-v2-native-operation.v1" | "apn.stargate-v2-native-operation.v2";
   readonly operationId: string; readonly profile: string; readonly profileHash: string; readonly idempotencyHash: string;
   readonly owner: Address; readonly recipient: Address; readonly amountAtomic: string; readonly maxNativeDebitAtomic: string;
+  readonly finalityPolicy: StargateV2RouteFinalityPolicy;
+  readonly finalityPolicyProvenance: StargateV2FinalityPolicyProvenance;
   readonly sourcePool: Address; readonly destinationPool: Address; readonly sourceEid: 30101; readonly destinationEid: 30320;
   readonly quote: StargateV2QuoteEvidence; readonly sourceCodeHash: Hex; readonly destinationBalanceBeforeAtomic: string;
   readonly destinationCodeHash: Hex;
@@ -70,15 +74,15 @@ export interface StargateNativeOperation {
   readonly integrityHash: string;
 }
 export interface StargateSourceReceipt {
-  readonly transactionHash: Hex; readonly blockNumberAtomic: string; readonly blockHash: Hex; readonly finality: "safe";
+  readonly transactionHash: Hex; readonly blockNumberAtomic: string; readonly blockHash: Hex; readonly finality: StargateV2FinalityTag;
   readonly guid: Hex; readonly amountSentAtomic: string; readonly amountReceivedAtomic: string;
 }
 export type StargateDestinationEvidence = Readonly<{
   mode: "oft_received"; emitter: Address; sourceTransactionHash: Hex; guid: Hex; sourceEid: 30101;
-  destinationTransactionHash: Hex; logIndexAtomic: string; blockNumberAtomic: string; blockHash: Hex; finality: "safe";
+  destinationTransactionHash: Hex; logIndexAtomic: string; blockNumberAtomic: string; blockHash: Hex; finality: StargateV2FinalityTag;
   recipient: Address; amountReceivedAtomic: string;
 }> | Readonly<{
-  mode: "balance_delta"; blockNumberAtomic: string; blockHash: Hex; finality: "safe"; recipient: Address;
+  mode: "balance_delta"; blockNumberAtomic: string; blockHash: Hex; finality: StargateV2FinalityTag; recipient: Address;
   balanceBeforeAtomic: string; balanceAfterAtomic: string; deltaAtomic: string;
 }>;
 
@@ -93,20 +97,21 @@ export interface StargatePreparedEnvelopeEvidence {
 export interface StargateRawLog { readonly address: Address; readonly topics: readonly Hex[]; readonly data: Hex }
 export interface StargateConfirmedReceipt {
   readonly transactionHash: Hex; readonly status: "success" | "reverted"; readonly blockNumberAtomic: string;
-  readonly blockHash: Hex; readonly finality: "safe"; readonly logs: readonly StargateRawLog[];
+  readonly blockHash: Hex; readonly finality: StargateV2FinalityTag; readonly logs: readonly StargateRawLog[];
 }
 export interface StargateNativeExecutionPorts {
   readonly sourceCall: EvmRpcCall;
   readonly destinationCall: EvmRpcCall;
-  readonly destinationBalance: (recipient: Address) => Promise<Readonly<{ balanceAtomic: string; blockNumberAtomic: string; blockHash: Hex }>>;
+  readonly destinationBalance: (recipient: Address, finalityTag: StargateV2FinalityTag) => Promise<Readonly<{ balanceAtomic: string; blockNumberAtomic: string; blockHash: Hex }>>;
   readonly prepareEnvelope: (transaction: Readonly<{ chainId: 1; from: Address; to: Address; data: Hex; valueAtomic: string }>) => Promise<StargatePreparedEnvelopeEvidence>;
   readonly signer: Readonly<{ kind: "imported_evm_signer"; address: Address; signTransaction: (tx: StargateNativeEnvelope) => Promise<Hex> }>;
   readonly signerIdentity: () => Promise<Readonly<{ profile: string; address: Address }>>;
   readonly approve: (operation: StargateNativeOperation) => Promise<void>;
   readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
-  readonly waitSourceReceipt: (transactionHash: Hex) => Promise<StargateConfirmedReceipt | null>;
+  readonly waitSourceReceipt: (transactionHash: Hex, finalityTag: StargateV2FinalityTag) => Promise<StargateConfirmedReceipt | null>;
   readonly observeDestination: (input: Readonly<{ sourceTransactionHash: Hex; guid: Hex; recipient: Address; sourceEid: 30101; destinationPool: Address;
-    minimumAmountAtomic: string; balanceBeforeAtomic: string; fromBlockNumberAtomic: string; fromBlockHash: Hex }>) => Promise<StargateDestinationEvidence | null>;
+    minimumAmountAtomic: string; balanceBeforeAtomic: string; fromBlockNumberAtomic: string; fromBlockHash: Hex;
+    finalityTag: StargateV2FinalityTag }>) => Promise<StargateDestinationEvidence | null>;
   readonly now?: () => number;
 }
 
@@ -221,11 +226,13 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
   if (uint(prepared.maxPriorityFeePerGasAtomic) > uint(prepared.maxFeePerGasAtomic, true)) fail("APN_RPC_PROTOCOL", "priority_fee");
   if (maximumDebit > cap) fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
   if (uint(prepared.nativeBalanceAtomic) < maximumDebit) fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
-  const destination = await ports.destinationBalance(recipient); uint(destination.balanceAtomic); uint(destination.blockNumberAtomic); hex32(destination.blockHash);
+  const finalityPolicy = stargateV2RouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN);
+  const destination = await ports.destinationBalance(recipient, finalityPolicy.destination.blockTag); uint(destination.balanceAtomic); uint(destination.blockNumberAtomic); hex32(destination.blockHash);
   const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
   const body = {
-    schemaVersion: "apn.stargate-v2-native-operation.v1" as const, operationId, profile, profileHash, idempotencyHash,
-    owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), sourcePool: SOURCE_POOL,
+    schemaVersion: "apn.stargate-v2-native-operation.v2" as const, operationId, profile, profileHash, idempotencyHash,
+    owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), finalityPolicy,
+    finalityPolicyProvenance: "pinned_v2" as const, sourcePool: SOURCE_POOL,
     destinationPool: DESTINATION_POOL, sourceEid: SOURCE_EID, destinationEid: DESTINATION_EID, quote, sourceCodeHash: config.codeHash,
     destinationCodeHash: destinationConfig.codeHash,
     destinationBalanceBeforeAtomic: destination.balanceAtomic, destinationBalanceBlock: { numberAtomic: destination.blockNumberAtomic, hash: destination.blockHash },
@@ -249,7 +256,7 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   journal: StargateNativeJournal): Promise<StargateNativeOperation> {
   let operation = await journal.load(operationId); if (operation === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
   if (["submission_started", "submitted", "unknown_finality"].includes(operation.phase)) return await observeOnly(operation, ports, journal);
-  if (operation.phase === "observed") return operation;
+  if (operation.phase === "observed") return operation; if (operation.finalityPolicyProvenance === "derived_legacy_v1") fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
   const now = ports.now ?? Date.now;
   if (Date.parse(operation.expiresAt) <= now()) fail("APN_REPREPARE_REQUIRED", "expired");
   if (operation.phase === "prepared") {
@@ -293,7 +300,7 @@ async function observeOnly(input: StargateNativeOperation, ports: StargateNative
   journal: StargateNativeJournal): Promise<StargateNativeOperation> {
   let operation = input;
   if (operation.transactionHash === undefined) fail("APN_STATE_CORRUPT", "attempt_without_hash");
-  const receipt = await ports.waitSourceReceipt(operation.transactionHash);
+  const receipt = await ports.waitSourceReceipt(operation.transactionHash, operation.finalityPolicy.source.blockTag);
   if (receipt === null) {
     if (operation.phase !== "unknown_finality") { operation = transition(operation, "unknown_finality", "source_receipt_not_safe", (ports.now ?? Date.now)()); await journal.save(operation); }
     return operation;
@@ -303,7 +310,7 @@ async function observeOnly(input: StargateNativeOperation, ports: StargateNative
     recipient: operation.recipient, sourceEid: SOURCE_EID,
     destinationPool: DESTINATION_POOL, minimumAmountAtomic: source.amountReceivedAtomic,
     balanceBeforeAtomic: operation.destinationBalanceBeforeAtomic, fromBlockNumberAtomic: operation.destinationBalanceBlock.numberAtomic,
-    fromBlockHash: operation.destinationBalanceBlock.hash });
+    fromBlockHash: operation.destinationBalanceBlock.hash, finalityTag: operation.finalityPolicy.destination.blockTag });
   if (destination === null) {
     if (operation.sourceReceipt === undefined) {
       const transitions = operation.phase === "submitted" ? operation.transitions : [...operation.transitions,
@@ -320,7 +327,7 @@ async function observeOnly(input: StargateNativeOperation, ports: StargateNative
 }
 
 function sourceReceipt(operation: StargateNativeOperation, receipt: StargateConfirmedReceipt): StargateSourceReceipt {
-  if (receipt.status !== "success" || receipt.finality !== "safe" || receipt.transactionHash !== operation.transactionHash) fail("APN_RPC_PROTOCOL", "source_receipt");
+  if (receipt.status !== "success" || receipt.finality !== operation.finalityPolicy.source.blockTag || receipt.transactionHash !== operation.transactionHash) fail("APN_RPC_PROTOCOL", "source_receipt");
   const events = receipt.logs.flatMap(log => {
     if (address(log.address) !== SOURCE_POOL) return [];
     try { const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", topics: log.topics as [Hex, ...Hex[]], data: log.data }); return [event.args]; }
@@ -332,10 +339,10 @@ function sourceReceipt(operation: StargateNativeOperation, receipt: StargateConf
     event.amountSentLD.toString() !== operation.quote.quote.amountSentAtomic ||
     event.amountReceivedLD.toString() !== operation.quote.quote.minimumOutputAtomic) fail("APN_RPC_PROTOCOL", "source_oft_sent_binding");
   return { transactionHash: operation.transactionHash!, blockNumberAtomic: uint(receipt.blockNumberAtomic).toString(), blockHash: hex32(receipt.blockHash),
-    finality: "safe", guid: hex32(event.guid), amountSentAtomic: event.amountSentLD.toString(), amountReceivedAtomic: event.amountReceivedLD.toString() };
+    finality: operation.finalityPolicy.source.blockTag, guid: hex32(event.guid), amountSentAtomic: event.amountSentLD.toString(), amountReceivedAtomic: event.amountReceivedLD.toString() };
 }
 function validateDestination(operation: StargateNativeOperation, source: StargateSourceReceipt, evidence: StargateDestinationEvidence): void {
-  if (evidence.finality !== "safe" || address(evidence.recipient) !== operation.recipient) fail("APN_RPC_PROTOCOL", "destination_binding");
+  if (evidence.finality !== operation.finalityPolicy.destination.blockTag || address(evidence.recipient) !== operation.recipient) fail("APN_RPC_PROTOCOL", "destination_binding");
   uint(evidence.blockNumberAtomic); hex32(evidence.blockHash);
   if (evidence.mode === "oft_received") {
     hex32(evidence.destinationTransactionHash); uint(evidence.logIndexAtomic);
@@ -428,9 +435,20 @@ function seal<T extends Omit<StargateNativeOperation, "integrityHash"> & { integ
   const { integrityHash: _old, ...body } = value as StargateNativeOperation; return Object.freeze({ ...body, integrityHash: hashObject(body) }) as StargateNativeOperation;
 }
 function validateRecord(value: unknown): StargateNativeOperation {
-  if (!isPlainRecord(value) || value.schemaVersion !== "apn.stargate-v2-native-operation.v1") fail("APN_STATE_CORRUPT", "schema");
-  const record = value as unknown as StargateNativeOperation, { integrityHash, ...body } = record;
-  if (hashObject(body) !== integrityHash || record.transitions.at(-1)?.phase !== record.phase || record.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
+  if (!isPlainRecord(value) || !["apn.stargate-v2-native-operation.v1", "apn.stargate-v2-native-operation.v2"].includes(String(value.schemaVersion))) fail("APN_STATE_CORRUPT", "schema");
+  const raw = value as unknown as StargateNativeOperation, { integrityHash, ...body } = raw;
+  if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
+  let record = raw;
+  if (raw.schemaVersion === "apn.stargate-v2-native-operation.v1") {
+    assertLegacyNativeLane(raw);
+    if (raw.finalityPolicy === undefined && raw.finalityPolicyProvenance === undefined) record = seal({ ...body,
+      finalityPolicy: stargateV2LegacyRouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN), finalityPolicyProvenance: "derived_legacy_v1" } as StargateNativeOperation);
+    else { assertStargateV2LegacyRouteFinalityPolicy(raw.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
+      if (raw.finalityPolicyProvenance !== "derived_legacy_v1") fail("APN_STATE_CORRUPT", "finality_policy_provenance"); }
+  } else {
+    assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
+    if (raw.finalityPolicyProvenance !== "pinned_v2") fail("APN_STATE_CORRUPT", "finality_policy_provenance");
+  }
   const order: StargateNativePhase[] = ["prepared", "approved", "submission_started", "submitted", "observed"];
   for (let i = 1; i < record.transitions.length; i++) {
     const a = record.transitions[i - 1]!.phase, b = record.transitions[i]!.phase;
@@ -439,6 +457,13 @@ function validateRecord(value: unknown): StargateNativeOperation {
     else if (order.indexOf(b) < order.indexOf(a) || order.indexOf(b) > order.indexOf(a) + 1) fail("APN_STATE_CORRUPT", "transition");
   }
   return record;
+}
+function assertLegacyNativeLane(record: StargateNativeOperation): void {
+  const route = record.quote?.route;
+  if (record.recipient !== record.owner || record.sourcePool !== SOURCE_POOL || record.destinationPool !== DESTINATION_POOL || record.sourceEid !== SOURCE_EID ||
+    record.destinationEid !== DESTINATION_EID || record.envelope?.chainId !== SOURCE_CHAIN || record.envelope.from !== record.owner || record.envelope.to !== SOURCE_POOL || route?.sourceChainId !== SOURCE_CHAIN ||
+    route.destinationChainId !== DESTINATION_CHAIN || route.sourceEid !== SOURCE_EID || route.destinationEid !== DESTINATION_EID || record.quote.recipient !== record.owner ||
+    route.sourcePool !== SOURCE_POOL || route.destinationPool !== DESTINATION_POOL || route.sourceToken !== zeroAddress || route.destinationToken !== zeroAddress || route.asset !== "ETH") fail("APN_STATE_CORRUPT", "legacy_lane");
 }
 function validateAdvance(previous: StargateNativeOperation | null, next: StargateNativeOperation): void {
   if (previous === null) { if (next.phase !== "prepared" || next.transitions.length !== 1) fail("APN_STATE_CORRUPT", "initial_state"); return; }
@@ -454,6 +479,7 @@ export interface StargateNativeCanonicalReceipt {
   readonly route: Readonly<{ sourceChainId: 1; sourceEid: 30101; sourcePool: Address; destinationChainId: 130;
     destinationEid: 30320; destinationPool: Address }>;
   readonly owner: Address; readonly recipient: Address; readonly principalAtomic: string; readonly nativeMessageFeeAtomic: string;
+  readonly finalityPolicy: StargateV2RouteFinalityPolicy;
   readonly totalValueAtomic: string; readonly maximumDebitAtomic: string; readonly quoteHash: string;
   readonly source: StargateSourceReceipt; readonly destination: StargateDestinationEvidence; readonly evidenceHash: string;
 }
@@ -466,7 +492,7 @@ export function stargateV2NativeCanonicalReceipt(operationInput: StargateNativeO
   const body = { schemaVersion: "apn.stargate-v2-native-receipt.v1" as const, operationId: operation.operationId,
     profile: operation.profile, route: { sourceChainId: SOURCE_CHAIN, sourceEid: SOURCE_EID, sourcePool: SOURCE_POOL,
       destinationChainId: DESTINATION_CHAIN, destinationEid: DESTINATION_EID, destinationPool: DESTINATION_POOL },
-    owner: operation.owner, recipient: operation.recipient, principalAtomic: operation.amountAtomic,
+    owner: operation.owner, recipient: operation.recipient, principalAtomic: operation.amountAtomic, finalityPolicy: operation.finalityPolicy,
     nativeMessageFeeAtomic: operation.quote.quote.nativeMessageFeeAtomic, totalValueAtomic: operation.totalValueAtomic,
     maximumDebitAtomic: operation.maximumDebitAtomic, quoteHash: operation.quote.quoteHash,
     source: operation.sourceReceipt, destination: operation.destinationEvidence };

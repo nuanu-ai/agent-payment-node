@@ -31,7 +31,7 @@ test("safe source receipt parser preserves exact pinned emitter event evidence",
   const rpc = { call: async (method: string) => method === "eth_getTransactionReceipt" ? { transactionHash: TX, status: "0x1",
     blockNumber: "0xa", blockHash: BLOCK, logs: [{ address: SOURCE, topics, data }] } :
     { number: "0xa", hash: BLOCK } };
-  const receipt = await confirmedStargateSourceReceipt(rpc as any, TX);
+  const receipt = await confirmedStargateSourceReceipt(rpc as any, TX, "safe");
   assert.equal(receipt?.status, "success"); assert.equal(receipt?.logs[0]?.address, SOURCE);
   assert.equal(receipt?.logs[0]?.topics[1], GUID);
 });
@@ -40,7 +40,7 @@ test("safe source receipt parser rejects a receipt orphaned by canonical block h
   let blocks = 0; const rpc = { call: async (method: string) => method === "eth_getTransactionReceipt"
     ? { transactionHash: TX, status: "0x1", blockNumber: "0xa", blockHash: BLOCK, logs: [] }
     : (++blocks === 1 ? { number: "0xa", hash: BLOCK } : { number: "0xa", hash: DEST_TX }) };
-  await assert.rejects(confirmedStargateSourceReceipt(rpc as any, TX), (error: any) => error.code === "APN_RPC_PROTOCOL");
+  await assert.rejects(confirmedStargateSourceReceipt(rpc as any, TX, "safe"), (error: any) => error.code === "APN_RPC_PROTOCOL");
 });
 
 test("destination observer parses only the pinned safe OFTReceived log over the bounded block range", async () => {
@@ -54,7 +54,8 @@ test("destination observer parses only the pinned safe OFTReceived log over the 
     throw new Error(`unexpected ${method}`);
   } };
   const evidence = await observeStargateDestination(rpc as any, { sourceTransactionHash: TX, guid: GUID, recipient: OWNER,
-    sourceEid: 30101, destinationPool: DESTINATION, minimumAmountAtomic: "9", balanceBeforeAtomic: "1", fromBlockNumberAtomic: "16", fromBlockHash: BLOCK });
+    sourceEid: 30101, destinationPool: DESTINATION, minimumAmountAtomic: "9", balanceBeforeAtomic: "1", fromBlockNumberAtomic: "16", fromBlockHash: BLOCK,
+    finalityTag: "safe" });
   assert.equal(evidence?.mode, "oft_received"); assert.equal(evidence?.destinationTransactionHash, DEST_TX);
   assert.equal(filter.address, DESTINATION); assert.equal(filter.fromBlock, "0x10"); assert.equal(filter.toBlock, "0x20");
 });

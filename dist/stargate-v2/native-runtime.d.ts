@@ -34,7 +34,7 @@ export declare class StargateNativeService {
     private ports;
     private remote;
 }
-export declare function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex): Promise<StargateConfirmedReceipt | null>;
+export declare function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex, finalityTag: StargateConfirmedReceipt["finality"]): Promise<StargateConfirmedReceipt | null>;
 export declare function observeStargateDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateNativeExecutionPorts["observeDestination"]>[0]): Promise<{
     mode: "oft_received";
     emitter: `0x${string}`;
@@ -47,7 +47,7 @@ export declare function observeStargateDestination(rpc: Pick<StargateJsonRpc, "c
     amountReceivedAtomic: string;
     blockNumberAtomic: string;
     blockHash: `0x${string}`;
-    finality: "safe";
+    finality: import("./finality-policy.js").StargateV2FinalityTag;
     balanceBeforeAtomic?: never;
     balanceAfterAtomic?: never;
     deltaAtomic?: never;
@@ -59,7 +59,7 @@ export declare function observeStargateDestination(rpc: Pick<StargateJsonRpc, "c
     deltaAtomic: string;
     blockNumberAtomic: string;
     blockHash: `0x${string}`;
-    finality: "safe";
+    finality: import("./finality-policy.js").StargateV2FinalityTag;
     emitter?: never;
     sourceTransactionHash?: never;
     guid?: never;

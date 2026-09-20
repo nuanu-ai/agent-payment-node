@@ -6,6 +6,7 @@ import { decodeFunctionData, encodeAbiParameters, type Abi } from "viem";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 import { STARGATE_QUOTE_OFT_OUTPUT, STARGATE_QUOTE_SEND_OUTPUT } from "../../src/stargate-v2/abi.js";
 import { STARGATE_QUOTE_ABI } from "../../src/stargate-v2/abi.js";
+import { stargateV2ChainFinalityPolicy } from "../../src/stargate-v2/finality-policy.js";
 import { STARGATE_V2_DEPLOYMENTS, stargateV2Route } from "../../src/stargate-v2/registry.js";
 import { quoteStargateV2Direct, type StargateV2QuoteRequest } from "../../src/stargate-v2/quote.js";
 
@@ -48,6 +49,7 @@ async function rpc(overrides: { chainId?: string; oft?: `0x${string}`; fee?: `0x
 test("official ABI fixture records only view quotes and finite source versions", async () => {
   const recorded = JSON.parse(await readFile(resolve("data/stargate/2026-09-20/official-registry-and-abi.json"), "utf8")) as {
     abi: Abi; sources: { commit?: string }[]; blockers: { chainId: number; asset: string }[];
+    finalityPolicy: { version: string; blockTags: Record<string, string>; rules: string[] };
     deployments: { chainId: number; eid: number; asset: string; token: string; pool: string; kind: string }[] };
   assert.deepEqual(recorded.abi.map((x) => x.type === "function" ? x.name : "").sort(), ["quoteOFT", "quoteSend"]);
   assert.ok(recorded.abi.every((x) => x.type === "function" && x.stateMutability === "view"));
@@ -60,6 +62,12 @@ test("official ABI fixture records only view quotes and finite source versions",
     [137, "POL"], [56, "BNB"], [43114, "AVAX"], [130, "USDC"], [59144, "ETH"], [59144, "USDC"],
     [143, "MON"], [143, "USDC"], [1329, "SEI"], [1329, "USDC"],
   ]);
+  assert.equal(recorded.finalityPolicy.version, "apn.stargate-v2-finality.v1");
+  assert.deepEqual(recorded.finalityPolicy.blockTags, { "1": "safe", "10": "safe", "130": "safe", "137": "finalized",
+    "8453": "safe", "42161": "safe", "43114": "safe" });
+  assert.equal(stargateV2ChainFinalityPolicy(137).blockTag, "finalized");
+  assert.equal(stargateV2ChainFinalityPolicy(10).blockTag, "safe");
+  assert.equal(stargateV2ChainFinalityPolicy(130).blockTag, "safe");
   assert.equal(STARGATE_V2_DEPLOYMENTS.length, 13);
   assert.deepEqual(recorded.deployments.map((x) => ({ ...x, token: x.token.toLowerCase(), pool: x.pool.toLowerCase() })),
     STARGATE_V2_DEPLOYMENTS.map((x) => ({ ...x, token: x.token.toLowerCase(), pool: x.pool.toLowerCase() })));

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, getAddress, keccak256, parseAbiParameters, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_QUOTE_ABI, STARGATE_QUOTE_OFT_OUTPUT, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
 import { cleanupStargateV2Token, encodeStargateNativeDrop, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, stargateV2TokenCanonicalReceipt,
   STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_MECHANISM,
@@ -13,6 +16,15 @@ import { temporaryState } from "./helpers.js";
 const KEY = `0x${"11".repeat(32)}` as Hex, ACCOUNT = privateKeyToAccount(KEY), OWNER = ACCOUNT.address;
 const BLOCK = `0x${"ab".repeat(32)}` as Hex, DEST_BLOCK = `0x${"cd".repeat(32)}` as Hex, GUID = `0x${"ef".repeat(32)}` as Hex;
 const AMOUNT = 100_000n, DROP = 50_000_000_000_000_000n, FEE = 1000n, NATIVE_CAP = 100_000_000_000_000_000n;
+function legacyTokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
+  const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, ...current } = operation;
+  const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v1" as const };
+  return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
+}
+async function seedTokenFixture(root: string, operation: StargateTokenOperation): Promise<void> {
+  const directory = join(root, "stargate-v2-token"); await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(directory, `${operation.operationId}.json`), `${canonicalJson(operation)}\n`, { mode: 0o600 });
+}
 class MemoryJournal implements StargateTokenJournal { value: StargateTokenOperation | null = null; history: StargateTokenOperation[] = []; private tail = Promise.resolve();
   async load(id: string) { return this.value?.operationId === id ? structuredClone(this.value) : null; }
   async save(op: StargateTokenOperation) { this.value = structuredClone(op); this.history.push(structuredClone(op)); }
@@ -75,13 +87,56 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     waitSourceReceipt: async tx => { receiptCalls++; if (receiptCalls === 1 && (options.allowance ?? 0n) === 0n) { allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [] }; }
       if (options.bridgeRevert && receiptCalls === 1) return { transactionHash: tx, status: "reverted", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [] };
       if (!options.residualAfterBridge || receiptCalls > 1) allowance = 0n; const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", args: { guid: GUID, fromAddress: OWNER } }) as readonly Hex[]; const data = encodeAbiParameters(parseAbiParameters("uint32 dstEid,uint256 amountSentLD,uint256 amountReceivedLD"), [30109, AMOUNT, AMOUNT]); return { transactionHash: tx, status: "success", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [{ address: STARGATE_TOKEN_SOURCE_POOL, topics, data }] }; },
-    observeDestination: async input => ({ emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: options.destinationMutation === "guid" ? BLOCK : input.guid, sourceEid: 30111, destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0", blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: "safe", recipient: input.recipient, amountReceivedAtomic: AMOUNT.toString(), tokenBalanceBeforeAtomic: input.tokenBalanceBeforeAtomic, tokenBalanceAfterAtomic: (BigInt(input.tokenBalanceBeforeAtomic) + (options.destinationMutation === "token" ? 1n : AMOUNT)).toString(), tokenDeltaAtomic: (options.destinationMutation === "token" ? 1n : AMOUNT).toString(), nativeBalanceBeforeAtomic: input.nativeBalanceBeforeAtomic, nativeBalanceAfterAtomic: (BigInt(input.nativeBalanceBeforeAtomic) + (options.destinationMutation === "native" ? 1n : DROP)).toString(), nativeDeltaAtomic: (options.destinationMutation === "native" ? 1n : DROP).toString(), nativeDrop: { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: "1", success: true } }), now: () => 2_000_000_000_000 };
+    observeDestination: async input => ({ emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: options.destinationMutation === "guid" ? BLOCK : input.guid, sourceEid: 30111, destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0", blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: input.finalityTag, recipient: input.recipient, amountReceivedAtomic: AMOUNT.toString(), tokenBalanceBeforeAtomic: input.tokenBalanceBeforeAtomic, tokenBalanceAfterAtomic: (BigInt(input.tokenBalanceBeforeAtomic) + (options.destinationMutation === "token" ? 1n : AMOUNT)).toString(), tokenDeltaAtomic: (options.destinationMutation === "token" ? 1n : AMOUNT).toString(), nativeBalanceBeforeAtomic: input.nativeBalanceBeforeAtomic, nativeBalanceAfterAtomic: (BigInt(input.nativeBalanceBeforeAtomic) + (options.destinationMutation === "native" ? 1n : DROP)).toString(), nativeDeltaAtomic: (options.destinationMutation === "native" ? 1n : DROP).toString(), nativeDrop: { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: "1", success: true } }), now: () => 2_000_000_000_000 };
   return { ports, journal, counts: () => ({ sends, signs, approvals }) };
 }
 const request = (changes: Partial<Parameters<typeof prepareStargateV2Token>[0]> = {}) => ({ profile: "owner", owner: OWNER, recipient: OWNER, amountAtomic: AMOUNT.toString(), nativeDropAtomic: DROP.toString(), minOutputAtomic: "99000", maxNativeDebitAtomic: "10000000000000000", idempotencyKey: "stargate-token-001", ...changes });
 
 test("Type-3 native-drop bytes and pinned contracts are exact", () => { const encoded = encodeStargateNativeDrop(DROP.toString(), OWNER); assert.equal(encoded, `0x000301003102${DROP.toString(16).padStart(32,"0")}${OWNER.slice(2).toLowerCase().padStart(64,"0")}`); assert.equal(STARGATE_TOKEN_SOURCE_EXECUTOR, getAddress("0x2D2ea0697bdbede3F01553D2Ae4B8d0c486B666e")); });
-test("prepare freezes fresh quote, cap, least approval and send envelopes", async () => { const s=setup(), op=await prepareStargateV2Token(request(),s.ports,s.journal); assert.equal(op.allowanceRequired,true); assert.equal(op.approvalEnvelope?.nonceAtomic,"7"); assert.equal(op.sendEnvelope.nonceAtomic,"8"); assert.equal(op.sendEnvelope.valueAtomic,FEE.toString()); const approval=decodeFunctionData({abi:STARGATE_ERC20_ABI,data:op.approvalEnvelope!.data}); assert.deepEqual(approval.args,[STARGATE_TOKEN_SOURCE_POOL,AMOUNT]); const send=decodeFunctionData({abi:STARGATE_SEND_ABI,data:op.sendEnvelope.data}); assert.equal(send.functionName,"sendToken"); if (send.functionName !== "sendToken") throw new Error("unexpected"); assert.equal(send.args[0].extraOptions,op.options); assert.equal(s.counts().sends,0); });
+test("prepare freezes fresh quote, cap, finality policy, least approval and send envelopes", async () => { const s=setup(), op=await prepareStargateV2Token(request(),s.ports,s.journal); assert.equal(op.schemaVersion,"apn.stargate-v2-token-operation.v2"); assert.equal(op.finalityPolicyProvenance,"pinned_v2"); assert.equal(op.allowanceRequired,true); assert.equal(op.approvalEnvelope?.nonceAtomic,"7"); assert.equal(op.sendEnvelope.nonceAtomic,"8"); assert.equal(op.sendEnvelope.valueAtomic,FEE.toString()); assert.deepEqual(op.finalityPolicy,{version:"apn.stargate-v2-finality.v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"finalized"}}); const approval=decodeFunctionData({abi:STARGATE_ERC20_ABI,data:op.approvalEnvelope!.data}); assert.deepEqual(approval.args,[STARGATE_TOKEN_SOURCE_POOL,AMOUNT]); const send=decodeFunctionData({abi:STARGATE_SEND_ABI,data:op.sendEnvelope.data}); assert.equal(send.functionName,"sendToken"); if (send.functionName !== "sendToken") throw new Error("unexpected"); assert.equal(send.args[0].extraOptions,op.options); assert.equal(s.counts().sends,0); });
+test("legacy v1 prepared token fixture loads locally with the historical all-safe policy", async (t) => {
+  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
+  const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"legacy-token-prepared"}),s.ports,s.journal);
+  await seedTokenFixture(temporary.root,legacyTokenFixture(prepared)); const loaded=await new FileStargateTokenJournal(temporary.root,state).load(prepared.operationId);
+  assert.equal(loaded?.schemaVersion,"apn.stargate-v2-token-operation.v1"); assert.equal(loaded?.finalityPolicyProvenance,"derived_legacy_v1");
+  assert.deepEqual(loaded?.finalityPolicy,{version:"apn.stargate-v2-finality.legacy-safe-v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"safe"}});
+  const journal=new FileStargateTokenJournal(temporary.root,state);
+  await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,journal),(e:any)=>e.code==="APN_OPERATION_BLOCKED"&&e.details.reason==="legacy_operation_nonresumable");
+  await assert.rejects(cleanupStargateV2Token(prepared.operationId,s.ports,journal),(e:any)=>e.code==="APN_OPERATION_BLOCKED"&&e.details.reason==="cleanup_not_required");
+  assert.deepEqual(s.counts(),{sends:0,signs:0,approvals:0});
+});
+test("legacy v1 token unknown finality remains safe-only observation with no resend", async (t) => {
+  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
+  const s=setup({allowance:AMOUNT,sendErrorAt:1}),prepared=await prepareStargateV2Token(request({idempotencyKey:"legacy-token-unknown"}),s.ports,s.journal);
+  const unknown=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(unknown.phase,"unknown_finality"); const before=s.counts();
+  await seedTokenFixture(temporary.root,legacyTokenFixture(unknown)); const observed=await observeStargateV2Token(prepared.operationId,s.ports,new FileStargateTokenJournal(temporary.root,state));
+  assert.equal(observed.phase,"observed"); assert.equal(observed.destinationEvidence?.finality,"safe"); assert.deepEqual(s.counts(),before);
+});
+test("legacy v1 token cleanup remains recoverable without resending the bridge", async (t) => {
+  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
+  const s=setup({allowance:AMOUNT,bridgeRevert:true}),prepared=await prepareStargateV2Token(request({idempotencyKey:"legacy-token-cleanup"}),s.ports,s.journal);
+  const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(required.phase,"cleanup_required"); const before=s.counts();
+  await seedTokenFixture(temporary.root,legacyTokenFixture(required)); const cleaned=await cleanupStargateV2Token(prepared.operationId,s.ports,new FileStargateTokenJournal(temporary.root,state));
+  assert.equal(cleaned.phase,"cleaned"); assert.equal(s.counts().sends,before.sends+1); assert.equal(s.counts().signs,before.signs+1);
+});
+test("v2 token missing policy, policy drift, and ambiguous legacy lanes are corrupt before effects", async (t) => {
+  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize(); const journal=new FileStargateTokenJournal(temporary.root,state);
+  const missingSetup=setup(),missing=await prepareStargateV2Token(request({idempotencyKey:"v2-token-missing-policy"}),missingSetup.ports,missingSetup.journal);
+  const {integrityHash:_i,finalityPolicy:_p,finalityPolicyProvenance:_fp,...missingBody}=missing; await seedTokenFixture(temporary.root,{...missingBody,integrityHash:hashObject(missingBody)} as StargateTokenOperation);
+  await assert.rejects(journal.load(missing.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT");
+  const driftSetup=setup(),driftOp=await prepareStargateV2Token(request({idempotencyKey:"v2-token-policy-drift"}),driftSetup.ports,driftSetup.journal);
+  const {integrityHash:_di,...driftBody}={...driftOp,finalityPolicy:{...driftOp.finalityPolicy,destination:{chainId:137 as const,blockTag:"safe" as const}}}; await seedTokenFixture(temporary.root,{...driftBody,integrityHash:hashObject(driftBody)} as StargateTokenOperation);
+  await assert.rejects(journal.load(driftOp.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT");
+  const laneSetup=setup(),laneOp=legacyTokenFixture(await prepareStargateV2Token(request({idempotencyKey:"legacy-token-lane-drift"}),laneSetup.ports,laneSetup.journal));
+  const {integrityHash:_li,...laneBody}=structuredClone(laneOp),badLane={...laneBody,quote:{...laneBody.quote,route:{...laneBody.quote.route,destinationChainId:130}}}; await seedTokenFixture(temporary.root,{...badLane,integrityHash:hashObject(badLane)} as StargateTokenOperation);
+  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT");
+  const {integrityHash:_ei,...executorBody}=laneOp,badExecutor={...executorBody,executor:STARGATE_TOKEN_DESTINATION_EXECUTOR}; await seedTokenFixture(temporary.root,{...badExecutor,integrityHash:hashObject(badExecutor)} as StargateTokenOperation);
+  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT");
+  const {integrityHash:_ti,...targetBody}=laneOp,badTarget={...targetBody,sendEnvelope:{...targetBody.sendEnvelope,to:STARGATE_TOKEN_DESTINATION_POOL}}; await seedTokenFixture(temporary.root,{...badTarget,integrityHash:hashObject(badTarget)} as StargateTokenOperation);
+  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT");
+  const {integrityHash:_ri,...recipientBody}=laneOp,badRecipient={...recipientBody,recipient:STARGATE_TOKEN_DESTINATION_POOL}; await seedTokenFixture(temporary.root,{...badRecipient,integrityHash:hashObject(badRecipient)} as StargateTokenOperation);
+  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT"); assert.deepEqual(laneSetup.counts(),{sends:0,signs:0,approvals:0});
+});
 test("zero native drop emits no options and remains cap checked", async () => { const s=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request({idempotencyKey:"token-only-route",nativeDropAtomic:"0"}),s.ports,s.journal); assert.equal(op.options,"0x"); assert.equal(op.nativeDropAtomic,"0"); });
 test("existing exact allowance skips approval while residual or cap overflow fail closed", async () => { const exact=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request(),exact.ports,exact.journal); assert.equal(op.allowanceRequired,false); assert.equal(op.approvalEnvelope,undefined); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"residual-allowance"}),setup({allowance:1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="residual_allowance_cleanup_required"); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"native-cap-over"}),setup({nativeCap:DROP-1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="native_drop_cap_exceeded"); });
 test("approval and bridge effects are separately marked, exact, observed, and canonical", async () => { const s=setup(), prepared=await prepareStargateV2Token(request(),s.ports,s.journal), observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.equal(observed.residualAllowanceAtomic,"0"); assert.equal(observed.usageState,"finalized"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.deepEqual(observed.transitions.map(x=>x.phase),["prepared","approved","allowance_submission_started","allowance_submitted","allowance_observed","submission_started","submitted","observed"]); assert.match(stargateV2TokenCanonicalReceipt(observed).evidenceHash,/^[a-f0-9]{64}$/u); });
