@@ -120,4 +120,24 @@ export const operationSchema = z.strictObject({ ...mutableFields, schemaVersion:
         sourceAccount: accountSchema, destinationStartBlock: blockSchema, sourceRpcOrigin: originSchema, destinationRpcOrigin: originSchema,
         preparedAt: isoSchema, expiresAt: isoSchema, policyHash: hashSchema, implicitProtocolFeeAtomic: uintSchema, allowlist: z.unknown().nullable() }),
     transitions: z.array(transitionSchema).min(1).max(512), integrityHash: hashSchema });
+/*
+ * Records written before the Linea allowlist/usage-lease journal upgrade kept the
+ * same durable version string. Keep their exact historical shapes separate from
+ * the current schema: this adapter is intentionally bounded to the two destination
+ * proof shapes that were actually emitted before that upgrade.
+ */
+const legacyDestinationProofSchema = z.union([
+    destinationProofSchema.omit({ nativeBalance: true, nativeTransfer: true }),
+    destinationProofSchema.omit({ nativeTransfer: true }),
+]);
+const legacyTransitionSchema = z.strictObject({
+    ...transitionSchema.omit({ destinationProof: true, usageLease: true }).shape,
+    destinationProof: legacyDestinationProofSchema.nullable(),
+});
+export const legacyBridgeOperationSchema = z.strictObject({
+    ...operationSchema.omit({ destinationProof: true, usageLease: true, intent: true, transitions: true }).shape,
+    destinationProof: legacyDestinationProofSchema.nullable(),
+    intent: operationSchema.shape.intent.omit({ allowlist: true }),
+    transitions: z.array(legacyTransitionSchema).min(1).max(512),
+});
 //# sourceMappingURL=schema.js.map
