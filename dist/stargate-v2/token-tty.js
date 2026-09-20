@@ -23,7 +23,12 @@ export class TtyStargateTokenApproval {
             ...(op.bridgeSimulation?.mode === "pending_post_approval" ? ["The bridge has not simulated successfully yet. After the approval is safe, APN must revalidate and exactly simulate it within this ceiling before signing."] : []),
             `Policy digest/revision: ${op.policy.policyDigest} / ${op.policy.policyRevision}`,
             `Quote: ${op.quote.quoteHash}; options: ${op.options}`,
-            `Expires: ${op.expiresAt}`,
+            `Approval must be signed and submitted before preparation expiry: ${op.expiresAt}`,
+            ...(op.approvalFinalityWindowMs === undefined ? [] : [
+                `Approval safe-finality window after the durable submission marker: ${Math.floor(op.approvalFinalityWindowMs / 60_000)} minutes`,
+                "After exact approval reaches safe finality, APN obtains and persists a new short-lived quote and revalidates every cap before it can sign the bridge.",
+                "The preparation quote is never used to sign the post-approval bridge.",
+            ]),
             "Every approval or bridge broadcast is durably marked first. Ambiguous results are observed and never resent.",
             "Completion requires exact safe source/destination events, USDC delivery, POL balance delta, and zero residual allowance.",
         ], code, op.expiresAt, this.options);

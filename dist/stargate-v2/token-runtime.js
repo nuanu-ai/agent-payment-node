@@ -87,7 +87,7 @@ export class StargateTokenService {
         assertServiceUsageTarget(op);
         if (["observed", "cleanup_required", "cleaned"].includes(op.phase))
             return op.usageTarget === undefined ? op : await this.status(id);
-        if (op.usageTarget === undefined && !["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality", "cleaned"].includes(op.phase))
+        if (op.usageTarget === undefined && !["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "allowance_observed", "post_approval_quote_bound", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality", "cleaned"].includes(op.phase))
             throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted or recoverable Stargate token operation can be observed.");
         return await observeStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal);
     }

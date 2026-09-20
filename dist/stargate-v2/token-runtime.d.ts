@@ -1,3 +1,4 @@
+import { type Hex } from "viem";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { Address } from "../model.js";
 import type { StateStore } from "../state.js";
@@ -29,32 +30,6 @@ export declare class StargateTokenService {
     status(id: string): Promise<StargateTokenOperation>;
     receipt(id: string): Promise<Readonly<{
         evidenceHash: string;
-        schemaVersion: "apn.stargate-v2-token-receipt.v1";
-        operationId: string;
-        profile: string;
-        route: {
-            sourceChainId: number;
-            sourceEid: number;
-            sourcePool: `0x${string}`;
-            sourceToken: `0x${string}`;
-            destinationChainId: number;
-            destinationEid: number;
-            destinationPool: `0x${string}`;
-            destinationToken: `0x${string}`;
-        };
-        owner: `0x${string}`;
-        recipient: `0x${string}`;
-        principalAtomic: string;
-        minimumOutputAtomic: string;
-        nativeDropAtomic: string;
-        nativeMessageFeeAtomic: string;
-        maximumDebitAtomic: string;
-        options: `0x${string}`;
-        executor: `0x${string}`;
-        executorNativeCapAtomic: string;
-        policy: import("./token-execution.js").StargateTokenPolicyBinding;
-        finalityPolicy: import("./finality-policy.js").StargateV2RouteFinalityPolicy;
-        quoteHash: string;
         feeApproval: Readonly<{
             readonly provenance: "exact_snapshot" | "owner_ceiling";
             readonly quotedMaxFeePerGasWei: string;
@@ -81,6 +56,45 @@ export declare class StargateTokenService {
         residualAllowanceAtomic: string;
         source: import("./token-execution.js").StargateTokenSourceReceipt;
         destination: StargateTokenDestinationEvidence;
+        quoteLifecycle?: {
+            prepareQuoteHash: string;
+            prepareExpiresAt: string;
+            approvalFinalityWindowMs: number;
+            approvalSubmissionStartedAt: string | null;
+            approvalFinalityDeadline: string | null;
+            postApprovalQuoteHash: string | null;
+            postApprovalQuoteBlock: Readonly<{
+                readonly numberAtomic: string;
+                readonly hash: Hex;
+            }> | null;
+            postApprovalQuoteExpiresAt: string | null;
+        };
+        schemaVersion: "apn.stargate-v2-token-receipt.v2" | "apn.stargate-v2-token-receipt.v1";
+        operationId: string;
+        profile: string;
+        route: {
+            sourceChainId: number;
+            sourceEid: number;
+            sourcePool: `0x${string}`;
+            sourceToken: `0x${string}`;
+            destinationChainId: number;
+            destinationEid: number;
+            destinationPool: `0x${string}`;
+            destinationToken: `0x${string}`;
+        };
+        owner: `0x${string}`;
+        recipient: `0x${string}`;
+        principalAtomic: string;
+        minimumOutputAtomic: string;
+        nativeDropAtomic: string;
+        nativeMessageFeeAtomic: string;
+        maximumDebitAtomic: string;
+        options: `0x${string}`;
+        executor: `0x${string}`;
+        executorNativeCapAtomic: string;
+        policy: import("./token-execution.js").StargateTokenPolicyBinding;
+        finalityPolicy: import("./finality-policy.js").StargateV2RouteFinalityPolicy;
+        quoteHash: string;
     }>>;
     private required;
     private ports;
