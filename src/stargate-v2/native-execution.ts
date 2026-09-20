@@ -388,13 +388,17 @@ async function verifySignedEnvelope(raw: Hex, operation: StargateNativeOperation
   const e = operation.envelope;
   if (signer !== operation.owner) fail("APN_RPC_PROTOCOL", "signed_transaction_signer");
   if (tx.chainId !== e.chainId) fail("APN_RPC_PROTOCOL", "signed_transaction_chain");
+  if (tx.type !== "eip1559") fail("APN_RPC_PROTOCOL", "signed_transaction_type");
   if (tx.to?.toLowerCase() !== e.to.toLowerCase()) fail("APN_RPC_PROTOCOL", "signed_transaction_to");
   if ((tx.data ?? "0x").toLowerCase() !== e.data.toLowerCase()) fail("APN_RPC_PROTOCOL", "signed_transaction_data");
   if ((tx.value ?? 0n) !== BigInt(e.valueAtomic)) fail("APN_RPC_PROTOCOL", "signed_transaction_value");
   if (tx.nonce !== Number(e.nonceAtomic)) fail("APN_RPC_PROTOCOL", "signed_transaction_nonce");
   if (tx.gas !== BigInt(e.gasLimitAtomic)) fail("APN_RPC_PROTOCOL", "signed_transaction_gas");
   if (tx.maxFeePerGas !== BigInt(e.maxFeePerGasAtomic)) fail("APN_RPC_PROTOCOL", "signed_transaction_max_fee");
-  if (tx.maxPriorityFeePerGas !== BigInt(e.maxPriorityFeePerGasAtomic)) fail("APN_RPC_PROTOCOL", "signed_transaction_priority_fee");
+  const expectedPriorityFee = BigInt(e.maxPriorityFeePerGasAtomic);
+  if (tx.maxPriorityFeePerGas === undefined
+    ? expectedPriorityFee !== 0n
+    : tx.maxPriorityFeePerGas !== expectedPriorityFee) fail("APN_RPC_PROTOCOL", "signed_transaction_priority_fee");
 }
 async function requoteFinalSend(call: EvmRpcCall, sendParam: Readonly<Record<string, unknown>>, tag: string): Promise<bigint> {
   const data = encodeFunctionData({ abi: STARGATE_QUOTE_ABI, functionName: "quoteSend", args: [sendParam as never, false] });
