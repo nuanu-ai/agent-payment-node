@@ -384,6 +384,10 @@ export declare const failureSchema: z.ZodObject<{
         }, z.core.$strict>;
         rpcOrigin: z.ZodString;
     }, z.core.$strict>>;
+    residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
+        observed: "observed";
+        unavailable: "unavailable";
+    }>>;
     preSignRpc: z.ZodOptional<z.ZodObject<{
         schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
         phase: z.ZodLiteral<"pre_sign_guard">;
@@ -891,6 +895,10 @@ export declare const transitionSchema: z.ZodObject<{
             }, z.core.$strict>;
             rpcOrigin: z.ZodString;
         }, z.core.$strict>>;
+        residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
+            observed: "observed";
+            unavailable: "unavailable";
+        }>>;
         preSignRpc: z.ZodOptional<z.ZodObject<{
             schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
             phase: z.ZodLiteral<"pre_sign_guard">;
@@ -1509,6 +1517,10 @@ export declare const operationSchema: z.ZodObject<{
                 }, z.core.$strict>;
                 rpcOrigin: z.ZodString;
             }, z.core.$strict>>;
+            residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
+                observed: "observed";
+                unavailable: "unavailable";
+            }>>;
             preSignRpc: z.ZodOptional<z.ZodObject<{
                 schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
                 phase: z.ZodLiteral<"pre_sign_guard">;
@@ -1694,6 +1706,10 @@ export declare const operationSchema: z.ZodObject<{
             }, z.core.$strict>;
             rpcOrigin: z.ZodString;
         }, z.core.$strict>>;
+        residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
+            observed: "observed";
+            unavailable: "unavailable";
+        }>>;
         preSignRpc: z.ZodOptional<z.ZodObject<{
             schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
             phase: z.ZodLiteral<"pre_sign_guard">;

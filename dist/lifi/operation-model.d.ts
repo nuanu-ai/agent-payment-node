@@ -43,6 +43,7 @@ export interface BridgeEffect {
 export interface BridgeFailure {
     readonly reason: string;
     readonly residualAllowance: BridgeResidualAllowance | null;
+    readonly residualAllowanceStatus?: "unavailable" | "observed";
     readonly preSignRpc?: BridgePreSignRpcFailure;
 }
 export type BridgePreSignRpcStage = "source_deployment_refresh" | "destination_deployment_refresh" | "source_account_refresh" | "source_execution_simulation" | "source_fee_quote";
@@ -99,6 +100,8 @@ export interface BridgeOperationRecord extends BridgeMutable {
     readonly transitions: readonly BridgeTransition[];
     readonly integrityHash: string;
 }
+/** The bridge was never signed or submitted, so keep the original pre-sign diagnostic across observation retries. */
+export declare function retainedUnsentBridgeRpcFailure(op: Pick<BridgeOperationRecord, "effects" | "failure">): BridgeFailure | null;
 export declare const BRIDGE_TERMINAL: readonly BridgeState[];
 export declare function bridgeIntentBinding(operation: Pick<BridgeOperationRecord, "schemaVersion" | "kind" | "profileHash" | "operationId" | "idempotencyHash" | "requestHash" | "intent" | "effects">): {
     schemaVersion: "apn.bridge-operation.v1";

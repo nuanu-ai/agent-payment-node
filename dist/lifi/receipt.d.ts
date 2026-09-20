@@ -53,6 +53,7 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
         category: import("./operation-model.js").BridgePreSignRpcCategory;
         method: import("./operation-model.js").BridgePreSignRpcMethod | null;
     };
+    residual_allowance_status?: "observed" | "unavailable";
     kind: "bridge_route";
     schema_version: "apn.bridge-operation.v1";
     operation_id: string;
@@ -254,6 +255,7 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
         category: import("./operation-model.js").BridgePreSignRpcCategory;
         method: import("./operation-model.js").BridgePreSignRpcMethod | null;
     };
+    residual_allowance_status?: "observed" | "unavailable";
     kind: "bridge_route";
     operation_id: string;
     profile: string;

@@ -62,6 +62,7 @@ function projectBridgeOperation(op: BridgeOperationRecord, legacy: boolean) {
         quoted_fee_wei: e.fee_quote.totalQuoteWei, included_fee_wei: e.included_proof?.actualTotalFeeWei ?? null })) },
     effects, source_proof: op.sourceProof, destination_proof: op.destinationProof,
     provider_observation: op.providerObservation, residual_allowance: op.failure?.residualAllowance ?? null,
+    ...(op.failure?.residualAllowanceStatus === undefined ? {} : { residual_allowance_status: op.failure.residualAllowanceStatus }),
     ...(op.failure?.preSignRpc === undefined ? {} : { pre_sign_rpc_failure: {
       schema_version: op.failure.preSignRpc.schemaVersion, phase: op.failure.preSignRpc.phase,
       effect_role: op.failure.preSignRpc.effectRole, stage: op.failure.preSignRpc.stage,

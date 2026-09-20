@@ -465,7 +465,12 @@ calldata or signing material. The failure remains final and does not add a
 retry, fallback, signature or send. A first-effect guard ends as
 `failed_before_effect`; a bridge guard after a safely completed approval ends
 as `failed_after_approval` and keeps the same bridge-stage context while the
-bridge effect remains unsigned and unsent.
+bridge effect remains unsigned and unsent. If the approval is only included,
+or the residual-allowance read fails, the operation remains
+`unknown_finality`, retains `unsent_apn_rpc_ambiguous` and its finite context,
+and exposes `residual_allowance_status` when that read was attempted. A later
+observation can terminalize the operation without signing or sending the
+bridge, while keeping the original diagnostic in status and receipt.
 
 Bridge journals written before the allowlist/usage-ledger upgrade remain
 readable through a separate, strict legacy decoder. The decoder verifies the

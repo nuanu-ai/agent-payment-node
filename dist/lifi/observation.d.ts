@@ -1,4 +1,4 @@
-import type { BridgeEffect, BridgeMutable, BridgeOperationRecord } from "./operation-model.js";
+import { type BridgeEffect, type BridgeMutable, type BridgeOperationRecord } from "./operation-model.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
 export type BridgeSave = (op: BridgeOperationRecord, patch: Partial<BridgeMutable>) => Promise<BridgeOperationRecord>;
 export declare class BridgeObservation {
