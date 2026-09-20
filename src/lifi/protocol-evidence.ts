@@ -2,7 +2,7 @@ import { decodeEventLog } from "viem";
 import { canonicalJson, sha256 } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
 import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./abi.js";
-import { BRIDGE_ASSET_REGISTRY } from "./asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
 import type { AcrossCorrelation, BridgeDestinationProof, BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall, StargateCorrelation } from "./model.js";
@@ -169,8 +169,12 @@ function acrossDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall
   const repaymentChainIdAtomic = bridgeUint(e.repaymentChainId.toString()).toString();
   if (info.fillType === 2 && (relayerCredit !== BRIDGE_ZERO_WORD || repaymentChainIdAtomic !== "0")) fail("slow_fill_credit");
   if (decoded.destinationToken === BRIDGE_ZERO_ADDRESS) {
-    const balance = decoded.destinationChainId === 59144 ? nativeBalanceProof(decoded, receipt) : null;
-    const transfer = decoded.destinationChainId === 59144 ? nativeTransferProof(decoded, receipt, emitter, c.outputAmountAtomic) : null;
+    const providerBound = bridgeProviderBoundNativeDestination({
+      fromChainId: decoded.sourceChainId, toChainId: decoded.destinationChainId,
+      fromToken: decoded.sourceToken, toToken: decoded.destinationToken,
+    });
+    const balance = providerBound ? nativeBalanceProof(decoded, receipt) : null;
+    const transfer = providerBound ? nativeTransferProof(decoded, receipt, emitter, c.outputAmountAtomic) : null;
     // The pinned SpokePool unwraps a native fill and sends the value to the recipient; the value send itself has no
     // log, so the credit is proved by the exact relay tuple plus the unwrap of exactly the output from the SpokePool.
     nativeMovement(decoded.destinationChainId, receipt, "unwrap", c.outputAmountAtomic);

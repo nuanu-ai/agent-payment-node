@@ -24,19 +24,20 @@ const request = (over: Partial<Record<string, unknown>> = {}) => ({ fromChainId:
   minOutputAtomic: "9000000", maxNativeDebitWei: "20000000000000000", maxRouteFeeAtomic: "1000000", slippageBps: 50, ...over });
 
 test("LI.FI registry admits exactly the reviewed chains, first-class native coins and token rows", () => {
-  assert.deepEqual([...BRIDGE_CHAINS], [1, 56, 8453, 42161, 59144]);
+  assert.deepEqual([...BRIDGE_CHAINS], [1, 56, 143, 8453, 42161, 59144]);
   for (const chainId of BRIDGE_CHAINS) {
     const row = BRIDGE_ASSET_REGISTRY[chainId];
     assert.equal(row.caip2, `eip155:${chainId}`);
     const native = bridgeNativeCoin(chainId);
     assert.deepEqual({ kind: native.kind, chainId: native.chainId, symbol: native.symbol, coinKey: native.coinKey, decimals: native.decimals,
       pairKey: native.pairKey, stargate: native.stargate, listing: native.listing },
-    { kind: "native", chainId, symbol: chainId === 56 ? "BNB" : "ETH", coinKey: chainId === 56 ? "BNB" : "ETH",
-      decimals: 18, pairKey: chainId === 56 ? "bnb" : "eth", stargate: null, listing: "frozen_list" });
+    { kind: "native", chainId, symbol: chainId === 56 ? "BNB" : chainId === 143 ? "MON" : "ETH",
+      coinKey: chainId === 56 ? "BNB" : chainId === 143 ? "MON" : "ETH",
+      decimals: 18, pairKey: chainId === 56 ? "bnb" : chainId === 143 ? "mon" : "eth", stargate: null, listing: "frozen_list" });
     assert.ok(row.tokens.every((asset) => asset.kind === "erc20" && asset.address !== BRIDGE_ZERO_ADDRESS));
   }
   assert.deepEqual(BRIDGE_CHAINS.map((id) => BRIDGE_ASSET_REGISTRY[id].tokens.map((t) => `${t.symbol}/${t.coinKey}/${t.decimals}`)),
-    [["USDC/USDC/6", "USDT/USDT/6", "WBTC/WBTC/8"], [], ["USDC/USDC/6"], ["USDC/USDC/6", "WBTC/WBTC/8"], []]);
+    [["USDC/USDC/6", "USDT/USDT/6", "WBTC/WBTC/8"], [], [], ["USDC/USDC/6"], ["USDC/USDC/6", "WBTC/WBTC/8"], []]);
   assert.equal(bridgeTokenRow(1, USDC[1]).code.upgradeability, "legacy_proxy");
   assert.equal(bridgeTokenRow(8453, USDC[8453]).code.upgradeability, "legacy_proxy");
   assert.equal(bridgeTokenRow(42161, USDC[42161]).code.upgradeability, "legacy_proxy");

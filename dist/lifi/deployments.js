@@ -31,6 +31,10 @@ const ACROSS = {
         spoke: code("0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
         implementation: code("0xcfcda84333431bcc9155f2368b8362f0d1dff8c9", "0xa860f20748abfdf98f4e55411b5db7630457bec1abfb5d88f1ecd5f25b4ec24b"),
     },
+    143: {
+        spoke: code("0xd2ecb3afe598b746F8123CaE365a598DA831A449", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
+        implementation: code("0x3266a6de0f3533b042ffdb1a8183168422be7349", "0x67f63f0bce352f1c92ead8a198ebf1b2861659d75524f6a0fc0fdf4cd73fc5c3"),
+    },
     59144: {
         spoke: code("0xEf4998E4cda2232c5f1824Eac8C5060F28BfAEeC", "0x020e6beeb2805a62c4bedee022067700a57a2fa6793db6f7773ad94bb6dfb633"),
     },
@@ -59,7 +63,7 @@ export function bridgeDeployment(chainId, peerChainId, tool, token) {
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_chain");
     const pool = bridgeAssetTool(asset, tool);
     const wrapped = BRIDGE_ASSET_REGISTRY[chainId].nativeCoin.wrapped;
-    const destinationOnly = chainId === 59144 && peerChainId === 1 && tool === "across" && asset.kind === "native";
+    const destinationOnly = (chainId === 143 || chainId === 59144) && peerChainId === 1 && tool === "across" && asset.kind === "native";
     const diamondHash = DIAMOND_HASH[chainId];
     const commonCode = [...(destinationOnly ? [] : [code(BRIDGE_DIAMOND, diamondHash ?? bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "diamond_deployment")),
             code(FEE_FORWARDER, "0x7ee455a6853068874bfd201f93d6383ed6d88934a922316db5575b057e2ebe74")]),

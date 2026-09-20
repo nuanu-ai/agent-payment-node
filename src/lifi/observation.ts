@@ -6,6 +6,7 @@ import { retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, 
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeDestinationProof, bridgeSourceProof, destinationEventFilter } from "./protocol-evidence.js";
 import { bridgeProtocolEmitter } from "./deployments.js";
+import { bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { approvalIncluded } from "./transaction.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
 
@@ -95,7 +96,7 @@ export class BridgeObservation {
     } catch { /* Provider availability is independent of canonical chain evidence. */ }
     if (observation !== null) op = await this.save(op, { providerObservation: observation });
     const hint = op.providerObservation?.destinationTransactionHash;
-    const providerBoundNative = m.request.toChainId === 59144;
+    const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
     if (providerBoundNative) {
       if (op.providerObservation?.status !== "completed_observed" || !isEvmTransactionHash(hint)) return await this.waiting(op);
       try { return await this.finish(await this.save(op, { destinationProof: await this.destinationCandidate(op, hint) })); }
@@ -124,7 +125,7 @@ export class BridgeObservation {
   }
   private async destinationCandidate(op: BridgeOperationRecord, hash: Hex): Promise<BridgeVerifiedDestinationProof> {
     const request = op.intent.materialization.request;
-    const proveNativeDelta = request.toToken === "0x0000000000000000000000000000000000000000" && request.toChainId === 59144;
+    const proveNativeDelta = bridgeProviderBoundNativeDestination(request);
     const found = await this.destination.observe(hash, undefined, proveNativeDelta ? { recipient: request.recipient,
       from: bridgeProtocolEmitter(request.toChainId, "across", request.toToken), amountAtomic: op.sourceProof!.correlation.kind === "across"
         ? op.sourceProof!.correlation.outputAmountAtomic : op.intent.decoded.minimumOutputAtomic } : undefined);

@@ -54,7 +54,7 @@ export function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourc
       const unwrap = wrapped.events === "weth9" ? eventLog(wrapped.address, "Withdrawal", { src: emitter, wad: BigInt(c.outputAmountAtomic) })
         : eventLog(wrapped.address, "Transfer", { from: emitter, to: BRIDGE_ZERO_ADDRESS, value: BigInt(c.outputAmountAtomic) });
       const result = receipt(d.destinationChainId, [fill, unwrap]);
-      if (d.destinationChainId !== 59144) return result;
+      if (d.destinationChainId !== 143 && d.destinationChainId !== 59144) return result;
       const beforeBlock = { numberAtomic: "122", hash: `0x${"bc".repeat(32)}` as Hex, timestampAtomic: "1" };
       const afterBlock = { numberAtomic: result.blockNumberAtomic, hash: result.blockHash, timestampAtomic: "2" };
       return { ...result, nativeBalance: { recipient: d.recipient, beforeBlock, afterBlock, beforeBalanceAtomic: "100",
