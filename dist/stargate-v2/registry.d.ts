@@ -8,7 +8,7 @@ export interface StargateV2Deployment {
     readonly asset: StargateV2Asset;
     readonly token: Address;
     readonly pool: Address;
-    readonly kind: "pool" | "oft";
+    readonly kind: "pool" | "oft" | "StargatePoolNative";
     readonly localDecimals: 6 | 18;
     readonly sharedDecimals: 6;
 }

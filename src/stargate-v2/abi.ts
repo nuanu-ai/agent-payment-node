@@ -37,3 +37,50 @@ export const STARGATE_QUOTE_ABI = [
     ], outputs: [{ name: "fee", type: "tuple", components: [{ name: "nativeFee", type: "uint256" }, { name: "lzTokenFee", type: "uint256" }] }],
   },
 ] as const;
+
+/**
+ * Pinned to IStargate.sol and StargateBase.sol at
+ * stargate-protocol/stargate-v2@ce598b8d16472cd76ee47d30b8a40bc5c1b667bb.
+ */
+export const STARGATE_SEND_ABI = [
+  {
+    type: "function", name: "sendToken", stateMutability: "payable", inputs: [
+      { name: "_sendParam", type: "tuple", components: [
+        { name: "dstEid", type: "uint32" }, { name: "to", type: "bytes32" },
+        { name: "amountLD", type: "uint256" }, { name: "minAmountLD", type: "uint256" },
+        { name: "extraOptions", type: "bytes" }, { name: "composeMsg", type: "bytes" }, { name: "oftCmd", type: "bytes" },
+      ] },
+      { name: "_fee", type: "tuple", components: [
+        { name: "nativeFee", type: "uint256" }, { name: "lzTokenFee", type: "uint256" },
+      ] },
+      { name: "_refundAddress", type: "address" },
+    ], outputs: [
+      { name: "msgReceipt", type: "tuple", components: [
+        { name: "guid", type: "bytes32" }, { name: "nonce", type: "uint64" }, { name: "fee", type: "tuple", components: [
+          { name: "nativeFee", type: "uint256" }, { name: "lzTokenFee", type: "uint256" },
+        ] },
+      ] },
+      { name: "oftReceipt", type: "tuple", components: [
+        { name: "amountSentLD", type: "uint256" }, { name: "amountReceivedLD", type: "uint256" },
+      ] },
+      { name: "ticket", type: "tuple", components: [
+        { name: "ticketId", type: "uint72" }, { name: "passengerBytes", type: "bytes" },
+      ] },
+    ],
+  },
+  { type: "function", name: "token", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
+  { type: "function", name: "localEid", stateMutability: "view", inputs: [], outputs: [{ type: "uint32" }] },
+  { type: "function", name: "sharedDecimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+  { type: "function", name: "status", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+  { type: "function", name: "paths", stateMutability: "view", inputs: [{ name: "eid", type: "uint32" }], outputs: [{ type: "uint64" }] },
+  { type: "function", name: "stargateType", stateMutability: "pure", inputs: [], outputs: [{ type: "uint8" }] },
+  { type: "event", name: "OFTSent", inputs: [
+    { name: "guid", type: "bytes32", indexed: true }, { name: "dstEid", type: "uint32", indexed: false },
+    { name: "fromAddress", type: "address", indexed: true }, { name: "amountSentLD", type: "uint256", indexed: false },
+    { name: "amountReceivedLD", type: "uint256", indexed: false },
+  ] },
+  { type: "event", name: "OFTReceived", inputs: [
+    { name: "guid", type: "bytes32", indexed: true }, { name: "srcEid", type: "uint32", indexed: false },
+    { name: "toAddress", type: "address", indexed: true }, { name: "amountReceivedLD", type: "uint256", indexed: false },
+  ] },
+] as const;
