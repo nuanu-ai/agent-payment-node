@@ -421,4 +421,45 @@ export declare const LAYERZERO_EXECUTOR_ABI: readonly [{
         readonly type: "uint64";
         readonly name: "lzComposeBaseGas";
     }];
+}, {
+    readonly type: "event";
+    readonly name: "NativeDropApplied";
+    readonly inputs: readonly [{
+        readonly name: "origin";
+        readonly type: "tuple";
+        readonly indexed: false;
+        readonly components: readonly [{
+            readonly name: "srcEid";
+            readonly type: "uint32";
+        }, {
+            readonly name: "sender";
+            readonly type: "bytes32";
+        }, {
+            readonly name: "nonce";
+            readonly type: "uint64";
+        }];
+    }, {
+        readonly name: "dstEid";
+        readonly type: "uint32";
+        readonly indexed: false;
+    }, {
+        readonly name: "oapp";
+        readonly type: "address";
+        readonly indexed: false;
+    }, {
+        readonly name: "params";
+        readonly type: "tuple[]";
+        readonly indexed: false;
+        readonly components: readonly [{
+            readonly name: "receiver";
+            readonly type: "address";
+        }, {
+            readonly name: "amount";
+            readonly type: "uint256";
+        }];
+    }, {
+        readonly name: "success";
+        readonly type: "bool[]";
+        readonly indexed: false;
+    }];
 }];

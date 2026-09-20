@@ -3,9 +3,12 @@ import test from "node:test";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, getAddress, keccak256, parseAbiParameters, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_QUOTE_ABI, STARGATE_QUOTE_OFT_OUTPUT, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
-import { encodeStargateNativeDrop, executeStargateV2Token, observeStargateV2Token, prepareStargateV2Token, stargateV2TokenCanonicalReceipt,
+import { cleanupStargateV2Token, encodeStargateNativeDrop, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, stargateV2TokenCanonicalReceipt,
+  STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_MECHANISM,
   STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_POOL,
   STARGATE_TOKEN_SOURCE_TOKEN, type StargateTokenExecutionPorts, type StargateTokenJournal, type StargateTokenOperation } from "../../src/stargate-v2/token-execution.js";
+import { StateStore } from "../../src/state.js";
+import { temporaryState } from "./helpers.js";
 
 const KEY = `0x${"11".repeat(32)}` as Hex, ACCOUNT = privateKeyToAccount(KEY), OWNER = ACCOUNT.address;
 const BLOCK = `0x${"ab".repeat(32)}` as Hex, DEST_BLOCK = `0x${"cd".repeat(32)}` as Hex, GUID = `0x${"ef".repeat(32)}` as Hex;
@@ -14,15 +17,17 @@ class MemoryJournal implements StargateTokenJournal { value: StargateTokenOperat
   async load(id: string) { return this.value?.operationId === id ? structuredClone(this.value) : null; }
   async save(op: StargateTokenOperation) { this.value = structuredClone(op); this.history.push(structuredClone(op)); }
   async withLock<T>(_id: string, work: () => Promise<T>) { const prior = this.tail; let release!:()=>void; this.tail = new Promise<void>(r=>release=r); await prior; try { return await work(); } finally { release(); } }
+  async withOwnerChainLock<T>(_owner: `0x${string}`, _chainId: number, work: () => Promise<T>) { return await work(); }
 }
-function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: number; legacy?: boolean; destinationMutation?: "guid"|"native"|"token" } = {}) {
-  let allowance = options.allowance ?? 0n, approvalConsumed = false, sends = 0, signs = 0, approvals = 0, receiptCalls = 0;
+function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: number; legacy?: boolean; bridgeRevert?: boolean;
+  residualAfterBridge?: boolean; advanceNonceOnSend?: boolean; preflightNonceDrift?: boolean; destinationMutation?: "guid"|"native"|"token" } = {}) {
+  let allowance = options.allowance ?? 0n, approvalConsumed = false, sends = 0, signs = 0, approvals = 0, receiptCalls = 0, nonce = 7n;
   const sourceCall: StargateTokenExecutionPorts["sourceCall"] = async (method, params) => {
     if (method === "eth_chainId") return "0xa";
     if (method === "eth_getBlockByNumber") return { number: "0x10", hash: BLOCK };
     if (method === "eth_getCode") return "0x60016000";
     if (method === "eth_getBalance") return "0x1fffffffffffff";
-    if (method === "eth_getTransactionCount") return approvalConsumed ? "0x8" : "0x7";
+    if (method === "eth_getTransactionCount") return `0x${(options.preflightNonceDrift ? 8n : (approvalConsumed ? 8n : nonce)).toString(16)}`;
     if (method === "eth_estimateGas") return "0x15f90";
     if (method !== "eth_call") throw new Error(`unexpected ${method}`);
     const data = (params[0] as { data: Hex }).data;
@@ -58,11 +63,14 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     destinationBalances: async () => ({ tokenAtomic: "500000", nativeAtomic: "1000000000000000000", blockNumberAtomic: "9", blockHash: DEST_BLOCK }),
     prepareEnvelope: async tx => ({ nonceAtomic: tx.nonceAtomic ?? "7", gasLimitAtomic: "100000", maxFeePerGasAtomic: "2", maxPriorityFeePerGasAtomic: "1", nativeBalanceAtomic: "9000000000000000000" }),
     signer: { kind: "imported_evm_signer", address: OWNER, signTransaction: async tx => { signs++; if (options.legacy) return await ACCOUNT.signTransaction({ type: "legacy", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), gasPrice: BigInt(tx.maxFeePerGasAtomic) }); return await ACCOUNT.signTransaction({ type: "eip1559", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [] }); } },
-    signerIdentity: async () => ({ profile: "owner", address: OWNER }), approve: async () => { approvals++; }, admitPolicy: async () => ({ policyDigest: "a".repeat(64), policyRevision: 1 }), confirmPolicy: async () => {},
-    sendRawTransaction: async raw => { sends++; if (options.sendErrorAt === sends) throw new Error("timeout"); return keccak256(raw); },
+    signerIdentity: async () => ({ profile: "owner", address: OWNER }), approve: async () => { approvals++; }, approveCleanup: async () => { approvals++; },
+    admitPolicy: async () => ({ policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM }), confirmPolicy: async () => {},
+    reserveUsage: async () => {}, followUsage: async () => {},
+    sendRawTransaction: async raw => { sends++; if (options.sendErrorAt === sends) throw new Error("timeout"); if (options.advanceNonceOnSend) nonce++; return keccak256(raw); },
     waitSourceReceipt: async tx => { receiptCalls++; if (receiptCalls === 1 && (options.allowance ?? 0n) === 0n) { allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [] }; }
-      allowance = 0n; const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", args: { guid: GUID, fromAddress: OWNER } }) as readonly Hex[]; const data = encodeAbiParameters(parseAbiParameters("uint32 dstEid,uint256 amountSentLD,uint256 amountReceivedLD"), [30109, AMOUNT, AMOUNT]); return { transactionHash: tx, status: "success", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [{ address: STARGATE_TOKEN_SOURCE_POOL, topics, data }] }; },
-    observeDestination: async input => ({ emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: options.destinationMutation === "guid" ? BLOCK : input.guid, sourceEid: 30111, destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0", blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: "safe", recipient: input.recipient, amountReceivedAtomic: AMOUNT.toString(), tokenBalanceBeforeAtomic: input.tokenBalanceBeforeAtomic, tokenBalanceAfterAtomic: (BigInt(input.tokenBalanceBeforeAtomic) + (options.destinationMutation === "token" ? 1n : AMOUNT)).toString(), tokenDeltaAtomic: (options.destinationMutation === "token" ? 1n : AMOUNT).toString(), nativeBalanceBeforeAtomic: input.nativeBalanceBeforeAtomic, nativeBalanceAfterAtomic: (BigInt(input.nativeBalanceBeforeAtomic) + (options.destinationMutation === "native" ? 1n : DROP)).toString(), nativeDeltaAtomic: (options.destinationMutation === "native" ? 1n : DROP).toString() }), now: () => 2_000_000_000_000 };
+      if (options.bridgeRevert && receiptCalls === 1) return { transactionHash: tx, status: "reverted", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [] };
+      if (!options.residualAfterBridge || receiptCalls > 1) allowance = 0n; const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", args: { guid: GUID, fromAddress: OWNER } }) as readonly Hex[]; const data = encodeAbiParameters(parseAbiParameters("uint32 dstEid,uint256 amountSentLD,uint256 amountReceivedLD"), [30109, AMOUNT, AMOUNT]); return { transactionHash: tx, status: "success", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [{ address: STARGATE_TOKEN_SOURCE_POOL, topics, data }] }; },
+    observeDestination: async input => ({ emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: options.destinationMutation === "guid" ? BLOCK : input.guid, sourceEid: 30111, destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0", blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: "safe", recipient: input.recipient, amountReceivedAtomic: AMOUNT.toString(), tokenBalanceBeforeAtomic: input.tokenBalanceBeforeAtomic, tokenBalanceAfterAtomic: (BigInt(input.tokenBalanceBeforeAtomic) + (options.destinationMutation === "token" ? 1n : AMOUNT)).toString(), tokenDeltaAtomic: (options.destinationMutation === "token" ? 1n : AMOUNT).toString(), nativeBalanceBeforeAtomic: input.nativeBalanceBeforeAtomic, nativeBalanceAfterAtomic: (BigInt(input.nativeBalanceBeforeAtomic) + (options.destinationMutation === "native" ? 1n : DROP)).toString(), nativeDeltaAtomic: (options.destinationMutation === "native" ? 1n : DROP).toString(), nativeDrop: { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: "1", success: true } }), now: () => 2_000_000_000_000 };
   return { ports, journal, counts: () => ({ sends, signs, approvals }) };
 }
 const request = (changes: Partial<Parameters<typeof prepareStargateV2Token>[0]> = {}) => ({ profile: "owner", owner: OWNER, recipient: OWNER, amountAtomic: AMOUNT.toString(), nativeDropAtomic: DROP.toString(), minOutputAtomic: "99000", maxNativeDebitAtomic: "10000000000000000", idempotencyKey: "stargate-token-001", ...changes });
@@ -74,5 +82,59 @@ test("existing exact allowance skips approval while residual or cap overflow fai
 test("approval and bridge effects are separately marked, exact, observed, and canonical", async () => { const s=setup(), prepared=await prepareStargateV2Token(request(),s.ports,s.journal), observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.equal(observed.residualAllowanceAtomic,"0"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.deepEqual(s.journal.history.map(x=>x.phase),["prepared","approved","allowance_submission_started","allowance_submitted","allowance_observed","submission_started","submitted","observed"]); assert.match(stargateV2TokenCanonicalReceipt(observed).evidenceHash,/^[a-f0-9]{64}$/u); });
 test("ambiguous approval is durable and concurrent/repeated execute never resends", async () => { const s=setup({sendErrorAt:1}), prepared=await prepareStargateV2Token(request(),s.ports,s.journal); const [a,b]=await Promise.all([executeStargateV2Token(prepared.operationId,s.ports,s.journal),executeStargateV2Token(prepared.operationId,s.ports,s.journal)]); assert.equal(a.phase,"allowance_unknown_finality"); assert.equal(b.phase,"observed"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.equal(s.journal.history.filter(x=>x.phase==="allowance_submission_started").length,1); });
 test("observe recovers an ambiguous approval without signing or broadcasting the bridge", async () => { const s=setup({sendErrorAt:1}), prepared=await prepareStargateV2Token(request({idempotencyKey:"observe-only-approval"}),s.ports,s.journal); const unknown=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(unknown.phase,"allowance_unknown_finality"); const observed=await observeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"allowance_observed"); assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1}); });
-test("legacy/type-confused envelope is rejected before any send", async () => { const s=setup({allowance:AMOUNT,legacy:true}), prepared=await prepareStargateV2Token(request(),s.ports,s.journal); await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),(e:any)=>e.details?.reason==="signed_transaction_envelope"); assert.equal(s.counts().sends,0); assert.equal(s.journal.value?.phase,"approved"); });
+test("legacy/type-confused envelope is rejected before any send and requires explicit cleanup", async () => { const s=setup({allowance:AMOUNT,legacy:true}), prepared=await prepareStargateV2Token(request(),s.ports,s.journal); await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),(e:any)=>e.details?.reason==="signed_transaction_envelope"); assert.equal(s.counts().sends,0); assert.equal(s.journal.value?.phase,"cleanup_required"); });
 for (const mutation of ["guid","native","token"] as const) test(`destination ${mutation} mismatch cannot terminalize`, async () => { const s=setup({allowance:AMOUNT,destinationMutation:mutation}), prepared=await prepareStargateV2Token(request({idempotencyKey:`destination-${mutation}`}),s.ports,s.journal); await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),(e:any)=>e.code==="APN_RPC_PROTOCOL"); assert.notEqual(s.journal.value?.phase,"observed"); });
+
+test("confirmed bridge revert enters explicit cleanup and approve-zero reaches terminal zero allowance", async () => {
+  const s = setup({ allowance: AMOUNT, bridgeRevert: true });
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "bridge-revert-cleanup" }), s.ports, s.journal);
+  const required = await executeStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(required.phase, "cleanup_required"); assert.equal(required.residualAllowanceAtomic, AMOUNT.toString());
+  const cleaned = await cleanupStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(cleaned.phase, "cleaned"); assert.equal(cleaned.residualAllowanceAtomic, "0");
+  assert.deepEqual(s.counts(), { sends: 2, signs: 2, approvals: 2 });
+  const before = s.counts(); await assert.rejects(observeStargateV2Token(prepared.operationId, s.ports, s.journal)); assert.deepEqual(s.counts(), before);
+});
+
+test("bridge preflight failure after approval requires explicit cleanup without reserving, signing, or sending", async () => {
+  const s = setup({ allowance: AMOUNT, preflightNonceDrift: true });
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "preflight-cleanup" }), s.ports, s.journal);
+  const required = await executeStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(required.phase, "cleanup_required"); assert.equal(required.cleanupReason, "nonce_changed");
+  assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 });
+});
+
+test("successful delivery with residual allowance cleans up before canonical completion", async () => {
+  const s = setup({ allowance: AMOUNT, residualAfterBridge: true });
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "delivered-residual-cleanup" }), s.ports, s.journal);
+  const required = await executeStargateV2Token(prepared.operationId, s.ports, s.journal); assert.equal(required.phase, "cleanup_required");
+  const observed = await cleanupStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(observed.phase, "observed"); assert.equal(observed.residualAllowanceAtomic, "0"); assert.match(stargateV2TokenCanonicalReceipt(observed).evidenceHash, /^[a-f0-9]{64}$/u);
+});
+
+test("ambiguous cleanup marker is observe-only and never resends", async () => {
+  const s = setup({ allowance: AMOUNT, bridgeRevert: true, sendErrorAt: 2 });
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "ambiguous-cleanup" }), s.ports, s.journal);
+  assert.equal((await executeStargateV2Token(prepared.operationId, s.ports, s.journal)).phase, "cleanup_required");
+  assert.equal((await cleanupStargateV2Token(prepared.operationId, s.ports, s.journal)).phase, "cleanup_unknown_finality");
+  const before = s.counts(), cleaned = await observeStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(cleaned.phase, "cleaned"); assert.deepEqual(s.counts(), before);
+});
+
+test("distinct operations for one owner serialize through preflight and only one can sign the shared nonce", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const state = new StateStore(temporary.root); await state.initialize();
+  const journal = new FileStargateTokenJournal(temporary.root, state), s = setup({ allowance: AMOUNT, advanceNonceOnSend: true });
+  const first = await prepareStargateV2Token(request({ idempotencyKey: "same-owner-race-one" }), s.ports, journal);
+  const second = await prepareStargateV2Token(request({ idempotencyKey: "same-owner-race-two" }), s.ports, journal);
+  const [a, b] = await Promise.all([executeStargateV2Token(first.operationId, s.ports, journal), executeStargateV2Token(second.operationId, s.ports, journal)]);
+  assert.equal([a.phase, b.phase].includes("observed"), true); assert.equal(s.counts().signs, 1); assert.equal(s.counts().sends, 1);
+  assert.equal([a.phase, b.phase].some(phase => phase === "cleaned" || phase === "cleanup_required"), true);
+});
+
+test("owner-chain lock permits different owners or source chains to proceed concurrently", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const journal = new FileStargateTokenJournal(temporary.root);
+  const other = getAddress("0x2222222222222222222222222222222222222222"); let active = 0, peak = 0;
+  const work = async () => { active++; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 20)); active--; };
+  await Promise.all([journal.withOwnerChainLock(OWNER, 10, work), journal.withOwnerChainLock(other, 10, work), journal.withOwnerChainLock(OWNER, 1, work)]);
+  assert.equal(peak, 3);
+});

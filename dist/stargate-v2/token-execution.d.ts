@@ -13,9 +13,14 @@ export declare const STARGATE_TOKEN_SOURCE_POOL: `0x${string}`;
 export declare const STARGATE_TOKEN_DESTINATION_POOL: `0x${string}`;
 /** Official LayerZero Optimism mainnet Executor at lz-address-book commit 7c800d6. */
 export declare const STARGATE_TOKEN_SOURCE_EXECUTOR: `0x${string}`;
+export declare const STARGATE_TOKEN_DESTINATION_EXECUTOR: `0x${string}`;
+export declare const STARGATE_TOKEN_MECHANISM: Readonly<{
+    provider: "stargate-v2";
+    reference: `eip155:10:0x${string}/eip155:137:0x${string}`;
+}>;
 /** Exact OptionsBuilder.addExecutorNativeDropOption Type-3 wire encoding. */
 export declare function encodeStargateNativeDrop(amountInput: string, recipientInput: Address): Hex;
-export type StargateTokenPhase = "prepared" | "approved" | "allowance_submission_started" | "allowance_unknown_finality" | "allowance_submitted" | "allowance_observed" | "submission_started" | "unknown_finality" | "submitted" | "observed";
+export type StargateTokenPhase = "prepared" | "approved" | "allowance_submission_started" | "allowance_unknown_finality" | "allowance_submitted" | "allowance_observed" | "submission_started" | "unknown_finality" | "submitted" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
 export interface StargateTokenTransition {
     readonly phase: StargateTokenPhase;
     readonly at: string;
@@ -59,10 +64,19 @@ export interface StargateTokenDestinationEvidence {
     readonly nativeBalanceBeforeAtomic: string;
     readonly nativeBalanceAfterAtomic: string;
     readonly nativeDeltaAtomic: string;
+    readonly nativeDrop?: Readonly<{
+        readonly executor: Address;
+        readonly nonceAtomic: string;
+        readonly success: true;
+    }>;
 }
 export interface StargateTokenPolicyBinding {
     readonly policyDigest: string;
     readonly policyRevision: number;
+    readonly mechanism: Readonly<{
+        readonly provider: string;
+        readonly reference: string;
+    }>;
 }
 export interface StargateTokenOperation {
     readonly schemaVersion: "apn.stargate-v2-token-operation.v1";
@@ -111,6 +125,9 @@ export interface StargateTokenOperation {
     readonly residualAllowanceAtomic?: string;
     readonly sourceReceipt?: StargateTokenSourceReceipt;
     readonly destinationEvidence?: StargateTokenDestinationEvidence;
+    readonly cleanupEnvelope?: StargateTokenEnvelope;
+    readonly cleanupTransactionHash?: Hex;
+    readonly cleanupReason?: string;
     readonly integrityHash: string;
 }
 export interface StargateTokenPreparationRequest {
@@ -171,6 +188,7 @@ export interface StargateTokenExecutionPorts {
         address: Address;
     }>>;
     readonly approve: (operation: StargateTokenOperation) => Promise<void>;
+    readonly approveCleanup: (operation: StargateTokenOperation) => Promise<void>;
     readonly admitPolicy: (input: Readonly<{
         profile: string;
         owner: Address;
@@ -178,6 +196,8 @@ export interface StargateTokenExecutionPorts {
         operationId: string;
     }>) => Promise<StargateTokenPolicyBinding>;
     readonly confirmPolicy: (operation: StargateTokenOperation) => Promise<void>;
+    readonly reserveUsage: (operation: StargateTokenOperation) => Promise<void>;
+    readonly followUsage: (operation: StargateTokenOperation, state: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert") => Promise<void>;
     readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
     readonly waitSourceReceipt: (transactionHash: Hex) => Promise<StargateTokenConfirmedReceipt | null>;
     readonly observeDestination: (input: Readonly<{
@@ -191,6 +211,7 @@ export interface StargateTokenExecutionPorts {
         nativeBalanceBeforeAtomic: string;
         nativeDropAtomic: string;
         fromBlockNumberAtomic: string;
+        fromBlockHash: Hex;
     }>) => Promise<StargateTokenDestinationEvidence | null>;
     readonly now?: () => number;
 }
@@ -198,6 +219,7 @@ export interface StargateTokenJournal {
     load(id: string): Promise<StargateTokenOperation | null>;
     save(op: StargateTokenOperation): Promise<void>;
     withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
+    withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
 }
 export declare class FileStargateTokenJournal implements StargateTokenJournal {
     private readonly root;
@@ -205,6 +227,7 @@ export declare class FileStargateTokenJournal implements StargateTokenJournal {
     constructor(root: string, locks?: Pick<StateStore, "initialize" | "withLocks">);
     private path;
     withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
+    withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
     load(id: string): Promise<StargateTokenOperation | null>;
     save(nextInput: StargateTokenOperation): Promise<void>;
 }
@@ -212,6 +235,8 @@ export declare function prepareStargateV2Token(request: StargateTokenPreparation
 export declare function executeStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
 /** Network observation only: it may advance an attempted effect and can never sign or broadcast. */
 export declare function observeStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
+/** Explicit foreground cleanup. Observation remains separate and never invokes this signer path. */
+export declare function cleanupStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
 export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOperation): Readonly<{
     evidenceHash: string;
     schemaVersion: "apn.stargate-v2-token-receipt.v1";

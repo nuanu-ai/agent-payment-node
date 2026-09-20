@@ -11,6 +11,7 @@ export declare class StargateTokenService {
     private destination?;
     private readonly journal;
     private readonly local;
+    private readonly usage;
     constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number);
     prepare(input: Readonly<{
         profile: string;
@@ -21,6 +22,7 @@ export declare class StargateTokenService {
         idempotencyKey: string;
     }>): Promise<StargateTokenOperation>;
     execute(id: string): Promise<StargateTokenOperation>;
+    cleanup(id: string): Promise<StargateTokenOperation>;
     observe(id: string): Promise<StargateTokenOperation>;
     status(id: string): Promise<StargateTokenOperation>;
     receipt(id: string): Promise<Readonly<{
@@ -57,6 +59,7 @@ export declare class StargateTokenService {
     }>>;
     private required;
     private ports;
+    private followUsage;
     private remote;
 }
 export declare function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>): Promise<StargateTokenDestinationEvidence | null>;
