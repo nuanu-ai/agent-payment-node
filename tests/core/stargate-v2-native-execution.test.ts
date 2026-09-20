@@ -220,6 +220,9 @@ test("v2 native records require the policy and reject rehashed policy drift", as
   const targetDrift = { ...legacyBody, envelope: { ...legacyBody.envelope, to: DESTINATION } };
   await assert.rejects(async () => stargateV2NativeCanonicalReceipt({ ...targetDrift, integrityHash: hashObject(targetDrift) } as StargateNativeOperation),
     (error: any) => error.code === "APN_STATE_CORRUPT");
+  const recipientDrift = { ...legacyBody, recipient: DESTINATION };
+  await assert.rejects(async () => stargateV2NativeCanonicalReceipt({ ...recipientDrift, integrityHash: hashObject(recipientDrift) } as StargateNativeOperation),
+    (error: any) => error.code === "APN_STATE_CORRUPT");
 });
 
 test("ambiguous send is durable unknown_finality and repeated execute observes without signing or resend", async () => {

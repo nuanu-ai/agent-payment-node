@@ -460,7 +460,7 @@ function validateRecord(value: unknown): StargateNativeOperation {
 }
 function assertLegacyNativeLane(record: StargateNativeOperation): void {
   const route = record.quote?.route;
-  if (record.sourcePool !== SOURCE_POOL || record.destinationPool !== DESTINATION_POOL || record.sourceEid !== SOURCE_EID ||
+  if (record.recipient !== record.owner || record.sourcePool !== SOURCE_POOL || record.destinationPool !== DESTINATION_POOL || record.sourceEid !== SOURCE_EID ||
     record.destinationEid !== DESTINATION_EID || record.envelope?.chainId !== SOURCE_CHAIN || record.envelope.from !== record.owner || record.envelope.to !== SOURCE_POOL || route?.sourceChainId !== SOURCE_CHAIN ||
     route.destinationChainId !== DESTINATION_CHAIN || route.sourceEid !== SOURCE_EID || route.destinationEid !== DESTINATION_EID || record.quote.recipient !== record.owner ||
     route.sourcePool !== SOURCE_POOL || route.destinationPool !== DESTINATION_POOL || route.sourceToken !== zeroAddress || route.destinationToken !== zeroAddress || route.asset !== "ETH") fail("APN_STATE_CORRUPT", "legacy_lane");
