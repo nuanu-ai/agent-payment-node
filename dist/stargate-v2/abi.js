@@ -87,6 +87,17 @@ export const LAYERZERO_EXECUTOR_ABI = [{
             { type: "uint64", name: "lzComposeBaseGas" },
         ],
     }, {
+        type: "function", name: "execute302", stateMutability: "payable", inputs: [{
+                name: "_executionParams", type: "tuple", components: [
+                    { name: "receiver", type: "address" },
+                    { name: "origin", type: "tuple", components: [
+                            { name: "srcEid", type: "uint32" }, { name: "sender", type: "bytes32" }, { name: "nonce", type: "uint64" },
+                        ] },
+                    { name: "guid", type: "bytes32" }, { name: "message", type: "bytes" }, { name: "extraData", type: "bytes" },
+                    { name: "gasLimit", type: "uint256" },
+                ],
+            }], outputs: [],
+    }, {
         type: "event", name: "NativeDropApplied", inputs: [
             { name: "origin", type: "tuple", indexed: false, components: [
                     { name: "srcEid", type: "uint32" }, { name: "sender", type: "bytes32" }, { name: "nonce", type: "uint64" },
@@ -97,6 +108,20 @@ export const LAYERZERO_EXECUTOR_ABI = [{
                     { name: "receiver", type: "address" }, { name: "amount", type: "uint256" },
                 ] },
             { name: "success", type: "bool[]", indexed: false },
+        ],
+    }];
+/** Minimal LayerZero Endpoint V2 packet evidence surface. */
+export const LAYERZERO_ENDPOINT_V2_ABI = [{
+        type: "event", name: "PacketSent", inputs: [
+            { name: "encodedPayload", type: "bytes", indexed: false }, { name: "options", type: "bytes", indexed: false },
+            { name: "sendLibrary", type: "address", indexed: false },
+        ],
+    }, {
+        type: "event", name: "PacketDelivered", inputs: [
+            { name: "origin", type: "tuple", indexed: false, components: [
+                    { name: "srcEid", type: "uint32" }, { name: "sender", type: "bytes32" }, { name: "nonce", type: "uint64" },
+                ] },
+            { name: "receiver", type: "address", indexed: false },
         ],
     }];
 //# sourceMappingURL=abi.js.map
