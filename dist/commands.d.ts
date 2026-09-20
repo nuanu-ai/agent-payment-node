@@ -23,7 +23,7 @@ export type CommandRequest = {
     readonly maxNativeDebitAtomic: string;
     readonly idempotencyKey: string;
 } | {
-    readonly command: "stargate.token.execute" | "stargate.token.observe" | "stargate.token.status" | "stargate.token.receipt";
+    readonly command: "stargate.token.execute" | "stargate.token.cleanup" | "stargate.token.observe" | "stargate.token.status" | "stargate.token.receipt";
     readonly operationId: string;
 } | {
     readonly command: "swap.uniswap.inventory";

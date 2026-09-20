@@ -1,6 +1,8 @@
-import { decodeEventLog, decodeFunctionResult, encodeEventTopics, encodeFunctionData, getAddress, keccak256, type Hex } from "viem";
+import { decodeEventLog, decodeFunctionResult, encodeEventTopics, encodeFunctionData, getAddress, keccak256, pad, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity, type AssetUsageState } from "../asset-usage-ledger.js";
+import { canonicalJson, domainHash } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
@@ -8,10 +10,11 @@ import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { Address } from "../model.js";
 import type { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
-import { STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "./abi.js";
+import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "./abi.js";
 import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtime.js";
-import { executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, stargateV2TokenCanonicalReceipt,
-  STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN,
+import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, stargateV2TokenCanonicalReceipt,
+  STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM,
+  STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN,
   type StargateTokenDestinationEvidence, type StargateTokenEnvelope, type StargateTokenExecutionPorts, type StargateTokenOperation } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
 
@@ -38,15 +41,17 @@ class LocalStargateTokenSigner {
 
 export class StargateTokenService {
   private source?: StargateJsonRpc; private destination?: StargateJsonRpc; private readonly journal: FileStargateTokenJournal; private readonly local: LocalStargateTokenSigner;
+  private readonly usage: AssetUsageLedger;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly env: Readonly<Record<string, string | undefined>>, private readonly now: () => number = Date.now) {
-    this.journal = new FileStargateTokenJournal(state.root, state); this.local = new LocalStargateTokenSigner(state, wrapping);
+    this.journal = new FileStargateTokenJournal(state.root, state); this.local = new LocalStargateTokenSigner(state, wrapping); this.usage = new AssetUsageLedger(state.root);
   }
   async prepare(input: Readonly<{ profile: string; amountAtomic: string; nativeDropAtomic: string; minOutputAtomic: string; maxNativeDebitAtomic: string; idempotencyKey: string }>) {
     this.remote(); await this.state.initialize(); const identity = await this.local.identity(input.profile), ports = await this.ports(identity.profile, identity.address);
     return await prepareStargateV2Token({ ...input, owner: identity.address, recipient: identity.address }, ports, this.journal);
   }
   async execute(id: string) { const op = await this.required(id); return await executeStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
-  async observe(id: string) { const op = await this.required(id); if (!["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "submission_started", "submitted", "unknown_finality"].includes(op.phase)) throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate token operation can be observed."); return await observeStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
+  async cleanup(id: string) { const op = await this.required(id); return await cleanupStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
+  async observe(id: string) { const op = await this.required(id); if (!["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "submission_started", "submitted", "unknown_finality", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase)) throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate token operation can be observed."); return await observeStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
   async status(id: string) { return await this.required(id); }
   async receipt(id: string) { return stargateV2TokenCanonicalReceipt(await this.required(id)); }
   private async required(id: string) { const op = await this.journal.load(id); if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stargate token operation was not found."); return op; }
@@ -59,22 +64,62 @@ export class StargateTokenService {
         const nonce = tx.nonceAtomic === undefined ? quantity(nonceRaw) : BigInt(tx.nonceAtomic); if (nonce < quantity(nonceRaw)) throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen Stargate nonce is stale."); const priority = quantity(tip), maxFee = 2n * quantity(block.baseFeePerGas) + priority;
         return { nonceAtomic: nonce.toString(), gasLimitAtomic: (quantity(gas) * 12n / 10n + 1n).toString(), maxFeePerGasAtomic: maxFee.toString(), maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() }; },
       signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async op => await new TtyStargateTokenApproval().approve(op),
+      approveCleanup: async op => await new TtyStargateTokenApproval().approveCleanup(op),
       admitPolicy: async input => { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, input.profile); if (active === null || active.accounts.evm !== input.owner) throw new ApnError("APN_ALLOWLIST_REFUSED", "Stargate token execution requires an active owner policy for this EVM account.");
-        evaluateAssetPolicy(active.registry, { chain: "eip155:10", asset: { kind: "token", identifier: STARGATE_TOKEN_SOURCE_TOKEN }, rail: "bridge", amountAtomic: input.amountAtomic, dailyUsageAtomic: "0", asOfDate: new Date(this.now()).toISOString().slice(0,10), asOf: new Date(this.now()).toISOString() }); return { policyDigest: active.digest, policyRevision: active.revision }; },
-      confirmPolicy: async op => { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile); if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision || active.accounts.evm !== op.owner) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again."); evaluateAssetPolicy(active.registry, { chain: "eip155:10", asset: { kind: "token", identifier: STARGATE_TOKEN_SOURCE_TOKEN }, rail: "bridge", amountAtomic: op.amountAtomic, dailyUsageAtomic: "0", asOfDate: new Date(this.now()).toISOString().slice(0,10), asOf: new Date(this.now()).toISOString() }); },
+        const identity = usageIdentity(input.owner), at = new Date(this.now()), current = await this.usage.usage(identity, at);
+        const admission = evaluateAssetPolicy(active.registry, { chain: identity.chain, asset: identity.asset, rail: "bridge", amountAtomic: input.amountAtomic, dailyUsageAtomic: current.amountAtomic, asOfDate: at.toISOString().slice(0,10), asOf: at.toISOString() });
+        requireMechanism(admission.asset.mechanismPins?.bridge); return { policyDigest: active.digest, policyRevision: active.revision, mechanism: STARGATE_TOKEN_MECHANISM }; },
+      confirmPolicy: async op => { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile); if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision || active.accounts.evm !== op.owner || canonicalJson(op.policy.mechanism) !== canonicalJson(STARGATE_TOKEN_MECHANISM)) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again."); const at = new Date(this.now()); const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:10", asset: { kind: "token", identifier: STARGATE_TOKEN_SOURCE_TOKEN }, rail: "bridge", amountAtomic: op.amountAtomic, dailyUsageAtomic: (await this.usage.usage(usageIdentity(op.owner), at)).amountAtomic, asOfDate: at.toISOString().slice(0,10), asOf: at.toISOString() }); requireMechanism(admission.asset.mechanismPins?.bridge); },
+      reserveUsage: async op => { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile); if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again."); const at = new Date(this.now()); await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic, idempotencyKey: usageKey(op.operationId), now: at }); },
+      followUsage: async (op, target) => await this.followUsage(op, target),
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; }, waitSourceReceipt: async txHash => await confirmedStargateSourceReceipt(source, txHash),
       observeDestination: async input => await observeStargateTokenDestination(destination, input, tokenAt), now: this.now };
+  }
+  private async followUsage(op: StargateTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert") {
+    const identity = usageIdentity(op.owner), reservationId = assetUsageReservationId(identity, usageKey(op.operationId));
+    const current = await this.usage.load(identity, reservationId); if (current === null) { if (target === "failed_before_effect") return; throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation is missing."); }
+    if (current.state === target) return;
+    if (target === "submitted" && current.state === "unknown_finality") return;
+    if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(current.state)) throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation reached a conflicting terminal state.");
+    const outcome = ["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(target)
+      ? { outcomeDigest: domainHash("apn.stargate-token-usage-outcome.v1", canonicalJson({ operationId: op.operationId, target, integrityHash: op.integrityHash })) } : {};
+    await this.usage.transition({ ...identity, reservationId, policyDigest: current.policyDigest, state: target, now: new Date(this.now()), ...outcome });
   }
   private remote() { if (this.source !== undefined && this.destination !== undefined) return { source: this.source, destination: this.destination }; const source = this.env.APN_OPTIMISM_RPC_URL, destination = this.env.APN_POLYGON_RPC_URL; if (source === undefined || destination === undefined) blocked("APN_OPTIMISM_RPC_URL_and_APN_POLYGON_RPC_URL_required"); this.source = new StargateJsonRpc(source); this.destination = new StargateJsonRpc(destination); return { source: this.source, destination: this.destination }; }
 }
 
 export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>): Promise<StargateTokenDestinationEvidence | null> {
   const safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false])), topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
-  const logs = await rpc.call("eth_getLogs", [{ address: STARGATE_TOKEN_DESTINATION_POOL, fromBlock: `0x${BigInt(input.fromBlockNumberAtomic).toString(16)}`, toBlock: safe.number, topics }]); if (!Array.isArray(logs)) blocked("destination_logs");
+  const baselineTag = `0x${BigInt(input.fromBlockNumberAtomic).toString(16)}`, baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false]));
+  if (hash(baseline.hash) !== input.fromBlockHash) throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline is no longer canonical.");
+  const logs = await rpc.call("eth_getLogs", [{ address: STARGATE_TOKEN_DESTINATION_POOL, fromBlock: baselineTag, toBlock: safe.number, topics }]); if (!Array.isArray(logs)) blocked("destination_logs");
+  const dropTopics = encodeEventTopics({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied" });
+  const dropLogs = BigInt(input.nativeDropAtomic) === 0n ? [] : await rpc.call("eth_getLogs", [{ address: STARGATE_TOKEN_DESTINATION_EXECUTOR,
+    fromBlock: baselineTag, toBlock: safe.number, topics: dropTopics }]);
+  if (!Array.isArray(dropLogs)) blocked("destination_native_drop_logs");
   const readToken = tokenAt ?? (async (client, token, account, tag) => decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", data: await client.call("eth_call", [{ to: token, data: encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", args: [account] }) }, tag]) as Hex }));
   for (const value of logs) { const log = record(value); try { const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: log.topics as [Hex, ...Hex[]], data: String(log.data) as Hex }); if (getAddress(String(log.address)) !== STARGATE_TOKEN_DESTINATION_POOL || event.args.srcEid !== 30111 || event.args.guid !== input.guid || getAddress(event.args.toAddress) !== input.recipient || event.args.amountReceivedLD.toString() !== input.minimumAmountAtomic) continue;
+      const exactBlock = record(await rpc.call("eth_getBlockByNumber", [String(log.blockNumber), false])); if (hash(exactBlock.hash) !== hash(log.blockHash)) continue;
+      let nativeDrop: StargateTokenDestinationEvidence["nativeDrop"];
+      if (BigInt(input.nativeDropAtomic) > 0n) {
+        const matching = dropLogs.flatMap(candidate => { const item = record(candidate); try {
+          if (hash(item.transactionHash) !== hash(log.transactionHash) || hash(item.blockHash) !== hash(log.blockHash) || getAddress(String(item.address)) !== STARGATE_TOKEN_DESTINATION_EXECUTOR) return [];
+          const decoded = decodeEventLog({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied", topics: item.topics as [Hex, ...Hex[]], data: String(item.data) as Hex }).args;
+          if (decoded.origin.srcEid !== 30111 || decoded.origin.sender.toLowerCase() !== pad(STARGATE_TOKEN_SOURCE_POOL, { size: 32 }).toLowerCase() || decoded.dstEid !== 30109 ||
+            getAddress(decoded.oapp) !== STARGATE_TOKEN_DESTINATION_POOL || decoded.params.length !== 1 || decoded.success.length !== 1 || decoded.success[0] !== true ||
+            getAddress(decoded.params[0]!.receiver) !== input.recipient || decoded.params[0]!.amount.toString() !== input.nativeDropAtomic) return [];
+          return [{ executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: decoded.origin.nonce.toString(), success: true as const }];
+        } catch { return []; } });
+        if (matching.length !== 1) continue; nativeDrop = matching[0]!;
+      }
       const [tokenAfter, nativeAfter] = await Promise.all([readToken(rpc as StargateJsonRpc, STARGATE_TOKEN_DESTINATION_TOKEN, input.recipient, String(safe.number)), rpc.call("eth_getBalance", [input.recipient, safe.number]).then(quantity)]); const tokenBefore = BigInt(input.tokenBalanceBeforeAtomic), nativeBefore = BigInt(input.nativeBalanceBeforeAtomic); if (tokenAfter < tokenBefore || nativeAfter < nativeBefore) return null;
-      return { emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30111, destinationTransactionHash: hash(log.transactionHash), logIndexAtomic: quantity(log.logIndex).toString(), blockNumberAtomic: quantity(log.blockNumber).toString(), blockHash: hash(log.blockHash), finality: "safe", recipient: input.recipient, amountReceivedAtomic: event.args.amountReceivedLD.toString(), tokenBalanceBeforeAtomic: tokenBefore.toString(), tokenBalanceAfterAtomic: tokenAfter.toString(), tokenDeltaAtomic: (tokenAfter-tokenBefore).toString(), nativeBalanceBeforeAtomic: nativeBefore.toString(), nativeBalanceAfterAtomic: nativeAfter.toString(), nativeDeltaAtomic: (nativeAfter-nativeBefore).toString() };
+      return { emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30111, destinationTransactionHash: hash(log.transactionHash), logIndexAtomic: quantity(log.logIndex).toString(), blockNumberAtomic: quantity(log.blockNumber).toString(), blockHash: hash(log.blockHash), finality: "safe", recipient: input.recipient, amountReceivedAtomic: event.args.amountReceivedLD.toString(), tokenBalanceBeforeAtomic: tokenBefore.toString(), tokenBalanceAfterAtomic: tokenAfter.toString(), tokenDeltaAtomic: (tokenAfter-tokenBefore).toString(), nativeBalanceBeforeAtomic: nativeBefore.toString(), nativeBalanceAfterAtomic: nativeAfter.toString(), nativeDeltaAtomic: (nativeAfter-nativeBefore).toString(), ...(nativeDrop === undefined ? {} : { nativeDrop }) };
     } catch { /* unrelated candidate */ } }
   return null;
+}
+
+function usageIdentity(owner: Address): AssetUsageIdentity { return { account: owner, chain: "eip155:10", asset: { kind: "token", identifier: STARGATE_TOKEN_SOURCE_TOKEN } }; }
+function usageKey(operationId: string): string { return `apn.stargate-token-usage:${operationId}`; }
+function requireMechanism(pin: unknown): void {
+  if (canonicalJson(pin) !== canonicalJson(STARGATE_TOKEN_MECHANISM)) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active bridge mechanism pin does not authorize this exact Stargate V2 lane.");
 }

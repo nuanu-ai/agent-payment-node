@@ -86,5 +86,17 @@ export const LAYERZERO_EXECUTOR_ABI = [{
             { type: "uint128", name: "floorMarginUSD" }, { type: "uint128", name: "nativeCap" },
             { type: "uint64", name: "lzComposeBaseGas" },
         ],
+    }, {
+        type: "event", name: "NativeDropApplied", inputs: [
+            { name: "origin", type: "tuple", indexed: false, components: [
+                    { name: "srcEid", type: "uint32" }, { name: "sender", type: "bytes32" }, { name: "nonce", type: "uint64" },
+                ] },
+            { name: "dstEid", type: "uint32", indexed: false },
+            { name: "oapp", type: "address", indexed: false },
+            { name: "params", type: "tuple[]", indexed: false, components: [
+                    { name: "receiver", type: "address" }, { name: "amount", type: "uint256" },
+                ] },
+            { name: "success", type: "bool[]", indexed: false },
+        ],
     }];
 //# sourceMappingURL=abi.js.map

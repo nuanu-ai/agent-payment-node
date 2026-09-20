@@ -685,6 +685,12 @@
       "eid": 30109,
       "address": "0xCd3F213AD101472e1713C72B1697E727C803885b"
     },
+    "destinationProofEvent": {
+      "signature": "NativeDropApplied((uint32,bytes32,uint64),uint32,address,(address,uint256)[],bool[])",
+      "originFields": ["srcEid", "sender", "nonce"],
+      "paramsFields": ["receiver", "amount"],
+      "source": "LayerZero-v2@9c741e7f9790639537b1710a203bcdfd73b0b9ac/packages/layerzero-v2/evm/messagelib/contracts/interfaces/IExecutor.sol"
+    },
     "capGetter": "dstConfig(uint32):(uint64,uint16,uint128,uint128,uint64)",
     "nativeCapOutputIndex": 3
   }

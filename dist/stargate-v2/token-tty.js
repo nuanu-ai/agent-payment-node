@@ -25,5 +25,18 @@ export class TtyStargateTokenApproval {
             "Completion requires exact safe source/destination events, USDC delivery, POL balance delta, and zero residual allowance.",
         ], code, op.expiresAt, this.options);
     }
+    async approveCleanup(op) {
+        const code = approvalCode("bridge", op.integrityHash);
+        await exactChainConsent([
+            "Agent Payment Node Stargate V2 residual allowance cleanup",
+            `Profile: ${op.profile}`,
+            `Operation: ${op.operationId}`,
+            `Owner: ${op.owner}`,
+            `Token/spender: ${op.sourceToken} / ${op.sourcePool}`,
+            `Current expected allowance: ${op.residualAllowanceAtomic ?? op.amountAtomic}; replacement allowance: 0`,
+            `Cleanup reason: ${op.cleanupReason ?? "residual_allowance"}`,
+            "The revoke transaction is durably marked before broadcast. An ambiguous result is observed and never resent.",
+        ], code, new Date(Date.now() + 300_000).toISOString(), this.options);
+    }
 }
 //# sourceMappingURL=token-tty.js.map

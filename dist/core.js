@@ -124,6 +124,7 @@ export class ApnCore {
                 return operationOutcome(await service.prepare(request));
             }
             case "stargate.token.execute":
+            case "stargate.token.cleanup":
             case "stargate.token.observe":
             case "stargate.token.status":
             case "stargate.token.receipt": {
@@ -132,6 +133,8 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate token runtime is unavailable.");
                 if (request.command === "stargate.token.execute")
                     return operationOutcome(await service.execute(request.operationId));
+                if (request.command === "stargate.token.cleanup")
+                    return operationOutcome(await service.cleanup(request.operationId));
                 if (request.command === "stargate.token.observe")
                     return operationOutcome(await service.observe(request.operationId));
                 if (request.command === "stargate.token.status")
