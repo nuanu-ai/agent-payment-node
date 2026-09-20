@@ -1,17 +1,17 @@
 import { canonicalJson, sha256 } from "../canonical.js";
-import { BridgeHttps } from "./https.js";
+import { BridgeHttps, LIFI_API_ORIGIN } from "./https.js";
 import { railStatusIdentifier } from "../rail-status-binding.js";
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgePeerToken, validateBridgeRequest } from "./asset-registry.js";
 import { BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "./discovery-candidates.js";
 import { validateBridgeInventoryCandidate } from "./catalog.js";
 import { bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
-const ORIGIN = "https://li.quest/v1";
+const ORIGIN = LIFI_API_ORIGIN;
 export const LIFI_ROUTE_RESPONSE_BYTES = 512 * 1024;
 export const LIFI_INVENTORY_RESPONSE_BYTES = 4 * 1024 * 1024;
 export class LifiProvider {
     transport;
     now;
-    constructor(transport = new BridgeHttps(), now = Date.now) {
+    constructor(transport = new BridgeHttps(undefined, process.env.APN_LIFI_API_KEY), now = Date.now) {
         this.transport = transport;
         this.now = now;
     }
