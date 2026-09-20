@@ -38,3 +38,7 @@ apn stargate token receipt --operation <operation-id>
 ```
 
 `execute` and the explicit `cleanup` command are foreground TTY signing surfaces. `observe` can advance only a previously attempted operation and cannot sign or broadcast. `status` performs no RPC, signature, or broadcast; it may reconcile only an operation-bound pending transition in the local shared usage ledger.
+
+## Optional EIP-1559 fee ceilings
+
+`prepare` accepts `--max-fee-per-gas-wei` and `--max-priority-fee-per-gas-wei` only as a pair. Both must be positive canonical uint256 values, the priority ceiling cannot exceed the max-fee ceiling, and each ceiling must be at least the fresh RPC quote. When omitted, APN preserves the exact quoted fee pair. When supplied, the journal, approval screen, unsigned approval and bridge envelopes, debit cap calculation, and receipt freeze the quoted pair and the separate owner-approved pair. Execution accepts a fresh fee quote only while both values remain within the approved pair; exceeding either ceiling requires prepare again and triggers allowance cleanup when approval already happened. The signed envelope always uses the approved pair. `maxNativeDebitAtomic` must cover approval gas plus the LayerZero message value plus the bridge gas ceiling, all charged at the approved max fee.

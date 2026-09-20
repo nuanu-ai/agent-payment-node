@@ -82,7 +82,7 @@ export interface StargateTokenPolicyBinding {
     }>;
 }
 export interface StargateTokenOperation {
-    readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2" | "apn.stargate-v2-token-operation.v3";
+    readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2" | "apn.stargate-v2-token-operation.v3" | "apn.stargate-v2-token-operation.v4";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;
@@ -119,6 +119,13 @@ export interface StargateTokenOperation {
     readonly initialAllowanceAtomic: string;
     readonly allowanceRequired: boolean;
     readonly approvalEnvelope?: StargateTokenEnvelope;
+    readonly feeApproval?: Readonly<{
+        readonly provenance: "exact_snapshot" | "owner_ceiling";
+        readonly quotedMaxFeePerGasWei: string;
+        readonly quotedMaxPriorityFeePerGasWei: string;
+        readonly approvedMaxFeePerGasWei: string;
+        readonly approvedMaxPriorityFeePerGasWei: string;
+    }>;
     readonly bridgeSimulation?: Readonly<{
         readonly mode: "exact_at_prepare" | "pending_post_approval";
         readonly prepareStatus: "succeeded" | "pending_post_approval";
@@ -152,6 +159,8 @@ export interface StargateTokenPreparationRequest {
     readonly minOutputAtomic: string;
     readonly maxNativeDebitAtomic: string;
     readonly idempotencyKey: string;
+    readonly maxFeePerGasWei?: string;
+    readonly maxPriorityFeePerGasWei?: string;
     readonly ttlMs?: number;
 }
 export interface StargateTokenPreparedEnvelope {
@@ -281,6 +290,19 @@ export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOper
     policy: StargateTokenPolicyBinding;
     finalityPolicy: StargateV2RouteFinalityPolicy;
     quoteHash: string;
+    feeApproval: Readonly<{
+        readonly provenance: "exact_snapshot" | "owner_ceiling";
+        readonly quotedMaxFeePerGasWei: string;
+        readonly quotedMaxPriorityFeePerGasWei: string;
+        readonly approvedMaxFeePerGasWei: string;
+        readonly approvedMaxPriorityFeePerGasWei: string;
+    }> | {
+        provenance: "legacy_exact_snapshot";
+        quotedMaxFeePerGasWei: string;
+        quotedMaxPriorityFeePerGasWei: string;
+        approvedMaxFeePerGasWei: string;
+        approvedMaxPriorityFeePerGasWei: string;
+    };
     bridgeSimulation: Readonly<{
         readonly mode: "exact_at_prepare" | "pending_post_approval";
         readonly prepareStatus: "succeeded" | "pending_post_approval";
