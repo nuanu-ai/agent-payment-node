@@ -1,4 +1,4 @@
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import type { EvmFeeQuote } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import type { FeeEstimate } from "../ports.js";
@@ -17,26 +17,26 @@ export interface LifiProviderPort {
   inventory(): Promise<Readonly<Record<"chains" | "tokens" | "tools" | "connections", LifiResponse>>>;
   routes(request: BridgeRouteRequest, sender: Address): Promise<LifiResponse>;
   materialize(step: Readonly<Record<string, unknown>>): Promise<LifiResponse>;
-  status(input: { readonly transactionHash: Hex; readonly tool: BridgeTool; readonly fromChainId: EvmChainId; readonly toChainId: EvmChainId }): Promise<BridgeProviderObservation>;
+  status(input: { readonly transactionHash: Hex; readonly tool: BridgeTool; readonly fromChainId: BridgeChainId; readonly toChainId: BridgeChainId }): Promise<BridgeProviderObservation>;
 }
 export interface BridgeRpcPort {
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly origin: string;
   assertChain(): Promise<void>;
   block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
-  deployment(tool: BridgeTool, peerChainId: EvmChainId, token: Address, block?: BridgeBlock): Promise<BridgeDeploymentIdentity>;
+  deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<BridgeDeploymentIdentity>;
   account(owner: Address, spender: Address, token: Address): Promise<BridgeAccountSnapshot>;
   prices(): Promise<Pick<FeeEstimate, "maxFeePerGasAtomic" | "maxPriorityFeePerGasAtomic">>;
   estimate(transaction: BridgeTransaction): Promise<FeeEstimate>;
   feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<EvmFeeQuote>;
   send(rawTransaction: Hex): Promise<Hex>;
-  observe(transactionHash: Hex, expected?: BridgeEnvelope): Promise<{
+  observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeRecipient?: Address): Promise<{
     readonly transaction: BridgeTransactionProof;
     readonly receipt: BridgeProtocolReceipt;
   } | null>;
   logs(input: { readonly fromBlockAtomic: string; readonly toBlockAtomic: string; readonly address: Address; readonly topics: readonly (Hex | null)[] }): Promise<readonly { readonly transactionHash: Hex; readonly blockNumberAtomic: string; readonly blockHash: Hex }[]>;
 }
-export type BridgeRpcFactory = (chainId: EvmChainId) => BridgeRpcPort;
+export type BridgeRpcFactory = (chainId: BridgeChainId) => BridgeRpcPort;
 export interface BridgeSealedMaterial {
   readonly schemaVersion: "apn.bridge-effect.v1";
   readonly profileHash: string;

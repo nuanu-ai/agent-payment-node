@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { decodeEventLog, encodeAbiParameters, encodeEventTopics, getAbiItem, getAddress, type AbiParameter } from "viem";
 import type { Address, Hex } from "../../src/model.js";
+import type { BridgeChainId } from "../../src/lifi/chains.js";
 import { bridgeEventsAbi, FEE_FORWARDER, FEE_RECIPIENT } from "../../src/lifi/abi.js";
 import { bridgeProtocolEmitter } from "../../src/lifi/deployments.js";
 import type { BridgeLog, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall } from "../../src/lifi/model.js";
-import { BRIDGE_DIAMOND, BRIDGE_ZERO_WORD } from "../../src/lifi/validation.js";
+import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD } from "../../src/lifi/validation.js";
+import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 type Json = Record<string, any>;
 const HASH = `0x${"ab".repeat(32)}` as Hex;
 const TX_HASH = `0x${"12".repeat(32)}` as Hex;
@@ -12,13 +14,17 @@ const RELAYER = getAddress("0x2222222222222222222222222222222222222222");
 const PAYER = getAddress("0x3333333333333333333333333333333333333333");
 export function makeSourceReceipt(d: DecodedBridgeCall): BridgeProtocolReceipt {
   const emitter = bridgeProtocolEmitter(d.sourceChainId, d.tool, d.sourceToken);
+  const native = d.sourceToken === BRIDGE_ZERO_ADDRESS;
   const logs: BridgeLog[] = [
-    eventLog(d.sourceToken, "Transfer", { from: d.sender, to: BRIDGE_DIAMOND, value: BigInt(d.sourceAmountAtomic) }),
-    eventLog(d.sourceToken, "Transfer", { from: BRIDGE_DIAMOND, to: FEE_RECIPIENT, value: BigInt(d.feeAmountAtomic) }),
-    eventLog(d.sourceToken, "Transfer", { from: BRIDGE_DIAMOND, to: emitter, value: BigInt(d.bridgeAmountAtomic) }),
     eventLog(BRIDGE_DIAMOND, "LiFiTransferStarted", { bridgeData: bridgeData(d) }),
     eventLog(FEE_FORWARDER, "FeesForwarded", { token: d.sourceToken, distributions: [{ recipient: FEE_RECIPIENT, amount: BigInt(d.feeAmountAtomic) }] }),
   ];
+  if (native) logs.push(eventLog(BRIDGE_ASSET_REGISTRY[d.sourceChainId].nativeCoin.wrapped.address, "Deposit", { dst: emitter, wad: BigInt(d.bridgeAmountAtomic) }));
+  else logs.unshift(
+    eventLog(d.sourceToken, "Transfer", { from: d.sender, to: BRIDGE_DIAMOND, value: BigInt(d.sourceAmountAtomic) }),
+    eventLog(d.sourceToken, "Transfer", { from: BRIDGE_DIAMOND, to: FEE_RECIPIENT, value: BigInt(d.feeAmountAtomic) }),
+    eventLog(d.sourceToken, "Transfer", { from: BRIDGE_DIAMOND, to: emitter, value: BigInt(d.bridgeAmountAtomic) }),
+  );
   if (d.protocol.kind === "across") logs.push(eventLog(emitter, "FundsDeposited", {
     inputToken: d.protocol.sendingAssetId, outputToken: d.protocol.receivingAssetId, inputAmount: BigInt(d.bridgeAmountAtomic),
     outputAmount: BigInt(d.protocol.outputAmountAtomic), destinationChainId: BigInt(d.destinationChainId), depositId: BigInt(d.sourceChainId),
@@ -36,13 +42,26 @@ export function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourc
   const emitter = bridgeProtocolEmitter(d.destinationChainId, d.tool, d.destinationToken);
   if (source.correlation.kind === "across") {
     const c = source.correlation;
-    return receipt(d.destinationChainId, [eventLog(emitter, "FilledRelay", {
+    const fill = eventLog(emitter, "FilledRelay", {
       inputToken: c.inputToken, outputToken: c.outputToken, inputAmount: BigInt(c.inputAmountAtomic), outputAmount: BigInt(c.outputAmountAtomic),
       repaymentChainId: fillType === 2 ? 0n : BigInt(d.destinationChainId), originChainId: BigInt(c.originChainId), depositId: BigInt(c.depositId),
       fillDeadline: Number(c.fillDeadline), exclusivityDeadline: Number(c.exclusivityDeadline), exclusiveRelayer: c.exclusiveRelayer,
       relayer: fillType === 2 ? BRIDGE_ZERO_WORD : addressWord(RELAYER), depositor: c.depositor, recipient: c.recipient, messageHash: BRIDGE_ZERO_WORD,
       relayExecutionInfo: { updatedRecipient: c.recipient, updatedMessageHash: BRIDGE_ZERO_WORD, updatedOutputAmount: BigInt(c.outputAmountAtomic), fillType },
-    }), eventLog(d.destinationToken, "Transfer", { from: fillType === 2 ? emitter : PAYER, to: d.recipient, value: BigInt(c.outputAmountAtomic) })]);
+    });
+    if (d.destinationToken === BRIDGE_ZERO_ADDRESS) {
+      const wrapped = BRIDGE_ASSET_REGISTRY[d.destinationChainId].nativeCoin.wrapped;
+      const unwrap = wrapped.events === "weth9" ? eventLog(wrapped.address, "Withdrawal", { src: emitter, wad: BigInt(c.outputAmountAtomic) })
+        : eventLog(wrapped.address, "Transfer", { from: emitter, to: BRIDGE_ZERO_ADDRESS, value: BigInt(c.outputAmountAtomic) });
+      const result = receipt(d.destinationChainId, [fill, unwrap]);
+      if (d.destinationChainId !== 59144) return result;
+      const beforeBlock = { numberAtomic: "122", hash: `0x${"bc".repeat(32)}` as Hex, timestampAtomic: "1" };
+      const afterBlock = { numberAtomic: result.blockNumberAtomic, hash: result.blockHash, timestampAtomic: "2" };
+      return { ...result, nativeBalance: { recipient: d.recipient, beforeBlock, afterBlock, beforeBalanceAtomic: "100",
+        afterBalanceAtomic: (100n + BigInt(c.outputAmountAtomic)).toString(), deltaAtomic: c.outputAmountAtomic } };
+    }
+    return receipt(d.destinationChainId, [fill,
+      eventLog(d.destinationToken, "Transfer", { from: fillType === 2 ? emitter : PAYER, to: d.recipient, value: BigInt(c.outputAmountAtomic) })]);
   }
   const c = source.correlation;
   return receipt(d.destinationChainId, [
@@ -51,7 +70,7 @@ export function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourc
   ]);
 }
 
-function receipt(chainId: 1 | 8453 | 42161, logs: readonly BridgeLog[]): BridgeProtocolReceipt {
+function receipt(chainId: BridgeChainId, logs: readonly BridgeLog[]): BridgeProtocolReceipt {
   return { chainId, transactionHash: TX_HASH, blockNumberAtomic: "123", blockHash: HASH, logs };
 }
 

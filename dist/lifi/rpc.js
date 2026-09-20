@@ -13,7 +13,8 @@ import { BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bri
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }];
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "eth_sendRawTransaction"]);
-export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 8453: "APN_BASE_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL" };
+export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 56: "APN_BNB_RPC_URL", 8453: "APN_BASE_RPC_URL",
+    42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" };
 /** The single explicit Ethereum-family RPC reader: endpoint only from its named environment variable, public HTTPS, no query. */
 export function bridgeRpcCall(chainId, environment, options = {}) {
     bridgeChain(chainId, "APN_RPC_CONFIG");
@@ -157,7 +158,7 @@ export class BridgeRpc {
             bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
         return hash;
     }
-    async observe(hash, expected) {
+    async observe(hash, expected, nativeRecipient) {
         await this.assertChain();
         bridgeHex(hash, 32, 32, "APN_RPC_PROTOCOL");
         const [rawTx, rawReceipt] = await Promise.all([this.call("eth_getTransactionByHash", [hash]), this.call("eth_getTransactionReceipt", [hash])]);
@@ -183,13 +184,29 @@ export class BridgeRpc {
         const logs = parseReceiptLogs(r.logs, hash, block, index), fees = await bridgeActualFees(this.chainId, r, block, this.call);
         if (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) || BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic))
             bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
+        let nativeBalance = null;
+        if (nativeRecipient !== undefined) {
+            if (number === 0n)
+                bridgeFailure("APN_RPC_PROTOCOL", "native_balance_genesis");
+            const beforeRaw = await evmRpcBlock(this.call, quantity(number - 1n));
+            const before = { numberAtomic: (number - 1n).toString(), hash: beforeRaw.hash, timestampAtomic: evmRpcQuantity(beforeRaw.raw.timestamp).toString() };
+            const [beforeBalance, afterBalance] = await Promise.all([
+                this.call("eth_getBalance", [nativeRecipient, { blockHash: before.hash, requireCanonical: true }]).then(evmRpcQuantity),
+                this.call("eth_getBalance", [nativeRecipient, { blockHash: block.hash, requireCanonical: true }]).then(evmRpcQuantity),
+            ]);
+            if (afterBalance < beforeBalance)
+                bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
+            nativeBalance = { recipient: nativeRecipient, beforeBlock: before, afterBlock: block,
+                beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
+            await this.recheck(before);
+        }
         await this.recheck(block);
         if (safeBlock !== null)
             await this.recheck(safeBlock);
         await this.assertChain();
         return { transaction: { chainId: this.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: this.origin, ...identity,
                 ...fees, status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
-            receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs } };
+            receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance } };
     }
     async logs(input) {
         await this.assertChain();

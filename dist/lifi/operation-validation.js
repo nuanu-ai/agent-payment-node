@@ -3,7 +3,7 @@ import { decodeBridgeCall } from "./decode.js";
 import { bridgeApprovalRequired, bridgeNativePrincipalWei } from "./economics.js";
 import { BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot } from "./operation-model.js";
 import { operationSchema } from "./schema.js";
-import { validateBridgeRequest } from "./asset-registry.js";
+import { bridgeExecutionDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHeadroomWei, bridgeSame, bridgeUint } from "./validation.js";
 import { approvalData } from "./transaction.js";
 import { BRIDGE_FEE_RULE_HASH } from "./rpc-fees.js";
@@ -57,6 +57,8 @@ export function validateBridgeOperation(value) {
 }
 function validateIntent(op) {
     const i = op.intent, m = i.materialization, r = validateBridgeRequest(m.request, "APN_STATE_CORRUPT");
+    if (!bridgeExecutionDestination(r.toChainId))
+        bridgeCorrupt();
     if (op.profileHash !== i.owner.profileHash || i.profile !== i.owner.profile ||
         op.profileHash !== sha256(`profile\0${i.profile}`) || i.owner.address !== m.sender ||
         op.createdAt !== i.preparedAt || i.expiresAt <= i.preparedAt || Date.parse(i.expiresAt) - Date.parse(i.preparedAt) > 300_000 ||
@@ -176,6 +178,11 @@ function validateSnapshot(op, s) {
         if (m.tool === "across" ? p.fillType === null || p.relayerCredit === null || p.repaymentChainIdAtomic === null ||
             (p.fillType === 2 && (p.relayerCredit !== BRIDGE_ZERO_WORD || p.repaymentChainIdAtomic !== "0"))
             : p.fillType !== null || p.relayerCredit !== null || p.repaymentChainIdAtomic !== null)
+            bridgeCorrupt();
+        const providerBoundNative = m.request.toChainId === 59144;
+        if (providerBoundNative && (s.providerObservation?.status !== "completed_observed" ||
+            s.providerObservation.destinationTransactionHash !== p.transactionHash || p.nativeBalance === null || p.nativeBalance.recipient !== m.request.recipient ||
+            BigInt(p.nativeBalance.deltaAtomic) < BigInt(m.request.minOutputAtomic)))
             bridgeCorrupt();
         if (s.sourceProof === null || p.correlationHash !== hashObject(s.sourceProof.correlation) || p.tool !== m.tool ||
             p.chainId !== m.request.toChainId || p.recipient !== m.request.recipient || p.token !== m.request.toToken ||

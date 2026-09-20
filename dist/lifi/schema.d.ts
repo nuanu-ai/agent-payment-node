@@ -7,8 +7,8 @@ export declare const railStatusSchema: z.ZodUnion<readonly [z.ZodString, z.ZodSt
 export declare const uintSchema: z.ZodString;
 export declare const addressSchema: z.ZodString;
 export declare const isoSchema: z.ZodString;
-export declare const chainSchema: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-export declare const destinationChainSchema: z.ZodUnion<readonly [z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>, z.ZodLiteral<10>, z.ZodLiteral<137>, z.ZodLiteral<43114>, z.ZodLiteral<130>]>;
+export declare const chainSchema: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+export declare const destinationChainSchema: z.ZodUnion<readonly [z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>, z.ZodLiteral<10>, z.ZodLiteral<137>, z.ZodLiteral<43114>, z.ZodLiteral<130>]>;
 export declare const toolSchema: z.ZodEnum<{
     across: "across";
     stargateV2: "stargateV2";
@@ -35,8 +35,8 @@ export declare const providerBindingSchema: z.ZodObject<{
     revision: z.ZodNumber;
 }, z.core.$strict>;
 export declare const requestSchema: z.ZodObject<{
-    fromChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-    toChainId: z.ZodUnion<readonly [z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>, z.ZodLiteral<10>, z.ZodLiteral<137>, z.ZodLiteral<43114>, z.ZodLiteral<130>]>;
+    fromChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+    toChainId: z.ZodUnion<readonly [z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>, z.ZodLiteral<10>, z.ZodLiteral<137>, z.ZodLiteral<43114>, z.ZodLiteral<130>]>;
     fromToken: z.ZodString;
     toToken: z.ZodString;
     amountAtomic: z.ZodString;
@@ -48,13 +48,13 @@ export declare const requestSchema: z.ZodObject<{
 }, z.core.$strict>;
 export declare const feeSchema: z.ZodObject<{
     name: z.ZodString;
-    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
     asset: z.ZodUnion<readonly [z.ZodString, z.ZodLiteral<"native">]>;
     amountAtomic: z.ZodString;
     included: z.ZodBoolean;
 }, z.core.$strict>;
 export declare const transactionSchema: z.ZodObject<{
-    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
     from: z.ZodString;
     to: z.ZodString;
     valueAtomic: z.ZodString;
@@ -69,8 +69,8 @@ export declare const materializationSchema: z.ZodObject<{
         stargateV2: "stargateV2";
     }>;
     request: z.ZodObject<{
-        fromChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-        toChainId: z.ZodUnion<readonly [z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>, z.ZodLiteral<10>, z.ZodLiteral<137>, z.ZodLiteral<43114>, z.ZodLiteral<130>]>;
+        fromChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+        toChainId: z.ZodUnion<readonly [z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>, z.ZodLiteral<10>, z.ZodLiteral<137>, z.ZodLiteral<43114>, z.ZodLiteral<130>]>;
         fromToken: z.ZodString;
         toToken: z.ZodString;
         amountAtomic: z.ZodString;
@@ -86,14 +86,14 @@ export declare const materializationSchema: z.ZodObject<{
     minimumOutputAtomic: z.ZodString;
     feeCosts: z.ZodArray<z.ZodObject<{
         name: z.ZodString;
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         asset: z.ZodUnion<readonly [z.ZodString, z.ZodLiteral<"native">]>;
         amountAtomic: z.ZodString;
         included: z.ZodBoolean;
     }, z.core.$strict>>;
     includedStepIdentities: z.ZodArray<z.ZodString>;
     transaction: z.ZodObject<{
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         from: z.ZodString;
         to: z.ZodString;
         valueAtomic: z.ZodString;
@@ -108,8 +108,8 @@ export declare const materializationSchema: z.ZodObject<{
     transactionDigest: z.ZodString;
 }, z.core.$strict>;
 export declare const deploymentSchema: z.ZodObject<{
-    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-    peerChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+    peerChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
     tool: z.ZodEnum<{
         across: "across";
         stargateV2: "stargateV2";
@@ -125,7 +125,7 @@ export declare const deploymentSchema: z.ZodObject<{
     configurationHash: z.ZodString;
 }, z.core.$strict>;
 export declare const accountSchema: z.ZodObject<{
-    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
     rpcOrigin: z.ZodString;
     block: z.ZodObject<{
         numberAtomic: z.ZodString;
@@ -149,7 +149,7 @@ export declare const economicsSchema: z.ZodObject<{
     maximumGasCostAtomic: z.ZodString;
 }, z.core.$strict>;
 export declare const feeQuoteSchema: z.ZodObject<{
-    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
     feeModel: z.ZodOptional<z.ZodLiteral<"arbitrum-inclusive">>;
     blockNumberAtomic: z.ZodString;
     blockHash: z.ZodString;
@@ -172,7 +172,7 @@ export declare const envelopeSchema: z.ZodObject<{
         bridge: "bridge";
         approval: "approval";
     }>;
-    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
     from: z.ZodString;
     to: z.ZodString;
     valueAtomic: z.ZodString;
@@ -185,7 +185,7 @@ export declare const envelopeSchema: z.ZodObject<{
         maximumGasCostAtomic: z.ZodString;
     }, z.core.$strict>;
     feeQuote: z.ZodObject<{
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         feeModel: z.ZodOptional<z.ZodLiteral<"arbitrum-inclusive">>;
         blockNumberAtomic: z.ZodString;
         blockHash: z.ZodString;
@@ -207,7 +207,7 @@ export declare const envelopeSchema: z.ZodObject<{
     envelopeHash: z.ZodString;
 }, z.core.$strict>;
 export declare const txProofSchema: z.ZodObject<{
-    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
     transactionHash: z.ZodString;
     block: z.ZodObject<{
         numberAtomic: z.ZodString;
@@ -263,7 +263,7 @@ export declare const sourceProofSchema: z.ZodObject<{
         across: "across";
         stargateV2: "stargateV2";
     }>;
-    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
     transactionHash: z.ZodString;
     blockNumberAtomic: z.ZodString;
     blockHash: z.ZodString;
@@ -274,8 +274,8 @@ export declare const sourceProofSchema: z.ZodObject<{
     correlation: z.ZodUnion<readonly [z.ZodObject<{
         kind: z.ZodLiteral<"across">;
         depositId: z.ZodString;
-        originChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-        destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        originChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+        destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         inputToken: z.ZodString;
         outputToken: z.ZodString;
         inputAmountAtomic: z.ZodString;
@@ -303,7 +303,7 @@ export declare const destinationProofSchema: z.ZodObject<{
         across: "across";
         stargateV2: "stargateV2";
     }>;
-    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
     transactionHash: z.ZodString;
     blockNumberAtomic: z.ZodString;
     blockHash: z.ZodString;
@@ -315,6 +315,22 @@ export declare const destinationProofSchema: z.ZodObject<{
     fillType: z.ZodNullable<z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>, z.ZodLiteral<2>]>>;
     relayerCredit: z.ZodNullable<z.ZodString>;
     repaymentChainIdAtomic: z.ZodNullable<z.ZodString>;
+    nativeBalance: z.ZodNullable<z.ZodObject<{
+        recipient: z.ZodString;
+        beforeBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        afterBlock: z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>;
+        beforeBalanceAtomic: z.ZodString;
+        afterBalanceAtomic: z.ZodString;
+        deltaAtomic: z.ZodString;
+    }, z.core.$strict>>;
     safeBlock: z.ZodObject<{
         numberAtomic: z.ZodString;
         hash: z.ZodString;
@@ -397,7 +413,7 @@ export declare const effectSchema: z.ZodObject<{
             bridge: "bridge";
             approval: "approval";
         }>;
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         from: z.ZodString;
         to: z.ZodString;
         valueAtomic: z.ZodString;
@@ -410,7 +426,7 @@ export declare const effectSchema: z.ZodObject<{
             maximumGasCostAtomic: z.ZodString;
         }, z.core.$strict>;
         feeQuote: z.ZodObject<{
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             feeModel: z.ZodOptional<z.ZodLiteral<"arbitrum-inclusive">>;
             blockNumberAtomic: z.ZodString;
             blockHash: z.ZodString;
@@ -452,7 +468,7 @@ export declare const effectSchema: z.ZodObject<{
     submittedAt: z.ZodNullable<z.ZodString>;
     submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
     includedProof: z.ZodNullable<z.ZodObject<{
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         transactionHash: z.ZodString;
         block: z.ZodObject<{
             numberAtomic: z.ZodString;
@@ -504,7 +520,7 @@ export declare const effectSchema: z.ZodObject<{
         logsHash: z.ZodString;
     }, z.core.$strict>>;
     safeProof: z.ZodNullable<z.ZodObject<{
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         transactionHash: z.ZodString;
         block: z.ZodObject<{
             numberAtomic: z.ZodString;
@@ -580,7 +596,7 @@ export declare const transitionSchema: z.ZodObject<{
         submittedAt: z.ZodNullable<z.ZodString>;
         submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
         includedProof: z.ZodNullable<z.ZodObject<{
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             transactionHash: z.ZodString;
             block: z.ZodObject<{
                 numberAtomic: z.ZodString;
@@ -632,7 +648,7 @@ export declare const transitionSchema: z.ZodObject<{
             logsHash: z.ZodString;
         }, z.core.$strict>>;
         safeProof: z.ZodNullable<z.ZodObject<{
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             transactionHash: z.ZodString;
             block: z.ZodObject<{
                 numberAtomic: z.ZodString;
@@ -709,7 +725,7 @@ export declare const transitionSchema: z.ZodObject<{
             across: "across";
             stargateV2: "stargateV2";
         }>;
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         transactionHash: z.ZodString;
         blockNumberAtomic: z.ZodString;
         blockHash: z.ZodString;
@@ -720,8 +736,8 @@ export declare const transitionSchema: z.ZodObject<{
         correlation: z.ZodUnion<readonly [z.ZodObject<{
             kind: z.ZodLiteral<"across">;
             depositId: z.ZodString;
-            originChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-            destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            originChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+            destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             inputToken: z.ZodString;
             outputToken: z.ZodString;
             inputAmountAtomic: z.ZodString;
@@ -749,7 +765,7 @@ export declare const transitionSchema: z.ZodObject<{
             across: "across";
             stargateV2: "stargateV2";
         }>;
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         transactionHash: z.ZodString;
         blockNumberAtomic: z.ZodString;
         blockHash: z.ZodString;
@@ -761,6 +777,22 @@ export declare const transitionSchema: z.ZodObject<{
         fillType: z.ZodNullable<z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>, z.ZodLiteral<2>]>>;
         relayerCredit: z.ZodNullable<z.ZodString>;
         repaymentChainIdAtomic: z.ZodNullable<z.ZodString>;
+        nativeBalance: z.ZodNullable<z.ZodObject<{
+            recipient: z.ZodString;
+            beforeBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            afterBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            beforeBalanceAtomic: z.ZodString;
+            afterBalanceAtomic: z.ZodString;
+            deltaAtomic: z.ZodString;
+        }, z.core.$strict>>;
         safeBlock: z.ZodObject<{
             numberAtomic: z.ZodString;
             hash: z.ZodString;
@@ -826,7 +858,7 @@ export declare const operationSchema: z.ZodObject<{
                 bridge: "bridge";
                 approval: "approval";
             }>;
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             from: z.ZodString;
             to: z.ZodString;
             valueAtomic: z.ZodString;
@@ -839,7 +871,7 @@ export declare const operationSchema: z.ZodObject<{
                 maximumGasCostAtomic: z.ZodString;
             }, z.core.$strict>;
             feeQuote: z.ZodObject<{
-                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
                 feeModel: z.ZodOptional<z.ZodLiteral<"arbitrum-inclusive">>;
                 blockNumberAtomic: z.ZodString;
                 blockHash: z.ZodString;
@@ -881,7 +913,7 @@ export declare const operationSchema: z.ZodObject<{
         submittedAt: z.ZodNullable<z.ZodString>;
         submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
         includedProof: z.ZodNullable<z.ZodObject<{
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             transactionHash: z.ZodString;
             block: z.ZodObject<{
                 numberAtomic: z.ZodString;
@@ -933,7 +965,7 @@ export declare const operationSchema: z.ZodObject<{
             logsHash: z.ZodString;
         }, z.core.$strict>>;
         safeProof: z.ZodNullable<z.ZodObject<{
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             transactionHash: z.ZodString;
             block: z.ZodObject<{
                 numberAtomic: z.ZodString;
@@ -1009,8 +1041,8 @@ export declare const operationSchema: z.ZodObject<{
                 stargateV2: "stargateV2";
             }>;
             request: z.ZodObject<{
-                fromChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-                toChainId: z.ZodUnion<readonly [z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>, z.ZodLiteral<10>, z.ZodLiteral<137>, z.ZodLiteral<43114>, z.ZodLiteral<130>]>;
+                fromChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+                toChainId: z.ZodUnion<readonly [z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>, z.ZodLiteral<10>, z.ZodLiteral<137>, z.ZodLiteral<43114>, z.ZodLiteral<130>]>;
                 fromToken: z.ZodString;
                 toToken: z.ZodString;
                 amountAtomic: z.ZodString;
@@ -1026,14 +1058,14 @@ export declare const operationSchema: z.ZodObject<{
             minimumOutputAtomic: z.ZodString;
             feeCosts: z.ZodArray<z.ZodObject<{
                 name: z.ZodString;
-                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
                 asset: z.ZodUnion<readonly [z.ZodString, z.ZodLiteral<"native">]>;
                 amountAtomic: z.ZodString;
                 included: z.ZodBoolean;
             }, z.core.$strict>>;
             includedStepIdentities: z.ZodArray<z.ZodString>;
             transaction: z.ZodObject<{
-                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
                 from: z.ZodString;
                 to: z.ZodString;
                 valueAtomic: z.ZodString;
@@ -1049,8 +1081,8 @@ export declare const operationSchema: z.ZodObject<{
         }, z.core.$strict>;
         decoded: z.ZodUnknown;
         sourceDeployment: z.ZodObject<{
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-            peerChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+            peerChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             tool: z.ZodEnum<{
                 across: "across";
                 stargateV2: "stargateV2";
@@ -1066,8 +1098,8 @@ export declare const operationSchema: z.ZodObject<{
             configurationHash: z.ZodString;
         }, z.core.$strict>;
         destinationDeployment: z.ZodObject<{
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-            peerChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+            peerChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             tool: z.ZodEnum<{
                 across: "across";
                 stargateV2: "stargateV2";
@@ -1083,7 +1115,7 @@ export declare const operationSchema: z.ZodObject<{
             configurationHash: z.ZodString;
         }, z.core.$strict>;
         sourceAccount: z.ZodObject<{
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             rpcOrigin: z.ZodString;
             block: z.ZodObject<{
                 numberAtomic: z.ZodString;
@@ -1135,7 +1167,7 @@ export declare const operationSchema: z.ZodObject<{
             submittedAt: z.ZodNullable<z.ZodString>;
             submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
             includedProof: z.ZodNullable<z.ZodObject<{
-                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
                 transactionHash: z.ZodString;
                 block: z.ZodObject<{
                     numberAtomic: z.ZodString;
@@ -1187,7 +1219,7 @@ export declare const operationSchema: z.ZodObject<{
                 logsHash: z.ZodString;
             }, z.core.$strict>>;
             safeProof: z.ZodNullable<z.ZodObject<{
-                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
                 transactionHash: z.ZodString;
                 block: z.ZodObject<{
                     numberAtomic: z.ZodString;
@@ -1264,7 +1296,7 @@ export declare const operationSchema: z.ZodObject<{
                 across: "across";
                 stargateV2: "stargateV2";
             }>;
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             transactionHash: z.ZodString;
             blockNumberAtomic: z.ZodString;
             blockHash: z.ZodString;
@@ -1275,8 +1307,8 @@ export declare const operationSchema: z.ZodObject<{
             correlation: z.ZodUnion<readonly [z.ZodObject<{
                 kind: z.ZodLiteral<"across">;
                 depositId: z.ZodString;
-                originChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-                destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+                originChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+                destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
                 inputToken: z.ZodString;
                 outputToken: z.ZodString;
                 inputAmountAtomic: z.ZodString;
@@ -1304,7 +1336,7 @@ export declare const operationSchema: z.ZodObject<{
                 across: "across";
                 stargateV2: "stargateV2";
             }>;
-            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             transactionHash: z.ZodString;
             blockNumberAtomic: z.ZodString;
             blockHash: z.ZodString;
@@ -1316,6 +1348,22 @@ export declare const operationSchema: z.ZodObject<{
             fillType: z.ZodNullable<z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>, z.ZodLiteral<2>]>>;
             relayerCredit: z.ZodNullable<z.ZodString>;
             repaymentChainIdAtomic: z.ZodNullable<z.ZodString>;
+            nativeBalance: z.ZodNullable<z.ZodObject<{
+                recipient: z.ZodString;
+                beforeBlock: z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>;
+                afterBlock: z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>;
+                beforeBalanceAtomic: z.ZodString;
+                afterBalanceAtomic: z.ZodString;
+                deltaAtomic: z.ZodString;
+            }, z.core.$strict>>;
             safeBlock: z.ZodObject<{
                 numberAtomic: z.ZodString;
                 hash: z.ZodString;
@@ -1387,7 +1435,7 @@ export declare const operationSchema: z.ZodObject<{
             across: "across";
             stargateV2: "stargateV2";
         }>;
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         transactionHash: z.ZodString;
         blockNumberAtomic: z.ZodString;
         blockHash: z.ZodString;
@@ -1398,8 +1446,8 @@ export declare const operationSchema: z.ZodObject<{
         correlation: z.ZodUnion<readonly [z.ZodObject<{
             kind: z.ZodLiteral<"across">;
             depositId: z.ZodString;
-            originChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-            destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+            originChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+            destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
             inputToken: z.ZodString;
             outputToken: z.ZodString;
             inputAmountAtomic: z.ZodString;
@@ -1427,7 +1475,7 @@ export declare const operationSchema: z.ZodObject<{
             across: "across";
             stargateV2: "stargateV2";
         }>;
-        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
         transactionHash: z.ZodString;
         blockNumberAtomic: z.ZodString;
         blockHash: z.ZodString;
@@ -1439,6 +1487,22 @@ export declare const operationSchema: z.ZodObject<{
         fillType: z.ZodNullable<z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>, z.ZodLiteral<2>]>>;
         relayerCredit: z.ZodNullable<z.ZodString>;
         repaymentChainIdAtomic: z.ZodNullable<z.ZodString>;
+        nativeBalance: z.ZodNullable<z.ZodObject<{
+            recipient: z.ZodString;
+            beforeBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            afterBlock: z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>;
+            beforeBalanceAtomic: z.ZodString;
+            afterBalanceAtomic: z.ZodString;
+            deltaAtomic: z.ZodString;
+        }, z.core.$strict>>;
         safeBlock: z.ZodObject<{
             numberAtomic: z.ZodString;
             hash: z.ZodString;

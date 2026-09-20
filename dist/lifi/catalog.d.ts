@@ -8,6 +8,7 @@ export declare function bridgeCapabilities(profile?: string): {
             coin_key: string;
             decimals: 18;
             bridgeable_principal: boolean;
+            quote_only: boolean;
             role: string;
             token: string;
             tools: string[];
@@ -136,6 +137,7 @@ export declare function bridgeInventory(responses: Readonly<Record<"chains" | "t
                 coin_key: string;
                 decimals: 18;
                 bridgeable_principal: boolean;
+                quote_only: boolean;
                 role: string;
                 token: string;
                 tools: string[];

@@ -1,4 +1,4 @@
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Hex } from "../model.js";
 import type { BridgeBlock } from "./model.js";
@@ -43,7 +43,7 @@ export declare const BASE_FEE_CONTRACT: {
         readonly expected: Hex;
     }];
 };
-export declare function bridgeActualFees(chainId: EvmChainId, receipt: Readonly<Record<string, unknown>>, block: BridgeBlock, call: EvmRpcCall): Promise<{
+export declare function bridgeActualFees(chainId: BridgeChainId, receipt: Readonly<Record<string, unknown>>, block: BridgeBlock, call: EvmRpcCall): Promise<{
     gasUsedAtomic: string;
     effectiveGasPriceAtomic: string;
     executionFeeWei: string;

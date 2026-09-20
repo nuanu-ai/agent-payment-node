@@ -1,4 +1,4 @@
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import { BridgeHttps } from "./https.js";
@@ -6,11 +6,13 @@ import type { BridgeBlock, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, Br
 import type { BridgeRpcFactory, BridgeRpcPort } from "./ports.js";
 export declare const BRIDGE_RPC_ENV: {
     readonly 1: "APN_ETHEREUM_RPC_URL";
+    readonly 56: "APN_BNB_RPC_URL";
     readonly 8453: "APN_BASE_RPC_URL";
     readonly 42161: "APN_ARBITRUM_RPC_URL";
+    readonly 59144: "APN_LINEA_RPC_URL";
 };
 /** The single explicit Ethereum-family RPC reader: endpoint only from its named environment variable, public HTTPS, no query. */
-export declare function bridgeRpcCall(chainId: EvmChainId, environment: Readonly<Record<string, string | undefined>>, options?: {
+export declare function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Record<string, string | undefined>>, options?: {
     readonly transport?: Pick<BridgeHttps, "request">;
     readonly wait?: (milliseconds: number) => Promise<void>;
 }): {
@@ -22,16 +24,16 @@ export declare function bridgeRpcFactory(environment: Readonly<Record<string, st
     readonly wait?: (milliseconds: number) => Promise<void>;
 }): BridgeRpcFactory;
 export declare class BridgeRpc implements BridgeRpcPort {
-    readonly chainId: EvmChainId;
+    readonly chainId: BridgeChainId;
     readonly origin: string;
     private readonly call;
     private readonly evm;
-    constructor(chainId: EvmChainId, origin: string, call: EvmRpcCall);
+    constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall);
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
-    deployment(tool: BridgeTool, peerChainId: EvmChainId, token: Address, block?: BridgeBlock): Promise<{
-        chainId: 1 | 8453 | 42161;
-        peerChainId: 1 | 8453 | 42161;
+    deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<{
+        chainId: 1 | 8453 | 42161 | 56 | 59144;
+        peerChainId: 1 | 8453 | 42161 | 56 | 59144;
         tool: BridgeTool;
         block: BridgeBlock;
         rpcOrigin: string;
@@ -41,7 +43,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
     }>;
     /** A native principal's balance is the native balance itself and its allowance is the constant zero: nothing is approved. */
     account(owner: Address, spender: Address, token: Address): Promise<{
-        chainId: 1 | 8453 | 42161;
+        chainId: 1 | 8453 | 42161 | 56 | 59144;
         rpcOrigin: string;
         block: BridgeBlock;
         owner: `0x${string}`;
@@ -60,7 +62,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
     estimate(transaction: BridgeTransaction): Promise<import("../ports.js").FeeEstimate>;
     feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<import("../evm-ports.js").EvmFeeQuote>;
     send(raw: Hex): Promise<Hex>;
-    observe(hash: Hex, expected?: BridgeEnvelope): Promise<{
+    observe(hash: Hex, expected?: BridgeEnvelope, nativeRecipient?: Address): Promise<{
         transaction: BridgeTransactionProof;
         receipt: BridgeProtocolReceipt;
     } | null>;

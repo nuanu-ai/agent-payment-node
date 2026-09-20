@@ -10,7 +10,7 @@ export const railStatusSchema = z.union([wordSchema, z.string().refine(isSolanaT
 export const uintSchema = z.string().refine((v) => { try { return bridgeUint(v) >= 0n; } catch { return false; } });
 export const addressSchema = z.string().refine((v) => { try { return bridgeAddress(v) === v; } catch { return false; } });
 export const isoSchema = z.string().refine((v) => { try { return bridgeIso(v) === v; } catch { return false; } });
-export const chainSchema = z.union([z.literal(1), z.literal(8453), z.literal(42161)]);
+export const chainSchema = z.union([z.literal(1), z.literal(56), z.literal(8453), z.literal(42161), z.literal(59144)]);
 export const destinationChainSchema = z.union([chainSchema, z.literal(10), z.literal(137), z.literal(43114), z.literal(130)]);
 export const toolSchema = z.enum(["across", "stargateV2"]);
 export const opaqueSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$/u);
@@ -71,6 +71,8 @@ export const destinationProofSchema = z.strictObject({ tool: toolSchema, chainId
   blockNumberAtomic: uintSchema, blockHash: wordSchema, recipient: addressSchema, token: addressSchema, amountAtomic: uintSchema,
   correlationHash: hashSchema, logsHash: hashSchema, fillType: z.union([z.literal(0), z.literal(1), z.literal(2)]).nullable(),
   relayerCredit: wordSchema.nullable(), repaymentChainIdAtomic: uintSchema.nullable(),
+  nativeBalance: z.strictObject({ recipient: addressSchema, beforeBlock: blockSchema, afterBlock: blockSchema,
+    beforeBalanceAtomic: uintSchema, afterBalanceAtomic: uintSchema, deltaAtomic: uintSchema }).nullable(),
   safeBlock: blockSchema, rpcOrigin: originSchema, transactionProofHash: hashSchema });
 export const scanSchema = z.strictObject({ startBlock: blockSchema, nextBlockAtomic: uintSchema, previousEndBlock: blockSchema.nullable() });
 export const providerObservationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "completed_observed", "partial_observed", "refund_observed", "failed_observed", "unknown"]),
