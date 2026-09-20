@@ -51,6 +51,8 @@ export function encodeStargateNativeDrop(amountInput: string, recipientInput: Ad
 export type StargateTokenPhase = "prepared" | "approved" | "allowance_submission_started" | "allowance_unknown_finality" |
   "allowance_submitted" | "allowance_observed" | "submission_started" | "unknown_finality" | "submitted" | "observed" |
   "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
+export type StargateTokenUsageState = "reserved" | "submitted" | "unknown_finality" | "finalized" |
+  "failed_before_effect" | "failed_confirmed_revert";
 export interface StargateTokenTransition { readonly phase: StargateTokenPhase; readonly at: string; readonly reason: string }
 export interface StargateTokenEnvelope { readonly chainId: 10; readonly from: Address; readonly to: Address; readonly data: Hex;
   readonly valueAtomic: string; readonly nonceAtomic: string; readonly gasLimitAtomic: string; readonly maxFeePerGasAtomic: string;
@@ -80,7 +82,9 @@ export interface StargateTokenOperation {
   readonly phase: StargateTokenPhase; readonly transitions: readonly StargateTokenTransition[]; readonly approvalTransactionHash?: Hex;
   readonly transactionHash?: Hex; readonly residualAllowanceAtomic?: string; readonly sourceReceipt?: StargateTokenSourceReceipt;
   readonly destinationEvidence?: StargateTokenDestinationEvidence; readonly cleanupEnvelope?: StargateTokenEnvelope;
-  readonly cleanupTransactionHash?: Hex; readonly cleanupReason?: string; readonly integrityHash: string;
+  readonly cleanupTransactionHash?: Hex; readonly cleanupReason?: string; readonly usageState?: StargateTokenUsageState;
+  /** Durable desired ledger transition. Presence means the idempotent ledger call still needs reconciliation. */
+  readonly usageTarget?: StargateTokenUsageState; readonly integrityHash: string;
 }
 export interface StargateTokenPreparationRequest { readonly profile: string; readonly owner: Address; readonly recipient: Address;
   readonly amountAtomic: string; readonly nativeDropAtomic: string; readonly minOutputAtomic: string; readonly maxNativeDebitAtomic: string;
@@ -99,8 +103,8 @@ export interface StargateTokenExecutionPorts {
   readonly approveCleanup: (operation: StargateTokenOperation) => Promise<void>;
   readonly admitPolicy: (input: Readonly<{ profile: string; owner: Address; amountAtomic: string; operationId: string }>) => Promise<StargateTokenPolicyBinding>;
   readonly confirmPolicy: (operation: StargateTokenOperation) => Promise<void>;
-  readonly reserveUsage: (operation: StargateTokenOperation) => Promise<void>;
-  readonly followUsage: (operation: StargateTokenOperation, state: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert") => Promise<void>;
+  readonly reserveUsage: (operation: StargateTokenOperation) => Promise<StargateTokenUsageState>;
+  readonly followUsage: (operation: StargateTokenOperation, state: Exclude<StargateTokenUsageState, "reserved">) => Promise<StargateTokenUsageState>;
   readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
   readonly waitSourceReceipt: (transactionHash: Hex) => Promise<StargateTokenConfirmedReceipt | null>;
   readonly observeDestination: (input: Readonly<{ sourceTransactionHash: Hex; guid: Hex; recipient: Address; sourceEid: 30111;
@@ -205,20 +209,22 @@ export async function executeStargateV2Token(id: string, ports: StargateTokenExe
 /** Network observation only: it may advance an attempted effect and can never sign or broadcast. */
 export async function observeStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
   return await journal.withLock(id, async () => {
-    const op = await journal.load(id); if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
+    let op = await journal.load(id); if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
+    op = await reconcileUsageOrCleanup(op, ports, journal);
     if (["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted"].includes(op.phase)) {
       return await observeAllowance(op, ports, journal);
     }
     if (["submission_started", "unknown_finality", "submitted"].includes(op.phase)) return await observeBridge(op, ports, journal);
     if (["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase)) return await observeCleanup(op, ports, journal);
-    if (op.phase === "observed") return op;
+    if (op.phase === "observed" || op.phase === "cleaned" || op.phase === "cleanup_required") return op;
     fail("APN_OPERATION_BLOCKED", "operation_not_attempted");
   });
 }
 async function executeLocked(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation> {
   let op = await journal.load(id); if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing"); const now = ports.now ?? Date.now;
-  if (op.phase === "observed") return op;
-  if (["cleanup_required", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality", "cleaned"].includes(op.phase)) {
+  op = await reconcileUsageOrCleanup(op, ports, journal);
+  if (op.phase === "observed" || op.phase === "cleaned" || op.phase === "cleanup_required") return op;
+  if (["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase)) {
     fail("APN_OPERATION_BLOCKED", "cleanup_command_required");
   }
   if (["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted"].includes(op.phase)) {
@@ -243,15 +249,23 @@ async function executeLocked(id: string, ports: StargateTokenExecutionPorts, jou
     await freshPreflight(op, ports, "before_send"); await ports.confirmPolicy(op);
     const identity = await ports.signerIdentity(); if (canonicalProfile(identity.profile) !== op.profile || address(identity.address) !== op.owner || address(ports.signer.address) !== op.owner) fail("APN_REPREPARE_REQUIRED", "signer_identity_changed");
   } catch (error) { return await requireCleanup(op, ports, journal, error instanceof ApnError ? String(error.details?.reason ?? error.code) : "bridge_preflight_failed"); }
-  await ports.reserveUsage(op);
+  op = await markUsageTarget(op, "reserved", journal);
+  try { op = await reconcileUsage(op, ports, journal); }
+  catch (error) {
+    op = await requireCleanup(op, ports, journal, error instanceof ApnError ? `usage_reservation_${String(error.code).toLowerCase()}` : "usage_reservation_failed");
+    op = await markUsageTarget(op, "failed_before_effect", journal); try { op = await reconcileUsage(op, ports, journal); } catch { /* durable target retries */ }
+    return op;
+  }
   let raw: Hex;
   try { raw = await ports.signer.signTransaction(op.sendEnvelope); await verifySignedEnvelope(raw, op.owner, op.sendEnvelope); }
-  catch (error) { op = await requireCleanup(op, ports, journal, "bridge_signing_failed"); await ports.followUsage(op, "failed_before_effect"); throw error; }
+  catch (error) { op = await requireCleanup(op, ports, journal, "bridge_signing_failed"); op = await markUsageTarget(op, "failed_before_effect", journal);
+    try { await reconcileUsage(op, ports, journal); } catch { /* durable target retries */ } throw error; }
   const hash = keccak256(raw);
   op = transition({ ...op, transactionHash: hash }, "submission_started", "bridge_attempt_marked_before_send", now()); await journal.save(op);
-  try { if ((await ports.sendRawTransaction(raw)).toLowerCase() !== hash.toLowerCase()) fail("APN_RPC_AMBIGUOUS", "send_hash");
-    op = transition(op, "submitted", "bridge_broadcast_returned_exact_hash", now()); await journal.save(op); await ports.followUsage(op, "submitted");
-  } catch { op = transition(op, "unknown_finality", "bridge_broadcast_ambiguous_no_resend", now()); await journal.save(op); await ports.followUsage(op, "unknown_finality"); return op; }
+  try { if ((await ports.sendRawTransaction(raw)).toLowerCase() !== hash.toLowerCase()) fail("APN_RPC_AMBIGUOUS", "send_hash"); }
+  catch { op = transition(op, "unknown_finality", "bridge_broadcast_ambiguous_no_resend", now()); await journal.save(op); op = await markUsageTarget(op, "unknown_finality", journal);
+    try { op = await reconcileUsage(op, ports, journal); } catch { /* durable target retries */ } return op; }
+  op = transition(op, "submitted", "bridge_broadcast_returned_exact_hash", now()); await journal.save(op); op = await markUsageTarget(op, "submitted", journal); op = await reconcileUsage(op, ports, journal);
   return await observeBridge(op, ports, journal);
 }
 async function observeAllowance(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
@@ -263,8 +277,10 @@ async function observeAllowance(op: StargateTokenOperation, ports: StargateToken
 }
 async function observeBridge(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
   if (op.transactionHash === undefined) fail("APN_STATE_CORRUPT", "bridge_hash_missing"); const receipt = await ports.waitSourceReceipt(op.transactionHash);
-  if (receipt === null) { if (op.phase !== "unknown_finality") { op = transition(op, "unknown_finality", "source_receipt_not_safe", (ports.now ?? Date.now)()); await journal.save(op); } await ports.followUsage(op, "unknown_finality"); return op; }
-  if (receipt.status === "reverted") { if (receipt.transactionHash !== op.transactionHash || receipt.finality !== "safe") fail("APN_RPC_PROTOCOL", "source_revert_receipt"); await ports.followUsage(op, "failed_confirmed_revert"); return await requireCleanup(op, ports, journal, "bridge_confirmed_revert"); }
+  if (receipt === null) { if (op.phase !== "unknown_finality") { op = transition(op, "unknown_finality", "source_receipt_not_safe", (ports.now ?? Date.now)()); await journal.save(op); }
+    op = await markUsageTarget(op, "unknown_finality", journal); return await reconcileUsage(op, ports, journal); }
+  if (receipt.status === "reverted") { if (receipt.transactionHash !== op.transactionHash || receipt.finality !== "safe") fail("APN_RPC_PROTOCOL", "source_revert_receipt");
+    op = await requireCleanup(op, ports, journal, "bridge_confirmed_revert"); op = await markUsageTarget(op, "failed_confirmed_revert", journal); return await reconcileUsage(op, ports, journal); }
   const source = sourceReceipt(op, receipt); const residual = await readAllowance(ports.sourceCall, op.owner, "safe");
   const destination = await ports.observeDestination({ sourceTransactionHash: source.transactionHash, guid: source.guid, recipient: op.recipient,
     sourceEid: 30111, destinationPool: STARGATE_TOKEN_DESTINATION_POOL, minimumAmountAtomic: source.amountReceivedAtomic,
@@ -273,12 +289,12 @@ async function observeBridge(op: StargateTokenOperation, ports: StargateTokenExe
   if (destination === null) { if (op.sourceReceipt === undefined || op.residualAllowanceAtomic === undefined) {
     const evidence = { ...op, sourceReceipt: source, residualAllowanceAtomic: residual.toString() };
     op = op.phase === "submitted" ? seal(evidence) : transition(evidence, "submitted", "source_safe_destination_pending", (ports.now ?? Date.now)());
-    await journal.save(op); } await ports.followUsage(op, "submitted"); return op; }
+    await journal.save(op); } op = await markUsageTarget(op, "submitted", journal); return await reconcileUsage(op, ports, journal); }
   validateDestination(op, source, destination);
   if (residual !== 0n) return await requireCleanup({ ...op, sourceReceipt: source, destinationEvidence: destination } as StargateTokenOperation,
     ports, journal, "residual_allowance_after_delivery");
   op = transition({ ...op, sourceReceipt: source, residualAllowanceAtomic: "0", destinationEvidence: destination }, "observed", "destination_token_and_native_drop_safe", (ports.now ?? Date.now)());
-  await journal.save(op); await ports.followUsage(op, "finalized"); return op;
+  await journal.save(op); op = await markUsageTarget(op, "finalized", journal); return await reconcileUsage(op, ports, journal);
 }
 
 async function requireCleanup(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal, reason: string) {
@@ -297,9 +313,9 @@ async function requireCleanup(op: StargateTokenOperation, ports: StargateTokenEx
 export async function cleanupStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
   const initial = await journal.load(id); if (initial === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
   return await journal.withOwnerChainLock(initial.owner, 10, async () => await journal.withLock(id, async () => {
-    let op = await journal.load(id); if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
+    let op = await journal.load(id); if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing"); op = await reconcileUsageOrCleanup(op, ports, journal);
     if (["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase)) return await observeCleanup(op, ports, journal);
-    if (op.phase === "cleaned") return op;
+    if (op.phase === "cleaned" || op.phase === "observed") return op;
     if (op.phase !== "cleanup_required") fail("APN_OPERATION_BLOCKED", "cleanup_not_required");
     const allowance = await readAllowance(ports.sourceCall, op.owner, "pending");
     if (allowance === 0n) return await finishCleanup({ ...op, residualAllowanceAtomic: "0" } as StargateTokenOperation, ports, journal, "zero_residual_allowance_proven");
@@ -335,9 +351,29 @@ async function observeCleanup(op: StargateTokenOperation, ports: StargateTokenEx
 async function finishCleanup(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal, reason: string) {
   const delivered = op.sourceReceipt !== undefined && op.destinationEvidence !== undefined;
   op = transition(op, delivered ? "observed" : "cleaned", reason, (ports.now ?? Date.now)()); await journal.save(op);
-  if (delivered) await ports.followUsage(op, "finalized");
+  if (delivered) { op = await markUsageTarget(op, "finalized", journal); op = await reconcileUsage(op, ports, journal); }
   return op;
 }
+async function markUsageTarget(op: StargateTokenOperation, target: StargateTokenUsageState, journal: StargateTokenJournal) {
+  op = seal({ ...op, usageTarget: target }); await journal.save(op); return op;
+}
+async function reconcileUsage(op: StargateTokenOperation, ports: Pick<StargateTokenExecutionPorts, "reserveUsage" | "followUsage">, journal: StargateTokenJournal) {
+  if (op.usageTarget === undefined) return op;
+  const state = op.usageTarget === "reserved" ? await ports.reserveUsage(op) : await ports.followUsage(op, op.usageTarget);
+  const { usageTarget: _target, ...settled } = op; op = seal({ ...settled, usageState: state }); await journal.save(op); return op;
+}
+async function reconcileUsageOrCleanup(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
+  try { return await reconcileUsage(op, ports, journal); }
+  catch (error) {
+    if (op.usageTarget !== "reserved") throw error;
+    op = await requireCleanup(op, ports, journal, error instanceof ApnError ? `usage_reservation_${String(error.code).toLowerCase()}` : "usage_reservation_failed");
+    op = await markUsageTarget(op, "failed_before_effect", journal); try { return await reconcileUsage(op, ports, journal); } catch { return op; }
+  }
+}
+/** Local ledger reconciliation for status/recovery callers; this never signs, broadcasts, or performs RPC. */
+export async function reconcileStargateV2TokenUsage(id: string, ports: Pick<StargateTokenExecutionPorts, "reserveUsage" | "followUsage">,
+  journal: StargateTokenJournal) { return await journal.withLock(id, async () => { const op = await journal.load(id);
+    if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing"); return await reconcileUsage(op, ports, journal); }); }
 async function freshPreflight(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, stage: "before_approval" | "before_send") {
   if (Date.parse(op.expiresAt) <= (ports.now ?? Date.now)()) fail("APN_REPREPARE_REQUIRED", "expired");
   const cap = await readExecutorCap(ports.sourceCall, "latest"); if (cap !== BigInt(op.executorNativeCapAtomic) || BigInt(op.nativeDropAtomic) > cap) fail("APN_REPREPARE_REQUIRED", "native_drop_cap_changed");
@@ -419,6 +455,8 @@ function transition(op: StargateTokenOperation | Omit<StargateTokenOperation, "i
 function seal(value: Omit<StargateTokenOperation, "integrityHash"> | StargateTokenOperation): StargateTokenOperation { const { integrityHash: _old, ...body } = value as StargateTokenOperation; return Object.freeze({ ...body, integrityHash: hashObject(body) }); }
 function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRecord(value) || value.schemaVersion !== "apn.stargate-v2-token-operation.v1") fail("APN_STATE_CORRUPT", "schema"); const record = value as unknown as StargateTokenOperation, { integrityHash, ...body } = record;
   if (hashObject(body) !== integrityHash || record.transitions.at(-1)?.phase !== record.phase || record.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
+  const usageStates: readonly StargateTokenUsageState[] = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
+  if ((record.usageState !== undefined && !usageStates.includes(record.usageState)) || (record.usageTarget !== undefined && !usageStates.includes(record.usageTarget))) fail("APN_STATE_CORRUPT", "usage_state");
   if (canonicalJson(record.policy.mechanism) !== canonicalJson(STARGATE_TOKEN_MECHANISM)) fail("APN_STATE_CORRUPT", "mechanism_pin");
   if (["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(record.phase) &&
     (record.cleanupEnvelope === undefined || record.cleanupTransactionHash === undefined)) fail("APN_STATE_CORRUPT", "cleanup_marker");
@@ -439,13 +477,22 @@ function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRe
 function validateAdvance(previous: StargateTokenOperation | null, next: StargateTokenOperation) { if (previous === null) { if (next.phase !== "prepared" || next.transitions.length !== 1) fail("APN_STATE_CORRUPT", "initial"); return; }
   const frozen = (x: StargateTokenOperation) => { const { phase: _p, transitions: _t, integrityHash: _i, approvalTransactionHash: _a, transactionHash: _h,
     residualAllowanceAtomic: _r, sourceReceipt: _s, destinationEvidence: _d, cleanupEnvelope: _ce, cleanupTransactionHash: _ch,
-    cleanupReason: _cr, ...rest } = x; return rest; };
+    cleanupReason: _cr, usageState: _us, usageTarget: _ut, ...rest } = x; return rest; };
   if (canonicalJson(frozen(previous)) !== canonicalJson(frozen(next)) || next.transitions.length < previous.transitions.length || canonicalJson(next.transitions.slice(0, previous.transitions.length)) !== canonicalJson(previous.transitions) || (previous.approvalTransactionHash !== undefined && previous.approvalTransactionHash !== next.approvalTransactionHash) || (previous.transactionHash !== undefined && previous.transactionHash !== next.transactionHash) ||
     (previous.cleanupEnvelope !== undefined && canonicalJson(previous.cleanupEnvelope) !== canonicalJson(next.cleanupEnvelope)) ||
     (previous.cleanupTransactionHash !== undefined && previous.cleanupTransactionHash !== next.cleanupTransactionHash) ||
-    (previous.cleanupReason !== undefined && previous.cleanupReason !== next.cleanupReason)) fail("APN_STATE_CORRUPT", "journal_rewrite"); }
+    (previous.cleanupReason !== undefined && previous.cleanupReason !== next.cleanupReason)) fail("APN_STATE_CORRUPT", "journal_rewrite");
+  if (previous.usageTarget !== undefined && next.usageTarget !== previous.usageTarget &&
+    !(previous.usageTarget === "reserved" && next.usageTarget === "failed_before_effect") &&
+    !(next.usageTarget === undefined && next.usageState !== undefined)) fail("APN_STATE_CORRUPT", "usage_target_rewrite");
+  const allowedUsage: Readonly<Partial<Record<StargateTokenUsageState, readonly StargateTokenUsageState[]>>> = {
+    reserved: ["submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"],
+    submitted: ["unknown_finality", "finalized", "failed_confirmed_revert"], unknown_finality: ["finalized", "failed_confirmed_revert"],
+    finalized: [], failed_before_effect: [], failed_confirmed_revert: [],
+  };
+  if (previous.usageState !== undefined && next.usageState !== previous.usageState && !allowedUsage[previous.usageState]?.includes(next.usageState!)) fail("APN_STATE_CORRUPT", "usage_state_rewrite"); }
 
-export function stargateV2TokenCanonicalReceipt(input: StargateTokenOperation) { const op = validateRecord(input); if (op.phase !== "observed" || op.sourceReceipt === undefined || op.destinationEvidence === undefined || op.residualAllowanceAtomic !== "0") fail("APN_OPERATION_BLOCKED", "receipt_not_observed");
+export function stargateV2TokenCanonicalReceipt(input: StargateTokenOperation) { const op = validateRecord(input); if (op.phase !== "observed" || op.sourceReceipt === undefined || op.destinationEvidence === undefined || op.residualAllowanceAtomic !== "0" || op.usageState !== "finalized" || op.usageTarget !== undefined) fail("APN_OPERATION_BLOCKED", "receipt_not_observed");
   const body = { schemaVersion: "apn.stargate-v2-token-receipt.v1" as const, operationId: op.operationId, profile: op.profile,
     route: { sourceChainId: 10, sourceEid: 30111, sourcePool: op.sourcePool, sourceToken: op.sourceToken, destinationChainId: 137, destinationEid: 30109, destinationPool: op.destinationPool, destinationToken: op.destinationToken },
     owner: op.owner, recipient: op.recipient, principalAtomic: op.amountAtomic, minimumOutputAtomic: op.quote.quote.minimumOutputAtomic,
