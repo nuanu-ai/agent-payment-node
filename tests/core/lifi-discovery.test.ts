@@ -164,7 +164,7 @@ test("LI.FI public provider API contract uses fixed endpoints, finite tools, one
   const publicInventory = bridgeInventory(responses) as any;
   assert.equal(publicInventory.observed.connections.executable_capability, false);
   assert.deepEqual(publicInventory.observed.connections.provider_inventory.pairs.at(-1), pairs.at(-1));
-  assert.deepEqual(new URL(calls.find((c) => c[0].includes("/tools?"))![0]).searchParams.getAll("chains"), ["1", "8453", "42161"]);
+  assert.deepEqual(new URL(calls.find((c) => c[0].includes("/tools?"))![0]).searchParams.getAll("chains"), ["1", "56", "8453", "42161", "59144"]);
   const connectionCalls = calls.filter((c) => c[0].includes("/connections?"));
   assert.equal(connectionCalls.length, admittedPairs + 2);
   const candidate = connectionCalls.map((c) => new URL(c[0])).find((url) => url.searchParams.get("toChain") === String(BASE_SOLANA_USDC_CANDIDATE.toChainId));

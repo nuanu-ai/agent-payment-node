@@ -9,8 +9,10 @@ import { bridgeFailure } from "./validation.js";
  */
 export const BRIDGE_ARCHIVE_RPC_ENV = {
     1: "APN_ETHEREUM_ARCHIVE_RPC_URL",
+    56: "APN_BNB_ARCHIVE_RPC_URL",
     8453: "APN_BASE_ARCHIVE_RPC_URL",
     42161: "APN_ARBITRUM_ARCHIVE_RPC_URL",
+    59144: "APN_LINEA_ARCHIVE_RPC_URL",
 };
 const TAG_INDEX = { eth_getCode: 1, eth_getStorageAt: 2, eth_call: 1 };
 export function bridgeArchiveEndpoint(chainId, environment) {

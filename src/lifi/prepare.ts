@@ -15,6 +15,7 @@ import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from
 import { newBridgeOperation } from "./transitions.js";
 import { bridgeExecutionDestination, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
+import { BridgeAllowlistGate } from "./allowlist.js";
 
 export interface BridgePreparationOptions {
   readonly state: StateStore; readonly records: BridgeOperationRepository; readonly quotes: BridgeQuoteRepository;
@@ -52,6 +53,10 @@ export class BridgePreparation {
       if (selected === undefined) bridgeFailure("APN_INVALID_INPUT", "route_not_in_snapshot");
       if (!bridgeExecutionDestination(quote.request.toChainId)) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "destination_execution_unreviewed");
       if (!selected.choice.preparable) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
+      const allowlist = quote.request.toChainId === 59144
+        ? await new BridgeAllowlistGate({ state, clock: { now: () => new Date(this.o.now()) } })
+          .admit(profile, quote.owner.address, quote.request, selected.choice.tool)
+        : null;
       const source = this.o.rpcFor(quote.request.fromChainId), destination = this.o.rpcFor(quote.request.toChainId);
       await Promise.all([source.assertChain(), destination.assertChain()]);
       const response = await this.o.provider.materialize(selected.step), preparedAt = new Date(this.o.now()).toISOString();
@@ -67,7 +72,8 @@ export class BridgePreparation {
         intent: { profile, quoteHash, owner: quote.owner, providerBinding: quote.providerBinding, materialization: m, decoded,
           sourceDeployment, destinationDeployment, sourceAccount, destinationStartBlock,
           sourceRpcOrigin: source.origin, destinationRpcOrigin: destination.origin, preparedAt, expiresAt,
-          policyHash: hashObject({ identity: "apn.bridge.foreground-approval.v1", request: m.request }), implicitProtocolFeeAtomic: parsed.implicitProtocolFeeAtomic },
+          policyHash: hashObject({ identity: "apn.bridge.foreground-approval.v1", request: m.request }),
+          implicitProtocolFeeAtomic: parsed.implicitProtocolFeeAtomic, allowlist },
         effects: envelopes.map(newBridgeEffect) });
       await this.o.records.persist(operation); return operation;
     });

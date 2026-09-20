@@ -1,0 +1,1761 @@
+{
+  "capture": {
+    "capturedAt": "2026-09-20T10:53:57Z",
+    "mode": "anonymous_read_only_no_signing_no_send",
+    "routeEndpoint": "https://li.quest/v1/advanced/routes",
+    "stepEndpoint": "https://li.quest/v1/advanced/stepTransaction",
+    "routeResponseSha256": "84ee98fc4bd7c937ad8ac87ac3a81716035674dfdb755a7ff666f6881a03af23",
+    "stepResponseSha256": "caa784c30485eab30abbf92d41368d63909926c11221f61a0868de945580b96b"
+  },
+  "routeRequest": {
+    "fromChainId": 1,
+    "toChainId": 59144,
+    "fromTokenAddress": "0x0000000000000000000000000000000000000000",
+    "toTokenAddress": "0x0000000000000000000000000000000000000000",
+    "fromAmount": "200000000000000",
+    "fromAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+    "toAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+    "options": {
+      "slippage": 0.005,
+      "allowSwitchChain": false,
+      "allowDestinationCall": false,
+      "executionType": "transaction",
+      "gasless": false,
+      "fee": 0,
+      "integrator": "lifi-api",
+      "bridges": {
+        "allow": [
+          "across"
+        ]
+      },
+      "exchanges": {
+        "allow": []
+      }
+    }
+  },
+  "routeResponse": {
+    "routes": [
+      {
+        "id": "405e42b8-ef69-433e-983f-758097869b13",
+        "fromChainId": 1,
+        "fromAmountUSD": "0.5164",
+        "fromAmount": "200000000000000",
+        "fromToken": {
+          "address": "0x0000000000000000000000000000000000000000",
+          "chainId": 1,
+          "symbol": "ETH",
+          "decimals": 18,
+          "name": "ETH",
+          "coinKey": "ETH",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+          "priceUSD": "2581.84",
+          "tags": [
+            "major_asset"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+            {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+            }
+          ]
+        },
+        "fromAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+        "toChainId": 59144,
+        "toAmountUSD": "0.4885",
+        "toAmount": "189197517787962",
+        "toAmountMin": "189197517787962",
+        "toToken": {
+          "address": "0x0000000000000000000000000000000000000000",
+          "chainId": 59144,
+          "symbol": "ETH",
+          "decimals": 18,
+          "name": "ETH",
+          "coinKey": "ETH",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+          "priceUSD": "2582.06",
+          "tags": [],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+            {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+            }
+          ]
+        },
+        "toAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+        "gasCostUSD": "0.0308",
+        "containsSwitchChain": false,
+        "steps": [
+          {
+            "type": "lifi",
+            "id": "405e42b8-ef69-433e-983f-758097869b13:0",
+            "tool": "across",
+            "toolDetails": {
+              "key": "across",
+              "name": "AcrossV4",
+              "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/across.svg"
+            },
+            "action": {
+              "fromToken": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              },
+              "fromAmount": "200000000000000",
+              "toToken": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 59144,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2582.06",
+                "tags": [],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              },
+              "fromChainId": 1,
+              "toChainId": 59144,
+              "slippage": 0.005,
+              "fromAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+              "toAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1"
+            },
+            "estimate": {
+              "tool": "across",
+              "approvalAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+              "toAmountMin": "189197517787962",
+              "toAmount": "189197517787962",
+              "fromAmount": "200000000000000",
+              "feeCosts": [
+                {
+                  "name": "LIFI Fixed Fee",
+                  "description": "Fixed LIFI fee, independent of any other fee",
+                  "token": {
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "chainId": 1,
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "name": "ETH",
+                    "coinKey": "ETH",
+                    "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                    "priceUSD": "2581.84",
+                    "tags": [
+                      "major_asset"
+                    ],
+                    "verificationStatus": "verified",
+                    "verificationStatusBreakdown": [
+                      {
+                        "provider": "hypernative",
+                        "result": "verified",
+                        "providerResult": "accept"
+                      }
+                    ]
+                  },
+                  "amount": "500000000000",
+                  "amountUSD": "0.0013",
+                  "percentage": "0.0025",
+                  "included": true,
+                  "feeSplit": {
+                    "lifiFee": "500000000000",
+                    "integratorFee": "0",
+                    "recipients": [
+                      {
+                        "name": "lifi",
+                        "type": "FIXED",
+                        "fee": "500000000000"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "Relayer fee",
+                  "description": "The fee taken by the relayer",
+                  "token": {
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "chainId": 1,
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "name": "ETH",
+                    "coinKey": "ETH",
+                    "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                    "priceUSD": "2581.84",
+                    "tags": [
+                      "major_asset"
+                    ],
+                    "verificationStatus": "verified",
+                    "verificationStatusBreakdown": [
+                      {
+                        "provider": "hypernative",
+                        "result": "verified",
+                        "providerResult": "accept"
+                      }
+                    ]
+                  },
+                  "amount": "19948341656",
+                  "amountUSD": "0.0001",
+                  "percentage": "0.000100",
+                  "included": true
+                },
+                {
+                  "name": "Relayer gas fee",
+                  "description": "The gas fee taken by the relayer",
+                  "token": {
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "chainId": 1,
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "name": "ETH",
+                    "coinKey": "ETH",
+                    "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                    "priceUSD": "2581.84",
+                    "tags": [
+                      "major_asset"
+                    ],
+                    "verificationStatus": "verified",
+                    "verificationStatusBreakdown": [
+                      {
+                        "provider": "hypernative",
+                        "result": "verified",
+                        "providerResult": "accept"
+                      }
+                    ]
+                  },
+                  "amount": "10282533870382",
+                  "amountUSD": "0.0265",
+                  "percentage": "0.051542",
+                  "included": true
+                }
+              ],
+              "gasCosts": [
+                {
+                  "type": "SEND",
+                  "price": "71396500",
+                  "estimate": "167000",
+                  "limit": "410000",
+                  "amount": "11923215500000",
+                  "amountUSD": "0.0308",
+                  "token": {
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "chainId": 1,
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "name": "ETH",
+                    "coinKey": "ETH",
+                    "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                    "priceUSD": "2581.84",
+                    "tags": [
+                      "major_asset"
+                    ],
+                    "verificationStatus": "verified",
+                    "verificationStatusBreakdown": [
+                      {
+                        "provider": "hypernative",
+                        "result": "verified",
+                        "providerResult": "accept"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "executionDuration": 2,
+              "fromAmountUSD": "0.5164",
+              "toAmountUSD": "0.4885",
+              "skipApproval": true,
+              "skipPermit": false
+            },
+            "includedSteps": [
+              {
+                "id": "da92daee-6f46-49d9-b591-fe0b87574284",
+                "type": "protocol",
+                "action": {
+                  "fromChainId": 1,
+                  "fromAmount": "200000000000000",
+                  "fromToken": {
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "chainId": 1,
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "name": "ETH",
+                    "coinKey": "ETH",
+                    "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                    "priceUSD": "2581.84",
+                    "tags": [
+                      "major_asset"
+                    ],
+                    "verificationStatus": "verified",
+                    "verificationStatusBreakdown": [
+                      {
+                        "provider": "hypernative",
+                        "result": "verified",
+                        "providerResult": "accept"
+                      }
+                    ]
+                  },
+                  "toChainId": 1,
+                  "toToken": {
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "chainId": 1,
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "name": "ETH",
+                    "coinKey": "ETH",
+                    "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                    "priceUSD": "2581.84",
+                    "tags": [
+                      "major_asset"
+                    ],
+                    "verificationStatus": "verified",
+                    "verificationStatusBreakdown": [
+                      {
+                        "provider": "hypernative",
+                        "result": "verified",
+                        "providerResult": "accept"
+                      }
+                    ]
+                  },
+                  "slippage": 0.005,
+                  "fromAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+                  "toAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+                  "jitoBundle": false,
+                  "integratorFees": {
+                    "feePercent": 0.0025,
+                    "sourceAmount": {
+                      "s": 1,
+                      "e": 14,
+                      "c": [
+                        2
+                      ]
+                    },
+                    "totalFee": {
+                      "s": 1,
+                      "e": 11,
+                      "c": [
+                        500000000000
+                      ]
+                    },
+                    "recipients": [
+                      {
+                        "name": "lifi",
+                        "type": "FIXED",
+                        "fee": {
+                          "s": 1,
+                          "e": 11,
+                          "c": [
+                            500000000000
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "integratorId": "lifi-api"
+                },
+                "estimate": {
+                  "fromAmount": "200000000000000",
+                  "toAmount": "199500000000000",
+                  "toAmountMin": "199500000000000",
+                  "tool": "feeCollection",
+                  "approvalAddress": "0xCE40449B773a3E6E5e769ADb4e567179d4828cbd",
+                  "gasCosts": [
+                    {
+                      "type": "SEND",
+                      "price": "71396500",
+                      "estimate": "100000",
+                      "limit": "130000",
+                      "amount": "7139650000000",
+                      "amountUSD": "0.0184",
+                      "token": {
+                        "address": "0x0000000000000000000000000000000000000000",
+                        "chainId": 1,
+                        "symbol": "ETH",
+                        "decimals": 18,
+                        "name": "ETH",
+                        "coinKey": "ETH",
+                        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                        "priceUSD": "2581.84",
+                        "tags": [
+                          "major_asset"
+                        ],
+                        "verificationStatus": "verified",
+                        "verificationStatusBreakdown": [
+                          {
+                            "provider": "hypernative",
+                            "result": "verified",
+                            "providerResult": "accept"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "feeCosts": [
+                    {
+                      "name": "LIFI Fixed Fee",
+                      "description": "Fixed LIFI fee, independent of any other fee",
+                      "token": {
+                        "address": "0x0000000000000000000000000000000000000000",
+                        "chainId": 1,
+                        "symbol": "ETH",
+                        "decimals": 18,
+                        "name": "ETH",
+                        "coinKey": "ETH",
+                        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                        "priceUSD": "2581.84",
+                        "tags": [
+                          "major_asset"
+                        ],
+                        "verificationStatus": "verified",
+                        "verificationStatusBreakdown": [
+                          {
+                            "provider": "hypernative",
+                            "result": "verified",
+                            "providerResult": "accept"
+                          }
+                        ]
+                      },
+                      "amount": "500000000000",
+                      "amountUSD": "0.0013",
+                      "percentage": "0.0025",
+                      "included": true,
+                      "feeSplit": {
+                        "lifiFee": "500000000000",
+                        "integratorFee": "0",
+                        "recipients": [
+                          {
+                            "name": "lifi",
+                            "type": "FIXED",
+                            "fee": "500000000000"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "executionDuration": 0
+                },
+                "tool": "feeCollection",
+                "toolDetails": {
+                  "key": "feeCollection",
+                  "name": "Integrator Fee",
+                  "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/protocols/feeCollection.svg"
+                }
+              },
+              {
+                "id": "624593d3-a2a7-4242-aa42-aa28b1b48ec8",
+                "type": "cross",
+                "action": {
+                  "fromChainId": 1,
+                  "fromAmount": "199500000000000",
+                  "fromToken": {
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "chainId": 1,
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "name": "ETH",
+                    "coinKey": "ETH",
+                    "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                    "priceUSD": "2581.84",
+                    "tags": [
+                      "major_asset"
+                    ],
+                    "verificationStatus": "verified",
+                    "verificationStatusBreakdown": [
+                      {
+                        "provider": "hypernative",
+                        "result": "verified",
+                        "providerResult": "accept"
+                      }
+                    ]
+                  },
+                  "toChainId": 59144,
+                  "toToken": {
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "chainId": 59144,
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "name": "ETH",
+                    "coinKey": "ETH",
+                    "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                    "priceUSD": "2582.06",
+                    "tags": [],
+                    "verificationStatus": "verified",
+                    "verificationStatusBreakdown": [
+                      {
+                        "provider": "hypernative",
+                        "result": "verified",
+                        "providerResult": "accept"
+                      }
+                    ]
+                  },
+                  "slippage": 0.005,
+                  "fromAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+                  "toAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+                  "jitoBundle": false,
+                  "integratorFees": {
+                    "feePercent": 0.0025,
+                    "sourceAmount": {
+                      "s": 1,
+                      "e": 14,
+                      "c": [
+                        2
+                      ]
+                    },
+                    "totalFee": {
+                      "s": 1,
+                      "e": 11,
+                      "c": [
+                        500000000000
+                      ]
+                    },
+                    "recipients": [
+                      {
+                        "name": "lifi",
+                        "type": "FIXED",
+                        "fee": {
+                          "s": 1,
+                          "e": 11,
+                          "c": [
+                            500000000000
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "integratorId": "lifi-api",
+                  "destinationGasConsumption": "0"
+                },
+                "estimate": {
+                  "fromAmount": "199500000000000",
+                  "toAmount": "189197517787962",
+                  "toAmountMin": "189197517787962",
+                  "approvalAddress": "0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5",
+                  "executionDuration": 2,
+                  "feeCosts": [
+                    {
+                      "name": "Relayer fee",
+                      "description": "The fee taken by the relayer",
+                      "token": {
+                        "address": "0x0000000000000000000000000000000000000000",
+                        "chainId": 1,
+                        "symbol": "ETH",
+                        "decimals": 18,
+                        "name": "ETH",
+                        "coinKey": "ETH",
+                        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                        "priceUSD": "2581.84",
+                        "tags": [
+                          "major_asset"
+                        ],
+                        "verificationStatus": "verified",
+                        "verificationStatusBreakdown": [
+                          {
+                            "provider": "hypernative",
+                            "result": "verified",
+                            "providerResult": "accept"
+                          }
+                        ]
+                      },
+                      "amount": "19948341656",
+                      "amountUSD": "0.0001",
+                      "percentage": "0.000100",
+                      "included": true
+                    },
+                    {
+                      "name": "Relayer gas fee",
+                      "description": "The gas fee taken by the relayer",
+                      "token": {
+                        "address": "0x0000000000000000000000000000000000000000",
+                        "chainId": 1,
+                        "symbol": "ETH",
+                        "decimals": 18,
+                        "name": "ETH",
+                        "coinKey": "ETH",
+                        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                        "priceUSD": "2581.84",
+                        "tags": [
+                          "major_asset"
+                        ],
+                        "verificationStatus": "verified",
+                        "verificationStatusBreakdown": [
+                          {
+                            "provider": "hypernative",
+                            "result": "verified",
+                            "providerResult": "accept"
+                          }
+                        ]
+                      },
+                      "amount": "10282533870382",
+                      "amountUSD": "0.0265",
+                      "percentage": "0.051542",
+                      "included": true
+                    }
+                  ],
+                  "gasCosts": [
+                    {
+                      "type": "SEND",
+                      "price": "71396500",
+                      "estimate": "67000",
+                      "limit": "87100",
+                      "amount": "4783565500000",
+                      "amountUSD": "0.0124",
+                      "token": {
+                        "address": "0x0000000000000000000000000000000000000000",
+                        "chainId": 1,
+                        "symbol": "ETH",
+                        "decimals": 18,
+                        "name": "ETH",
+                        "coinKey": "ETH",
+                        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                        "priceUSD": "2581.84",
+                        "tags": [
+                          "major_asset"
+                        ],
+                        "verificationStatus": "verified",
+                        "verificationStatusBreakdown": [
+                          {
+                            "provider": "hypernative",
+                            "result": "verified",
+                            "providerResult": "accept"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "tool": "across"
+                },
+                "tool": "across",
+                "toolDetails": {
+                  "key": "across",
+                  "name": "AcrossV4",
+                  "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/across.svg"
+                }
+              }
+            ],
+            "integrator": "lifi-api",
+            "fee": 0,
+            "executionType": "transaction"
+          }
+        ],
+        "tags": [
+          "RECOMMENDED",
+          "CHEAPEST",
+          "FASTEST"
+        ]
+      }
+    ],
+    "unavailableRoutes": {
+      "filteredOut": [],
+      "failed": []
+    }
+  },
+  "stepRequest": {
+    "type": "lifi",
+    "id": "405e42b8-ef69-433e-983f-758097869b13:0",
+    "tool": "across",
+    "toolDetails": {
+      "key": "across",
+      "name": "AcrossV4",
+      "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/across.svg"
+    },
+    "action": {
+      "fromToken": {
+        "address": "0x0000000000000000000000000000000000000000",
+        "chainId": 1,
+        "symbol": "ETH",
+        "decimals": 18,
+        "name": "ETH",
+        "coinKey": "ETH",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+        "priceUSD": "2581.84",
+        "tags": [
+          "major_asset"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+          }
+        ]
+      },
+      "fromAmount": "200000000000000",
+      "toToken": {
+        "address": "0x0000000000000000000000000000000000000000",
+        "chainId": 59144,
+        "symbol": "ETH",
+        "decimals": 18,
+        "name": "ETH",
+        "coinKey": "ETH",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+        "priceUSD": "2582.06",
+        "tags": [],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+          }
+        ]
+      },
+      "fromChainId": 1,
+      "toChainId": 59144,
+      "slippage": 0.005,
+      "fromAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+      "toAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1"
+    },
+    "estimate": {
+      "tool": "across",
+      "approvalAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+      "toAmountMin": "189197517787962",
+      "toAmount": "189197517787962",
+      "fromAmount": "200000000000000",
+      "feeCosts": [
+        {
+          "name": "LIFI Fixed Fee",
+          "description": "Fixed LIFI fee, independent of any other fee",
+          "token": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "amount": "500000000000",
+          "amountUSD": "0.0013",
+          "percentage": "0.0025",
+          "included": true,
+          "feeSplit": {
+            "lifiFee": "500000000000",
+            "integratorFee": "0",
+            "recipients": [
+              {
+                "name": "lifi",
+                "type": "FIXED",
+                "fee": "500000000000"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Relayer fee",
+          "description": "The fee taken by the relayer",
+          "token": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "amount": "19948341656",
+          "amountUSD": "0.0001",
+          "percentage": "0.000100",
+          "included": true
+        },
+        {
+          "name": "Relayer gas fee",
+          "description": "The gas fee taken by the relayer",
+          "token": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "amount": "10282533870382",
+          "amountUSD": "0.0265",
+          "percentage": "0.051542",
+          "included": true
+        }
+      ],
+      "gasCosts": [
+        {
+          "type": "SEND",
+          "price": "71396500",
+          "estimate": "167000",
+          "limit": "410000",
+          "amount": "11923215500000",
+          "amountUSD": "0.0308",
+          "token": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          }
+        }
+      ],
+      "executionDuration": 2,
+      "fromAmountUSD": "0.5164",
+      "toAmountUSD": "0.4885",
+      "skipApproval": true,
+      "skipPermit": false
+    },
+    "includedSteps": [
+      {
+        "id": "da92daee-6f46-49d9-b591-fe0b87574284",
+        "type": "protocol",
+        "action": {
+          "fromChainId": 1,
+          "fromAmount": "200000000000000",
+          "fromToken": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "toChainId": 1,
+          "toToken": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "slippage": 0.005,
+          "fromAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+          "toAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+          "jitoBundle": false,
+          "integratorFees": {
+            "feePercent": 0.0025,
+            "sourceAmount": {
+              "s": 1,
+              "e": 14,
+              "c": [
+                2
+              ]
+            },
+            "totalFee": {
+              "s": 1,
+              "e": 11,
+              "c": [
+                500000000000
+              ]
+            },
+            "recipients": [
+              {
+                "name": "lifi",
+                "type": "FIXED",
+                "fee": {
+                  "s": 1,
+                  "e": 11,
+                  "c": [
+                    500000000000
+                  ]
+                }
+              }
+            ]
+          },
+          "integratorId": "lifi-api"
+        },
+        "estimate": {
+          "fromAmount": "200000000000000",
+          "toAmount": "199500000000000",
+          "toAmountMin": "199500000000000",
+          "tool": "feeCollection",
+          "approvalAddress": "0xCE40449B773a3E6E5e769ADb4e567179d4828cbd",
+          "gasCosts": [
+            {
+              "type": "SEND",
+              "price": "71396500",
+              "estimate": "100000",
+              "limit": "130000",
+              "amount": "7139650000000",
+              "amountUSD": "0.0184",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              }
+            }
+          ],
+          "feeCosts": [
+            {
+              "name": "LIFI Fixed Fee",
+              "description": "Fixed LIFI fee, independent of any other fee",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              },
+              "amount": "500000000000",
+              "amountUSD": "0.0013",
+              "percentage": "0.0025",
+              "included": true,
+              "feeSplit": {
+                "lifiFee": "500000000000",
+                "integratorFee": "0",
+                "recipients": [
+                  {
+                    "name": "lifi",
+                    "type": "FIXED",
+                    "fee": "500000000000"
+                  }
+                ]
+              }
+            }
+          ],
+          "executionDuration": 0
+        },
+        "tool": "feeCollection",
+        "toolDetails": {
+          "key": "feeCollection",
+          "name": "Integrator Fee",
+          "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/protocols/feeCollection.svg"
+        }
+      },
+      {
+        "id": "624593d3-a2a7-4242-aa42-aa28b1b48ec8",
+        "type": "cross",
+        "action": {
+          "fromChainId": 1,
+          "fromAmount": "199500000000000",
+          "fromToken": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "toChainId": 59144,
+          "toToken": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 59144,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2582.06",
+            "tags": [],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "slippage": 0.005,
+          "fromAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+          "toAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+          "jitoBundle": false,
+          "integratorFees": {
+            "feePercent": 0.0025,
+            "sourceAmount": {
+              "s": 1,
+              "e": 14,
+              "c": [
+                2
+              ]
+            },
+            "totalFee": {
+              "s": 1,
+              "e": 11,
+              "c": [
+                500000000000
+              ]
+            },
+            "recipients": [
+              {
+                "name": "lifi",
+                "type": "FIXED",
+                "fee": {
+                  "s": 1,
+                  "e": 11,
+                  "c": [
+                    500000000000
+                  ]
+                }
+              }
+            ]
+          },
+          "integratorId": "lifi-api",
+          "destinationGasConsumption": "0"
+        },
+        "estimate": {
+          "fromAmount": "199500000000000",
+          "toAmount": "189197517787962",
+          "toAmountMin": "189197517787962",
+          "approvalAddress": "0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5",
+          "executionDuration": 2,
+          "feeCosts": [
+            {
+              "name": "Relayer fee",
+              "description": "The fee taken by the relayer",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              },
+              "amount": "19948341656",
+              "amountUSD": "0.0001",
+              "percentage": "0.000100",
+              "included": true
+            },
+            {
+              "name": "Relayer gas fee",
+              "description": "The gas fee taken by the relayer",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              },
+              "amount": "10282533870382",
+              "amountUSD": "0.0265",
+              "percentage": "0.051542",
+              "included": true
+            }
+          ],
+          "gasCosts": [
+            {
+              "type": "SEND",
+              "price": "71396500",
+              "estimate": "67000",
+              "limit": "87100",
+              "amount": "4783565500000",
+              "amountUSD": "0.0124",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              }
+            }
+          ],
+          "tool": "across"
+        },
+        "tool": "across",
+        "toolDetails": {
+          "key": "across",
+          "name": "AcrossV4",
+          "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/across.svg"
+        }
+      }
+    ],
+    "integrator": "lifi-api",
+    "fee": 0,
+    "executionType": "transaction"
+  },
+  "stepResponse": {
+    "type": "lifi",
+    "id": "405e42b8-ef69-433e-983f-758097869b13:0",
+    "tool": "across",
+    "toolDetails": {
+      "key": "across",
+      "name": "AcrossV4",
+      "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/across.svg"
+    },
+    "action": {
+      "fromToken": {
+        "address": "0x0000000000000000000000000000000000000000",
+        "chainId": 1,
+        "symbol": "ETH",
+        "decimals": 18,
+        "name": "ETH",
+        "coinKey": "ETH",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+        "priceUSD": "2581.84",
+        "tags": [
+          "major_asset"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+          }
+        ]
+      },
+      "fromAmount": "200000000000000",
+      "toToken": {
+        "address": "0x0000000000000000000000000000000000000000",
+        "chainId": 59144,
+        "symbol": "ETH",
+        "decimals": 18,
+        "name": "ETH",
+        "coinKey": "ETH",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+        "priceUSD": "2582.06",
+        "tags": [],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+          }
+        ]
+      },
+      "fromChainId": 1,
+      "toChainId": 59144,
+      "slippage": 0.005,
+      "fromAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+      "toAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1"
+    },
+    "estimate": {
+      "tool": "across",
+      "approvalAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+      "toAmountMin": "189197517787962",
+      "toAmount": "189197517787962",
+      "fromAmount": "200000000000000",
+      "feeCosts": [
+        {
+          "name": "LIFI Fixed Fee",
+          "description": "Fixed LIFI fee, independent of any other fee",
+          "token": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "amount": "500000000000",
+          "amountUSD": "0.0013",
+          "percentage": "0.0025",
+          "included": true,
+          "feeSplit": {
+            "lifiFee": "500000000000",
+            "integratorFee": "0",
+            "recipients": [
+              {
+                "name": "lifi",
+                "type": "FIXED",
+                "fee": "500000000000"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Relayer fee",
+          "description": "The fee taken by the relayer",
+          "token": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "amount": "19948341656",
+          "amountUSD": "0.0001",
+          "percentage": "0.000100",
+          "included": true
+        },
+        {
+          "name": "Relayer gas fee",
+          "description": "The gas fee taken by the relayer",
+          "token": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "amount": "10282533870382",
+          "amountUSD": "0.0265",
+          "percentage": "0.051542",
+          "included": true
+        }
+      ],
+      "gasCosts": [
+        {
+          "type": "SEND",
+          "price": "71396500",
+          "estimate": "410000",
+          "limit": "533000",
+          "amount": "29272565000000",
+          "amountUSD": "0.0756",
+          "token": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          }
+        }
+      ],
+      "executionDuration": 2,
+      "fromAmountUSD": "0.5164",
+      "toAmountUSD": "0.4885",
+      "skipApproval": true
+    },
+    "includedSteps": [
+      {
+        "id": "da92daee-6f46-49d9-b591-fe0b87574284",
+        "type": "protocol",
+        "action": {
+          "fromChainId": 1,
+          "fromAmount": "200000000000000",
+          "fromToken": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "toChainId": 1,
+          "toToken": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "slippage": 0.005,
+          "fromAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+          "toAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE"
+        },
+        "estimate": {
+          "fromAmount": "200000000000000",
+          "toAmount": "199500000000000",
+          "toAmountMin": "199500000000000",
+          "tool": "feeCollection",
+          "approvalAddress": "0xCE40449B773a3E6E5e769ADb4e567179d4828cbd",
+          "gasCosts": [
+            {
+              "type": "SEND",
+              "price": "71396500",
+              "estimate": "100000",
+              "limit": "130000",
+              "amount": "7139650000000",
+              "amountUSD": "0.0184",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              }
+            }
+          ],
+          "feeCosts": [
+            {
+              "name": "LIFI Fixed Fee",
+              "description": "Fixed LIFI fee, independent of any other fee",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              },
+              "amount": "500000000000",
+              "amountUSD": "0.0013",
+              "percentage": "0.0025",
+              "included": true,
+              "feeSplit": {
+                "lifiFee": "500000000000",
+                "integratorFee": "0",
+                "recipients": [
+                  {
+                    "name": "lifi",
+                    "type": "FIXED",
+                    "fee": "500000000000"
+                  }
+                ]
+              }
+            }
+          ],
+          "executionDuration": 0
+        },
+        "tool": "feeCollection",
+        "toolDetails": {
+          "key": "feeCollection",
+          "name": "Integrator Fee",
+          "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/protocols/feeCollection.svg"
+        }
+      },
+      {
+        "id": "624593d3-a2a7-4242-aa42-aa28b1b48ec8",
+        "type": "cross",
+        "action": {
+          "fromChainId": 1,
+          "fromAmount": "199500000000000",
+          "fromToken": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 1,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2581.84",
+            "tags": [
+              "major_asset"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "toChainId": 59144,
+          "toToken": {
+            "address": "0x0000000000000000000000000000000000000000",
+            "chainId": 59144,
+            "symbol": "ETH",
+            "decimals": 18,
+            "name": "ETH",
+            "coinKey": "ETH",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+            "priceUSD": "2582.06",
+            "tags": [],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+              {
+                "provider": "hypernative",
+                "result": "verified",
+                "providerResult": "accept"
+              }
+            ]
+          },
+          "slippage": 0.005,
+          "fromAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+          "toAddress": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+          "destinationGasConsumption": "0"
+        },
+        "estimate": {
+          "fromAmount": "199500000000000",
+          "toAmount": "189197517787962",
+          "toAmountMin": "189197517787962",
+          "approvalAddress": "0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5",
+          "executionDuration": 2,
+          "feeCosts": [
+            {
+              "name": "Relayer fee",
+              "description": "The fee taken by the relayer",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              },
+              "amount": "19948341656",
+              "amountUSD": "0.0001",
+              "percentage": "0.000100",
+              "included": true
+            },
+            {
+              "name": "Relayer gas fee",
+              "description": "The gas fee taken by the relayer",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              },
+              "amount": "10282533870382",
+              "amountUSD": "0.0265",
+              "percentage": "0.051542",
+              "included": true
+            }
+          ],
+          "gasCosts": [
+            {
+              "type": "SEND",
+              "price": "71396500",
+              "estimate": "67000",
+              "limit": "87100",
+              "amount": "4783565500000",
+              "amountUSD": "0.0124",
+              "token": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "chainId": 1,
+                "symbol": "ETH",
+                "decimals": 18,
+                "name": "ETH",
+                "coinKey": "ETH",
+                "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+                "priceUSD": "2581.84",
+                "tags": [
+                  "major_asset"
+                ],
+                "verificationStatus": "verified",
+                "verificationStatusBreakdown": [
+                  {
+                    "provider": "hypernative",
+                    "result": "verified",
+                    "providerResult": "accept"
+                  }
+                ]
+              }
+            }
+          ],
+          "tool": "across"
+        },
+        "tool": "across",
+        "toolDetails": {
+          "key": "across",
+          "name": "AcrossV4",
+          "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/across.svg"
+        }
+      }
+    ],
+    "integrator": "lifi-api",
+    "fee": 0,
+    "stepSimulation": {
+      "status": "not-attempted",
+      "gasSource": "tool",
+      "disabledReason": "integrator_not_allowed"
+    },
+    "transactionRequest": {
+      "value": "0xb5e620f48000",
+      "to": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+      "data": "0x1794958f0000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000022000000000000000000000000000000000000000000000000000000000000004006c39c7fde090ceeb2d25a2c526088292560fc864bf88ebf8e93218f50db2c45000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001a642f0e3c3af545e7acbd38b07251b3990914f10000000000000000000000000000000000000000000000000000b571b6a1f800000000000000000000000000000000000000000000000000000000000000e7080000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066163726f7373000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000086c6966692d61706900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000ce40449b773a3e6e5e769adb4e567179d4828cbd000000000000000000000000ce40449b773a3e6e5e769adb4e567179d4828cbd000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b5e620f4800000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000840e8ae67f00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000c06ebbefd94032b85424d51906e2a335efae264b000000000000000000000000000000000000000000000000000000746a528800000000000000000000000000000000000000000000000000000000000000000000000000000000001a642f0e3c3af545e7acbd38b07251b3990914f10000000000000000000000001a642f0e3c3af545e7acbd38b07251b3990914f1000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000e5d7c2a44ffddf6b295a15c148167daaaf5cf34f0000000000000000000000000000000000000000000000000000ac12fad7133a0000000000000000000000000000000000000000000000000d293f048340f6120000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006aafbaab000000000000000000000000000000000000000000000000000000006aafde6d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000000",
+      "from": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+      "chainId": 1,
+      "gasPrice": "0x4416c94",
+      "gasLimit": "0x82208"
+    },
+    "transactionId": "0x6c39c7fde090ceeb2d25a2c526088292560fc864bf88ebf8e93218f50db2c450"
+  }
+}

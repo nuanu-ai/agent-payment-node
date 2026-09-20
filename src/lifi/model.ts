@@ -1,12 +1,12 @@
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import type { EvmFeeQuote } from "../evm-ports.js";
 import type { Address, Economics, Hex } from "../model.js";
 import type { RailStatusIdentifier } from "../rail-status-binding.js";
 
 export type BridgeTool = "across" | "stargateV2";
 export interface BridgeRouteRequest {
-  readonly fromChainId: EvmChainId;
-  readonly toChainId: EvmChainId;
+  readonly fromChainId: BridgeChainId;
+  readonly toChainId: BridgeChainId;
   readonly fromToken: Address;
   readonly toToken: Address;
   readonly amountAtomic: string;
@@ -31,14 +31,14 @@ export interface BridgeProviderBinding {
 }
 export interface BridgeFee {
   readonly name: string;
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   /** `"native"` is the chain's first-class native coin, never the provider's zero-address wire sentinel. */
   readonly asset: Address | "native";
   readonly amountAtomic: string;
   readonly included: boolean;
 }
 export interface BridgeTransaction {
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly from: Address;
   readonly to: Address;
   readonly valueAtomic: string;
@@ -101,8 +101,8 @@ export interface DecodedBridgeCall {
   readonly referrer: Address;
   readonly sender: Address;
   readonly recipient: Address;
-  readonly sourceChainId: EvmChainId;
-  readonly destinationChainId: EvmChainId;
+  readonly sourceChainId: BridgeChainId;
+  readonly destinationChainId: BridgeChainId;
   readonly sourceToken: Address;
   readonly destinationToken: Address;
   readonly sourceAmountAtomic: string;
@@ -121,8 +121,8 @@ export interface BridgeBlock {
   readonly timestampAtomic: string;
 }
 export interface BridgeDeploymentContract {
-  readonly chainId: EvmChainId;
-  readonly peerChainId: EvmChainId;
+  readonly chainId: BridgeChainId;
+  readonly peerChainId: BridgeChainId;
   readonly tool: BridgeTool;
   readonly diamond: Address;
   readonly feeForwarder: Address;
@@ -141,8 +141,8 @@ export interface BridgeDeploymentContract {
   }[];
 }
 export interface BridgeDeploymentIdentity {
-  readonly chainId: EvmChainId;
-  readonly peerChainId: EvmChainId;
+  readonly chainId: BridgeChainId;
+  readonly peerChainId: BridgeChainId;
   readonly tool: BridgeTool;
   readonly block: BridgeBlock;
   readonly rpcOrigin: string;
@@ -157,17 +157,34 @@ export interface BridgeLog {
 }
 /** Pure protocol decoders receive logs only after the RPC adapter verifies membership. */
 export interface BridgeProtocolReceipt {
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly transactionHash: Hex;
   readonly blockNumberAtomic: string;
   readonly blockHash: Hex;
   readonly logs: readonly BridgeLog[];
+  readonly nativeBalance?: BridgeNativeBalanceProof | null;
+  readonly nativeTransfer?: BridgeNativeTransferProof | null;
+}
+export interface BridgeNativeTransferProof {
+  readonly transactionHash: Hex;
+  readonly from: Address;
+  readonly to: Address;
+  readonly valueAtomic: string;
+  readonly traceHash: string;
+}
+export interface BridgeNativeBalanceProof {
+  readonly recipient: Address;
+  readonly beforeBlock: BridgeBlock;
+  readonly afterBlock: BridgeBlock;
+  readonly beforeBalanceAtomic: string;
+  readonly afterBalanceAtomic: string;
+  readonly deltaAtomic: string;
 }
 export interface AcrossCorrelation {
   readonly kind: "across";
   readonly depositId: string;
-  readonly originChainId: EvmChainId;
-  readonly destinationChainId: EvmChainId;
+  readonly originChainId: BridgeChainId;
+  readonly destinationChainId: BridgeChainId;
   readonly inputToken: Hex;
   readonly outputToken: Hex;
   readonly inputAmountAtomic: string;
@@ -192,7 +209,7 @@ export interface StargateCorrelation {
 }
 export interface BridgeSourceProof {
   readonly tool: BridgeTool;
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly transactionHash: Hex;
   readonly blockNumberAtomic: string;
   readonly blockHash: Hex;
@@ -204,7 +221,7 @@ export interface BridgeSourceProof {
 }
 export interface BridgeDestinationProof {
   readonly tool: BridgeTool;
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly transactionHash: Hex;
   readonly blockNumberAtomic: string;
   readonly blockHash: Hex;
@@ -216,6 +233,8 @@ export interface BridgeDestinationProof {
   readonly fillType: 0 | 1 | 2 | null;
   readonly relayerCredit: Hex | null;
   readonly repaymentChainIdAtomic: string | null;
+  readonly nativeBalance: BridgeNativeBalanceProof | null;
+  readonly nativeTransfer: BridgeNativeTransferProof | null;
 }
 
 /** The stated headroom the owner approves: `economics` is `quoted * (1 + headroomBps/10_000)`, rounded up. */
@@ -227,7 +246,7 @@ export interface BridgeFeeCeiling {
 }
 export interface BridgeEnvelope {
   readonly role: "approval" | "bridge";
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly from: Address;
   readonly to: Address;
   readonly valueAtomic: string;
@@ -239,7 +258,7 @@ export interface BridgeEnvelope {
   readonly envelopeHash: string;
 }
 export interface BridgeTransactionProof {
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly transactionHash: Hex;
   readonly block: BridgeBlock;
   readonly safeBlock: BridgeBlock | null;
@@ -274,7 +293,7 @@ export interface BridgeFeeEvidence {
   };
 }
 export interface BridgeAccountSnapshot {
-  readonly chainId: EvmChainId;
+  readonly chainId: BridgeChainId;
   readonly rpcOrigin: string;
   readonly block: BridgeBlock;
   readonly owner: Address;

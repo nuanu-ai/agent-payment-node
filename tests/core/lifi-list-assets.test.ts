@@ -28,7 +28,8 @@ const USDC = { 1: getAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), 8453
 const USDT = getAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7");
 const USDT0_ARBITRUM = getAddress("0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9");
 const WETH = { 1: getAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), 8453: getAddress("0x4200000000000000000000000000000000000006"),
-  42161: getAddress("0x82aF49447D8a07e3bd95BD0d56f35241523fBab1") } as const;
+  42161: getAddress("0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"), 56: getAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
+  59144: getAddress("0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f") } as const;
 const SPOKE = { 1: getAddress("0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5"), 8453: getAddress("0x09aea4b2242abC8bb4BB78D537A67a245A7bEC64"),
   42161: getAddress("0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A") } as const;
 const RELAYER = getAddress("0x2222222222222222222222222222222222222222");
@@ -63,7 +64,8 @@ test("the bridge registry is the frozen list's exact identities; WBTC stays a le
   for (const chainId of BRIDGE_CHAINS) {
     const row = BRIDGE_ASSET_REGISTRY[chainId], native = assets.find((a) => a.chain === row.caip2 && a.kind === "native")!;
     assert.equal(row.nativeCoin.symbol, native.symbol); assert.equal(row.nativeCoin.decimals, native.decimals);
-    assert.deepEqual([...row.nativeCoin.peers].sort(), BRIDGE_CHAINS.filter((id) => id !== chainId).sort());
+    const peers = { 1: [56, 8453, 42161, 59144], 56: [1], 8453: [1, 42161], 42161: [1, 8453], 59144: [1] } as const;
+    assert.deepEqual([...row.nativeCoin.peers].sort(), [...peers[chainId]].sort());
     assert.equal(row.nativeCoin.wrapped.address, WETH[chainId]);
     assert.equal(bridgeAssetRow(chainId, BRIDGE_ZERO_ADDRESS), row.nativeCoin);
     for (const token of row.tokens) {
@@ -77,7 +79,9 @@ test("the bridge registry is the frozen list's exact identities; WBTC stays a le
     { decimals: 6, approval: "zero_first", transferFee: "tether_fee_zero", peers: [], stargate: null });
   assert.equal(usdt.code.upgradeability, "immutable");
   const capabilities = bridgeCapabilities();
-  assert.ok(capabilities.chains.every((row) => row.native_coin.bridgeable_principal && row.native_coin.tools.join() === "across"));
+  assert.ok(capabilities.chains.every((row) => row.native_coin.tools.join() === "across"));
+  assert.equal(capabilities.chains.find((row) => row.chain === "eip155:56")?.native_coin.bridgeable_principal, false);
+  assert.equal(capabilities.chains.find((row) => row.chain === "eip155:59144")?.native_coin.bridgeable_principal, true);
 });
 
 test("unlisted, unpaired and mixed-kind legs are refused with a named reason", async () => {

@@ -9,6 +9,7 @@ import { BridgeQuoteRepository } from "./quote-repository.js";
 import { publicBridgeOperation } from "./receipt.js";
 import { transitionBridge } from "./transitions.js";
 import { bridgeFailure } from "./validation.js";
+import { BridgeAllowlistGate, bridgeUsageTarget } from "./allowlist.js";
 export class BridgeService {
     context;
     records;
@@ -61,7 +62,11 @@ export class BridgeService {
     async save(op, patch) {
         const next = transitionBridge(op, patch, this.context.clock.now().toISOString());
         await this.records.persist(next);
+        await this.followUsage(next);
         return next;
+    }
+    async followUsage(op) {
+        await new BridgeAllowlistGate(this.context).follow(op, bridgeUsageTarget(op));
     }
     async locked(input, work) {
         const operationId = canonicalOperationId(input), first = await this.operations.required(operationId);
@@ -72,6 +77,7 @@ export class BridgeService {
             if (current.kind !== "bridge_route")
                 bridgeFailure("APN_STATE_CORRUPT", "bridge_operation_kind_changed");
             await this.records.repairReceipt(current.record);
+            await this.followUsage(current.record);
             return await work(current.record);
         });
     }
