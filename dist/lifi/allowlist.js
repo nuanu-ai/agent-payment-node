@@ -138,7 +138,7 @@ export function validateBridgeAllowlistBinding(value) {
     return binding;
 }
 export function bridgeUsageTarget(op) {
-    if (op.state === "completed")
+    if (op.state === "completed" || op.state === "destination_failed")
         return "finalized";
     if (op.state === "failed_before_effect")
         return "failed_before_effect";

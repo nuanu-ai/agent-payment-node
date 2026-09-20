@@ -52,6 +52,15 @@ export function bridgeDestinationProof(source: BridgeSourceProof, materializatio
   return stargateDestination(source, decoded, receipt);
 }
 
+/** Prove the canonical Across fill tuple before requesting any destination execution trace. */
+export function validateBnbFilledRelay(source: BridgeSourceProof, materialization: BridgeMaterialization,
+  decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): void {
+  const canonical = decodeBridgeCall(materialization);
+  if (!bridgeSame(canonical, decoded) || decoded.composite === undefined || source.tool !== "across" ||
+    receipt.chainId !== decoded.destinationChainId) fail("destination_binding");
+  validateStoredSource(source, decoded); validateReceipt(receipt); acrossFilledRelay(source, decoded, receipt);
+}
+
 function validateStoredSource(source: BridgeSourceProof, decoded: DecodedBridgeCall): void {
   if (bridgeHex(source.transactionHash, 32, 32, "APN_STATE_CORRUPT") === BRIDGE_ZERO_WORD ||
     bridgeHex(source.blockHash, 32, 32, "APN_STATE_CORRUPT") === BRIDGE_ZERO_WORD) fail("stored_source_identity");
@@ -154,29 +163,27 @@ function stargateSource(decoded: DecodedBridgeCall, receipt: BridgeProtocolRecei
 }
 
 function acrossDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeDestinationProof {
-  if (source.correlation.kind !== "across") return fail("across_correlation");
-  const c = source.correlation;
+  const { info, relayerCredit, repaymentChainIdAtomic } = acrossFilledRelay(source, decoded, receipt);
+  const c = source.correlation as AcrossCorrelation;
   const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "across", decoded.destinationToken);
-  const e = oneEvent(receipt, emitter, EVENT_TOPICS.filledRelay, "FilledRelay") as FilledRelay;
-  const info = e.relayExecutionInfo;
-  const messageHash = decoded.composite === undefined ? BRIDGE_ZERO_WORD : keccak256(decoded.protocol.kind === "across" ? decoded.protocol.message : "0x");
-  if (e.originChainId !== BigInt(c.originChainId) || e.depositId.toString() !== c.depositId || e.inputToken.toLowerCase() !== c.inputToken ||
-    e.outputToken.toLowerCase() !== c.outputToken || e.inputAmount.toString() !== c.inputAmountAtomic || e.outputAmount.toString() !== c.outputAmountAtomic ||
-    e.fillDeadline.toString() !== c.fillDeadline || e.exclusivityDeadline.toString() !== c.exclusivityDeadline ||
-    e.exclusiveRelayer.toLowerCase() !== c.exclusiveRelayer || e.depositor.toLowerCase() !== c.depositor || e.recipient.toLowerCase() !== c.recipient ||
-    e.messageHash.toLowerCase() !== messageHash || info.updatedRecipient.toLowerCase() !== c.recipient ||
-    info.updatedMessageHash.toLowerCase() !== messageHash || info.updatedOutputAmount.toString() !== c.outputAmountAtomic ||
-    !Number.isInteger(info.fillType) || info.fillType < 0 || info.fillType > 2) fail("FilledRelay");
-  const relayerCredit = bridgeHex(e.relayer, 32, 32, "APN_RPC_PROTOCOL");
-  const repaymentChainIdAtomic = bridgeUint(e.repaymentChainId.toString()).toString();
-  if (info.fillType === 2 && (relayerCredit !== BRIDGE_ZERO_WORD || repaymentChainIdAtomic !== "0")) fail("slow_fill_credit");
   if (decoded.destinationToken === BRIDGE_ZERO_ADDRESS) {
     if (decoded.composite !== undefined) {
-      const balance = nativeBalanceProof(decoded, receipt), transfer = nativeTransferMinimumProof(decoded, receipt, BNB_COMPOSITE.executor, decoded.minimumOutputAtomic);
-      if (BigInt(balance.deltaAtomic) < BigInt(transfer.valueAtomic)) fail("native_destination_balance");
+      const balance = nativeBalanceProof(decoded, receipt), trace = receipt.compositeTrace;
+      if (trace === undefined || trace === null || trace.transactionHash !== receipt.transactionHash ||
+        trace.inputAmountAtomic !== decoded.composite.inputAmountAtomic || !/^[a-f0-9]{64}$/u.test(trace.traceHash)) fail("bnb_destination_trace");
       const recovered = events(receipt, BNB_COMPOSITE.weth, EVENT_TOPICS.transfer, "Transfer") as readonly Transfer[];
-      if (recovered.some((x) => x.to === decoded.recipient && x.value > 0n)) fail("bnb_recovered_weth");
-      return destinationResult(source, decoded, receipt, transfer.valueAtomic, info.fillType as 0 | 1 | 2, relayerCredit, repaymentChainIdAtomic, balance, transfer);
+      const exactRecovered = recovered.filter((x) => x.from === BNB_COMPOSITE.receiver && x.to === decoded.recipient &&
+        x.value.toString() === decoded.composite!.inputAmountAtomic);
+      if (trace.outcome === "recovered_weth") {
+        if (exactRecovered.length !== 1 || trace.deliveredAmountAtomic !== "0" || BigInt(balance.deltaAtomic) !== 0n) fail("bnb_recovery_evidence");
+      } else if (exactRecovered.length !== 0) fail("bnb_recovery_conflict");
+      if (trace.outcome === "completed_native" || trace.outcome === "below_floor") {
+        if (trace.vaultOutputAtomic === null || BigInt(trace.deliveredAmountAtomic) <= 0n ||
+          BigInt(balance.deltaAtomic) < BigInt(trace.deliveredAmountAtomic) ||
+          (trace.outcome === "completed_native") !== (BigInt(trace.deliveredAmountAtomic) >= BigInt(decoded.minimumOutputAtomic))) fail("bnb_native_outcome");
+      }
+      return destinationResult(source, decoded, receipt, trace.deliveredAmountAtomic, info.fillType as 0 | 1 | 2,
+        relayerCredit, repaymentChainIdAtomic, balance, null, trace);
     }
     const providerBound = bridgeProviderBoundNativeDestination({
       fromChainId: decoded.sourceChainId, toChainId: decoded.destinationChainId,
@@ -196,13 +203,25 @@ function acrossDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall
     delivered[0]!.value.toString() !== c.outputAmountAtomic || (info.fillType === 2 && delivered[0]!.from !== emitter)) fail("destination_token_movement");
   return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType as 0 | 1 | 2, relayerCredit, repaymentChainIdAtomic, null);
 }
-function nativeTransferMinimumProof(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt, emitter: Address, minimumAtomic: string): NonNullable<BridgeProtocolReceipt["nativeTransfer"]> {
-  const proof = receipt.nativeTransfer;
-  if (proof === undefined || proof === null || proof.transactionHash !== receipt.transactionHash || proof.from !== emitter || proof.to !== decoded.recipient ||
-    BigInt(proof.valueAtomic) < BigInt(minimumAtomic) || !/^[a-f0-9]{64}$/u.test(proof.traceHash)) fail("native_destination_transfer");
-  return proof;
+function acrossFilledRelay(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt) {
+  if (source.correlation.kind !== "across") return fail("across_correlation");
+  const c = source.correlation;
+  const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "across", decoded.destinationToken);
+  const e = oneEvent(receipt, emitter, EVENT_TOPICS.filledRelay, "FilledRelay") as FilledRelay;
+  const info = e.relayExecutionInfo;
+  const messageHash = decoded.composite === undefined ? BRIDGE_ZERO_WORD : keccak256(decoded.protocol.kind === "across" ? decoded.protocol.message : "0x");
+  if (e.originChainId !== BigInt(c.originChainId) || e.depositId.toString() !== c.depositId || e.inputToken.toLowerCase() !== c.inputToken ||
+    e.outputToken.toLowerCase() !== c.outputToken || e.inputAmount.toString() !== c.inputAmountAtomic || e.outputAmount.toString() !== c.outputAmountAtomic ||
+    e.fillDeadline.toString() !== c.fillDeadline || e.exclusivityDeadline.toString() !== c.exclusivityDeadline ||
+    e.exclusiveRelayer.toLowerCase() !== c.exclusiveRelayer || e.depositor.toLowerCase() !== c.depositor || e.recipient.toLowerCase() !== c.recipient ||
+    e.messageHash.toLowerCase() !== messageHash || info.updatedRecipient.toLowerCase() !== c.recipient ||
+    info.updatedMessageHash.toLowerCase() !== messageHash || info.updatedOutputAmount.toString() !== c.outputAmountAtomic ||
+    !Number.isInteger(info.fillType) || info.fillType < 0 || info.fillType > 2) fail("FilledRelay");
+  const relayerCredit = bridgeHex(e.relayer, 32, 32, "APN_RPC_PROTOCOL");
+  const repaymentChainIdAtomic = bridgeUint(e.repaymentChainId.toString()).toString();
+  if (info.fillType === 2 && (relayerCredit !== BRIDGE_ZERO_WORD || repaymentChainIdAtomic !== "0")) fail("slow_fill_credit");
+  return { info, relayerCredit, repaymentChainIdAtomic };
 }
-
 function stargateDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeDestinationProof {
   if (source.correlation.kind !== "stargateV2") return fail("stargate_correlation");
   const c = source.correlation;
@@ -238,11 +257,12 @@ function nativeMovement(chainId: DecodedBridgeCall["sourceChainId"], receipt: Br
   if (matches !== 1) fail(direction === "wrap" ? "native_source_wrap" : "native_destination_unwrap");
 }
 
-function destinationResult(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt, amountAtomic: string, fillType: 0 | 1 | 2 | null, relayerCredit: Hex | null, repaymentChainIdAtomic: string | null, nativeBalance: BridgeDestinationProof["nativeBalance"], nativeTransfer: BridgeDestinationProof["nativeTransfer"] = null): BridgeDestinationProof {
+function destinationResult(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt, amountAtomic: string, fillType: 0 | 1 | 2 | null, relayerCredit: Hex | null, repaymentChainIdAtomic: string | null, nativeBalance: BridgeDestinationProof["nativeBalance"], nativeTransfer: BridgeDestinationProof["nativeTransfer"] = null, compositeTrace: BridgeDestinationProof["compositeTrace"] = null): BridgeDestinationProof {
   return {
     tool: decoded.tool, chainId: receipt.chainId, transactionHash: receipt.transactionHash, blockNumberAtomic: receipt.blockNumberAtomic,
     blockHash: receipt.blockHash, recipient: decoded.recipient, token: decoded.destinationToken, amountAtomic,
     correlationHash: sha256(canonicalJson(source.correlation)), logsHash: logsHash(receipt.logs), fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance, nativeTransfer,
+    ...(decoded.composite === undefined ? {} : { compositeTrace }),
   };
 }
 function nativeTransferProof(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt, emitter: Address, amountAtomic: string): NonNullable<BridgeProtocolReceipt["nativeTransfer"]> {

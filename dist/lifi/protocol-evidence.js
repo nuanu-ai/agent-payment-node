@@ -36,6 +36,16 @@ export function bridgeDestinationProof(source, materialization, decoded, receipt
         return acrossDestination(source, decoded, receipt);
     return stargateDestination(source, decoded, receipt);
 }
+/** Prove the canonical Across fill tuple before requesting any destination execution trace. */
+export function validateBnbFilledRelay(source, materialization, decoded, receipt) {
+    const canonical = decodeBridgeCall(materialization);
+    if (!bridgeSame(canonical, decoded) || decoded.composite === undefined || source.tool !== "across" ||
+        receipt.chainId !== decoded.destinationChainId)
+        fail("destination_binding");
+    validateStoredSource(source, decoded);
+    validateReceipt(receipt);
+    acrossFilledRelay(source, decoded, receipt);
+}
 function validateStoredSource(source, decoded) {
     if (bridgeHex(source.transactionHash, 32, 32, "APN_STATE_CORRUPT") === BRIDGE_ZERO_WORD ||
         bridgeHex(source.blockHash, 32, 32, "APN_STATE_CORRUPT") === BRIDGE_ZERO_WORD)
@@ -145,34 +155,31 @@ function stargateSource(decoded, receipt) {
     };
 }
 function acrossDestination(source, decoded, receipt) {
-    if (source.correlation.kind !== "across")
-        return fail("across_correlation");
+    const { info, relayerCredit, repaymentChainIdAtomic } = acrossFilledRelay(source, decoded, receipt);
     const c = source.correlation;
     const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "across", decoded.destinationToken);
-    const e = oneEvent(receipt, emitter, EVENT_TOPICS.filledRelay, "FilledRelay");
-    const info = e.relayExecutionInfo;
-    const messageHash = decoded.composite === undefined ? BRIDGE_ZERO_WORD : keccak256(decoded.protocol.kind === "across" ? decoded.protocol.message : "0x");
-    if (e.originChainId !== BigInt(c.originChainId) || e.depositId.toString() !== c.depositId || e.inputToken.toLowerCase() !== c.inputToken ||
-        e.outputToken.toLowerCase() !== c.outputToken || e.inputAmount.toString() !== c.inputAmountAtomic || e.outputAmount.toString() !== c.outputAmountAtomic ||
-        e.fillDeadline.toString() !== c.fillDeadline || e.exclusivityDeadline.toString() !== c.exclusivityDeadline ||
-        e.exclusiveRelayer.toLowerCase() !== c.exclusiveRelayer || e.depositor.toLowerCase() !== c.depositor || e.recipient.toLowerCase() !== c.recipient ||
-        e.messageHash.toLowerCase() !== messageHash || info.updatedRecipient.toLowerCase() !== c.recipient ||
-        info.updatedMessageHash.toLowerCase() !== messageHash || info.updatedOutputAmount.toString() !== c.outputAmountAtomic ||
-        !Number.isInteger(info.fillType) || info.fillType < 0 || info.fillType > 2)
-        fail("FilledRelay");
-    const relayerCredit = bridgeHex(e.relayer, 32, 32, "APN_RPC_PROTOCOL");
-    const repaymentChainIdAtomic = bridgeUint(e.repaymentChainId.toString()).toString();
-    if (info.fillType === 2 && (relayerCredit !== BRIDGE_ZERO_WORD || repaymentChainIdAtomic !== "0"))
-        fail("slow_fill_credit");
     if (decoded.destinationToken === BRIDGE_ZERO_ADDRESS) {
         if (decoded.composite !== undefined) {
-            const balance = nativeBalanceProof(decoded, receipt), transfer = nativeTransferMinimumProof(decoded, receipt, BNB_COMPOSITE.executor, decoded.minimumOutputAtomic);
-            if (BigInt(balance.deltaAtomic) < BigInt(transfer.valueAtomic))
-                fail("native_destination_balance");
+            const balance = nativeBalanceProof(decoded, receipt), trace = receipt.compositeTrace;
+            if (trace === undefined || trace === null || trace.transactionHash !== receipt.transactionHash ||
+                trace.inputAmountAtomic !== decoded.composite.inputAmountAtomic || !/^[a-f0-9]{64}$/u.test(trace.traceHash))
+                fail("bnb_destination_trace");
             const recovered = events(receipt, BNB_COMPOSITE.weth, EVENT_TOPICS.transfer, "Transfer");
-            if (recovered.some((x) => x.to === decoded.recipient && x.value > 0n))
-                fail("bnb_recovered_weth");
-            return destinationResult(source, decoded, receipt, transfer.valueAtomic, info.fillType, relayerCredit, repaymentChainIdAtomic, balance, transfer);
+            const exactRecovered = recovered.filter((x) => x.from === BNB_COMPOSITE.receiver && x.to === decoded.recipient &&
+                x.value.toString() === decoded.composite.inputAmountAtomic);
+            if (trace.outcome === "recovered_weth") {
+                if (exactRecovered.length !== 1 || trace.deliveredAmountAtomic !== "0" || BigInt(balance.deltaAtomic) !== 0n)
+                    fail("bnb_recovery_evidence");
+            }
+            else if (exactRecovered.length !== 0)
+                fail("bnb_recovery_conflict");
+            if (trace.outcome === "completed_native" || trace.outcome === "below_floor") {
+                if (trace.vaultOutputAtomic === null || BigInt(trace.deliveredAmountAtomic) <= 0n ||
+                    BigInt(balance.deltaAtomic) < BigInt(trace.deliveredAmountAtomic) ||
+                    (trace.outcome === "completed_native") !== (BigInt(trace.deliveredAmountAtomic) >= BigInt(decoded.minimumOutputAtomic)))
+                    fail("bnb_native_outcome");
+            }
+            return destinationResult(source, decoded, receipt, trace.deliveredAmountAtomic, info.fillType, relayerCredit, repaymentChainIdAtomic, balance, null, trace);
         }
         const providerBound = bridgeProviderBoundNativeDestination({
             fromChainId: decoded.sourceChainId, toChainId: decoded.destinationChainId,
@@ -194,12 +201,27 @@ function acrossDestination(source, decoded, receipt) {
         fail("destination_token_movement");
     return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic, null);
 }
-function nativeTransferMinimumProof(decoded, receipt, emitter, minimumAtomic) {
-    const proof = receipt.nativeTransfer;
-    if (proof === undefined || proof === null || proof.transactionHash !== receipt.transactionHash || proof.from !== emitter || proof.to !== decoded.recipient ||
-        BigInt(proof.valueAtomic) < BigInt(minimumAtomic) || !/^[a-f0-9]{64}$/u.test(proof.traceHash))
-        fail("native_destination_transfer");
-    return proof;
+function acrossFilledRelay(source, decoded, receipt) {
+    if (source.correlation.kind !== "across")
+        return fail("across_correlation");
+    const c = source.correlation;
+    const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "across", decoded.destinationToken);
+    const e = oneEvent(receipt, emitter, EVENT_TOPICS.filledRelay, "FilledRelay");
+    const info = e.relayExecutionInfo;
+    const messageHash = decoded.composite === undefined ? BRIDGE_ZERO_WORD : keccak256(decoded.protocol.kind === "across" ? decoded.protocol.message : "0x");
+    if (e.originChainId !== BigInt(c.originChainId) || e.depositId.toString() !== c.depositId || e.inputToken.toLowerCase() !== c.inputToken ||
+        e.outputToken.toLowerCase() !== c.outputToken || e.inputAmount.toString() !== c.inputAmountAtomic || e.outputAmount.toString() !== c.outputAmountAtomic ||
+        e.fillDeadline.toString() !== c.fillDeadline || e.exclusivityDeadline.toString() !== c.exclusivityDeadline ||
+        e.exclusiveRelayer.toLowerCase() !== c.exclusiveRelayer || e.depositor.toLowerCase() !== c.depositor || e.recipient.toLowerCase() !== c.recipient ||
+        e.messageHash.toLowerCase() !== messageHash || info.updatedRecipient.toLowerCase() !== c.recipient ||
+        info.updatedMessageHash.toLowerCase() !== messageHash || info.updatedOutputAmount.toString() !== c.outputAmountAtomic ||
+        !Number.isInteger(info.fillType) || info.fillType < 0 || info.fillType > 2)
+        fail("FilledRelay");
+    const relayerCredit = bridgeHex(e.relayer, 32, 32, "APN_RPC_PROTOCOL");
+    const repaymentChainIdAtomic = bridgeUint(e.repaymentChainId.toString()).toString();
+    if (info.fillType === 2 && (relayerCredit !== BRIDGE_ZERO_WORD || repaymentChainIdAtomic !== "0"))
+        fail("slow_fill_credit");
+    return { info, relayerCredit, repaymentChainIdAtomic };
 }
 function stargateDestination(source, decoded, receipt) {
     if (source.correlation.kind !== "stargateV2")
@@ -239,11 +261,12 @@ function nativeMovement(chainId, receipt, direction, amountAtomic) {
     if (matches !== 1)
         fail(direction === "wrap" ? "native_source_wrap" : "native_destination_unwrap");
 }
-function destinationResult(source, decoded, receipt, amountAtomic, fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance, nativeTransfer = null) {
+function destinationResult(source, decoded, receipt, amountAtomic, fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance, nativeTransfer = null, compositeTrace = null) {
     return {
         tool: decoded.tool, chainId: receipt.chainId, transactionHash: receipt.transactionHash, blockNumberAtomic: receipt.blockNumberAtomic,
         blockHash: receipt.blockHash, recipient: decoded.recipient, token: decoded.destinationToken, amountAtomic,
         correlationHash: sha256(canonicalJson(source.correlation)), logsHash: logsHash(receipt.logs), fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance, nativeTransfer,
+        ...(decoded.composite === undefined ? {} : { compositeTrace }),
     };
 }
 function nativeTransferProof(decoded, receipt, emitter, amountAtomic) {

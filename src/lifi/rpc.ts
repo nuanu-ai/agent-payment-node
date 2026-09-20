@@ -16,7 +16,7 @@ import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
 import { BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
-import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbPoolConfiguration } from "./bnb-composite.js";
+import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbCompositeTrace, verifyBnbPoolConfiguration } from "./bnb-composite.js";
 
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }] as const;
@@ -182,7 +182,7 @@ export class BridgeRpc implements BridgeRpcPort {
     if (hash !== keccak256(raw)) bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
     return hash;
   }
-  async observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string }>): Promise<{ transaction: BridgeTransactionProof; receipt: BridgeProtocolReceipt } | null> {
+  async observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Parameters<BridgeRpcPort["observe"]>[2]): Promise<{ transaction: BridgeTransactionProof; receipt: BridgeProtocolReceipt } | null> {
     await this.assertChain(); bridgeHex(hash, 32, 32, "APN_RPC_PROTOCOL");
     const [rawTx, rawReceipt] = await Promise.all([this.call("eth_getTransactionByHash", [hash]), this.call("eth_getTransactionReceipt", [hash])]);
     if (rawTx === null || rawReceipt === null) return null;
@@ -203,6 +203,7 @@ export class BridgeRpc implements BridgeRpcPort {
     if (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) || BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic)) bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
     let nativeBalance: BridgeProtocolReceipt["nativeBalance"] = null;
     let nativeTransfer: BridgeProtocolReceipt["nativeTransfer"] = null;
+    let compositeTrace: BridgeProtocolReceipt["compositeTrace"] = null;
     if (nativeDelivery !== undefined) {
       if (number === 0n) bridgeFailure("APN_RPC_PROTOCOL", "native_balance_genesis");
       const beforeRaw = await evmRpcBlock(this.call, quantity(number - 1n));
@@ -215,13 +216,14 @@ export class BridgeRpc implements BridgeRpcPort {
       if (afterBalance < beforeBalance) bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
       nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,
         beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
-      nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
+      if (nativeDelivery.composite === undefined) nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
+      else compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call);
       await this.recheck(before);
     }
     await this.recheck(block); if (safeBlock !== null) await this.recheck(safeBlock); await this.assertChain();
     return { transaction: { chainId: this.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: this.origin, ...identity,
       ...fees, status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
-      receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer } };
+      receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer, compositeTrace } };
   }
   async logs(input: Parameters<BridgeRpcPort["logs"]>[0]) {
     await this.assertChain(); const from = bridgeUint(input.fromBlockAtomic), to = bridgeUint(input.toBlockAtomic);

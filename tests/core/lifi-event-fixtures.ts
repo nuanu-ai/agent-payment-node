@@ -58,7 +58,9 @@ export function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourc
         return { ...result, nativeBalance: { recipient: d.recipient, beforeBlock,
           afterBlock: { numberAtomic: result.blockNumberAtomic, hash: result.blockHash, timestampAtomic: "2" }, beforeBalanceAtomic: "100",
           afterBalanceAtomic: (100n + BigInt(amount)).toString(), deltaAtomic: amount },
-          nativeTransfer: { transactionHash: result.transactionHash, from: BNB_COMPOSITE.executor, to: d.recipient, valueAtomic: amount, traceHash: "a".repeat(64) } };
+          nativeTransfer: null, compositeTrace: { outcome: "completed_native", transactionHash: result.transactionHash,
+            inputAmountAtomic: d.composite.inputAmountAtomic, vaultOutputAtomic: amount, deliveredAmountAtomic: amount,
+            retainedAmountAtomic: "0", traceHash: "a".repeat(64) } };
       }
       const wrapped = BRIDGE_ASSET_REGISTRY[d.destinationChainId].nativeCoin.wrapped;
       const unwrap = wrapped.events === "weth9" ? eventLog(wrapped.address, "Withdrawal", { src: emitter, wad: BigInt(c.outputAmountAtomic) })

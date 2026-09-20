@@ -16,10 +16,10 @@ import { LIFI_ACROSS_BRIDGE_MECHANISM, validateBridgeAllowlistBinding } from "./
 const EDGES: Readonly<Record<BridgeState, readonly BridgeState[]>> = {
   awaiting_approval: ["execution_pending", "failed_before_effect"],
   execution_pending: ["source_pending", "unknown_finality", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"],
-  source_pending: ["destination_pending", "unknown_finality", "completed", "failed_after_approval", "failed_confirmed_revert"],
-  destination_pending: ["unknown_finality", "completed", "failed_confirmed_revert"],
-  unknown_finality: ["source_pending", "destination_pending", "completed", "failed_after_approval", "failed_confirmed_revert"],
-  completed: [], failed_before_effect: [], failed_after_approval: [], failed_confirmed_revert: [],
+  source_pending: ["destination_pending", "unknown_finality", "completed", "destination_failed", "failed_after_approval", "failed_confirmed_revert"],
+  destination_pending: ["unknown_finality", "completed", "destination_failed", "failed_confirmed_revert"],
+  unknown_finality: ["source_pending", "destination_pending", "completed", "destination_failed", "failed_after_approval", "failed_confirmed_revert"],
+  completed: [], destination_failed: [], failed_before_effect: [], failed_after_approval: [], failed_confirmed_revert: [],
 };
 const PHASE_EDGES: Readonly<Record<BridgeEffectPhase, readonly BridgeEffectPhase[]>> = {
   unsealed: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
@@ -181,16 +181,27 @@ function validateSnapshot(op: BridgeOperationRecord, s: BridgeTransition, legacy
       : p.fillType !== null || p.relayerCredit !== null || p.repaymentChainIdAtomic !== null) bridgeCorrupt();
     const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
     if (!legacy && providerBoundNative && (s.providerObservation?.status !== "completed_observed" ||
-      s.providerObservation.destinationTransactionHash !== p.transactionHash || p.nativeBalance === null || p.nativeBalance.recipient !== m.request.recipient ||
-      p.nativeTransfer === null || p.nativeTransfer.transactionHash !== p.transactionHash || p.nativeTransfer.to !== m.request.recipient ||
-      p.nativeTransfer.valueAtomic !== p.amountAtomic || BigInt(p.nativeBalance.deltaAtomic) < BigInt(m.request.minOutputAtomic))) bridgeCorrupt();
+      s.providerObservation.destinationTransactionHash !== p.transactionHash || p.nativeBalance === null || p.nativeBalance.recipient !== m.request.recipient)) bridgeCorrupt();
+    if (!legacy && providerBoundNative && op.intent.decoded.composite === undefined &&
+      (p.nativeTransfer === null || p.nativeTransfer.transactionHash !== p.transactionHash || p.nativeTransfer.to !== m.request.recipient ||
+       p.nativeTransfer.valueAtomic !== p.amountAtomic || BigInt(p.nativeBalance!.deltaAtomic) < BigInt(m.request.minOutputAtomic))) bridgeCorrupt();
+    if (!legacy && op.intent.decoded.composite !== undefined) {
+      const trace = p.compositeTrace;
+      if (p.nativeTransfer !== null || trace === undefined || trace === null || trace.transactionHash !== p.transactionHash ||
+        trace.inputAmountAtomic !== op.intent.decoded.composite.inputAmountAtomic || p.amountAtomic !== trace.deliveredAmountAtomic ||
+        !["completed_native", "recovered_weth", "below_floor", "protocol_mismatch"].includes(trace.outcome)) bridgeCorrupt();
+    }
     if (s.sourceProof === null || p.correlationHash !== hashObject(s.sourceProof.correlation) || p.tool !== m.tool ||
       p.chainId !== m.request.toChainId || p.recipient !== m.request.recipient || p.token !== m.request.toToken ||
       p.rpcOrigin !== op.intent.destinationRpcOrigin || BigInt(p.safeBlock.numberAtomic) < BigInt(p.blockNumberAtomic) ||
-      BigInt(p.amountAtomic) < BigInt(m.request.minOutputAtomic) || p.amountAtomic !== (s.sourceProof.correlation.kind === "across"
-        ? s.sourceProof.correlation.outputAmountAtomic : s.sourceProof.correlation.amountReceivedAtomic)) bridgeCorrupt();
+      (op.intent.decoded.composite === undefined && (BigInt(p.amountAtomic) < BigInt(m.request.minOutputAtomic) || p.amountAtomic !== (s.sourceProof.correlation.kind === "across"
+        ? s.sourceProof.correlation.outputAmountAtomic : s.sourceProof.correlation.amountReceivedAtomic)))) bridgeCorrupt();
   }
-  if (s.state === "completed" && (s.effects.some((e) => e.phase !== "safe_success") || s.destinationProof === null || s.sourceProof === null)) bridgeCorrupt();
+  if (s.state === "completed" && (s.effects.some((e) => e.phase !== "safe_success") || s.destinationProof === null || s.sourceProof === null ||
+    (op.intent.decoded.composite !== undefined && s.destinationProof.compositeTrace?.outcome !== "completed_native"))) bridgeCorrupt();
+  if (s.state === "destination_failed" && (s.effects.some((e) => e.phase !== "safe_success") || s.sourceProof === null || s.failure === null ||
+    !["recovered_weth", "below_floor", "protocol_mismatch"].includes(s.failure.reason) ||
+    (s.failure.reason !== "protocol_mismatch" && s.destinationProof?.compositeTrace?.outcome !== s.failure.reason))) bridgeCorrupt();
   if (s.state === "failed_before_effect" && (s.effects.some((e) => e.submissionAttempts !== 0 || e.phase === "signing_started") || s.failure === null)) bridgeCorrupt();
   if (s.failure?.preSignRpc !== undefined) {
     const d = s.failure.preSignRpc, request = op.intent.materialization.request;

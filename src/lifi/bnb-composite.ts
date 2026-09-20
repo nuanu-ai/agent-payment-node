@@ -1,16 +1,19 @@
-import { concatHex, decodeAbiParameters, decodeFunctionResult, encodeAbiParameters, encodeFunctionData, getAddress, hashTypedData, keccak256, parseAbi, parseAbiParameters, recoverTypedDataAddress } from "viem";
+import { concatHex, decodeAbiParameters, decodeFunctionData, decodeFunctionResult, encodeAbiParameters, encodeFunctionData, getAddress, hashTypedData, keccak256, parseAbi, parseAbiParameters, recoverTypedDataAddress } from "viem";
+import { hashObject } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
 import { bridgeFailure, bridgeHex } from "./validation.js";
 
 export const BNB_COMPOSITE = Object.freeze({
   chainId: 56 as const,
   receiver: getAddress("0x33b255b5db44A78c34381f89f1a454bc0Ef49871"),
+  spokePool: getAddress("0x4e8e101924ede233c13e2d8622dc8aed2872d505"),
   executor: getAddress("0x2dfaDAB8266483beD9Fd9A292Ce56596a2D1378D"),
   flyRouter: getAddress("0x20F6ee51340aDEed01A59B0e65cB3703f3dc860c"),
   core: getAddress("0x09ad820aac5779683b481c4674208a4e1b024afa"),
   weth: getAddress("0x2170Ed0880ac9A755fd29B2688956BD959F933F8"),
   wbnb: getAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
   vault: getAddress("0xA82f327BBbf0667356d2935c6532D164B06cEceD"),
+  pool: getAddress("0xaEcf01c5a659d74Dc33C9C922a4458eAB0b13DeA"),
   poolId: "0xaecf01c5a659d74dc33c9c922a4458eab0b13dea000100000000000000000012" as Hex,
   poolTokens: [getAddress("0x2170Ed0880ac9A755fd29B2688956BD959F933F8"), getAddress("0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47"),
     getAddress("0x570A5D26f7765Ecb712C0924E4De545B89fD43dF"), getAddress("0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402"),
@@ -41,6 +44,7 @@ export interface BnbCompositeCall {
   readonly maximumRetentionBps: number;
   readonly consumerId: Hex;
   readonly signature: Hex;
+  readonly flyCalldata: Hex;
   readonly payloadHash: Hex;
   readonly messageHash: Hex;
 }
@@ -61,11 +65,11 @@ export function decodeBnbCompositeMessage(message: Hex, expectedTransactionId: H
   return { kind: "across-fly-bnb", transactionId, finalReceiver, inputAmountAtomic: swap.fromAmount.toString(),
     expectedOutputAtomic: program.expectedOutputAtomic, minimumOutputAtomic: program.minimumOutputAtomic,
     deadlineAtomic: program.deadlineAtomic, maximumRetentionBps: program.maximumRetentionBps,
-    consumerId: program.consumerId, signature: program.signature,
+    consumerId: program.consumerId, signature: program.signature, flyCalldata: swap.callData,
     payloadHash: program.payloadHash, messageHash: keccak256(message) };
 }
 
-export function decodeFlyProgram(calldata: Hex, _expectedRecipient: Address, expectedAmount: bigint): Omit<BnbCompositeCall, "kind" | "transactionId" | "finalReceiver" | "inputAmountAtomic" | "messageHash"> {
+export function decodeFlyProgram(calldata: Hex, _expectedRecipient: Address, expectedAmount: bigint): Omit<BnbCompositeCall, "kind" | "transactionId" | "finalReceiver" | "inputAmountAtomic" | "messageHash" | "flyCalldata"> {
   const raw = Buffer.from(bridgeHex(calldata, 2048).slice(2), "hex");
   if (raw.length < 4 + 64 || `0x${raw.subarray(0, 4).toString("hex")}` !== BNB_COMPOSITE.selector) fail("fly_selector");
   const offset = uint(raw, 4, 32), length = uint(raw, 36, 32);
@@ -138,6 +142,157 @@ export function verifyBnbPoolConfiguration(registrationRaw: Hex, tokensRaw: Hex)
       tokenState[1].length !== BNB_COMPOSITE.poolTokens.length || tokenState[0].some((token, index) => token !== BNB_COMPOSITE.poolTokens[index]) ||
       tokenState[0][0] !== BNB_COMPOSITE.weth || tokenState[0].at(-1) !== BNB_COMPOSITE.wbnb || tokenState[2] <= 0n) fail("bnb_pool_configuration");
   return { pool, specialization: 1, tokens: tokenState[0], lastChangeBlockAtomic: tokenState[2].toString() };
+}
+
+const TRACE_ABI = parseAbi([
+  "function handleV3AcrossMessage(address tokenSent,uint256 amount,address relayer,bytes message)",
+  "function swapAndCompleteBridgeTokens(bytes32 transactionId,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[] swaps,address transferredAssetId,address receiver)",
+  "function approve(address spender,uint256 amount) returns (bool)",
+  "function transfer(address recipient,uint256 amount) returns (bool)",
+  "function transferFrom(address sender,address recipient,uint256 amount) returns (bool)",
+  "function withdraw(uint256 amount)",
+  "function swap((bytes32 poolId,uint8 kind,address assetIn,address assetOut,uint256 amount,bytes userData) singleSwap,(address sender,bool fromInternalBalance,address recipient,bool toInternalBalance) funds,uint256 limit,uint256 deadline) returns (uint256 amountCalculated)",
+  "function onSwap((uint8 kind,address tokenIn,address tokenOut,uint256 amount,bytes32 poolId,uint256 lastChangeBlock,address from,address to,bytes userData) request,uint256 balanceTokenIn,uint256 balanceTokenOut) view returns (uint256 amount)",
+]);
+export type BnbDestinationOutcome = "completed_native" | "recovered_weth" | "below_floor" | "protocol_mismatch";
+export interface BnbCompositeTraceProof {
+  readonly outcome: BnbDestinationOutcome;
+  readonly transactionHash: Hex;
+  readonly inputAmountAtomic: string;
+  readonly vaultOutputAtomic: string | null;
+  readonly deliveredAmountAtomic: string;
+  readonly retainedAmountAtomic: string;
+  readonly traceHash: string;
+}
+type TraceNode = Readonly<{ type: "CALL" | "STATICCALL"; from: Address; to: Address; value: bigint; input: Hex; output: Hex;
+  error: string | null; calls: readonly TraceNode[] }>;
+
+/**
+ * Validate the complete bounded callTracer subtree for the one admitted Across/Fly program. The digest covers every
+ * normalized frame, including read-only frames. A well-formed but different effect graph is a durable mismatch rather
+ * than an invitation to retry the source transaction.
+ */
+export function verifyBnbCompositeTrace(raw: unknown, transactionHash: Hex, message: Hex,
+  call: BnbCompositeCall): BnbCompositeTraceProof {
+  const root = traceNode(raw, { count: 0 }, 0);
+  const traceHash = hashObject({ transactionHash, root: traceProjection(root) });
+  try {
+    exactFrame(root, BNB_COMPOSITE.spokePool, null, "spoke");
+    const spokeEffects = effects(root);
+    if (spokeEffects.length !== 2) mismatch();
+    exactToken(spokeEffects[0], BNB_COMPOSITE.weth, "transfer", [BNB_COMPOSITE.receiver, BigInt(call.inputAmountAtomic)]);
+    const receiver = spokeEffects[1]!;
+    exactFrame(receiver, BNB_COMPOSITE.receiver, "0x3a5be8cb", "receiver");
+    const h = decode(receiver.input, "handleV3AcrossMessage") as readonly [Address, bigint, Address, Hex];
+    if (h[0] !== BNB_COMPOSITE.weth || h[1].toString() !== call.inputAmountAtomic || h[3] !== message) mismatch();
+    const receiverEffects = effects(receiver);
+    exactToken(receiverEffects[0], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.executor, BigInt(call.inputAmountAtomic)]);
+    const executor = receiverEffects[1];
+    if (executor === undefined || executor.to !== BNB_COMPOSITE.executor || executor.input.slice(0, 10) !== "0x4f91bc2b") mismatch();
+    const executorArgs = decode(executor.input, "swapAndCompleteBridgeTokens") as readonly [Hex, readonly any[], Address, Address];
+    if (executorArgs[0] !== call.transactionId || executorArgs[1].length !== 1 || executorArgs[2] !== BNB_COMPOSITE.weth || executorArgs[3] !== call.finalReceiver) mismatch();
+    const swap = executorArgs[1][0] as Record<string, unknown>;
+    if (swap.callTo !== BNB_COMPOSITE.flyRouter || swap.approveTo !== BNB_COMPOSITE.flyRouter || swap.sendingAssetId !== BNB_COMPOSITE.weth ||
+      swap.receivingAssetId !== "0x0000000000000000000000000000000000000000" || String(swap.fromAmount) !== call.inputAmountAtomic ||
+      swap.callData !== call.flyCalldata || swap.requiresDeposit !== true) mismatch();
+
+    if (executor.error !== null) {
+      if (receiverEffects.length !== 4) mismatch();
+      if (walk(executor).some((frame) => frame.type === "CALL" && frame.to === call.finalReceiver && frame.value > 0n && frame.error === null)) mismatch();
+      exactToken(receiverEffects[2], BNB_COMPOSITE.weth, "transfer", [call.finalReceiver, BigInt(call.inputAmountAtomic)]);
+      exactToken(receiverEffects[3], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.executor, 0n]);
+      return { outcome: "recovered_weth", transactionHash, inputAmountAtomic: call.inputAmountAtomic,
+        vaultOutputAtomic: null, deliveredAmountAtomic: "0", retainedAmountAtomic: "0", traceHash };
+    }
+    if (receiverEffects.length !== 3) mismatch();
+    exactToken(receiverEffects[2], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.executor, 0n]);
+    const executorEffects = effects(executor);
+    exactToken(executorEffects[0], BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.receiver, BNB_COMPOSITE.executor, BigInt(call.inputAmountAtomic)]);
+    exactToken(executorEffects[1], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.flyRouter, BigInt(call.inputAmountAtomic)]);
+    const fly = executorEffects[2];
+    if (fly === undefined || fly.to !== BNB_COMPOSITE.flyRouter || fly.input !== call.flyCalldata || fly.error !== null) mismatch();
+    const delivered = executorEffects[3];
+    if (executorEffects.length !== 4 || delivered === undefined || delivered.to !== call.finalReceiver || delivered.value <= 0n || delivered.input !== "0x" || delivered.error !== null) mismatch();
+
+    const flyEffects = effects(fly);
+    exactToken(flyEffects[0], BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.executor, BNB_COMPOSITE.core, BigInt(call.inputAmountAtomic)]);
+    const core = flyEffects[1];
+    if (core === undefined || core.to !== BNB_COMPOSITE.core || core.error !== null) mismatch();
+    const flyReturn = flyEffects[2];
+    if (flyEffects.length !== 3 || flyReturn === undefined || flyReturn.to !== BNB_COMPOSITE.executor || flyReturn.input !== "0x" || flyReturn.error !== null) mismatch();
+
+    const coreEffects = effects(core);
+    exactToken(coreEffects[0], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.vault, BigInt(call.inputAmountAtomic)]);
+    const vault = coreEffects[1];
+    if (vault === undefined || vault.to !== BNB_COMPOSITE.vault || vault.error !== null || vault.input.slice(0, 10) !== BNB_COMPOSITE.balancerSelector) mismatch();
+    const v = decode(vault.input, "swap") as readonly [any, any, bigint, bigint];
+    if (v[0].poolId !== BNB_COMPOSITE.poolId || Number(v[0].kind) !== 0 || v[0].assetIn !== BNB_COMPOSITE.weth ||
+      v[0].assetOut !== BNB_COMPOSITE.wbnb || String(v[0].amount) !== call.inputAmountAtomic || v[0].userData !== "0x" ||
+      v[1].sender !== BNB_COMPOSITE.core || v[1].recipient !== BNB_COMPOSITE.core || v[1].fromInternalBalance !== false ||
+      v[1].toInternalBalance !== false || v[2] !== 0n || v[3].toString() !== call.deadlineAtomic) mismatch();
+    if (!/^0x[0-9a-f]{64}$/u.test(vault.output)) mismatch();
+    const vaultOutput = BigInt(vault.output);
+    if (vaultOutput <= 0n) mismatch();
+    if (vault.calls.length !== 3) mismatch();
+    const pool = vault.calls[0];
+    if (pool === undefined || pool.type !== "STATICCALL" || pool.to !== BNB_COMPOSITE.pool || pool.error !== null || pool.value !== 0n ||
+      pool.output !== vault.output) mismatch();
+    const poolArgs = decode(pool.input, "onSwap") as readonly [any, bigint, bigint], request = poolArgs[0];
+    if (Number(request.kind) !== 0 || request.tokenIn !== BNB_COMPOSITE.weth || request.tokenOut !== BNB_COMPOSITE.wbnb ||
+      String(request.amount) !== call.inputAmountAtomic || request.poolId !== BNB_COMPOSITE.poolId || request.from !== BNB_COMPOSITE.core ||
+      request.to !== BNB_COMPOSITE.core || request.userData !== "0x" || BigInt(request.lastChangeBlock) <= 0n || poolArgs[1] <= 0n || poolArgs[2] <= 0n) mismatch();
+    exactToken(vault.calls[1], BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.core, BNB_COMPOSITE.vault, BigInt(call.inputAmountAtomic)]);
+    exactToken(vault.calls[2], BNB_COMPOSITE.wbnb, "transfer", [BNB_COMPOSITE.core, vaultOutput]);
+    const unwrap = coreEffects[2];
+    if (unwrap === undefined || unwrap.to !== BNB_COMPOSITE.wbnb || unwrap.error !== null || unwrap.value !== 0n ||
+      (decode(unwrap.input, "withdraw") as readonly [bigint])[0] !== vaultOutput) mismatch();
+    const coreReturn = coreEffects[3];
+    if (coreEffects.length !== 4 || coreReturn === undefined || coreReturn.to !== BNB_COMPOSITE.flyRouter || coreReturn.input !== "0x" ||
+      coreReturn.value !== vaultOutput || coreReturn.error !== null) mismatch();
+    const expectedDelivered = retainedOutput(vaultOutput, BigInt(call.expectedOutputAtomic), BigInt(call.maximumRetentionBps));
+    if (flyReturn.value !== expectedDelivered || delivered.value !== expectedDelivered) mismatch();
+    const retained = vaultOutput - expectedDelivered;
+    return { outcome: delivered.value < BigInt(call.minimumOutputAtomic) ? "below_floor" : "completed_native", transactionHash,
+      inputAmountAtomic: call.inputAmountAtomic, vaultOutputAtomic: vaultOutput.toString(), deliveredAmountAtomic: delivered.value.toString(),
+      retainedAmountAtomic: retained.toString(), traceHash };
+  } catch (error) {
+    if (error instanceof TraceMismatch) return { outcome: "protocol_mismatch", transactionHash, inputAmountAtomic: call.inputAmountAtomic,
+      vaultOutputAtomic: null, deliveredAmountAtomic: "0", retainedAmountAtomic: "0", traceHash };
+    throw error;
+  }
+}
+
+class TraceMismatch extends Error {}
+function mismatch(): never { throw new TraceMismatch(); }
+function retainedOutput(actual: bigint, expected: bigint, retentionBps: bigint): bigint {
+  return actual <= expected ? actual : [expected, actual - actual * retentionBps / 10_000n].reduce((a, b) => a > b ? a : b);
+}
+function traceNode(raw: unknown, bounded: { count: number }, depth: number): TraceNode {
+  if (depth > 32 || ++bounded.count > 1024 || raw === null || typeof raw !== "object" || Array.isArray(raw)) fail("bnb_trace_shape");
+  const r = raw as Record<string, unknown>, allowed = new Set(["type", "from", "to", "value", "input", "output", "error", "revertReason", "calls", "gas", "gasUsed"]);
+  if (Object.keys(r).some((key) => !allowed.has(key)) || (r.type !== "CALL" && r.type !== "STATICCALL")) fail("bnb_trace_shape");
+  const calls = r.calls === undefined ? [] : r.calls;
+  if (!Array.isArray(calls) || calls.length > 256) fail("bnb_trace_shape");
+  let from: Address, to: Address, input: Hex, output: Hex, value: bigint;
+  try { from = getAddress(String(r.from)); to = getAddress(String(r.to)); input = bridgeHex(r.input ?? "0x", 24_576); output = bridgeHex(r.output ?? "0x", 24_576); value = BigInt(String(r.value ?? "0x0")); }
+  catch { return fail("bnb_trace_shape"); }
+  if (value < 0n || (r.error !== undefined && typeof r.error !== "string")) fail("bnb_trace_shape");
+  return { type: r.type, from, to, value, input, output, error: r.error === undefined ? null : r.error as string,
+    calls: calls.map((child) => traceNode(child, bounded, depth + 1)) };
+}
+function effects(node: TraceNode): readonly TraceNode[] { return node.calls.filter((c) => c.type === "CALL" && (c.input !== "0x" || c.value > 0n)); }
+function walk(node: TraceNode): readonly TraceNode[] { return [node, ...node.calls.flatMap(walk)]; }
+function traceProjection(node: TraceNode): unknown { return { ...node, value: node.value.toString(), calls: node.calls.map(traceProjection) }; }
+function exactFrame(node: TraceNode, to: Address, selector: Hex | null, _reason: string): void {
+  if (node.type !== "CALL" || node.to !== to || node.error !== null || node.value !== 0n || (selector !== null && node.input.slice(0, 10) !== selector)) mismatch();
+}
+function decode(input: Hex, name: string): readonly unknown[] {
+  try { const d = decodeFunctionData({ abi: TRACE_ABI, data: input }); if (d.functionName !== name) mismatch(); return d.args as readonly unknown[]; }
+  catch (error) { if (error instanceof TraceMismatch) throw error; return mismatch(); }
+}
+function exactToken(node: TraceNode | undefined, token: Address, name: "approve" | "transfer" | "transferFrom", args: readonly unknown[]): void {
+  if (node === undefined || node.to !== token || node.error !== null || node.value !== 0n) mismatch();
+  const got = decode(node.input, name); if (got.length !== args.length || got.some((v, i) => String(v) !== String(args[i]))) mismatch();
 }
 
 function compact(p: Buffer, at: number): bigint {

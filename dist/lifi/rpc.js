@@ -11,7 +11,7 @@ import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
 import { BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
-import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbPoolConfiguration } from "./bnb-composite.js";
+import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbCompositeTrace, verifyBnbPoolConfiguration } from "./bnb-composite.js";
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }];
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction", "eth_sendRawTransaction"]);
@@ -227,6 +227,7 @@ export class BridgeRpc {
             bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
         let nativeBalance = null;
         let nativeTransfer = null;
+        let compositeTrace = null;
         if (nativeDelivery !== undefined) {
             if (number === 0n)
                 bridgeFailure("APN_RPC_PROTOCOL", "native_balance_genesis");
@@ -241,7 +242,10 @@ export class BridgeRpc {
                 bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
             nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,
                 beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
-            nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
+            if (nativeDelivery.composite === undefined)
+                nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
+            else
+                compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call);
             await this.recheck(before);
         }
         await this.recheck(block);
@@ -250,7 +254,7 @@ export class BridgeRpc {
         await this.assertChain();
         return { transaction: { chainId: this.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: this.origin, ...identity,
                 ...fees, status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
-            receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer } };
+            receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer, compositeTrace } };
     }
     async logs(input) {
         await this.assertChain();

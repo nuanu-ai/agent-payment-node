@@ -12,7 +12,7 @@ const operation = option("--operation", "operation_id", ["64_lowercase_hex_chara
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
   success: "Bounded bridge capability, quote, operation or combined receipt with separate mainnet acceptance.",
   failures: ["Classified APN error; no provider fallback or automatic replacement effect."] } as const;
-const bridgeStates = { terminal: ["completed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"],
+const bridgeStates = { terminal: ["completed", "destination_failed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"],
   non_terminal: ["awaiting_approval", "execution_pending", "source_pending", "destination_pending", "unknown_finality"] } as const;
 const done = { terminal: ["completed", "classified_failure"], non_terminal: [] };
 const readApproval = { class: "none", when: "Never signs or submits." } as const;
