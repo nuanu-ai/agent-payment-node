@@ -2,7 +2,7 @@ import { hashObject } from "../canonical.js";
 import type { Hex } from "../model.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
 import type { BridgeDeploymentIdentity, BridgeTransactionProof } from "./model.js";
-import type { BridgeEffect, BridgeMutable, BridgeOperationRecord, BridgeVerifiedDestinationProof } from "./operation-model.js";
+import { retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeDestinationProof, bridgeSourceProof, destinationEventFilter } from "./protocol-evidence.js";
 import { bridgeProtocolEmitter } from "./deployments.js";
@@ -31,13 +31,13 @@ export class BridgeObservation {
         }
       } catch {
         reliable = false;
-        op = await this.save(op, { state: "unknown_finality", failure: { reason: "source_observation_unavailable", residualAllowance: null } });
+        op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? { reason: "source_observation_unavailable", residualAllowance: null } });
         continue;
       }
       if (observation === null) {
         reliable = false;
         if (effect.safeProof !== null) {
-          op = await this.save(op, { state: "unknown_finality", failure: { reason: "safe_source_observation_conflict", residualAllowance: null } });
+          op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? { reason: "safe_source_observation_conflict", residualAllowance: null } });
         } else {
           op = await this.save(op, { state: "unknown_finality", effects: replaceEffect(op, {
             ...effect, phase: "unknown_finality", includedProof: null, safeProof: null,
@@ -49,7 +49,7 @@ export class BridgeObservation {
       if (effect.safeProof !== null) {
         if (transaction.safeBlock === null || !bridgeSame(proofIdentity(effect.safeProof), proofIdentity(transaction))) {
           reliable = false;
-          op = await this.save(op, { state: "unknown_finality", failure: { reason: "safe_source_observation_conflict", residualAllowance: null } });
+          op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? { reason: "safe_source_observation_conflict", residualAllowance: null } });
         }
         continue;
       }

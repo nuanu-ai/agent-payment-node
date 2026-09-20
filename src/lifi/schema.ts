@@ -90,6 +90,7 @@ const preSignRpcFailureSchema = z.strictObject({
 });
 export const failureSchema = z.strictObject({ reason: reasonSchema,
   residualAllowance: z.strictObject({ amountAtomic: uintSchema, block: blockSchema, rpcOrigin: originSchema }).nullable(),
+  residualAllowanceStatus: z.enum(["unavailable", "observed"]).optional(),
   preSignRpc: preSignRpcFailureSchema.optional() });
 export const consentSchema = z.strictObject({ policy: z.literal("apn.bridge.foreground-approval.v1"), fingerprint: hashSchema, approvedAt: isoSchema, expiresAt: isoSchema });
 export const stateSchema = z.enum(["awaiting_approval", "execution_pending", "source_pending", "destination_pending", "unknown_finality", "completed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"]);
