@@ -14,6 +14,7 @@ export declare class BridgeExecution {
     approve(op: BridgeOperationRecord, approval: BridgeApprovalPort): Promise<BridgeOperationRecord>;
     run(op: BridgeOperationRecord): Promise<BridgeOperationRecord>;
     private guard;
+    private allowlist;
     private haltUnsent;
     private terminalFailure;
 }

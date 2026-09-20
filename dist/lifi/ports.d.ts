@@ -30,7 +30,11 @@ export interface BridgeRpcPort {
     estimate(transaction: BridgeTransaction): Promise<FeeEstimate>;
     feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<EvmFeeQuote>;
     send(rawTransaction: Hex): Promise<Hex>;
-    observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeRecipient?: Address): Promise<{
+    observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{
+        recipient: Address;
+        from: Address;
+        amountAtomic: string;
+    }>): Promise<{
         readonly transaction: BridgeTransactionProof;
         readonly receipt: BridgeProtocolReceipt;
     } | null>;

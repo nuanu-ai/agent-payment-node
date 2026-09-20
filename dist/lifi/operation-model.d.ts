@@ -1,5 +1,7 @@
 import type { BridgeAccountSnapshot, BridgeBlock, BridgeDeploymentIdentity, BridgeDestinationProof, BridgeDestinationScan, BridgeEnvelope, BridgeMaterialization, BridgeOwner, BridgeProviderBinding, BridgeProviderObservation, BridgeResidualAllowance, BridgeSourceProof, BridgeTransactionProof, DecodedBridgeCall } from "./model.js";
 import type { Hex } from "../model.js";
+import type { AssetUsageReservation } from "../asset-usage-ledger.js";
+import type { BridgeAllowlistBinding } from "./allowlist.js";
 export type BridgeState = "awaiting_approval" | "execution_pending" | "source_pending" | "destination_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_after_approval" | "failed_confirmed_revert";
 export type BridgeEffectPhase = "unsealed" | "signing_started" | "sealed" | "submitting" | "submitted_pending" | "unknown_finality" | "included_success" | "included_revert" | "safe_success" | "safe_revert";
 export interface BridgeIntent {
@@ -19,6 +21,7 @@ export interface BridgeIntent {
     readonly expiresAt: string;
     readonly policyHash: string;
     readonly implicitProtocolFeeAtomic: string;
+    readonly allowlist: BridgeAllowlistBinding | null;
 }
 export interface BridgeConsent {
     readonly policy: "apn.bridge.foreground-approval.v1";
@@ -55,6 +58,8 @@ export interface BridgeMutable {
     readonly providerObservation: BridgeProviderObservation | null;
     readonly destinationScan: BridgeDestinationScan;
     readonly failure: BridgeFailure | null;
+    /** Frozen reservation as first created; live lifecycle remains in the shared ledger. */
+    readonly usageLease: AssetUsageReservation | null;
 }
 export type BridgeEffectSnapshot = Omit<BridgeEffect, "envelope"> & {
     readonly envelopeHash: string;

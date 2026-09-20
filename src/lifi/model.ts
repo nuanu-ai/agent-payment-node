@@ -163,6 +163,14 @@ export interface BridgeProtocolReceipt {
   readonly blockHash: Hex;
   readonly logs: readonly BridgeLog[];
   readonly nativeBalance?: BridgeNativeBalanceProof | null;
+  readonly nativeTransfer?: BridgeNativeTransferProof | null;
+}
+export interface BridgeNativeTransferProof {
+  readonly transactionHash: Hex;
+  readonly from: Address;
+  readonly to: Address;
+  readonly valueAtomic: string;
+  readonly traceHash: string;
 }
 export interface BridgeNativeBalanceProof {
   readonly recipient: Address;
@@ -226,6 +234,7 @@ export interface BridgeDestinationProof {
   readonly relayerCredit: Hex | null;
   readonly repaymentChainIdAtomic: string | null;
   readonly nativeBalance: BridgeNativeBalanceProof | null;
+  readonly nativeTransfer: BridgeNativeTransferProof | null;
 }
 
 /** The stated headroom the owner approves: `economics` is `quoted * (1 + headroomBps/10_000)`, rounded up. */

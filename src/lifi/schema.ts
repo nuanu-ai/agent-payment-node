@@ -73,6 +73,8 @@ export const destinationProofSchema = z.strictObject({ tool: toolSchema, chainId
   relayerCredit: wordSchema.nullable(), repaymentChainIdAtomic: uintSchema.nullable(),
   nativeBalance: z.strictObject({ recipient: addressSchema, beforeBlock: blockSchema, afterBlock: blockSchema,
     beforeBalanceAtomic: uintSchema, afterBalanceAtomic: uintSchema, deltaAtomic: uintSchema }).nullable(),
+  nativeTransfer: z.strictObject({ transactionHash: wordSchema, from: addressSchema, to: addressSchema,
+    valueAtomic: uintSchema, traceHash: hashSchema }).nullable(),
   safeBlock: blockSchema, rpcOrigin: originSchema, transactionProofHash: hashSchema });
 export const scanSchema = z.strictObject({ startBlock: blockSchema, nextBlockAtomic: uintSchema, previousEndBlock: blockSchema.nullable() });
 export const providerObservationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "completed_observed", "partial_observed", "refund_observed", "failed_observed", "unknown"]),
@@ -87,7 +89,7 @@ export const effectSchema = z.strictObject({ ...effectFields, envelope: envelope
 const effectSnapshotSchema = z.strictObject({ ...effectFields, envelopeHash: hashSchema });
 const mutableFields = { state: stateSchema, approval: consentSchema.nullable(), sourceProof: sourceProofSchema.nullable(),
   destinationProof: destinationProofSchema.nullable(), providerObservation: providerObservationSchema.nullable(),
-  destinationScan: scanSchema, failure: failureSchema.nullable() };
+  destinationScan: scanSchema, failure: failureSchema.nullable(), usageLease: z.unknown().nullable() };
 export const transitionSchema = z.strictObject({ ...mutableFields, effects: z.array(effectSnapshotSchema).min(1).max(2),
   at: isoSchema, previousHash: hashSchema, transitionHash: hashSchema });
 export const operationSchema = z.strictObject({ ...mutableFields, schemaVersion: z.literal("apn.bridge-operation.v1"), kind: z.literal("bridge_route"),
@@ -96,5 +98,5 @@ export const operationSchema = z.strictObject({ ...mutableFields, schemaVersion:
   intent: z.strictObject({ profile: ownerSchema.shape.profile, quoteHash: hashSchema, owner: ownerSchema, providerBinding: providerBindingSchema,
     materialization: materializationSchema, decoded: z.unknown(), sourceDeployment: deploymentSchema, destinationDeployment: deploymentSchema,
     sourceAccount: accountSchema, destinationStartBlock: blockSchema, sourceRpcOrigin: originSchema, destinationRpcOrigin: originSchema,
-    preparedAt: isoSchema, expiresAt: isoSchema, policyHash: hashSchema, implicitProtocolFeeAtomic: uintSchema }),
+    preparedAt: isoSchema, expiresAt: isoSchema, policyHash: hashSchema, implicitProtocolFeeAtomic: uintSchema, allowlist: z.unknown().nullable() }),
   transitions: z.array(transitionSchema).min(1).max(512), integrityHash: hashSchema });

@@ -12,6 +12,7 @@ import { BridgeQuoteRepository } from "./quote-repository.js";
 import { publicBridgeOperation } from "./receipt.js";
 import { transitionBridge } from "./transitions.js";
 import { bridgeFailure } from "./validation.js";
+import { BridgeAllowlistGate, bridgeUsageTarget } from "./allowlist.js";
 
 export interface BridgeDependencies {
   readonly provider: LifiProviderPort;
@@ -67,7 +68,12 @@ export class BridgeService {
   }
   private async save(op: BridgeOperationRecord, patch: Partial<BridgeMutable>) {
     const next = transitionBridge(op, patch, this.context.clock.now().toISOString());
-    await this.records.persist(next); return next;
+    await this.records.persist(next);
+    await this.followUsage(next);
+    return next;
+  }
+  private async followUsage(op: BridgeOperationRecord) {
+    await new BridgeAllowlistGate(this.context).follow(op, bridgeUsageTarget(op));
   }
   private async locked<T>(input: string, work: (op: BridgeOperationRecord) => Promise<T>): Promise<T> {
     const operationId = canonicalOperationId(input), first = await this.operations.required(operationId);
@@ -76,6 +82,7 @@ export class BridgeService {
       const current = await this.operations.required(operationId);
       if (current.kind !== "bridge_route") bridgeFailure("APN_STATE_CORRUPT", "bridge_operation_kind_changed");
       await this.records.repairReceipt(current.record);
+      await this.followUsage(current.record);
       return await work(current.record);
     });
   }

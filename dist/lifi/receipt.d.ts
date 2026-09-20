@@ -133,6 +133,27 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
     policy: {
         identity: string;
         policy_hash: string;
+        allowlist: {
+            schema_version: "apn.bridge-allowlist.v1";
+            policy_digest: string;
+            policy_revision: number;
+            account: string;
+            self_recipient: string;
+            chain: string;
+            asset: Readonly<{
+                kind: "native";
+                identifier: null;
+            } | {
+                kind: "token";
+                identifier: string;
+            }>;
+            amount_atomic: string;
+            mechanism: Readonly<{
+                provider: "lifi";
+                reference: "across-v4";
+            }>;
+            reservation_id: string | null;
+        } | null;
         approved_at: string | null;
         expiry_enforced_before_first_send: boolean;
         inclusion_deadline: string;
@@ -276,6 +297,27 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
     policy: {
         identity: string;
         policy_hash: string;
+        allowlist: {
+            schema_version: "apn.bridge-allowlist.v1";
+            policy_digest: string;
+            policy_revision: number;
+            account: string;
+            self_recipient: string;
+            chain: string;
+            asset: Readonly<{
+                kind: "native";
+                identifier: null;
+            } | {
+                kind: "token";
+                identifier: string;
+            }>;
+            amount_atomic: string;
+            mechanism: Readonly<{
+                provider: "lifi";
+                reference: "across-v4";
+            }>;
+            reservation_id: string | null;
+        } | null;
         approved_at: string | null;
         expiry_enforced_before_first_send: boolean;
         inclusion_deadline: string;

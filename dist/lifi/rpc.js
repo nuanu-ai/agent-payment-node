@@ -12,7 +12,7 @@ import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
 import { BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }];
-const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "eth_sendRawTransaction"]);
+const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction", "eth_sendRawTransaction"]);
 export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 56: "APN_BNB_RPC_URL", 8453: "APN_BASE_RPC_URL",
     42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" };
 /** The single explicit Ethereum-family RPC reader: endpoint only from its named environment variable, public HTTPS, no query. */
@@ -158,7 +158,7 @@ export class BridgeRpc {
             bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
         return hash;
     }
-    async observe(hash, expected, nativeRecipient) {
+    async observe(hash, expected, nativeDelivery) {
         await this.assertChain();
         bridgeHex(hash, 32, 32, "APN_RPC_PROTOCOL");
         const [rawTx, rawReceipt] = await Promise.all([this.call("eth_getTransactionByHash", [hash]), this.call("eth_getTransactionReceipt", [hash])]);
@@ -185,19 +185,22 @@ export class BridgeRpc {
         if (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) || BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic))
             bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
         let nativeBalance = null;
-        if (nativeRecipient !== undefined) {
+        let nativeTransfer = null;
+        if (nativeDelivery !== undefined) {
             if (number === 0n)
                 bridgeFailure("APN_RPC_PROTOCOL", "native_balance_genesis");
             const beforeRaw = await evmRpcBlock(this.call, quantity(number - 1n));
             const before = { numberAtomic: (number - 1n).toString(), hash: beforeRaw.hash, timestampAtomic: evmRpcQuantity(beforeRaw.raw.timestamp).toString() };
-            const [beforeBalance, afterBalance] = await Promise.all([
-                this.call("eth_getBalance", [nativeRecipient, { blockHash: before.hash, requireCanonical: true }]).then(evmRpcQuantity),
-                this.call("eth_getBalance", [nativeRecipient, { blockHash: block.hash, requireCanonical: true }]).then(evmRpcQuantity),
+            const [beforeBalance, afterBalance, trace] = await Promise.all([
+                this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: before.hash, requireCanonical: true }]).then(evmRpcQuantity),
+                this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: block.hash, requireCanonical: true }]).then(evmRpcQuantity),
+                this.call("debug_traceTransaction", [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }]),
             ]);
             if (afterBalance < beforeBalance)
                 bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
-            nativeBalance = { recipient: nativeRecipient, beforeBlock: before, afterBlock: block,
+            nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,
                 beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
+            nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
             await this.recheck(before);
         }
         await this.recheck(block);
@@ -206,7 +209,7 @@ export class BridgeRpc {
         await this.assertChain();
         return { transaction: { chainId: this.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: this.origin, ...identity,
                 ...fees, status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
-            receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance } };
+            receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer } };
     }
     async logs(input) {
         await this.assertChain();
@@ -234,6 +237,27 @@ export class BridgeRpc {
         if (!bridgeSame(await this.block(block.numberAtomic), block))
             bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
     }
+}
+function exactNativeTransfer(value, transactionHash, expected) {
+    const rows = [];
+    const visit = (raw, path, depth) => {
+        if (depth > 32 || rows.length > 1024)
+            bridgeFailure("APN_RPC_PROTOCOL", "native_trace_bound");
+        const call = evmRpcRecord(raw), from = evmRpcAddress(call.from), to = evmRpcAddress(call.to), valueAtomic = evmRpcQuantity(call.value ?? "0x0").toString();
+        if (call.type === "CALL" && call.error === undefined && from === expected.from && to === expected.recipient && valueAtomic === expected.amountAtomic) {
+            rows.push({ type: "CALL", from, to, valueAtomic, path });
+        }
+        if (call.calls !== undefined) {
+            if (!Array.isArray(call.calls) || call.calls.length > 256)
+                bridgeFailure("APN_RPC_PROTOCOL", "native_trace_calls");
+            call.calls.forEach((child, index) => visit(child, `${path}.${index}`, depth + 1));
+        }
+    };
+    visit(value, "0", 0);
+    if (rows.length !== 1)
+        bridgeFailure("APN_RPC_PROTOCOL", "native_destination_transfer");
+    return { transactionHash, from: expected.from, to: expected.recipient, valueAtomic: expected.amountAtomic,
+        traceHash: hashObject({ transactionHash, delivery: rows[0] }) };
 }
 function quantity(n) { return `0x${n.toString(16)}`; }
 function parseReceiptLogs(value, hash, block, transactionIndex) {

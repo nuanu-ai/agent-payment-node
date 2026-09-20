@@ -1,6 +1,7 @@
 import { hashObject } from "../canonical.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
 import { bridgeDestinationProof, bridgeSourceProof, destinationEventFilter } from "./protocol-evidence.js";
+import { bridgeProtocolEmitter } from "./deployments.js";
 import { approvalIncluded } from "./transaction.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
 export class BridgeObservation {
@@ -148,7 +149,9 @@ export class BridgeObservation {
     async destinationCandidate(op, hash) {
         const request = op.intent.materialization.request;
         const proveNativeDelta = request.toToken === "0x0000000000000000000000000000000000000000" && request.toChainId === 59144;
-        const found = await this.destination.observe(hash, undefined, proveNativeDelta ? request.recipient : undefined);
+        const found = await this.destination.observe(hash, undefined, proveNativeDelta ? { recipient: request.recipient,
+            from: bridgeProtocolEmitter(request.toChainId, "across", request.toToken), amountAtomic: op.sourceProof.correlation.kind === "across"
+                ? op.sourceProof.correlation.outputAmountAtomic : op.intent.decoded.minimumOutputAtomic } : undefined);
         if (found === null || found.transaction.safeBlock === null || found.transaction.status !== "success")
             bridgeFailure("APN_RPC_PROTOCOL", "destination_not_safe_success");
         await this.historicalDeployment(op, this.destination, found.transaction, op.intent.destinationDeployment);
