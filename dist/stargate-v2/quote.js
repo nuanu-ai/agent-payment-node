@@ -34,13 +34,16 @@ const decodeExact = (raw, parameters) => {
 };
 export async function quoteStargateV2Direct(request, call) {
     const snapshot = canonicalJson(request), amount = uint(request.amountAtomic), recipient = canonicalAddress(request.recipient);
+    const extraOptions = request.extraOptions ?? "0x";
+    if (!/^0x(?:[0-9a-f]{2})*$/u.test(extraOptions) || size(extraOptions) > 1024)
+        protocol("extra options are malformed");
     const route = stargateV2Route({ chainId: request.sourceChainId, token: request.sourceToken }, { chainId: request.destinationChainId, token: request.destinationToken });
     await assertChain(call, route.from.chainId);
     const block = await evmRpcBlock(call, "latest"), code = boundedResult(await call("eth_getCode", [route.from.pool, block.tag]));
     if (code === "0x")
         protocol("the pinned source contract has no code");
     const sendParam = { dstEid: route.to.eid, to: pad(recipient, { size: 32 }), amountLD: amount, minAmountLD: 0n,
-        extraOptions: "0x", composeMsg: "0x", oftCmd: "0x" };
+        extraOptions, composeMsg: "0x", oftCmd: "0x" };
     const quoteOftData = encodeFunctionData({ abi: STARGATE_QUOTE_ABI, functionName: "quoteOFT", args: [sendParam] });
     const oftRaw = boundedResult(await call("eth_call", [{ to: route.from.pool, data: quoteOftData }, block.tag]));
     const [limit, details, receipt] = decodeExact(oftRaw, STARGATE_QUOTE_OFT_OUTPUT);

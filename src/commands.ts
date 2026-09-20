@@ -10,6 +10,9 @@ export type CommandRequest =
   | { readonly command: "stargate.native.prepare"; readonly profile: string; readonly amountAtomic: string;
       readonly maxNativeDebitAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "stargate.native.execute" | "stargate.native.observe" | "stargate.native.status" | "stargate.native.receipt"; readonly operationId: string }
+  | { readonly command: "stargate.token.prepare"; readonly profile: string; readonly amountAtomic: string;
+      readonly nativeDropAtomic: string; readonly minOutputAtomic: string; readonly maxNativeDebitAtomic: string; readonly idempotencyKey: string }
+  | { readonly command: "stargate.token.execute" | "stargate.token.observe" | "stargate.token.status" | "stargate.token.receipt"; readonly operationId: string }
   | { readonly command: "swap.uniswap.inventory" }
   | { readonly command: "swap.uniswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
       readonly outputToken: string; readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly deadline: number;

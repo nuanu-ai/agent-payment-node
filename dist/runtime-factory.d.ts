@@ -33,8 +33,10 @@ import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runtime.js";
 import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
+import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export interface RuntimeFactoryOptions {
     readonly stargateNative?: StargateNativeService;
+    readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.uniswap.quote";

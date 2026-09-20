@@ -1,0 +1,62 @@
+import type { WrappingSecretPort } from "../macos-keychain.js";
+import type { Address } from "../model.js";
+import type { StateStore } from "../state.js";
+import { StargateJsonRpc } from "./native-runtime.js";
+import { type StargateTokenDestinationEvidence, type StargateTokenExecutionPorts, type StargateTokenOperation } from "./token-execution.js";
+export declare class StargateTokenService {
+    private readonly state;
+    private readonly env;
+    private readonly now;
+    private source?;
+    private destination?;
+    private readonly journal;
+    private readonly local;
+    constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number);
+    prepare(input: Readonly<{
+        profile: string;
+        amountAtomic: string;
+        nativeDropAtomic: string;
+        minOutputAtomic: string;
+        maxNativeDebitAtomic: string;
+        idempotencyKey: string;
+    }>): Promise<StargateTokenOperation>;
+    execute(id: string): Promise<StargateTokenOperation>;
+    observe(id: string): Promise<StargateTokenOperation>;
+    status(id: string): Promise<StargateTokenOperation>;
+    receipt(id: string): Promise<Readonly<{
+        evidenceHash: string;
+        schemaVersion: "apn.stargate-v2-token-receipt.v1";
+        operationId: string;
+        profile: string;
+        route: {
+            sourceChainId: number;
+            sourceEid: number;
+            sourcePool: `0x${string}`;
+            sourceToken: `0x${string}`;
+            destinationChainId: number;
+            destinationEid: number;
+            destinationPool: `0x${string}`;
+            destinationToken: `0x${string}`;
+        };
+        owner: `0x${string}`;
+        recipient: `0x${string}`;
+        principalAtomic: string;
+        minimumOutputAtomic: string;
+        nativeDropAtomic: string;
+        nativeMessageFeeAtomic: string;
+        maximumDebitAtomic: string;
+        options: `0x${string}`;
+        executor: `0x${string}`;
+        executorNativeCapAtomic: string;
+        policy: import("./token-execution.js").StargateTokenPolicyBinding;
+        quoteHash: string;
+        approvalTransactionHash: `0x${string}` | null;
+        residualAllowanceAtomic: string;
+        source: import("./token-execution.js").StargateTokenSourceReceipt;
+        destination: StargateTokenDestinationEvidence;
+    }>>;
+    private required;
+    private ports;
+    private remote;
+}
+export declare function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>): Promise<StargateTokenDestinationEvidence | null>;

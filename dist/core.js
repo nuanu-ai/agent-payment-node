@@ -117,6 +117,27 @@ export class ApnCore {
                     return operationOutcome(await service.status(request.operationId));
                 return receiptOutcome(await service.receipt(request.operationId));
             }
+            case "stargate.token.prepare": {
+                const service = this.context.stargateToken;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate token runtime is unavailable.");
+                return operationOutcome(await service.prepare(request));
+            }
+            case "stargate.token.execute":
+            case "stargate.token.observe":
+            case "stargate.token.status":
+            case "stargate.token.receipt": {
+                const service = this.context.stargateToken;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate token runtime is unavailable.");
+                if (request.command === "stargate.token.execute")
+                    return operationOutcome(await service.execute(request.operationId));
+                if (request.command === "stargate.token.observe")
+                    return operationOutcome(await service.observe(request.operationId));
+                if (request.command === "stargate.token.status")
+                    return operationOutcome(await service.status(request.operationId));
+                return receiptOutcome(await service.receipt(request.operationId));
+            }
             case "swap.uniswap.inventory":
             case "swap.uniswap.quote":
             case "swap.uniswap.prepare":
