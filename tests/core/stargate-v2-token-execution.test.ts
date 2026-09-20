@@ -223,6 +223,39 @@ test("v4 integrity validation rejects inconsistent approved fee provenance befor
   await assert.rejects(new FileStargateTokenJournal(temporary.root,state).load(op.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT"&&e.details.reason==="fee_approval_binding");assert.deepEqual(s.counts(),{sends:0,signs:0,approvals:0});
 });
 
+test("v4 FileJournal saves and loads an omitted fee ceiling snapshot with a zero quoted priority", async (t) => {
+  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
+  const journal=new FileStargateTokenJournal(temporary.root,state),s=setup({preparedPriority:0n});
+  const prepared=await prepareStargateV2Token(request({idempotencyKey:"file-journal-zero-tip-snapshot"}),s.ports,journal);
+  const loaded=await journal.load(prepared.operationId);
+  assert.deepEqual(loaded?.feeApproval,{provenance:"exact_snapshot",quotedMaxFeePerGasWei:"2",quotedMaxPriorityFeePerGasWei:"0",approvedMaxFeePerGasWei:"2",approvedMaxPriorityFeePerGasWei:"0"});
+  assert.equal(loaded?.sendEnvelope.maxFeePerGasAtomic,"2"); assert.equal(loaded?.sendEnvelope.maxPriorityFeePerGasAtomic,"0");
+});
+
+test("v4 FileJournal saves and loads an owner ceiling above a zero quoted priority", async (t) => {
+  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
+  const journal=new FileStargateTokenJournal(temporary.root,state),s=setup({preparedPriority:0n});
+  const prepared=await prepareStargateV2Token(request({idempotencyKey:"file-journal-zero-quote-owner-ceiling",maxFeePerGasWei:"4",maxPriorityFeePerGasWei:"2"}),s.ports,journal);
+  const loaded=await journal.load(prepared.operationId);
+  assert.deepEqual(loaded?.feeApproval,{provenance:"owner_ceiling",quotedMaxFeePerGasWei:"2",quotedMaxPriorityFeePerGasWei:"0",approvedMaxFeePerGasWei:"4",approvedMaxPriorityFeePerGasWei:"2"});
+  assert.equal(loaded?.approvalEnvelope?.maxPriorityFeePerGasAtomic,"2"); assert.equal(loaded?.sendEnvelope.maxPriorityFeePerGasAtomic,"2");
+});
+
+test("v4 FileJournal rejects malformed zero and inverted fee bindings", async (t) => {
+  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
+  const journal=new FileStargateTokenJournal(temporary.root,state),s=setup({preparedPriority:0n});
+  const op=await prepareStargateV2Token(request({idempotencyKey:"file-journal-malformed-fees",maxFeePerGasWei:"4",maxPriorityFeePerGasWei:"2"}),s.ports,s.journal);
+  for (const feeApproval of [
+    {...op.feeApproval!,approvedMaxFeePerGasWei:"0"},
+    {...op.feeApproval!,approvedMaxPriorityFeePerGasWei:"5"},
+    {...op.feeApproval!,quotedMaxPriorityFeePerGasWei:"3"},
+    {...op.feeApproval!,approvedMaxPriorityFeePerGasWei:"00"},
+  ]) {
+    const {integrityHash:_integrity,...body}={...op,feeApproval}; const corrupt={...body,integrityHash:hashObject(body)} as StargateTokenOperation;
+    await assert.rejects(journal.save(corrupt),(e:any)=>e.code==="APN_STATE_CORRUPT"&&e.details.reason==="fee_approval_binding");
+  }
+});
+
 test("post-approval exact estimate and eth_call pass before one bridge signature", async () => { const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"staged-pass"}),s.ports,s.journal); const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:0,bridgeEstimates:1,bridgeCalls:1}); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); const receipt=stargateV2TokenCanonicalReceipt(observed); assert.equal(receipt.bridgeSimulation.mode,"pending_post_approval"); assert.equal(receipt.bridgeSimulation.gasCeilingAtomic,prepared.sendEnvelope.gasLimitAtomic); });
 
 for (const [name, options, reason] of [

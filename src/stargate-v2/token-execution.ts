@@ -509,7 +509,7 @@ function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRe
       const validStoredUint = (input: unknown, positive = false) => typeof input === "string" && UINT.test(input) && BigInt(input) < 1n << 256n && (!positive || BigInt(input) > 0n);
       if (fees === undefined || !["exact_snapshot", "owner_ceiling"].includes(fees.provenance) ||
         !validStoredUint(fees.quotedMaxFeePerGasWei, true) || !validStoredUint(fees.quotedMaxPriorityFeePerGasWei) ||
-        !validStoredUint(fees.approvedMaxFeePerGasWei, true) || !validStoredUint(fees.approvedMaxPriorityFeePerGasWei, true) ||
+        !validStoredUint(fees.approvedMaxFeePerGasWei, true) || !validStoredUint(fees.approvedMaxPriorityFeePerGasWei) ||
         BigInt(fees.quotedMaxPriorityFeePerGasWei) > BigInt(fees.quotedMaxFeePerGasWei) ||
         BigInt(fees.quotedMaxFeePerGasWei) > BigInt(fees.approvedMaxFeePerGasWei) ||
         BigInt(fees.quotedMaxPriorityFeePerGasWei) > BigInt(fees.approvedMaxPriorityFeePerGasWei) ||
