@@ -163,6 +163,18 @@ export class ApnCore {
   }
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
+      case "stargate.native.prepare": {
+        const service = this.context.stargateNative;
+        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate native runtime is unavailable.");
+        return operationOutcome(await service.prepare(request));
+      }
+      case "stargate.native.execute": case "stargate.native.status": case "stargate.native.receipt": {
+        const service = this.context.stargateNative;
+        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate native runtime is unavailable.");
+        if (request.command === "stargate.native.execute") return operationOutcome(await service.execute(request.operationId));
+        if (request.command === "stargate.native.status") return operationOutcome(await service.status(request.operationId));
+        return receiptOutcome(await service.receipt(request.operationId));
+      }
       case "swap.uniswap.inventory": case "swap.uniswap.quote": case "swap.uniswap.prepare": case "swap.uniswap.status": case "swap.uniswap.approve": case "swap.uniswap.execute": return await executeUniswapCommand(request, this.context);
       case "swap.sunswap.inventory": case "swap.sunswap.quote": case "swap.sunswap.prepare": case "swap.sunswap.status": case "swap.sunswap.approve": case "swap.sunswap.execute": return await executeSunSwapCommand(request, this.context);
       case "swap.jupiter.inventory": case "swap.jupiter.quote": case "swap.jupiter.prepare": case "swap.jupiter.status": case "swap.jupiter.approve": case "swap.jupiter.execute": return await executeJupiterCommand(request, this.context);

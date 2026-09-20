@@ -38,6 +38,7 @@ export interface StargateNativeOperation {
     readonly quote: StargateV2QuoteEvidence;
     readonly sourceCodeHash: Hex;
     readonly destinationBalanceBeforeAtomic: string;
+    readonly destinationCodeHash: Hex;
     readonly destinationBalanceBlock: {
         readonly numberAtomic: string;
         readonly hash: Hex;
@@ -66,7 +67,12 @@ export interface StargateSourceReceipt {
 }
 export type StargateDestinationEvidence = Readonly<{
     mode: "oft_received";
+    emitter: Address;
+    sourceTransactionHash: Hex;
     guid: Hex;
+    sourceEid: 30101;
+    destinationTransactionHash: Hex;
+    logIndexAtomic: string;
     blockNumberAtomic: string;
     blockHash: Hex;
     finality: "safe";
@@ -113,6 +119,7 @@ export interface StargateConfirmedReceipt {
 }
 export interface StargateNativeExecutionPorts {
     readonly sourceCall: EvmRpcCall;
+    readonly destinationCall: EvmRpcCall;
     readonly destinationBalance: (recipient: Address) => Promise<Readonly<{
         balanceAtomic: string;
         blockNumberAtomic: string;
@@ -130,27 +137,35 @@ export interface StargateNativeExecutionPorts {
         address: Address;
         signTransaction: (tx: StargateNativeEnvelope) => Promise<Hex>;
     }>;
+    readonly signerIdentity: () => Promise<Readonly<{
+        profile: string;
+        address: Address;
+    }>>;
     readonly approve: (operation: StargateNativeOperation) => Promise<void>;
     readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
     readonly waitSourceReceipt: (transactionHash: Hex) => Promise<StargateConfirmedReceipt | null>;
     readonly observeDestination: (input: Readonly<{
+        sourceTransactionHash: Hex;
         guid: Hex;
         recipient: Address;
         sourceEid: 30101;
         destinationPool: Address;
         minimumAmountAtomic: string;
         balanceBeforeAtomic: string;
+        fromBlockNumberAtomic: string;
     }>) => Promise<StargateDestinationEvidence | null>;
     readonly now?: () => number;
 }
 export interface StargateNativeJournal {
     load(operationId: string): Promise<StargateNativeOperation | null>;
     save(next: StargateNativeOperation): Promise<void>;
+    withLock<T>(operationId: string, work: () => Promise<T>): Promise<T>;
 }
 export declare class FileStargateNativeJournal implements StargateNativeJournal {
     private readonly root;
     constructor(root: string);
     private path;
+    withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
     load(id: string): Promise<StargateNativeOperation | null>;
     save(nextInput: StargateNativeOperation): Promise<void>;
 }
@@ -158,6 +173,10 @@ export declare class LocalStargateNativeSigner {
     private readonly state;
     private readonly wallets;
     constructor(state: StateStore, wrapping: WrappingSecretPort);
+    identity(profileInput: string, expectedOwner?: Address): Promise<Readonly<{
+        profile: string;
+        address: Address;
+    }>>;
     port(profileInput: string, expectedOwner: Address): Promise<StargateNativeExecutionPorts["signer"]>;
 }
 export declare function prepareStargateV2NativeEth(request: StargateNativePreparationRequest, ports: StargateNativeExecutionPorts, journal: StargateNativeJournal): Promise<StargateNativeOperation>;

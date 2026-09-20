@@ -64,6 +64,17 @@ export function mcpFieldName(optionName: `--${string}`): string {
 
 function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   const options = parsed.values;
+  if (parsed.command.path[0] === "stargate") {
+    switch (parsed.command.path.join(" ")) {
+      case "stargate native prepare": return { request: { command: "stargate.native.prepare", profile: value(options, "--profile"),
+        amountAtomic: value(options, "--amount-atomic"), maxNativeDebitAtomic: value(options, "--max-native-debit-atomic"),
+        idempotencyKey: value(options, "--idempotency-key") } };
+      case "stargate native execute": return { request: { command: "stargate.native.execute", operationId: value(options, "--operation") } };
+      case "stargate native status": return { request: { command: "stargate.native.status", operationId: value(options, "--operation") } };
+      case "stargate native receipt": return { request: { command: "stargate.native.receipt", operationId: value(options, "--operation") } };
+      default: throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported Stargate native command.");
+    }
+  }
   if (parsed.command.path[0] === "swap") {
     const path = parsed.command.path.join(" ");
     if (path.startsWith("swap ethereum uniswap ")) return { request: bindUniswapCommand(path, options) };

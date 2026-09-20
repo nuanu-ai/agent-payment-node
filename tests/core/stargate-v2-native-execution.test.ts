@@ -24,8 +24,13 @@ const FEE = 100n;
 class MemoryJournal implements StargateNativeJournal {
   value: StargateNativeOperation | null = null;
   history: StargateNativeOperation[] = [];
+  private tail: Promise<void> = Promise.resolve();
   async load(id: string) { return this.value?.operationId === id ? structuredClone(this.value) : null; }
   async save(value: StargateNativeOperation) { this.value = structuredClone(value); this.history.push(structuredClone(value)); }
+  async withLock<T>(_id: string, work: () => Promise<T>): Promise<T> {
+    const prior = this.tail; let release!: () => void; this.tail = new Promise<void>(resolve => { release = resolve; });
+    await prior; try { return await work(); } finally { release(); }
+  }
 }
 
 function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint } = {}) {
@@ -36,6 +41,8 @@ function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint } = {})
     if (method === "eth_chainId") return "0x1";
     if (method === "eth_getBlockByNumber") return { number: "0x10", hash: BLOCK };
     if (method === "eth_getCode") return options.code ?? "0x60016000";
+    if (method === "eth_getBalance") return "0x1fffffffffffff";
+    if (method === "eth_getTransactionCount") return "0x7";
     if (method !== "eth_call") throw new Error(`unexpected ${method}`);
     const data = (params[0] as { data: Hex }).data;
     try {
@@ -51,9 +58,31 @@ function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint } = {})
     if (decoded.functionName === "token") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "token", result: "0x0000000000000000000000000000000000000000" });
     if (decoded.functionName === "localEid") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "localEid", result: 30101 });
     if (decoded.functionName === "sharedDecimals") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sharedDecimals", result: 6 });
+    if (decoded.functionName === "status") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "status", result: 1 });
+    if (decoded.functionName === "stargateType") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "stargateType", result: 0 });
+    if (decoded.functionName === "paths") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "paths", result: 1_000_000n });
+    if (decoded.functionName === "sendToken") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", result: [
+      { guid: GUID, nonce: 1n, fee: { nativeFee: FEE, lzTokenFee: 0n } },
+      { amountSentLD: AMOUNT, amountReceivedLD: AMOUNT }, { ticketId: 0n, passengerBytes: "0x" },
+    ] });
     throw new Error("unexpected eth_call");
   };
   return { call, methods };
+}
+
+function destinationRpc(): StargateNativeExecutionPorts["destinationCall"] {
+  return async (method, params) => {
+    if (method === "eth_chainId") return "0x82";
+    if (method === "eth_getCode") return "0x60026000";
+    if (method !== "eth_call") throw new Error(`unexpected destination ${method}`);
+    const decoded = decodeFunctionData({ abi: STARGATE_SEND_ABI, data: (params[0] as { data: Hex }).data });
+    if (decoded.functionName === "token") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "token", result: "0x0000000000000000000000000000000000000000" });
+    if (decoded.functionName === "localEid") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "localEid", result: 30320 });
+    if (decoded.functionName === "sharedDecimals") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sharedDecimals", result: 6 });
+    if (decoded.functionName === "status") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "status", result: 1 });
+    if (decoded.functionName === "stargateType") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "stargateType", result: 0 });
+    throw new Error("unexpected destination eth_call");
+  };
 }
 
 function sourceReceipt(hash: Hex, owner = OWNER, received = AMOUNT) {
@@ -68,6 +97,7 @@ function setup(options: { code?: Hex; fee?: bigint; freshFee?: bigint; sendError
   const account = privateKeyToAccount(PRIVATE_KEY);
   const ports: StargateNativeExecutionPorts = {
     sourceCall: q.call,
+    destinationCall: destinationRpc(),
     destinationBalance: async recipient => ({ balanceAtomic: "500", blockNumberAtomic: "9", blockHash: DEST_BLOCK }),
     prepareEnvelope: async tx => ({ nonceAtomic: "7", gasLimitAtomic: "100000", maxFeePerGasAtomic: "2",
       maxPriorityFeePerGasAtomic: "1", nativeBalanceAtomic: "9000000000000000" }),
@@ -76,10 +106,13 @@ function setup(options: { code?: Hex; fee?: bigint; freshFee?: bigint; sendError
         value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic),
         maxFeePerGas: BigInt(tx.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [] });
     } },
+    signerIdentity: async () => ({ profile: "owner", address: OWNER }),
     approve: async () => { approvals++; },
     sendRawTransaction: async raw => { sends++; if (options.sendError) throw new Error("timeout"); return keccak256(raw); },
     waitSourceReceipt: async hash => options.sendError ? null : sourceReceipt(hash),
-    observeDestination: async input => options.destination === "pending" ? null : ({ mode: "oft_received", guid: input.guid,
+    observeDestination: async input => options.destination === "pending" ? null : ({ mode: "oft_received", emitter: DESTINATION,
+      sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30101,
+      destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0",
       blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: "safe", recipient: input.recipient, amountReceivedAtomic: AMOUNT.toString() }),
     now: () => 2_000_000_000_000,
   };
@@ -112,6 +145,12 @@ test("refuses non-self recipient before quote, signing, or submission", async ()
 test("refuses a maxNativeDebit cap below principal plus message fee plus gas envelope", async () => {
   const s = setup(); await assert.rejects(prepareStargateV2NativeEth(request({ maxNativeDebitAtomic: AMOUNT.toString() }), s.ports, s.journal),
     (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details.reason === "max_native_debit_exceeded");
+  assert.equal(s.counts().signs, 0); assert.equal(s.counts().sends, 0);
+});
+
+test("refuses native principal dust that quoteOFT would round down", async () => {
+  const s = setup(); await assert.rejects(prepareStargateV2NativeEth(request({ amountAtomic: (AMOUNT + 1n).toString() }), s.ports, s.journal),
+    (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details.reason === "dust_amount_not_supported");
   assert.equal(s.counts().signs, 0); assert.equal(s.counts().sends, 0);
 });
 
@@ -156,7 +195,9 @@ test("destination pending keeps submitted source proof and a later call observes
   const s = setup({ destination: "pending" }), prepared = await prepareStargateV2NativeEth(request(), s.ports, s.journal);
   const pending = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
   assert.equal(pending.phase, "submitted"); assert.equal(pending.sourceReceipt?.guid, GUID); assert.equal(s.counts().sends, 1);
-  (s.ports as any).observeDestination = async (input: any) => ({ mode: "oft_received", guid: input.guid, blockNumberAtomic: "31",
+  (s.ports as any).observeDestination = async (input: any) => ({ mode: "oft_received", emitter: DESTINATION,
+    sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30101, blockNumberAtomic: "31",
+    destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0",
     blockHash: DEST_BLOCK, finality: "safe", recipient: input.recipient, amountReceivedAtomic: AMOUNT.toString() });
   const observed = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
   assert.equal(observed.phase, "observed"); assert.equal(s.counts().sends, 1); assert.equal(s.counts().signs, 1);
@@ -174,4 +215,61 @@ test("same idempotency key with mutated principal is a conflict before any new q
   await assert.rejects(prepareStargateV2NativeEth(request({ amountAtomic: (AMOUNT * 2n).toString() }), s.ports, s.journal),
     (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details.reason === "idempotency_conflict");
   assert.equal(s.q.methods.length, before); assert.equal(s.counts().signs, 0); assert.equal(s.counts().sends, 0);
+});
+
+test("two concurrent execute calls serialize to exactly one sign and one send", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request(), s.ports, s.journal);
+  const [a, b] = await Promise.all([
+    executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+  ]);
+  assert.equal(a.phase, "observed"); assert.equal(b.phase, "observed");
+  assert.deepEqual(s.counts(), { sends: 1, signs: 1, approvals: 1 });
+});
+
+test("signed raw transaction with mutated value is refused before marker and send", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request(), s.ports, s.journal), account = privateKeyToAccount(PRIVATE_KEY);
+  (s.ports as any).signer = { kind: "imported_evm_signer", address: OWNER, signTransaction: async (tx: any) =>
+    await account.signTransaction({ type: "eip1559", chainId: 1, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic) + 1n,
+      nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic),
+      maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [] }) };
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_RPC_PROTOCOL" && error.details.reason === "signed_transaction_value");
+  assert.equal(s.journal.value?.phase, "approved"); assert.equal(s.counts().sends, 0);
+});
+
+test("balance delta cannot finalize destination delivery", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request(), s.ports, s.journal);
+  (s.ports as any).observeDestination = async (input: any) => ({ mode: "balance_delta", blockNumberAtomic: "31", blockHash: DEST_BLOCK,
+    finality: "safe", recipient: input.recipient, balanceBeforeAtomic: "500", balanceAfterAtomic: (500n + AMOUNT).toString(), deltaAtomic: AMOUNT.toString() });
+  const result = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
+  assert.equal(result.phase, "submitted"); assert.equal(result.destinationEvidence, undefined); assert.equal(s.counts().sends, 1);
+});
+
+test("destination event must bind exact emitter, source eid, guid, source transaction and frozen amount", async () => {
+  for (const mutation of ["emitter", "sourceEid", "guid", "sourceTransactionHash", "amountReceivedAtomic"] as const) {
+    const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: `native-event-${mutation}` }), s.ports, s.journal);
+    const original = s.ports.observeDestination;
+    (s.ports as any).observeDestination = async (input: any) => {
+      const evidence: any = await original(input);
+      if (mutation === "emitter") evidence.emitter = OWNER;
+      if (mutation === "sourceEid") evidence.sourceEid = 30102;
+      if (mutation === "guid") evidence.guid = DEST_BLOCK;
+      if (mutation === "sourceTransactionHash") evidence.sourceTransactionHash = DEST_BLOCK;
+      if (mutation === "amountReceivedAtomic") evidence.amountReceivedAtomic = (AMOUNT - 1n).toString();
+      return evidence;
+    };
+    await assert.rejects(() => executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+      (error: any) => error.code === "APN_RPC_PROTOCOL" && error.details.reason === "destination_event");
+    assert.equal(s.counts().sends, 1);
+  }
+});
+
+test("changed signer identity immediately before signing refuses without attempt marker or send", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-signer-mutation" }), s.ports, s.journal);
+  (s.ports as any).signerIdentity = async () => ({ profile: "other", address: OWNER });
+  await assert.rejects(() => executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_REPREPARE_REQUIRED" && error.details.reason === "signer_identity_changed");
+  assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 });
+  assert.equal((await s.journal.load(prepared.operationId))?.phase, "approved");
 });

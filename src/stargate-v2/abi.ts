@@ -71,6 +71,9 @@ export const STARGATE_SEND_ABI = [
   { type: "function", name: "token", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
   { type: "function", name: "localEid", stateMutability: "view", inputs: [], outputs: [{ type: "uint32" }] },
   { type: "function", name: "sharedDecimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+  { type: "function", name: "status", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+  { type: "function", name: "paths", stateMutability: "view", inputs: [{ name: "eid", type: "uint32" }], outputs: [{ type: "uint64" }] },
+  { type: "function", name: "stargateType", stateMutability: "pure", inputs: [], outputs: [{ type: "uint8" }] },
   { type: "event", name: "OFTSent", inputs: [
     { name: "guid", type: "bytes32", indexed: true }, { name: "dstEid", type: "uint32", indexed: false },
     { name: "fromAddress", type: "address", indexed: true }, { name: "amountSentLD", type: "uint256", indexed: false },
