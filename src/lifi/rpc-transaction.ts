@@ -7,12 +7,26 @@ import type { BridgeEnvelope } from "./model.js";
 import { verifyBridgeSigned } from "./transaction.js";
 import { bridgeFailure, bridgeHex } from "./validation.js";
 
+const SECP256K1_ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+const SECP256K1_HALF_ORDER = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n;
+
+/**
+ * Some EVM RPC providers encode transaction signature scalars without a leading zero nibble.
+ * This tolerance is intentionally local to transaction r/s; generic DATA remains byte-exact.
+ */
+export function evmTransactionSignatureScalar(value: unknown): Hex {
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{1,64}$/u.test(value)) bridgeFailure("APN_RPC_PROTOCOL", "transaction_signature");
+  const scalar = BigInt(value);
+  if (scalar === 0n || scalar >= SECP256K1_ORDER) bridgeFailure("APN_RPC_PROTOCOL", "transaction_signature");
+  return `0x${value.slice(2).toLowerCase().padStart(64, "0")}` as Hex;
+}
+
 export async function verifyRpcTransaction(raw: Record<string, unknown>, chainId: BridgeChainId, hash: Hex, expected?: BridgeEnvelope) {
   const type = evmRpcQuantity(raw.type), nonce = safeNumber(evmRpcQuantity(raw.nonce)), to = evmRpcAddress(raw.to), from = evmRpcAddress(raw.from);
   if (type > 4n || evmRpcHex(raw.hash, 32) !== hash || (raw.chainId !== undefined && evmRpcQuantity(raw.chainId) !== BigInt(chainId))) bridgeFailure("APN_RPC_PROTOCOL", "transaction_chain_or_hash");
   const data = bridgeHex(raw.input, 128 * 1024, undefined, "APN_RPC_PROTOCOL"), gas = evmRpcQuantity(raw.gas), value = evmRpcQuantity(raw.value);
-  const r = evmRpcHex(raw.r, 32), s = evmRpcHex(raw.s, 32), v = evmRpcQuantity(raw.v ?? raw.yParity);
-  if (BigInt(r) === 0n || BigInt(s) === 0n || BigInt(s) > 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n) bridgeFailure("APN_RPC_PROTOCOL", "transaction_signature");
+  const r = evmTransactionSignatureScalar(raw.r), s = evmTransactionSignatureScalar(raw.s), v = evmRpcQuantity(raw.v ?? raw.yParity);
+  if (BigInt(s) > SECP256K1_HALF_ORDER) bridgeFailure("APN_RPC_PROTOCOL", "transaction_signature");
   const y = type === 0n ? Number((v >= 35n ? v - 35n - 2n * BigInt(chainId) : v - 27n)) : safeNumber(evmRpcQuantity(raw.yParity ?? raw.v));
   if ((y !== 0 && y !== 1) || (raw.yParity !== undefined && evmRpcQuantity(raw.yParity) !== BigInt(y))) bridgeFailure("APN_RPC_PROTOCOL", "transaction_parity");
   const accessList = type === 0n ? [] : parseAccessList(raw.accessList);
