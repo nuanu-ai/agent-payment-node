@@ -19,10 +19,12 @@ export declare const STARGATE_TOKEN_MECHANISM: Readonly<{
     provider: "stargate-v2";
     reference: `eip155:10:0x${string}/eip155:137:0x${string}`;
 }>;
+export declare const STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS: number;
+export declare const STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS = 60000;
 export declare const STARGATE_TOKEN_MAX_BRIDGE_GAS = 5000000n;
 /** Exact OptionsBuilder.addExecutorNativeDropOption Type-3 wire encoding. */
 export declare function encodeStargateNativeDrop(amountInput: string, recipientInput: Address): Hex;
-export type StargateTokenPhase = "prepared" | "approved" | "allowance_submission_started" | "allowance_unknown_finality" | "allowance_submitted" | "allowance_observed" | "submission_started" | "unknown_finality" | "submitted" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
+export type StargateTokenPhase = "prepared" | "approved" | "allowance_submission_started" | "allowance_unknown_finality" | "allowance_submitted" | "allowance_observed" | "post_approval_quote_bound" | "submission_started" | "unknown_finality" | "submitted" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
 export type StargateTokenUsageState = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
 export interface StargateTokenTransition {
     readonly phase: StargateTokenPhase;
@@ -81,8 +83,43 @@ export interface StargateTokenPolicyBinding {
         readonly reference: string;
     }>;
 }
+export interface StargateTokenPostApprovalQuote {
+    readonly schemaVersion: "apn.stargate-v2-token-post-approval-quote.v1";
+    readonly quotedAt: string;
+    readonly expiresAt: string;
+    readonly quote: StargateV2QuoteEvidence;
+    readonly quoteBlock: Readonly<{
+        readonly numberAtomic: string;
+        readonly hash: Hex;
+    }>;
+    readonly finalityPolicy: StargateV2RouteFinalityPolicy;
+    readonly executorNativeCapAtomic: string;
+    readonly sourceCodeHash: Hex;
+    readonly destinationCodeHash: Hex;
+    readonly sourceTokenCodeHash: Hex;
+    readonly destinationTokenCodeHash: Hex;
+    readonly policy: StargateTokenPolicyBinding;
+    readonly sourceSnapshot: Readonly<{
+        readonly tokenBalanceAtomic: string;
+        readonly nativeBalanceAtomic: string;
+        readonly allowanceAtomic: string;
+        readonly nonceAtomic: string;
+        readonly quotedMaxFeePerGasWei: string;
+        readonly quotedMaxPriorityFeePerGasWei: string;
+    }>;
+    readonly destinationSnapshot: Readonly<{
+        readonly tokenBalanceAtomic: string;
+        readonly nativeBalanceAtomic: string;
+        readonly blockNumberAtomic: string;
+        readonly blockHash: Hex;
+    }>;
+    readonly bridgeEstimateGasAtomic: string;
+    readonly sendEnvelope: StargateTokenEnvelope;
+    readonly maximumDebitAtomic: string;
+    readonly snapshotHash: string;
+}
 export interface StargateTokenOperation {
-    readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2" | "apn.stargate-v2-token-operation.v3" | "apn.stargate-v2-token-operation.v4";
+    readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2" | "apn.stargate-v2-token-operation.v3" | "apn.stargate-v2-token-operation.v4" | "apn.stargate-v2-token-operation.v5";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;
@@ -131,6 +168,10 @@ export interface StargateTokenOperation {
         readonly prepareStatus: "succeeded" | "pending_post_approval";
         readonly gasCeilingAtomic: string;
     }>;
+    readonly approvalFinalityWindowMs?: number;
+    readonly approvalSubmissionStartedAt?: string;
+    readonly approvalFinalityDeadline?: string;
+    readonly postApprovalQuote?: StargateTokenPostApprovalQuote;
     readonly sendEnvelope: StargateTokenEnvelope;
     readonly maximumDebitAtomic: string;
     readonly preparedAt: string;
@@ -264,32 +305,6 @@ export declare function cleanupStargateV2Token(id: string, ports: StargateTokenE
 export declare function reconcileStargateV2TokenUsage(id: string, ports: Pick<StargateTokenExecutionPorts, "reserveUsage" | "followUsage">, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
 export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOperation): Readonly<{
     evidenceHash: string;
-    schemaVersion: "apn.stargate-v2-token-receipt.v1";
-    operationId: string;
-    profile: string;
-    route: {
-        sourceChainId: number;
-        sourceEid: number;
-        sourcePool: `0x${string}`;
-        sourceToken: `0x${string}`;
-        destinationChainId: number;
-        destinationEid: number;
-        destinationPool: `0x${string}`;
-        destinationToken: `0x${string}`;
-    };
-    owner: `0x${string}`;
-    recipient: `0x${string}`;
-    principalAtomic: string;
-    minimumOutputAtomic: string;
-    nativeDropAtomic: string;
-    nativeMessageFeeAtomic: string;
-    maximumDebitAtomic: string;
-    options: `0x${string}`;
-    executor: `0x${string}`;
-    executorNativeCapAtomic: string;
-    policy: StargateTokenPolicyBinding;
-    finalityPolicy: StargateV2RouteFinalityPolicy;
-    quoteHash: string;
     feeApproval: Readonly<{
         readonly provenance: "exact_snapshot" | "owner_ceiling";
         readonly quotedMaxFeePerGasWei: string;
@@ -316,4 +331,43 @@ export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOper
     residualAllowanceAtomic: string;
     source: StargateTokenSourceReceipt;
     destination: StargateTokenDestinationEvidence;
+    quoteLifecycle?: {
+        prepareQuoteHash: string;
+        prepareExpiresAt: string;
+        approvalFinalityWindowMs: number;
+        approvalSubmissionStartedAt: string | null;
+        approvalFinalityDeadline: string | null;
+        postApprovalQuoteHash: string | null;
+        postApprovalQuoteBlock: Readonly<{
+            readonly numberAtomic: string;
+            readonly hash: Hex;
+        }> | null;
+        postApprovalQuoteExpiresAt: string | null;
+    };
+    schemaVersion: "apn.stargate-v2-token-receipt.v2" | "apn.stargate-v2-token-receipt.v1";
+    operationId: string;
+    profile: string;
+    route: {
+        sourceChainId: number;
+        sourceEid: number;
+        sourcePool: `0x${string}`;
+        sourceToken: `0x${string}`;
+        destinationChainId: number;
+        destinationEid: number;
+        destinationPool: `0x${string}`;
+        destinationToken: `0x${string}`;
+    };
+    owner: `0x${string}`;
+    recipient: `0x${string}`;
+    principalAtomic: string;
+    minimumOutputAtomic: string;
+    nativeDropAtomic: string;
+    nativeMessageFeeAtomic: string;
+    maximumDebitAtomic: string;
+    options: `0x${string}`;
+    executor: `0x${string}`;
+    executorNativeCapAtomic: string;
+    policy: StargateTokenPolicyBinding;
+    finalityPolicy: StargateV2RouteFinalityPolicy;
+    quoteHash: string;
 }>;
