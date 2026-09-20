@@ -51,6 +51,7 @@ export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, AssetUsageLedger, v
 export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
 export { DIRECT_ASSET_USAGE_LEASE_SCHEMA, DirectAssetUsageAdapter, validateDirectAssetUsageLease, } from "./direct-asset-usage.js";
 export * from "./swap/index.js";
+export * from "./stargate-v2/index.js";
 export class ApnCore {
     context;
     wallet;

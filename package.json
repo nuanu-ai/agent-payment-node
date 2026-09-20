@@ -32,6 +32,8 @@
     "docs/gasless.md",
     "docs/evm-assets.md",
     "docs/platform-support.md",
+    "data/stargate/2026-09-20/official-registry-and-abi.json",
+    "docs/stargate-v2-direct-quote.md",
     "docs/uniswap.md",
     "docs/sunswap.md",
     "docs/jupiter.md"
