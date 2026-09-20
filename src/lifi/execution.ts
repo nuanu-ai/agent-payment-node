@@ -4,7 +4,7 @@ import type { StateStore } from "../state.js";
 import { assertBridgeRemaining, guardBridgeEffect } from "./economics.js";
 import { validateMaterial } from "./effect-store.js";
 import { BridgeObservation, replaceEffect, type BridgeSave } from "./observation.js";
-import type { BridgeOperationRecord } from "./operation-model.js";
+import { retainedUnsentBridgeRpcFailure, type BridgeOperationRecord, type BridgePreSignRpcFailure } from "./operation-model.js";
 import { assertBridgeOwner } from "./owner.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { publicBridgeOperation } from "./receipt.js";
@@ -42,7 +42,7 @@ export class BridgeExecution {
     const haltReason = op.failure?.reason.startsWith("unsent_") ? op.failure.reason : null;
     const refreshed = await this.observation.sources(op); op = refreshed.operation;
     if (!refreshed.reliable) {
-      if (haltReason !== null) op = await this.save(op, { failure: { reason: haltReason, residualAllowance: null } });
+      if (haltReason !== null) op = await this.save(op, { failure: retainedUnsentBridgeRpcFailure(op) ?? { reason: haltReason, residualAllowance: null } });
       return op;
     }
     const reverted = op.effects.findIndex((e) => e.phase === "safe_revert");
@@ -110,16 +110,43 @@ export class BridgeExecution {
     return new BridgeAllowlistGate({ state: this.state, clock: { now: () => new Date(this.now()) } });
   }
   private async haltUnsent(op: BridgeOperationRecord, error: unknown, existingReason?: string): Promise<BridgeOperationRecord> {
-    const reason = existingReason ?? `unsent_${error instanceof ApnError ? error.code.toLowerCase() : "guard_unavailable"}`;
+    const retained = retainedUnsentBridgeRpcFailure(op);
+    const reason = retained?.reason ?? existingReason ?? `unsent_${error instanceof ApnError ? error.code.toLowerCase() : "guard_unavailable"}`;
+    const classifiedRpc = preSignRpcFailure(error);
+    const classifiedEffect = classifiedRpc === null ? undefined : op.effects.find((effect) => effect.role === classifiedRpc.effectRole);
+    const preSignRpc = retained?.preSignRpc ?? (classifiedRpc !== null && classifiedEffect?.phase === "unsealed" &&
+      classifiedEffect.submissionAttempts === 0 ? classifiedRpc : null);
+    const failure = preSignRpc === null ? { reason, residualAllowance: null } : {
+      reason: "unsent_apn_rpc_ambiguous", residualAllowance: null, preSignRpc,
+      ...(retained?.residualAllowanceStatus === "unavailable" ? { residualAllowanceStatus: "unavailable" as const } : {}),
+    };
     if (op.effects.some((e) => e.phase === "signing_started")) bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_committed_signing_material_unresolved");
-    if (op.effects.every((e) => e.submissionAttempts === 0)) return await this.save(op, { state: "failed_before_effect", failure: { reason, residualAllowance: null } });
-    if (op.effects[0]?.role === "approval" && op.effects[0].phase === "safe_success" && op.effects.at(-1)!.submissionAttempts === 0) return await this.terminalFailure(op, "failed_after_approval", reason);
-    return await this.save(op, { state: "unknown_finality", failure: { reason, residualAllowance: null } });
+    if (op.effects.every((e) => e.submissionAttempts === 0)) return await this.save(op, { state: "failed_before_effect", failure });
+    if (op.effects[0]?.role === "approval" && op.effects[0].phase === "safe_success" && op.effects.at(-1)!.submissionAttempts === 0) {
+      return await this.terminalFailure(op, "failed_after_approval", reason, preSignRpc);
+    }
+    return await this.save(op, { state: "unknown_finality", failure });
   }
-  private async terminalFailure(op: BridgeOperationRecord, state: "failed_after_approval" | "failed_confirmed_revert", reason: string): Promise<BridgeOperationRecord> {
+  private async terminalFailure(op: BridgeOperationRecord, state: "failed_after_approval" | "failed_confirmed_revert", reason: string,
+    preSignRpc: BridgePreSignRpcFailure | null = null): Promise<BridgeOperationRecord> {
+    const retained = retainedUnsentBridgeRpcFailure(op), diagnostic = preSignRpc ?? retained?.preSignRpc ?? null;
+    const failureReason = diagnostic === null ? reason : "unsent_apn_rpc_ambiguous";
     let residualAllowance;
     try { residualAllowance = await this.observation.residual(op); }
-    catch { return await this.save(op, { state: "unknown_finality", failure: { reason, residualAllowance: null } }); }
-    return await this.save(op, { state, failure: { reason, residualAllowance } });
+    catch { return await this.save(op, { state: "unknown_finality", failure: { reason: failureReason, residualAllowance: null,
+      ...(diagnostic === null ? {} : { residualAllowanceStatus: "unavailable" as const, preSignRpc: diagnostic }) } }); }
+    return await this.save(op, { state, failure: { reason: failureReason, residualAllowance,
+      ...(diagnostic === null ? {} : { residualAllowanceStatus: "observed" as const, preSignRpc: diagnostic }) } });
   }
+}
+function preSignRpcFailure(error: unknown): BridgePreSignRpcFailure | null {
+  if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS") return null;
+  const d = error.details;
+  if (d === undefined || typeof d.rpcStage !== "string" || typeof d.rpcChainRole !== "string" || typeof d.rpcChainId !== "string" ||
+    typeof d.rpcCategory !== "string" || typeof d.effectRole !== "string") return null;
+  return { schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard",
+    effectRole: d.effectRole as BridgePreSignRpcFailure["effectRole"], stage: d.rpcStage as BridgePreSignRpcFailure["stage"],
+    chainRole: d.rpcChainRole as BridgePreSignRpcFailure["chainRole"], chainId: Number(d.rpcChainId),
+    category: d.rpcCategory as BridgePreSignRpcFailure["category"],
+    method: typeof d.rpcMethod === "string" ? d.rpcMethod as BridgePreSignRpcFailure["method"] : null };
 }

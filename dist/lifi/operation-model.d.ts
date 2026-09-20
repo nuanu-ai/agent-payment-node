@@ -43,6 +43,21 @@ export interface BridgeEffect {
 export interface BridgeFailure {
     readonly reason: string;
     readonly residualAllowance: BridgeResidualAllowance | null;
+    readonly residualAllowanceStatus?: "unavailable" | "observed";
+    readonly preSignRpc?: BridgePreSignRpcFailure;
+}
+export type BridgePreSignRpcStage = "source_deployment_refresh" | "destination_deployment_refresh" | "source_account_refresh" | "source_execution_simulation" | "source_fee_quote";
+export type BridgePreSignRpcCategory = "deployment_refresh" | "account_nonce" | "simulation" | "fee_quote";
+export type BridgePreSignRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getCode" | "eth_getStorageAt" | "eth_getTransactionCount" | "eth_call" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "debug_traceTransaction";
+export interface BridgePreSignRpcFailure {
+    readonly schemaVersion: "apn.bridge-presign-rpc-failure.v1";
+    readonly phase: "pre_sign_guard";
+    readonly effectRole: "approval" | "bridge";
+    readonly stage: BridgePreSignRpcStage;
+    readonly chainRole: "source" | "destination";
+    readonly chainId: number;
+    readonly category: BridgePreSignRpcCategory;
+    readonly method: BridgePreSignRpcMethod | null;
 }
 export interface BridgeVerifiedDestinationProof extends BridgeDestinationProof {
     readonly safeBlock: BridgeBlock;
@@ -85,6 +100,8 @@ export interface BridgeOperationRecord extends BridgeMutable {
     readonly transitions: readonly BridgeTransition[];
     readonly integrityHash: string;
 }
+/** The bridge was never signed or submitted, so keep the original pre-sign diagnostic across observation retries. */
+export declare function retainedUnsentBridgeRpcFailure(op: Pick<BridgeOperationRecord, "effects" | "failure">): BridgeFailure | null;
 export declare const BRIDGE_TERMINAL: readonly BridgeState[];
 export declare function bridgeIntentBinding(operation: Pick<BridgeOperationRecord, "schemaVersion" | "kind" | "profileHash" | "operationId" | "idempotencyHash" | "requestHash" | "intent" | "effects">): {
     schemaVersion: "apn.bridge-operation.v1";

@@ -1,4 +1,13 @@
 import { hashObject } from "../canonical.js";
+/** The bridge was never signed or submitted, so keep the original pre-sign diagnostic across observation retries. */
+export function retainedUnsentBridgeRpcFailure(op) {
+    const failure = op.failure, bridge = op.effects.at(-1), approval = op.effects.length === 2 ? op.effects[0] : null;
+    if (failure?.reason !== "unsent_apn_rpc_ambiguous" || failure.preSignRpc?.effectRole !== "bridge" ||
+        bridge?.role !== "bridge" || bridge.phase !== "unsealed" || bridge.submissionAttempts !== 0 ||
+        approval?.role !== "approval" || approval.submissionAttempts !== 1)
+        return null;
+    return failure;
+}
 export const BRIDGE_TERMINAL = ["completed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"];
 export function bridgeIntentBinding(operation) {
     return { schemaVersion: operation.schemaVersion, kind: operation.kind, profileHash: operation.profileHash,
