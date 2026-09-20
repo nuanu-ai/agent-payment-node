@@ -107,9 +107,11 @@ import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js"
 import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
 import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
+import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
 export interface RuntimeFactoryOptions {
   readonly stargateNative?: StargateNativeService;
+  readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
@@ -259,6 +261,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const clock = options.clock ?? { now: () => new Date() };
   const stargateNative = options.stargateNative ?? (bound.request.command.startsWith("stargate.native.")
     ? new StargateNativeService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
+  const stargateToken = options.stargateToken ?? (bound.request.command.startsWith("stargate.token.")
+    ? new StargateTokenService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
   // Keyless Uniswap is built per swap.uniswap.* command, like bridge and 1Click. Only CLI approve gets a terminal;
   // MCP intercepts approve/execute with a CLI handoff before this factory runs.
   const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.") && options.uniswap === undefined
@@ -282,6 +286,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   return new ApnCore({
     state,
     ...(stargateNative === undefined ? {} : { stargateNative }),
+    ...(stargateToken === undefined ? {} : { stargateToken }),
     // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
     ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
       portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },

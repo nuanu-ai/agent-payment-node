@@ -7,6 +7,8 @@ export interface StargateV2QuoteRequest {
     readonly destinationToken: Address | "native";
     readonly recipient: Address;
     readonly amountAtomic: string;
+    /** Canonical LayerZero Type-3 options. Empty for ordinary transfers. */
+    readonly extraOptions?: Hex;
 }
 export interface StargateV2QuoteEvidence {
     readonly schemaVersion: "apn.stargate-v2-direct-quote.v1";

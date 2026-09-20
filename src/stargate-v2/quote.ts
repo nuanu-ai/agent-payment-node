@@ -14,6 +14,8 @@ export interface StargateV2QuoteRequest {
   readonly destinationToken: Address | "native";
   readonly recipient: Address;
   readonly amountAtomic: string;
+  /** Canonical LayerZero Type-3 options. Empty for ordinary transfers. */
+  readonly extraOptions?: Hex;
 }
 export interface StargateV2QuoteEvidence {
   readonly schemaVersion: "apn.stargate-v2-direct-quote.v1";
@@ -48,6 +50,8 @@ const decodeExact = <T>(raw: Hex, parameters: Parameters<typeof decodeAbiParamet
 
 export async function quoteStargateV2Direct(request: StargateV2QuoteRequest, call: EvmRpcCall): Promise<StargateV2QuoteEvidence> {
   const snapshot = canonicalJson(request), amount = uint(request.amountAtomic), recipient = canonicalAddress(request.recipient);
+  const extraOptions = request.extraOptions ?? "0x";
+  if (!/^0x(?:[0-9a-f]{2})*$/u.test(extraOptions) || size(extraOptions) > 1024) protocol("extra options are malformed");
   const route = stargateV2Route(
     { chainId: request.sourceChainId as never, token: request.sourceToken },
     { chainId: request.destinationChainId as never, token: request.destinationToken },
@@ -56,7 +60,7 @@ export async function quoteStargateV2Direct(request: StargateV2QuoteRequest, cal
   const block = await evmRpcBlock(call, "latest"), code = boundedResult(await call("eth_getCode", [route.from.pool, block.tag]));
   if (code === "0x") protocol("the pinned source contract has no code");
   const sendParam = { dstEid: route.to.eid, to: pad(recipient, { size: 32 }), amountLD: amount, minAmountLD: 0n,
-    extraOptions: "0x" as Hex, composeMsg: "0x" as Hex, oftCmd: "0x" as Hex };
+    extraOptions, composeMsg: "0x" as Hex, oftCmd: "0x" as Hex };
   const quoteOftData = encodeFunctionData({ abi: STARGATE_QUOTE_ABI, functionName: "quoteOFT", args: [sendParam] });
   const oftRaw = boundedResult(await call("eth_call", [{ to: route.from.pool, data: quoteOftData }, block.tag]));
   type OftResult = readonly [{ readonly minAmountLD: bigint; readonly maxAmountLD: bigint },

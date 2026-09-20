@@ -26,6 +26,21 @@
       "name": "LayerZero OFT permissionless quote reference",
       "url": "https://docs.layerzero.network/v2/developers/evm/stablecoin-oft/rbac-reference",
       "retrievedAt": "2026-09-20"
+    },
+    {
+      "name": "LayerZero V2 Type-3 options and native-drop encoding",
+      "url": "https://github.com/LayerZero-Labs/LayerZero-v2",
+      "commit": "9c741e7f9790639537b1710a203bcdfd73b0b9ac",
+      "paths": [
+        "packages/layerzero-v2/evm/oapp/contracts/oapp/libs/OptionsBuilder.sol",
+        "packages/layerzero-v2/evm/messagelib/contracts/libs/ExecutorOptions.sol",
+        "packages/layerzero-v2/evm/messagelib/contracts/Executor.sol"
+      ]
+    },
+    {
+      "name": "LayerZero Optimism and Polygon Executor addresses",
+      "url": "https://github.com/LayerZero-Labs/lz-address-book/blob/7c800d680072ae6cc50edf95711fa601974a4a70/src/generated/LZAddresses.sol",
+      "commit": "7c800d680072ae6cc50edf95711fa601974a4a70"
     }
   ],
   "abi": [
@@ -652,5 +667,25 @@
         }
       ]
     }
-  ]
+  ],
+  "layerZeroNativeDrop": {
+    "optionType": 3,
+    "workerId": 1,
+    "executorOptionType": 2,
+    "optionSize": 49,
+    "amountType": "uint128",
+    "receiverType": "bytes32",
+    "sourceExecutor": {
+      "chainId": 10,
+      "eid": 30111,
+      "address": "0x2D2ea0697bdbede3F01553D2Ae4B8d0c486B666e"
+    },
+    "destinationExecutor": {
+      "chainId": 137,
+      "eid": 30109,
+      "address": "0xCd3F213AD101472e1713C72B1697E727C803885b"
+    },
+    "capGetter": "dstConfig(uint32):(uint64,uint16,uint128,uint128,uint64)",
+    "nativeCapOutputIndex": 3
+  }
 }
