@@ -244,6 +244,42 @@ test("signed raw transaction with mutated value is refused before marker and sen
   assert.equal(s.journal.value?.phase, "approved"); assert.equal(s.counts().sends, 0);
 });
 
+test("signed EIP-1559 transaction whose zero priority fee parses as undefined is accepted", async () => {
+  const s = setup();
+  (s.ports as any).prepareEnvelope = async () => ({ nonceAtomic: "7", gasLimitAtomic: "100000", maxFeePerGasAtomic: "2",
+    maxPriorityFeePerGasAtomic: "0", nativeBalanceAtomic: "9000000000000000" });
+  const prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-zero-priority" }), s.ports, s.journal);
+  const observed = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
+  assert.equal(observed.phase, "observed"); assert.deepEqual(s.counts(), { sends: 1, signs: 1, approvals: 1 });
+});
+
+test("missing parsed priority fee is refused when the frozen fee is nonzero", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-missing-priority" }), s.ports, s.journal);
+  const account = privateKeyToAccount(PRIVATE_KEY);
+  (s.ports as any).signer = { kind: "imported_evm_signer", address: OWNER, signTransaction: async (tx: any) =>
+    await account.signTransaction({ type: "eip1559", chainId: 1, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic),
+      nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic),
+      maxPriorityFeePerGas: 0n, accessList: [] }) };
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_RPC_PROTOCOL" && error.details.reason === "signed_transaction_priority_fee");
+  assert.equal(s.journal.value?.phase, "approved"); assert.equal(s.counts().sends, 0);
+});
+
+test("nonzero signed priority fee is refused when the frozen fee is zero", async () => {
+  const s = setup();
+  (s.ports as any).prepareEnvelope = async () => ({ nonceAtomic: "7", gasLimitAtomic: "100000", maxFeePerGasAtomic: "2",
+    maxPriorityFeePerGasAtomic: "0", nativeBalanceAtomic: "9000000000000000" });
+  const prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-tampered-priority" }), s.ports, s.journal);
+  const account = privateKeyToAccount(PRIVATE_KEY);
+  (s.ports as any).signer = { kind: "imported_evm_signer", address: OWNER, signTransaction: async (tx: any) =>
+    await account.signTransaction({ type: "eip1559", chainId: 1, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic),
+      nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic),
+      maxPriorityFeePerGas: 1n, accessList: [] }) };
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_RPC_PROTOCOL" && error.details.reason === "signed_transaction_priority_fee");
+  assert.equal(s.journal.value?.phase, "approved"); assert.equal(s.counts().sends, 0);
+});
+
 test("balance delta cannot finalize destination delivery", async () => {
   const s = setup(), prepared = await prepareStargateV2NativeEth(request(), s.ports, s.journal);
   (s.ports as any).observeDestination = async (input: any) => ({ mode: "balance_delta", blockNumberAtomic: "31", blockHash: DEST_BLOCK,
