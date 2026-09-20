@@ -61,9 +61,13 @@ export interface BnbCompositeTraceProof {
     readonly retainedAmountAtomic: string;
     readonly traceHash: string;
 }
+export interface BnbDestinationTransaction {
+    readonly sender: Address;
+    readonly calldata: Hex;
+}
 /**
  * Validate the complete bounded callTracer subtree for the one admitted Across/Fly program. The digest covers every
  * normalized frame, including read-only frames. A well-formed but different effect graph is a durable mismatch rather
  * than an invitation to retry the source transaction.
  */
-export declare function verifyBnbCompositeTrace(raw: unknown, transactionHash: Hex, message: Hex, call: BnbCompositeCall): BnbCompositeTraceProof;
+export declare function verifyBnbCompositeTrace(raw: unknown, transactionHash: Hex, message: Hex, call: BnbCompositeCall, transaction: BnbDestinationTransaction): BnbCompositeTraceProof;
