@@ -2,6 +2,7 @@ import { encodeAbiParameters, encodeFunctionData, getAddress, parseAbiParameters
 import { ACROSS_SELECTOR, deploymentAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, LAYER_ZERO_ENDPOINT, STARGATE_SELECTOR } from "./abi.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgePeerToken, bridgeTokenRow } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, bridgeFailure } from "./validation.js";
+import { BNB_COMPOSITE } from "./bnb-composite.js";
 const EIP1967_IMPLEMENTATION = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 const EIP1967_BEACON = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50";
 const EIP1967_ADMIN = "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
@@ -31,6 +32,7 @@ const ACROSS = {
         spoke: code("0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
         implementation: code("0xcfcda84333431bcc9155f2368b8362f0d1dff8c9", "0xa860f20748abfdf98f4e55411b5db7630457bec1abfb5d88f1ecd5f25b4ec24b"),
     },
+    56: { spoke: code("0x4e8e101924ede233c13e2d8622dc8aed2872d505", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75") },
     143: {
         spoke: code("0xd2ecb3afe598b746F8123CaE365a598DA831A449", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
         implementation: code("0x3266a6de0f3533b042ffdb1a8183168422be7349", "0x67f63f0bce352f1c92ead8a198ebf1b2861659d75524f6a0fc0fdf4cd73fc5c3"),
@@ -52,12 +54,37 @@ const STARGATE = {
 export function bridgeDeployment(chainId, peerChainId, tool, token) {
     bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
     bridgeChain(peerChainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-    if (chainId === 56 || peerChainId === 56)
-        bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bnb_composite_execution_unreviewed");
     if (chainId === peerChainId)
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_direction");
     if (tool !== "across" && tool !== "stargateV2")
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_tool");
+    if (chainId === 56) {
+        if (peerChainId !== 1 || tool !== "across" || token !== BRIDGE_ZERO_ADDRESS)
+            bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bnb_composite_finite_direction");
+        const spoke = getAddress("0x4e8e101924ede233c13e2d8622dc8aed2872d505");
+        return { chainId, peerChainId, tool, diamond: BRIDGE_DIAMOND, feeForwarder: FEE_FORWARDER, feeRecipient: FEE_RECIPIENT,
+            token, protocolEmitter: spoke, endpointId: null, quoteTimeBufferAtomic: "3600", fillDeadlineBufferAtomic: "21600",
+            code: [
+                code(BNB_COMPOSITE.flyRouter, "0xaffe8098fa7a152f718c07de0ea7657382e535a301aaf12f89bbba8f91e4b352"),
+                code(BNB_COMPOSITE.core, "0xc3508fb257eee0d20085dfdf41a56e95e8912ca82e3d0a9a9f6e696a261ed1cd"),
+                code(BNB_COMPOSITE.vault, "0x6a4e88ca30a16ae895be058f307388265b2c66a79fdd7bbcdcd9ee8bc2053b01"),
+                code(BNB_COMPOSITE.poolId.slice(0, 42), "0x2b3cdb059e60c9fafdc7c9f66eb07f53c9be869b5d5799422872c88c173d2b27"),
+                code(BNB_COMPOSITE.executor, "0x60134c855342605905c28c4d6bb3d8bf04beff523cdf7e05028a345d8d0c9713"),
+                code(BNB_COMPOSITE.receiver, "0x63e17243f25e66ca76ad9a7a6e640c7eec84caa6382881121c9cccf9f1855002"),
+                code(spoke, "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
+                code(BNB_COMPOSITE.weth, "0x24d639ec3ab0dfc14d482da65b0dfc3c325351d938d8cfffa4aa47e4ac8f0e65"),
+                code(BNB_COMPOSITE.wbnb, "0xb7d84205eaaf83ce7b3940c6beaad6d22790255e34a9a2b486aa8cdfff118fe6"),
+            ],
+            reads: [
+                call(BNB_COMPOSITE.flyRouter, "internalCallers", [BNB_COMPOSITE.signer], TRUE_WORD),
+                call(BNB_COMPOSITE.flyRouter, "coreAddress", [], wordAddress(BNB_COMPOSITE.core)),
+                call(BNB_COMPOSITE.flyRouter, "weth", [], wordAddress(BNB_COMPOSITE.wbnb)),
+                call(BNB_COMPOSITE.core, "whitelist", [BNB_COMPOSITE.flyRouter], TRUE_WORD),
+                call(BNB_COMPOSITE.receiver, "EXECUTOR", [], wordAddress(BNB_COMPOSITE.executor)),
+                call(BNB_COMPOSITE.receiver, "SPOKEPOOL", [], wordAddress(spoke)),
+                call(spoke, "depositQuoteTimeBuffer", [], wordUint(3600)), call(spoke, "fillDeadlineBuffer", [], wordUint(21600)),
+            ] };
+    }
     const asset = bridgeAssetRow(chainId, token, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
     if (!asset.peers.includes(peerChainId))
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_chain");

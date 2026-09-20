@@ -3,6 +3,7 @@ import { isEvmTransactionHash } from "../rail-status-binding.js";
 import { retainedUnsentBridgeRpcFailure } from "./operation-model.js";
 import { bridgeDestinationProof, bridgeSourceProof, destinationEventFilter } from "./protocol-evidence.js";
 import { bridgeProtocolEmitter } from "./deployments.js";
+import { BNB_COMPOSITE } from "./bnb-composite.js";
 import { bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { approvalIncluded } from "./transaction.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
@@ -151,9 +152,11 @@ export class BridgeObservation {
     async destinationCandidate(op, hash) {
         const request = op.intent.materialization.request;
         const proveNativeDelta = bridgeProviderBoundNativeDestination(request);
+        const bnb = op.intent.decoded.composite !== undefined;
         const found = await this.destination.observe(hash, undefined, proveNativeDelta ? { recipient: request.recipient,
-            from: bridgeProtocolEmitter(request.toChainId, "across", request.toToken), amountAtomic: op.sourceProof.correlation.kind === "across"
-                ? op.sourceProof.correlation.outputAmountAtomic : op.intent.decoded.minimumOutputAtomic } : undefined);
+            from: bnb ? BNB_COMPOSITE.executor : bridgeProtocolEmitter(request.toChainId, "across", request.toToken),
+            ...(bnb ? { minimumAmountAtomic: op.intent.decoded.minimumOutputAtomic } : { amountAtomic: op.sourceProof.correlation.kind === "across"
+                    ? op.sourceProof.correlation.outputAmountAtomic : op.intent.decoded.minimumOutputAtomic }) } : undefined);
         if (found === null || found.transaction.safeBlock === null || found.transaction.status !== "success")
             bridgeFailure("APN_RPC_PROTOCOL", "destination_not_safe_success");
         await this.historicalDeployment(op, this.destination, found.transaction, op.intent.destinationDeployment);

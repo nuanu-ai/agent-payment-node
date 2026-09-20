@@ -66,7 +66,8 @@ export declare class BridgeRpc implements BridgeRpcPort {
     observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{
         recipient: Address;
         from: Address;
-        amountAtomic: string;
+        amountAtomic?: string;
+        minimumAmountAtomic?: string;
     }>): Promise<{
         transaction: BridgeTransactionProof;
         receipt: BridgeProtocolReceipt;

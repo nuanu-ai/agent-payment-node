@@ -321,6 +321,15 @@ export declare class BridgeService {
         proof_class: string;
         reason: string;
         route: {
+            composite?: {
+                kind: "across-fly-bnb";
+                payload_hash: `0x${string}`;
+                message_hash: `0x${string}`;
+                input_amount_atomic: string;
+                deadline_atomic: string;
+                maximum_retention_bps: number;
+                recovery: "unswapped_WETH_is_not_native_BNB_success";
+            };
             route_id: string;
             step_id: string;
             tool: import("./model.js").BridgeTool;
@@ -518,6 +527,15 @@ export declare class BridgeService {
         proof_class: string;
         reason: string;
         route: {
+            composite?: {
+                kind: "across-fly-bnb";
+                payload_hash: `0x${string}`;
+                message_hash: `0x${string}`;
+                input_amount_atomic: string;
+                deadline_atomic: string;
+                maximum_retention_bps: number;
+                recovery: "unswapped_WETH_is_not_native_BNB_success";
+            };
             route_id: string;
             step_id: string;
             tool: import("./model.js").BridgeTool;

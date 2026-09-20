@@ -33,7 +33,8 @@ export interface BridgeRpcPort {
     observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{
         recipient: Address;
         from: Address;
-        amountAtomic: string;
+        amountAtomic?: string;
+        minimumAmountAtomic?: string;
     }>): Promise<{
         readonly transaction: BridgeTransactionProof;
         readonly receipt: BridgeProtocolReceipt;

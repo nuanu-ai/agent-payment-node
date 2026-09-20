@@ -1,10 +1,11 @@
-import { decodeEventLog } from "viem";
+import { decodeEventLog, keccak256 } from "viem";
 import { canonicalJson, sha256 } from "../canonical.js";
 import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./abi.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeSame, bridgeUint } from "./validation.js";
+import { BNB_COMPOSITE } from "./bnb-composite.js";
 export function bridgeSourceProof(materialization, decoded, receipt) {
     const canonical = decodeBridgeCall(materialization);
     if (!bridgeSame(canonical, decoded) || receipt.chainId !== decoded.sourceChainId)
@@ -57,7 +58,7 @@ function validateStoredSource(source, decoded) {
         if (c.originChainId !== decoded.sourceChainId || c.destinationChainId !== decoded.destinationChainId ||
             inputToken !== p.sendingAssetId || outputToken !== p.receivingAssetId || c.inputAmountAtomic !== decoded.bridgeAmountAtomic || c.outputAmountAtomic !== p.outputAmountAtomic ||
             depositor !== p.refundAddress || recipient !== p.receiverAddress || exclusiveRelayer !== p.exclusiveRelayer ||
-            c.quoteTimestamp !== p.quoteTimestamp || c.fillDeadline !== p.fillDeadline || c.exclusivityDeadline !== "0" || c.message !== "0x")
+            c.quoteTimestamp !== p.quoteTimestamp || c.fillDeadline !== p.fillDeadline || c.exclusivityDeadline !== "0" || c.message !== p.message)
             fail("stored_across_correlation");
         return;
     }
@@ -92,7 +93,7 @@ function validateCommonSourceEvents(decoded, receipt) {
     if (b.transactionId.toLowerCase() !== decoded.transactionId || b.bridge !== decoded.bridgeName || b.integrator !== decoded.integrator ||
         b.referrer !== decoded.referrer || b.sendingAssetId !== decoded.sourceToken || b.receiver !== decoded.recipient ||
         b.minAmount.toString() !== decoded.bridgeAmountAtomic || b.destinationChainId !== BigInt(decoded.destinationChainId) ||
-        !b.hasSourceSwaps || b.hasDestinationCall)
+        !b.hasSourceSwaps || b.hasDestinationCall !== (decoded.composite !== undefined))
         fail("LiFiTransferStarted");
     const fees = oneEvent(receipt, FEE_FORWARDER, EVENT_TOPICS.feesForwarded, "FeesForwarded");
     if (fees.token !== decoded.sourceToken || fees.distributions.length !== 1 || fees.distributions[0].recipient !== FEE_RECIPIENT ||
@@ -119,14 +120,14 @@ function acrossSource(decoded, receipt) {
         e.inputAmount.toString() !== decoded.bridgeAmountAtomic || e.outputAmount.toString() !== p.outputAmountAtomic ||
         e.destinationChainId !== BigInt(decoded.destinationChainId) || e.quoteTimestamp.toString() !== p.quoteTimestamp ||
         e.fillDeadline.toString() !== p.fillDeadline || e.exclusivityDeadline !== 0 || e.depositor.toLowerCase() !== p.refundAddress ||
-        e.recipient.toLowerCase() !== p.receiverAddress || e.exclusiveRelayer.toLowerCase() !== p.exclusiveRelayer || e.message !== "0x")
+        e.recipient.toLowerCase() !== p.receiverAddress || e.exclusiveRelayer.toLowerCase() !== p.exclusiveRelayer || e.message !== p.message)
         fail("FundsDeposited");
     return {
         kind: "across", depositId: e.depositId.toString(), originChainId: decoded.sourceChainId, destinationChainId: decoded.destinationChainId,
         inputToken: bridgeHex(e.inputToken, 32, 32), outputToken: bridgeHex(e.outputToken, 32, 32), inputAmountAtomic: e.inputAmount.toString(),
         outputAmountAtomic: e.outputAmount.toString(), depositor: bridgeHex(e.depositor, 32, 32), recipient: bridgeHex(e.recipient, 32, 32),
         exclusiveRelayer: bridgeHex(e.exclusiveRelayer, 32, 32), quoteTimestamp: String(e.quoteTimestamp), fillDeadline: String(e.fillDeadline),
-        exclusivityDeadline: String(e.exclusivityDeadline), message: "0x",
+        exclusivityDeadline: String(e.exclusivityDeadline), message: bridgeHex(e.message, 4096),
     };
 }
 function stargateSource(decoded, receipt) {
@@ -150,12 +151,13 @@ function acrossDestination(source, decoded, receipt) {
     const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "across", decoded.destinationToken);
     const e = oneEvent(receipt, emitter, EVENT_TOPICS.filledRelay, "FilledRelay");
     const info = e.relayExecutionInfo;
+    const messageHash = decoded.composite === undefined ? BRIDGE_ZERO_WORD : keccak256(decoded.protocol.kind === "across" ? decoded.protocol.message : "0x");
     if (e.originChainId !== BigInt(c.originChainId) || e.depositId.toString() !== c.depositId || e.inputToken.toLowerCase() !== c.inputToken ||
         e.outputToken.toLowerCase() !== c.outputToken || e.inputAmount.toString() !== c.inputAmountAtomic || e.outputAmount.toString() !== c.outputAmountAtomic ||
         e.fillDeadline.toString() !== c.fillDeadline || e.exclusivityDeadline.toString() !== c.exclusivityDeadline ||
         e.exclusiveRelayer.toLowerCase() !== c.exclusiveRelayer || e.depositor.toLowerCase() !== c.depositor || e.recipient.toLowerCase() !== c.recipient ||
-        e.messageHash.toLowerCase() !== BRIDGE_ZERO_WORD || info.updatedRecipient.toLowerCase() !== c.recipient ||
-        info.updatedMessageHash.toLowerCase() !== BRIDGE_ZERO_WORD || info.updatedOutputAmount.toString() !== c.outputAmountAtomic ||
+        e.messageHash.toLowerCase() !== messageHash || info.updatedRecipient.toLowerCase() !== c.recipient ||
+        info.updatedMessageHash.toLowerCase() !== messageHash || info.updatedOutputAmount.toString() !== c.outputAmountAtomic ||
         !Number.isInteger(info.fillType) || info.fillType < 0 || info.fillType > 2)
         fail("FilledRelay");
     const relayerCredit = bridgeHex(e.relayer, 32, 32, "APN_RPC_PROTOCOL");
@@ -163,6 +165,15 @@ function acrossDestination(source, decoded, receipt) {
     if (info.fillType === 2 && (relayerCredit !== BRIDGE_ZERO_WORD || repaymentChainIdAtomic !== "0"))
         fail("slow_fill_credit");
     if (decoded.destinationToken === BRIDGE_ZERO_ADDRESS) {
+        if (decoded.composite !== undefined) {
+            const balance = nativeBalanceProof(decoded, receipt), transfer = nativeTransferMinimumProof(decoded, receipt, BNB_COMPOSITE.executor, decoded.minimumOutputAtomic);
+            if (BigInt(balance.deltaAtomic) < BigInt(transfer.valueAtomic))
+                fail("native_destination_balance");
+            const recovered = events(receipt, BNB_COMPOSITE.weth, EVENT_TOPICS.transfer, "Transfer");
+            if (recovered.some((x) => x.to === decoded.recipient && x.value > 0n))
+                fail("bnb_recovered_weth");
+            return destinationResult(source, decoded, receipt, transfer.valueAtomic, info.fillType, relayerCredit, repaymentChainIdAtomic, balance, transfer);
+        }
         const providerBound = bridgeProviderBoundNativeDestination({
             fromChainId: decoded.sourceChainId, toChainId: decoded.destinationChainId,
             fromToken: decoded.sourceToken, toToken: decoded.destinationToken,
@@ -182,6 +193,13 @@ function acrossDestination(source, decoded, receipt) {
         delivered[0].value.toString() !== c.outputAmountAtomic || (info.fillType === 2 && delivered[0].from !== emitter))
         fail("destination_token_movement");
     return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic, null);
+}
+function nativeTransferMinimumProof(decoded, receipt, emitter, minimumAtomic) {
+    const proof = receipt.nativeTransfer;
+    if (proof === undefined || proof === null || proof.transactionHash !== receipt.transactionHash || proof.from !== emitter || proof.to !== decoded.recipient ||
+        BigInt(proof.valueAtomic) < BigInt(minimumAtomic) || !/^[a-f0-9]{64}$/u.test(proof.traceHash))
+        fail("native_destination_transfer");
+    return proof;
 }
 function stargateDestination(source, decoded, receipt) {
     if (source.correlation.kind !== "stargateV2")

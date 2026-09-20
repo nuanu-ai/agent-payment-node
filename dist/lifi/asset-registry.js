@@ -213,7 +213,7 @@ export function bridgeNativeDenominationConversion(request) {
 }
 /** Native destinations that require a provider named transaction plus exact trace and balance proof. */
 export function bridgeProviderBoundNativeDestination(request) {
-    return request.fromChainId === 1 && (request.toChainId === 143 || request.toChainId === 59144) &&
+    return request.fromChainId === 1 && (request.toChainId === 56 || request.toChainId === 143 || request.toChainId === 59144) &&
         request.fromToken === BRIDGE_ZERO_ADDRESS && request.toToken === BRIDGE_ZERO_ADDRESS;
 }
 /** Both legs must share a pair key, decimals and each other's chain as a peer: native pairs with native, a token with its own. */

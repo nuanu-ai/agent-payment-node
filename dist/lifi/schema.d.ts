@@ -286,7 +286,7 @@ export declare const sourceProofSchema: z.ZodObject<{
         quoteTimestamp: z.ZodString;
         fillDeadline: z.ZodString;
         exclusivityDeadline: z.ZodString;
-        message: z.ZodLiteral<"0x">;
+        message: z.ZodString;
     }, z.core.$strict>, z.ZodObject<{
         kind: z.ZodLiteral<"stargateV2">;
         guid: z.ZodString;
@@ -797,7 +797,7 @@ export declare const transitionSchema: z.ZodObject<{
             quoteTimestamp: z.ZodString;
             fillDeadline: z.ZodString;
             exclusivityDeadline: z.ZodString;
-            message: z.ZodLiteral<"0x">;
+            message: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             kind: z.ZodLiteral<"stargateV2">;
             guid: z.ZodString;
@@ -1419,7 +1419,7 @@ export declare const operationSchema: z.ZodObject<{
                 quoteTimestamp: z.ZodString;
                 fillDeadline: z.ZodString;
                 exclusivityDeadline: z.ZodString;
-                message: z.ZodLiteral<"0x">;
+                message: z.ZodString;
             }, z.core.$strict>, z.ZodObject<{
                 kind: z.ZodLiteral<"stargateV2">;
                 guid: z.ZodString;
@@ -1608,7 +1608,7 @@ export declare const operationSchema: z.ZodObject<{
             quoteTimestamp: z.ZodString;
             fillDeadline: z.ZodString;
             exclusivityDeadline: z.ZodString;
-            message: z.ZodLiteral<"0x">;
+            message: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             kind: z.ZodLiteral<"stargateV2">;
             guid: z.ZodString;
