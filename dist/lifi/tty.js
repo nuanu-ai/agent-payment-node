@@ -8,16 +8,33 @@ export class TtyBridgeApproval {
     async confirm(input) {
         const s = input.summary;
         const from = s.asset.from, to = s.asset.to, native = s.asset.native_principal_admitted;
+        const sameDenomination = s.fees.token_loss_bound_atomic !== null;
+        const bounds = s.asset_bounds;
+        const economics = sameDenomination ? [
+            `Source principal: ${s.transfer.amountAtomic} ${from.symbol} atomic (${from.decimals} decimals)`,
+            `Quoted destination output: ${s.transfer.quoted_output_atomic} ${to.symbol} atomic`,
+            `Maximum slippage: ${s.transfer.slippageBps} basis points`,
+            `Minimum destination output: ${s.transfer.minimum_output_atomic} ${to.symbol} atomic`,
+            `Maximum ${from.symbol} loss including fees/slippage: ${s.transfer.maxRouteFeeAtomic} atomic`,
+            `Token loss bound at this route: ${s.fees.token_loss_bound_atomic} ${from.symbol} atomic`,
+            `Aggregate source native debit cap: ${s.transfer.maxNativeDebitWei} wei${native ? " (fees only; the native principal is bound by the amount)" : ""}`,
+        ] : [
+            `Source debit bound (${from.chain} ${from.symbol}): principal ${bounds.source.principal_debit_atomic} atomic`,
+            `Source route fee cap (${from.chain} ${from.symbol}): ${bounds.source.route_fee_cap_atomic} atomic (included in principal)`,
+            `Source execution fee cap (${from.chain} ${from.native_coin.symbol}): ${bounds.source.native_execution_fee_cap_atomic} atomic`,
+            ...(bounds.source.maximum_total_native_debit_atomic === null ? [] :
+                [`Maximum total source native debit (${from.chain} ${from.native_coin.symbol}): ${bounds.source.maximum_total_native_debit_atomic} atomic`]),
+            `Expected destination output (${to.chain} ${to.symbol}): ${bounds.destination.expected_output_atomic} atomic`,
+            `Minimum destination output (${to.chain} ${to.symbol}): ${bounds.destination.minimum_output_atomic} atomic`,
+            `Owner minimum destination floor (${to.chain} ${to.symbol}): ${bounds.destination.owner_minimum_output_atomic} atomic`,
+            `Maximum slippage: ${s.transfer.slippageBps} basis points`,
+        ];
         const lines = ["Agent Payment Node cross-chain bridge approval", `Profile: ${s.profile}`, `Provider: ${s.provider}`,
             `Custody: ${s.custody}`, `Execution owner: ${s.execution_owner}`, `Operation: ${input.operationId}`,
             `LI.FI route: ${s.route.route_id}; tool: ${s.route.tool}`, `Source chain: eip155:${s.transfer.fromChainId}`,
             `Destination chain: eip155:${s.transfer.toChainId}`, `Source ${from.symbol}: ${from.token}`, `Destination ${to.symbol}: ${to.token}`,
-            `Sender: ${s.transfer.sender}`, `Recipient: ${s.transfer.recipient}`, `Source principal: ${s.transfer.amountAtomic} ${from.symbol} atomic (${from.decimals} decimals)`,
-            `Quoted destination output: ${s.transfer.quoted_output_atomic} ${to.symbol} atomic`, `Maximum slippage: ${s.transfer.slippageBps} basis points`,
-            `Minimum destination output: ${s.transfer.minimum_output_atomic} ${to.symbol} atomic`, `Maximum ${from.symbol} loss including fees/slippage: ${s.transfer.maxRouteFeeAtomic} atomic`,
-            `Token loss bound at this route: ${s.fees.token_loss_bound_atomic} ${from.symbol} atomic`,
+            `Sender: ${s.transfer.sender}`, `Recipient: ${s.transfer.recipient}`, ...economics,
             `Unitemized protocol fee: ${s.fees.implicit_protocol_token_fee_atomic} ${from.symbol} atomic`,
-            `Aggregate source native debit cap: ${s.transfer.maxNativeDebitWei} wei${native ? " (fees only; the native principal is bound by the amount)" : ""}`,
             `Allowance at prepare: ${s.transfer.allowance_atomic_at_prepare} atomic`, `Spender: ${s.transfer.spender}`,
             ...(native ? ["Native principal: sent as the bridge transaction value; no approval effect; approval cap 0."]
                 : ["A separate included approval costs gas even if the bridge cannot proceed.",

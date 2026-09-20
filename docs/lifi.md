@@ -270,10 +270,18 @@ principal itself is bound by `--amount`, and the funding check still requires
 principal plus fees. APN uses integer arithmetic and rejects
 exponent notation, signs, whitespace, excess precision and uint256 overflow.
 
-The token loss bound is source principal minus the materialized minimum output;
-it includes fees and slippage and must fit `--max-route-fee`. Included token fees
-are counted once. Stargate's native messaging fee must equal transaction value
-and one declared additional native fee. Approval gas is a separate paid effect.
+When source and destination use the same denomination, the token loss bound is
+source principal minus the materialized minimum output; it includes fees and
+slippage and must fit `--max-route-fee`. For a reviewed denomination-changing
+native route such as Ethereum ETH to Monad MON, APN never subtracts the two
+atomic units: the public operation and TTY state the ETH principal, included
+ETH route-fee cap, ETH execution-fee cap and maximum total ETH debit separately
+from the expected, materialized minimum and owner minimum MON output. The legacy
+`token_loss_bound_atomic` receipt field is `null` for that route. These values
+are projected from the fingerprinted materialization request rather than from
+display-only inputs. Included token fees are counted once. Stargate's native
+messaging fee must equal transaction value and one declared additional native
+fee. Approval gas is a separate paid effect.
 
 Only zero allowance or an exact existing allowance to the LI.FI Diamond is
 accepted. Zero allowance creates `approve(spender, principal)` and bridge

@@ -3,14 +3,27 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { canonicalJson, sha256 } from "../../src/canonical.js";
+import { approvalCode } from "../../src/approval-code.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { bridgeExecutionDestination } from "../../src/lifi/asset-registry.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
+import { publicBridgeOperation } from "../../src/lifi/receipt.js";
 import { BridgeRpc } from "../../src/lifi/rpc.js";
+import { TtyBridgeApproval } from "../../src/lifi/tty.js";
 import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
+
+async function renderApproval(summary: ReturnType<typeof publicBridgeOperation>, operationId: string, fingerprint: string): Promise<string> {
+  let printed = "";
+  const phrase = approvalCode("bridge", fingerprint);
+  const tty = new TtyBridgeApproval({ isTerminal: () => true, openTerminal: async () => ({ fd: 143,
+    write: async (text) => { printed += text; }, read: async function* () { yield Buffer.from(`${phrase}\n`); }, close: async () => {} }) });
+  assert.equal(await tty.confirm({ operationId, fingerprint, exactPhrase: phrase,
+    summary: { ...summary, expires_at: new Date(Date.now() + 60_000).toISOString() } as typeof summary }), true);
+  return printed;
+}
 
 test("immutable Monad RPC baseline pins safe finality, Across, WMON, implementation, buffers and trace capability", async () => {
   const raw = await readFile(resolve("tests/core/lifi-fixtures/deployment-monad-rpc-20260920.json"), "utf8");
@@ -62,6 +75,37 @@ test("Ethereum to Monad admits only the exact direct native Across self route an
   const lease = await new AssetUsageLedger(temporary.root).load({ account: binding.account, chain: binding.chain, asset: binding.asset },
     record.usageLease!.reservationId);
   assert.equal(lease?.state, "finalized");
+});
+
+test("Monad receipt and TTY keep source ETH bounds separate from destination MON output", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "eth-monad");
+  const { id, operation } = await s.prepare("across", "monad-denomination-001");
+  const summary = publicBridgeOperation(operation);
+  assert.equal(summary.fees.token_loss_bound_atomic, null);
+  assert.deepEqual(summary.asset_bounds, {
+    binding: "intent.materialization.request", same_denomination: false,
+    source: { chain: "eip155:1", asset: "native", symbol: "ETH", decimals: 18,
+      principal_debit_atomic: "200000000000000", route_fee_cap_atomic: "100000000000000",
+      route_fee_included_in_principal: true, native_execution_fee_cap_atomic: "2000000000000000",
+      maximum_total_native_debit_atomic: "2200000000000000" },
+    destination: { chain: "eip155:143", asset: "native", symbol: "MON", decimals: 18,
+      expected_output_atomic: "21000000000000000000", minimum_output_atomic: "20900000000000000000",
+      owner_minimum_output_atomic: "20900000000000000000" },
+  });
+  const printed = await renderApproval(summary, id, operation.fingerprint);
+  for (const line of [
+    "Source debit bound (eip155:1 ETH): principal 200000000000000 atomic",
+    "Source route fee cap (eip155:1 ETH): 100000000000000 atomic (included in principal)",
+    "Source execution fee cap (eip155:1 ETH): 2000000000000000 atomic",
+    "Maximum total source native debit (eip155:1 ETH): 2200000000000000 atomic",
+    "Expected destination output (eip155:143 MON): 21000000000000000000 atomic",
+    "Minimum destination output (eip155:143 MON): 20900000000000000000 atomic",
+    "Owner minimum destination floor (eip155:143 MON): 20900000000000000000 atomic",
+  ]) assert.ok(printed.includes(line), line);
+  assert.doesNotMatch(printed, /Token loss bound|Maximum ETH loss/u);
+  assert.equal(s.source.submissions.length, 0);
+  assert.equal(s.wrapping.loads, 0);
 });
 
 test("Monad wrong tool and composite materializations fail before any signing or send", async (t) => {
@@ -116,4 +160,11 @@ test("Monad admission does not change Linea or admit reverse and non Across depl
   const prepared = await linea.prepare("across", "linea-compatible-001");
   assert.equal(prepared.operation.intent.materialization.request.toChainId, 59144);
   assert.notEqual(prepared.operation.intent.allowlist, null);
+  const summary = publicBridgeOperation(prepared.operation);
+  assert.equal(summary.asset_bounds!.same_denomination, true);
+  assert.equal(summary.fees.token_loss_bound_atomic,
+    (BigInt(summary.transfer.amountAtomic) - BigInt(summary.transfer.minimum_output_atomic)).toString());
+  const printed = await renderApproval(summary, prepared.id, prepared.operation.fingerprint);
+  assert.ok(printed.includes(`Maximum ETH loss including fees/slippage: ${summary.transfer.maxRouteFeeAtomic} atomic`));
+  assert.ok(printed.includes(`Token loss bound at this route: ${summary.fees.token_loss_bound_atomic} ETH atomic`));
 });
