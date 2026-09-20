@@ -511,10 +511,14 @@ The candidate always has `sourceMessageCorrelation: "unverified"` and
 submission, completed operation or receipt for this lane. A later protocol
 packet for the selected direct Circle CCTP V2 lane must bind its signed fee
 quote, Base burn and CCTP message to the specific Solana USDC mint and receive
-transaction before a bridge receipt can be supported. This LI.FI-shaped
-candidate does not establish that correlation. A recipient with no USDC
-associated token account is outside this kernel's proof contract; its creation
-and rent payer need separate admission.
+transaction before a bridge receipt can be supported. Public Circle/LI.FI
+bridge/provider observation APIs supply the destination observations and their
+normal provenance; APN does not require or implement its own Iris attester key,
+signed-domain verifier or custom attestation cryptography. Until owner/provider
+acceptance, the offline destination path remains `executionAdmitted: false` and
+`bridgeCompletion: false`. This LI.FI-shaped candidate does not establish that
+correlation. A recipient with no USDC associated token account is outside this
+kernel's proof contract; its creation and rent payer need separate admission.
 
 ## Offline Base to Solana Mayan quote inspection
 
@@ -598,11 +602,13 @@ source hash, Mayan tool, Base and Solana chain IDs, sender and recipient,
 canonical USDC token identities, the source amount, a receiving amount at
 least as large as the quoted minimum, and a canonical Solana receiving
 signature. Missing fields or contradictions are rejected. The result
-is a provider hint with `bridgeCompletion: false`. It does not fetch responses,
-authenticate their transport, cryptographically verify Circle's attestation,
-prove onchain Solana delivery, or admit execution. The source hash and message
-correlation must first come from a separately verified source receipt. The
-parser uses only fields shown in [Circle's V1 message response](https://developers.circle.com/cctp/migration-from-v1-to-v2)
+is a provider hint with `bridgeCompletion: false`. The caller obtains the
+responses through the public Circle/LI.FI bridge/provider observation APIs and
+passes their normal provenance; this offline parser does not fetch or replace
+that external transport and attestation acceptance. It does not prove onchain
+Solana delivery or admit execution. The source hash and message correlation
+must first come from a separately verified source receipt. The parser uses only
+fields shown in [Circle's V1 message response](https://developers.circle.com/cctp/migration-from-v1-to-v2)
 and [LI.FI status schema](https://docs.li.fi/agents/reference/endpoint-specs).
 
 ## Offline direct Circle CCTP V2 source receipt candidate
@@ -623,8 +629,11 @@ currently admits this exact quote shape and rejects additional fee items.
 The V2 source message contains a zero nonce placeholder; the parser does not expose
 or infer an attested nonce. Duplicate or ambiguous events fail closed. Its
 result is source evidence only (`executionAdmitted: false`,
-`bridgeCompletion: false`) and does not authenticate the caller's RPC evidence,
-verify a Circle attestation, prove a destination mint, or admit execution.
+`bridgeCompletion: false`). The public bridge/provider observation API and its
+normal provenance, followed by owner/provider acceptance, carry the RPC and
+attestation trust boundary. This source evidence does not prove a destination
+mint or admit execution; APN does not implement a separate attestation
+verifier.
 The event ABI and packed message format follow Circle's
 [TokenMessengerV2](https://github.com/circlefin/evm-cctp-contracts/blob/master/src/v2/TokenMessengerV2.sol),
 [MessageTransmitterV2](https://github.com/circlefin/evm-cctp-contracts/blob/master/src/v2/MessageTransmitterV2.sol),
