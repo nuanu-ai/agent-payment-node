@@ -371,7 +371,9 @@ SpokePool to the bound profile owner for exactly the FilledRelay output. The
 safe canonical transaction and block bind that trace; the previous-block to
 receipt-block balance delta is corroborating evidence and cannot replace the
 transaction-attributable transfer. The configured public Linea endpoint was
-read-only checked on 20 September 2026 and returned `callTracer` output.
+read-only checked on 20 September 2026 and returned `callTracer` output. Linea
+deployment verification replays a pinned safe-block trace probe, so a configured
+RPC without `debug_traceTransaction` support refuses the lane before execution.
 
 Linea execution requires an active owner allowlist admission for the Ethereum
 native asset on rail `bridge`, with mechanism `{ provider: "lifi", reference:

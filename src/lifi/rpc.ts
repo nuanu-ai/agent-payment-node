@@ -14,11 +14,12 @@ import { bridgeArchiveEndpoint, isHistoricalStateRead } from "./rpc-archive.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
-import { BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
+import { BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
 
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }] as const;
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction", "eth_sendRawTransaction"]);
+const LINEA_TRACE_PROBE_TRANSACTION = "0x4352433956109d31ab50db9547f16bcb90f3545f793ed40f75716ccd9a360efd" as Hex;
 export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 56: "APN_BNB_RPC_URL", 8453: "APN_BASE_RPC_URL",
   42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" } as const;
 /** The single explicit Ethereum-family RPC reader: endpoint only from its named environment variable, public HTTPS, no query. */
@@ -103,6 +104,14 @@ export class BridgeRpc implements BridgeRpcPort {
       const observed = bridgeHex(result, 64 * 1024, undefined, "APN_RPC_PROTOCOL");
       if (observed !== row.expected) bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_configuration_changed");
       configuration.push({ ...row, expected: observed });
+    }
+    if (this.chainId === 59144 && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
+      const trace = evmRpcRecord(await this.call("debug_traceTransaction", [LINEA_TRACE_PROBE_TRANSACTION,
+        { tracer: "callTracer", tracerConfig: { onlyTopCall: true, withLog: false } }]));
+      if (trace.type !== "CALL" || evmRpcAddress(trace.from).toLowerCase() !== "0x9629fe86f04e735923e8542ddd9f265f576e7421" ||
+          evmRpcAddress(trace.to).toLowerCase() !== "0xbcc016e2a79d509d2b776827ed986568d9b56d59" || evmRpcQuantity(trace.value) !== 243939205000000000n) {
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "linea_trace_capability_changed");
+      }
     }
     await this.recheck(at); await this.assertChain();
     return { chainId: this.chainId, peerChainId, tool, block: at, rpcOrigin: this.origin,

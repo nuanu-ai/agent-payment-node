@@ -76,13 +76,23 @@ export class BridgeAllowlistGate {
   }
 
   async follow(op: BridgeOperationRecord, target: BridgeUsageTarget): Promise<void> {
+    if (op.intent.allowlist === null) return;
     const frozen = op.usageLease;
-    if (frozen === null || target === "reserved") return;
     const binding = validateBridgeAllowlistBinding(op.intent.allowlist), expectedId = assetUsageReservationId(identity(binding), bridgeUsageKey(op.operationId));
-    if (frozen.reservationId !== expectedId || frozen.policyDigest !== binding.policyDigest || frozen.amountAtomic !== binding.amountAtomic ||
-        frozen.state !== "reserved" || !bridgeSame(identity(frozen), identity(binding))) bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_lease_binding");
     let current = await this.ledger.load(identity(binding), expectedId);
+    // reserve() is idempotent under this operation-derived id. If the process died after the ledger write but before
+    // the journal save, the frozen operation still has a null lease; discovering this exact id is the recovery link.
+    if (frozen === null && current === null) return;
+    if (frozen !== null && (frozen.reservationId !== expectedId || frozen.policyDigest !== binding.policyDigest ||
+        frozen.amountAtomic !== binding.amountAtomic || frozen.state !== "reserved" ||
+        !bridgeSame(identity(frozen), identity(binding)))) bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_lease_binding");
     if (current === null) bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_lease_missing");
+    if (current.reservationId !== expectedId || current.policyDigest !== binding.policyDigest || current.amountAtomic !== binding.amountAtomic ||
+        current.rail !== "bridge" || !bridgeSame(identity(current), identity(binding))) bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_lease_binding");
+    if (target === "reserved") {
+      if (current.state !== "reserved") bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_orphan_state");
+      return;
+    }
     if (current.state === target) return;
     if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(current.state)) {
       bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_terminal_conflict");
@@ -125,11 +135,11 @@ export function validateBridgeAllowlistBinding(value: unknown): BridgeAllowlistB
 }
 
 export function bridgeUsageTarget(op: BridgeOperationRecord): BridgeUsageTarget {
-  if (op.usageLease === null) return "reserved";
   if (op.state === "completed") return "finalized";
   if (op.state === "failed_before_effect") return "failed_before_effect";
   if (op.state === "failed_after_approval" || op.state === "failed_confirmed_revert") return "failed_confirmed_revert";
   if (op.state === "unknown_finality" || op.effects.some((effect) => effect.phase === "unknown_finality")) return "unknown_finality";
+  if (op.usageLease === null) return "reserved";
   return op.effects.some((effect) => effect.submissionAttempts === 1) ? "submitted" : "reserved";
 }
 
