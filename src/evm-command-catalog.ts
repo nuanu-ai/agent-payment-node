@@ -14,13 +14,16 @@ const selection: readonly CommandOption[] = [
 ];
 const failures = ["Classified APN error; no implicit token, chain, decimals or spending approval."];
 const selectorSynopsis = "--profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>]";
+const balanceSelection: readonly CommandOption[] = selection.map((option) => option.name === "--chain"
+  ? { ...option, constraints: ["direct_read_mainnet_caip2", ...DIRECT_EVM_NETWORKS.map((network) => network.caip2)] }
+  : option);
 
 export const EVM_COMMANDS: readonly CommandDefinition[] = [
   {
     path: ["wallet", "balance-asset"],
     synopsis: `apn wallet balance-asset ${selectorSynopsis}`,
     summary: "Read one explicitly selected local-wallet EVM asset and native gas balance.",
-    options: selection,
+    options: balanceSelection,
     effect: { class: "network_read", summary: "Reads chain-verified balances and metadata without signing or submitting." },
     approval: { class: "none", when: "Never." },
     output: { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1, success: "Exact asset, atomic and decimal balances, RPC provenance and asset-specific funding posture.", failures },

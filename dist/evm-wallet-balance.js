@@ -1,14 +1,14 @@
 import { networkPolicyBinding, x402Network } from "./x402-network.js";
 import { ApnError } from "./errors.js";
-import { evmChain, evmUint, publicEvmAsset } from "./evm-asset.js";
+import { EVM_NETWORKS, evmUint, publicEvmAsset } from "./evm-asset.js";
+import { directEvmChain } from "./evm-direct-networks.js";
 import { requireEvmRpc } from "./evm-direct.js";
 import { formatAtomic } from "./money.js";
 import { policyBinding } from "./profile-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 export async function evmWalletBalance(context, profileInput, selection) {
     const profile = canonicalProfile(profileInput);
-    // Balance reads keep the shared network set; direct-only networks are not widened into the wallet policy lookup.
-    const chainId = evmChain(selection.chainId);
+    const chainId = directEvmChain(selection.chainId);
     await context.ready();
     const profileHash = context.state.profileHash(profile);
     return await context.state.withLocks([`profile:${profileHash}`], async () => {
@@ -21,9 +21,11 @@ export async function evmWalletBalance(context, profileInput, selection) {
         const snapshot = await requireEvmRpc(context.requireRpc()).balance(wallet.address, selection);
         if (snapshot.address !== wallet.address || snapshot.asset.chainId !== selection.chainId)
             throw new ApnError("APN_ASSET_MISMATCH", "Asset balance belongs to a different wallet or chain.");
-        const policy = await context.policy?.load(networkPolicyBinding(policyBinding(wallet), chainId));
+        const sharedNetwork = EVM_NETWORKS.find((network) => network.chainId === chainId);
+        const policy = sharedNetwork === undefined ? undefined : await context.policy?.load(networkPolicyBinding(policyBinding(wallet), sharedNetwork.chainId));
+        const x402Token = sharedNetwork === undefined ? undefined : x402Network(sharedNetwork.chainId).token;
         const limit = snapshot.asset.kind === "native" ? policy?.maxBalanceEthWei :
-            snapshot.asset.address === x402Network(chainId).token ? policy?.maxBalanceUsdcAtomic : undefined;
+            snapshot.asset.address === x402Token ? policy?.maxBalanceUsdcAtomic : undefined;
         const atomic = evmUint(snapshot.assetAtomic), native = evmUint(snapshot.nativeAtomic);
         return {
             profile, funding_address: wallet.address, chain: `eip155:${snapshot.asset.chainId}`, asset: publicEvmAsset(snapshot.asset),
