@@ -2,6 +2,7 @@ import { hashObject } from "../canonical.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeNativePrincipal } from "./asset-registry.js";
 import { validateBridgeOperation } from "./operation-validation.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY } from "./validation.js";
+import { isLegacyBridgeOperation } from "./legacy-operation.js";
 export function bridgeNextActions(op) {
     if (op.terminal)
         return op.state === "completed" ? [] : ["apn bridge prepare --help"];
@@ -20,6 +21,9 @@ export function bridgeProofClass(op) {
 }
 export function publicBridgeOperation(op) {
     validateBridgeOperation(op);
+    return projectBridgeOperation(op, false);
+}
+function projectBridgeOperation(op, legacy) {
     const i = op.intent, m = i.materialization;
     const effects = op.effects.map((e) => ({
         role: e.role, phase: e.phase, envelope_hash: e.envelope.envelopeHash, transaction_hash: e.transactionHash,
@@ -63,15 +67,44 @@ export function publicBridgeOperation(op) {
         rpc_origins: { source: i.sourceRpcOrigin, destination: i.destinationRpcOrigin },
         deployments: { source: i.sourceDeployment, destination: i.destinationDeployment },
         policy: { identity: "apn.bridge.foreground-approval.v1", policy_hash: i.policyHash,
-            allowlist: i.allowlist === null ? null : { schema_version: i.allowlist.schemaVersion, policy_digest: i.allowlist.policyDigest,
-                policy_revision: i.allowlist.policyRevision, account: i.allowlist.account, self_recipient: i.allowlist.selfRecipient,
-                chain: i.allowlist.chain, asset: i.allowlist.asset, amount_atomic: i.allowlist.amountAtomic,
-                mechanism: i.allowlist.mechanism, reservation_id: op.usageLease?.reservationId ?? null },
+            ...(legacy ? {} : { allowlist: i.allowlist === null ? null : { schema_version: i.allowlist.schemaVersion, policy_digest: i.allowlist.policyDigest,
+                    policy_revision: i.allowlist.policyRevision, account: i.allowlist.account, self_recipient: i.allowlist.selfRecipient,
+                    chain: i.allowlist.chain, asset: i.allowlist.asset, amount_atomic: i.allowlist.amountAtomic,
+                    mechanism: i.allowlist.mechanism, reservation_id: op.usageLease?.reservationId ?? null } }),
             approved_at: op.approval?.approvedAt ?? null, expiry_enforced_before_first_send: true,
             inclusion_deadline: m.tool === "across" ? "protocol_fill_deadline" : "not_present_in_protocol" },
         created_at: op.createdAt, updated_at: op.updatedAt, expires_at: i.expiresAt,
         next_actions: bridgeNextActions(op),
     };
+}
+export function publicLegacyBridgeOperation(op) {
+    const projected = projectBridgeOperation(op.raw, true);
+    return { ...projected,
+        schema_version: op.schemaVersion,
+        policy: { ...projected.policy, allowlist: { availability: "legacy_unknown", reservation_id: null } },
+        journal_compatibility: { schema_version: op.schemaVersion, durable_schema_version: op.durableSchemaVersion,
+            resumable: false, allowlist_binding: op.compatibility.allowlistBinding, usage_lease: op.compatibility.usageLease,
+            native_balance_proof: op.compatibility.nativeBalanceProof, native_transfer_proof: op.compatibility.nativeTransferProof },
+        next_actions: op.terminal && op.state === "completed" ? [] : ["apn bridge prepare --help"] };
+}
+export function publicStoredBridgeOperation(op) {
+    return isLegacyBridgeOperation(op) ? publicLegacyBridgeOperation(op) : publicBridgeOperation(op);
+}
+/** Reconstructs the exact historical receipt projection for integrity checks only. */
+export function legacyBridgeReceipt(op) {
+    const body = { ...projectBridgeOperation(op.raw, true), schema_version: "apn.bridge-receipt.v1",
+        operation_binding_hash: op.raw.integrityHash };
+    return { ...body, receipt_hash: hashObject(body) };
+}
+/** Exact receipt projections emitted by the two supported pre-upgrade writers. */
+export function legacyBridgeReceiptCandidates(op) {
+    const latest = legacyBridgeReceipt(op);
+    const olderBody = structuredClone(latest);
+    delete olderBody.receipt_hash;
+    delete olderBody.asset.from.approval;
+    delete olderBody.asset.to.approval;
+    const older = { ...olderBody, receipt_hash: hashObject(olderBody) };
+    return [latest, older];
 }
 function assetProjection(chainId, token) {
     const row = BRIDGE_ASSET_REGISTRY[chainId], asset = bridgeAssetRow(chainId, token, "APN_STATE_CORRUPT");

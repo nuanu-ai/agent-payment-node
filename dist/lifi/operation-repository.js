@@ -4,8 +4,10 @@ import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import {} from "./operation-model.js";
 import { bridgeCorrupt, validateBridgeContinuity, validateBridgeOperation } from "./operation-validation.js";
 import { bridgeReceipt } from "./receipt.js";
+import { legacyBridgeReceiptCandidates } from "./receipt.js";
 import { bridgeAtTransition } from "./transitions.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
+import { adaptLegacyBridgeOperation, isLegacyBridgeOperation } from "./legacy-operation.js";
 export class BridgeOperationRepository extends SecureStateStore {
     initialized;
     async ready() {
@@ -17,45 +19,75 @@ export class BridgeOperationRepository extends SecureStateStore {
         await this.initialized;
     }
     async loadOperation(profileHash, operationId) {
+        const stored = await this.loadStoredOperation(profileHash, operationId);
+        if (stored === null)
+            return null;
+        if (isLegacyBridgeOperation(stored))
+            bridgeCorrupt();
+        return stored;
+    }
+    async loadStoredOperation(profileHash, operationId) {
         const value = await this.readJson(this.path("bridge-operations", profileHash, operationId));
         if (value === null)
             return null;
-        const op = validateBridgeOperation(value);
+        let op;
+        try {
+            op = validateBridgeOperation(value);
+        }
+        catch (error) {
+            if (!(error instanceof ApnError) || error.code !== "APN_STATE_CORRUPT")
+                throw error;
+            op = adaptLegacyBridgeOperation(value);
+        }
         if (op.profileHash !== profileHash || op.operationId !== operationId)
             bridgeCorrupt();
         return op;
     }
-    async findOperation(operationId) {
+    async findStoredOperation(operationId) {
         stateIdentifier(operationId, "bridge operation ID");
-        const matches = (await this.listAllOperations()).filter((op) => op.operationId === operationId);
+        const matches = (await this.listAllStoredOperations()).filter((op) => op.operationId === operationId);
         if (matches.length > 1)
             bridgeCorrupt();
         return matches[0] ?? null;
     }
-    async listOperations(profileHash) {
+    async listStoredOperations(profileHash) {
         stateIdentifier(profileHash, "bridge profile hash");
         const directory = `bridge-operations/${profileHash}`;
         const result = [];
         for (const entry of await this.readDirectory(directory)) {
             if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name))
                 bridgeCorrupt();
-            const op = await this.loadOperation(profileHash, entry.name.slice(0, -5));
+            const op = await this.loadStoredOperation(profileHash, entry.name.slice(0, -5));
             if (op === null)
                 bridgeCorrupt();
             result.push(op);
         }
         return result;
     }
-    async listAllOperations() {
+    async listAllStoredOperations() {
         const result = [];
         for (const entry of await this.readDirectory("bridge-operations")) {
             if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name))
                 bridgeCorrupt();
-            result.push(...await this.listOperations(entry.name));
+            result.push(...await this.listStoredOperations(entry.name));
         }
         if (new Set(result.map((op) => op.operationId)).size !== result.length)
             bridgeCorrupt();
         return result;
+    }
+    async findOperation(operationId) {
+        const stored = await this.findStoredOperation(operationId);
+        if (stored === null)
+            return null;
+        if (isLegacyBridgeOperation(stored))
+            bridgeCorrupt();
+        return stored;
+    }
+    async listOperations(profileHash) {
+        return (await this.listStoredOperations(profileHash)).filter((op) => !isLegacyBridgeOperation(op));
+    }
+    async listAllOperations() {
+        return (await this.listAllStoredOperations()).filter((op) => !isLegacyBridgeOperation(op));
     }
     async writeOperation(op) {
         validateBridgeOperation(op);
@@ -102,6 +134,12 @@ export class BridgeOperationRepository extends SecureStateStore {
             throw new ApnError("APN_OPERATION_BLOCKED", "The bridge receipt needs recovery from its saved operation.", {
                 operationId, nextActions: [`apn operation resume --operation ${operationId}`],
             });
+        return value;
+    }
+    async loadLegacyReceipt(op) {
+        const value = await this.readJson(this.path("bridge-receipts", op.profileHash, op.operationId));
+        if (!isPlainRecord(value) || !legacyBridgeReceiptCandidates(op).some((candidate) => bridgeSame(value, candidate)))
+            bridgeCorrupt();
         return value;
     }
     path(root, profileHash, operationId) {

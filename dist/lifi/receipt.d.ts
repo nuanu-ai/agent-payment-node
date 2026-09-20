@@ -1,4 +1,5 @@
 import type { BridgeOperationRecord } from "./operation-model.js";
+import type { LegacyBridgeOperationRecord, StoredBridgeOperationRecord } from "./legacy-operation.js";
 export declare function bridgeNextActions(op: BridgeOperationRecord): readonly string[];
 export declare function bridgeProofClass(op: BridgeOperationRecord): string;
 export declare function publicBridgeOperation(op: BridgeOperationRecord): {
@@ -131,9 +132,10 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
         destination: import("./model.js").BridgeDeploymentIdentity;
     };
     policy: {
-        identity: string;
-        policy_hash: string;
-        allowlist: {
+        approved_at: string | null;
+        expiry_enforced_before_first_send: boolean;
+        inclusion_deadline: string;
+        allowlist?: {
             schema_version: "apn.bridge-allowlist.v1";
             policy_digest: string;
             policy_revision: number;
@@ -154,15 +156,40 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
             }>;
             reservation_id: string | null;
         } | null;
-        approved_at: string | null;
-        expiry_enforced_before_first_send: boolean;
-        inclusion_deadline: string;
+        identity: string;
+        policy_hash: string;
     };
     created_at: string;
     updated_at: string;
     expires_at: string;
     next_actions: readonly string[];
 };
+export type PublicBridgeOperation = ReturnType<typeof publicBridgeOperation>;
+export type LegacyPublicBridgeOperation = Omit<PublicBridgeOperation, "schema_version" | "policy"> & {
+    readonly schema_version: "apn.bridge-operation.legacy-view.v1";
+    readonly policy: Omit<PublicBridgeOperation["policy"], "allowlist"> & {
+        readonly allowlist: {
+            readonly availability: "legacy_unknown";
+            readonly reservation_id: null;
+        };
+    };
+    readonly journal_compatibility: {
+        readonly schema_version: "apn.bridge-operation.legacy-view.v1";
+        readonly durable_schema_version: "apn.bridge-operation.v1";
+        readonly resumable: false;
+        readonly allowlist_binding: "legacy_unknown";
+        readonly usage_lease: "legacy_unknown";
+        readonly native_balance_proof: "recorded" | "legacy_unknown";
+        readonly native_transfer_proof: "legacy_unknown";
+    };
+};
+export type StoredPublicBridgeOperation = PublicBridgeOperation | LegacyPublicBridgeOperation;
+export declare function publicLegacyBridgeOperation(op: LegacyBridgeOperationRecord): LegacyPublicBridgeOperation;
+export declare function publicStoredBridgeOperation(op: StoredBridgeOperationRecord): StoredPublicBridgeOperation;
+/** Reconstructs the exact historical receipt projection for integrity checks only. */
+export declare function legacyBridgeReceipt(op: LegacyBridgeOperationRecord): Record<string, unknown>;
+/** Exact receipt projections emitted by the two supported pre-upgrade writers. */
+export declare function legacyBridgeReceiptCandidates(op: LegacyBridgeOperationRecord): readonly unknown[];
 export declare function bridgeReceipt(op: BridgeOperationRecord): {
     receipt_hash: string;
     schema_version: "apn.bridge-receipt.v1";
@@ -295,9 +322,10 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
         destination: import("./model.js").BridgeDeploymentIdentity;
     };
     policy: {
-        identity: string;
-        policy_hash: string;
-        allowlist: {
+        approved_at: string | null;
+        expiry_enforced_before_first_send: boolean;
+        inclusion_deadline: string;
+        allowlist?: {
             schema_version: "apn.bridge-allowlist.v1";
             policy_digest: string;
             policy_revision: number;
@@ -318,9 +346,8 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
             }>;
             reservation_id: string | null;
         } | null;
-        approved_at: string | null;
-        expiry_enforced_before_first_send: boolean;
-        inclusion_deadline: string;
+        identity: string;
+        policy_hash: string;
     };
     created_at: string;
     updated_at: string;
