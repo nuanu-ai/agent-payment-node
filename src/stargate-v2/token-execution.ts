@@ -11,8 +11,7 @@ import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_QUOTE_ABI, STARGATE_SEND_ABI } from "./abi.js";
-import { assertStargateV2RouteFinalityPolicy, stargateV2RouteFinalityPolicy, type StargateV2FinalityTag,
-  type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
+import { assertStargateV2LegacyRouteFinalityPolicy, assertStargateV2RouteFinalityPolicy, stargateV2LegacyRouteFinalityPolicy, stargateV2RouteFinalityPolicy, type StargateV2FinalityPolicyProvenance, type StargateV2FinalityTag, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct, type StargateV2QuoteEvidence } from "./quote.js";
 export const STARGATE_TOKEN_SOURCE_CHAIN = 10 as const;
 export const STARGATE_TOKEN_DESTINATION_CHAIN = 137 as const;
@@ -66,10 +65,8 @@ export interface StargateTokenDestinationEvidence { readonly emitter: Address; r
 export interface StargateTokenPolicyBinding { readonly policyDigest: string; readonly policyRevision: number;
   readonly mechanism: Readonly<{ readonly provider: string; readonly reference: string }> }
 export interface StargateTokenOperation {
-  readonly schemaVersion: "apn.stargate-v2-token-operation.v1"; readonly operationId: string; readonly profile: string;
-  readonly profileHash: string; readonly idempotencyHash: string; readonly owner: Address; readonly recipient: Address;
-  readonly finalityPolicy: StargateV2RouteFinalityPolicy;
-  readonly amountAtomic: string; readonly nativeDropAtomic: string; readonly maxNativeDebitAtomic: string; readonly minOutputAtomic: string;
+  readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2"; readonly operationId: string; readonly profile: string; readonly profileHash: string; readonly idempotencyHash: string; readonly owner: Address; readonly recipient: Address;
+  readonly finalityPolicy: StargateV2RouteFinalityPolicy; readonly finalityPolicyProvenance: StargateV2FinalityPolicyProvenance; readonly amountAtomic: string; readonly nativeDropAtomic: string; readonly maxNativeDebitAtomic: string; readonly minOutputAtomic: string;
   readonly sourceToken: Address; readonly destinationToken: Address; readonly sourcePool: Address; readonly destinationPool: Address;
   readonly sourceEid: 30111; readonly destinationEid: 30109; readonly executor: Address; readonly executorNativeCapAtomic: string;
   readonly options: Hex; readonly quote: StargateV2QuoteEvidence; readonly sourceCodeHash: Hex; readonly destinationCodeHash: Hex;
@@ -186,7 +183,7 @@ export async function prepareStargateV2Token(request: StargateTokenPreparationRe
   if (BigInt(sendPrepared.nativeBalanceAtomic) < maximumDebit) fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
   const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString(), operationId });
   const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
-  const body = { schemaVersion: "apn.stargate-v2-token-operation.v1" as const, operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy,
+  const body = { schemaVersion: "apn.stargate-v2-token-operation.v2" as const, operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy, finalityPolicyProvenance: "pinned_v2" as const,
     amountAtomic: amount.toString(), nativeDropAtomic: drop.toString(), maxNativeDebitAtomic: cap.toString(), minOutputAtomic: minOut.toString(),
     sourceToken: STARGATE_TOKEN_SOURCE_TOKEN, destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, sourcePool: STARGATE_TOKEN_SOURCE_POOL,
     destinationPool: STARGATE_TOKEN_DESTINATION_POOL, sourceEid: 30111 as const, destinationEid: 30109 as const,
@@ -450,9 +447,11 @@ async function verifySignedEnvelope(raw: Hex, owner: Address, e: StargateTokenEn
   if (signer !== owner || tx.chainId !== 10 || tx.type !== "eip1559" || tx.to?.toLowerCase() !== e.to.toLowerCase() || (tx.data ?? "0x").toLowerCase() !== e.data.toLowerCase() || (tx.value ?? 0n) !== BigInt(e.valueAtomic) || tx.nonce !== Number(e.nonceAtomic) || tx.gas !== BigInt(e.gasLimitAtomic) || tx.maxFeePerGas !== BigInt(e.maxFeePerGasAtomic) || (tx.maxPriorityFeePerGas ?? 0n) !== BigInt(e.maxPriorityFeePerGasAtomic)) fail("APN_RPC_PROTOCOL", "signed_transaction_envelope"); }
 function transition(op: StargateTokenOperation | Omit<StargateTokenOperation, "integrityHash">, phase: StargateTokenPhase, reason: string, at: number) { return seal({ ...op, phase, transitions: [...op.transitions, { phase, at: new Date(at).toISOString(), reason }] }); }
 function seal(value: Omit<StargateTokenOperation, "integrityHash"> | StargateTokenOperation): StargateTokenOperation { const { integrityHash: _old, ...body } = value as StargateTokenOperation; return Object.freeze({ ...body, integrityHash: hashObject(body) }); }
-function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRecord(value) || value.schemaVersion !== "apn.stargate-v2-token-operation.v1") fail("APN_STATE_CORRUPT", "schema"); const record = value as unknown as StargateTokenOperation, { integrityHash, ...body } = record;
-  if (hashObject(body) !== integrityHash || record.transitions.at(-1)?.phase !== record.phase || record.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
-  assertStargateV2RouteFinalityPolicy(record.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN);
+function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRecord(value) || !["apn.stargate-v2-token-operation.v1", "apn.stargate-v2-token-operation.v2"].includes(String(value.schemaVersion))) fail("APN_STATE_CORRUPT", "schema"); const raw = value as unknown as StargateTokenOperation, { integrityHash, ...body } = raw; if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
+  let record = raw;
+  if (raw.schemaVersion === "apn.stargate-v2-token-operation.v1") { assertLegacyTokenLane(raw);
+    if (raw.finalityPolicy === undefined && raw.finalityPolicyProvenance === undefined) record = seal({ ...body, finalityPolicy: stargateV2LegacyRouteFinalityPolicy(STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN), finalityPolicyProvenance: "derived_legacy_v1" } as StargateTokenOperation); else { assertStargateV2LegacyRouteFinalityPolicy(raw.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN); if (raw.finalityPolicyProvenance !== "derived_legacy_v1") fail("APN_STATE_CORRUPT", "finality_policy_provenance"); }
+  } else { assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN); if (raw.finalityPolicyProvenance !== "pinned_v2") fail("APN_STATE_CORRUPT", "finality_policy_provenance"); }
   const usageStates: readonly StargateTokenUsageState[] = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
   if ((record.usageState !== undefined && !usageStates.includes(record.usageState)) || (record.usageTarget !== undefined && !usageStates.includes(record.usageTarget))) fail("APN_STATE_CORRUPT", "usage_state");
   if (canonicalJson(record.policy.mechanism) !== canonicalJson(STARGATE_TOKEN_MECHANISM)) fail("APN_STATE_CORRUPT", "mechanism_pin");
@@ -472,6 +471,7 @@ function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRe
   if (record.transitions[0]?.phase !== "prepared") fail("APN_STATE_CORRUPT", "transition");
   for (let i = 1; i < record.transitions.length; i++) if (!allowed[record.transitions[i - 1]!.phase]?.includes(record.transitions[i]!.phase)) fail("APN_STATE_CORRUPT", "transition");
   return record; }
+function assertLegacyTokenLane(record: StargateTokenOperation) { const route = record.quote?.route; if (record.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || record.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || record.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || record.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || record.sourceEid !== STARGATE_TOKEN_SOURCE_EID || record.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || record.sendEnvelope?.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || route?.sourceChainId !== STARGATE_TOKEN_SOURCE_CHAIN || route?.destinationChainId !== STARGATE_TOKEN_DESTINATION_CHAIN || route?.sourceEid !== STARGATE_TOKEN_SOURCE_EID || route?.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || route?.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || route?.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || route?.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || route?.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || route?.asset !== "USDC") fail("APN_STATE_CORRUPT", "legacy_lane"); }
 function validateAdvance(previous: StargateTokenOperation | null, next: StargateTokenOperation) { if (previous === null) { if (next.phase !== "prepared" || next.transitions.length !== 1) fail("APN_STATE_CORRUPT", "initial"); return; }
   const frozen = (x: StargateTokenOperation) => { const { phase: _p, transitions: _t, integrityHash: _i, approvalTransactionHash: _a, transactionHash: _h,
     residualAllowanceAtomic: _r, sourceReceipt: _s, destinationEvidence: _d, cleanupEnvelope: _ce, cleanupTransactionHash: _ch,

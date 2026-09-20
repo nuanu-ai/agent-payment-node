@@ -15,10 +15,10 @@ import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "./abi.js";
-import { assertStargateV2RouteFinalityPolicy, stargateV2RouteFinalityPolicy, type StargateV2FinalityTag,
+import { assertStargateV2LegacyRouteFinalityPolicy, assertStargateV2RouteFinalityPolicy, stargateV2LegacyRouteFinalityPolicy,
+  stargateV2RouteFinalityPolicy, type StargateV2FinalityPolicyProvenance, type StargateV2FinalityTag,
   type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct, type StargateV2QuoteEvidence } from "./quote.js";
-
 const SOURCE_CHAIN = 1 as const;
 const DESTINATION_CHAIN = 130 as const;
 const SOURCE_EID = 30101 as const;
@@ -58,10 +58,11 @@ export interface StargateNativeEnvelope {
   readonly maxPriorityFeePerGasAtomic: string;
 }
 export interface StargateNativeOperation {
-  readonly schemaVersion: "apn.stargate-v2-native-operation.v1";
+  readonly schemaVersion: "apn.stargate-v2-native-operation.v1" | "apn.stargate-v2-native-operation.v2";
   readonly operationId: string; readonly profile: string; readonly profileHash: string; readonly idempotencyHash: string;
   readonly owner: Address; readonly recipient: Address; readonly amountAtomic: string; readonly maxNativeDebitAtomic: string;
   readonly finalityPolicy: StargateV2RouteFinalityPolicy;
+  readonly finalityPolicyProvenance: StargateV2FinalityPolicyProvenance;
   readonly sourcePool: Address; readonly destinationPool: Address; readonly sourceEid: 30101; readonly destinationEid: 30320;
   readonly quote: StargateV2QuoteEvidence; readonly sourceCodeHash: Hex; readonly destinationBalanceBeforeAtomic: string;
   readonly destinationCodeHash: Hex;
@@ -229,8 +230,9 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
   const destination = await ports.destinationBalance(recipient, finalityPolicy.destination.blockTag); uint(destination.balanceAtomic); uint(destination.blockNumberAtomic); hex32(destination.blockHash);
   const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
   const body = {
-    schemaVersion: "apn.stargate-v2-native-operation.v1" as const, operationId, profile, profileHash, idempotencyHash,
-    owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), finalityPolicy, sourcePool: SOURCE_POOL,
+    schemaVersion: "apn.stargate-v2-native-operation.v2" as const, operationId, profile, profileHash, idempotencyHash,
+    owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), finalityPolicy,
+    finalityPolicyProvenance: "pinned_v2" as const, sourcePool: SOURCE_POOL,
     destinationPool: DESTINATION_POOL, sourceEid: SOURCE_EID, destinationEid: DESTINATION_EID, quote, sourceCodeHash: config.codeHash,
     destinationCodeHash: destinationConfig.codeHash,
     destinationBalanceBeforeAtomic: destination.balanceAtomic, destinationBalanceBlock: { numberAtomic: destination.blockNumberAtomic, hash: destination.blockHash },
@@ -433,10 +435,20 @@ function seal<T extends Omit<StargateNativeOperation, "integrityHash"> & { integ
   const { integrityHash: _old, ...body } = value as StargateNativeOperation; return Object.freeze({ ...body, integrityHash: hashObject(body) }) as StargateNativeOperation;
 }
 function validateRecord(value: unknown): StargateNativeOperation {
-  if (!isPlainRecord(value) || value.schemaVersion !== "apn.stargate-v2-native-operation.v1") fail("APN_STATE_CORRUPT", "schema");
-  const record = value as unknown as StargateNativeOperation, { integrityHash, ...body } = record;
-  if (hashObject(body) !== integrityHash || record.transitions.at(-1)?.phase !== record.phase || record.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
-  assertStargateV2RouteFinalityPolicy(record.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
+  if (!isPlainRecord(value) || !["apn.stargate-v2-native-operation.v1", "apn.stargate-v2-native-operation.v2"].includes(String(value.schemaVersion))) fail("APN_STATE_CORRUPT", "schema");
+  const raw = value as unknown as StargateNativeOperation, { integrityHash, ...body } = raw;
+  if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
+  let record = raw;
+  if (raw.schemaVersion === "apn.stargate-v2-native-operation.v1") {
+    assertLegacyNativeLane(raw);
+    if (raw.finalityPolicy === undefined && raw.finalityPolicyProvenance === undefined) record = seal({ ...body,
+      finalityPolicy: stargateV2LegacyRouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN), finalityPolicyProvenance: "derived_legacy_v1" } as StargateNativeOperation);
+    else { assertStargateV2LegacyRouteFinalityPolicy(raw.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
+      if (raw.finalityPolicyProvenance !== "derived_legacy_v1") fail("APN_STATE_CORRUPT", "finality_policy_provenance"); }
+  } else {
+    assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
+    if (raw.finalityPolicyProvenance !== "pinned_v2") fail("APN_STATE_CORRUPT", "finality_policy_provenance");
+  }
   const order: StargateNativePhase[] = ["prepared", "approved", "submission_started", "submitted", "observed"];
   for (let i = 1; i < record.transitions.length; i++) {
     const a = record.transitions[i - 1]!.phase, b = record.transitions[i]!.phase;
@@ -445,6 +457,13 @@ function validateRecord(value: unknown): StargateNativeOperation {
     else if (order.indexOf(b) < order.indexOf(a) || order.indexOf(b) > order.indexOf(a) + 1) fail("APN_STATE_CORRUPT", "transition");
   }
   return record;
+}
+function assertLegacyNativeLane(record: StargateNativeOperation): void {
+  const route = record.quote?.route;
+  if (record.sourcePool !== SOURCE_POOL || record.destinationPool !== DESTINATION_POOL || record.sourceEid !== SOURCE_EID ||
+    record.destinationEid !== DESTINATION_EID || record.envelope?.chainId !== SOURCE_CHAIN || route?.sourceChainId !== SOURCE_CHAIN ||
+    route.destinationChainId !== DESTINATION_CHAIN || route.sourceEid !== SOURCE_EID || route.destinationEid !== DESTINATION_EID ||
+    route.sourcePool !== SOURCE_POOL || route.destinationPool !== DESTINATION_POOL || route.asset !== "ETH") fail("APN_STATE_CORRUPT", "legacy_lane");
 }
 function validateAdvance(previous: StargateNativeOperation | null, next: StargateNativeOperation): void {
   if (previous === null) { if (next.phase !== "prepared" || next.transitions.length !== 1) fail("APN_STATE_CORRUPT", "initial_state"); return; }

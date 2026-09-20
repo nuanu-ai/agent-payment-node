@@ -2,7 +2,7 @@ import { type Hex } from "viem";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
-import { type StargateV2FinalityTag, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
+import { type StargateV2FinalityPolicyProvenance, type StargateV2FinalityTag, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { type StargateV2QuoteEvidence } from "./quote.js";
 export declare const STARGATE_TOKEN_SOURCE_CHAIN: 10;
 export declare const STARGATE_TOKEN_DESTINATION_CHAIN: 137;
@@ -81,7 +81,7 @@ export interface StargateTokenPolicyBinding {
     }>;
 }
 export interface StargateTokenOperation {
-    readonly schemaVersion: "apn.stargate-v2-token-operation.v1";
+    readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;
@@ -89,6 +89,7 @@ export interface StargateTokenOperation {
     readonly owner: Address;
     readonly recipient: Address;
     readonly finalityPolicy: StargateV2RouteFinalityPolicy;
+    readonly finalityPolicyProvenance: StargateV2FinalityPolicyProvenance;
     readonly amountAtomic: string;
     readonly nativeDropAtomic: string;
     readonly maxNativeDebitAtomic: string;

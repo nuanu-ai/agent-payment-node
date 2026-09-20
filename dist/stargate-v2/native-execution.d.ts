@@ -3,7 +3,7 @@ import type { EvmRpcCall } from "../evm-ports.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
-import { type StargateV2FinalityTag, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
+import { type StargateV2FinalityPolicyProvenance, type StargateV2FinalityTag, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { type StargateV2QuoteEvidence } from "./quote.js";
 export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality";
 export interface StargateNativeTransition {
@@ -23,7 +23,7 @@ export interface StargateNativeEnvelope {
     readonly maxPriorityFeePerGasAtomic: string;
 }
 export interface StargateNativeOperation {
-    readonly schemaVersion: "apn.stargate-v2-native-operation.v1";
+    readonly schemaVersion: "apn.stargate-v2-native-operation.v1" | "apn.stargate-v2-native-operation.v2";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;
@@ -33,6 +33,7 @@ export interface StargateNativeOperation {
     readonly amountAtomic: string;
     readonly maxNativeDebitAtomic: string;
     readonly finalityPolicy: StargateV2RouteFinalityPolicy;
+    readonly finalityPolicyProvenance: StargateV2FinalityPolicyProvenance;
     readonly sourcePool: Address;
     readonly destinationPool: Address;
     readonly sourceEid: 30101;

@@ -6,7 +6,7 @@ import { ApnError } from "../errors.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_QUOTE_ABI, STARGATE_SEND_ABI } from "./abi.js";
-import { assertStargateV2RouteFinalityPolicy, stargateV2RouteFinalityPolicy } from "./finality-policy.js";
+import { assertStargateV2LegacyRouteFinalityPolicy, assertStargateV2RouteFinalityPolicy, stargateV2LegacyRouteFinalityPolicy, stargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct } from "./quote.js";
 export const STARGATE_TOKEN_SOURCE_CHAIN = 10;
 export const STARGATE_TOKEN_DESTINATION_CHAIN = 137;
@@ -186,7 +186,7 @@ export async function prepareStargateV2Token(request, ports, journal) {
         fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
     const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString(), operationId });
     const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
-    const body = { schemaVersion: "apn.stargate-v2-token-operation.v1", operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy,
+    const body = { schemaVersion: "apn.stargate-v2-token-operation.v2", operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy, finalityPolicyProvenance: "pinned_v2",
         amountAtomic: amount.toString(), nativeDropAtomic: drop.toString(), maxNativeDebitAtomic: cap.toString(), minOutputAtomic: minOut.toString(),
         sourceToken: STARGATE_TOKEN_SOURCE_TOKEN, destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, sourcePool: STARGATE_TOKEN_SOURCE_POOL,
         destinationPool: STARGATE_TOKEN_DESTINATION_POOL, sourceEid: 30111, destinationEid: 30109,
@@ -689,12 +689,27 @@ async function verifySignedEnvelope(raw, owner, e) {
 function transition(op, phase, reason, at) { return seal({ ...op, phase, transitions: [...op.transitions, { phase, at: new Date(at).toISOString(), reason }] }); }
 function seal(value) { const { integrityHash: _old, ...body } = value; return Object.freeze({ ...body, integrityHash: hashObject(body) }); }
 function validateRecord(value) {
-    if (!isPlainRecord(value) || value.schemaVersion !== "apn.stargate-v2-token-operation.v1")
+    if (!isPlainRecord(value) || !["apn.stargate-v2-token-operation.v1", "apn.stargate-v2-token-operation.v2"].includes(String(value.schemaVersion)))
         fail("APN_STATE_CORRUPT", "schema");
-    const record = value, { integrityHash, ...body } = record;
-    if (hashObject(body) !== integrityHash || record.transitions.at(-1)?.phase !== record.phase || record.operationId.length !== 64)
+    const raw = value, { integrityHash, ...body } = raw;
+    if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64)
         fail("APN_STATE_CORRUPT", "integrity");
-    assertStargateV2RouteFinalityPolicy(record.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN);
+    let record = raw;
+    if (raw.schemaVersion === "apn.stargate-v2-token-operation.v1") {
+        assertLegacyTokenLane(raw);
+        if (raw.finalityPolicy === undefined && raw.finalityPolicyProvenance === undefined)
+            record = seal({ ...body, finalityPolicy: stargateV2LegacyRouteFinalityPolicy(STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN), finalityPolicyProvenance: "derived_legacy_v1" });
+        else {
+            assertStargateV2LegacyRouteFinalityPolicy(raw.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN);
+            if (raw.finalityPolicyProvenance !== "derived_legacy_v1")
+                fail("APN_STATE_CORRUPT", "finality_policy_provenance");
+        }
+    }
+    else {
+        assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN);
+        if (raw.finalityPolicyProvenance !== "pinned_v2")
+            fail("APN_STATE_CORRUPT", "finality_policy_provenance");
+    }
     const usageStates = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
     if ((record.usageState !== undefined && !usageStates.includes(record.usageState)) || (record.usageTarget !== undefined && !usageStates.includes(record.usageTarget)))
         fail("APN_STATE_CORRUPT", "usage_state");
@@ -723,6 +738,8 @@ function validateRecord(value) {
             fail("APN_STATE_CORRUPT", "transition");
     return record;
 }
+function assertLegacyTokenLane(record) { const route = record.quote?.route; if (record.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || record.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || record.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || record.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || record.sourceEid !== STARGATE_TOKEN_SOURCE_EID || record.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || record.sendEnvelope?.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || route?.sourceChainId !== STARGATE_TOKEN_SOURCE_CHAIN || route?.destinationChainId !== STARGATE_TOKEN_DESTINATION_CHAIN || route?.sourceEid !== STARGATE_TOKEN_SOURCE_EID || route?.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || route?.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || route?.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || route?.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || route?.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || route?.asset !== "USDC")
+    fail("APN_STATE_CORRUPT", "legacy_lane"); }
 function validateAdvance(previous, next) {
     if (previous === null) {
         if (next.phase !== "prepared" || next.transitions.length !== 1)
