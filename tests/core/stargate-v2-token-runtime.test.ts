@@ -5,7 +5,8 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { StateStore } from "../../src/state.js";
 import { LAYERZERO_ENDPOINT_V2_ABI, LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
 import { LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN,
-  STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "../../src/stargate-v2/token-execution.js";
+  STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_MESSAGING,
+  STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "../../src/stargate-v2/token-execution.js";
 import { confirmedStargateTokenSourceReceipt, observeStargateTokenDestination, StargateTokenService } from "../../src/stargate-v2/token-runtime.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -14,12 +15,17 @@ const OWNER = getAddress("0x1111111111111111111111111111111111111111");
 const TX = `0x${"12".repeat(32)}` as Hex, OTHER_TX = `0x${"13".repeat(32)}` as Hex, GUID = `0x${"34".repeat(32)}` as Hex;
 const BASELINE = `0x${"56".repeat(32)}` as Hex, EVENT_BLOCK = `0x${"78".repeat(32)}` as Hex, SAFE = `0x${"9a".repeat(32)}` as Hex;
 const DROP = 50_000n;
+const SOURCE_TEST_CODE = "0x6002" as Hex, SOURCE_TEST_CODE_HASH = keccak256(SOURCE_TEST_CODE);
 
 test("token source receipt verifies pinned TokenMessaging code when PacketSent is present",async()=>{
   const topics=encodeEventTopics({abi:LAYERZERO_ENDPOINT_V2_ABI,eventName:"PacketSent"}),data=encodeAbiParameters(parseAbiParameters("bytes encodedPayload,bytes options,address sendLibrary"),["0x01","0x",OWNER]);
-  const source=(code:Hex)=>({call:async(method:string)=>{if(method==="eth_getTransactionReceipt")return{transactionHash:TX,status:"0x1",blockNumber:"0xa",blockHash:EVENT_BLOCK,logs:[{address:LAYERZERO_ENDPOINT_V2,topics,data}]};if(method==="eth_getBlockByNumber")return{number:"0xa",hash:EVENT_BLOCK};if(method==="eth_getCode")return code;throw new Error(method);}});
-  assert.ok(await confirmedStargateTokenSourceReceipt(source(TEST_CODE) as any,TX,"safe",TEST_CODE_HASH));
-  await assert.rejects(confirmedStargateTokenSourceReceipt(source("0x6002") as any,TX,"safe",TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
+  const reads:unknown[][]=[]; const source=(code:Hex)=>({call:async(method:string,params:unknown[])=>{if(method==="eth_getTransactionReceipt")return{transactionHash:TX,status:"0x1",blockNumber:"0xa",blockHash:EVENT_BLOCK,logs:[{address:LAYERZERO_ENDPOINT_V2,topics,data}]};if(method==="eth_getBlockByNumber")return{number:"0xa",hash:EVENT_BLOCK};if(method==="eth_getCode"){reads.push(params);return code;}throw new Error(method);}});
+  assert.equal(STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH,"0x40eefa854ab4e4564009d7d4c08b0e2d341f6b6a354c201c326096468b300827");
+  assert.equal(STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH,"0xae66157283b0894d904b84d87efe27ea850e5eae61351827f4fcf7c3c04d593f");
+  assert.ok(await confirmedStargateTokenSourceReceipt(source(SOURCE_TEST_CODE) as any,TX,"safe",SOURCE_TEST_CODE_HASH));
+  assert.deepEqual(reads,[[STARGATE_TOKEN_SOURCE_MESSAGING,"safe"]]);
+  await assert.rejects(confirmedStargateTokenSourceReceipt(source(TEST_CODE) as any,TX,"safe",SOURCE_TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
+  await assert.rejects(confirmedStargateTokenSourceReceipt(source(SOURCE_TEST_CODE) as any,TX,"safe",TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
 });
 
 function bridgeAdmission(mechanism: Readonly<{ provider: string; reference: string }> = STARGATE_TOKEN_MECHANISM, dailyLimitAtomic = "150") {
@@ -131,7 +137,7 @@ const TEST_CODE = "0x6001" as Hex, TEST_CODE_HASH = keccak256(TEST_CODE), PACKET
 const sourcePacket = { srcEid: 30111 as const, sender: pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }), nonceAtomic: PACKET_NONCE.toString(),
   dstEid: 30109 as const, receiver: pad(STARGATE_TOKEN_DESTINATION_MESSAGING, { size: 32 }) };
 function destinationRpc(mode: "split" | "combined" = "split", mutation?: DestinationMutation) {
-  const ranges: { from: bigint; to: bigint }[] = [], deliveryBlock = 304n;
+  const ranges: { from: bigint; to: bigint }[] = [], codeReads: unknown[][] = [], deliveryBlock = 304n;
   const dropBlock = mutation === "bad-order" ? 305n : (mode === "combined" ? deliveryBlock : 209n);
   const dropTx = mode === "combined" ? TX : OTHER_TX;
   const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: GUID, toAddress: OWNER } });
@@ -158,14 +164,14 @@ function destinationRpc(mode: "split" | "combined" = "split", mutation?: Destina
   if (mutation === "dedup") for (const rows of Object.values(byAddress)) rows.push(structuredClone(rows[0]));
   const executeData = encodeFunctionData({ abi: LAYERZERO_EXECUTOR_ABI, functionName: "execute302", args: [{ receiver: STARGATE_TOKEN_DESTINATION_MESSAGING,
     origin, guid: mutation === "guid" ? OTHER_TX : GUID, message: "0x0100", extraData: "0x", gasLimit: 170_000n }] });
-  return { ranges, call: async (method: string, params: readonly any[]) => {
+  return { ranges, codeReads, call: async (method: string, params: readonly any[]) => {
     if (method === "eth_getBlockByNumber") {
       const tag = String(params[0]); if (tag === "safe" || tag === "latest") throw new Error(`weaker finality tag ${tag} forbidden`);
       if (tag === "finalized") return { number: "0x150", hash: SAFE };
       if (tag === "0x9") return { number: "0x9", hash: mutation === "baseline" ? SAFE : BASELINE };
       const number = BigInt(tag); return { number: tag, hash: number === deliveryBlock ? EVENT_BLOCK : SAFE };
     }
-    if (method === "eth_getCode") return TEST_CODE;
+    if (method === "eth_getCode") { codeReads.push([...params]); return TEST_CODE; }
     if (method === "eth_getLogs") { const filter = params[0], from = BigInt(filter.fromBlock), to = BigInt(filter.toBlock); ranges.push({ from, to });
       if (to - from + 1n > 100n) throw new Error("provider rejects ranges above 100 blocks");
       if (mutation === "provider-error" && from === 209n) throw new Error("provider range failure");
@@ -188,6 +194,16 @@ for (const mode of ["split", "combined"] as const) test(`live-shaped ${mode} fin
   assert.equal(evidence?.finality, "finalized"); assert.equal(evidence?.packetDelivery?.nonceAtomic, PACKET_NONCE.toString());
   assert.equal(evidence?.nativeDrop?.nonceAtomic, PACKET_NONCE.toString());
   assert.equal(evidence?.nativeDrop?.transactionHash, mode === "split" ? OTHER_TX : TX);
+  assert.deepEqual(rpc.codeReads,[[STARGATE_TOKEN_DESTINATION_MESSAGING,"0x150"]]);
+});
+
+test("source and destination TokenMessaging runtime hashes cannot be swapped or independently changed",async()=>{
+  const destination=destinationRpc();
+  await assert.rejects(observeStargateTokenDestination(destination as any,destinationInput,undefined,SOURCE_TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
+  await assert.rejects(observeStargateTokenDestination({call:async(method:string,params:readonly any[])=>{
+    if(method==="eth_getBlockByNumber")return params[0]==="finalized"?{number:"0x150",hash:SAFE}:{number:"0x9",hash:BASELINE};
+    if(method==="eth_getCode")return "0x6003";throw new Error(method);
+  }} as any,destinationInput,undefined,TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
 });
 
 test("destination scanner uses complete inclusive <=100-block chunks and deduplicates identical provider rows", async () => {

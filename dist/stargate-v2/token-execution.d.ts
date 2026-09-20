@@ -18,7 +18,8 @@ export declare const STARGATE_TOKEN_DESTINATION_EXECUTOR: `0x${string}`;
 export declare const LAYERZERO_ENDPOINT_V2: `0x${string}`;
 export declare const STARGATE_TOKEN_SOURCE_MESSAGING: `0x${string}`;
 export declare const STARGATE_TOKEN_DESTINATION_MESSAGING: `0x${string}`;
-export declare const STARGATE_TOKEN_MESSAGING_CODE_HASH: Hex;
+export declare const STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH: Hex;
+export declare const STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH: Hex;
 export declare const STARGATE_TOKEN_MECHANISM: Readonly<{
     provider: "stargate-v2";
     reference: `eip155:10:0x${string}/eip155:137:0x${string}`;
