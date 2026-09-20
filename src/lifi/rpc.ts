@@ -217,7 +217,8 @@ export class BridgeRpc implements BridgeRpcPort {
       nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,
         beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
       if (nativeDelivery.composite === undefined) nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
-      else compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call);
+      else compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call,
+        { sender: identity.from, calldata: bridgeHex(tx.input, 24_576, undefined, "APN_RPC_PROTOCOL") });
       await this.recheck(before);
     }
     await this.recheck(block); if (safeBlock !== null) await this.recheck(safeBlock); await this.assertChain();

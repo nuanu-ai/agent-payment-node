@@ -164,12 +164,15 @@ const TRACE_ABI = parseAbi([
  * normalized frame, including read-only frames. A well-formed but different effect graph is a durable mismatch rather
  * than an invitation to retry the source transaction.
  */
-export function verifyBnbCompositeTrace(raw, transactionHash, message, call) {
+export function verifyBnbCompositeTrace(raw, transactionHash, message, call, transaction) {
     const root = traceNode(raw, { count: 0 }, 0);
     const traceHash = hashObject({ transactionHash, root: traceProjection(root) });
     try {
-        exactFrame(root, BNB_COMPOSITE.spokePool, null, "spoke");
-        const spokeEffects = effects(root);
+        assertCallerTree(root);
+        if (transaction.calldata.length < 10 || root.from !== transaction.sender || root.input !== transaction.calldata)
+            mismatch();
+        exactFrame(root, BNB_COMPOSITE.spokePool, transaction.calldata.slice(0, 10), "spoke");
+        const spokeEffects = root.calls;
         if (spokeEffects.length !== 2)
             mismatch();
         exactToken(spokeEffects[0], BNB_COMPOSITE.weth, "transfer", [BNB_COMPOSITE.receiver, BigInt(call.inputAmountAtomic)]);
@@ -178,10 +181,11 @@ export function verifyBnbCompositeTrace(raw, transactionHash, message, call) {
         const h = decode(receiver.input, "handleV3AcrossMessage");
         if (h[0] !== BNB_COMPOSITE.weth || h[1].toString() !== call.inputAmountAtomic || h[3] !== message)
             mismatch();
-        const receiverEffects = effects(receiver);
+        const receiverEffects = receiver.calls;
         exactToken(receiverEffects[0], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.executor, BigInt(call.inputAmountAtomic)]);
         const executor = receiverEffects[1];
-        if (executor === undefined || executor.to !== BNB_COMPOSITE.executor || executor.input.slice(0, 10) !== "0x4f91bc2b")
+        if (executor === undefined || executor.type !== "CALL" || executor.to !== BNB_COMPOSITE.executor || executor.value !== 0n ||
+            executor.input.slice(0, 10) !== "0x4f91bc2b")
             mismatch();
         const executorArgs = decode(executor.input, "swapAndCompleteBridgeTokens");
         if (executorArgs[0] !== call.transactionId || executorArgs[1].length !== 1 || executorArgs[2] !== BNB_COMPOSITE.weth || executorArgs[3] !== call.finalReceiver)
@@ -204,27 +208,31 @@ export function verifyBnbCompositeTrace(raw, transactionHash, message, call) {
         if (receiverEffects.length !== 3)
             mismatch();
         exactToken(receiverEffects[2], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.executor, 0n]);
-        const executorEffects = effects(executor);
+        const executorEffects = executor.calls;
         exactToken(executorEffects[0], BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.receiver, BNB_COMPOSITE.executor, BigInt(call.inputAmountAtomic)]);
         exactToken(executorEffects[1], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.flyRouter, BigInt(call.inputAmountAtomic)]);
         const fly = executorEffects[2];
-        if (fly === undefined || fly.to !== BNB_COMPOSITE.flyRouter || fly.input !== call.flyCalldata || fly.error !== null)
+        if (fly === undefined || fly.type !== "CALL" || fly.to !== BNB_COMPOSITE.flyRouter || fly.value !== 0n || fly.input !== call.flyCalldata || fly.error !== null)
             mismatch();
         const delivered = executorEffects[3];
-        if (executorEffects.length !== 4 || delivered === undefined || delivered.to !== call.finalReceiver || delivered.value <= 0n || delivered.input !== "0x" || delivered.error !== null)
+        if (executorEffects.length !== 4 || delivered === undefined || delivered.type !== "CALL" || delivered.to !== call.finalReceiver || delivered.value <= 0n ||
+            delivered.input !== "0x" || delivered.output !== "0x" || delivered.error !== null || delivered.calls.length !== 0)
             mismatch();
-        const flyEffects = effects(fly);
+        const flyEffects = fly.calls;
         exactToken(flyEffects[0], BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.executor, BNB_COMPOSITE.core, BigInt(call.inputAmountAtomic)]);
         const core = flyEffects[1];
-        if (core === undefined || core.to !== BNB_COMPOSITE.core || core.error !== null)
+        if (core === undefined || core.type !== "CALL" || core.to !== BNB_COMPOSITE.core || core.error !== null ||
+            core.value !== 0n || core.input !== coreInvocation(call.flyCalldata))
             mismatch();
         const flyReturn = flyEffects[2];
-        if (flyEffects.length !== 3 || flyReturn === undefined || flyReturn.to !== BNB_COMPOSITE.executor || flyReturn.input !== "0x" || flyReturn.error !== null)
+        if (flyEffects.length !== 3 || flyReturn === undefined || flyReturn.type !== "CALL" || flyReturn.to !== BNB_COMPOSITE.executor ||
+            flyReturn.input !== "0x" || flyReturn.output !== "0x" || flyReturn.error !== null || flyReturn.calls.length !== 0)
             mismatch();
-        const coreEffects = effects(core);
+        const coreEffects = core.calls;
         exactToken(coreEffects[0], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.vault, BigInt(call.inputAmountAtomic)]);
         const vault = coreEffects[1];
-        if (vault === undefined || vault.to !== BNB_COMPOSITE.vault || vault.error !== null || vault.input.slice(0, 10) !== BNB_COMPOSITE.balancerSelector)
+        if (vault === undefined || vault.type !== "CALL" || vault.to !== BNB_COMPOSITE.vault || vault.error !== null || vault.value !== 0n ||
+            vault.input.slice(0, 10) !== BNB_COMPOSITE.balancerSelector)
             mismatch();
         const v = decode(vault.input, "swap");
         if (v[0].poolId !== BNB_COMPOSITE.poolId || Number(v[0].kind) !== 0 || v[0].assetIn !== BNB_COMPOSITE.weth ||
@@ -251,12 +259,16 @@ export function verifyBnbCompositeTrace(raw, transactionHash, message, call) {
         exactToken(vault.calls[1], BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.core, BNB_COMPOSITE.vault, BigInt(call.inputAmountAtomic)]);
         exactToken(vault.calls[2], BNB_COMPOSITE.wbnb, "transfer", [BNB_COMPOSITE.core, vaultOutput]);
         const unwrap = coreEffects[2];
-        if (unwrap === undefined || unwrap.to !== BNB_COMPOSITE.wbnb || unwrap.error !== null || unwrap.value !== 0n ||
+        if (unwrap === undefined || unwrap.type !== "CALL" || unwrap.to !== BNB_COMPOSITE.wbnb || unwrap.error !== null || unwrap.value !== 0n || unwrap.output !== "0x" ||
             decode(unwrap.input, "withdraw")[0] !== vaultOutput)
             mismatch();
+        const unwrapReturn = unwrap.calls[0];
+        if (unwrap.calls.length !== 1 || unwrapReturn === undefined || unwrapReturn.type !== "CALL" || unwrapReturn.to !== BNB_COMPOSITE.core ||
+            unwrapReturn.input !== "0x" || unwrapReturn.value !== vaultOutput || unwrapReturn.output !== "0x" || unwrapReturn.error !== null || unwrapReturn.calls.length !== 0)
+            mismatch();
         const coreReturn = coreEffects[3];
-        if (coreEffects.length !== 4 || coreReturn === undefined || coreReturn.to !== BNB_COMPOSITE.flyRouter || coreReturn.input !== "0x" ||
-            coreReturn.value !== vaultOutput || coreReturn.error !== null)
+        if (coreEffects.length !== 4 || coreReturn === undefined || coreReturn.type !== "CALL" || coreReturn.to !== BNB_COMPOSITE.flyRouter ||
+            coreReturn.input !== "0x" || coreReturn.output !== "0x" || coreReturn.value !== vaultOutput || coreReturn.error !== null || coreReturn.calls.length !== 0)
             mismatch();
         const expectedDelivered = retainedOutput(vaultOutput, BigInt(call.expectedOutputAtomic), BigInt(call.maximumRetentionBps));
         if (flyReturn.value !== expectedDelivered || delivered.value !== expectedDelivered)
@@ -304,9 +316,15 @@ function traceNode(raw, bounded, depth) {
     return { type: r.type, from, to, value, input, output, error: r.error === undefined ? null : r.error,
         calls: calls.map((child) => traceNode(child, bounded, depth + 1)) };
 }
-function effects(node) { return node.calls.filter((c) => c.type === "CALL" && (c.input !== "0x" || c.value > 0n)); }
 function walk(node) { return [node, ...node.calls.flatMap(walk)]; }
 function traceProjection(node) { return { ...node, value: node.value.toString(), calls: node.calls.map(traceProjection) }; }
+function assertCallerTree(node) {
+    for (const child of node.calls) {
+        if (child.from !== node.to)
+            mismatch();
+        assertCallerTree(child);
+    }
+}
 function exactFrame(node, to, selector, _reason) {
     if (node.type !== "CALL" || node.to !== to || node.error !== null || node.value !== 0n || (selector !== null && node.input.slice(0, 10) !== selector))
         mismatch();
@@ -325,11 +343,19 @@ function decode(input, name) {
     }
 }
 function exactToken(node, token, name, args) {
-    if (node === undefined || node.to !== token || node.error !== null || node.value !== 0n)
+    if (node === undefined || node.type !== "CALL" || node.to !== token || node.error !== null || node.value !== 0n ||
+        node.output !== `0x${"0".repeat(63)}1` || node.calls.length !== 0)
         mismatch();
     const got = decode(node.input, name);
     if (got.length !== args.length || got.some((v, i) => String(v) !== String(args[i])))
         mismatch();
+}
+function coreInvocation(flyCalldata) {
+    const raw = Buffer.from(flyCalldata.slice(2), "hex"), payloadLength = Number(uint(raw, 36, 32));
+    if (payloadLength <= 0 || 68 + payloadLength > raw.length)
+        return mismatch();
+    const selector = Buffer.from("158f6894", "hex"), head = raw.subarray(4, 68), payload = raw.subarray(68, 68 + payloadLength);
+    return `0x${Buffer.concat([selector, head, payload]).toString("hex")}`;
 }
 function compact(p, at) {
     const shift = p[at];

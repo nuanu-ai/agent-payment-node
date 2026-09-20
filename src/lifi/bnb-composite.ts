@@ -166,6 +166,10 @@ export interface BnbCompositeTraceProof {
 }
 type TraceNode = Readonly<{ type: "CALL" | "STATICCALL"; from: Address; to: Address; value: bigint; input: Hex; output: Hex;
   error: string | null; calls: readonly TraceNode[] }>;
+export interface BnbDestinationTransaction {
+  readonly sender: Address;
+  readonly calldata: Hex;
+}
 
 /**
  * Validate the complete bounded callTracer subtree for the one admitted Across/Fly program. The digest covers every
@@ -173,22 +177,25 @@ type TraceNode = Readonly<{ type: "CALL" | "STATICCALL"; from: Address; to: Addr
  * than an invitation to retry the source transaction.
  */
 export function verifyBnbCompositeTrace(raw: unknown, transactionHash: Hex, message: Hex,
-  call: BnbCompositeCall): BnbCompositeTraceProof {
+  call: BnbCompositeCall, transaction: BnbDestinationTransaction): BnbCompositeTraceProof {
   const root = traceNode(raw, { count: 0 }, 0);
   const traceHash = hashObject({ transactionHash, root: traceProjection(root) });
   try {
-    exactFrame(root, BNB_COMPOSITE.spokePool, null, "spoke");
-    const spokeEffects = effects(root);
+    assertCallerTree(root);
+    if (transaction.calldata.length < 10 || root.from !== transaction.sender || root.input !== transaction.calldata) mismatch();
+    exactFrame(root, BNB_COMPOSITE.spokePool, transaction.calldata.slice(0, 10) as Hex, "spoke");
+    const spokeEffects = root.calls;
     if (spokeEffects.length !== 2) mismatch();
     exactToken(spokeEffects[0], BNB_COMPOSITE.weth, "transfer", [BNB_COMPOSITE.receiver, BigInt(call.inputAmountAtomic)]);
     const receiver = spokeEffects[1]!;
     exactFrame(receiver, BNB_COMPOSITE.receiver, "0x3a5be8cb", "receiver");
     const h = decode(receiver.input, "handleV3AcrossMessage") as readonly [Address, bigint, Address, Hex];
     if (h[0] !== BNB_COMPOSITE.weth || h[1].toString() !== call.inputAmountAtomic || h[3] !== message) mismatch();
-    const receiverEffects = effects(receiver);
+    const receiverEffects = receiver.calls;
     exactToken(receiverEffects[0], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.executor, BigInt(call.inputAmountAtomic)]);
     const executor = receiverEffects[1];
-    if (executor === undefined || executor.to !== BNB_COMPOSITE.executor || executor.input.slice(0, 10) !== "0x4f91bc2b") mismatch();
+    if (executor === undefined || executor.type !== "CALL" || executor.to !== BNB_COMPOSITE.executor || executor.value !== 0n ||
+      executor.input.slice(0, 10) !== "0x4f91bc2b") mismatch();
     const executorArgs = decode(executor.input, "swapAndCompleteBridgeTokens") as readonly [Hex, readonly any[], Address, Address];
     if (executorArgs[0] !== call.transactionId || executorArgs[1].length !== 1 || executorArgs[2] !== BNB_COMPOSITE.weth || executorArgs[3] !== call.finalReceiver) mismatch();
     const swap = executorArgs[1][0] as Record<string, unknown>;
@@ -206,25 +213,29 @@ export function verifyBnbCompositeTrace(raw: unknown, transactionHash: Hex, mess
     }
     if (receiverEffects.length !== 3) mismatch();
     exactToken(receiverEffects[2], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.executor, 0n]);
-    const executorEffects = effects(executor);
+    const executorEffects = executor.calls;
     exactToken(executorEffects[0], BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.receiver, BNB_COMPOSITE.executor, BigInt(call.inputAmountAtomic)]);
     exactToken(executorEffects[1], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.flyRouter, BigInt(call.inputAmountAtomic)]);
     const fly = executorEffects[2];
-    if (fly === undefined || fly.to !== BNB_COMPOSITE.flyRouter || fly.input !== call.flyCalldata || fly.error !== null) mismatch();
+    if (fly === undefined || fly.type !== "CALL" || fly.to !== BNB_COMPOSITE.flyRouter || fly.value !== 0n || fly.input !== call.flyCalldata || fly.error !== null) mismatch();
     const delivered = executorEffects[3];
-    if (executorEffects.length !== 4 || delivered === undefined || delivered.to !== call.finalReceiver || delivered.value <= 0n || delivered.input !== "0x" || delivered.error !== null) mismatch();
+    if (executorEffects.length !== 4 || delivered === undefined || delivered.type !== "CALL" || delivered.to !== call.finalReceiver || delivered.value <= 0n ||
+      delivered.input !== "0x" || delivered.output !== "0x" || delivered.error !== null || delivered.calls.length !== 0) mismatch();
 
-    const flyEffects = effects(fly);
+    const flyEffects = fly.calls;
     exactToken(flyEffects[0], BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.executor, BNB_COMPOSITE.core, BigInt(call.inputAmountAtomic)]);
     const core = flyEffects[1];
-    if (core === undefined || core.to !== BNB_COMPOSITE.core || core.error !== null) mismatch();
+    if (core === undefined || core.type !== "CALL" || core.to !== BNB_COMPOSITE.core || core.error !== null ||
+      core.value !== 0n || core.input !== coreInvocation(call.flyCalldata)) mismatch();
     const flyReturn = flyEffects[2];
-    if (flyEffects.length !== 3 || flyReturn === undefined || flyReturn.to !== BNB_COMPOSITE.executor || flyReturn.input !== "0x" || flyReturn.error !== null) mismatch();
+    if (flyEffects.length !== 3 || flyReturn === undefined || flyReturn.type !== "CALL" || flyReturn.to !== BNB_COMPOSITE.executor ||
+      flyReturn.input !== "0x" || flyReturn.output !== "0x" || flyReturn.error !== null || flyReturn.calls.length !== 0) mismatch();
 
-    const coreEffects = effects(core);
+    const coreEffects = core.calls;
     exactToken(coreEffects[0], BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.vault, BigInt(call.inputAmountAtomic)]);
     const vault = coreEffects[1];
-    if (vault === undefined || vault.to !== BNB_COMPOSITE.vault || vault.error !== null || vault.input.slice(0, 10) !== BNB_COMPOSITE.balancerSelector) mismatch();
+    if (vault === undefined || vault.type !== "CALL" || vault.to !== BNB_COMPOSITE.vault || vault.error !== null || vault.value !== 0n ||
+      vault.input.slice(0, 10) !== BNB_COMPOSITE.balancerSelector) mismatch();
     const v = decode(vault.input, "swap") as readonly [any, any, bigint, bigint];
     if (v[0].poolId !== BNB_COMPOSITE.poolId || Number(v[0].kind) !== 0 || v[0].assetIn !== BNB_COMPOSITE.weth ||
       v[0].assetOut !== BNB_COMPOSITE.wbnb || String(v[0].amount) !== call.inputAmountAtomic || v[0].userData !== "0x" ||
@@ -244,11 +255,14 @@ export function verifyBnbCompositeTrace(raw: unknown, transactionHash: Hex, mess
     exactToken(vault.calls[1], BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.core, BNB_COMPOSITE.vault, BigInt(call.inputAmountAtomic)]);
     exactToken(vault.calls[2], BNB_COMPOSITE.wbnb, "transfer", [BNB_COMPOSITE.core, vaultOutput]);
     const unwrap = coreEffects[2];
-    if (unwrap === undefined || unwrap.to !== BNB_COMPOSITE.wbnb || unwrap.error !== null || unwrap.value !== 0n ||
+    if (unwrap === undefined || unwrap.type !== "CALL" || unwrap.to !== BNB_COMPOSITE.wbnb || unwrap.error !== null || unwrap.value !== 0n || unwrap.output !== "0x" ||
       (decode(unwrap.input, "withdraw") as readonly [bigint])[0] !== vaultOutput) mismatch();
+    const unwrapReturn = unwrap.calls[0];
+    if (unwrap.calls.length !== 1 || unwrapReturn === undefined || unwrapReturn.type !== "CALL" || unwrapReturn.to !== BNB_COMPOSITE.core ||
+      unwrapReturn.input !== "0x" || unwrapReturn.value !== vaultOutput || unwrapReturn.output !== "0x" || unwrapReturn.error !== null || unwrapReturn.calls.length !== 0) mismatch();
     const coreReturn = coreEffects[3];
-    if (coreEffects.length !== 4 || coreReturn === undefined || coreReturn.to !== BNB_COMPOSITE.flyRouter || coreReturn.input !== "0x" ||
-      coreReturn.value !== vaultOutput || coreReturn.error !== null) mismatch();
+    if (coreEffects.length !== 4 || coreReturn === undefined || coreReturn.type !== "CALL" || coreReturn.to !== BNB_COMPOSITE.flyRouter ||
+      coreReturn.input !== "0x" || coreReturn.output !== "0x" || coreReturn.value !== vaultOutput || coreReturn.error !== null || coreReturn.calls.length !== 0) mismatch();
     const expectedDelivered = retainedOutput(vaultOutput, BigInt(call.expectedOutputAtomic), BigInt(call.maximumRetentionBps));
     if (flyReturn.value !== expectedDelivered || delivered.value !== expectedDelivered) mismatch();
     const retained = vaultOutput - expectedDelivered;
@@ -280,9 +294,11 @@ function traceNode(raw: unknown, bounded: { count: number }, depth: number): Tra
   return { type: r.type, from, to, value, input, output, error: r.error === undefined ? null : r.error as string,
     calls: calls.map((child) => traceNode(child, bounded, depth + 1)) };
 }
-function effects(node: TraceNode): readonly TraceNode[] { return node.calls.filter((c) => c.type === "CALL" && (c.input !== "0x" || c.value > 0n)); }
 function walk(node: TraceNode): readonly TraceNode[] { return [node, ...node.calls.flatMap(walk)]; }
 function traceProjection(node: TraceNode): unknown { return { ...node, value: node.value.toString(), calls: node.calls.map(traceProjection) }; }
+function assertCallerTree(node: TraceNode): void {
+  for (const child of node.calls) { if (child.from !== node.to) mismatch(); assertCallerTree(child); }
+}
 function exactFrame(node: TraceNode, to: Address, selector: Hex | null, _reason: string): void {
   if (node.type !== "CALL" || node.to !== to || node.error !== null || node.value !== 0n || (selector !== null && node.input.slice(0, 10) !== selector)) mismatch();
 }
@@ -291,8 +307,16 @@ function decode(input: Hex, name: string): readonly unknown[] {
   catch (error) { if (error instanceof TraceMismatch) throw error; return mismatch(); }
 }
 function exactToken(node: TraceNode | undefined, token: Address, name: "approve" | "transfer" | "transferFrom", args: readonly unknown[]): void {
-  if (node === undefined || node.to !== token || node.error !== null || node.value !== 0n) mismatch();
+  if (node === undefined || node.type !== "CALL" || node.to !== token || node.error !== null || node.value !== 0n ||
+    node.output !== `0x${"0".repeat(63)}1` || node.calls.length !== 0) mismatch();
   const got = decode(node.input, name); if (got.length !== args.length || got.some((v, i) => String(v) !== String(args[i]))) mismatch();
+}
+
+function coreInvocation(flyCalldata: Hex): Hex {
+  const raw = Buffer.from(flyCalldata.slice(2), "hex"), payloadLength = Number(uint(raw, 36, 32));
+  if (payloadLength <= 0 || 68 + payloadLength > raw.length) return mismatch();
+  const selector = Buffer.from("158f6894", "hex"), head = raw.subarray(4, 68), payload = raw.subarray(68, 68 + payloadLength);
+  return `0x${Buffer.concat([selector, head, payload]).toString("hex")}`;
 }
 
 function compact(p: Buffer, at: number): bigint {
