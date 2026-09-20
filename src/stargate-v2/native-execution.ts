@@ -106,13 +106,14 @@ export interface StargateNativeExecutionPorts {
   readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
   readonly waitSourceReceipt: (transactionHash: Hex) => Promise<StargateConfirmedReceipt | null>;
   readonly observeDestination: (input: Readonly<{ sourceTransactionHash: Hex; guid: Hex; recipient: Address; sourceEid: 30101; destinationPool: Address;
-    minimumAmountAtomic: string; balanceBeforeAtomic: string; fromBlockNumberAtomic: string }>) => Promise<StargateDestinationEvidence | null>;
+    minimumAmountAtomic: string; balanceBeforeAtomic: string; fromBlockNumberAtomic: string; fromBlockHash: Hex }>) => Promise<StargateDestinationEvidence | null>;
   readonly now?: () => number;
 }
 
 export interface StargateNativeJournal {
   load(operationId: string): Promise<StargateNativeOperation | null>; save(next: StargateNativeOperation): Promise<void>;
   withLock<T>(operationId: string, work: () => Promise<T>): Promise<T>;
+  withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
 }
 
 export class FileStargateNativeJournal implements StargateNativeJournal {
@@ -127,6 +128,9 @@ export class FileStargateNativeJournal implements StargateNativeJournal {
   async withLock<T>(id: string, work: () => Promise<T>): Promise<T> {
     await this.locks.initialize();
     return await this.locks.withLocks([`stargate-native:${id}`], work, { waitMs: 30_000 });
+  }
+  async withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T> {
+    await this.locks.initialize(); return await this.locks.withLocks([`stargate-source:${chainId}:${address(owner).toLowerCase()}`], work, { waitMs: 30_000 });
   }
   async load(id: string): Promise<StargateNativeOperation | null> {
     try {
@@ -236,7 +240,9 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
 
 export async function executeStargateV2NativeEth(operationId: string, ports: StargateNativeExecutionPorts,
   journal: StargateNativeJournal): Promise<StargateNativeOperation> {
-  return await journal.withLock(operationId, async () => await executeLocked(operationId, ports, journal));
+  const initial = await journal.load(operationId); if (initial === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
+  return await journal.withOwnerChainLock(initial.owner, SOURCE_CHAIN, async () =>
+    await journal.withLock(operationId, async () => await executeLocked(operationId, ports, journal)));
 }
 
 async function executeLocked(operationId: string, ports: StargateNativeExecutionPorts,
@@ -296,7 +302,8 @@ async function observeOnly(input: StargateNativeOperation, ports: StargateNative
   const destination = await ports.observeDestination({ sourceTransactionHash: source.transactionHash, guid: source.guid,
     recipient: operation.recipient, sourceEid: SOURCE_EID,
     destinationPool: DESTINATION_POOL, minimumAmountAtomic: source.amountReceivedAtomic,
-    balanceBeforeAtomic: operation.destinationBalanceBeforeAtomic, fromBlockNumberAtomic: operation.destinationBalanceBlock.numberAtomic });
+    balanceBeforeAtomic: operation.destinationBalanceBeforeAtomic, fromBlockNumberAtomic: operation.destinationBalanceBlock.numberAtomic,
+    fromBlockHash: operation.destinationBalanceBlock.hash });
   if (destination === null) {
     if (operation.sourceReceipt === undefined) {
       const transitions = operation.phase === "submitted" ? operation.transitions : [...operation.transitions,

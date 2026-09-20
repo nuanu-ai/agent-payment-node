@@ -355,3 +355,111 @@ export declare const STARGATE_SEND_ABI: readonly [{
         readonly indexed: false;
     }];
 }];
+/** Minimal ERC-20 surface used by the token lane. */
+export declare const STARGATE_ERC20_ABI: readonly [{
+    readonly type: "function";
+    readonly name: "allowance";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "owner";
+    }, {
+        readonly type: "address";
+        readonly name: "spender";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "uint256";
+    }];
+}, {
+    readonly type: "function";
+    readonly name: "balanceOf";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "account";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "uint256";
+    }];
+}, {
+    readonly type: "function";
+    readonly name: "approve";
+    readonly stateMutability: "nonpayable";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "spender";
+    }, {
+        readonly type: "uint256";
+        readonly name: "amount";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "bool";
+    }];
+}];
+/** Executor DstConfig getter pinned to LayerZero-v2 Executor.sol. */
+export declare const LAYERZERO_EXECUTOR_ABI: readonly [{
+    readonly type: "function";
+    readonly name: "dstConfig";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "uint32";
+        readonly name: "dstEid";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "uint64";
+        readonly name: "lzReceiveBaseGas";
+    }, {
+        readonly type: "uint16";
+        readonly name: "multiplierBps";
+    }, {
+        readonly type: "uint128";
+        readonly name: "floorMarginUSD";
+    }, {
+        readonly type: "uint128";
+        readonly name: "nativeCap";
+    }, {
+        readonly type: "uint64";
+        readonly name: "lzComposeBaseGas";
+    }];
+}, {
+    readonly type: "event";
+    readonly name: "NativeDropApplied";
+    readonly inputs: readonly [{
+        readonly name: "origin";
+        readonly type: "tuple";
+        readonly indexed: false;
+        readonly components: readonly [{
+            readonly name: "srcEid";
+            readonly type: "uint32";
+        }, {
+            readonly name: "sender";
+            readonly type: "bytes32";
+        }, {
+            readonly name: "nonce";
+            readonly type: "uint64";
+        }];
+    }, {
+        readonly name: "dstEid";
+        readonly type: "uint32";
+        readonly indexed: false;
+    }, {
+        readonly name: "oapp";
+        readonly type: "address";
+        readonly indexed: false;
+    }, {
+        readonly name: "params";
+        readonly type: "tuple[]";
+        readonly indexed: false;
+        readonly components: readonly [{
+            readonly name: "receiver";
+            readonly type: "address";
+        }, {
+            readonly name: "amount";
+            readonly type: "uint256";
+        }];
+    }, {
+        readonly name: "success";
+        readonly type: "bool[]";
+        readonly indexed: false;
+    }];
+}];

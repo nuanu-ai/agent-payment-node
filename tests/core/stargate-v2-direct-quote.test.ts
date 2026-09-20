@@ -53,7 +53,8 @@ test("official ABI fixture records only view quotes and finite source versions",
   assert.ok(recorded.abi.every((x) => x.type === "function" && x.stateMutability === "view"));
   assert.deepEqual(recorded.sources.flatMap((x) => x.commit ?? []), [
     "ce598b8d16472cd76ee47d30b8a40bc5c1b667bb", "7c800d680072ae6cc50edf95711fa601974a4a70",
-    "ce598b8d16472cd76ee47d30b8a40bc5c1b667bb",
+    "ce598b8d16472cd76ee47d30b8a40bc5c1b667bb", "9c741e7f9790639537b1710a203bcdfd73b0b9ac",
+    "7c800d680072ae6cc50edf95711fa601974a4a70",
   ]);
   assert.deepEqual(recorded.blockers.map((x) => [x.chainId, x.asset]), [
     [137, "POL"], [56, "BNB"], [43114, "AVAX"], [130, "USDC"], [59144, "ETH"], [59144, "USDC"],

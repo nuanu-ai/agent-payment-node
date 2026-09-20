@@ -67,6 +67,10 @@ export class FileStargateNativeJournal {
         await this.locks.initialize();
         return await this.locks.withLocks([`stargate-native:${id}`], work, { waitMs: 30_000 });
     }
+    async withOwnerChainLock(owner, chainId, work) {
+        await this.locks.initialize();
+        return await this.locks.withLocks([`stargate-source:${chainId}:${address(owner).toLowerCase()}`], work, { waitMs: 30_000 });
+    }
     async load(id) {
         try {
             const path = this.path(id);
@@ -225,7 +229,10 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
     return operation;
 }
 export async function executeStargateV2NativeEth(operationId, ports, journal) {
-    return await journal.withLock(operationId, async () => await executeLocked(operationId, ports, journal));
+    const initial = await journal.load(operationId);
+    if (initial === null)
+        fail("APN_OPERATION_BLOCKED", "operation_missing");
+    return await journal.withOwnerChainLock(initial.owner, SOURCE_CHAIN, async () => await journal.withLock(operationId, async () => await executeLocked(operationId, ports, journal)));
 }
 async function executeLocked(operationId, ports, journal) {
     let operation = await journal.load(operationId);
@@ -302,7 +309,8 @@ async function observeOnly(input, ports, journal) {
     const destination = await ports.observeDestination({ sourceTransactionHash: source.transactionHash, guid: source.guid,
         recipient: operation.recipient, sourceEid: SOURCE_EID,
         destinationPool: DESTINATION_POOL, minimumAmountAtomic: source.amountReceivedAtomic,
-        balanceBeforeAtomic: operation.destinationBalanceBeforeAtomic, fromBlockNumberAtomic: operation.destinationBalanceBlock.numberAtomic });
+        balanceBeforeAtomic: operation.destinationBalanceBeforeAtomic, fromBlockNumberAtomic: operation.destinationBalanceBlock.numberAtomic,
+        fromBlockHash: operation.destinationBalanceBlock.hash });
     if (destination === null) {
         if (operation.sourceReceipt === undefined) {
             const transitions = operation.phase === "submitted" ? operation.transitions : [...operation.transitions,
@@ -433,6 +441,8 @@ async function verifySignedEnvelope(raw, operation) {
         fail("APN_RPC_PROTOCOL", "signed_transaction_signer");
     if (tx.chainId !== e.chainId)
         fail("APN_RPC_PROTOCOL", "signed_transaction_chain");
+    if (tx.type !== "eip1559")
+        fail("APN_RPC_PROTOCOL", "signed_transaction_type");
     if (tx.to?.toLowerCase() !== e.to.toLowerCase())
         fail("APN_RPC_PROTOCOL", "signed_transaction_to");
     if ((tx.data ?? "0x").toLowerCase() !== e.data.toLowerCase())
@@ -445,7 +455,10 @@ async function verifySignedEnvelope(raw, operation) {
         fail("APN_RPC_PROTOCOL", "signed_transaction_gas");
     if (tx.maxFeePerGas !== BigInt(e.maxFeePerGasAtomic))
         fail("APN_RPC_PROTOCOL", "signed_transaction_max_fee");
-    if (tx.maxPriorityFeePerGas !== BigInt(e.maxPriorityFeePerGasAtomic))
+    const expectedPriorityFee = BigInt(e.maxPriorityFeePerGasAtomic);
+    if (tx.maxPriorityFeePerGas === undefined
+        ? expectedPriorityFee !== 0n
+        : tx.maxPriorityFeePerGas !== expectedPriorityFee)
         fail("APN_RPC_PROTOCOL", "signed_transaction_priority_fee");
 }
 async function requoteFinalSend(call, sendParam, tag) {

@@ -133,6 +133,9 @@ export async function confirmedStargateSourceReceipt(rpc, transactionHash) {
     const receipt = record(raw), safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false]));
     if (quantity(receipt.blockNumber) > quantity(safe.number))
         return null;
+    const canonical = record(await rpc.call("eth_getBlockByNumber", [receipt.blockNumber, false]));
+    if (hash(canonical.hash) !== hash(receipt.blockHash))
+        throw new ApnError("APN_RPC_PROTOCOL", "Stargate source receipt is not in the canonical safe chain.");
     const logs = Array.isArray(receipt.logs) ? receipt.logs.map(value => {
         const log = record(value);
         return { address: getAddress(String(log.address)),
@@ -144,10 +147,12 @@ export async function confirmedStargateSourceReceipt(rpc, transactionHash) {
 export async function observeStargateDestination(rpc, input) {
     if (input.destinationPool !== DESTINATION_POOL || input.sourceEid !== 30101)
         blocked("destination_binding");
-    const safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false])), topic = encodeEventTopics({ abi: STARGATE_SEND_ABI,
+    const safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false])), baselineTag = `0x${BigInt(input.fromBlockNumberAtomic).toString(16)}`, baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false])), topic = encodeEventTopics({ abi: STARGATE_SEND_ABI,
         eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
+    if (hash(baseline.hash) !== input.fromBlockHash)
+        throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline is no longer canonical.");
     const raw = await rpc.call("eth_getLogs", [{ address: DESTINATION_POOL,
-            fromBlock: `0x${BigInt(input.fromBlockNumberAtomic).toString(16)}`, toBlock: safe.number, topics: topic }]);
+            fromBlock: baselineTag, toBlock: safe.number, topics: topic }]);
     if (!Array.isArray(raw))
         blocked("destination_logs");
     for (const value of raw) {
@@ -156,6 +161,9 @@ export async function observeStargateDestination(rpc, input) {
             if (getAddress(String(log.address)) !== DESTINATION_POOL)
                 continue;
             const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: log.topics, data: String(log.data) });
+            const canonical = record(await rpc.call("eth_getBlockByNumber", [log.blockNumber, false]));
+            if (hash(canonical.hash) !== hash(log.blockHash))
+                continue;
             if (event.args.srcEid === input.sourceEid && event.args.guid === input.guid && getAddress(event.args.toAddress) === input.recipient &&
                 event.args.amountReceivedLD.toString() === input.minimumAmountAtomic)
                 return { mode: "oft_received", emitter: DESTINATION_POOL,

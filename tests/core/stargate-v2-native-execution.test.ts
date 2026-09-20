@@ -36,6 +36,7 @@ class MemoryJournal implements StargateNativeJournal {
     const prior = this.tail; let release!: () => void; this.tail = new Promise<void>(resolve => { release = resolve; });
     await prior; try { return await work(); } finally { release(); }
   }
+  async withOwnerChainLock<T>(_owner: `0x${string}`, _chainId: number, work: () => Promise<T>): Promise<T> { return await work(); }
 }
 
 function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint; estimateGas?: bigint } = {}) {

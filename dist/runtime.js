@@ -5,6 +5,7 @@ import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
     stargateNative;
+    stargateToken;
     portfolio;
     uniswapRuntime;
     sunswapRuntime;
@@ -52,6 +53,8 @@ export class RuntimeContext {
     constructor(dependencies) {
         if (dependencies.stargateNative !== undefined)
             this.stargateNative = dependencies.stargateNative;
+        if (dependencies.stargateToken !== undefined)
+            this.stargateToken = dependencies.stargateToken;
         if (dependencies.portfolio !== undefined)
             this.portfolio = dependencies.portfolio;
         if (dependencies.uniswapRuntime !== undefined)
