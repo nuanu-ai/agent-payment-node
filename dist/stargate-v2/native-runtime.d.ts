@@ -3,6 +3,7 @@ import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { StateStore } from "../state.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { type StargateConfirmedReceipt, type StargateNativeExecutionPorts, type StargateNativeOperation } from "./native-execution.js";
+export type StargateRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getTransactionCount" | "eth_getCode" | "eth_call" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "eth_sendRawTransaction" | "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getLogs";
 export declare class StargateJsonRpc {
     private readonly https;
     private sequence;
