@@ -1583,3 +1583,4 @@ export declare const operationSchema: z.ZodObject<{
     }, z.core.$strict>>;
     usageLease: z.ZodNullable<z.ZodUnknown>;
 }, z.core.$strict>;
+export declare const legacyBridgeOperationSchema: z.ZodType<unknown>;

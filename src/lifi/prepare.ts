@@ -16,6 +16,8 @@ import { newBridgeOperation } from "./transitions.js";
 import { bridgeExecutionDestination, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
+import type { StoredBridgeOperationRecord } from "./legacy-operation.js";
+import { isLegacyBridgeOperation } from "./legacy-operation.js";
 
 export interface BridgePreparationOptions {
   readonly state: StateStore; readonly records: BridgeOperationRepository; readonly quotes: BridgeQuoteRepository;
@@ -35,7 +37,7 @@ export class BridgePreparation {
         created_at: quote.createdAt, routes: quote.routes.map(bridgeRouteProjection), mainnet_acceptance: "open" };
     });
   }
-  async prepare(input: { readonly profile: string; readonly quote: string; readonly route: string; readonly idempotencyKey: string }): Promise<BridgeOperationRecord> {
+  async prepare(input: { readonly profile: string; readonly quote: string; readonly route: string; readonly idempotencyKey: string }): Promise<StoredBridgeOperationRecord> {
     const profile = canonicalProfile(input.profile), quoteHash = bridgeHash(input.quote, "APN_INVALID_INPUT"), routeId = bridgeOpaque(input.route, "APN_INVALID_INPUT");
     const key = canonicalIdempotencyKey(input.idempotencyKey), state = this.o.state, profileHash = state.profileHash(profile),
       operationId = state.operationId(profile, key), idempotencyHash = state.idempotencyHash(key), requestHash = hashObject({ profile, quote: quoteHash, route: routeId });
@@ -43,7 +45,8 @@ export class BridgePreparation {
       const existing = await this.o.operations.resolvePrepare({ kind: "bridge_route", profileHash, operationId, idempotencyHash, requestHash });
       if (existing !== null) {
         if (existing.kind !== "bridge_route") bridgeFailure("APN_STATE_CORRUPT", "bridge_global_operation_kind");
-        await this.o.records.repairReceipt(existing.record); return existing.record;
+        if (!isLegacyBridgeOperation(existing.record)) await this.o.records.repairReceipt(existing.record);
+        return existing.record;
       }
       const quote = await this.o.quotes.load(profileHash, quoteHash);
       if (quote === null) bridgeFailure("APN_INVALID_INPUT", "quote_not_owned_by_profile");

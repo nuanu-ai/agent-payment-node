@@ -2,7 +2,7 @@ import { hashObject, sha256 } from "../canonical.js";
 import { decodeBridgeCall } from "./decode.js";
 import { bridgeApprovalRequired, bridgeNativePrincipalWei } from "./economics.js";
 import { BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot } from "./operation-model.js";
-import { operationSchema } from "./schema.js";
+import { legacyBridgeOperationSchema, operationSchema } from "./schema.js";
 import { bridgeExecutionDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHeadroomWei, bridgeSame, bridgeUint } from "./validation.js";
 import { approvalData } from "./transaction.js";
@@ -27,13 +27,25 @@ const PHASE_EDGES = {
 };
 export function bridgeCorrupt() { return bridgeFailure("APN_STATE_CORRUPT", "durable_bridge_binding"); }
 export function validateBridgeOperation(value) {
-    if (!operationSchema.safeParse(value).success)
+    return validateBridgeOperationShape(value, false);
+}
+/** Validates the exact pre-allowlist durable shape without upgrading or rewriting it. */
+export function validateLegacyBridgeOperation(value) {
+    return validateBridgeOperationShape(value, true);
+}
+function validateBridgeOperationShape(value, legacy) {
+    if (!(legacy ? legacyBridgeOperationSchema : operationSchema).safeParse(value).success)
         bridgeCorrupt();
     const op = value;
+    // The old schema string was unfortunately reused. A timestamp ceiling prevents
+    // malformed records produced by the upgraded writer from being downgraded into
+    // the compatibility path.
+    if (legacy && op.createdAt >= "2026-09-20T11:13:44.000Z")
+        bridgeCorrupt();
     const { integrityHash, ...body } = op;
     if (integrityHash !== hashObject(body) || op.fingerprint !== hashObject(bridgeIntentBinding(op)))
         bridgeCorrupt();
-    validateIntent(op);
+    validateIntent(op, legacy);
     let previous;
     for (const entry of op.transitions) {
         const { transitionHash, ...entryBody } = entry;
@@ -42,12 +54,12 @@ export function validateBridgeOperation(value) {
         if (previous === undefined) {
             if (entry.state !== "awaiting_approval" || entry.at !== op.createdAt || entry.approval !== null ||
                 entry.effects.some((e) => e.phase !== "unsealed") || entry.sourceProof !== null || entry.destinationProof !== null ||
-                entry.providerObservation !== null || entry.failure !== null || entry.usageLease !== null || !bridgeSame(entry.destinationScan, { startBlock: op.intent.destinationStartBlock, nextBlockAtomic: op.intent.destinationStartBlock.numberAtomic, previousEndBlock: null }))
+                entry.providerObservation !== null || entry.failure !== null || (!legacy && entry.usageLease !== null) || !bridgeSame(entry.destinationScan, { startBlock: op.intent.destinationStartBlock, nextBlockAtomic: op.intent.destinationStartBlock.numberAtomic, previousEndBlock: null }))
                 bridgeCorrupt();
         }
         else
-            validateTransition(previous, entry);
-        validateSnapshot(op, entry);
+            validateTransition(previous, entry, legacy);
+        validateSnapshot(op, entry, legacy);
         previous = entry;
     }
     if (previous === undefined || previous.at !== op.updatedAt || op.terminal !== BRIDGE_TERMINAL.includes(op.state))
@@ -57,7 +69,7 @@ export function validateBridgeOperation(value) {
         bridgeCorrupt();
     return op;
 }
-function validateIntent(op) {
+function validateIntent(op, legacy) {
     const i = op.intent, m = i.materialization, r = validateBridgeRequest(m.request, "APN_STATE_CORRUPT");
     if (!bridgeExecutionDestination(r.toChainId))
         bridgeCorrupt();
@@ -68,19 +80,21 @@ function validateIntent(op) {
         i.policyHash !== hashObject({ identity: "apn.bridge.foreground-approval.v1", request: r }) ||
         op.requestHash !== hashObject({ profile: i.profile, quote: i.quoteHash, route: m.routeId }))
         bridgeCorrupt();
-    if ((r.toChainId === 59144) !== (i.allowlist !== null) || (r.toChainId === 59144 && (r.recipient !== i.owner.address || m.tool !== "across")))
-        bridgeCorrupt();
-    const allowlist = i.allowlist === null ? null : validateBridgeAllowlistBinding(i.allowlist);
-    if (allowlist !== null && (allowlist.account !== i.owner.address || allowlist.selfRecipient !== r.recipient || allowlist.chain !== `eip155:${r.fromChainId}` ||
-        allowlist.amountAtomic !== r.amountAtomic || !bridgeSame(allowlist.mechanism, LIFI_ACROSS_BRIDGE_MECHANISM)))
-        bridgeCorrupt();
-    if (op.usageLease !== null && allowlist !== null) {
-        const usageIdentity = { account: allowlist.account, chain: allowlist.chain, asset: allowlist.asset };
-        const lease = validateAssetUsageReservation(op.usageLease);
-        if (lease.state !== "reserved" || lease.rail !== "bridge" || lease.policyDigest !== allowlist.policyDigest ||
-            lease.amountAtomic !== allowlist.amountAtomic || lease.account !== allowlist.account || lease.chain !== allowlist.chain ||
-            !bridgeSame(lease.asset, allowlist.asset) || lease.reservationId !== assetUsageReservationId(usageIdentity, `apn.bridge-usage:${op.operationId}`))
+    if (!legacy) {
+        if ((r.toChainId === 59144) !== (i.allowlist !== null) || (r.toChainId === 59144 && (r.recipient !== i.owner.address || m.tool !== "across")))
             bridgeCorrupt();
+        const allowlist = i.allowlist === null ? null : validateBridgeAllowlistBinding(i.allowlist);
+        if (allowlist !== null && (allowlist.account !== i.owner.address || allowlist.selfRecipient !== r.recipient || allowlist.chain !== `eip155:${r.fromChainId}` ||
+            allowlist.amountAtomic !== r.amountAtomic || !bridgeSame(allowlist.mechanism, LIFI_ACROSS_BRIDGE_MECHANISM)))
+            bridgeCorrupt();
+        if (op.usageLease !== null && allowlist !== null) {
+            const usageIdentity = { account: allowlist.account, chain: allowlist.chain, asset: allowlist.asset };
+            const lease = validateAssetUsageReservation(op.usageLease);
+            if (lease.state !== "reserved" || lease.rail !== "bridge" || lease.policyDigest !== allowlist.policyDigest ||
+                lease.amountAtomic !== allowlist.amountAtomic || lease.account !== allowlist.account || lease.chain !== allowlist.chain ||
+                !bridgeSame(lease.asset, allowlist.asset) || lease.reservationId !== assetUsageReservationId(usageIdentity, `apn.bridge-usage:${op.operationId}`))
+                bridgeCorrupt();
+        }
     }
     try {
         if (!bridgeSame(decodeBridgeCall(m), i.decoded))
@@ -166,7 +180,7 @@ export function validateEnvelopeProof(p, e, hash) {
         BigInt(p.feeEvidence.arbitrumPosterGasAtomic) > BigInt(p.gasUsedAtomic) : p.feeEvidence.arbitrumPosterGasAtomic !== null))
         bridgeCorrupt();
 }
-function validateSnapshot(op, s) {
+function validateSnapshot(op, s, legacy) {
     if (s.effects.length !== op.effects.length)
         bridgeCorrupt();
     s.effects.forEach((effect, index) => validateEffect(effect, op.effects[index].envelope, s.at));
@@ -175,12 +189,14 @@ function validateSnapshot(op, s) {
         bridgeCorrupt();
     if (s.approval === null && s.effects.some((e) => e.phase !== "unsealed"))
         bridgeCorrupt();
-    if (op.intent.allowlist !== null && (s.approval === null) !== (s.usageLease === null))
-        bridgeCorrupt();
-    if (op.intent.allowlist === null && s.usageLease !== null)
-        bridgeCorrupt();
-    if (s.usageLease !== null && !bridgeSame(s.usageLease, op.usageLease))
-        bridgeCorrupt();
+    if (!legacy) {
+        if (op.intent.allowlist !== null && (s.approval === null) !== (s.usageLease === null))
+            bridgeCorrupt();
+        if (op.intent.allowlist === null && s.usageLease !== null)
+            bridgeCorrupt();
+        if (s.usageLease !== null && !bridgeSame(s.usageLease, op.usageLease))
+            bridgeCorrupt();
+    }
     if (s.state === "awaiting_approval" && s.approval !== null)
         bridgeCorrupt();
     if (s.state !== "awaiting_approval" && s.state !== "failed_before_effect" && s.approval === null)
@@ -202,7 +218,7 @@ function validateSnapshot(op, s) {
             : p.fillType !== null || p.relayerCredit !== null || p.repaymentChainIdAtomic !== null)
             bridgeCorrupt();
         const providerBoundNative = m.request.toChainId === 59144;
-        if (providerBoundNative && (s.providerObservation?.status !== "completed_observed" ||
+        if (!legacy && providerBoundNative && (s.providerObservation?.status !== "completed_observed" ||
             s.providerObservation.destinationTransactionHash !== p.transactionHash || p.nativeBalance === null || p.nativeBalance.recipient !== m.request.recipient ||
             p.nativeTransfer === null || p.nativeTransfer.transactionHash !== p.transactionHash || p.nativeTransfer.to !== m.request.recipient ||
             p.nativeTransfer.valueAtomic !== p.amountAtomic || BigInt(p.nativeBalance.deltaAtomic) < BigInt(m.request.minOutputAtomic)))
@@ -254,12 +270,12 @@ function validateEffect(e, envelope, at) {
         !bridgeSame({ ...e.safeProof, safeBlock: null }, { ...e.includedProof, safeBlock: null })))
         bridgeCorrupt();
 }
-function validateTransition(p, n) {
+function validateTransition(p, n, legacy = false) {
     if (BRIDGE_TERMINAL.includes(p.state) || (p.state !== n.state && !EDGES[p.state].includes(n.state)) || n.at < p.at)
         bridgeCorrupt();
     if (p.approval !== null && !bridgeSame(p.approval, n.approval))
         bridgeCorrupt();
-    if (p.usageLease !== null && !bridgeSame(p.usageLease, n.usageLease))
+    if (!legacy && p.usageLease !== null && !bridgeSame(p.usageLease, n.usageLease))
         bridgeCorrupt();
     if (p.effects.length !== n.effects.length)
         bridgeCorrupt();

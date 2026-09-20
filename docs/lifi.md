@@ -434,13 +434,12 @@ needs a listed USDT destination on an admitted chain.
 
 ## Allowlist gate for the bridge rail
 
-The frozen list now bounds which identities the bridge registry may admit. The
-owner allowlist policy (`docs/allowlist-policy.md`, rail `bridge` with a
-`{ provider, reference }` mechanism pin) is **not yet enforced** by
-`bridge routes` or `bridge prepare`: the seam is `BridgePreparation.prepare` in
-`src/lifi/prepare.ts`, right after `validateBridgeRequest`, where
-`loadActiveAssetPolicyRegistry` and a usage reservation for the source leg
-would bind the operation to the policy digest. It is listed as follow-up work.
+The frozen list bounds which identities the bridge registry may admit. Native
+delivery to Linea requires the owner allowlist policy
+(`docs/allowlist-policy.md`, rail `bridge`) with the exact Across mechanism pin.
+Prepare freezes the policy digest and revision; approval reserves source usage
+in the shared UTC-day ledger before signing and terminal state follows that
+reservation without reconstructing a policy from provider data.
 
 ## Recovery and proof
 
@@ -456,6 +455,18 @@ progress only under its original deadline and checks. Signing commitment is
 durable before custody is entered; a recovered commitment can load only its
 original authenticated seal. Missing committed material blocks recovery and
 never permits a replacement signature.
+
+Bridge journals written before the allowlist/usage-ledger upgrade remain
+readable through a separate, strict legacy decoder. The decoder verifies the
+original record, transition chain, intent fingerprint and receipt binding in
+their historical shapes and keeps the raw durable bytes unchanged. Public
+status marks the unavailable allowlist, usage lease and newer native-delivery
+proof fields as `legacy_unknown`; it does not manufacture null policy pins or
+ledger reservations. These records still participate in global operation ID,
+idempotency and account conflict scans. They are read-only: status and a valid
+saved receipt are available, while approve and resume fail closed, so a legacy
+record cannot acquire/release a current usage lease or sign, submit or resend
+an effect. Current journals continue to require every current schema field.
 
 APN records the first submission attempt before calling the RPC. Once that
 boundary is reached, all recovery observes the original hash without resend,
