@@ -606,6 +606,7 @@ cache: every run reads the chains.
 ```text
 apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>
 apn stargate native execute --operation <operation-id>
+apn stargate native observe --operation <operation-id>
 apn stargate native status --operation <operation-id>
 apn stargate native receipt --operation <operation-id>
 apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>]

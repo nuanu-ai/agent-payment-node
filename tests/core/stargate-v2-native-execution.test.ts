@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
   decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, getAddress, keccak256, parseAbiParameters,
@@ -7,9 +11,10 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_OFT_OUTPUT, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
 import {
-  executeStargateV2NativeEth, prepareStargateV2NativeEth, stargateV2NativeCanonicalReceipt, type StargateNativeExecutionPorts,
+  executeStargateV2NativeEth, FileStargateNativeJournal, prepareStargateV2NativeEth, stargateV2NativeCanonicalReceipt, type StargateNativeExecutionPorts,
   type StargateNativeJournal, type StargateNativeOperation,
 } from "../../src/stargate-v2/native-execution.js";
+import { StateStore } from "../../src/state.js";
 
 const PRIVATE_KEY = `0x${"11".repeat(32)}` as Hex;
 const OWNER = privateKeyToAccount(PRIVATE_KEY).address;
@@ -33,7 +38,7 @@ class MemoryJournal implements StargateNativeJournal {
   }
 }
 
-function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint } = {}) {
+function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint; estimateGas?: bigint } = {}) {
   let quoteRound = 0;
   const methods: string[] = [];
   const call: StargateNativeExecutionPorts["sourceCall"] = async (method, params) => {
@@ -43,6 +48,7 @@ function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint } = {})
     if (method === "eth_getCode") return options.code ?? "0x60016000";
     if (method === "eth_getBalance") return "0x1fffffffffffff";
     if (method === "eth_getTransactionCount") return "0x7";
+    if (method === "eth_estimateGas") return `0x${(options.estimateGas ?? 90_000n).toString(16)}`;
     if (method !== "eth_call") throw new Error(`unexpected ${method}`);
     const data = (params[0] as { data: Hex }).data;
     try {
@@ -92,7 +98,7 @@ function sourceReceipt(hash: Hex, owner = OWNER, received = AMOUNT) {
     logs: [{ address: SOURCE, topics, data }] };
 }
 
-function setup(options: { code?: Hex; fee?: bigint; freshFee?: bigint; sendError?: boolean; destination?: "event" | "pending" } = {}) {
+function setup(options: { code?: Hex; fee?: bigint; freshFee?: bigint; estimateGas?: bigint; sendError?: boolean; destination?: "event" | "pending" } = {}) {
   const q = quoteRpc(options), journal = new MemoryJournal(); let sends = 0, signs = 0, approvals = 0, envelope: StargateNativeOperation["envelope"] | undefined;
   const account = privateKeyToAccount(PRIVATE_KEY);
   const ports: StargateNativeExecutionPorts = {
@@ -272,4 +278,49 @@ test("changed signer identity immediately before signing refuses without attempt
     (error: any) => error.code === "APN_REPREPARE_REQUIRED" && error.details.reason === "signer_identity_changed");
   assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 });
   assert.equal((await s.journal.load(prepared.operationId))?.phase, "approved");
+});
+
+test("fresh exact-call gas estimate cannot exceed the frozen gas limit", async () => {
+  const s = setup({ estimateGas: 100_001n }), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-gas-growth" }), s.ports, s.journal);
+  await assert.rejects(() => executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_REPREPARE_REQUIRED" && error.details.reason === "source_gas_limit");
+  assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 });
+});
+
+test("production file journal advisory lock permits exactly one concurrent broadcast", async (t) => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), "apn-stargate-file-journal-")); t.after(async () => await rm(root, { recursive: true, force: true }));
+  const state = new StateStore(root); await state.initialize();
+  const journal = new FileStargateNativeJournal(root, state), s = setup();
+  const prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-file-concurrent" }), s.ports, s.journal);
+  await journal.save(prepared);
+  const results = await Promise.allSettled([
+    executeStargateV2NativeEth(prepared.operationId, s.ports, journal),
+    executeStargateV2NativeEth(prepared.operationId, s.ports, journal),
+  ]);
+  assert.equal(results.filter(result => result.status === "fulfilled" && result.value.phase === "observed").length, 2);
+  assert.deepEqual(s.counts(), { sends: 1, signs: 1, approvals: 1 });
+  assert.equal((await journal.load(prepared.operationId))?.phase, "observed");
+});
+
+test("production file journal lock is released by process crash while its stable lock file remains", async (t) => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), "apn-stargate-crash-lock-")); t.after(async () => await rm(root, { recursive: true, force: true }));
+  const journal = new FileStargateNativeJournal(root), id = "a".repeat(64);
+  const moduleUrl = new URL("../../src/stargate-v2/native-execution.js", import.meta.url).href;
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", `
+    import { FileStargateNativeJournal } from ${JSON.stringify(moduleUrl)};
+    const journal = new FileStargateNativeJournal(${JSON.stringify(root)});
+    await journal.withLock(${JSON.stringify(id)}, async () => { process.stdout.write("locked\\n"); setInterval(() => {}, 60_000); await new Promise(() => {}); });
+  `], { stdio: ["ignore", "pipe", "inherit"] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  await new Promise<void>((resolve, reject) => { child.stdout!.once("data", () => resolve()); child.once("error", reject);
+    child.once("exit", code => reject(new Error(`lock holder exited before ready: ${code}`))); });
+  await assert.rejects(journal.withLock(id, async () => undefined), (error: any) => error.code === "APN_STATE_BUSY");
+  child.kill("SIGKILL"); await new Promise<void>(resolve => child.once("exit", () => resolve()));
+  await journal.withLock(id, async () => undefined);
+});
+
+test("production file journal absent-record load is a true local read without directory creation", async (t) => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), "apn-stargate-local-read-")); t.after(async () => await rm(root, { recursive: true, force: true }));
+  const journal = new FileStargateNativeJournal(root); assert.equal(await journal.load("c".repeat(64)), null);
+  await assert.rejects(lstat(join(root, "stargate-v2-native")), (error: any) => error.code === "ENOENT");
 });

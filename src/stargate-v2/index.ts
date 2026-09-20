@@ -8,4 +8,4 @@ export { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNat
 export type { StargateDestinationEvidence, StargateNativeExecutionPorts, StargateNativeJournal, StargateNativeOperation,
   StargateNativePreparationRequest, StargateSourceReceipt, StargateNativeCanonicalReceipt } from "./native-execution.js";
 export { TtyStargateNativeApproval } from "./native-tty.js";
-export { StargateJsonRpc, StargateNativeService } from "./native-runtime.js";
+export { StargateJsonRpc, StargateNativeService, confirmedStargateSourceReceipt, observeStargateDestination } from "./native-runtime.js";

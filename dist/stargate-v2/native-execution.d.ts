@@ -2,7 +2,7 @@ import { type Hex } from "viem";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { Address } from "../model.js";
-import type { StateStore } from "../state.js";
+import { StateStore } from "../state.js";
 import { type StargateV2QuoteEvidence } from "./quote.js";
 export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality";
 export interface StargateNativeTransition {
@@ -163,7 +163,8 @@ export interface StargateNativeJournal {
 }
 export declare class FileStargateNativeJournal implements StargateNativeJournal {
     private readonly root;
-    constructor(root: string);
+    private readonly locks;
+    constructor(root: string, locks?: Pick<StateStore, "initialize" | "withLocks">);
     private path;
     withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
     load(id: string): Promise<StargateNativeOperation | null>;

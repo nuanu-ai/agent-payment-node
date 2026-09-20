@@ -65,7 +65,7 @@ export class StargateNativeService {
             blocked("APN_ETHEREUM_RPC_URL_and_APN_UNICHAIN_RPC_URL_required");
         this.source = new StargateJsonRpc(source);
         this.destination = new StargateJsonRpc(destination);
-        this.journal = new FileStargateNativeJournal(state.root);
+        this.journal = new FileStargateNativeJournal(state.root, state);
         this.local = new LocalStargateNativeSigner(state, wrapping);
     }
     async prepare(input) {
@@ -77,12 +77,13 @@ export class StargateNativeService {
         const operation = await this.required(operationId);
         return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal);
     }
-    async status(operationId) {
+    async observe(operationId) {
         const operation = await this.required(operationId);
-        return ["submission_started", "submitted", "unknown_finality"].includes(operation.phase)
-            ? await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal)
-            : operation;
+        if (!["submission_started", "submitted", "unknown_finality"].includes(operation.phase))
+            throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate operation can be observed.");
+        return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal);
     }
+    async status(operationId) { return await this.required(operationId); }
     async receipt(operationId) { return stargateV2NativeCanonicalReceipt(await this.required(operationId)); }
     async required(id) {
         const found = await this.journal.load(id);
@@ -112,12 +113,12 @@ export class StargateNativeService {
             }, signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async (operation) => await new TtyStargateNativeApproval().approve(operation),
             sendRawTransaction: async (raw) => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw))
                 throw new Error("hash"); return returned; },
-            waitSourceReceipt: async (transactionHash) => await confirmedReceipt(source, transactionHash),
-            observeDestination: async (input) => await observeDestination(destination, input), now: this.now,
+            waitSourceReceipt: async (transactionHash) => await confirmedStargateSourceReceipt(source, transactionHash),
+            observeDestination: async (input) => await observeStargateDestination(destination, input), now: this.now,
         };
     }
 }
-async function confirmedReceipt(rpc, transactionHash) {
+export async function confirmedStargateSourceReceipt(rpc, transactionHash) {
     const raw = await rpc.call("eth_getTransactionReceipt", [transactionHash]);
     if (raw === null)
         return null;
@@ -132,7 +133,9 @@ async function confirmedReceipt(rpc, transactionHash) {
     return { transactionHash: hash(receipt.transactionHash), status: quantity(receipt.status) === 1n ? "success" : "reverted",
         blockNumberAtomic: quantity(receipt.blockNumber).toString(), blockHash: hash(receipt.blockHash), finality: "safe", logs };
 }
-async function observeDestination(rpc, input) {
+export async function observeStargateDestination(rpc, input) {
+    if (input.destinationPool !== DESTINATION_POOL || input.sourceEid !== 30101)
+        blocked("destination_binding");
     const safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false])), topic = encodeEventTopics({ abi: STARGATE_SEND_ABI,
         eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
     const raw = await rpc.call("eth_getLogs", [{ address: DESTINATION_POOL,
@@ -142,6 +145,8 @@ async function observeDestination(rpc, input) {
     for (const value of raw) {
         const log = record(value);
         try {
+            if (getAddress(String(log.address)) !== DESTINATION_POOL)
+                continue;
             const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: log.topics, data: String(log.data) });
             if (event.args.srcEid === input.sourceEid && event.args.guid === input.guid && getAddress(event.args.toAddress) === input.recipient &&
                 event.args.amountReceivedLD.toString() === input.minimumAmountAtomic)

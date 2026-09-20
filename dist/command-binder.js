@@ -56,6 +56,7 @@ function bindParsedCatalog(parsed) {
                     amountAtomic: value(options, "--amount-atomic"), maxNativeDebitAtomic: value(options, "--max-native-debit-atomic"),
                     idempotencyKey: value(options, "--idempotency-key") } };
             case "stargate native execute": return { request: { command: "stargate.native.execute", operationId: value(options, "--operation") } };
+            case "stargate native observe": return { request: { command: "stargate.native.observe", operationId: value(options, "--operation") } };
             case "stargate native status": return { request: { command: "stargate.native.status", operationId: value(options, "--operation") } };
             case "stargate native receipt": return { request: { command: "stargate.native.receipt", operationId: value(options, "--operation") } };
             default: throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported Stargate native command.");
