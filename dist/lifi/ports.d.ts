@@ -3,6 +3,7 @@ import type { EvmFeeQuote } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import type { FeeEstimate } from "../ports.js";
 import type { BridgeOperationRecord } from "./operation-model.js";
+import type { BnbCompositeCall } from "./bnb-composite.js";
 import type { BridgeAccountSnapshot, BridgeBlock, BridgeDeploymentIdentity, BridgeEnvelope, BridgeOwner, BridgeProtocolReceipt, BridgeProviderObservation, BridgeRouteRequest, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 export interface LifiResponse {
     readonly status: number;
@@ -33,7 +34,12 @@ export interface BridgeRpcPort {
     observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{
         recipient: Address;
         from: Address;
-        amountAtomic: string;
+        amountAtomic?: string;
+        minimumAmountAtomic?: string;
+        composite?: Readonly<{
+            message: Hex;
+            call: BnbCompositeCall;
+        }>;
     }>): Promise<{
         readonly transaction: BridgeTransactionProof;
         readonly receipt: BridgeProtocolReceipt;

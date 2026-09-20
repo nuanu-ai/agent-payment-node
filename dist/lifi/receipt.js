@@ -13,6 +13,8 @@ export function bridgeNextActions(op) {
 export function bridgeProofClass(op) {
     if (op.state === "completed")
         return "rpc_safe_correlated";
+    if (op.state === "destination_failed")
+        return "rpc_safe_destination_terminal";
     if (op.state === "failed_confirmed_revert" || op.state === "failed_after_approval")
         return "rpc_safe_source";
     if (op.effects.some((e) => e.submissionAttempts === 1))
@@ -63,7 +65,12 @@ function projectBridgeOperation(op, legacy) {
         route: { route_id: m.routeId, step_id: m.stepId, tool: m.tool, quote_hash: i.quoteHash,
             request_hash: m.requestHash, response_hash: m.responseHash, route_hash: m.routeHash, step_hash: m.stepHash,
             materialized_step_hash: m.materializedStepHash, transaction_digest: m.transactionDigest,
-            lifi_transaction_id: i.decoded.transactionId, included_step_identities: m.includedStepIdentities },
+            lifi_transaction_id: i.decoded.transactionId, included_step_identities: m.includedStepIdentities,
+            ...(i.decoded.composite === undefined ? {} : { composite: { kind: i.decoded.composite.kind,
+                    payload_hash: i.decoded.composite.payloadHash, message_hash: i.decoded.composite.messageHash,
+                    input_amount_atomic: i.decoded.composite.inputAmountAtomic, deadline_atomic: i.decoded.composite.deadlineAtomic,
+                    maximum_retention_bps: i.decoded.composite.maximumRetentionBps,
+                    recovery: "unswapped_WETH_is_not_native_BNB_success" } }) },
         asset: { from, to, native_principal_admitted: nativePrincipal },
         ...(legacy ? {} : { asset_bounds: assetBounds }),
         transfer: { ...m.request, sender: m.sender, quoted_output_atomic: m.quotedOutputAtomic,

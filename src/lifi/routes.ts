@@ -9,7 +9,7 @@ import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure,
   bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeSame, bridgeUint } from "./validation.js";
 
-/** Quote-shape pins only. This composite BNB lane is refused by `bridgeExecutionDestination` before any RPC or materialization. */
+/** Exact contracts for the reviewed composite BNB delivery graph. */
 const BNB_QUOTE_DELIVERY = {
   token: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8" as Address,
   handler: "0x33b255b5db44A78c34381f89f1a454bc0Ef49871" as Address,
@@ -84,7 +84,10 @@ function parseBridgeMaterialization(selected: ParsedBridgeRoute, response: LifiR
   if (response.status !== 200) bridgeFailure("APN_PROVIDER_UNAVAILABLE", "step_materialization_status");
   const step = bridgeRecord(bridgeJson(response.body, LIFI_ROUTE_RESPONSE_BYTES));
   assertStep(step, request, sender);
-  if (hashObject(stepIdentity(step)) !== selected.choice.stepIdentityHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "materialized_step_identity_changed");
+  if (hashObject(stepIdentity(step)) !== selected.choice.stepIdentityHash &&
+      !(bridgeCrossNativeConversion(request) && step.id === selected.choice.stepId && step.tool === selected.choice.tool)) {
+    bridgeFailure("APN_PROVIDER_PROTOCOL", "materialized_step_identity_changed");
+  }
   const estimate = bridgeRecord(step.estimate), tx = bridgeRecord(step.transactionRequest);
   const allowed = ["to", "from", "data", "value", "chainId", "gasLimit", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "type", "accessList", "nonce"];
   if (Object.keys(tx).some((k) => !allowed.includes(k)) || (tx.type !== undefined && tx.type !== 2 && tx.type !== "0x2") ||
@@ -122,15 +125,16 @@ export function validateRouteEconomics(m: BridgeMaterialization): string {
   const r = m.request, amount = bridgeUint(r.amountAtomic, true), output = bridgeUint(m.quotedOutputAtomic, true), minimum = bridgeUint(m.minimumOutputAtomic, true);
   const conversion = bridgeNativeDenominationConversion(r);
   if ((!conversion && (output > amount || amount - minimum > bridgeUint(r.maxRouteFeeAtomic))) || minimum > output || minimum < bridgeUint(r.minOutputAtomic, true) ||
-    (output - minimum) * 10_000n > output * BigInt(r.slippageBps)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_output_or_token_fee_limit");
-  let included = 0n; const additional = [];
+    (output - minimum) * 10_000n > output * BigInt(r.slippageBps) + 9_999n) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_output_or_token_fee_limit");
+  let included = 0n, sourceIncluded = 0n; const additional = [];
   for (const fee of m.feeCosts) {
     if (fee.included) {
       if ((fee.chainId !== r.fromChainId && fee.chainId !== r.toChainId) || fee.asset !== bridgeFeeAsset(requestAsset(r, fee.chainId))) bridgeFailure("APN_PROVIDER_PROTOCOL", "included_fee_asset");
       included += bridgeUint(fee.amountAtomic);
+      if (fee.chainId === r.fromChainId) sourceIncluded += bridgeUint(fee.amountAtomic);
     } else additional.push(fee);
   }
-  if ((conversion ? included > bridgeUint(r.maxRouteFeeAtomic) : included + output > amount)) bridgeFailure("APN_PROVIDER_PROTOCOL", "token_fee_double_count");
+  if ((conversion ? sourceIncluded > bridgeUint(r.maxRouteFeeAtomic) : included + output > amount)) bridgeFailure("APN_PROVIDER_PROTOCOL", "token_fee_double_count");
   // A native principal travels as the bridge transaction's value; an ERC-20 principal never carries value on Across.
   if (m.tool === "across" ? additional.length !== 0 || m.transaction.valueAtomic !== (bridgeNativePrincipal(r) ? r.amountAtomic : "0") :
     additional.length !== 1 || additional[0]!.chainId !== r.fromChainId || additional[0]!.asset !== "native" ||
@@ -186,11 +190,12 @@ function assertBnbEffectGraph(subs: readonly Record<string, unknown>[], request:
   assertIncludedAction(bridgeRecord(subs[0]!.action), request, request.amountAtomic, true);
   const across = bridgeRecord(subs[1]!.action), swap = bridgeRecord(subs[2]!.action);
   const from = bridgeRecord(across.fromToken), intermediate = bridgeRecord(across.toToken), swapFrom = bridgeRecord(swap.fromToken), swapTo = bridgeRecord(swap.toToken);
-  const destinationGas = bridgeUint(across.destinationGasConsumption, true), callData = bridgeHex(across.destinationCallData, 4096);
+  const destinationGas = bridgeUint(across.destinationGasConsumption, true);
+  const callData = across.destinationCallData === undefined ? null : bridgeHex(across.destinationCallData, 4096);
   if (across.fromChainId !== 1 || across.toChainId !== 56 || across.fromAmount !== bridgeAmount || bridgeAddress(from.address) !== BRIDGE_ZERO_ADDRESS ||
     from.chainId !== 1 || from.decimals !== 18 || bridgeAddress(intermediate.address) !== BNB_QUOTE_DELIVERY.token || intermediate.chainId !== 56 || intermediate.decimals !== 18 ||
     bridgeAddress(across.fromAddress) !== BRIDGE_DIAMOND || bridgeAddress(across.toAddress) !== BNB_QUOTE_DELIVERY.handler || across.slippage !== request.slippageBps / 10_000 ||
-    destinationGas > 2_000_000n || callData !== `0x${"0".repeat((callData.length - 2))}`) bridgeFailure("APN_PROVIDER_PROTOCOL", "bnb_across_action");
+    destinationGas > 2_000_000n || (callData !== null && callData !== `0x${"0".repeat((callData.length - 2))}`)) bridgeFailure("APN_PROVIDER_PROTOCOL", "bnb_across_action");
   if (swap.fromChainId !== 56 || swap.toChainId !== 56 || bridgeAddress(swapFrom.address) !== BNB_QUOTE_DELIVERY.token || swapFrom.chainId !== 56 || swapFrom.decimals !== 18 ||
     bridgeAddress(swapTo.address) !== BRIDGE_ZERO_ADDRESS || swapTo.chainId !== 56 || swapTo.decimals !== 18 || bridgeUint(swap.fromAmount, true) > bridgeUint(bridgeAmount, true) ||
     bridgeAddress(swap.fromAddress) !== bridgeAddress(swap.toAddress) || swap.slippage !== request.slippageBps / 10_000) bridgeFailure("APN_PROVIDER_PROTOCOL", "bnb_swap_action");

@@ -80,6 +80,10 @@ export function bridgeExpiry(m: BridgeMaterialization, decoded: DecodedBridgeCal
     if (contract.quoteTimeBufferAtomic === null || contract.fillDeadlineBufferAtomic === null) bridgeFailure("APN_PROVIDER_PROTOCOL", "across_time_contract");
     assertProtocolTime(m, decoded, account);
     for (const candidate of [(BigInt(p.quoteTimestamp) + BigInt(contract.quoteTimeBufferAtomic)) * 1000n, BigInt(p.fillDeadline) * 1000n]) if (candidate < expires) expires = candidate;
+    if (decoded.composite !== undefined) {
+      const flyDeadline = BigInt(decoded.composite.deadlineAtomic) * 1000n;
+      if (flyDeadline < expires) expires = flyDeadline;
+    }
   }
   if (expires > BigInt(Number.MAX_SAFE_INTEGER) || expires - BigInt(now) < BigInt(BRIDGE_MIN_REMAINING_MS)) bridgeFailure("APN_REPREPARE_REQUIRED", "bridge_validity_remaining");
   return new Date(Number(expires)).toISOString();
@@ -90,6 +94,9 @@ function assertProtocolTime(m: BridgeMaterialization, decoded: DecodedBridgeCall
   if (contract.quoteTimeBufferAtomic === null || contract.fillDeadlineBufferAtomic === null ||
     BigInt(p.quoteTimestamp) > now || now - BigInt(p.quoteTimestamp) > BigInt(contract.quoteTimeBufferAtomic) ||
     now >= BigInt(p.fillDeadline) || BigInt(p.fillDeadline) > now + BigInt(contract.fillDeadlineBufferAtomic)) bridgeFailure("APN_REPREPARE_REQUIRED", "across_protocol_validity");
+  if (decoded.composite !== undefined && (now >= BigInt(decoded.composite.deadlineAtomic) || BigInt(decoded.composite.deadlineAtomic) > BigInt(p.fillDeadline))) {
+    bridgeFailure("APN_REPREPARE_REQUIRED", "fly_deadline_validity");
+  }
 }
 export function assertBridgeRemaining(op: BridgeOperationRecord, now: number): void {
   if (Date.parse(op.intent.expiresAt) - now < BRIDGE_MIN_REMAINING_MS) bridgeFailure("APN_REPREPARE_REQUIRED", "bridge_validity_remaining");

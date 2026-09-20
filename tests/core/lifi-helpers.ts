@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { decodeFunctionData, encodeFunctionData, getAddress, keccak256, parseTransaction } from "viem";
+import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeFunctionData, getAddress, keccak256, parseAbiParameters, parseTransaction } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { ApnCore } from "../../src/core.js";
 import { hashObject, sha256 } from "../../src/canonical.js";
@@ -19,7 +19,8 @@ import type { BridgeApprovalPort, BridgeRpcPort, LifiProviderPort } from "../../
 import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { BRIDGE_FEE_RULE_HASH } from "../../src/lifi/rpc-fees.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
-import { addressWord, makeDestinationReceipt, makeSourceReceipt } from "./lifi-event-fixtures.js";
+import { addressWord, eventLog, makeDestinationReceipt, makeSourceReceipt } from "./lifi-event-fixtures.js";
+import { BNB_COMPOSITE } from "../../src/lifi/bnb-composite.js";
 import { activateDirectPolicy, WIDE_CAPS } from "./direct-allowlist-helpers.js";
 import { LIFI_ACROSS_BRIDGE_MECHANISM } from "../../src/lifi/allowlist.js";
 
@@ -38,7 +39,20 @@ export class LifiApproval implements BridgeApprovalPort {
   accepted = true;
   async confirm(input: Parameters<BridgeApprovalPort["confirm"]>[0]) { this.calls.push(input); return this.accepted; }
 }
-export async function lifiSteps(pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad", now: Date): Promise<LifiJson[]> {
+export async function lifiSteps(pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad" | "eth-bnb", now: Date): Promise<LifiJson[]> {
+  if (pair === "eth-bnb") {
+    const capture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", "bnb-composite-fly-20260921.json"), "utf8")) as LifiJson;
+    const step = structuredClone(capture.materializationResponse), decoded = decodeFunctionData({ abi: acrossBridgeAbi, data: step.transactionRequest.data });
+    const args = structuredClone(decoded.args) as unknown as any[], messageType = parseAbiParameters("bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address");
+    const message = decodeAbiParameters(messageType, args[2].message);
+    args[0].receiver = LIFI_SYNTHETIC_SENDER; args[2].refundAddress = addressWord(LIFI_SYNTHETIC_SENDER);
+    args[2].message = encodeAbiParameters(messageType, [message[0], message[1], LIFI_SYNTHETIC_SENDER]);
+    args[2].quoteTimestamp = Math.floor(now.getTime() / 1000) - 10; args[2].fillDeadline = Math.floor(now.getTime() / 1000) + 300;
+    step.action.fromAddress = LIFI_SYNTHETIC_SENDER; step.action.toAddress = LIFI_SYNTHETIC_SENDER;
+    step.transactionRequest.from = LIFI_SYNTHETIC_SENDER;
+    step.transactionRequest.data = encodeFunctionData({ abi: acrossBridgeAbi, functionName: decoded.functionName, args: args as never });
+    return [step];
+  }
   if (pair === "eth-linea" || pair === "eth-monad") {
     const capture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", "lifi-ethereum-linea-native-across-20260920.json"), "utf8")) as LifiJson;
     const step = structuredClone(capture.stepResponse);
@@ -111,6 +125,7 @@ export class LifiTestRpc implements BridgeRpcPort {
   native = 1_000_000_000_000_000_000n; balance = 100_000_000n;
   safeApproval = true; safeBridge = true; destinationAvailable = true; destinationSafe = true;
   destinationFillType: 0 | 1 | 2 = 0;
+  destinationCompositeOutcome: "completed_native" | "recovered_weth" | "below_floor" | "protocol_mismatch" = "completed_native";
   missingHashes = new Set<Hex>(); reverted = new Set<"approval" | "bridge">();
   sendTimeout = false; returnedHash: Hex | undefined; estimateGas = "300000"; gasPrice = "2000000000";
   drift = false; failObserve = false; failAccount = false; changedBlock = false; scanStart: string | undefined;
@@ -155,21 +170,33 @@ export class LifiTestRpc implements BridgeRpcPort {
     if (this.sendTimeout) throw new Error("synthetic timeout after acceptance");
     return this.returnedHash ?? keccak256(raw);
   }
-  async observe(hash: Hex, expected?: BridgeEnvelope, _nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic: string }>) {
+  async observe(hash: Hex, expected?: BridgeEnvelope, _nativeDelivery?: Parameters<BridgeRpcPort["observe"]>[2]) {
     this.calls.push("observe"); if (this.failObserve) throw new Error("synthetic observation unavailable");
     if (this.missingHashes.has(hash) || this.op === undefined) return null;
     const op = this.op, d = op.intent.decoded;
     if (expected === undefined) {
       if (!this.destinationAvailable || hash !== LIFI_DESTINATION_HASH) return null;
       const sourceReceipt = makeSourceReceipt(d), source = bridgeSourceProof(op.intent.materialization, d, sourceReceipt),
-        generated = makeDestinationReceipt(d, source, this.destinationFillType), destinationBlock = await this.block("2000"),
-        receipt = { ...generated, transactionHash: hash, blockNumberAtomic: "2000", blockHash: destinationBlock.hash,
+        generated = makeDestinationReceipt(d, source, this.destinationFillType), destinationBlock = await this.block("2000");
+      let shaped = generated;
+      if (d.composite !== undefined && this.destinationCompositeOutcome !== "completed_native") {
+        const outcome = this.destinationCompositeOutcome, amount = outcome === "below_floor" ? (BigInt(d.minimumOutputAtomic) - 1n).toString() : "0";
+        shaped = { ...generated,
+          logs: outcome === "recovered_weth" ? [...generated.logs, eventLog(BNB_COMPOSITE.weth, "Transfer", {
+            from: BNB_COMPOSITE.receiver, to: d.recipient, value: BigInt(d.composite.inputAmountAtomic),
+          })] : generated.logs,
+          nativeBalance: { ...generated.nativeBalance!, afterBalanceAtomic: (100n + BigInt(amount)).toString(), deltaAtomic: amount },
+          compositeTrace: { ...generated.compositeTrace!, outcome, deliveredAmountAtomic: amount,
+            vaultOutputAtomic: outcome === "below_floor" ? amount : null, retainedAmountAtomic: "0" } };
+      }
+      const receipt = { ...shaped, transactionHash: hash, blockNumberAtomic: "2000", blockHash: destinationBlock.hash,
           ...(generated.nativeTransfer === undefined || generated.nativeTransfer === null ? {} : { nativeTransfer: {
             ...generated.nativeTransfer, transactionHash: hash,
           } }),
           ...(generated.nativeBalance === undefined || generated.nativeBalance === null ? {} : { nativeBalance: {
-            ...generated.nativeBalance, beforeBlock: { ...generated.nativeBalance.beforeBlock, numberAtomic: "1999" }, afterBlock: destinationBlock,
-          } }) };
+            ...shaped.nativeBalance!, beforeBlock: { ...shaped.nativeBalance!.beforeBlock, numberAtomic: "1999" }, afterBlock: destinationBlock,
+          } }),
+          ...(shaped.compositeTrace === undefined || shaped.compositeTrace === null ? {} : { compositeTrace: { ...shaped.compositeTrace, transactionHash: hash } }) };
       const tx = await this.proof(hash, op.effects.at(-1)!.envelope, this.destinationSafe, receipt.logs, "success", true);
       return { transaction: tx, receipt };
     }
@@ -200,12 +227,12 @@ export class LifiTestRpc implements BridgeRpcPort {
           blockHash: block.hash, requireCanonical: true as const, version: "1.6.0" as const, regime: "jovian" as const, scalarAtomic: "0", constantWei: operator.toString() } : null } };
   }
 }
-export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad" = "eth-base", options: {
+export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad" | "eth-bnb" = "eth-base", options: {
   now?: Date; wrapping?: LifiWrapping; provider?: LifiTestProvider; source?: LifiTestRpc; destination?: LifiTestRpc; initializeWallet?: boolean;
   policy?: false | { readonly maximumPerTransferAtomic?: string; readonly dailyLimitAtomic?: string;
     readonly provider?: string; readonly reference?: string };
 } = {}) {
-  const now = options.now ?? new Date(pair === "eth-linea" || pair === "eth-monad" ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z"), state = new StateStore(root), profile = "lifi-local";
+  const now = options.now ?? new Date(pair === "eth-bnb" ? "2026-09-20T16:23:00.000Z" : pair === "eth-linea" || pair === "eth-monad" ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z"), state = new StateStore(root), profile = "lifi-local";
   const wrapping = options.wrapping ?? new LifiWrapping(), wallets = new EncryptedWalletStore(state, wrapping);
   await state.initialize();
   if (options.initializeWallet !== false) {
@@ -215,12 +242,16 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
       address: identity.address, createdAt: identity.createdAt, bindingHash: identity.bindingHash }));
   }
   let capturedRoutes: LifiJson | undefined;
-  if (pair === "eth-linea" && options.provider === undefined) {
-    const capture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", "lifi-ethereum-linea-native-across-20260920.json"), "utf8")) as LifiJson;
-    capturedRoutes = capture.routeResponse;
+  if ((pair === "eth-linea" || pair === "eth-bnb") && options.provider === undefined) {
+    const capture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", pair === "eth-bnb" ? "bnb-composite-fly-20260921.json" : "lifi-ethereum-linea-native-across-20260920.json"), "utf8")) as LifiJson;
+    capturedRoutes = structuredClone(capture.routeResponse);
+    if (pair === "eth-bnb") {
+      const route = capturedRoutes!.routes[0]; route.fromAddress = LIFI_SYNTHETIC_SENDER; route.toAddress = LIFI_SYNTHETIC_SENDER;
+      for (const step of route.steps) { step.action.fromAddress = LIFI_SYNTHETIC_SENDER; step.action.toAddress = LIFI_SYNTHETIC_SENDER; }
+    }
   }
   const provider = options.provider ?? new LifiTestProvider(await lifiSteps(pair, now), now, capturedRoutes), a = provider.steps[0]!.action;
-  if ((pair === "eth-linea" || pair === "eth-monad") && options.initializeWallet !== false && options.policy !== false) {
+  if ((pair === "eth-linea" || pair === "eth-monad" || pair === "eth-bnb") && options.initializeWallet !== false && options.policy !== false) {
     const caps = { maximumPerTransferAtomic: options.policy?.maximumPerTransferAtomic ?? WIDE_CAPS.maximumPerTransferAtomic,
       dailyLimitAtomic: options.policy?.dailyLimitAtomic ?? WIDE_CAPS.dailyLimitAtomic };
     await activateDirectPolicy(root, profile, { accounts: { evm: LIFI_SYNTHETIC_SENDER }, now, admissions: [{
@@ -236,7 +267,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
   const core = new ApnCore({ state, bridge: dependencies, clock: { now: () => new Date(now) } });
   const native = a.fromToken.address === BRIDGE_ZERO_ADDRESS;
   const request: BridgeRouteRequest = { fromChainId: a.fromChainId, toChainId: a.toChainId, fromToken: a.fromToken.address, toToken: a.toToken.address,
-    recipient: pair === "eth-linea" || pair === "eth-monad" ? LIFI_SYNTHETIC_SENDER : LIFI_RECIPIENT, amountAtomic: a.fromAmount, minOutputAtomic: native ? provider.steps[0]!.estimate.toAmountMin : "9000000",
+    recipient: pair === "eth-linea" || pair === "eth-monad" || pair === "eth-bnb" ? LIFI_SYNTHETIC_SENDER : LIFI_RECIPIENT, amountAtomic: a.fromAmount, minOutputAtomic: native ? provider.steps[0]!.estimate.toAmountMin : "9000000",
     maxNativeDebitWei: native ? "2000000000000000" : "20000000000000000", maxRouteFeeAtomic: native ? "100000000000000" : "1000000", slippageBps: 50 };
   const prepare = async (tool: BridgeTool = "across", key = "lifi-fixture-0001") => {
     const quotes = await core.execute({ command: "bridge.routes", profile, request }); assert.equal(quotes.ok, true, quotes.error?.message);

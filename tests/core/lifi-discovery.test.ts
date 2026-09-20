@@ -41,18 +41,19 @@ test("v1 candidate lanes retain the exact pre-Circle LI.FI rows and indexes", ()
   ]);
 });
 
-test("LI.FI all five CLI and MCP commands bind identically, without a generic RPC fallback", () => {
+test("LI.FI all six CLI and MCP commands bind identically, without a generic RPC fallback", () => {
   const argumentsByPath: Record<string, Record<string, string>> = {
     "bridge capabilities": { profile: "lifi-local" }, "bridge inventory": {}, "bridge routes": routeArgs,
     "bridge prepare": { profile: "lifi-local", quote: "a".repeat(64), route: "route-across", idempotency_key: "bridge-key-0001" },
     "bridge approve": { operation: "b".repeat(64) },
+    "operation repair-deployment": { operation: "b".repeat(64) },
   };
   for (const c of BRIDGE_COMMANDS) {
     const args = argumentsByPath[c.path.join(" ")]!;
     assert.deepEqual(bindArgv(argv([...c.path], args)), bindMcpInput(c, args));
     assert.throws(() => bindArgv(argv([...c.path], { ...args, rpc_url: "https://rpc.example" })), { code: "APN_INVALID_INPUT" });
     assert.throws(() => bindMcpInput(c, { ...args, secret: "unaccepted" }), { code: "APN_INVALID_INPUT" });
-    assert.match(renderHelp([...c.path]), /apn bridge/u);
+    assert.match(renderHelp([...c.path]), new RegExp(`apn ${c.path[0]}`, "u"));
   }
   assert.deepEqual(projectMcpTools().filter((t) => t.name.startsWith("apn_bridge_")).map((t) => t.name),
     ["apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare", "apn_bridge_approve"]);

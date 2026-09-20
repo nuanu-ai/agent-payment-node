@@ -286,7 +286,7 @@ export declare const sourceProofSchema: z.ZodObject<{
         quoteTimestamp: z.ZodString;
         fillDeadline: z.ZodString;
         exclusivityDeadline: z.ZodString;
-        message: z.ZodLiteral<"0x">;
+        message: z.ZodString;
     }, z.core.$strict>, z.ZodObject<{
         kind: z.ZodLiteral<"stargateV2">;
         guid: z.ZodString;
@@ -338,6 +338,20 @@ export declare const destinationProofSchema: z.ZodObject<{
         valueAtomic: z.ZodString;
         traceHash: z.ZodString;
     }, z.core.$strict>>;
+    compositeTrace: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        outcome: z.ZodEnum<{
+            completed_native: "completed_native";
+            recovered_weth: "recovered_weth";
+            below_floor: "below_floor";
+            protocol_mismatch: "protocol_mismatch";
+        }>;
+        transactionHash: z.ZodString;
+        inputAmountAtomic: z.ZodString;
+        vaultOutputAtomic: z.ZodNullable<z.ZodString>;
+        deliveredAmountAtomic: z.ZodString;
+        retainedAmountAtomic: z.ZodString;
+        traceHash: z.ZodString;
+    }, z.core.$strict>>>;
     safeBlock: z.ZodObject<{
         numberAtomic: z.ZodString;
         hash: z.ZodString;
@@ -442,6 +456,7 @@ export declare const stateSchema: z.ZodEnum<{
     execution_pending: "execution_pending";
     source_pending: "source_pending";
     destination_pending: "destination_pending";
+    destination_failed: "destination_failed";
     failed_after_approval: "failed_after_approval";
 }>;
 export declare const phaseSchema: z.ZodEnum<{
@@ -761,6 +776,7 @@ export declare const transitionSchema: z.ZodObject<{
         execution_pending: "execution_pending";
         source_pending: "source_pending";
         destination_pending: "destination_pending";
+        destination_failed: "destination_failed";
         failed_after_approval: "failed_after_approval";
     }>;
     approval: z.ZodNullable<z.ZodObject<{
@@ -797,7 +813,7 @@ export declare const transitionSchema: z.ZodObject<{
             quoteTimestamp: z.ZodString;
             fillDeadline: z.ZodString;
             exclusivityDeadline: z.ZodString;
-            message: z.ZodLiteral<"0x">;
+            message: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             kind: z.ZodLiteral<"stargateV2">;
             guid: z.ZodString;
@@ -849,6 +865,20 @@ export declare const transitionSchema: z.ZodObject<{
             valueAtomic: z.ZodString;
             traceHash: z.ZodString;
         }, z.core.$strict>>;
+        compositeTrace: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            outcome: z.ZodEnum<{
+                completed_native: "completed_native";
+                recovered_weth: "recovered_weth";
+                below_floor: "below_floor";
+                protocol_mismatch: "protocol_mismatch";
+            }>;
+            transactionHash: z.ZodString;
+            inputAmountAtomic: z.ZodString;
+            vaultOutputAtomic: z.ZodNullable<z.ZodString>;
+            deliveredAmountAtomic: z.ZodString;
+            retainedAmountAtomic: z.ZodString;
+            traceHash: z.ZodString;
+        }, z.core.$strict>>>;
         safeBlock: z.ZodObject<{
             numberAtomic: z.ZodString;
             hash: z.ZodString;
@@ -1383,6 +1413,7 @@ export declare const operationSchema: z.ZodObject<{
             execution_pending: "execution_pending";
             source_pending: "source_pending";
             destination_pending: "destination_pending";
+            destination_failed: "destination_failed";
             failed_after_approval: "failed_after_approval";
         }>;
         approval: z.ZodNullable<z.ZodObject<{
@@ -1419,7 +1450,7 @@ export declare const operationSchema: z.ZodObject<{
                 quoteTimestamp: z.ZodString;
                 fillDeadline: z.ZodString;
                 exclusivityDeadline: z.ZodString;
-                message: z.ZodLiteral<"0x">;
+                message: z.ZodString;
             }, z.core.$strict>, z.ZodObject<{
                 kind: z.ZodLiteral<"stargateV2">;
                 guid: z.ZodString;
@@ -1471,6 +1502,20 @@ export declare const operationSchema: z.ZodObject<{
                 valueAtomic: z.ZodString;
                 traceHash: z.ZodString;
             }, z.core.$strict>>;
+            compositeTrace: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                outcome: z.ZodEnum<{
+                    completed_native: "completed_native";
+                    recovered_weth: "recovered_weth";
+                    below_floor: "below_floor";
+                    protocol_mismatch: "protocol_mismatch";
+                }>;
+                transactionHash: z.ZodString;
+                inputAmountAtomic: z.ZodString;
+                vaultOutputAtomic: z.ZodNullable<z.ZodString>;
+                deliveredAmountAtomic: z.ZodString;
+                retainedAmountAtomic: z.ZodString;
+                traceHash: z.ZodString;
+            }, z.core.$strict>>>;
             safeBlock: z.ZodObject<{
                 numberAtomic: z.ZodString;
                 hash: z.ZodString;
@@ -1572,6 +1617,7 @@ export declare const operationSchema: z.ZodObject<{
         execution_pending: "execution_pending";
         source_pending: "source_pending";
         destination_pending: "destination_pending";
+        destination_failed: "destination_failed";
         failed_after_approval: "failed_after_approval";
     }>;
     approval: z.ZodNullable<z.ZodObject<{
@@ -1608,7 +1654,7 @@ export declare const operationSchema: z.ZodObject<{
             quoteTimestamp: z.ZodString;
             fillDeadline: z.ZodString;
             exclusivityDeadline: z.ZodString;
-            message: z.ZodLiteral<"0x">;
+            message: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             kind: z.ZodLiteral<"stargateV2">;
             guid: z.ZodString;
@@ -1660,6 +1706,20 @@ export declare const operationSchema: z.ZodObject<{
             valueAtomic: z.ZodString;
             traceHash: z.ZodString;
         }, z.core.$strict>>;
+        compositeTrace: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            outcome: z.ZodEnum<{
+                completed_native: "completed_native";
+                recovered_weth: "recovered_weth";
+                below_floor: "below_floor";
+                protocol_mismatch: "protocol_mismatch";
+            }>;
+            transactionHash: z.ZodString;
+            inputAmountAtomic: z.ZodString;
+            vaultOutputAtomic: z.ZodNullable<z.ZodString>;
+            deliveredAmountAtomic: z.ZodString;
+            retainedAmountAtomic: z.ZodString;
+            traceHash: z.ZodString;
+        }, z.core.$strict>>>;
         safeBlock: z.ZodObject<{
             numberAtomic: z.ZodString;
             hash: z.ZodString;

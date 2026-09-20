@@ -1,7 +1,8 @@
 # LI.FI EVM cross-chain assets
 
 This APN 0.5.24 package includes local-wallet route selection and execution for
-the admitted assets between Ethereum, Base and Arbitrum One. It implements
+the admitted assets between Ethereum, Base, Arbitrum One and the finite native
+destinations below. It implements
 Across V4 and Stargate V2 Taxi through the LI.FI API. Package availability,
 source tests and installed-package tests are separate from real mainnet
 acceptance, which remains **0/3**, and named human acceptance remains open.
@@ -18,6 +19,34 @@ informational: a listed chain, token or tool does not establish executable APN
 support. Solana and TRON bridge directions, Stargate Bus, Polymer and other
 bridge tools remain outside this execution profile. Direct Solana/TRON rails
 and gasless payment profiles have separate acceptance requirements.
+
+### Ethereum native to BNB native composite lane
+
+The sole admitted BNB execution graph is LI.FI fee collection followed by
+Across V4 to `ReceiverAcrossV4`, then one Fly destination swap from BSC WETH
+to native BNB. APN decodes the full destination message and compressed Fly
+program. It requires exactly the pinned WETH approval, one Balancer
+`GIVEN_IN` WETH/WBNB pool call, WBNB unwrap, Core native balance read and native
+return to the Fly router. The signed Fly header, raw payload hash, owner output
+floor, retention bound, self recipient and source debit caps are part of the
+durable operation integrity binding.
+
+Preparation refreshes the Fly signer allowlist, Fly/Core linkage and whitelist,
+Receiver Executor/SpokePool immutables, Across buffers, contract code and the
+Vault pool registration with the complete five-token list, exact order, WETH as
+the input token and WBNB as the output token. Completion requires
+the canonical Across message hash and a safe BNB transaction whose complete
+bounded callTracer subtree matches the pinned SpokePool, Receiver, Executor,
+Fly, Core, Vault, pool swap, WBNB unwrap and native-return hierarchy. The digest
+covers the entire validated subtree. Vault output must equal the unwrap amount;
+retention math must equal the Fly-to-Executor and Executor-to-self value; and the
+self balance delta must cover that delivery. Recovery of unswapped WETH,
+below-floor output, a protocol graph mismatch and unavailable evidence remain
+distinct durable outcomes across restart. Only `completed_native` completes the
+native BNB delivery.
+The retained fixture is
+`tests/core/lifi-fixtures/bnb-composite-fly-20260921.json`; it is read-only
+evidence and its expired amounts and deadlines are never used as a live quote.
 
 ### Reviewed quote-only EVM destinations
 
@@ -421,8 +450,7 @@ step-materialization request/response with SHA-256 provenance. The captured
 0.0002 ETH route is direct Across with only FeeForwarder and Across effects,
 `value = 200000000000000`, bridge amount `199500000000000`, output
 `189197517787962`, empty message and gas limit `533000`. No signature or send
-was performed. BNB remains quote-only and outside the execution destination
-set.
+was performed.
 
 The matching public RPC baseline is
 `tests/core/lifi-fixtures/deployment-linea-rpc-20260920.json`. It freezes Linea
