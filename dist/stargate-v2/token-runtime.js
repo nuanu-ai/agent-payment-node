@@ -9,7 +9,7 @@ import { ApnError } from "../errors.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "./abi.js";
 import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtime.js";
-import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "./token-execution.js";
+import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, reconcileStargateV2TokenUsage, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
 function blocked(reason) { throw new ApnError("APN_RPC_CONFIG", `Stargate token runtime unavailable: ${reason}.`, { reason }); }
 function quantity(v) { if (typeof v !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(v))
@@ -82,10 +82,15 @@ export class StargateTokenService {
     }
     async execute(id) { const op = await this.required(id); return await executeStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
     async cleanup(id) { const op = await this.required(id); return await cleanupStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
-    async observe(id) { const op = await this.required(id); if (!["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "submission_started", "submitted", "unknown_finality", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase))
+    async observe(id) { const op = await this.required(id); if (op.usageTarget !== "reserved" && !["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "submission_started", "submitted", "unknown_finality", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase))
         throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate token operation can be observed."); return await observeStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
-    async status(id) { return await this.required(id); }
-    async receipt(id) { return stargateV2TokenCanonicalReceipt(await this.required(id)); }
+    async status(id) {
+        const op = await this.required(id);
+        if (op.usageTarget === undefined)
+            return op;
+        return await reconcileStargateV2TokenUsage(id, { reserveUsage: value => this.reserveUsage(value), followUsage: (value, target) => this.followUsage(value, target) }, this.journal);
+    }
+    async receipt(id) { return stargateV2TokenCanonicalReceipt(await this.status(id)); }
     async required(id) { const op = await this.journal.load(id); if (op === null)
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Stargate token operation was not found."); return op; }
     async ports(profile, owner) {
@@ -118,30 +123,40 @@ export class StargateTokenService {
             },
             confirmPolicy: async (op) => { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile); if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision || active.accounts.evm !== op.owner || canonicalJson(op.policy.mechanism) !== canonicalJson(STARGATE_TOKEN_MECHANISM))
                 throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again."); const at = new Date(this.now()); const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:10", asset: { kind: "token", identifier: STARGATE_TOKEN_SOURCE_TOKEN }, rail: "bridge", amountAtomic: op.amountAtomic, dailyUsageAtomic: (await this.usage.usage(usageIdentity(op.owner), at)).amountAtomic, asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() }); requireMechanism(admission.asset.mechanismPins?.bridge); },
-            reserveUsage: async (op) => { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile); if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision)
-                throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again."); const at = new Date(this.now()); await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic, idempotencyKey: usageKey(op.operationId), now: at }); },
+            reserveUsage: async (op) => await this.reserveUsage(op),
             followUsage: async (op, target) => await this.followUsage(op, target),
             sendRawTransaction: async (raw) => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw))
                 throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash) => await confirmedStargateSourceReceipt(source, txHash),
             observeDestination: async (input) => await observeStargateTokenDestination(destination, input, tokenAt), now: this.now };
+    }
+    async reserveUsage(op) {
+        const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile);
+        if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision)
+            throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again.");
+        const at = new Date(this.now());
+        return (await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic,
+            idempotencyKey: usageKey(op.operationId), now: at })).state;
     }
     async followUsage(op, target) {
         const identity = usageIdentity(op.owner), reservationId = assetUsageReservationId(identity, usageKey(op.operationId));
         const current = await this.usage.load(identity, reservationId);
         if (current === null) {
             if (target === "failed_before_effect")
-                return;
+                return target;
             throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation is missing.");
         }
         if (current.state === target)
-            return;
+            return current.state;
         if (target === "submitted" && current.state === "unknown_finality")
-            return;
-        if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(current.state))
+            return current.state;
+        if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(current.state)) {
+            if (target === "submitted" || target === "unknown_finality")
+                return current.state;
             throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation reached a conflicting terminal state.");
+        }
         const outcome = ["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(target)
             ? { outcomeDigest: domainHash("apn.stargate-token-usage-outcome.v1", canonicalJson({ operationId: op.operationId, target, integrityHash: op.integrityHash })) } : {};
-        await this.usage.transition({ ...identity, reservationId, policyDigest: current.policyDigest, state: target, now: new Date(this.now()), ...outcome });
+        return (await this.usage.transition({ ...identity, reservationId, policyDigest: current.policyDigest, state: target, now: new Date(this.now()), ...outcome })).state;
     }
     remote() { if (this.source !== undefined && this.destination !== undefined)
         return { source: this.source, destination: this.destination }; const source = this.env.APN_OPTIMISM_RPC_URL, destination = this.env.APN_POLYGON_RPC_URL; if (source === undefined || destination === undefined)

@@ -21,6 +21,7 @@ export declare const STARGATE_TOKEN_MECHANISM: Readonly<{
 /** Exact OptionsBuilder.addExecutorNativeDropOption Type-3 wire encoding. */
 export declare function encodeStargateNativeDrop(amountInput: string, recipientInput: Address): Hex;
 export type StargateTokenPhase = "prepared" | "approved" | "allowance_submission_started" | "allowance_unknown_finality" | "allowance_submitted" | "allowance_observed" | "submission_started" | "unknown_finality" | "submitted" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
+export type StargateTokenUsageState = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
 export interface StargateTokenTransition {
     readonly phase: StargateTokenPhase;
     readonly at: string;
@@ -128,6 +129,9 @@ export interface StargateTokenOperation {
     readonly cleanupEnvelope?: StargateTokenEnvelope;
     readonly cleanupTransactionHash?: Hex;
     readonly cleanupReason?: string;
+    readonly usageState?: StargateTokenUsageState;
+    /** Durable desired ledger transition. Presence means the idempotent ledger call still needs reconciliation. */
+    readonly usageTarget?: StargateTokenUsageState;
     readonly integrityHash: string;
 }
 export interface StargateTokenPreparationRequest {
@@ -196,8 +200,8 @@ export interface StargateTokenExecutionPorts {
         operationId: string;
     }>) => Promise<StargateTokenPolicyBinding>;
     readonly confirmPolicy: (operation: StargateTokenOperation) => Promise<void>;
-    readonly reserveUsage: (operation: StargateTokenOperation) => Promise<void>;
-    readonly followUsage: (operation: StargateTokenOperation, state: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert") => Promise<void>;
+    readonly reserveUsage: (operation: StargateTokenOperation) => Promise<StargateTokenUsageState>;
+    readonly followUsage: (operation: StargateTokenOperation, state: Exclude<StargateTokenUsageState, "reserved">) => Promise<StargateTokenUsageState>;
     readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
     readonly waitSourceReceipt: (transactionHash: Hex) => Promise<StargateTokenConfirmedReceipt | null>;
     readonly observeDestination: (input: Readonly<{
@@ -237,6 +241,8 @@ export declare function executeStargateV2Token(id: string, ports: StargateTokenE
 export declare function observeStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
 /** Explicit foreground cleanup. Observation remains separate and never invokes this signer path. */
 export declare function cleanupStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
+/** Local ledger reconciliation for status/recovery callers; this never signs, broadcasts, or performs RPC. */
+export declare function reconcileStargateV2TokenUsage(id: string, ports: Pick<StargateTokenExecutionPorts, "reserveUsage" | "followUsage">, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
 export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOperation): Readonly<{
     evidenceHash: string;
     schemaVersion: "apn.stargate-v2-token-receipt.v1";

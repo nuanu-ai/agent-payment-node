@@ -59,6 +59,19 @@ test("token runtime rejects another bridge provider/reference pin", async (t) =>
     (error: any) => error.code === "APN_ALLOWLIST_REFUSED");
 });
 
+test("concurrent reservations serialize the shared daily cap", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date("2026-09-20T10:00:00.000Z");
+  await activateDirectPolicy(temporary.root, "owner", { accounts: { evm: OWNER }, admissions: [bridgeAdmission(STARGATE_TOKEN_MECHANISM, "150")], now });
+  const ports = await policyPorts(temporary.root, now), base = { profile: "owner", owner: OWNER, amountAtomic: "100" };
+  const binding = await ports.admitPolicy({ ...base, operationId: "1".repeat(64) });
+  const operations = ["1", "2"].map(value => ({ ...base, operationId: value.repeat(64), policy: binding, integrityHash: value.repeat(64) } as any));
+  const results = await Promise.allSettled(operations.map(operation => ports.reserveUsage(operation)));
+  assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter(result => result.status === "rejected").length, 1);
+  const ledger = new AssetUsageLedger(temporary.root), identity = { account: OWNER, chain: "eip155:10", asset: { kind: "token" as const, identifier: STARGATE_TOKEN_SOURCE_TOKEN } };
+  assert.equal((await ledger.usage(identity, now)).amountAtomic, "100");
+});
+
 function destinationRpc(mutation?: "success" | "receiver" | "amount" | "transaction" | "guid" | "baseline") {
   const oftGuid = mutation === "guid" ? (`0x${"35".repeat(32)}` as Hex) : GUID;
   const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: oftGuid, toAddress: OWNER } });

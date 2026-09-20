@@ -59,6 +59,7 @@ export declare class StargateTokenService {
     }>>;
     private required;
     private ports;
+    private reserveUsage;
     private followUsage;
     private remote;
 }

@@ -20,8 +20,11 @@ class MemoryJournal implements StargateTokenJournal { value: StargateTokenOperat
   async withOwnerChainLock<T>(_owner: `0x${string}`, _chainId: number, work: () => Promise<T>) { return await work(); }
 }
 function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: number; legacy?: boolean; bridgeRevert?: boolean;
-  residualAfterBridge?: boolean; advanceNonceOnSend?: boolean; preflightNonceDrift?: boolean; destinationMutation?: "guid"|"native"|"token" } = {}) {
+  residualAfterBridge?: boolean; advanceNonceOnSend?: boolean; preflightNonceDrift?: boolean; reserveError?: boolean; signErrorOnce?: boolean;
+  followErrorOnce?: "submitted"|"unknown_finality"|"finalized"|"failed_before_effect"|"failed_confirmed_revert";
+  destinationMutation?: "guid"|"native"|"token" } = {}) {
   let allowance = options.allowance ?? 0n, approvalConsumed = false, sends = 0, signs = 0, approvals = 0, receiptCalls = 0, nonce = 7n;
+  let usageState: "reserved"|"submitted"|"unknown_finality"|"finalized"|"failed_before_effect"|"failed_confirmed_revert" = "reserved", followFailed = false;
   const sourceCall: StargateTokenExecutionPorts["sourceCall"] = async (method, params) => {
     if (method === "eth_chainId") return "0xa";
     if (method === "eth_getBlockByNumber") return { number: "0x10", hash: BLOCK };
@@ -62,10 +65,12 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
   const journal = new MemoryJournal(); const ports: StargateTokenExecutionPorts = { sourceCall, destinationCall,
     destinationBalances: async () => ({ tokenAtomic: "500000", nativeAtomic: "1000000000000000000", blockNumberAtomic: "9", blockHash: DEST_BLOCK }),
     prepareEnvelope: async tx => ({ nonceAtomic: tx.nonceAtomic ?? "7", gasLimitAtomic: "100000", maxFeePerGasAtomic: "2", maxPriorityFeePerGasAtomic: "1", nativeBalanceAtomic: "9000000000000000000" }),
-    signer: { kind: "imported_evm_signer", address: OWNER, signTransaction: async tx => { signs++; if (options.legacy) return await ACCOUNT.signTransaction({ type: "legacy", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), gasPrice: BigInt(tx.maxFeePerGasAtomic) }); return await ACCOUNT.signTransaction({ type: "eip1559", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [] }); } },
+    signer: { kind: "imported_evm_signer", address: OWNER, signTransaction: async tx => { signs++; if (options.signErrorOnce && signs === 1) throw new Error("signing failed"); if (options.legacy) return await ACCOUNT.signTransaction({ type: "legacy", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), gasPrice: BigInt(tx.maxFeePerGasAtomic) }); return await ACCOUNT.signTransaction({ type: "eip1559", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [] }); } },
     signerIdentity: async () => ({ profile: "owner", address: OWNER }), approve: async () => { approvals++; }, approveCleanup: async () => { approvals++; },
     admitPolicy: async () => ({ policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM }), confirmPolicy: async () => {},
-    reserveUsage: async () => {}, followUsage: async () => {},
+    reserveUsage: async () => { if (options.reserveError) throw new Error("usage cap race"); usageState = "reserved"; return usageState; },
+    followUsage: async (_op, target) => { if (options.followErrorOnce === target && !followFailed) { followFailed = true; throw new Error("usage transition crash"); }
+      usageState = target; return usageState; },
     sendRawTransaction: async raw => { sends++; if (options.sendErrorAt === sends) throw new Error("timeout"); if (options.advanceNonceOnSend) nonce++; return keccak256(raw); },
     waitSourceReceipt: async tx => { receiptCalls++; if (receiptCalls === 1 && (options.allowance ?? 0n) === 0n) { allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [] }; }
       if (options.bridgeRevert && receiptCalls === 1) return { transactionHash: tx, status: "reverted", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [] };
@@ -79,7 +84,7 @@ test("Type-3 native-drop bytes and pinned contracts are exact", () => { const en
 test("prepare freezes fresh quote, cap, least approval and send envelopes", async () => { const s=setup(), op=await prepareStargateV2Token(request(),s.ports,s.journal); assert.equal(op.allowanceRequired,true); assert.equal(op.approvalEnvelope?.nonceAtomic,"7"); assert.equal(op.sendEnvelope.nonceAtomic,"8"); assert.equal(op.sendEnvelope.valueAtomic,FEE.toString()); const approval=decodeFunctionData({abi:STARGATE_ERC20_ABI,data:op.approvalEnvelope!.data}); assert.deepEqual(approval.args,[STARGATE_TOKEN_SOURCE_POOL,AMOUNT]); const send=decodeFunctionData({abi:STARGATE_SEND_ABI,data:op.sendEnvelope.data}); assert.equal(send.functionName,"sendToken"); if (send.functionName !== "sendToken") throw new Error("unexpected"); assert.equal(send.args[0].extraOptions,op.options); assert.equal(s.counts().sends,0); });
 test("zero native drop emits no options and remains cap checked", async () => { const s=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request({idempotencyKey:"token-only-route",nativeDropAtomic:"0"}),s.ports,s.journal); assert.equal(op.options,"0x"); assert.equal(op.nativeDropAtomic,"0"); });
 test("existing exact allowance skips approval while residual or cap overflow fail closed", async () => { const exact=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request(),exact.ports,exact.journal); assert.equal(op.allowanceRequired,false); assert.equal(op.approvalEnvelope,undefined); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"residual-allowance"}),setup({allowance:1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="residual_allowance_cleanup_required"); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"native-cap-over"}),setup({nativeCap:DROP-1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="native_drop_cap_exceeded"); });
-test("approval and bridge effects are separately marked, exact, observed, and canonical", async () => { const s=setup(), prepared=await prepareStargateV2Token(request(),s.ports,s.journal), observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.equal(observed.residualAllowanceAtomic,"0"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.deepEqual(s.journal.history.map(x=>x.phase),["prepared","approved","allowance_submission_started","allowance_submitted","allowance_observed","submission_started","submitted","observed"]); assert.match(stargateV2TokenCanonicalReceipt(observed).evidenceHash,/^[a-f0-9]{64}$/u); });
+test("approval and bridge effects are separately marked, exact, observed, and canonical", async () => { const s=setup(), prepared=await prepareStargateV2Token(request(),s.ports,s.journal), observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.equal(observed.residualAllowanceAtomic,"0"); assert.equal(observed.usageState,"finalized"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.deepEqual(observed.transitions.map(x=>x.phase),["prepared","approved","allowance_submission_started","allowance_submitted","allowance_observed","submission_started","submitted","observed"]); assert.match(stargateV2TokenCanonicalReceipt(observed).evidenceHash,/^[a-f0-9]{64}$/u); });
 test("ambiguous approval is durable and concurrent/repeated execute never resends", async () => { const s=setup({sendErrorAt:1}), prepared=await prepareStargateV2Token(request(),s.ports,s.journal); const [a,b]=await Promise.all([executeStargateV2Token(prepared.operationId,s.ports,s.journal),executeStargateV2Token(prepared.operationId,s.ports,s.journal)]); assert.equal(a.phase,"allowance_unknown_finality"); assert.equal(b.phase,"observed"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.equal(s.journal.history.filter(x=>x.phase==="allowance_submission_started").length,1); });
 test("observe recovers an ambiguous approval without signing or broadcasting the bridge", async () => { const s=setup({sendErrorAt:1}), prepared=await prepareStargateV2Token(request({idempotencyKey:"observe-only-approval"}),s.ports,s.journal); const unknown=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(unknown.phase,"allowance_unknown_finality"); const observed=await observeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"allowance_observed"); assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1}); });
 test("legacy/type-confused envelope is rejected before any send and requires explicit cleanup", async () => { const s=setup({allowance:AMOUNT,legacy:true}), prepared=await prepareStargateV2Token(request(),s.ports,s.journal); await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),(e:any)=>e.details?.reason==="signed_transaction_envelope"); assert.equal(s.counts().sends,0); assert.equal(s.journal.value?.phase,"cleanup_required"); });
@@ -93,7 +98,7 @@ test("confirmed bridge revert enters explicit cleanup and approve-zero reaches t
   const cleaned = await cleanupStargateV2Token(prepared.operationId, s.ports, s.journal);
   assert.equal(cleaned.phase, "cleaned"); assert.equal(cleaned.residualAllowanceAtomic, "0");
   assert.deepEqual(s.counts(), { sends: 2, signs: 2, approvals: 2 });
-  const before = s.counts(); await assert.rejects(observeStargateV2Token(prepared.operationId, s.ports, s.journal)); assert.deepEqual(s.counts(), before);
+  const before = s.counts(); assert.equal((await observeStargateV2Token(prepared.operationId, s.ports, s.journal)).phase, "cleaned"); assert.deepEqual(s.counts(), before);
 });
 
 test("bridge preflight failure after approval requires explicit cleanup without reserving, signing, or sending", async () => {
@@ -102,6 +107,51 @@ test("bridge preflight failure after approval requires explicit cleanup without 
   const required = await executeStargateV2Token(prepared.operationId, s.ports, s.journal);
   assert.equal(required.phase, "cleanup_required"); assert.equal(required.cleanupReason, "nonce_changed");
   assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 });
+});
+
+test("usage reservation cap race after approval durably requires cleanup", async () => {
+  const s = setup({ allowance: AMOUNT, reserveError: true });
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "usage-cap-race-cleanup" }), s.ports, s.journal);
+  const required = await executeStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(required.phase, "cleanup_required"); assert.equal(required.cleanupReason, "usage_reservation_failed");
+  assert.equal(required.usageState, "failed_before_effect"); assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 });
+  const cleaned = await cleanupStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(cleaned.phase, "cleaned"); assert.equal(cleaned.residualAllowanceAtomic, "0");
+});
+
+test("persisted reservation intent that loses a retry cap race still enters cleanup", async () => {
+  const s = setup({ allowance: AMOUNT, reserveError: true });
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "usage-intent-crash-race" }), s.ports, s.journal);
+  await s.journal.save({ ...prepared, phase: "approved", transitions: [...prepared.transitions, { phase: "approved", at: new Date(2_000_000_000_000).toISOString(), reason: "foreground_owner_confirmation" }], usageTarget: "reserved" } as StargateTokenOperation);
+  const required = await executeStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(required.phase, "cleanup_required"); assert.equal(required.usageState, "failed_before_effect"); assert.equal(s.counts().signs, 0);
+});
+
+test("submitted usage transition error resumes without signing or sending again", async () => {
+  const s = setup({ allowance: AMOUNT, followErrorOnce: "submitted" });
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "usage-submitted-reconcile" }), s.ports, s.journal);
+  await assert.rejects(executeStargateV2Token(prepared.operationId, s.ports, s.journal), /usage transition crash/u);
+  assert.equal(s.journal.value?.phase, "submitted"); assert.equal(s.journal.value?.usageTarget, "submitted");
+  const before = s.counts(), observed = await executeStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(observed.phase, "observed"); assert.equal(observed.usageState, "finalized"); assert.deepEqual(s.counts(), before);
+});
+
+test("finalized usage transition error resumes from observed proof without resend", async () => {
+  const s = setup({ allowance: AMOUNT, followErrorOnce: "finalized" });
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "usage-finalized-reconcile" }), s.ports, s.journal);
+  await assert.rejects(executeStargateV2Token(prepared.operationId, s.ports, s.journal), /usage transition crash/u);
+  assert.equal(s.journal.value?.phase, "observed"); assert.equal(s.journal.value?.usageTarget, "finalized");
+  const before = s.counts(), observed = await executeStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(observed.usageState, "finalized"); assert.equal(observed.usageTarget, undefined); assert.deepEqual(s.counts(), before);
+});
+
+test("signing failure usage release error is reconciled by cleanup without bridge resend", async () => {
+  const s = setup({ allowance: AMOUNT, signErrorOnce: true, followErrorOnce: "failed_before_effect" });
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "usage-signing-failure-reconcile" }), s.ports, s.journal);
+  await assert.rejects(executeStargateV2Token(prepared.operationId, s.ports, s.journal));
+  assert.equal(s.journal.value?.phase, "cleanup_required"); assert.equal(s.journal.value?.usageTarget, "failed_before_effect");
+  const sends = s.counts().sends, cleaned = await cleanupStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(cleaned.phase, "cleaned"); assert.equal(cleaned.usageState, "failed_before_effect"); assert.equal(s.counts().sends, sends + 1);
 });
 
 test("successful delivery with residual allowance cleans up before canonical completion", async () => {
