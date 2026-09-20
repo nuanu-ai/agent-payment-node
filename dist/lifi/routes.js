@@ -1,5 +1,5 @@
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
-import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeFeeAsset, bridgeNativeCoin, bridgeNativePrincipal } from "./asset-registry.js";
+import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeDestinationChain, bridgeExecutionDestination, bridgeFeeAsset, bridgeNativeCoin, bridgeNativePrincipal, bridgeQuoteDestination } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeSame, bridgeUint } from "./validation.js";
@@ -15,6 +15,12 @@ function requestAsset(request, chainId) {
 function toolGate(tool, request) {
     if (tool !== "across" && tool !== "stargateV2")
         return "finite_decoder_and_correlated_evidence_unavailable";
+    if (!bridgeExecutionDestination(request.toChainId)) {
+        const row = bridgeQuoteDestination(request.toChainId);
+        if (!row.tools.includes(tool))
+            return "destination_tool_quote_unavailable";
+        return "destination_execution_unreviewed";
+    }
     try {
         bridgeAssetTool(requestAsset(request, request.fromChainId), tool);
         bridgeAssetTool(requestAsset(request, request.toChainId), tool);
@@ -50,8 +56,16 @@ export function parseBridgeRoutes(response, request, sender) {
     return results;
 }
 export function materializeBridgeRoute(selected, response, request, sender) {
-    if (!selected.choice.preparable)
+    return parseBridgeMaterialization(selected, response, request, sender, false);
+}
+/** Decode and validate a reviewed quote-only destination without creating an operation or enabling an RPC/send path. */
+export function inspectBridgeRouteMaterialization(selected, response, request, sender) {
+    return parseBridgeMaterialization(selected, response, request, sender, true);
+}
+function parseBridgeMaterialization(selected, response, request, sender, quoteOnly) {
+    if (!selected.choice.preparable && !(quoteOnly && selected.choice.unavailableReason === "destination_execution_unreviewed")) {
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
+    }
     if (response.status !== 200)
         bridgeFailure("APN_PROVIDER_UNAVAILABLE", "step_materialization_status");
     const step = bridgeRecord(bridgeJson(response.body, LIFI_ROUTE_RESPONSE_BYTES));
@@ -175,13 +189,14 @@ function assertTuple(value, request, sender, action) {
     }
 }
 function assertIncludedAction(a, request, amount, collection) {
-    actionKeys(a);
-    assertToken(a.fromToken, request.fromChainId, request);
-    assertToken(a.toToken, collection ? request.fromChainId : request.toChainId, request);
-    if (a.fromChainId !== request.fromChainId || a.toChainId !== (collection ? request.fromChainId : request.toChainId) ||
-        a.fromAmount !== amount || bridgeAddress(a.fromAddress) !== BRIDGE_DIAMOND ||
-        bridgeAddress(a.toAddress) !== (collection ? BRIDGE_DIAMOND : request.recipient) || a.slippage !== request.slippageBps / 10_000 ||
-        (a.destinationGasConsumption !== undefined && a.destinationGasConsumption !== "0"))
+    includedActionKeys(a);
+    const { jitoBundle: _jitoBundle, integratorFees: _integratorFees, integratorId: _integratorId, ...identity } = a;
+    assertToken(identity.fromToken, request.fromChainId, request);
+    assertToken(identity.toToken, collection ? request.fromChainId : request.toChainId, request);
+    if (identity.fromChainId !== request.fromChainId || identity.toChainId !== (collection ? request.fromChainId : request.toChainId) ||
+        identity.fromAmount !== amount || bridgeAddress(identity.fromAddress) !== BRIDGE_DIAMOND ||
+        bridgeAddress(identity.toAddress) !== (collection ? BRIDGE_DIAMOND : request.recipient) || identity.slippage !== request.slippageBps / 10_000 ||
+        (identity.destinationGasConsumption !== undefined && identity.destinationGasConsumption !== "0"))
         bridgeFailure("APN_PROVIDER_PROTOCOL", "included_action_tuple");
 }
 function actionKeys(a) {
@@ -206,7 +221,7 @@ function assertToken(value, chainId, request) {
 }
 function parseFees(value, request) {
     return list(value, 16, "fee_count").map((value) => {
-        const fee = bridgeRecord(value), token = bridgeRecord(fee.token), chainId = bridgeChain(token.chainId), address = bridgeAddress(token.address);
+        const fee = bridgeRecord(value), token = bridgeRecord(fee.token), chainId = bridgeDestinationChain(token.chainId), address = bridgeAddress(token.address);
         if (typeof fee.included !== "boolean" || typeof fee.name !== "string" || fee.name.length < 1 || fee.name.length > 192 || /[\u0000-\u001f\u007f]/u.test(fee.name))
             bridgeFailure("APN_PROVIDER_PROTOCOL", "fee_semantics");
         // An included fee must be the admitted asset on one of the two route chains; anything else is the native coin.

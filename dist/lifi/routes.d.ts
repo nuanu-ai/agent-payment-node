@@ -24,6 +24,12 @@ export declare function materializeBridgeRoute(selected: ParsedBridgeRoute, resp
     readonly implicitProtocolFeeAtomic: string;
     readonly providerNonceAtomic: string | null;
 };
+/** Decode and validate a reviewed quote-only destination without creating an operation or enabling an RPC/send path. */
+export declare function inspectBridgeRouteMaterialization(selected: ParsedBridgeRoute, response: LifiResponse, request: BridgeRouteRequest, sender: Address): {
+    readonly materialization: BridgeMaterialization;
+    readonly implicitProtocolFeeAtomic: string;
+    readonly providerNonceAtomic: string | null;
+};
 export declare function validateRouteEconomics(m: BridgeMaterialization): string;
 export declare function bridgeRouteProjection(choice: BridgeRouteChoice): {
     route_id: string;

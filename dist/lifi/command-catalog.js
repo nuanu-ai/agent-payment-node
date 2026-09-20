@@ -1,4 +1,4 @@
-import { bridgeAssetRow, bridgeCaip2, bridgeDecimal, validateBridgeRequest } from "./asset-registry.js";
+import { bridgeAssetRow, bridgeCaip2, bridgeDecimal, bridgeDestinationCaip2, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHash, bridgeOpaque, bridgeUint } from "./validation.js";
 const option = (name, type, constraints, required = true) => ({
     name, type, constraints, required, default: { kind: "none" }, sensitivity: "operator_input",
@@ -21,7 +21,7 @@ export const BRIDGE_COMMANDS = [
         options: [], effect: { class: "network_read", summary: "Bounded public LI.FI inventory; it grants no execution authority." },
         approval: readApproval, output, states: done, recovery: [], examples: ["apn bridge inventory"] },
     { path: ["bridge", "routes"], synopsis: "apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --from-token <address> --to-token <address> --amount <decimal> --to <address> --min-output <decimal> --max-native-debit-wei <uint> --max-route-fee <decimal> --slippage-bps <uint>",
-        summary: "Save bounded LI.FI alternatives for the admitted assets between Ethereum, Base and Arbitrum.",
+        summary: "Save bounded LI.FI alternatives for executable Ethereum, Base and Arbitrum pairs or reviewed quote-only Ethereum USDC destinations.",
         options: [profile, option("--from-chain", "string", ["eip155:1_or_eip155:8453_or_eip155:42161"]), option("--to-chain", "string", ["different_admitted_eip155_chain"]),
             option("--from-token", "string", ["native_or_admitted_source_token_address"]), option("--to-token", "string", ["native_or_admitted_destination_token_same_pair"]),
             option("--amount", "string", ["positive_decimal_at_the_asset_decimals"]), option("--to", "address", ["nonzero_recipient"]),
@@ -68,7 +68,7 @@ export function bindBridgeCommand(path, o) {
     if (path === "bridge approve")
         return { command: "bridge.approve", operationId: o["--operation"] };
     const slippage = bridgeUint(o["--slippage-bps"], false, "APN_INVALID_INPUT");
-    const fromChainId = bridgeCaip2(o["--from-chain"]), toChainId = bridgeCaip2(o["--to-chain"]);
+    const fromChainId = bridgeCaip2(o["--from-chain"]), toChainId = bridgeDestinationCaip2(o["--to-chain"]);
     const fromToken = bridgeLegToken(o["--from-token"]), toToken = bridgeLegToken(o["--to-token"]);
     // Amounts are parsed at the admitted asset's own precision, never at a fixed six places.
     const decimals = bridgeAssetRow(fromChainId, fromToken, "APN_INVALID_INPUT").decimals;

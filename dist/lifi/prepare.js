@@ -10,7 +10,7 @@ import { assertBridgeOwner, bridgeOwner } from "./owner.js";
 import { BridgeQuoteRepository, newBridgeQuote } from "./quote-repository.js";
 import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from "./routes.js";
 import { newBridgeOperation } from "./transitions.js";
-import { validateBridgeRequest } from "./asset-registry.js";
+import { bridgeExecutionDestination, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 export class BridgePreparation {
     o;
@@ -49,6 +49,8 @@ export class BridgePreparation {
             const selected = parseBridgeRoutes({ status: 200, body: quote.rawResponse }, quote.request, quote.owner.address).find((r) => r.choice.routeId === routeId);
             if (selected === undefined)
                 bridgeFailure("APN_INVALID_INPUT", "route_not_in_snapshot");
+            if (!bridgeExecutionDestination(quote.request.toChainId))
+                bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "destination_execution_unreviewed");
             if (!selected.choice.preparable)
                 bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
             const source = this.o.rpcFor(quote.request.fromChainId), destination = this.o.rpcFor(quote.request.toChainId);
