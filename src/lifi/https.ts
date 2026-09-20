@@ -3,11 +3,18 @@ import { ApnError, type ErrorCode } from "../errors.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../network-policy.js";
 import type { LifiResponse } from "./ports.js";
 
+/** Fixed LI.FI API base. Credentials are never sent to another origin or path. */
+export const LIFI_API_ORIGIN = "https://li.quest/v1";
+
 /** Shared finite transport: public DNS pin, default TLS, no redirect or implicit retry. */
 export class BridgeHttps {
   private active = 0;
   private readonly waiting: Array<() => void> = [];
-  constructor(private readonly resolveAddresses: typeof resolvePublicAddresses = resolvePublicAddresses) {}
+  readonly #lifiApiKey: string | undefined;
+  constructor(private readonly resolveAddresses: typeof resolvePublicAddresses = resolvePublicAddresses,
+    lifiApiKey?: string) {
+    this.#lifiApiKey = lifiApiKey === undefined || lifiApiKey === "" ? undefined : lifiApiKey;
+  }
   async request(endpointInput: string, method: "GET" | "POST", body: string | null, maximumBytes: number,
     code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG"): Promise<LifiResponse> {
     const endpoint = parsePublicHttpsUrl(endpointInput, code, "Bridge endpoint", 2048);
@@ -27,7 +34,8 @@ export class BridgeHttps {
       clearTimeout(timeout); timeout = undefined;
       const remaining = deadline - Date.now();
       if (remaining < 1) throw failure(code, "request_deadline");
-      return await send(endpoint, method, body, addresses, maximumBytes, remaining, code);
+      return await send(endpoint, method, body, addresses, maximumBytes, remaining, code,
+        isLifiApiEndpoint(endpoint) ? this.#lifiApiKey : undefined);
     } finally {
       clearTimeout(timeout);
       const release = this.waiting.shift();
@@ -36,12 +44,16 @@ export class BridgeHttps {
     }
   }
 }
+function isLifiApiEndpoint(endpoint: URL): boolean {
+  return endpoint.protocol === "https:" && endpoint.hostname === "li.quest" && endpoint.port === "" &&
+    (endpoint.pathname === "/v1" || endpoint.pathname.startsWith("/v1/"));
+}
 function failure(code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", reason: string): ApnError {
   const error: ErrorCode = code === "APN_RPC_CONFIG" ? "APN_RPC_AMBIGUOUS" : "APN_PROVIDER_UNAVAILABLE";
   return new ApnError(error, `Bridge transport failed: ${reason}.`);
 }
 function send(endpoint: URL, method: "GET" | "POST", body: string | null, addresses: readonly PinnedAddress[],
-  maximumBytes: number, remaining: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG"): Promise<LifiResponse> {
+  maximumBytes: number, remaining: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", lifiApiKey?: string): Promise<LifiResponse> {
   return new Promise((resolve, reject) => {
     const selected = addresses[0];
     if (selected === undefined) { reject(failure(code, "DNS_empty")); return; }
@@ -52,7 +64,9 @@ function send(endpoint: URL, method: "GET" | "POST", body: string | null, addres
       else resolve(value!);
     };
     const request = httpsRequest(endpoint, { method, agent: false, family: selected.family,
-      headers: { accept: "application/json", "accept-encoding": "identity", ...(body === null ? {} : {
+      headers: { accept: "application/json", "accept-encoding": "identity", ...(lifiApiKey === undefined ? {} : {
+        "x-lifi-api-key": lifiApiKey,
+      }), ...(body === null ? {} : {
         "content-type": "application/json", "content-length": Buffer.byteLength(body).toString(),
       }) }, lookup: (_host, _options, callback) => callback(null, selected.address, selected.family),
     }, (response) => {

@@ -149,6 +149,9 @@ does not inspect a wallet, state, Keychain or network. Inventory anonymously
 reads LI.FI chains, tokens, tools and connections and exposes bounded public
 fields with response hashes.
 
+Optional authenticated LI.FI requests read `APN_LIFI_API_KEY` from the runtime
+environment; the value is used only for the fixed LI.FI API base.
+
 Configure each selected chain explicitly. The generic EVM `--rpc-url` option is
 not a fallback for bridge operations.
 
