@@ -6,10 +6,11 @@ import { bridgeInventory } from "./catalog.js";
 import { BridgeOperationRepository } from "./operation-repository.js";
 import { BridgePreparation } from "./prepare.js";
 import { BridgeQuoteRepository } from "./quote-repository.js";
-import { publicBridgeOperation } from "./receipt.js";
+import { publicBridgeOperation, publicStoredBridgeOperation } from "./receipt.js";
 import { transitionBridge } from "./transitions.js";
 import { bridgeFailure } from "./validation.js";
 import { BridgeAllowlistGate, bridgeUsageTarget } from "./allowlist.js";
+import { isLegacyBridgeOperation } from "./legacy-operation.js";
 export class BridgeService {
     context;
     records;
@@ -24,7 +25,7 @@ export class BridgeService {
         return await this.preparation().routes(profile, request);
     }
     async prepare(input) {
-        return publicBridgeOperation(await this.preparation().prepare(input));
+        return publicStoredBridgeOperation(await this.preparation().prepare(input));
     }
     async approve(operationId) {
         return await this.locked(operationId, async (op) => {
@@ -41,8 +42,18 @@ export class BridgeService {
     async resume(operationId) {
         return await this.locked(operationId, async (op) => publicBridgeOperation(op.terminal || op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
     }
-    async status(operationId) { return await this.locked(operationId, async (op) => publicBridgeOperation(op)); }
+    async status(operationId) {
+        const found = await this.operations.required(operationId);
+        if (found.kind !== "bridge_route")
+            bridgeFailure("APN_OPERATION_BLOCKED", "operation_is_not_bridge");
+        return publicStoredBridgeOperation(found.record);
+    }
     async receipt(operationId) {
+        const found = await this.operations.required(operationId);
+        if (found.kind !== "bridge_route")
+            bridgeFailure("APN_OPERATION_BLOCKED", "operation_is_not_bridge");
+        if (isLegacyBridgeOperation(found.record))
+            return await this.records.loadLegacyReceipt(found.record);
         return await this.locked(operationId, async (op) => await this.records.loadReceipt(op.profileHash, op.operationId));
     }
     dependencies() {
@@ -72,10 +83,14 @@ export class BridgeService {
         const operationId = canonicalOperationId(input), first = await this.operations.required(operationId);
         if (first.kind !== "bridge_route")
             bridgeFailure("APN_OPERATION_BLOCKED", "operation_is_not_bridge");
+        if (isLegacyBridgeOperation(first.record))
+            bridgeFailure("APN_OPERATION_BLOCKED", "legacy_bridge_non_resumable");
         return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${operationId}`], async () => {
             const current = await this.operations.required(operationId);
             if (current.kind !== "bridge_route")
                 bridgeFailure("APN_STATE_CORRUPT", "bridge_operation_kind_changed");
+            if (isLegacyBridgeOperation(current.record))
+                bridgeFailure("APN_OPERATION_BLOCKED", "legacy_bridge_non_resumable");
             await this.records.repairReceipt(current.record);
             await this.followUsage(current.record);
             return await work(current.record);

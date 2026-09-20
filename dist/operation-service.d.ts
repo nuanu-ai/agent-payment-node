@@ -7,7 +7,7 @@ import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { type RailOperationRecord } from "./rail-operation-model.js";
 import { BridgeOperationRepository } from "./lifi/operation-repository.js";
-import type { BridgeOperationRecord } from "./lifi/operation-model.js";
+import type { StoredBridgeOperationRecord } from "./lifi/legacy-operation.js";
 import { GaslessOperationRepository } from "./gasless/operation-repository.js";
 import type { GaslessOperationRecord } from "./gasless/operation-model.js";
 import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operation-model.js";
@@ -30,7 +30,7 @@ export type StoredMoneyOperation = {
     readonly record: GaslessOperationRecord;
 } | {
     readonly kind: "bridge_route";
-    readonly record: BridgeOperationRecord;
+    readonly record: StoredBridgeOperationRecord;
 } | {
     readonly kind: "rail_transfer";
     readonly record: RailOperationRecord;
@@ -75,6 +75,9 @@ export declare class OperationService {
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;
     required(operationId: string): Promise<StoredMoneyOperation>;
     status(operationId: string): Promise<unknown>;
+    private listAllBridgeOperations;
+    private listBridgeOperations;
+    private findBridgeOperation;
     x402Outcome(operationId: string, options: {
         readonly exposeSellerResult: boolean;
         readonly exposeTerminalReceipt: boolean;

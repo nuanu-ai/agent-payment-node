@@ -13,6 +13,7 @@ import { newBridgeOperation } from "./transitions.js";
 import { bridgeExecutionDestination, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
+import { isLegacyBridgeOperation } from "./legacy-operation.js";
 export class BridgePreparation {
     o;
     constructor(o) {
@@ -39,7 +40,8 @@ export class BridgePreparation {
             if (existing !== null) {
                 if (existing.kind !== "bridge_route")
                     bridgeFailure("APN_STATE_CORRUPT", "bridge_global_operation_kind");
-                await this.o.records.repairReceipt(existing.record);
+                if (!isLegacyBridgeOperation(existing.record))
+                    await this.o.records.repairReceipt(existing.record);
                 return existing.record;
             }
             const quote = await this.o.quotes.load(profileHash, quoteHash);

@@ -8,7 +8,7 @@ import { projectPublicX402Receipt, projectPublicX402Result } from "./x402-public
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { publicRailOperation } from "./rail-operation-model.js";
 import { BridgeOperationRepository } from "./lifi/operation-repository.js";
-import { publicBridgeOperation } from "./lifi/receipt.js";
+import { publicStoredBridgeOperation } from "./lifi/receipt.js";
 import { GaslessOperationRepository } from "./gasless/operation-repository.js";
 import { publicGaslessOperation } from "./gasless/receipt.js";
 import { MetaMaskGaslessOperationRepository } from "./metamask-gasless/journal/repository.js";
@@ -52,7 +52,7 @@ export class OperationService {
             ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
             ...(await this.metaMaskGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "metamask_gasless_transfer", record })),
             ...(await this.gasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "gasless_transfer", record })),
-            ...(await this.bridges.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "bridge_route", record })),
+            ...(await this.listAllBridgeOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "bridge_route", record })),
             ...(await this.rails.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "rail_transfer", record })),
             ...(await this.state.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "direct_transfer", record })),
             ...(await this.state.listAllX402Operations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "x402_fetch", strategy: "local", record })),
@@ -110,7 +110,7 @@ export class OperationService {
             ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
             ...(await this.metaMaskGasless.listOperations(profileHash)).map((record) => ({ kind: "metamask_gasless_transfer", record })),
             ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer", record })),
-            ...(await this.bridges.listOperations(profileHash)).map((record) => ({ kind: "bridge_route", record })),
+            ...(await this.listBridgeOperations(profileHash)).map((record) => ({ kind: "bridge_route", record })),
             ...(await this.rails.listOperations(profileHash)).map((record) => ({ kind: "rail_transfer", record })),
             ...(await this.state.listOperations(profileHash)).map((record) => ({ kind: "direct_transfer", record })),
             ...(await this.state.listX402Operations(profileHash)).map((record) => ({ kind: "x402_fetch", strategy: "local", record })),
@@ -140,7 +140,7 @@ export class OperationService {
         const x402 = await this.state.findX402Operation(canonicalId);
         const providerX402 = await this.providerX402.findOperation(canonicalId);
         const rail = await this.rails.findOperation(canonicalId);
-        const bridge = await this.bridges.findOperation(canonicalId);
+        const bridge = await this.findBridgeOperation(canonicalId);
         const gasless = await this.gasless.findOperation(canonicalId);
         const metaMaskGasless = await this.metaMaskGasless.findOperation(canonicalId);
         const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
@@ -176,7 +176,7 @@ export class OperationService {
         if (operation.kind === "rail_transfer")
             return publicRailOperation(operation.record);
         if (operation.kind === "bridge_route")
-            return publicBridgeOperation(operation.record);
+            return publicStoredBridgeOperation(operation.record);
         if (operation.kind === "gasless_transfer")
             return publicGaslessOperation(operation.record);
         if (operation.kind === "metamask_gasless_transfer")
@@ -188,6 +188,27 @@ export class OperationService {
         return operation.strategy === "local"
             ? publicX402Operation(operation.record)
             : publicProviderX402Operation(operation.record);
+    }
+    // Test and embedding ports written before the compatibility reader expose the
+    // original current-record methods. Keep those ports working while the concrete
+    // repository supplies the version-aware methods.
+    async listAllBridgeOperations() {
+        const repository = this.bridges;
+        return typeof repository.listAllStoredOperations === "function"
+            ? await repository.listAllStoredOperations()
+            : await repository.listAllOperations();
+    }
+    async listBridgeOperations(profileHash) {
+        const repository = this.bridges;
+        return typeof repository.listStoredOperations === "function"
+            ? await repository.listStoredOperations(profileHash)
+            : await repository.listOperations(profileHash);
+    }
+    async findBridgeOperation(operationId) {
+        const repository = this.bridges;
+        return typeof repository.findStoredOperation === "function"
+            ? await repository.findStoredOperation(operationId)
+            : await repository.findOperation(operationId);
     }
     async x402Outcome(operationId, options) {
         const found = await this.required(operationId);

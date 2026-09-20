@@ -1,10 +1,10 @@
 import { OperationService } from "../operation-service.js";
 import type { StateStore } from "../state.js";
 import type { BridgeRouteRequest } from "./model.js";
-import { type BridgeOperationRecord } from "./operation-model.js";
 import { BridgeOperationRepository } from "./operation-repository.js";
 import type { BridgeRpcFactory, LifiProviderPort } from "./ports.js";
 import { BridgeQuoteRepository } from "./quote-repository.js";
+import type { StoredBridgeOperationRecord } from "./legacy-operation.js";
 export interface BridgePreparationOptions {
     readonly state: StateStore;
     readonly records: BridgeOperationRepository;
@@ -41,5 +41,5 @@ export declare class BridgePreparation {
         readonly quote: string;
         readonly route: string;
         readonly idempotencyKey: string;
-    }): Promise<BridgeOperationRecord>;
+    }): Promise<StoredBridgeOperationRecord>;
 }

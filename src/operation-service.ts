@@ -18,8 +18,8 @@ import { projectPublicX402Receipt, projectPublicX402Result } from "./x402-public
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { publicRailOperation, type RailOperationRecord } from "./rail-operation-model.js";
 import { BridgeOperationRepository } from "./lifi/operation-repository.js";
-import type { BridgeOperationRecord } from "./lifi/operation-model.js";
-import { publicBridgeOperation } from "./lifi/receipt.js";
+import type { StoredBridgeOperationRecord } from "./lifi/legacy-operation.js";
+import { publicStoredBridgeOperation } from "./lifi/receipt.js";
 import { GaslessOperationRepository } from "./gasless/operation-repository.js";
 import type { GaslessOperationRecord } from "./gasless/operation-model.js";
 import { publicGaslessOperation } from "./gasless/receipt.js";
@@ -40,7 +40,7 @@ export type StoredMoneyOperation =
   | { readonly kind: "smart_account_gasless_transfer"; readonly record: SmartAccountGaslessOperationRecord }
   | { readonly kind: "metamask_gasless_transfer"; readonly record: MetaMaskGaslessOperationRecord }
   | { readonly kind: "gasless_transfer"; readonly record: GaslessOperationRecord }
-  | { readonly kind: "bridge_route"; readonly record: BridgeOperationRecord }
+  | { readonly kind: "bridge_route"; readonly record: StoredBridgeOperationRecord }
   | { readonly kind: "rail_transfer"; readonly record: RailOperationRecord }
   | { readonly kind: "direct_transfer"; readonly record: OperationRecord }
   | { readonly kind: "x402_fetch"; readonly strategy: "local"; readonly record: X402OperationRecord }
@@ -81,7 +81,7 @@ export class OperationService {
       ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
       ...(await this.metaMaskGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "metamask_gasless_transfer" as const, record })),
       ...(await this.gasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "gasless_transfer" as const, record })),
-      ...(await this.bridges.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "bridge_route" as const, record })),
+      ...(await this.listAllBridgeOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "bridge_route" as const, record })),
       ...(await this.rails.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "rail_transfer" as const, record })),
       ...(await this.state.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "direct_transfer" as const, record })),
       ...(await this.state.listAllX402Operations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "x402_fetch" as const, strategy: "local" as const, record })),
@@ -136,7 +136,7 @@ export class OperationService {
       ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
       ...(await this.metaMaskGasless.listOperations(profileHash)).map((record) => ({ kind: "metamask_gasless_transfer" as const, record })),
       ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer" as const, record })),
-      ...(await this.bridges.listOperations(profileHash)).map((record) => ({ kind: "bridge_route" as const, record })),
+      ...(await this.listBridgeOperations(profileHash)).map((record) => ({ kind: "bridge_route" as const, record })),
       ...(await this.rails.listOperations(profileHash)).map((record) => ({ kind: "rail_transfer" as const, record })),
       ...(await this.state.listOperations(profileHash)).map((record) => ({ kind: "direct_transfer" as const, record })),
       ...(await this.state.listX402Operations(profileHash)).map((record) => ({ kind: "x402_fetch" as const, strategy: "local" as const, record })),
@@ -168,7 +168,7 @@ export class OperationService {
     const x402 = await this.state.findX402Operation(canonicalId);
     const providerX402 = await this.providerX402.findOperation(canonicalId);
     const rail = await this.rails.findOperation(canonicalId);
-    const bridge = await this.bridges.findOperation(canonicalId);
+    const bridge = await this.findBridgeOperation(canonicalId);
     const gasless = await this.gasless.findOperation(canonicalId);
     const metaMaskGasless = await this.metaMaskGasless.findOperation(canonicalId);
     const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
@@ -193,7 +193,7 @@ export class OperationService {
     const operation = await this.required(operationId);
     if (operation.kind === "direct_transfer") return publicOperation(operation.record);
     if (operation.kind === "rail_transfer") return publicRailOperation(operation.record);
-    if (operation.kind === "bridge_route") return publicBridgeOperation(operation.record);
+    if (operation.kind === "bridge_route") return publicStoredBridgeOperation(operation.record);
     if (operation.kind === "gasless_transfer") return publicGaslessOperation(operation.record);
     if (operation.kind === "metamask_gasless_transfer") return publicMetaMaskGaslessOperation(operation.record);
     if (operation.kind === "smart_account_gasless_transfer") return publicSmartAccountGaslessOperation(operation.record);
@@ -201,6 +201,34 @@ export class OperationService {
     return operation.strategy === "local"
       ? publicX402Operation(operation.record)
       : publicProviderX402Operation(operation.record);
+  }
+
+  // Test and embedding ports written before the compatibility reader expose the
+  // original current-record methods. Keep those ports working while the concrete
+  // repository supplies the version-aware methods.
+  private async listAllBridgeOperations(): Promise<readonly StoredBridgeOperationRecord[]> {
+    const repository = this.bridges as BridgeOperationRepository & Partial<{
+      listAllStoredOperations(): Promise<readonly StoredBridgeOperationRecord[]>;
+    }>;
+    return typeof repository.listAllStoredOperations === "function"
+      ? await repository.listAllStoredOperations()
+      : await repository.listAllOperations();
+  }
+  private async listBridgeOperations(profileHash: string): Promise<readonly StoredBridgeOperationRecord[]> {
+    const repository = this.bridges as BridgeOperationRepository & Partial<{
+      listStoredOperations(profileHash: string): Promise<readonly StoredBridgeOperationRecord[]>;
+    }>;
+    return typeof repository.listStoredOperations === "function"
+      ? await repository.listStoredOperations(profileHash)
+      : await repository.listOperations(profileHash);
+  }
+  private async findBridgeOperation(operationId: string): Promise<StoredBridgeOperationRecord | null> {
+    const repository = this.bridges as BridgeOperationRepository & Partial<{
+      findStoredOperation(operationId: string): Promise<StoredBridgeOperationRecord | null>;
+    }>;
+    return typeof repository.findStoredOperation === "function"
+      ? await repository.findStoredOperation(operationId)
+      : await repository.findOperation(operationId);
   }
 
   async x402Outcome(
