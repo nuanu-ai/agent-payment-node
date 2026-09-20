@@ -7,7 +7,7 @@ export { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNat
 export type { StargateDestinationEvidence, StargateNativeExecutionPorts, StargateNativeJournal, StargateNativeOperation, StargateNativePreparationRequest, StargateSourceReceipt, StargateNativeCanonicalReceipt } from "./native-execution.js";
 export { TtyStargateNativeApproval } from "./native-tty.js";
 export { StargateJsonRpc, StargateNativeService, confirmedStargateSourceReceipt, observeStargateDestination } from "./native-runtime.js";
-export { encodeStargateNativeDrop, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, stargateV2TokenCanonicalReceipt } from "./token-execution.js";
-export type { StargateTokenDestinationEvidence, StargateTokenExecutionPorts, StargateTokenJournal, StargateTokenOperation, StargateTokenPreparationRequest } from "./token-execution.js";
+export { encodeStargateNativeDrop, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS } from "./token-execution.js";
+export type { StargateTokenDestinationEvidence, StargateTokenExecutionPorts, StargateTokenJournal, StargateTokenOperation, StargateTokenPostApprovalQuote, StargateTokenPreparationRequest } from "./token-execution.js";
 export { StargateTokenService, observeStargateTokenDestination } from "./token-runtime.js";
 export { TtyStargateTokenApproval } from "./token-tty.js";
