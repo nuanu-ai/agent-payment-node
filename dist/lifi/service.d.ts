@@ -35,6 +35,7 @@ export declare class BridgeService {
                     coin_key: string;
                     decimals: 18;
                     bridgeable_principal: boolean;
+                    quote_only: boolean;
                     role: string;
                     token: string;
                     tools: string[];
@@ -230,8 +231,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;
@@ -371,8 +372,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;
@@ -512,8 +513,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;
@@ -653,8 +654,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;
@@ -796,8 +797,8 @@ export declare class BridgeService {
             actual_output_atomic: string | null;
             allowance_atomic_at_prepare: string;
             spender: `0x${string}`;
-            fromChainId: import("../evm-asset.js").EvmChainId;
-            toChainId: import("../evm-asset.js").EvmChainId;
+            fromChainId: import("./chains.js").BridgeChainId;
+            toChainId: import("./chains.js").BridgeChainId;
             fromToken: import("../model.js").Address;
             toToken: import("../model.js").Address;
             amountAtomic: string;

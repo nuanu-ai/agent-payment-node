@@ -105,6 +105,17 @@ export class BridgeObservation {
         if (observation !== null)
             op = await this.save(op, { providerObservation: observation });
         const hint = op.providerObservation?.destinationTransactionHash;
+        const providerBoundNative = m.request.toChainId === 59144;
+        if (providerBoundNative) {
+            if (op.providerObservation?.status !== "completed_observed" || !isEvmTransactionHash(hint))
+                return await this.waiting(op);
+            try {
+                return await this.finish(await this.save(op, { destinationProof: await this.destinationCandidate(op, hint) }));
+            }
+            catch {
+                return await this.save(op, { state: "unknown_finality", failure: { reason: "provider_destination_proof_mismatch", residualAllowance: null } });
+            }
+        }
         // Only an EVM hash can address the EVM destination reader; a Solana hint falls through to the scan.
         if (isEvmTransactionHash(hint)) {
             let proof = null;
@@ -135,7 +146,9 @@ export class BridgeObservation {
         return await this.save(op, { state: "completed", failure: { reason: "delivery_correlated", residualAllowance } });
     }
     async destinationCandidate(op, hash) {
-        const found = await this.destination.observe(hash);
+        const request = op.intent.materialization.request;
+        const proveNativeDelta = request.toToken === "0x0000000000000000000000000000000000000000" && request.toChainId === 59144;
+        const found = await this.destination.observe(hash, undefined, proveNativeDelta ? request.recipient : undefined);
         if (found === null || found.transaction.safeBlock === null || found.transaction.status !== "success")
             bridgeFailure("APN_RPC_PROTOCOL", "destination_not_safe_success");
         await this.historicalDeployment(op, this.destination, found.transaction, op.intent.destinationDeployment);

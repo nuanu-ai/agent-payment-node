@@ -67,8 +67,8 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
         actual_output_atomic: string | null;
         allowance_atomic_at_prepare: string;
         spender: `0x${string}`;
-        fromChainId: import("../evm-asset.js").EvmChainId;
-        toChainId: import("../evm-asset.js").EvmChainId;
+        fromChainId: import("./chains.js").BridgeChainId;
+        toChainId: import("./chains.js").BridgeChainId;
         fromToken: import("../model.js").Address;
         toToken: import("../model.js").Address;
         amountAtomic: string;
@@ -210,8 +210,8 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
         actual_output_atomic: string | null;
         allowance_atomic_at_prepare: string;
         spender: `0x${string}`;
-        fromChainId: import("../evm-asset.js").EvmChainId;
-        toChainId: import("../evm-asset.js").EvmChainId;
+        fromChainId: import("./chains.js").BridgeChainId;
+        toChainId: import("./chains.js").BridgeChainId;
         fromToken: import("../model.js").Address;
         toToken: import("../model.js").Address;
         amountAtomic: string;

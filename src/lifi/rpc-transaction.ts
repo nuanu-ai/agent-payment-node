@@ -1,13 +1,13 @@
 import { getAddress, keccak256, recoverTransactionAddress, serializeTransaction, type TransactionSerializable, type TransactionSerialized } from "viem";
 import { sha256 } from "../canonical.js";
 import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
-import type { EvmChainId } from "../evm-asset.js";
+import type { BridgeChainId } from "./chains.js";
 import type { Hex } from "../model.js";
 import type { BridgeEnvelope } from "./model.js";
 import { verifyBridgeSigned } from "./transaction.js";
 import { bridgeFailure, bridgeHex } from "./validation.js";
 
-export async function verifyRpcTransaction(raw: Record<string, unknown>, chainId: EvmChainId, hash: Hex, expected?: BridgeEnvelope) {
+export async function verifyRpcTransaction(raw: Record<string, unknown>, chainId: BridgeChainId, hash: Hex, expected?: BridgeEnvelope) {
   const type = evmRpcQuantity(raw.type), nonce = safeNumber(evmRpcQuantity(raw.nonce)), to = evmRpcAddress(raw.to), from = evmRpcAddress(raw.from);
   if (type > 4n || evmRpcHex(raw.hash, 32) !== hash || (raw.chainId !== undefined && evmRpcQuantity(raw.chainId) !== BigInt(chainId))) bridgeFailure("APN_RPC_PROTOCOL", "transaction_chain_or_hash");
   const data = bridgeHex(raw.input, 128 * 1024, undefined, "APN_RPC_PROTOCOL"), gas = evmRpcQuantity(raw.gas), value = evmRpcQuantity(raw.value);

@@ -6,6 +6,7 @@ import { decodeEventLog, decodeFunctionData, encodeAbiParameters, encodeEventTop
 import type { AbiParameter } from "viem";
 import { canonicalJson, sha256 } from "../../src/canonical.js";
 import type { Address, Hex } from "../../src/model.js";
+import type { BridgeChainId } from "../../src/lifi/chains.js";
 import { ACROSS_SELECTOR, acrossBridgeAbi, bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT, feeForwarderAbi, stargateBridgeAbi } from "../../src/lifi/abi.js";
 import { decodeBridgeCall } from "../../src/lifi/decode.js";
 import { bridgeDeployment, bridgeEndpointId, bridgeProtocolEmitter } from "../../src/lifi/deployments.js";
@@ -330,7 +331,7 @@ function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourceProof,
   ]);
 }
 
-function receipt(chainId: 1 | 8453 | 42161, logs: readonly BridgeLog[]): BridgeProtocolReceipt {
+function receipt(chainId: BridgeChainId, logs: readonly BridgeLog[]): BridgeProtocolReceipt {
   return { chainId, transactionHash: TX_HASH, blockNumberAtomic: "123", blockHash: HASH, logs };
 }
 

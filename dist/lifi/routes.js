@@ -1,8 +1,14 @@
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
-import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeDestinationChain, bridgeExecutionDestination, bridgeFeeAsset, bridgeNativeCoin, bridgeNativePrincipal, bridgeQuoteDestination } from "./asset-registry.js";
+import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeFeeAsset, bridgeNativeCoin, bridgeNativePrincipal, bridgeQuoteDestination } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeSame, bridgeUint } from "./validation.js";
+/** Quote-shape pins only. This composite BNB lane is refused by `bridgeExecutionDestination` before any RPC or materialization. */
+const BNB_QUOTE_DELIVERY = {
+    token: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+    handler: "0x33b255b5db44A78c34381f89f1a454bc0Ef49871",
+    swapTarget: "0x20F6ee51340aDEed01A59B0e65cB3703f3dc860c",
+};
 /** The admitted row for the leg of the request that this chain identifies. Both chains are distinct by construction. */
 function requestAsset(request, chainId) {
     if (chainId === request.fromChainId)
@@ -100,18 +106,23 @@ function parseBridgeMaterialization(selected, response, request, sender, quoteOn
     if (bridgeHex(step.transactionId, 32, 32) !== decoded.transactionId)
         bridgeFailure("APN_PROVIDER_PROTOCOL", "provider_transfer_id");
     const subs = list(step.includedSteps, 8, "included_step_count").map((s) => bridgeRecord(s));
-    if (subs.length !== 2 || subs[0].tool !== "feeCollection" || subs[0].type !== "protocol" ||
-        subs[1].tool !== m.tool || subs[1].type !== "cross")
-        bridgeFailure("APN_PROVIDER_PROTOCOL", "included_effect_graph");
-    assertIncludedAction(bridgeRecord(subs[0].action), request, request.amountAtomic, true);
-    assertIncludedAction(bridgeRecord(subs[1].action), request, decoded.bridgeAmountAtomic, false);
+    if (bridgeCrossNativeConversion(request))
+        assertBnbEffectGraph(subs, request, decoded.bridgeAmountAtomic, m.quotedOutputAtomic, m.minimumOutputAtomic);
+    else {
+        if (subs.length !== 2 || subs[0].tool !== "feeCollection" || subs[0].type !== "protocol" ||
+            subs[1].tool !== m.tool || subs[1].type !== "cross")
+            bridgeFailure("APN_PROVIDER_PROTOCOL", "included_effect_graph");
+        assertIncludedAction(bridgeRecord(subs[0].action), request, request.amountAtomic, true);
+        assertIncludedAction(bridgeRecord(subs[1].action), request, decoded.bridgeAmountAtomic, false);
+    }
     const implicitProtocolFeeAtomic = validateRouteEconomics(m);
     return { materialization: m, implicitProtocolFeeAtomic, providerNonceAtomic: tx.nonce === undefined ? null : providerQuantity(tx.nonce).toString() };
 }
 export function validateRouteEconomics(m) {
     const r = m.request, amount = bridgeUint(r.amountAtomic, true), output = bridgeUint(m.quotedOutputAtomic, true), minimum = bridgeUint(m.minimumOutputAtomic, true);
-    if (output > amount || minimum > output || minimum < bridgeUint(r.minOutputAtomic, true) ||
-        (output - minimum) * 10000n > output * BigInt(r.slippageBps) || amount - minimum > bridgeUint(r.maxRouteFeeAtomic))
+    const conversion = bridgeCrossNativeConversion(r);
+    if ((!conversion && (output > amount || amount - minimum > bridgeUint(r.maxRouteFeeAtomic))) || minimum > output || minimum < bridgeUint(r.minOutputAtomic, true) ||
+        (output - minimum) * 10000n > output * BigInt(r.slippageBps))
         bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_output_or_token_fee_limit");
     let included = 0n;
     const additional = [];
@@ -124,14 +135,14 @@ export function validateRouteEconomics(m) {
         else
             additional.push(fee);
     }
-    if (included + output > amount)
+    if ((conversion ? included > bridgeUint(r.maxRouteFeeAtomic) : included + output > amount))
         bridgeFailure("APN_PROVIDER_PROTOCOL", "token_fee_double_count");
     // A native principal travels as the bridge transaction's value; an ERC-20 principal never carries value on Across.
     if (m.tool === "across" ? additional.length !== 0 || m.transaction.valueAtomic !== (bridgeNativePrincipal(r) ? r.amountAtomic : "0") :
         additional.length !== 1 || additional[0].chainId !== r.fromChainId || additional[0].asset !== "native" ||
             additional[0].amountAtomic !== m.transaction.valueAtomic)
         bridgeFailure("APN_PROVIDER_PROTOCOL", "native_fee_identity");
-    return (amount - included - output).toString();
+    return conversion ? "0" : (amount - included - output).toString();
 }
 function assertStep(step, request, sender) {
     bridgeOpaque(step.id);
@@ -166,12 +177,13 @@ function assertStep(step, request, sender) {
             bridgeUint(gas[key]);
     }
     const subs = list(step.includedSteps, 8, "included_step_count");
-    for (const value of subs) {
+    for (const [index, value] of subs.entries()) {
         const sub = bridgeRecord(value);
         bridgeOpaque(sub.id);
         bridgeOpaque(sub.tool);
         rejectExecutionExtensions(sub);
-        includedActionKeys(bridgeRecord(sub.action));
+        if (!bridgeCrossNativeConversion(request) || index === 0)
+            includedActionKeys(bridgeRecord(sub.action));
         if (sub.includedSteps !== undefined && (!Array.isArray(sub.includedSteps) || sub.includedSteps.length !== 0))
             bridgeFailure("APN_PROVIDER_PROTOCOL", "nested_effect_graph");
     }
@@ -184,9 +196,33 @@ function assertTuple(value, request, sender, action) {
         bridgeFailure("APN_PROVIDER_PROTOCOL", "route_action_tuple");
     if (action) {
         actionKeys(value);
-        if (value.slippage !== request.slippageBps / 10_000 || (value.destinationGasConsumption !== undefined && value.destinationGasConsumption !== "0"))
+        if (value.slippage !== request.slippageBps / 10_000 || (value.destinationGasConsumption !== undefined &&
+            value.destinationGasConsumption !== "0" && !bridgeCrossNativeConversion(request)))
             bridgeFailure("APN_PROVIDER_PROTOCOL", "slippage_or_destination_call");
     }
+}
+function assertBnbEffectGraph(subs, request, bridgeAmount, output, minimum) {
+    if (subs.length !== 3 || subs[0].tool !== "feeCollection" || subs[0].type !== "protocol" ||
+        subs[1].tool !== "across" || subs[1].type !== "cross" || subs[2].tool !== "fly" || subs[2].type !== "swap") {
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "bnb_included_effect_graph");
+    }
+    assertIncludedAction(bridgeRecord(subs[0].action), request, request.amountAtomic, true);
+    const across = bridgeRecord(subs[1].action), swap = bridgeRecord(subs[2].action);
+    const from = bridgeRecord(across.fromToken), intermediate = bridgeRecord(across.toToken), swapFrom = bridgeRecord(swap.fromToken), swapTo = bridgeRecord(swap.toToken);
+    const destinationGas = bridgeUint(across.destinationGasConsumption, true), callData = bridgeHex(across.destinationCallData, 4096);
+    if (across.fromChainId !== 1 || across.toChainId !== 56 || across.fromAmount !== bridgeAmount || bridgeAddress(from.address) !== BRIDGE_ZERO_ADDRESS ||
+        from.chainId !== 1 || from.decimals !== 18 || bridgeAddress(intermediate.address) !== BNB_QUOTE_DELIVERY.token || intermediate.chainId !== 56 || intermediate.decimals !== 18 ||
+        bridgeAddress(across.fromAddress) !== BRIDGE_DIAMOND || bridgeAddress(across.toAddress) !== BNB_QUOTE_DELIVERY.handler || across.slippage !== request.slippageBps / 10_000 ||
+        destinationGas > 2000000n || callData !== `0x${"0".repeat((callData.length - 2))}`)
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "bnb_across_action");
+    if (swap.fromChainId !== 56 || swap.toChainId !== 56 || bridgeAddress(swapFrom.address) !== BNB_QUOTE_DELIVERY.token || swapFrom.chainId !== 56 || swapFrom.decimals !== 18 ||
+        bridgeAddress(swapTo.address) !== BRIDGE_ZERO_ADDRESS || swapTo.chainId !== 56 || swapTo.decimals !== 18 || bridgeUint(swap.fromAmount, true) > bridgeUint(bridgeAmount, true) ||
+        bridgeAddress(swap.fromAddress) !== bridgeAddress(swap.toAddress) || swap.slippage !== request.slippageBps / 10_000)
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "bnb_swap_action");
+    const estimate = bridgeRecord(subs[2].estimate);
+    if (estimate.tool !== "fly" || estimate.fromAmount !== swap.fromAmount || estimate.toAmount !== output || estimate.toAmountMin !== minimum ||
+        bridgeAddress(estimate.approvalAddress) !== BNB_QUOTE_DELIVERY.swapTarget)
+        bridgeFailure("APN_PROVIDER_PROTOCOL", "bnb_swap_estimate");
 }
 function assertIncludedAction(a, request, amount, collection) {
     includedActionKeys(a);

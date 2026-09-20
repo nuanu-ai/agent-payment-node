@@ -59,8 +59,8 @@ declare const schemaV1: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         phase: z.ZodEnum<{
-            submitted_pending: "submitted_pending";
             unknown_finality: "unknown_finality";
+            submitted_pending: "submitted_pending";
             signing_started: "signing_started";
             submitting: "submitting";
             sealed: "sealed";
@@ -128,8 +128,8 @@ declare const schemaV1: z.ZodObject<{
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     phase: z.ZodEnum<{
-        submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
+        submitted_pending: "submitted_pending";
         signing_started: "signing_started";
         submitting: "submitting";
         sealed: "sealed";
@@ -232,8 +232,8 @@ declare const schemaV2: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         phase: z.ZodEnum<{
-            submitted_pending: "submitted_pending";
             unknown_finality: "unknown_finality";
+            submitted_pending: "submitted_pending";
             signing_started: "signing_started";
             submitting: "submitting";
             sealed: "sealed";
@@ -301,8 +301,8 @@ declare const schemaV2: z.ZodObject<{
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     phase: z.ZodEnum<{
-        submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
+        submitted_pending: "submitted_pending";
         signing_started: "signing_started";
         submitting: "submitting";
         sealed: "sealed";
@@ -413,8 +413,8 @@ declare const schemaV3: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         phase: z.ZodEnum<{
-            submitted_pending: "submitted_pending";
             unknown_finality: "unknown_finality";
+            submitted_pending: "submitted_pending";
             signing_started: "signing_started";
             submitting: "submitting";
             sealed: "sealed";
@@ -482,8 +482,8 @@ declare const schemaV3: z.ZodObject<{
     }, z.core.$strict>>;
     nonceAtomic: z.ZodNullable<z.ZodString>;
     phase: z.ZodEnum<{
-        submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
+        submitted_pending: "submitted_pending";
         signing_started: "signing_started";
         submitting: "submitting";
         sealed: "sealed";

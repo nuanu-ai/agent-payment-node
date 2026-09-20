@@ -163,17 +163,20 @@ function acrossDestination(source, decoded, receipt) {
     if (info.fillType === 2 && (relayerCredit !== BRIDGE_ZERO_WORD || repaymentChainIdAtomic !== "0"))
         fail("slow_fill_credit");
     if (decoded.destinationToken === BRIDGE_ZERO_ADDRESS) {
+        const balance = decoded.destinationChainId === 59144 ? nativeBalanceProof(decoded, receipt) : null;
         // The pinned SpokePool unwraps a native fill and sends the value to the recipient; the value send itself has no
         // log, so the credit is proved by the exact relay tuple plus the unwrap of exactly the output from the SpokePool.
         nativeMovement(decoded.destinationChainId, receipt, "unwrap", c.outputAmountAtomic);
-        return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic);
+        if (balance !== null && BigInt(balance.deltaAtomic) < BigInt(c.outputAmountAtomic))
+            fail("native_destination_balance");
+        return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic, balance);
     }
     const transfers = events(receipt, decoded.destinationToken, EVENT_TOPICS.transfer, "Transfer");
     const delivered = transfers.filter((x) => x.to === decoded.recipient);
     if (delivered.length !== 1 || bridgeAddress(delivered[0].from) !== delivered[0].from || delivered[0].from === BRIDGE_ZERO_ADDRESS ||
         delivered[0].value.toString() !== c.outputAmountAtomic || (info.fillType === 2 && delivered[0].from !== emitter))
         fail("destination_token_movement");
-    return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic);
+    return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic, null);
 }
 function stargateDestination(source, decoded, receipt) {
     if (source.correlation.kind !== "stargateV2")
@@ -190,7 +193,7 @@ function stargateDestination(source, decoded, receipt) {
     const delivered = transfers.filter((x) => x.to === decoded.recipient);
     if (delivered.length !== 1 || delivered[0].from !== emitter || delivered[0].value !== received.amountReceivedLD)
         fail("destination_token_movement");
-    return destinationResult(source, decoded, receipt, received.amountReceivedLD.toString(), null, null, null);
+    return destinationResult(source, decoded, receipt, received.amountReceivedLD.toString(), null, null, null, null);
 }
 /**
  * One exact wrapped-native movement by the Across SpokePool. WETH9 logs `Deposit(dst)` / `Withdrawal(src)`; Arbitrum's
@@ -213,12 +216,21 @@ function nativeMovement(chainId, receipt, direction, amountAtomic) {
     if (matches !== 1)
         fail(direction === "wrap" ? "native_source_wrap" : "native_destination_unwrap");
 }
-function destinationResult(source, decoded, receipt, amountAtomic, fillType, relayerCredit, repaymentChainIdAtomic) {
+function destinationResult(source, decoded, receipt, amountAtomic, fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance) {
     return {
         tool: decoded.tool, chainId: receipt.chainId, transactionHash: receipt.transactionHash, blockNumberAtomic: receipt.blockNumberAtomic,
         blockHash: receipt.blockHash, recipient: decoded.recipient, token: decoded.destinationToken, amountAtomic,
-        correlationHash: sha256(canonicalJson(source.correlation)), logsHash: logsHash(receipt.logs), fillType, relayerCredit, repaymentChainIdAtomic,
+        correlationHash: sha256(canonicalJson(source.correlation)), logsHash: logsHash(receipt.logs), fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance,
     };
+}
+function nativeBalanceProof(decoded, receipt) {
+    const proof = receipt.nativeBalance;
+    if (proof === undefined || proof === null || proof.recipient !== decoded.recipient || proof.afterBlock.numberAtomic !== receipt.blockNumberAtomic ||
+        proof.afterBlock.hash !== receipt.blockHash || BigInt(proof.beforeBlock.numberAtomic) + 1n !== BigInt(proof.afterBlock.numberAtomic) ||
+        BigInt(proof.afterBalanceAtomic) < BigInt(proof.beforeBalanceAtomic) ||
+        BigInt(proof.afterBalanceAtomic) - BigInt(proof.beforeBalanceAtomic) !== BigInt(proof.deltaAtomic))
+        fail("native_destination_balance");
+    return proof;
 }
 function validateReceipt(receipt) {
     bridgeUint(receipt.blockNumberAtomic, true, "APN_RPC_PROTOCOL");

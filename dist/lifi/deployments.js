@@ -31,6 +31,9 @@ const ACROSS = {
         spoke: code("0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
         implementation: code("0xcfcda84333431bcc9155f2368b8362f0d1dff8c9", "0xa860f20748abfdf98f4e55411b5db7630457bec1abfb5d88f1ecd5f25b4ec24b"),
     },
+    59144: {
+        spoke: code("0xEf4998E4cda2232c5f1824Eac8C5060F28BfAEeC", "0x020e6beeb2805a62c4bedee022067700a57a2fa6793db6f7773ad94bb6dfb633"),
+    },
 };
 const STARGATE = {
     1: stargate("0xbF4aD13FA0e6E05916a78C201f147c5152dbe1C9", "0x23db18775c54e7533c4a6cc48d1dee2d2f43957a7a1ec25e48b06a519119dde7", "0x6d6620eFa72948C5f68A3C8646d58C00d3f4A980", "0xef22a8fb9189866e656f799d686af5c5cdeb0ab47e1baa4f636f6d8253af970c", "0xb747fab405fadff7fc9d8adb083d18d3454ac58ffdefe9121ed5f008f57d93e0", 30101),
@@ -45,6 +48,8 @@ const STARGATE = {
 export function bridgeDeployment(chainId, peerChainId, tool, token) {
     bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
     bridgeChain(peerChainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+    if (chainId === 56 || peerChainId === 56)
+        bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bnb_composite_execution_unreviewed");
     if (chainId === peerChainId)
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_direction");
     if (tool !== "across" && tool !== "stargateV2")
@@ -54,35 +59,44 @@ export function bridgeDeployment(chainId, peerChainId, tool, token) {
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_chain");
     const pool = bridgeAssetTool(asset, tool);
     const wrapped = BRIDGE_ASSET_REGISTRY[chainId].nativeCoin.wrapped;
-    const commonCode = [code(BRIDGE_DIAMOND, DIAMOND_HASH[chainId]),
-        code(FEE_FORWARDER, "0x7ee455a6853068874bfd201f93d6383ed6d88934a922316db5575b057e2ebe74"),
+    const destinationOnly = chainId === 59144 && peerChainId === 1 && tool === "across" && asset.kind === "native";
+    const diamondHash = DIAMOND_HASH[chainId];
+    const commonCode = [...(destinationOnly ? [] : [code(BRIDGE_DIAMOND, diamondHash ?? bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "diamond_deployment")),
+            code(FEE_FORWARDER, "0x7ee455a6853068874bfd201f93d6383ed6d88934a922316db5575b057e2ebe74")]),
         ...(asset.kind === "native" ? proxyCode(wrapped.address, wrapped.code) : proxyCode(asset.address, asset.code))];
-    const reads = [
-        call(BRIDGE_DIAMOND, "isContractSelectorWhitelisted", [FEE_FORWARDER, FEE_FORWARDER_SELECTOR], TRUE_WORD),
-        call(FEE_FORWARDER, "owner", [], wordAddress(FEE_FORWARDER_OWNER)),
-        ...assetReads(asset),
-    ];
+    const reads = [...(destinationOnly ? [] : [
+            call(BRIDGE_DIAMOND, "isContractSelectorWhitelisted", [FEE_FORWARDER, FEE_FORWARDER_SELECTOR], TRUE_WORD),
+            call(FEE_FORWARDER, "owner", [], wordAddress(FEE_FORWARDER_OWNER)),
+        ]), ...assetReads(asset)];
     if (pool === null) {
         const a = ACROSS[chainId];
+        if (a === undefined)
+            bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "across_chain_unreviewed");
+        const facet = a.facet;
         return {
             chainId, peerChainId, tool, diamond: BRIDGE_DIAMOND, feeForwarder: FEE_FORWARDER, feeRecipient: FEE_RECIPIENT,
             token: asset.kind === "native" ? BRIDGE_ZERO_ADDRESS : asset.address, protocolEmitter: a.spoke.address, endpointId: null,
             quoteTimeBufferAtomic: "3600", fillDeadlineBufferAtomic: "21600",
-            code: [...commonCode, a.facet, a.spoke, a.implementation],
+            code: [...commonCode, ...(facet === undefined ? [] : [facet]), a.spoke,
+                ...(a.implementation === undefined ? [] : [a.implementation])],
             reads: [
                 ...reads,
-                call(BRIDGE_DIAMOND, "facetAddress", [ACROSS_SELECTOR], wordAddress(a.facet.address)),
-                call(a.facet.address, "SPOKEPOOL", [], wordAddress(a.spoke.address)),
-                call(a.facet.address, "WRAPPED_NATIVE", [], wordAddress(wrapped.address)),
+                ...(facet === undefined ? [] : [
+                    call(BRIDGE_DIAMOND, "facetAddress", [ACROSS_SELECTOR], wordAddress(facet.address)),
+                    call(facet.address, "SPOKEPOOL", [], wordAddress(a.spoke.address)),
+                    call(facet.address, "WRAPPED_NATIVE", [], wordAddress(wrapped.address)),
+                ]),
                 call(a.spoke.address, "depositQuoteTimeBuffer", [], wordUint(3600)),
                 call(a.spoke.address, "fillDeadlineBuffer", [], wordUint(21600)),
-                storage(a.spoke.address, EIP1967_IMPLEMENTATION, wordAddress(a.implementation.address)),
+                ...(a.implementation === undefined ? [] : [storage(a.spoke.address, EIP1967_IMPLEMENTATION, wordAddress(a.implementation.address))]),
             ],
         };
     }
     if (asset.kind === "native")
         return bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_pool_asset_unreviewed");
     const s = STARGATE[chainId], peer = STARGATE[peerChainId];
+    if (s === undefined || peer === undefined)
+        bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_chain_unreviewed");
     const peerPool = bridgeAssetTool(bridgePeerToken(asset, peerChainId), tool);
     if (peerPool === null || peerPool.assetId !== pool.assetId)
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_pool_asset_unreviewed");
@@ -108,14 +122,23 @@ export function bridgeDeployment(chainId, peerChainId, tool, token) {
 }
 export function bridgeProtocolEmitter(chainId, tool, token) {
     bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-    if (tool === "across")
-        return ACROSS[chainId].spoke.address;
+    if (tool === "across") {
+        const across = ACROSS[chainId];
+        if (across === undefined)
+            return bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "across_chain_unreviewed");
+        return across.spoke.address;
+    }
     const pool = bridgeAssetTool(bridgeTokenRow(chainId, token, "APN_PROVIDER_CAPABILITY_UNAVAILABLE"), tool);
     if (pool === null)
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_pool_asset_unreviewed");
     return pool.router;
 }
-export function bridgeEndpointId(chainId) { return STARGATE[bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")].localEid; }
+export function bridgeEndpointId(chainId) {
+    const row = STARGATE[bridgeChain(chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")];
+    if (row === undefined)
+        return bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_chain_unreviewed");
+    return row.localEid;
+}
 function proxyCode(address, c) {
     const proxy = code(address, c.codeHash);
     if (c.upgradeability === "immutable")
