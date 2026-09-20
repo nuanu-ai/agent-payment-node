@@ -1,6 +1,6 @@
 import { canonicalJson, sha256 } from "../canonical.js";
 import type { Address } from "../model.js";
-import { BridgeHttps } from "./https.js";
+import { BridgeHttps, LIFI_API_ORIGIN } from "./https.js";
 import type { BridgeProviderObservation, BridgeRouteRequest } from "./model.js";
 import type { LifiProviderPort, LifiResponse } from "./ports.js";
 import { railStatusIdentifier, type RailStatusIdentifier } from "../rail-status-binding.js";
@@ -9,13 +9,13 @@ import { BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "./discover
 import { validateBridgeInventoryCandidate } from "./catalog.js";
 import { bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
 
-const ORIGIN = "https://li.quest/v1";
+const ORIGIN = LIFI_API_ORIGIN;
 export const LIFI_ROUTE_RESPONSE_BYTES = 512 * 1024;
 export const LIFI_INVENTORY_RESPONSE_BYTES = 4 * 1024 * 1024;
 export interface LifiTransport { request(endpoint: string, method: "GET" | "POST", body: string | null,
   maximumBytes: number, code: "APN_HTTP_CONFIG"): Promise<LifiResponse> }
 export class LifiProvider implements LifiProviderPort {
-  constructor(private readonly transport: LifiTransport = new BridgeHttps(), private readonly now: () => number = Date.now) {}
+  constructor(private readonly transport: LifiTransport = new BridgeHttps(undefined, process.env.APN_LIFI_API_KEY), private readonly now: () => number = Date.now) {}
   async inventory(): Promise<Readonly<Record<"chains" | "tokens" | "tools" | "connections", LifiResponse>>> {
     const pairs = BRIDGE_CHAINS.flatMap((from) => BRIDGE_ASSET_REGISTRY[from].tokens.flatMap((asset) =>
       asset.peers.map((to) => ({ from, to, fromToken: asset.address, toToken: bridgePeerToken(asset, to).address }))));
