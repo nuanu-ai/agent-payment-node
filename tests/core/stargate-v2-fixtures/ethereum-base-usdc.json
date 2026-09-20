@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "apn.stargate-v2-rpc-fixture.v1",
+  "sourceChainId": 1,
+  "destinationChainId": 8453,
+  "block": {
+    "number": "0x10",
+    "hash": "0xabababababababababababababababababababababababababababababababab"
+  },
+  "recipient": "0x1111111111111111111111111111111111111111",
+  "amountAtomic": "1000000",
+  "quoteOft": {
+    "limit": {
+      "minAmountLD": "1",
+      "maxAmountLD": "5000000"
+    },
+    "feeDetails": [
+      {
+        "feeAmountLD": "-2500",
+        "description": "protocol fee"
+      }
+    ],
+    "receipt": {
+      "amountSentLD": "1000000",
+      "amountReceivedLD": "997500"
+    }
+  },
+  "quoteSend": {
+    "nativeFee": "203111847073271",
+    "lzTokenFee": "0"
+  }
+}
