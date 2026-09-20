@@ -19,6 +19,7 @@ export declare const STARGATE_TOKEN_MECHANISM: Readonly<{
     provider: "stargate-v2";
     reference: `eip155:10:0x${string}/eip155:137:0x${string}`;
 }>;
+export declare const STARGATE_TOKEN_MAX_BRIDGE_GAS = 5000000n;
 /** Exact OptionsBuilder.addExecutorNativeDropOption Type-3 wire encoding. */
 export declare function encodeStargateNativeDrop(amountInput: string, recipientInput: Address): Hex;
 export type StargateTokenPhase = "prepared" | "approved" | "allowance_submission_started" | "allowance_unknown_finality" | "allowance_submitted" | "allowance_observed" | "submission_started" | "unknown_finality" | "submitted" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
@@ -81,7 +82,7 @@ export interface StargateTokenPolicyBinding {
     }>;
 }
 export interface StargateTokenOperation {
-    readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2";
+    readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2" | "apn.stargate-v2-token-operation.v3";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;
@@ -118,6 +119,11 @@ export interface StargateTokenOperation {
     readonly initialAllowanceAtomic: string;
     readonly allowanceRequired: boolean;
     readonly approvalEnvelope?: StargateTokenEnvelope;
+    readonly bridgeSimulation?: Readonly<{
+        readonly mode: "exact_at_prepare" | "pending_post_approval";
+        readonly prepareStatus: "succeeded" | "pending_post_approval";
+        readonly gasCeilingAtomic: string;
+    }>;
     readonly sendEnvelope: StargateTokenEnvelope;
     readonly maximumDebitAtomic: string;
     readonly preparedAt: string;
@@ -275,6 +281,15 @@ export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOper
     policy: StargateTokenPolicyBinding;
     finalityPolicy: StargateV2RouteFinalityPolicy;
     quoteHash: string;
+    bridgeSimulation: Readonly<{
+        readonly mode: "exact_at_prepare" | "pending_post_approval";
+        readonly prepareStatus: "succeeded" | "pending_post_approval";
+        readonly gasCeilingAtomic: string;
+    }> | {
+        mode: "legacy_exact_at_prepare";
+        prepareStatus: "legacy_succeeded";
+        gasCeilingAtomic: string;
+    };
     approvalTransactionHash: `0x${string}` | null;
     residualAllowanceAtomic: string;
     source: StargateTokenSourceReceipt;

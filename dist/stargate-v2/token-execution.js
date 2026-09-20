@@ -22,6 +22,7 @@ export const STARGATE_TOKEN_DESTINATION_EXECUTOR = getAddress("0xCd3F213AD101472
 export const STARGATE_TOKEN_MECHANISM = Object.freeze({ provider: "stargate-v2", reference: `eip155:10:${STARGATE_TOKEN_SOURCE_POOL}/eip155:137:${STARGATE_TOKEN_DESTINATION_POOL}` });
 const UINT = /^(?:0|[1-9][0-9]{0,77})$/u, HASH = /^0x[0-9a-f]{64}$/u, CODE = /^0x(?:[0-9a-f]{2})+$/u;
 const MAX_TTL_MS = 120_000;
+export const STARGATE_TOKEN_MAX_BRIDGE_GAS = 5000000n;
 function fail(code, reason) {
     throw new ApnError(code, `Direct Stargate V2 token execution failed closed: ${reason}.`, { reason });
 }
@@ -167,12 +168,23 @@ export async function prepareStargateV2Token(request, ports, journal) {
     const approvalData = encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "approve", args: [STARGATE_TOKEN_SOURCE_POOL, amount] });
     const approvalPrepared = approvalRequired ? await ports.prepareEnvelope({ chainId: 10, from: owner, to: STARGATE_TOKEN_SOURCE_TOKEN, data: approvalData, valueAtomic: "0" }) : undefined;
     const baseNonce = approvalPrepared?.nonceAtomic;
-    const sendPrepared = await ports.prepareEnvelope({ chainId: 10, from: owner, to: STARGATE_TOKEN_SOURCE_POOL, data: sendData,
-        valueAtomic: quote.quote.nativeMessageFeeAtomic, ...(baseNonce === undefined ? {} : { nonceAtomic: (BigInt(baseNonce) + 1n).toString() }) });
+    const exactSendPrepared = approvalRequired ? undefined : await ports.prepareEnvelope({ chainId: 10, from: owner, to: STARGATE_TOKEN_SOURCE_POOL, data: sendData,
+        valueAtomic: quote.quote.nativeMessageFeeAtomic });
     const envelope = (to, data, value, p) => ({ chainId: 10, from: owner, to, data,
         valueAtomic: value, nonceAtomic: uint(p.nonceAtomic).toString(), gasLimitAtomic: uint(p.gasLimitAtomic, true).toString(),
         maxFeePerGasAtomic: uint(p.maxFeePerGasAtomic, true).toString(), maxPriorityFeePerGasAtomic: uint(p.maxPriorityFeePerGasAtomic).toString() });
     const approvalEnvelope = approvalPrepared === undefined ? undefined : envelope(STARGATE_TOKEN_SOURCE_TOKEN, approvalData, "0", approvalPrepared);
+    const approvalDebit = approvalEnvelope === undefined ? 0n : BigInt(approvalEnvelope.gasLimitAtomic) * BigInt(approvalEnvelope.maxFeePerGasAtomic);
+    const messageValue = BigInt(quote.quote.nativeMessageFeeAtomic);
+    if (approvalDebit + messageValue >= cap)
+        fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
+    const stagedGasCeiling = approvalRequired ? (cap - approvalDebit - messageValue) / BigInt(approvalPrepared.maxFeePerGasAtomic) : 0n;
+    if (approvalRequired && stagedGasCeiling < 1n)
+        fail("APN_OPERATION_BLOCKED", "bridge_gas_budget_empty");
+    const boundedStagedGas = stagedGasCeiling > STARGATE_TOKEN_MAX_BRIDGE_GAS ? STARGATE_TOKEN_MAX_BRIDGE_GAS : stagedGasCeiling;
+    const sendPrepared = exactSendPrepared ?? { nonceAtomic: (BigInt(baseNonce) + 1n).toString(), gasLimitAtomic: boundedStagedGas.toString(),
+        maxFeePerGasAtomic: approvalPrepared.maxFeePerGasAtomic, maxPriorityFeePerGasAtomic: approvalPrepared.maxPriorityFeePerGasAtomic,
+        nativeBalanceAtomic: approvalPrepared.nativeBalanceAtomic };
     const sendEnvelope = envelope(STARGATE_TOKEN_SOURCE_POOL, sendData, quote.quote.nativeMessageFeeAtomic, sendPrepared);
     for (const e of [approvalEnvelope, sendEnvelope].filter((x) => x !== undefined))
         if (BigInt(e.maxPriorityFeePerGasAtomic) > BigInt(e.maxFeePerGasAtomic))
@@ -186,7 +198,7 @@ export async function prepareStargateV2Token(request, ports, journal) {
         fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
     const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString(), operationId });
     const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
-    const body = { schemaVersion: "apn.stargate-v2-token-operation.v2", operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy, finalityPolicyProvenance: "pinned_v2",
+    const body = { schemaVersion: "apn.stargate-v2-token-operation.v3", operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy, finalityPolicyProvenance: "pinned_v2",
         amountAtomic: amount.toString(), nativeDropAtomic: drop.toString(), maxNativeDebitAtomic: cap.toString(), minOutputAtomic: minOut.toString(),
         sourceToken: STARGATE_TOKEN_SOURCE_TOKEN, destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, sourcePool: STARGATE_TOKEN_SOURCE_POOL,
         destinationPool: STARGATE_TOKEN_DESTINATION_POOL, sourceEid: 30111, destinationEid: 30109,
@@ -194,7 +206,9 @@ export async function prepareStargateV2Token(request, ports, journal) {
         sourceCodeHash: source.poolCodeHash, destinationCodeHash: destination.poolCodeHash, sourceTokenCodeHash: source.tokenCodeHash,
         destinationTokenCodeHash: destination.tokenCodeHash, policy, destinationTokenBalanceBeforeAtomic: dest.tokenAtomic,
         destinationNativeBalanceBeforeAtomic: dest.nativeAtomic, destinationBalanceBlock: { numberAtomic: dest.blockNumberAtomic, hash: dest.blockHash },
-        initialAllowanceAtomic: allowance.toString(), allowanceRequired: approvalRequired, ...(approvalEnvelope === undefined ? {} : { approvalEnvelope }), sendEnvelope,
+        initialAllowanceAtomic: allowance.toString(), allowanceRequired: approvalRequired, ...(approvalEnvelope === undefined ? {} : { approvalEnvelope }),
+        bridgeSimulation: { mode: approvalRequired ? "pending_post_approval" : "exact_at_prepare",
+            prepareStatus: approvalRequired ? "pending_post_approval" : "succeeded", gasCeilingAtomic: sendEnvelope.gasLimitAtomic }, sendEnvelope,
         maximumDebitAtomic: maximumDebit.toString(), preparedAt, expiresAt, phase: "prepared",
         transitions: [{ phase: "prepared", at: preparedAt, reason: "fresh_quote_caps_allowance_and_envelopes_frozen" }],
     };
@@ -561,12 +575,13 @@ async function freshPreflight(op, ports, stage) {
         fail("APN_STATE_CORRUPT", "send_calldata");
     if (await requoteSend(ports.sourceCall, decodedSend.args[0], "latest") !== BigInt(op.quote.quote.nativeMessageFeeAtomic))
         fail("APN_REPREPARE_REQUIRED", "exact_send_fee_changed");
-    const [source, destination, balance, nativeBalance, allowance, nonce] = await Promise.all([
+    const [source, destination, balance, nativeBalance, allowance, nonce, latest, priorityRaw] = await Promise.all([
         readPoolConfig(ports.sourceCall, 10, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, 30111, "latest"),
         readPoolConfig(ports.destinationCall, 137, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, 30109, "latest"),
         readTokenBalance(ports.sourceCall, STARGATE_TOKEN_SOURCE_TOKEN, op.owner, "pending"), ports.sourceCall("eth_getBalance", [op.owner, "pending"]),
         readAllowance(ports.sourceCall, op.owner, "pending"),
         ports.sourceCall("eth_getTransactionCount", [op.owner, "pending"]),
+        ports.sourceCall("eth_getBlockByNumber", ["latest", false]), ports.sourceCall("eth_maxPriorityFeePerGas", []),
     ]);
     if (source.poolCodeHash !== op.sourceCodeHash || source.tokenCodeHash !== op.sourceTokenCodeHash || destination.poolCodeHash !== op.destinationCodeHash || destination.tokenCodeHash !== op.destinationTokenCodeHash)
         fail("APN_REPREPARE_REQUIRED", "code_changed");
@@ -582,12 +597,24 @@ async function freshPreflight(op, ports, stage) {
         : BigInt(envelope.valueAtomic) + BigInt(envelope.gasLimitAtomic) * BigInt(envelope.maxFeePerGasAtomic);
     if (quantity(nativeBalance) < remainingDebit)
         fail("APN_REPREPARE_REQUIRED", "native_balance");
+    const block = latest, priority = quantity(priorityRaw), freshMaxFee = 2n * quantity(block.baseFeePerGas) + priority;
+    if (freshMaxFee > BigInt(envelope.maxFeePerGasAtomic) || priority > BigInt(envelope.maxPriorityFeePerGasAtomic))
+        fail("APN_REPREPARE_REQUIRED", "fee_spike");
     const tx = { from: op.owner, to: envelope.to, data: envelope.data, value: `0x${BigInt(envelope.valueAtomic).toString(16)}`,
         gas: `0x${BigInt(envelope.gasLimitAtomic).toString(16)}`, maxFeePerGas: `0x${BigInt(envelope.maxFeePerGasAtomic).toString(16)}`,
         maxPriorityFeePerGas: `0x${BigInt(envelope.maxPriorityFeePerGasAtomic).toString(16)}` };
-    const [simulation, estimate] = await Promise.all([ports.sourceCall("eth_call", [tx, "pending"]), ports.sourceCall("eth_estimateGas", [tx, "pending"])]);
+    const [simulation, estimate] = await Promise.all([
+        ports.sourceCall("eth_call", [tx, "pending"]).catch(() => fail("APN_REPREPARE_REQUIRED", stage === "before_approval" ? "approval_simulation" : "send_simulation")),
+        ports.sourceCall("eth_estimateGas", [tx, "pending"]).catch(() => fail("APN_REPREPARE_REQUIRED", stage === "before_approval" ? "approval_estimate" : "send_estimate")),
+    ]);
     if (quantity(estimate) > BigInt(envelope.gasLimitAtomic))
         fail("APN_REPREPARE_REQUIRED", "gas_limit");
+    if (stage === "before_send") {
+        const approvalGasDebit = op.approvalEnvelope === undefined ? 0n : BigInt(op.approvalEnvelope.gasLimitAtomic) * BigInt(op.approvalEnvelope.maxFeePerGasAtomic);
+        const recomputed = approvalGasDebit + BigInt(envelope.valueAtomic) + quantity(estimate) * freshMaxFee;
+        if (recomputed > BigInt(op.maxNativeDebitAtomic))
+            fail("APN_REPREPARE_REQUIRED", "recomputed_native_debit");
+    }
     if (stage === "before_approval") {
         try {
             if (decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "approve", data: simulation }) !== true)
@@ -700,7 +727,7 @@ async function verifySignedEnvelope(raw, owner, e) {
 function transition(op, phase, reason, at) { return seal({ ...op, phase, transitions: [...op.transitions, { phase, at: new Date(at).toISOString(), reason }] }); }
 function seal(value) { const { integrityHash: _old, ...body } = value; return Object.freeze({ ...body, integrityHash: hashObject(body) }); }
 function validateRecord(value) {
-    if (!isPlainRecord(value) || !["apn.stargate-v2-token-operation.v1", "apn.stargate-v2-token-operation.v2"].includes(String(value.schemaVersion)))
+    if (!isPlainRecord(value) || !["apn.stargate-v2-token-operation.v1", "apn.stargate-v2-token-operation.v2", "apn.stargate-v2-token-operation.v3"].includes(String(value.schemaVersion)))
         fail("APN_STATE_CORRUPT", "schema");
     const raw = value, { integrityHash, ...body } = raw;
     if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64)
@@ -721,6 +748,19 @@ function validateRecord(value) {
         if (raw.finalityPolicyProvenance !== "pinned_v2")
             fail("APN_STATE_CORRUPT", "finality_policy_provenance");
     }
+    if (raw.schemaVersion === "apn.stargate-v2-token-operation.v3") {
+        const simulation = raw.bridgeSimulation;
+        const approvalDebit = raw.approvalEnvelope === undefined ? 0n : BigInt(raw.approvalEnvelope.gasLimitAtomic) * BigInt(raw.approvalEnvelope.maxFeePerGasAtomic);
+        const totalDebit = approvalDebit + BigInt(raw.sendEnvelope.valueAtomic) + BigInt(raw.sendEnvelope.gasLimitAtomic) * BigInt(raw.sendEnvelope.maxFeePerGasAtomic);
+        if (simulation === undefined || simulation.gasCeilingAtomic !== raw.sendEnvelope.gasLimitAtomic || BigInt(simulation.gasCeilingAtomic) < 1n || BigInt(simulation.gasCeilingAtomic) > STARGATE_TOKEN_MAX_BRIDGE_GAS ||
+            totalDebit.toString() !== raw.maximumDebitAtomic || totalDebit > BigInt(raw.maxNativeDebitAtomic) ||
+            (raw.allowanceRequired ? simulation.mode !== "pending_post_approval" || simulation.prepareStatus !== "pending_post_approval" || raw.initialAllowanceAtomic !== "0" || raw.approvalEnvelope === undefined ||
+                BigInt(raw.sendEnvelope.nonceAtomic) !== BigInt(raw.approvalEnvelope.nonceAtomic) + 1n || raw.sendEnvelope.maxFeePerGasAtomic !== raw.approvalEnvelope.maxFeePerGasAtomic || raw.sendEnvelope.maxPriorityFeePerGasAtomic !== raw.approvalEnvelope.maxPriorityFeePerGasAtomic
+                : simulation.mode !== "exact_at_prepare" || simulation.prepareStatus !== "succeeded" || raw.initialAllowanceAtomic !== raw.amountAtomic || raw.approvalEnvelope !== undefined))
+            fail("APN_STATE_CORRUPT", "bridge_simulation_binding");
+    }
+    else if (raw.bridgeSimulation !== undefined)
+        fail("APN_STATE_CORRUPT", "legacy_simulation_field");
     const usageStates = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
     if ((record.usageState !== undefined && !usageStates.includes(record.usageState)) || (record.usageTarget !== undefined && !usageStates.includes(record.usageTarget)))
         fail("APN_STATE_CORRUPT", "usage_state");
@@ -788,6 +828,8 @@ export function stargateV2TokenCanonicalReceipt(input) {
         nativeDropAtomic: op.nativeDropAtomic, nativeMessageFeeAtomic: op.quote.quote.nativeMessageFeeAtomic, maximumDebitAtomic: op.maximumDebitAtomic,
         options: op.options, executor: op.executor, executorNativeCapAtomic: op.executorNativeCapAtomic, policy: op.policy,
         finalityPolicy: op.finalityPolicy, quoteHash: op.quote.quoteHash,
+        bridgeSimulation: op.bridgeSimulation ?? { mode: "legacy_exact_at_prepare", prepareStatus: "legacy_succeeded",
+            gasCeilingAtomic: op.sendEnvelope.gasLimitAtomic },
         approvalTransactionHash: op.approvalTransactionHash ?? null, residualAllowanceAtomic: op.residualAllowanceAtomic, source: op.sourceReceipt, destination: op.destinationEvidence };
     return Object.freeze({ ...body, evidenceHash: hashObject(body) });
 }
