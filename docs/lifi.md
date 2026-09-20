@@ -462,7 +462,10 @@ integrity-bound record names the effect role, source or destination chain, the
 finite guard stage, its category and the exact JSON-RPC method when the
 transport reached one. It never stores an endpoint, header, provider message,
 calldata or signing material. The failure remains final and does not add a
-retry, fallback, signature or send.
+retry, fallback, signature or send. A first-effect guard ends as
+`failed_before_effect`; a bridge guard after a safely completed approval ends
+as `failed_after_approval` and keeps the same bridge-stage context while the
+bridge effect remains unsigned and unsent.
 
 Bridge journals written before the allowlist/usage-ledger upgrade remain
 readable through a separate, strict legacy decoder. The decoder verifies the

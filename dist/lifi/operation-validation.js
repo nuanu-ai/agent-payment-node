@@ -240,7 +240,10 @@ function validateSnapshot(op, s, legacy) {
         const expectedCategory = d.stage.endsWith("deployment_refresh") ? "deployment_refresh"
             : d.stage === "source_account_refresh" ? "account_nonce"
                 : d.stage === "source_execution_simulation" ? "simulation" : "fee_quote";
-        if (s.failure.reason !== "unsent_apn_rpc_ambiguous" || s.state !== "failed_before_effect" ||
+        const compatibleState = (s.state === "failed_before_effect" && d.effectRole === s.effects[0].role) ||
+            (s.state === "failed_after_approval" && d.effectRole === "bridge" && approval?.phase === "safe_success" &&
+                bridge.submissionAttempts === 0 && bridge.phase === "unsealed");
+        if (s.failure.reason !== "unsent_apn_rpc_ambiguous" || !compatibleState ||
             d.chainId !== expectedChain || d.category !== expectedCategory ||
             (d.stage.startsWith("source_") ? d.chainRole !== "source" : d.chainRole !== "destination") ||
             !s.effects.some((effect) => effect.role === d.effectRole))

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { hashObject } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
-import type { BridgePreSignRpcFailure } from "../../src/lifi/operation-model.js";
+import type { BridgeOperationRecord, BridgePreSignRpcFailure } from "../../src/lifi/operation-model.js";
+import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { bridgeRpcCall } from "../../src/lifi/rpc.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -79,6 +81,49 @@ for (const row of cases) test(`LI.FI ${row.name} persists only its exact redacte
   assert.equal(serialized.includes("leaked"), false);
 });
 
+test("LI.FI bridge simulation ambiguity after safe approval retains its redacted boundary without bridge signing or send", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root); const { id, operation } = await s.prepare();
+  const estimate = s.source.estimate.bind(s.source);
+  s.source.estimate = async (transaction) => {
+    if (transaction.to === operation.effects.at(-1)!.envelope.to && s.source.allowance === s.request.amountAtomic) {
+      throw new ApnError("APN_RPC_AMBIGUOUS", `transport failed at ${endpoint}`, { rpcMethod: "eth_estimateGas", leaked: secret });
+    }
+    return await estimate(transaction);
+  };
+
+  const result = await s.core.execute({ command: "bridge.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = (await s.core.bridges.records.findOperation(id))!;
+  const expected: BridgePreSignRpcFailure = { schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard",
+    effectRole: "bridge", stage: "source_execution_simulation", chainRole: "source",
+    chainId: operation.intent.materialization.request.fromChainId, category: "simulation", method: "eth_estimateGas" };
+  assert.equal(record.state, "failed_after_approval"); assert.equal(record.failure?.reason, "unsent_apn_rpc_ambiguous");
+  assert.deepEqual(record.failure?.preSignRpc, expected);
+  assert.deepEqual(record.effects.map(({ role, phase, submissionAttempts }) => ({ role, phase, submissionAttempts })), [
+    { role: "approval", phase: "safe_success", submissionAttempts: 1 },
+    { role: "bridge", phase: "unsealed", submissionAttempts: 0 },
+  ]);
+  assert.equal(s.source.submissions.length, 1);
+
+  const status = await s.core.execute({ command: "operation.status", operationId: id });
+  const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
+  assert.equal(status.ok, true, status.error?.message); assert.equal(receipt.ok, true, receipt.error?.message);
+  assert.equal((status.operation as any).pre_sign_rpc_failure.effect_role, "bridge");
+  assert.equal((status.operation as any).pre_sign_rpc_failure.stage, "source_execution_simulation");
+  assert.equal((status.operation as any).pre_sign_rpc_failure.method, "eth_estimateGas");
+  assert.deepEqual((receipt.receipt as any).pre_sign_rpc_failure, (status.operation as any).pre_sign_rpc_failure);
+  const serialized = JSON.stringify({ record, status, receipt });
+  assert.equal(serialized.includes(endpoint), false); assert.equal(serialized.includes(secret), false); assert.equal(serialized.includes("leaked"), false);
+
+  const loads = s.wrapping.loads;
+  const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(resumed.ok, true, resumed.error?.message); assert.equal(s.source.submissions.length, 1); assert.equal(s.wrapping.loads, loads);
+
+  assert.throws(() => validateBridgeOperation(resealFailure(record, { reason: "unsent_apn_operation_blocked" })), { code: "APN_STATE_CORRUPT" });
+  assert.throws(() => validateBridgeOperation(resealFailure(record, { state: "unknown_finality", terminal: false })), { code: "APN_STATE_CORRUPT" });
+});
+
 test("LI.FI successful current operation and receipt retain their existing projection", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root); s.source.allowance = s.request.amountAtomic;
@@ -91,3 +136,16 @@ test("LI.FI successful current operation and receipt retain their existing proje
   assert.equal(Object.hasOwn(receipt.receipt as object, "pre_sign_rpc_failure"), false);
   assert.equal(s.source.submissions.length, 1);
 });
+
+function resealFailure(record: BridgeOperationRecord, patch: { readonly reason?: string; readonly state?: BridgeOperationRecord["state"];
+  readonly terminal?: boolean }): BridgeOperationRecord {
+  const changed = structuredClone(record) as any, transition = changed.transitions.at(-1)!;
+  if (patch.reason !== undefined) { changed.failure.reason = patch.reason; transition.failure.reason = patch.reason; }
+  if (patch.state !== undefined) { changed.state = patch.state; transition.state = patch.state; }
+  if (patch.terminal !== undefined) changed.terminal = patch.terminal;
+  const { transitionHash: _transitionHash, ...transitionBody } = transition;
+  transition.transitionHash = hashObject(transitionBody);
+  const { integrityHash: _integrityHash, ...body } = changed;
+  changed.integrityHash = hashObject(body);
+  return changed;
+}
