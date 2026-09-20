@@ -1,6 +1,6 @@
 import type { StateStore } from "../state.js";
 import { type BridgeSave } from "./observation.js";
-import type { BridgeOperationRecord } from "./operation-model.js";
+import { type BridgeOperationRecord } from "./operation-model.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcPort, LifiProviderPort } from "./ports.js";
 export declare class BridgeExecution {
     private readonly state;

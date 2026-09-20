@@ -121,8 +121,7 @@ export class BridgeOperationRepository extends SecureStateStore {
   }
 }
 function validateReceipt(value: unknown, op: BridgeOperationRecord): void {
-  if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint ||
-    !bridgeSame(Object.keys(value).sort(), Object.keys(bridgeReceipt(op)).sort())) bridgeCorrupt();
+  if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint) bridgeCorrupt();
   const { receipt_hash, ...body } = value;
   if (hashObject(body) !== receipt_hash) bridgeCorrupt();
   const index = op.transitions.findIndex((_, i) => bridgeAtTransition(op, i).integrityHash === value.operation_binding_hash);

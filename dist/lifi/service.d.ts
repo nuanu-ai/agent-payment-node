@@ -168,6 +168,57 @@ export declare class BridgeService {
     }>;
     prepare(input: Parameters<BridgePreparation["prepare"]>[0]): Promise<StoredPublicBridgeOperation>;
     approve(operationId: string): Promise<{
+        rpc_origins: {
+            source: string;
+            destination: string;
+        };
+        deployments: {
+            source: import("./model.js").BridgeDeploymentIdentity;
+            destination: import("./model.js").BridgeDeploymentIdentity;
+        };
+        policy: {
+            approved_at: string | null;
+            expiry_enforced_before_first_send: boolean;
+            inclusion_deadline: string;
+            allowlist?: {
+                schema_version: "apn.bridge-allowlist.v1";
+                policy_digest: string;
+                policy_revision: number;
+                account: string;
+                self_recipient: string;
+                chain: string;
+                asset: Readonly<{
+                    kind: "native";
+                    identifier: null;
+                } | {
+                    kind: "token";
+                    identifier: string;
+                }>;
+                amount_atomic: string;
+                mechanism: Readonly<{
+                    provider: "lifi";
+                    reference: "across-v4";
+                }>;
+                reservation_id: string | null;
+            } | null;
+            identity: string;
+            policy_hash: string;
+        };
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        pre_sign_rpc_failure?: {
+            schema_version: "apn.bridge-presign-rpc-failure.v1";
+            phase: "pre_sign_guard";
+            effect_role: "bridge" | "approval";
+            stage: import("./operation-model.js").BridgePreSignRpcStage;
+            chain_role: "source" | "destination";
+            chain_id: number;
+            category: import("./operation-model.js").BridgePreSignRpcCategory;
+            method: import("./operation-model.js").BridgePreSignRpcMethod | null;
+        };
+        residual_allowance_status?: "observed" | "unavailable";
         kind: "bridge_route";
         schema_version: "apn.bridge-operation.v1";
         operation_id: string;
@@ -288,48 +339,59 @@ export declare class BridgeService {
         destination_proof: import("./operation-model.js").BridgeVerifiedDestinationProof | null;
         provider_observation: import("./model.js").BridgeProviderObservation | null;
         residual_allowance: import("./model.js").BridgeResidualAllowance | null;
-        rpc_origins: {
-            source: string;
-            destination: string;
-        };
-        deployments: {
-            source: import("./model.js").BridgeDeploymentIdentity;
-            destination: import("./model.js").BridgeDeploymentIdentity;
-        };
-        policy: {
-            approved_at: string | null;
-            expiry_enforced_before_first_send: boolean;
-            inclusion_deadline: string;
-            allowlist?: {
-                schema_version: "apn.bridge-allowlist.v1";
-                policy_digest: string;
-                policy_revision: number;
-                account: string;
-                self_recipient: string;
-                chain: string;
-                asset: Readonly<{
-                    kind: "native";
-                    identifier: null;
-                } | {
-                    kind: "token";
-                    identifier: string;
-                }>;
-                amount_atomic: string;
-                mechanism: Readonly<{
-                    provider: "lifi";
-                    reference: "across-v4";
-                }>;
-                reservation_id: string | null;
-            } | null;
-            identity: string;
-            policy_hash: string;
-        };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
     }>;
     resume(operationId: string): Promise<{
+        rpc_origins: {
+            source: string;
+            destination: string;
+        };
+        deployments: {
+            source: import("./model.js").BridgeDeploymentIdentity;
+            destination: import("./model.js").BridgeDeploymentIdentity;
+        };
+        policy: {
+            approved_at: string | null;
+            expiry_enforced_before_first_send: boolean;
+            inclusion_deadline: string;
+            allowlist?: {
+                schema_version: "apn.bridge-allowlist.v1";
+                policy_digest: string;
+                policy_revision: number;
+                account: string;
+                self_recipient: string;
+                chain: string;
+                asset: Readonly<{
+                    kind: "native";
+                    identifier: null;
+                } | {
+                    kind: "token";
+                    identifier: string;
+                }>;
+                amount_atomic: string;
+                mechanism: Readonly<{
+                    provider: "lifi";
+                    reference: "across-v4";
+                }>;
+                reservation_id: string | null;
+            } | null;
+            identity: string;
+            policy_hash: string;
+        };
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        pre_sign_rpc_failure?: {
+            schema_version: "apn.bridge-presign-rpc-failure.v1";
+            phase: "pre_sign_guard";
+            effect_role: "bridge" | "approval";
+            stage: import("./operation-model.js").BridgePreSignRpcStage;
+            chain_role: "source" | "destination";
+            chain_id: number;
+            category: import("./operation-model.js").BridgePreSignRpcCategory;
+            method: import("./operation-model.js").BridgePreSignRpcMethod | null;
+        };
+        residual_allowance_status?: "observed" | "unavailable";
         kind: "bridge_route";
         schema_version: "apn.bridge-operation.v1";
         operation_id: string;
@@ -450,46 +512,6 @@ export declare class BridgeService {
         destination_proof: import("./operation-model.js").BridgeVerifiedDestinationProof | null;
         provider_observation: import("./model.js").BridgeProviderObservation | null;
         residual_allowance: import("./model.js").BridgeResidualAllowance | null;
-        rpc_origins: {
-            source: string;
-            destination: string;
-        };
-        deployments: {
-            source: import("./model.js").BridgeDeploymentIdentity;
-            destination: import("./model.js").BridgeDeploymentIdentity;
-        };
-        policy: {
-            approved_at: string | null;
-            expiry_enforced_before_first_send: boolean;
-            inclusion_deadline: string;
-            allowlist?: {
-                schema_version: "apn.bridge-allowlist.v1";
-                policy_digest: string;
-                policy_revision: number;
-                account: string;
-                self_recipient: string;
-                chain: string;
-                asset: Readonly<{
-                    kind: "native";
-                    identifier: null;
-                } | {
-                    kind: "token";
-                    identifier: string;
-                }>;
-                amount_atomic: string;
-                mechanism: Readonly<{
-                    provider: "lifi";
-                    reference: "across-v4";
-                }>;
-                reservation_id: string | null;
-            } | null;
-            identity: string;
-            policy_hash: string;
-        };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
     }>;
     status(operationId: string): Promise<StoredPublicBridgeOperation>;
     receipt(operationId: string): Promise<BridgeReceipt | Record<string, unknown>>;

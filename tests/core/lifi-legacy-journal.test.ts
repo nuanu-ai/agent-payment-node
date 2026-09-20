@@ -61,9 +61,12 @@ test("legacy failed LI.FI journal stays readable and cannot be resumed, signed, 
 
   const status = await s.core.execute({ command: "operation.status", operationId: prepared.id });
   assert.equal(status.ok, true, status.error?.message); assert.equal((status.operation as any).state, "failed_before_effect");
+  assert.equal(Object.hasOwn(status.operation as object, "pre_sign_rpc_failure"), false);
   assert.equal((status.operation as any).journal_compatibility.resumable, false);
   assert.equal((status.operation as any).policy.allowlist.availability, "legacy_unknown");
-  assert.deepEqual((await s.core.execute({ command: "receipt.get", operationId: prepared.id })).receipt, fixture.receipt);
+  const receipt = await s.core.execute({ command: "receipt.get", operationId: prepared.id });
+  assert.deepEqual(receipt.receipt, fixture.receipt);
+  assert.equal(Object.hasOwn(receipt.receipt as object, "pre_sign_rpc_failure"), false);
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: prepared.id })).error?.code, "APN_OPERATION_BLOCKED");
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: prepared.id })).error?.code, "APN_OPERATION_BLOCKED");
   assert.equal(s.source.submissions.length, sends); assert.equal(await readFile(fixture.operationPath, "utf8"), before);

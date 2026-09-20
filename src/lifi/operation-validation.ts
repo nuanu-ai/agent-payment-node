@@ -189,6 +189,28 @@ function validateSnapshot(op: BridgeOperationRecord, s: BridgeTransition, legacy
   }
   if (s.state === "completed" && (s.effects.some((e) => e.phase !== "safe_success") || s.destinationProof === null || s.sourceProof === null)) bridgeCorrupt();
   if (s.state === "failed_before_effect" && (s.effects.some((e) => e.submissionAttempts !== 0 || e.phase === "signing_started") || s.failure === null)) bridgeCorrupt();
+  if (s.failure?.preSignRpc !== undefined) {
+    const d = s.failure.preSignRpc, request = op.intent.materialization.request;
+    const expectedChain = d.chainRole === "source" ? request.fromChainId : request.toChainId;
+    const expectedCategory = d.stage.endsWith("deployment_refresh") ? "deployment_refresh"
+      : d.stage === "source_account_refresh" ? "account_nonce"
+      : d.stage === "source_execution_simulation" ? "simulation" : "fee_quote";
+    const unsubmittedBridgeAfterApproval = d.effectRole === "bridge" && approval?.role === "approval" &&
+      approval.submissionAttempts === 1 && bridge.role === "bridge" && bridge.submissionAttempts === 0 && bridge.phase === "unsealed";
+    const compatibleState = (s.state === "failed_before_effect" && d.effectRole === s.effects[0]!.role &&
+      s.effects.some((effect) => effect.role === d.effectRole && effect.phase === "unsealed" && effect.submissionAttempts === 0)) ||
+      (s.state === "failed_after_approval" && unsubmittedBridgeAfterApproval && approval?.phase === "safe_success") ||
+      (s.state === "source_pending" && unsubmittedBridgeAfterApproval &&
+        (approval?.phase === "included_success" || approval?.phase === "safe_success")) ||
+      (s.state === "unknown_finality" && unsubmittedBridgeAfterApproval) ||
+      (s.state === "failed_confirmed_revert" && unsubmittedBridgeAfterApproval && approval?.phase === "safe_revert");
+    if (s.failure.reason !== "unsent_apn_rpc_ambiguous" || !compatibleState ||
+      d.chainId !== expectedChain || d.category !== expectedCategory ||
+      (d.stage.startsWith("source_") ? d.chainRole !== "source" : d.chainRole !== "destination") ||
+      !s.effects.some((effect) => effect.role === d.effectRole)) bridgeCorrupt();
+  }
+  if ((s.failure?.residualAllowanceStatus === "observed" && s.failure.residualAllowance === null) ||
+    (s.failure?.residualAllowanceStatus === "unavailable" && s.failure.residualAllowance !== null)) bridgeCorrupt();
   if (s.state === "failed_after_approval" && (approval?.phase !== "safe_success" || bridge.submissionAttempts !== 0 || bridge.phase === "signing_started" || s.failure === null)) bridgeCorrupt();
   if (s.state === "failed_confirmed_revert") {
     const index = s.effects.findIndex((e) => e.phase === "safe_revert");
