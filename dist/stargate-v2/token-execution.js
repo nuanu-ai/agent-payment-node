@@ -22,7 +22,9 @@ export const STARGATE_TOKEN_DESTINATION_EXECUTOR = getAddress("0xCd3F213AD101472
 export const LAYERZERO_ENDPOINT_V2 = getAddress("0x1a44076050125825900e736c501f859c50fE728c");
 export const STARGATE_TOKEN_SOURCE_MESSAGING = getAddress("0xF1fCb4CBd57B67d683972A59B6a7b1e2E8Bf27E6");
 export const STARGATE_TOKEN_DESTINATION_MESSAGING = getAddress("0x6CE9bf8CDaB780416AD1fd87b318A077D2f50EaC");
-export const STARGATE_TOKEN_MESSAGING_CODE_HASH = "0x726daaaf8dc9855ad889809e4c1a71368b156a014c45a384100802db191114f3";
+// TokenMessaging embeds chain-specific immutable configuration, so each deployed runtime has its own byte hash.
+export const STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH = "0x40eefa854ab4e4564009d7d4c08b0e2d341f6b6a354c201c326096468b300827";
+export const STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH = "0xae66157283b0894d904b84d87efe27ea850e5eae61351827f4fcf7c3c04d593f";
 export const STARGATE_TOKEN_MECHANISM = Object.freeze({ provider: "stargate-v2", reference: `eip155:10:${STARGATE_TOKEN_SOURCE_POOL}/eip155:137:${STARGATE_TOKEN_DESTINATION_POOL}` });
 const UINT = /^(?:0|[1-9][0-9]{0,77})$/u, HASH = /^0x[0-9a-f]{64}$/u, CODE = /^0x(?:[0-9a-f]{2})+$/u;
 const MAX_TTL_MS = 120_000;

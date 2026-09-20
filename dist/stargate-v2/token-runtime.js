@@ -9,7 +9,7 @@ import { ApnError } from "../errors.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { LAYERZERO_ENDPOINT_V2_ABI, LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "./abi.js";
 import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtime.js";
-import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, reconcileStargateV2TokenUsage, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM, LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_MESSAGING_CODE_HASH, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "./token-execution.js";
+import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, reconcileStargateV2TokenUsage, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM, LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
 function blocked(reason) { throw new ApnError("APN_RPC_CONFIG", `Stargate token runtime unavailable: ${reason}.`, { reason }); }
 function quantity(v) { if (typeof v !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(v))
@@ -180,7 +180,7 @@ function assertServiceUsageTarget(op) {
     if (!legal[op.usageTarget].includes(op.phase))
         throw new ApnError("APN_STATE_CORRUPT", "The Stargate token usage reconciliation target is incompatible with the journal phase.");
 }
-export async function confirmedStargateTokenSourceReceipt(rpc, transactionHash, finalityTag, expectedCodeHash = STARGATE_TOKEN_MESSAGING_CODE_HASH) {
+export async function confirmedStargateTokenSourceReceipt(rpc, transactionHash, finalityTag, expectedCodeHash = STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH) {
     const receipt = await confirmedStargateSourceReceipt(rpc, transactionHash, finalityTag);
     if (receipt === null)
         return null;
@@ -217,7 +217,7 @@ async function destinationLogs(rpc, addresses, topic0, from, to) {
 }
 function logPosition(log) { return [quantity(log.blockNumber), quantity(log.logIndex)]; }
 function atOrBefore(a, b) { const x = logPosition(a), y = logPosition(b); return x[0] < y[0] || (x[0] === y[0] && x[1] <= y[1]); }
-export async function observeStargateTokenDestination(rpc, input, tokenAt, expectedCodeHash = STARGATE_TOKEN_MESSAGING_CODE_HASH) {
+export async function observeStargateTokenDestination(rpc, input, tokenAt, expectedCodeHash = STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH) {
     const finalityHead = record(await rpc.call("eth_getBlockByNumber", [input.finalityTag, false])), head = quantity(finalityHead.number);
     const baselineNumber = BigInt(input.fromBlockNumberAtomic), baselineTag = `0x${baselineNumber.toString(16)}`;
     const baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false]));
