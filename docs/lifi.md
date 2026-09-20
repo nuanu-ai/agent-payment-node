@@ -19,6 +19,29 @@ support. Solana and TRON bridge directions, Stargate Bus, Polymer and other
 bridge tools remain outside this execution profile. Direct Solana/TRON rails
 and gasless payment profiles have separate acceptance requirements.
 
+### Reviewed quote-only EVM destinations
+
+The public LI.FI quote API was read on 2026-09-20 for Ethereum USDC to four
+additional USDC deployments already named by the frozen allowlist. APN accepts
+these exact chains, assets and tools for route discovery and offline calldata
+inspection only. Every returned row remains `preparable: false` with
+`destination_execution_unreviewed`; `bridge prepare` refuses it before opening
+any destination RPC, and no approval or send path is enabled.
+
+| Destination | USDC | Reviewed public quote tools | Provider refusal captured |
+|---|---|---|---|
+| OP Mainnet (`eip155:10`) | `0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85` | Across V4, Stargate V2 Taxi | none |
+| Polygon PoS (`eip155:137`) | `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359` | Across V4 | Stargate V2: no available quote |
+| Avalanche C-Chain (`eip155:43114`) | `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E` | Stargate V2 Taxi | Across: no available quote |
+| Unichain (`eip155:130`) | `0x078D782b760474a361dDA0AF3839290b0EF57AD6` | Across V4 | Stargate V2: no available quote |
+
+The recorded provider fixture is
+`tests/core/lifi-fixtures/lifi-ethereum-additional-destinations-quote-20260920.json`.
+It proves the same `swapAndStartBridgeTokensViaAcrossV4` (`0x1794958f`) and
+`swapAndStartBridgeTokensViaStargate` (`0xa6010a66`) envelopes, exact chain and
+token identities, fee forwarding, Taxi endpoint IDs, and fail-closed rejection
+of altered calldata or fees. Glacis, Mayan and LI.FI Intents remain refused.
+
 Offline capabilities expose direct Circle CCTP V2 with Forwarding and a signed
 upfront fee quote in `selected_direct_lane` as the first-lane design, still
 non-executable. The existing `candidate_lanes` array keeps its LI.FI Solana

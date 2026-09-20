@@ -3,7 +3,7 @@ import { sha256 } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
 import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER, FEE_FORWARDER_NATIVE_SELECTOR, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, STARGATE_SELECTOR, stargateBridgeAbi } from "./abi.js";
 import type { BridgeMaterialization, DecodedBridgeCall } from "./model.js";
-import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeFeeAsset, bridgeNativePrincipal, validateBridgeRequest } from "./asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, BRIDGE_QUOTE_DESTINATIONS, bridgeAssetRow, bridgeFeeAsset, bridgeNativePrincipal, bridgeQuoteDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 
 type BridgeData = Readonly<{
@@ -45,6 +45,7 @@ export function decodeBridgeCall(materialization: BridgeMaterialization): Decode
     (quotedOutput - minimumOutput) * 10_000n > quotedOutput * BigInt(request.slippageBps)) fail("output_economics");
 
   const selector = data.slice(0, 10) as Hex;
+  if (mQuotedDestination(request.toChainId) && !bridgeQuoteDestination(request.toChainId).tools.includes(materialization.tool as never)) fail("destination_tool_quote_unavailable");
   try {
     if (materialization.tool === "across" && selector === ACROSS_SELECTOR) {
       const decoded = decodeFunctionData({ abi: acrossBridgeAbi, data });
@@ -159,5 +160,10 @@ function canonicalData(abi: typeof acrossBridgeAbi | typeof stargateBridgeAbi | 
   return encodeFunctionData({ abi, functionName: functionName as never, args: args as never }).toLowerCase() as Hex;
 }
 function addressWord(address: Address): string { return `0x${"0".repeat(24)}${address.slice(2).toLowerCase()}`; }
-function destinationEid(chainId: number): number { if (chainId === 1) return 30101; if (chainId === 8453) return 30184; if (chainId === 42161) return 30110; return fail("destination_EID"); }
+function destinationEid(chainId: number): number {
+  if (chainId === 1) return 30101; if (chainId === 8453) return 30184; if (chainId === 42161) return 30110;
+  const row = bridgeQuoteDestination(chainId); if (row.endpointId !== null) return row.endpointId;
+  return fail("destination_EID");
+}
+function mQuotedDestination(chainId: number): boolean { return chainId in BRIDGE_QUOTE_DESTINATIONS; }
 function fail(reason: string): never { return bridgeFailure("APN_PROVIDER_PROTOCOL", reason); }
