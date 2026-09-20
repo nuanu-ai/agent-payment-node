@@ -57,6 +57,10 @@ export declare class StargateTokenService {
         source: import("./token-execution.js").StargateTokenSourceReceipt;
         destination: StargateTokenDestinationEvidence;
         quoteLifecycle?: {
+            ownerApprovedMinimumOutputAtomic: string;
+            ownerApprovedMaximumQuoteLossAtomic: string;
+            initialQuotedOutputAtomic: string;
+            initialQuotedNativeMessageFeeAtomic: string;
             prepareQuoteHash: string;
             prepareExpiresAt: string;
             approvalFinalityWindowMs: number;
@@ -68,6 +72,8 @@ export declare class StargateTokenService {
                 readonly hash: Hex;
             }> | null;
             postApprovalQuoteExpiresAt: string | null;
+            postApprovalQuotedOutputAtomic: string | null;
+            postApprovalQuotedNativeMessageFeeAtomic: string | null;
         };
         schemaVersion: "apn.stargate-v2-token-receipt.v2" | "apn.stargate-v2-token-receipt.v1";
         operationId: string;

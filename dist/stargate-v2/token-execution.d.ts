@@ -88,6 +88,8 @@ export interface StargateTokenPostApprovalQuote {
     readonly quotedAt: string;
     readonly expiresAt: string;
     readonly quote: StargateV2QuoteEvidence;
+    readonly ownerApprovedMinimumOutputAtomic: string;
+    readonly ownerApprovedMaximumQuoteLossAtomic: string;
     readonly quoteBlock: Readonly<{
         readonly numberAtomic: string;
         readonly hash: Hex;
@@ -332,6 +334,10 @@ export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOper
     source: StargateTokenSourceReceipt;
     destination: StargateTokenDestinationEvidence;
     quoteLifecycle?: {
+        ownerApprovedMinimumOutputAtomic: string;
+        ownerApprovedMaximumQuoteLossAtomic: string;
+        initialQuotedOutputAtomic: string;
+        initialQuotedNativeMessageFeeAtomic: string;
         prepareQuoteHash: string;
         prepareExpiresAt: string;
         approvalFinalityWindowMs: number;
@@ -343,6 +349,8 @@ export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOper
             readonly hash: Hex;
         }> | null;
         postApprovalQuoteExpiresAt: string | null;
+        postApprovalQuotedOutputAtomic: string | null;
+        postApprovalQuotedNativeMessageFeeAtomic: string | null;
     };
     schemaVersion: "apn.stargate-v2-token-receipt.v2" | "apn.stargate-v2-token-receipt.v1";
     operationId: string;
