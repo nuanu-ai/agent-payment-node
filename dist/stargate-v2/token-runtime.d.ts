@@ -53,6 +53,15 @@ export declare class StargateTokenService {
         policy: import("./token-execution.js").StargateTokenPolicyBinding;
         finalityPolicy: import("./finality-policy.js").StargateV2RouteFinalityPolicy;
         quoteHash: string;
+        bridgeSimulation: Readonly<{
+            readonly mode: "exact_at_prepare" | "pending_post_approval";
+            readonly prepareStatus: "succeeded" | "pending_post_approval";
+            readonly gasCeilingAtomic: string;
+        }> | {
+            mode: "legacy_exact_at_prepare";
+            prepareStatus: "legacy_succeeded";
+            gasCeilingAtomic: string;
+        };
         approvalTransactionHash: `0x${string}` | null;
         residualAllowanceAtomic: string;
         source: import("./token-execution.js").StargateTokenSourceReceipt;
