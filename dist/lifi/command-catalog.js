@@ -13,6 +13,12 @@ const bridgeStates = { terminal: ["completed", "failed_before_effect", "failed_a
 const done = { terminal: ["completed", "classified_failure"], non_terminal: [] };
 const readApproval = { class: "none", when: "Never signs or submits." };
 export const BRIDGE_COMMANDS = [
+    { path: ["operation", "repair-deployment"], synopsis: "apn operation repair-deployment --operation <operation-id>",
+        summary: "Repair the one recognized historical Linea destination deployment identity in an eligible bridge journal.", options: [operation],
+        effect: { class: "recovery", summary: "Reads the frozen destination transaction and deployment at its exact canonical block, then atomically reseals only the deployment-bound journal hashes and receipt. It never loads custody, signs, submits, retries or resends." },
+        approval: { class: "prior_operation_authorization", when: "The existing submitted operation and exact versioned migration candidate are the authority boundary." },
+        output, states: bridgeStates, recovery: [{ command_path: ["operation", "resume"], when: "Continue read-only observation of the already submitted effect." }],
+        examples: ["apn operation repair-deployment --operation <operation-id>"] },
     { path: ["bridge", "capabilities"], synopsis: "apn bridge capabilities [--profile <profile>]",
         summary: "Offline bridge capability rows for all four profiles, exact RPC environment names and open acceptance gates.",
         options: [{ ...profile, required: false }], effect: { class: "none", summary: "Static only; even a profile argument does not read APN state, providers, RPC or Keychain." },

@@ -80,6 +80,7 @@ const EXPECTED_COMMANDS = [
   "policy admit-tron",
   "pay transfer prepare-tron",
   "wallet portfolio",
+  "operation repair-deployment",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
   "circle approval prepare", "circle approval execute", "circle approval status", "circle source submit",
   "oneclick source submit", "oneclick source status",

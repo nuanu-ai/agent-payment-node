@@ -370,6 +370,7 @@ export class ApnCore {
                 }
                 return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds));
             }
+            case "operation.repair-deployment": return dataOutcome(await this.bridges.repairDeployment(request.operationId), "local_journal_migration");
             case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));
             case "operation.recover-provider-request": return operationOutcome(await this.transfer.recoverProviderRequest(request.operationId, request.providerRequestId));
             case "operation.recover-transaction-settlement": {

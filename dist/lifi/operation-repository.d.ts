@@ -2,6 +2,7 @@ import { SecureStateStore } from "../secure-state-store.js";
 import { type BridgeOperationRecord } from "./operation-model.js";
 import { type BridgeReceipt } from "./receipt.js";
 import { type LegacyBridgeOperationRecord, type StoredBridgeOperationRecord } from "./legacy-operation.js";
+import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
 export declare class BridgeOperationRepository extends SecureStateStore {
     private initialized;
     private ready;
@@ -17,6 +18,10 @@ export declare class BridgeOperationRepository extends SecureStateStore {
     /** Caller holds the same profile/operation locks as every other money service. */
     persist(op: BridgeOperationRecord): Promise<void>;
     repairReceipt(op: BridgeOperationRecord): Promise<void>;
+    /** Caller holds the profile and operation locks. The audit-first order makes an interrupted repair resumable. */
+    migrateDeployment(previous: BridgeOperationRecord, next: BridgeOperationRecord, audit: BridgeDeploymentMigrationAudit): Promise<void>;
+    /** Complete or verify the derived receipt after an audit-first migration was interrupted. */
+    repairMigratedDeployment(previous: BridgeOperationRecord, op: BridgeOperationRecord, audit: BridgeDeploymentMigrationAudit): Promise<void>;
     loadReceipt(profileHash: string, operationId: string): Promise<BridgeReceipt>;
     loadLegacyReceipt(op: LegacyBridgeOperationRecord): Promise<Record<string, unknown>>;
     private path;

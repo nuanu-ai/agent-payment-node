@@ -658,6 +658,7 @@ apn wallet capabilities-tron [--profile <profile>]
 apn policy admit-tron --profile <profile> --asset <trx-or-usdt> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-trx <decimal>
 apn pay transfer prepare-tron --profile <profile> --asset <trx-or-usdt> --to <tron-address> --amount <decimal> --max-fee-trx <decimal> --idempotency-key <key>
 apn wallet portfolio [--profile <profile>]
+apn operation repair-deployment --operation <operation-id>
 apn bridge capabilities [--profile <profile>]
 apn bridge inventory
 apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --from-token <address> --to-token <address> --amount <decimal> --to <address> --min-output <decimal> --max-native-debit-wei <uint> --max-route-fee <decimal> --slippage-bps <uint>
