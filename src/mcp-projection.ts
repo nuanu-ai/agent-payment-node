@@ -54,6 +54,7 @@ const SELECTED_PATHS = [
   "pay transfer prepare-asset",
   "pay transfer approve",
   "operation status",
+  "operation repair-deployment",
   "operation abandon",
   "operation resume",
   "operation recover-provider-request",
