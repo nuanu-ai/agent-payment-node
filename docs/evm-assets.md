@@ -2,12 +2,12 @@
 
 Owner acceptance runbook: [direct EVM live proofs](evm-direct-live-acceptance-2026-09-19.md).
 
-The APN 0.5.24 package retains the released 0.5.10 EVM support for exactly
-Base (`eip155:8453`), Ethereum mainnet (`eip155:1`) and Arbitrum One
-(`eip155:42161`) for the local encrypted disposable wallet. Direct transfers
-(`pay transfer prepare-asset`) also run on the eight other EVM networks of the
-frozen allowlist; x402, wallet policy, `wallet balance-asset`, LI.FI and the
-portfolio network set are unchanged (see
+The APN 0.5.24 package supports the local encrypted disposable wallet on the
+11 direct EVM networks in the frozen allowlist. `wallet balance-asset` reads
+native coins or any explicitly selected contract on each of those networks;
+direct transfers (`pay transfer prepare-asset`) use the same network registry
+with the frozen token allowlist. x402, wallet policy, LI.FI and the portfolio
+network set remain on their own registries (see
 [Direct networks](#direct-networks-fee-models-and-finality)). Package
 availability and a fresh mainnet payment remain separate proof layers.
 
