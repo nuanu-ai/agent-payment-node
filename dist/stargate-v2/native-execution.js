@@ -1,10 +1,11 @@
-import { lstat, mkdir, open, readFile, realpath, rename, rmdir } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, realpath, rename } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { decodeAbiParameters, decodeEventLog, decodeFunctionResult, encodeFunctionData, getAddress, keccak256, pad, parseTransaction, recoverTransactionAddress, zeroAddress, } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
+import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "./abi.js";
 import { quoteStargateV2Direct } from "./quote.js";
@@ -52,8 +53,10 @@ function rpcQuantity(value) {
 }
 export class FileStargateNativeJournal {
     root;
-    constructor(root) {
+    locks;
+    constructor(root, locks) {
         this.root = root;
+        this.locks = locks ?? new StateStore(root, { lockWaitMs: 0 });
     }
     path(id) {
         if (!/^[a-f0-9]{64}$/u.test(id))
@@ -61,26 +64,13 @@ export class FileStargateNativeJournal {
         return join(this.root, "stargate-v2-native", `${id}.json`);
     }
     async withLock(id, work) {
-        const path = this.path(id), directory = dirname(path);
-        await secureDirectory(directory);
-        const lock = `${path}.lock`;
-        try {
-            await mkdir(lock, { mode: 0o700 });
-        }
-        catch {
-            return fail("APN_OPERATION_BLOCKED", "operation_locked");
-        }
-        try {
-            return await work();
-        }
-        finally {
-            await rmdir(lock);
-        }
+        await this.locks.initialize();
+        return await this.locks.withLocks([`stargate-native:${id}`], work);
     }
     async load(id) {
         try {
             const path = this.path(id);
-            await secureDirectory(dirname(path));
+            await secureDirectory(dirname(path), false);
             const info = await lstat(path);
             if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0)
                 fail("APN_STATE_CORRUPT", "journal_file_mode");
@@ -115,8 +105,9 @@ export class FileStargateNativeJournal {
         }
     }
 }
-async function secureDirectory(directory) {
-    await mkdir(directory, { recursive: true, mode: 0o700 });
+async function secureDirectory(directory, create = true) {
+    if (create)
+        await mkdir(directory, { recursive: true, mode: 0o700 });
     const info = await lstat(directory);
     if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077) !== 0)
         fail("APN_STATE_CORRUPT", "journal_directory_mode");
@@ -382,13 +373,18 @@ async function readSourceConfig(call, tag, operation) {
     if (status !== 1 || (operation !== undefined && BigInt(credit) < BigInt(operation.amountAtomic) / 1000000000000n))
         fail("APN_REPREPARE_REQUIRED", "source_status_or_credit");
     if (operation !== undefined) {
-        const [balance, nonce, simulation] = await Promise.all([
+        const transaction = { from: operation.owner, to: operation.envelope.to, data: operation.envelope.data,
+            value: `0x${BigInt(operation.envelope.valueAtomic).toString(16)}`, gas: `0x${BigInt(operation.envelope.gasLimitAtomic).toString(16)}`,
+            maxFeePerGas: `0x${BigInt(operation.envelope.maxFeePerGasAtomic).toString(16)}`,
+            maxPriorityFeePerGas: `0x${BigInt(operation.envelope.maxPriorityFeePerGasAtomic).toString(16)}` };
+        const [balance, nonce, simulation, estimate] = await Promise.all([
             call("eth_getBalance", [operation.owner, "pending"]), call("eth_getTransactionCount", [operation.owner, "pending"]),
-            call("eth_call", [{ from: operation.owner, to: operation.envelope.to, data: operation.envelope.data,
-                    value: `0x${BigInt(operation.envelope.valueAtomic).toString(16)}` }, "pending"]),
+            call("eth_call", [transaction, "pending"]), call("eth_estimateGas", [transaction, "pending"]),
         ]);
         if (rpcQuantity(balance) < BigInt(operation.maximumDebitAtomic) || rpcQuantity(nonce).toString() !== operation.envelope.nonceAtomic)
             fail("APN_REPREPARE_REQUIRED", "source_balance_or_nonce");
+        if (rpcQuantity(estimate) > BigInt(operation.envelope.gasLimitAtomic))
+            fail("APN_REPREPARE_REQUIRED", "source_gas_limit");
         try {
             const decoded = decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", data: simulation });
             if (decoded[1].amountSentLD.toString() !== operation.amountAtomic ||

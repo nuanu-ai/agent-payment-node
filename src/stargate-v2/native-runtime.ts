@@ -53,7 +53,7 @@ export class StargateNativeService {
     const source = environment.APN_ETHEREUM_RPC_URL, destination = environment.APN_UNICHAIN_RPC_URL;
     if (source === undefined || destination === undefined) blocked("APN_ETHEREUM_RPC_URL_and_APN_UNICHAIN_RPC_URL_required");
     this.source = new StargateJsonRpc(source); this.destination = new StargateJsonRpc(destination);
-    this.journal = new FileStargateNativeJournal(state.root); this.local = new LocalStargateNativeSigner(state, wrapping);
+    this.journal = new FileStargateNativeJournal(state.root, state); this.local = new LocalStargateNativeSigner(state, wrapping);
   }
   async prepare(input: Readonly<{ profile: string; amountAtomic: string; maxNativeDebitAtomic: string; idempotencyKey: string }>): Promise<StargateNativeOperation> {
     await this.state.initialize(); const identity = await this.local.identity(input.profile), ports = await this.ports(identity.profile, identity.address);
@@ -62,12 +62,13 @@ export class StargateNativeService {
   async execute(operationId: string): Promise<StargateNativeOperation> {
     const operation = await this.required(operationId); return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal);
   }
-  async status(operationId: string): Promise<StargateNativeOperation> {
+  async observe(operationId: string): Promise<StargateNativeOperation> {
     const operation = await this.required(operationId);
-    return ["submission_started", "submitted", "unknown_finality"].includes(operation.phase)
-      ? await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal)
-      : operation;
+    if (!["submission_started", "submitted", "unknown_finality"].includes(operation.phase))
+      throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate operation can be observed.");
+    return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal);
   }
+  async status(operationId: string): Promise<StargateNativeOperation> { return await this.required(operationId); }
   async receipt(operationId: string) { return stargateV2NativeCanonicalReceipt(await this.required(operationId)); }
   private async required(id: string): Promise<StargateNativeOperation> {
     const found = await this.journal.load(id); if (found === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stargate native operation was not found."); return found;
@@ -92,13 +93,13 @@ export class StargateNativeService {
           maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() };
       }, signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async operation => await new TtyStargateNativeApproval().approve(operation),
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; },
-      waitSourceReceipt: async transactionHash => await confirmedReceipt(source, transactionHash),
-      observeDestination: async input => await observeDestination(destination, input), now: this.now,
+      waitSourceReceipt: async transactionHash => await confirmedStargateSourceReceipt(source, transactionHash),
+      observeDestination: async input => await observeStargateDestination(destination, input), now: this.now,
     };
   }
 }
 
-async function confirmedReceipt(rpc: StargateJsonRpc, transactionHash: Hex): Promise<StargateConfirmedReceipt | null> {
+export async function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex): Promise<StargateConfirmedReceipt | null> {
   const raw = await rpc.call("eth_getTransactionReceipt", [transactionHash]); if (raw === null) return null;
   const receipt = record(raw), safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false]));
   if (quantity(receipt.blockNumber) > quantity(safe.number)) return null;
@@ -108,7 +109,9 @@ async function confirmedReceipt(rpc: StargateJsonRpc, transactionHash: Hex): Pro
     blockNumberAtomic: quantity(receipt.blockNumber).toString(), blockHash: hash(receipt.blockHash), finality: "safe", logs };
 }
 
-async function observeDestination(rpc: StargateJsonRpc, input: Parameters<StargateNativeExecutionPorts["observeDestination"]>[0]) {
+export async function observeStargateDestination(rpc: Pick<StargateJsonRpc, "call">,
+  input: Parameters<StargateNativeExecutionPorts["observeDestination"]>[0]) {
+  if (input.destinationPool !== DESTINATION_POOL || input.sourceEid !== 30101) blocked("destination_binding");
   const safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false])), topic = encodeEventTopics({ abi: STARGATE_SEND_ABI,
     eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
   const raw = await rpc.call("eth_getLogs", [{ address: DESTINATION_POOL,
@@ -117,6 +120,7 @@ async function observeDestination(rpc: StargateJsonRpc, input: Parameters<Starga
   for (const value of raw) {
     const log = record(value);
     try {
+      if (getAddress(String(log.address)) !== DESTINATION_POOL) continue;
       const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: (log.topics as Hex[]) as [Hex, ...Hex[]], data: String(log.data) as Hex });
       if (event.args.srcEid === input.sourceEid && event.args.guid === input.guid && getAddress(event.args.toAddress) === input.recipient &&
         event.args.amountReceivedLD.toString() === input.minimumAmountAtomic) return { mode: "oft_received" as const, emitter: DESTINATION_POOL,

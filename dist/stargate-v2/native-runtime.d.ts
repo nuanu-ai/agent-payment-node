@@ -1,7 +1,8 @@
+import { type Hex } from "viem";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { StateStore } from "../state.js";
 import { BridgeHttps } from "../lifi/https.js";
-import { type StargateNativeOperation } from "./native-execution.js";
+import { type StargateConfirmedReceipt, type StargateNativeExecutionPorts, type StargateNativeOperation } from "./native-execution.js";
 export declare class StargateJsonRpc {
     private readonly https;
     private sequence;
@@ -25,8 +26,43 @@ export declare class StargateNativeService {
         idempotencyKey: string;
     }>): Promise<StargateNativeOperation>;
     execute(operationId: string): Promise<StargateNativeOperation>;
+    observe(operationId: string): Promise<StargateNativeOperation>;
     status(operationId: string): Promise<StargateNativeOperation>;
     receipt(operationId: string): Promise<import("./native-execution.js").StargateNativeCanonicalReceipt>;
     private required;
     private ports;
 }
+export declare function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex): Promise<StargateConfirmedReceipt | null>;
+export declare function observeStargateDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateNativeExecutionPorts["observeDestination"]>[0]): Promise<{
+    mode: "oft_received";
+    emitter: `0x${string}`;
+    sourceTransactionHash: `0x${string}`;
+    guid: `0x${string}`;
+    sourceEid: 30101;
+    recipient: `0x${string}`;
+    destinationTransactionHash: `0x${string}`;
+    logIndexAtomic: string;
+    amountReceivedAtomic: string;
+    blockNumberAtomic: string;
+    blockHash: `0x${string}`;
+    finality: "safe";
+    balanceBeforeAtomic?: never;
+    balanceAfterAtomic?: never;
+    deltaAtomic?: never;
+} | {
+    mode: "balance_delta";
+    recipient: `0x${string}`;
+    balanceBeforeAtomic: string;
+    balanceAfterAtomic: string;
+    deltaAtomic: string;
+    blockNumberAtomic: string;
+    blockHash: `0x${string}`;
+    finality: "safe";
+    emitter?: never;
+    sourceTransactionHash?: never;
+    guid?: never;
+    sourceEid?: never;
+    destinationTransactionHash?: never;
+    logIndexAtomic?: never;
+    amountReceivedAtomic?: never;
+} | null>;

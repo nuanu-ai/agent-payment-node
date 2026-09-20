@@ -12,7 +12,7 @@ export type CommandRequest = {
     readonly maxNativeDebitAtomic: string;
     readonly idempotencyKey: string;
 } | {
-    readonly command: "stargate.native.execute" | "stargate.native.status" | "stargate.native.receipt";
+    readonly command: "stargate.native.execute" | "stargate.native.observe" | "stargate.native.status" | "stargate.native.receipt";
     readonly operationId: string;
 } | {
     readonly command: "swap.uniswap.inventory";

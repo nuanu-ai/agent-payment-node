@@ -168,10 +168,11 @@ export class ApnCore {
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate native runtime is unavailable.");
         return operationOutcome(await service.prepare(request));
       }
-      case "stargate.native.execute": case "stargate.native.status": case "stargate.native.receipt": {
+      case "stargate.native.execute": case "stargate.native.observe": case "stargate.native.status": case "stargate.native.receipt": {
         const service = this.context.stargateNative;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate native runtime is unavailable.");
         if (request.command === "stargate.native.execute") return operationOutcome(await service.execute(request.operationId));
+        if (request.command === "stargate.native.observe") return operationOutcome(await service.observe(request.operationId));
         if (request.command === "stargate.native.status") return operationOutcome(await service.status(request.operationId));
         return receiptOutcome(await service.receipt(request.operationId));
       }
