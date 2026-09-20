@@ -15,6 +15,10 @@ export declare const STARGATE_TOKEN_DESTINATION_POOL: `0x${string}`;
 /** Official LayerZero Optimism mainnet Executor at lz-address-book commit 7c800d6. */
 export declare const STARGATE_TOKEN_SOURCE_EXECUTOR: `0x${string}`;
 export declare const STARGATE_TOKEN_DESTINATION_EXECUTOR: `0x${string}`;
+export declare const LAYERZERO_ENDPOINT_V2: `0x${string}`;
+export declare const STARGATE_TOKEN_SOURCE_MESSAGING: `0x${string}`;
+export declare const STARGATE_TOKEN_DESTINATION_MESSAGING: `0x${string}`;
+export declare const STARGATE_TOKEN_MESSAGING_CODE_HASH: Hex;
 export declare const STARGATE_TOKEN_MECHANISM: Readonly<{
     provider: "stargate-v2";
     reference: `eip155:10:0x${string}/eip155:137:0x${string}`;
@@ -42,6 +46,13 @@ export interface StargateTokenEnvelope {
     readonly maxFeePerGasAtomic: string;
     readonly maxPriorityFeePerGasAtomic: string;
 }
+export interface StargateTokenPacketBinding {
+    readonly srcEid: 30111;
+    readonly sender: Hex;
+    readonly nonceAtomic: string;
+    readonly dstEid: 30109;
+    readonly receiver: Hex;
+}
 export interface StargateTokenSourceReceipt {
     readonly transactionHash: Hex;
     readonly blockNumberAtomic: string;
@@ -50,6 +61,7 @@ export interface StargateTokenSourceReceipt {
     readonly guid: Hex;
     readonly amountSentAtomic: string;
     readonly amountReceivedAtomic: string;
+    readonly packet?: StargateTokenPacketBinding;
 }
 export interface StargateTokenDestinationEvidence {
     readonly emitter: Address;
@@ -73,6 +85,19 @@ export interface StargateTokenDestinationEvidence {
         readonly executor: Address;
         readonly nonceAtomic: string;
         readonly success: true;
+        readonly transactionHash?: Hex;
+        readonly blockNumberAtomic?: string;
+        readonly blockHash?: Hex;
+        readonly logIndexAtomic?: string;
+    }>;
+    readonly packetDelivery?: Readonly<{
+        readonly endpoint: Address;
+        readonly tokenMessaging: Address;
+        readonly nonceAtomic: string;
+        readonly transactionHash: Hex;
+        readonly blockNumberAtomic: string;
+        readonly blockHash: Hex;
+        readonly logIndexAtomic: string;
     }>;
 }
 export interface StargateTokenPolicyBinding {
@@ -277,6 +302,7 @@ export interface StargateTokenExecutionPorts {
         nativeDropAtomic: string;
         fromBlockNumberAtomic: string;
         fromBlockHash: Hex;
+        sourcePacket?: StargateTokenPacketBinding;
         finalityTag: StargateV2FinalityTag;
     }>) => Promise<StargateTokenDestinationEvidence | null>;
     readonly now?: () => number;

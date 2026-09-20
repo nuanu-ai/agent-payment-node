@@ -5,7 +5,7 @@ import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
-import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_QUOTE_ABI, STARGATE_SEND_ABI } from "./abi.js";
+import { LAYERZERO_ENDPOINT_V2_ABI, LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_QUOTE_ABI, STARGATE_SEND_ABI } from "./abi.js";
 import { assertStargateV2LegacyRouteFinalityPolicy, assertStargateV2RouteFinalityPolicy, stargateV2LegacyRouteFinalityPolicy, stargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct } from "./quote.js";
 export const STARGATE_TOKEN_SOURCE_CHAIN = 10;
@@ -19,6 +19,10 @@ export const STARGATE_TOKEN_DESTINATION_POOL = getAddress("0x9Aa02D4Fae7F58b8E8f
 /** Official LayerZero Optimism mainnet Executor at lz-address-book commit 7c800d6. */
 export const STARGATE_TOKEN_SOURCE_EXECUTOR = getAddress("0x2D2ea0697bdbede3F01553D2Ae4B8d0c486B666e");
 export const STARGATE_TOKEN_DESTINATION_EXECUTOR = getAddress("0xCd3F213AD101472e1713C72B1697E727C803885b");
+export const LAYERZERO_ENDPOINT_V2 = getAddress("0x1a44076050125825900e736c501f859c50fE728c");
+export const STARGATE_TOKEN_SOURCE_MESSAGING = getAddress("0xF1fCb4CBd57B67d683972A59B6a7b1e2E8Bf27E6");
+export const STARGATE_TOKEN_DESTINATION_MESSAGING = getAddress("0x6CE9bf8CDaB780416AD1fd87b318A077D2f50EaC");
+export const STARGATE_TOKEN_MESSAGING_CODE_HASH = "0x726daaaf8dc9855ad889809e4c1a71368b156a014c45a384100802db191114f3";
 export const STARGATE_TOKEN_MECHANISM = Object.freeze({ provider: "stargate-v2", reference: `eip155:10:${STARGATE_TOKEN_SOURCE_POOL}/eip155:137:${STARGATE_TOKEN_DESTINATION_POOL}` });
 const UINT = /^(?:0|[1-9][0-9]{0,77})$/u, HASH = /^0x[0-9a-f]{64}$/u, CODE = /^0x(?:[0-9a-f]{2})+$/u;
 const MAX_TTL_MS = 120_000;
@@ -49,6 +53,18 @@ function hex32(value) { if (typeof value !== "string" || !HASH.test(value))
     return fail("APN_RPC_PROTOCOL", "hash"); return value; }
 function quantity(value) { if (typeof value !== "string" || !/^0x(?:0|[1-9a-f][0-9a-f]*)$/u.test(value))
     return fail("APN_RPC_PROTOCOL", "quantity"); return BigInt(value); }
+function packetBinding(payload) {
+    const bytes = payload.slice(2);
+    if (!/^[0-9a-f]+$/u.test(bytes) || bytes.length < 226 || bytes.slice(0, 2) !== "01")
+        fail("APN_RPC_PROTOCOL", "source_packet_encoding");
+    const at = (offset, length) => bytes.slice(offset * 2, (offset + length) * 2);
+    const binding = { srcEid: Number(BigInt(`0x${at(9, 4)}`)), sender: `0x${at(13, 32)}`,
+        nonceAtomic: BigInt(`0x${at(1, 8)}`).toString(), dstEid: Number(BigInt(`0x${at(45, 4)}`)),
+        receiver: `0x${at(49, 32)}`, guid: `0x${at(81, 32)}` };
+    if (binding.srcEid !== 30111 || binding.dstEid !== 30109)
+        fail("APN_RPC_PROTOCOL", "source_packet_eids");
+    return binding;
+}
 /** Exact OptionsBuilder.addExecutorNativeDropOption Type-3 wire encoding. */
 export function encodeStargateNativeDrop(amountInput, recipientInput) {
     const amount = uint(amountInput, true), recipient = address(recipientInput);
@@ -471,6 +487,7 @@ async function observeBridge(op, ports, journal) {
         sourceEid: 30111, destinationPool: STARGATE_TOKEN_DESTINATION_POOL, minimumAmountAtomic: source.amountReceivedAtomic,
         tokenBalanceBeforeAtomic: destinationBaseline.tokenBalanceAtomic, nativeBalanceBeforeAtomic: destinationBaseline.nativeBalanceAtomic,
         nativeDropAtomic: op.nativeDropAtomic, fromBlockNumberAtomic: destinationBaseline.blockNumberAtomic, fromBlockHash: destinationBaseline.blockHash,
+        ...(source.packet === undefined ? {} : { sourcePacket: source.packet }),
         finalityTag: op.finalityPolicy.destination.blockTag });
     if (destination === null) {
         if (op.sourceReceipt === undefined || op.residualAllowanceAtomic === undefined) {
@@ -823,14 +840,33 @@ function sourceReceipt(op, receipt) {
     const minimumOutputAtomic = (op.postApprovalQuote?.quote ?? op.quote).quote.minimumOutputAtomic;
     if (event.dstEid !== 30109 || address(event.fromAddress) !== op.owner || event.amountSentLD.toString() !== op.amountAtomic || event.amountReceivedLD.toString() !== minimumOutputAtomic)
         fail("APN_RPC_PROTOCOL", "source_oft_sent_binding");
-    return { transactionHash: op.transactionHash, blockNumberAtomic: uint(receipt.blockNumberAtomic).toString(), blockHash: hex32(receipt.blockHash), finality: op.finalityPolicy.source.blockTag, guid: hex32(event.guid), amountSentAtomic: event.amountSentLD.toString(), amountReceivedAtomic: event.amountReceivedLD.toString() };
+    const packets = receipt.logs.flatMap(log => {
+        if (address(log.address) !== LAYERZERO_ENDPOINT_V2)
+            return [];
+        try {
+            const decoded = decodeEventLog({ abi: LAYERZERO_ENDPOINT_V2_ABI, eventName: "PacketSent", topics: log.topics, data: log.data });
+            return [packetBinding(decoded.args.encodedPayload)];
+        }
+        catch {
+            return [];
+        }
+    });
+    if (op.schemaVersion === "apn.stargate-v2-token-operation.v5" && packets.length !== 1)
+        fail("APN_RPC_PROTOCOL", "source_packet_sent_count");
+    const packet = packets[0];
+    if (packet !== undefined && (packet.guid !== event.guid || packet.sender.toLowerCase() !== pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }).toLowerCase() ||
+        packet.receiver.toLowerCase() !== pad(STARGATE_TOKEN_DESTINATION_MESSAGING, { size: 32 }).toLowerCase()))
+        fail("APN_RPC_PROTOCOL", "source_packet_sent_binding");
+    return { transactionHash: op.transactionHash, blockNumberAtomic: uint(receipt.blockNumberAtomic).toString(), blockHash: hex32(receipt.blockHash), finality: op.finalityPolicy.source.blockTag, guid: hex32(event.guid), amountSentAtomic: event.amountSentLD.toString(), amountReceivedAtomic: event.amountReceivedLD.toString(),
+        ...(packet === undefined ? {} : { packet: { srcEid: packet.srcEid, sender: packet.sender, nonceAtomic: packet.nonceAtomic,
+                dstEid: packet.dstEid, receiver: packet.receiver } }) };
 }
 function validateDestination(op, source, e) {
     if (e.finality !== op.finalityPolicy.destination.blockTag || e.emitter !== STARGATE_TOKEN_DESTINATION_POOL || e.sourceTransactionHash !== source.transactionHash || e.sourceEid !== 30111 || e.guid !== source.guid || address(e.recipient) !== op.recipient || e.amountReceivedAtomic !== source.amountReceivedAtomic)
         fail("APN_RPC_PROTOCOL", "destination_event");
-    if (BigInt(e.tokenBalanceAfterAtomic) - BigInt(e.tokenBalanceBeforeAtomic) !== BigInt(e.tokenDeltaAtomic) || BigInt(e.tokenDeltaAtomic) < BigInt(source.amountReceivedAtomic))
+    if (BigInt(e.tokenBalanceAfterAtomic) - BigInt(e.tokenBalanceBeforeAtomic) !== BigInt(e.tokenDeltaAtomic))
         fail("APN_RPC_PROTOCOL", "destination_token_delta");
-    if (BigInt(e.nativeBalanceAfterAtomic) - BigInt(e.nativeBalanceBeforeAtomic) !== BigInt(e.nativeDeltaAtomic) || BigInt(e.nativeDeltaAtomic) < BigInt(op.nativeDropAtomic))
+    if (BigInt(e.nativeBalanceAfterAtomic) - BigInt(e.nativeBalanceBeforeAtomic) !== BigInt(e.nativeDeltaAtomic))
         fail("APN_RPC_PROTOCOL", "destination_native_drop_delta");
     if (BigInt(op.nativeDropAtomic) === 0n) {
         if (e.nativeDrop !== undefined)
@@ -839,6 +875,10 @@ function validateDestination(op, source, e) {
     else if (e.nativeDrop?.executor !== STARGATE_TOKEN_DESTINATION_EXECUTOR || e.nativeDrop.success !== true || BigInt(e.nativeDrop.nonceAtomic) < 0n) {
         fail("APN_RPC_PROTOCOL", "destination_native_drop_event");
     }
+    if (op.schemaVersion === "apn.stargate-v2-token-operation.v5" && (source.packet === undefined || e.packetDelivery === undefined ||
+        e.packetDelivery.endpoint !== LAYERZERO_ENDPOINT_V2 || e.packetDelivery.tokenMessaging !== STARGATE_TOKEN_DESTINATION_MESSAGING ||
+        e.packetDelivery.nonceAtomic !== source.packet.nonceAtomic))
+        fail("APN_RPC_PROTOCOL", "destination_packet_delivery");
     hex32(e.destinationTransactionHash);
     hex32(e.blockHash);
     uint(e.logIndexAtomic);

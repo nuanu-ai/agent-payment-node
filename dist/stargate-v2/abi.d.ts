@@ -422,6 +422,44 @@ export declare const LAYERZERO_EXECUTOR_ABI: readonly [{
         readonly name: "lzComposeBaseGas";
     }];
 }, {
+    readonly type: "function";
+    readonly name: "execute302";
+    readonly stateMutability: "payable";
+    readonly inputs: readonly [{
+        readonly name: "_executionParams";
+        readonly type: "tuple";
+        readonly components: readonly [{
+            readonly name: "receiver";
+            readonly type: "address";
+        }, {
+            readonly name: "origin";
+            readonly type: "tuple";
+            readonly components: readonly [{
+                readonly name: "srcEid";
+                readonly type: "uint32";
+            }, {
+                readonly name: "sender";
+                readonly type: "bytes32";
+            }, {
+                readonly name: "nonce";
+                readonly type: "uint64";
+            }];
+        }, {
+            readonly name: "guid";
+            readonly type: "bytes32";
+        }, {
+            readonly name: "message";
+            readonly type: "bytes";
+        }, {
+            readonly name: "extraData";
+            readonly type: "bytes";
+        }, {
+            readonly name: "gasLimit";
+            readonly type: "uint256";
+        }];
+    }];
+    readonly outputs: readonly [];
+}, {
     readonly type: "event";
     readonly name: "NativeDropApplied";
     readonly inputs: readonly [{
@@ -460,6 +498,46 @@ export declare const LAYERZERO_EXECUTOR_ABI: readonly [{
     }, {
         readonly name: "success";
         readonly type: "bool[]";
+        readonly indexed: false;
+    }];
+}];
+/** Minimal LayerZero Endpoint V2 packet evidence surface. */
+export declare const LAYERZERO_ENDPOINT_V2_ABI: readonly [{
+    readonly type: "event";
+    readonly name: "PacketSent";
+    readonly inputs: readonly [{
+        readonly name: "encodedPayload";
+        readonly type: "bytes";
+        readonly indexed: false;
+    }, {
+        readonly name: "options";
+        readonly type: "bytes";
+        readonly indexed: false;
+    }, {
+        readonly name: "sendLibrary";
+        readonly type: "address";
+        readonly indexed: false;
+    }];
+}, {
+    readonly type: "event";
+    readonly name: "PacketDelivered";
+    readonly inputs: readonly [{
+        readonly name: "origin";
+        readonly type: "tuple";
+        readonly indexed: false;
+        readonly components: readonly [{
+            readonly name: "srcEid";
+            readonly type: "uint32";
+        }, {
+            readonly name: "sender";
+            readonly type: "bytes32";
+        }, {
+            readonly name: "nonce";
+            readonly type: "uint64";
+        }];
+    }, {
+        readonly name: "receiver";
+        readonly type: "address";
         readonly indexed: false;
     }];
 }];

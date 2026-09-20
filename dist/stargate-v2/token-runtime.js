@@ -1,4 +1,4 @@
-import { decodeEventLog, decodeFunctionResult, encodeEventTopics, encodeFunctionData, getAddress, keccak256, pad } from "viem";
+import { decodeEventLog, decodeFunctionData, decodeFunctionResult, encodeEventTopics, encodeFunctionData, getAddress, keccak256, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
@@ -7,9 +7,9 @@ import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
 import { canonicalProfile } from "../wallet-policy.js";
-import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "./abi.js";
+import { LAYERZERO_ENDPOINT_V2_ABI, LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "./abi.js";
 import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtime.js";
-import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, reconcileStargateV2TokenUsage, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "./token-execution.js";
+import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, reconcileStargateV2TokenUsage, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM, LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_MESSAGING_CODE_HASH, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
 function blocked(reason) { throw new ApnError("APN_RPC_CONFIG", `Stargate token runtime unavailable: ${reason}.`, { reason }); }
 function quantity(v) { if (typeof v !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(v))
@@ -134,7 +134,7 @@ export class StargateTokenService {
             reserveUsage: async (op) => await this.reserveUsage(op),
             followUsage: async (op, target) => await this.followUsage(op, target),
             sendRawTransaction: async (raw) => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw))
-                throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateSourceReceipt(source, txHash, finalityTag),
+                throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateTokenSourceReceipt(source, txHash, finalityTag),
             observeDestination: async (input) => await observeStargateTokenDestination(destination, input, tokenAt), now: this.now };
     }
     async reserveUsage(op) {
@@ -180,60 +180,171 @@ function assertServiceUsageTarget(op) {
     if (!legal[op.usageTarget].includes(op.phase))
         throw new ApnError("APN_STATE_CORRUPT", "The Stargate token usage reconciliation target is incompatible with the journal phase.");
 }
-export async function observeStargateTokenDestination(rpc, input, tokenAt) {
-    const finalityHead = record(await rpc.call("eth_getBlockByNumber", [input.finalityTag, false])), topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
-    const baselineTag = `0x${BigInt(input.fromBlockNumberAtomic).toString(16)}`, baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false]));
+export async function confirmedStargateTokenSourceReceipt(rpc, transactionHash, finalityTag, expectedCodeHash = STARGATE_TOKEN_MESSAGING_CODE_HASH) {
+    const receipt = await confirmedStargateSourceReceipt(rpc, transactionHash, finalityTag);
+    if (receipt === null)
+        return null;
+    if (receipt.logs.some(log => log.address === LAYERZERO_ENDPOINT_V2)) {
+        const code = await rpc.call("eth_getCode", [STARGATE_TOKEN_SOURCE_MESSAGING, finalityTag]);
+        if (typeof code !== "string" || !/^0x(?:[0-9a-fA-F]{2})+$/u.test(code) || keccak256(code) !== expectedCodeHash)
+            throw new ApnError("APN_RPC_PROTOCOL", "Pinned Optimism TokenMessaging code mismatch.");
+    }
+    return receipt;
+}
+// Public Polygon providers used by the live recovery rejected 261-block log ranges despite advertising a larger limit.
+const DESTINATION_LOG_CHUNK = 100n, DESTINATION_MAX_CHUNKS = 256;
+async function destinationLogs(rpc, addresses, topic0, from, to) {
+    if (to < from)
+        return [];
+    const chunks = Number((to - from) / DESTINATION_LOG_CHUNK + 1n);
+    if (chunks > DESTINATION_MAX_CHUNKS)
+        blocked("destination_scan_range");
+    const unique = new Map();
+    for (let start = from; start <= to; start += DESTINATION_LOG_CHUNK) {
+        const end = start + DESTINATION_LOG_CHUNK - 1n > to ? to : start + DESTINATION_LOG_CHUNK - 1n;
+        const raw = await rpc.call("eth_getLogs", [{ address: addresses, fromBlock: `0x${start.toString(16)}`, toBlock: `0x${end.toString(16)}`, topics: [topic0] }]);
+        if (!Array.isArray(raw) || raw.length > 5_000)
+            blocked("destination_logs");
+        for (const candidate of raw) {
+            const value = record(candidate), key = `${String(value.transactionHash).toLowerCase()}:${String(value.logIndex).toLowerCase()}`;
+            const encoded = JSON.stringify(value), previous = unique.get(key);
+            if (previous !== undefined && previous.raw !== encoded)
+                blocked("destination_log_conflict");
+            unique.set(key, { raw: encoded, value });
+        }
+    }
+    return [...unique.values()].map(item => item.value);
+}
+function logPosition(log) { return [quantity(log.blockNumber), quantity(log.logIndex)]; }
+function atOrBefore(a, b) { const x = logPosition(a), y = logPosition(b); return x[0] < y[0] || (x[0] === y[0] && x[1] <= y[1]); }
+export async function observeStargateTokenDestination(rpc, input, tokenAt, expectedCodeHash = STARGATE_TOKEN_MESSAGING_CODE_HASH) {
+    const finalityHead = record(await rpc.call("eth_getBlockByNumber", [input.finalityTag, false])), head = quantity(finalityHead.number);
+    const baselineNumber = BigInt(input.fromBlockNumberAtomic), baselineTag = `0x${baselineNumber.toString(16)}`;
+    const baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false]));
     if (hash(baseline.hash) !== input.fromBlockHash)
         throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline is no longer canonical.");
-    const logs = await rpc.call("eth_getLogs", [{ address: STARGATE_TOKEN_DESTINATION_POOL, fromBlock: baselineTag, toBlock: finalityHead.number, topics }]);
-    if (!Array.isArray(logs))
-        blocked("destination_logs");
+    if (head < baselineNumber)
+        throw new ApnError("APN_RPC_PROTOCOL", "Stargate finalized horizon precedes its frozen baseline.");
+    const messagingCode = await rpc.call("eth_getCode", [STARGATE_TOKEN_DESTINATION_MESSAGING, finalityHead.number]);
+    if (typeof messagingCode !== "string" || !/^0x(?:[0-9a-fA-F]{2})+$/u.test(messagingCode) || keccak256(messagingCode) !== expectedCodeHash)
+        throw new ApnError("APN_RPC_PROTOCOL", "Pinned Polygon TokenMessaging code mismatch.");
+    const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
+    const deliveredTopics = encodeEventTopics({ abi: LAYERZERO_ENDPOINT_V2_ABI, eventName: "PacketDelivered" });
     const dropTopics = encodeEventTopics({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied" });
-    const dropLogs = BigInt(input.nativeDropAtomic) === 0n ? [] : await rpc.call("eth_getLogs", [{ address: STARGATE_TOKEN_DESTINATION_EXECUTOR,
-            fromBlock: baselineTag, toBlock: finalityHead.number, topics: dropTopics }]);
-    if (!Array.isArray(dropLogs))
-        blocked("destination_native_drop_logs");
-    const readToken = tokenAt ?? (async (client, token, account, tag) => decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", data: await client.call("eth_call", [{ to: token, data: encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", args: [account] }) }, tag]) }));
-    for (const value of logs) {
-        const log = record(value);
+    const addresses = BigInt(input.nativeDropAtomic) === 0n
+        ? [STARGATE_TOKEN_DESTINATION_POOL, LAYERZERO_ENDPOINT_V2]
+        : [STARGATE_TOKEN_DESTINATION_POOL, LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_EXECUTOR];
+    const topic0 = [oftTopics[0], deliveredTopics[0], ...(BigInt(input.nativeDropAtomic) === 0n ? [] : [dropTopics[0]])];
+    const allLogs = await destinationLogs(rpc, addresses, topic0, baselineNumber, head);
+    const oftLogs = allLogs.filter(log => { try {
+        return getAddress(String(log.address)) === STARGATE_TOKEN_DESTINATION_POOL;
+    }
+    catch {
+        return false;
+    } });
+    const deliveredLogs = allLogs.filter(log => { try {
+        return getAddress(String(log.address)) === LAYERZERO_ENDPOINT_V2;
+    }
+    catch {
+        return false;
+    } });
+    const dropLogs = allLogs.filter(log => { try {
+        return getAddress(String(log.address)) === STARGATE_TOKEN_DESTINATION_EXECUTOR;
+    }
+    catch {
+        return false;
+    } });
+    const canonical = new Map();
+    const isCanonical = async (log) => {
+        const number = String(log.blockNumber), expected = hash(log.blockHash);
+        const key = `${number}:${expected}`;
+        if (!canonical.has(key)) {
+            const block = record(await rpc.call("eth_getBlockByNumber", [number, false]));
+            canonical.set(key, hash(block.hash) === expected);
+        }
+        return canonical.get(key);
+    };
+    const packet = input.sourcePacket;
+    const oftMatches = [];
+    for (const log of oftLogs) {
         try {
             const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: log.topics, data: String(log.data) });
-            if (getAddress(String(log.address)) !== STARGATE_TOKEN_DESTINATION_POOL || event.args.srcEid !== 30111 || event.args.guid !== input.guid || getAddress(event.args.toAddress) !== input.recipient || event.args.amountReceivedLD.toString() !== input.minimumAmountAtomic)
-                continue;
-            const exactBlock = record(await rpc.call("eth_getBlockByNumber", [String(log.blockNumber), false]));
-            if (hash(exactBlock.hash) !== hash(log.blockHash))
-                continue;
-            let nativeDrop;
-            if (BigInt(input.nativeDropAtomic) > 0n) {
-                const matching = dropLogs.flatMap(candidate => {
-                    const item = record(candidate);
-                    try {
-                        if (hash(item.transactionHash) !== hash(log.transactionHash) || hash(item.blockHash) !== hash(log.blockHash) || getAddress(String(item.address)) !== STARGATE_TOKEN_DESTINATION_EXECUTOR)
-                            return [];
-                        const decoded = decodeEventLog({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied", topics: item.topics, data: String(item.data) }).args;
-                        if (decoded.origin.srcEid !== 30111 || decoded.origin.sender.toLowerCase() !== pad(STARGATE_TOKEN_SOURCE_POOL, { size: 32 }).toLowerCase() || decoded.dstEid !== 30109 ||
-                            getAddress(decoded.oapp) !== STARGATE_TOKEN_DESTINATION_POOL || decoded.params.length !== 1 || decoded.success.length !== 1 || decoded.success[0] !== true ||
-                            getAddress(decoded.params[0].receiver) !== input.recipient || decoded.params[0].amount.toString() !== input.nativeDropAtomic)
-                            return [];
-                        return [{ executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: decoded.origin.nonce.toString(), success: true }];
-                    }
-                    catch {
-                        return [];
-                    }
-                });
-                if (matching.length !== 1)
-                    continue;
-                nativeDrop = matching[0];
-            }
-            const [tokenAfter, nativeAfter] = await Promise.all([readToken(rpc, STARGATE_TOKEN_DESTINATION_TOKEN, input.recipient, String(finalityHead.number)), rpc.call("eth_getBalance", [input.recipient, finalityHead.number]).then(quantity)]);
-            const tokenBefore = BigInt(input.tokenBalanceBeforeAtomic), nativeBefore = BigInt(input.nativeBalanceBeforeAtomic);
-            if (tokenAfter < tokenBefore || nativeAfter < nativeBefore)
-                return null;
-            return { emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30111, destinationTransactionHash: hash(log.transactionHash), logIndexAtomic: quantity(log.logIndex).toString(), blockNumberAtomic: quantity(log.blockNumber).toString(), blockHash: hash(log.blockHash), finality: input.finalityTag, recipient: input.recipient, amountReceivedAtomic: event.args.amountReceivedLD.toString(), tokenBalanceBeforeAtomic: tokenBefore.toString(), tokenBalanceAfterAtomic: tokenAfter.toString(), tokenDeltaAtomic: (tokenAfter - tokenBefore).toString(), nativeBalanceBeforeAtomic: nativeBefore.toString(), nativeBalanceAfterAtomic: nativeAfter.toString(), nativeDeltaAtomic: (nativeAfter - nativeBefore).toString(), ...(nativeDrop === undefined ? {} : { nativeDrop }) };
+            if (getAddress(String(log.address)) === STARGATE_TOKEN_DESTINATION_POOL && event.args.srcEid === 30111 && event.args.guid === input.guid &&
+                getAddress(event.args.toAddress) === input.recipient && event.args.amountReceivedLD.toString() === input.minimumAmountAtomic && await isCanonical(log))
+                oftMatches.push({ log, amount: event.args.amountReceivedLD });
         }
         catch { /* unrelated candidate */ }
     }
-    return null;
+    if (oftMatches.length !== 1)
+        return null;
+    const oft = oftMatches[0];
+    let delivery;
+    if (packet !== undefined) {
+        const matches = [];
+        for (const log of deliveredLogs) {
+            try {
+                const event = decodeEventLog({ abi: LAYERZERO_ENDPOINT_V2_ABI, eventName: "PacketDelivered", topics: log.topics, data: String(log.data) });
+                if (getAddress(String(log.address)) === LAYERZERO_ENDPOINT_V2 && event.args.origin.srcEid === packet.srcEid && event.args.origin.sender.toLowerCase() === packet.sender.toLowerCase() &&
+                    event.args.origin.nonce.toString() === packet.nonceAtomic && getAddress(event.args.receiver) === STARGATE_TOKEN_DESTINATION_MESSAGING &&
+                    hash(log.transactionHash) === hash(oft.log.transactionHash) && await isCanonical(log))
+                    matches.push({ log, nonce: event.args.origin.nonce });
+            }
+            catch { /* unrelated candidate */ }
+        }
+        if (matches.length !== 1)
+            return null;
+        delivery = matches[0];
+        if (!atOrBefore(oft.log, delivery.log))
+            return null;
+        const tx = record(await rpc.call("eth_getTransactionByHash", [hash(delivery.log.transactionHash)]));
+        try {
+            if (hash(tx.hash) !== hash(delivery.log.transactionHash) || hash(tx.blockHash) !== hash(delivery.log.blockHash) ||
+                quantity(tx.blockNumber) !== quantity(delivery.log.blockNumber) || getAddress(String(tx.to)) !== STARGATE_TOKEN_DESTINATION_EXECUTOR)
+                return null;
+            const decoded = decodeFunctionData({ abi: LAYERZERO_EXECUTOR_ABI, data: String(tx.input) });
+            if (decoded.functionName !== "execute302")
+                return null;
+            const params = decoded.args[0];
+            if (getAddress(params.receiver) !== STARGATE_TOKEN_DESTINATION_MESSAGING || params.origin.srcEid !== packet.srcEid ||
+                params.origin.sender.toLowerCase() !== packet.sender.toLowerCase() || params.origin.nonce.toString() !== packet.nonceAtomic || params.guid !== input.guid)
+                return null;
+        }
+        catch {
+            return null;
+        }
+    }
+    let nativeDrop;
+    if (BigInt(input.nativeDropAtomic) > 0n) {
+        const matches = [];
+        for (const log of dropLogs) {
+            try {
+                const event = decodeEventLog({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied", topics: log.topics, data: String(log.data) }).args;
+                const nonce = packet?.nonceAtomic;
+                if (getAddress(String(log.address)) === STARGATE_TOKEN_DESTINATION_EXECUTOR && event.origin.srcEid === 30111 &&
+                    event.origin.sender.toLowerCase() === pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }).toLowerCase() && (nonce === undefined || event.origin.nonce.toString() === nonce) &&
+                    event.dstEid === 30109 && getAddress(event.oapp) === STARGATE_TOKEN_DESTINATION_MESSAGING && event.params.length === 1 && event.success.length === 1 && event.success[0] === true &&
+                    getAddress(event.params[0].receiver) === input.recipient && event.params[0].amount.toString() === input.nativeDropAtomic && await isCanonical(log))
+                    matches.push({ log, nonce: event.origin.nonce });
+            }
+            catch { /* unrelated candidate */ }
+        }
+        if (matches.length !== 1 || !atOrBefore(matches[0].log, oft.log))
+            return null;
+        const match = matches[0];
+        nativeDrop = { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: match.nonce.toString(), success: true,
+            transactionHash: hash(match.log.transactionHash), blockNumberAtomic: quantity(match.log.blockNumber).toString(), blockHash: hash(match.log.blockHash), logIndexAtomic: quantity(match.log.logIndex).toString() };
+    }
+    const readToken = tokenAt ?? (async (client, token, account, tag) => decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", data: await client.call("eth_call", [{ to: token, data: encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", args: [account] }) }, tag]) }));
+    const [tokenAfter, nativeAfter] = await Promise.all([readToken(rpc, STARGATE_TOKEN_DESTINATION_TOKEN, input.recipient, String(finalityHead.number)), rpc.call("eth_getBalance", [input.recipient, finalityHead.number]).then(quantity)]);
+    const tokenBefore = BigInt(input.tokenBalanceBeforeAtomic), nativeBefore = BigInt(input.nativeBalanceBeforeAtomic), log = oft.log;
+    return { emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30111,
+        destinationTransactionHash: hash(log.transactionHash), logIndexAtomic: quantity(log.logIndex).toString(), blockNumberAtomic: quantity(log.blockNumber).toString(),
+        blockHash: hash(log.blockHash), finality: input.finalityTag, recipient: input.recipient, amountReceivedAtomic: oft.amount.toString(),
+        tokenBalanceBeforeAtomic: tokenBefore.toString(), tokenBalanceAfterAtomic: tokenAfter.toString(), tokenDeltaAtomic: (tokenAfter - tokenBefore).toString(),
+        nativeBalanceBeforeAtomic: nativeBefore.toString(), nativeBalanceAfterAtomic: nativeAfter.toString(), nativeDeltaAtomic: (nativeAfter - nativeBefore).toString(),
+        ...(nativeDrop === undefined ? {} : { nativeDrop }), ...(delivery === undefined ? {} : { packetDelivery: { endpoint: LAYERZERO_ENDPOINT_V2,
+                tokenMessaging: STARGATE_TOKEN_DESTINATION_MESSAGING, nonceAtomic: delivery.nonce.toString(), transactionHash: hash(delivery.log.transactionHash),
+                blockNumberAtomic: quantity(delivery.log.blockNumber).toString(), blockHash: hash(delivery.log.blockHash), logIndexAtomic: quantity(delivery.log.logIndex).toString() } }) };
 }
 function usageIdentity(owner) { return { account: owner, chain: "eip155:10", asset: { kind: "token", identifier: STARGATE_TOKEN_SOURCE_TOKEN } }; }
 function usageKey(operationId) { return `apn.stargate-token-usage:${operationId}`; }
