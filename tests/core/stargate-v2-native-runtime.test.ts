@@ -22,7 +22,25 @@ test("StargateJsonRpc sends bounded JSON-RPC and refuses methods outside the exe
   } } as any);
   assert.equal(await rpc.call("eth_chainId", []), "0x1");
   assert.deepEqual({ method: request.method, params: request.params }, { method: "eth_chainId", params: [] });
-  await assert.rejects(rpc.call("eth_sign", []), (error: any) => error.code === "APN_RPC_CONFIG" && error.details.reason === "rpc_method");
+  for (const method of ["eth_sign", "personal_sign", "eth_sendTransaction", "wallet_sendTransaction"]) {
+    await assert.rejects(rpc.call(method, []), (error: any) => error.code === "APN_RPC_CONFIG" && error.details.reason === "rpc_method");
+  }
+});
+
+test("StargateJsonRpc admits one exact read-only delivery transaction lookup and validates its bounded projection", async () => {
+  const TO = getAddress("0x2222222222222222222222222222222222222222"), input = "0x1234" as Hex;
+  const response = (result: unknown) => new StargateJsonRpc("https://rpc.example", { request: async (...args: any[]) => {
+    const request = JSON.parse(args[2]); return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
+  } } as any);
+  const exact = { hash: TX, to: TO.toLowerCase(), input, blockHash: BLOCK, blockNumber: "0x10" };
+  assert.deepEqual(await response(exact).call("eth_getTransactionByHash", [TX]),
+    { hash: TX, to: TO, input, blockHash: BLOCK, blockNumber: "0x10" });
+  for (const result of [null, "bad", { ...exact, hash: DEST_TX }, { ...exact, to: null }, { ...exact, input: "0x1" },
+    { ...exact, blockHash: "0x12" }, { ...exact, blockNumber: "10" }]) {
+    await assert.rejects(response(result).call("eth_getTransactionByHash", [TX]), (error: any) => error.code === "APN_RPC_PROTOCOL");
+  }
+  await assert.rejects(response(exact).call("eth_getTransactionByHash", []), (error: any) => error.code === "APN_RPC_PROTOCOL");
+  await assert.rejects(response(exact).call("eth_getTransactionByHash", ["0x12"]), (error: any) => error.code === "APN_RPC_PROTOCOL");
 });
 
 test("safe source receipt parser preserves exact pinned emitter event evidence", async () => {

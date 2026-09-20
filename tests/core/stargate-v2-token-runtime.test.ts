@@ -132,12 +132,14 @@ test("service status and receipt reconcile legal terminal targets and reject ill
   }
 });
 
-type DestinationMutation = "nonce" | "sender" | "oapp" | "guid" | "duplicate-drop" | "duplicate-delivery" | "failed-drop" | "noncanonical" | "bad-order" | "baseline" | "provider-error" | "dedup" | "low-balances";
+type DestinationMutation = "nonce" | "sender" | "oapp" | "guid" | "duplicate-drop" | "duplicate-delivery" | "failed-drop" |
+  "noncanonical" | "bad-order" | "baseline" | "provider-error" | "dedup" | "low-balances" | "tx-hash" | "tx-to" |
+  "tx-input" | "tx-block-hash" | "tx-block-number";
 const TEST_CODE = "0x6001" as Hex, TEST_CODE_HASH = keccak256(TEST_CODE), PACKET_NONCE = 27308n;
 const sourcePacket = { srcEid: 30111 as const, sender: pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }), nonceAtomic: PACKET_NONCE.toString(),
   dstEid: 30109 as const, receiver: pad(STARGATE_TOKEN_DESTINATION_MESSAGING, { size: 32 }) };
 function destinationRpc(mode: "split" | "combined" = "split", mutation?: DestinationMutation) {
-  const ranges: { from: bigint; to: bigint }[] = [], codeReads: unknown[][] = [], deliveryBlock = 304n;
+  const ranges: { from: bigint; to: bigint }[] = [], codeReads: unknown[][] = [], transactionReads: unknown[][] = [], deliveryBlock = 304n;
   const dropBlock = mutation === "bad-order" ? 305n : (mode === "combined" ? deliveryBlock : 209n);
   const dropTx = mode === "combined" ? TX : OTHER_TX;
   const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: GUID, toAddress: OWNER } });
@@ -164,7 +166,7 @@ function destinationRpc(mode: "split" | "combined" = "split", mutation?: Destina
   if (mutation === "dedup") for (const rows of Object.values(byAddress)) rows.push(structuredClone(rows[0]));
   const executeData = encodeFunctionData({ abi: LAYERZERO_EXECUTOR_ABI, functionName: "execute302", args: [{ receiver: STARGATE_TOKEN_DESTINATION_MESSAGING,
     origin, guid: mutation === "guid" ? OTHER_TX : GUID, message: "0x0100", extraData: "0x", gasLimit: 170_000n }] });
-  return { ranges, codeReads, call: async (method: string, params: readonly any[]) => {
+  return { ranges, codeReads, transactionReads, call: async (method: string, params: readonly any[]) => {
     if (method === "eth_getBlockByNumber") {
       const tag = String(params[0]); if (tag === "safe" || tag === "latest") throw new Error(`weaker finality tag ${tag} forbidden`);
       if (tag === "finalized") return { number: "0x150", hash: SAFE };
@@ -177,7 +179,12 @@ function destinationRpc(mode: "split" | "combined" = "split", mutation?: Destina
       if (mutation === "provider-error" && from === 209n) throw new Error("provider range failure");
       return Object.values(byAddress).flat().filter(row => BigInt(row.blockNumber) >= from && BigInt(row.blockNumber) <= to);
     }
-    if (method === "eth_getTransactionByHash") return { hash: TX, blockHash: EVENT_BLOCK, blockNumber: `0x${deliveryBlock.toString(16)}`, to: STARGATE_TOKEN_DESTINATION_EXECUTOR, input: executeData };
+    if (method === "eth_getTransactionByHash") { transactionReads.push([...params]); return {
+      hash: mutation === "tx-hash" ? OTHER_TX : TX, blockHash: mutation === "tx-block-hash" ? SAFE : EVENT_BLOCK,
+      blockNumber: mutation === "tx-block-number" ? "0x131" : `0x${deliveryBlock.toString(16)}`,
+      to: mutation === "tx-to" ? STARGATE_TOKEN_DESTINATION_POOL : STARGATE_TOKEN_DESTINATION_EXECUTOR,
+      input: mutation === "tx-input" ? "0x1234" : executeData };
+    }
     if (method === "eth_getBalance") return `0x${(mutation === "low-balances" ? 1n : 1_000_000n + DROP).toString(16)}`;
     if (method === "eth_call") return encodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", result: mutation === "low-balances" ? 1n : 1_000_100n });
     throw new Error(method);
@@ -195,6 +202,7 @@ for (const mode of ["split", "combined"] as const) test(`live-shaped ${mode} fin
   assert.equal(evidence?.nativeDrop?.nonceAtomic, PACKET_NONCE.toString());
   assert.equal(evidence?.nativeDrop?.transactionHash, mode === "split" ? OTHER_TX : TX);
   assert.deepEqual(rpc.codeReads,[[STARGATE_TOKEN_DESTINATION_MESSAGING,"0x150"]]);
+  assert.deepEqual(rpc.transactionReads,[[TX]]);
 });
 
 test("source and destination TokenMessaging runtime hashes cannot be swapped or independently changed",async()=>{
@@ -223,6 +231,9 @@ test("destination scanner refuses a finalized horizon above its 256-query ceilin
 
 for (const mutation of ["nonce","sender","oapp","guid","duplicate-drop","duplicate-delivery","failed-drop","noncanonical","bad-order"] as const)
   test(`${mutation} packet/drop/delivery evidence fails closed`,async()=>assert.equal(await observeStargateTokenDestination(destinationRpc("split",mutation) as any,destinationInput,undefined,TEST_CODE_HASH),null));
+
+for (const mutation of ["tx-hash","tx-to","tx-input","tx-block-hash","tx-block-number"] as const)
+  test(`${mutation} delivery transaction binding fails closed`,async()=>assert.equal(await observeStargateTokenDestination(destinationRpc("split",mutation) as any,destinationInput,undefined,TEST_CODE_HASH),null));
 
 test("post-finality balances are corroborative and cannot replace or invalidate exact packet events",async()=>{
   const evidence=await observeStargateTokenDestination(destinationRpc("split","low-balances") as any,destinationInput,undefined,TEST_CODE_HASH);assert.ok(evidence);assert.ok(BigInt(evidence!.tokenDeltaAtomic)<0n);assert.ok(BigInt(evidence!.nativeDeltaAtomic)<0n);
