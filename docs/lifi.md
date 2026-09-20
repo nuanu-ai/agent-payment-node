@@ -456,6 +456,14 @@ durable before custody is entered; a recovered commitment can load only its
 original authenticated seal. Missing committed material blocks recovery and
 never permits a replacement signature.
 
+If an RPC transport fails during a pre-sign guard, the terminal operation and
+receipt keep `unsent_apn_rpc_ambiguous` and add `pre_sign_rpc_failure`. This
+integrity-bound record names the effect role, source or destination chain, the
+finite guard stage, its category and the exact JSON-RPC method when the
+transport reached one. It never stores an endpoint, header, provider message,
+calldata or signing material. The failure remains final and does not add a
+retry, fallback, signature or send.
+
 Bridge journals written before the allowlist/usage-ledger upgrade remain
 readable through a separate, strict legacy decoder. The decoder verifies the
 original record, transition chain, intent fingerprint and receipt binding in

@@ -99,7 +99,18 @@ export const destinationProofSchema = z.strictObject({ tool: toolSchema, chainId
 export const scanSchema = z.strictObject({ startBlock: blockSchema, nextBlockAtomic: uintSchema, previousEndBlock: blockSchema.nullable() });
 export const providerObservationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "completed_observed", "partial_observed", "refund_observed", "failed_observed", "unknown"]),
     destinationTransactionHash: railStatusSchema.nullable(), observedAt: isoSchema, responseHash: hashSchema.nullable() });
-export const failureSchema = z.strictObject({ reason: reasonSchema, residualAllowance: z.strictObject({ amountAtomic: uintSchema, block: blockSchema, rpcOrigin: originSchema }).nullable() });
+const preSignRpcFailureSchema = z.strictObject({
+    schemaVersion: z.literal("apn.bridge-presign-rpc-failure.v1"), phase: z.literal("pre_sign_guard"),
+    effectRole: z.enum(["approval", "bridge"]),
+    stage: z.enum(["source_deployment_refresh", "destination_deployment_refresh", "source_account_refresh", "source_execution_simulation", "source_fee_quote"]),
+    chainRole: z.enum(["source", "destination"]), chainId: chainSchema,
+    category: z.enum(["deployment_refresh", "account_nonce", "simulation", "fee_quote"]),
+    method: z.enum(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt",
+        "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "debug_traceTransaction"]).nullable(),
+});
+export const failureSchema = z.strictObject({ reason: reasonSchema,
+    residualAllowance: z.strictObject({ amountAtomic: uintSchema, block: blockSchema, rpcOrigin: originSchema }).nullable(),
+    preSignRpc: preSignRpcFailureSchema.optional() });
 export const consentSchema = z.strictObject({ policy: z.literal("apn.bridge.foreground-approval.v1"), fingerprint: hashSchema, approvedAt: isoSchema, expiresAt: isoSchema });
 export const stateSchema = z.enum(["awaiting_approval", "execution_pending", "source_pending", "destination_pending", "unknown_finality", "completed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"]);
 export const phaseSchema = z.enum(["unsealed", "signing_started", "sealed", "submitting", "submitted_pending", "unknown_finality", "included_success", "included_revert", "safe_success", "safe_revert"]);

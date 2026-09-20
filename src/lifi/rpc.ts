@@ -1,5 +1,6 @@
 import { encodeFunctionData, keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
+import { ApnError } from "../errors.js";
 import { EvmRpc } from "../evm-rpc.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
 import type { BridgeChainId } from "./chains.js";
@@ -49,7 +50,14 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   const exchange = async (target: URL, method: string, params: readonly unknown[]): Promise<unknown> => {
     for (let attempt = 0; ; attempt += 1) {
       const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
-      const response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");
+      let response;
+      try { response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG"); }
+      catch (error) {
+        if (error instanceof ApnError && error.code === "APN_RPC_AMBIGUOUS") {
+          throw new ApnError("APN_RPC_AMBIGUOUS", "Bridge RPC transport is unavailable.", { rpcMethod: method });
+        }
+        throw error;
+      }
       if (response.status === 429 && chainId === 8453 && method !== "eth_sendRawTransaction" && attempt < 2) {
         await wait(attempt === 0 ? 1_000 : 2_000);
         continue;

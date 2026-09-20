@@ -384,6 +384,44 @@ export declare const failureSchema: z.ZodObject<{
         }, z.core.$strict>;
         rpcOrigin: z.ZodString;
     }, z.core.$strict>>;
+    preSignRpc: z.ZodOptional<z.ZodObject<{
+        schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
+        phase: z.ZodLiteral<"pre_sign_guard">;
+        effectRole: z.ZodEnum<{
+            bridge: "bridge";
+            approval: "approval";
+        }>;
+        stage: z.ZodEnum<{
+            source_deployment_refresh: "source_deployment_refresh";
+            destination_deployment_refresh: "destination_deployment_refresh";
+            source_account_refresh: "source_account_refresh";
+            source_execution_simulation: "source_execution_simulation";
+            source_fee_quote: "source_fee_quote";
+        }>;
+        chainRole: z.ZodEnum<{
+            source: "source";
+            destination: "destination";
+        }>;
+        chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+        category: z.ZodEnum<{
+            simulation: "simulation";
+            deployment_refresh: "deployment_refresh";
+            account_nonce: "account_nonce";
+            fee_quote: "fee_quote";
+        }>;
+        method: z.ZodNullable<z.ZodEnum<{
+            eth_chainId: "eth_chainId";
+            eth_getBlockByNumber: "eth_getBlockByNumber";
+            eth_getBalance: "eth_getBalance";
+            eth_getCode: "eth_getCode";
+            eth_getStorageAt: "eth_getStorageAt";
+            eth_getTransactionCount: "eth_getTransactionCount";
+            eth_call: "eth_call";
+            eth_estimateGas: "eth_estimateGas";
+            eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+            debug_traceTransaction: "debug_traceTransaction";
+        }>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const consentSchema: z.ZodObject<{
     policy: z.ZodLiteral<"apn.bridge.foreground-approval.v1">;
@@ -852,6 +890,44 @@ export declare const transitionSchema: z.ZodObject<{
                 timestampAtomic: z.ZodString;
             }, z.core.$strict>;
             rpcOrigin: z.ZodString;
+        }, z.core.$strict>>;
+        preSignRpc: z.ZodOptional<z.ZodObject<{
+            schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
+            phase: z.ZodLiteral<"pre_sign_guard">;
+            effectRole: z.ZodEnum<{
+                bridge: "bridge";
+                approval: "approval";
+            }>;
+            stage: z.ZodEnum<{
+                source_deployment_refresh: "source_deployment_refresh";
+                destination_deployment_refresh: "destination_deployment_refresh";
+                source_account_refresh: "source_account_refresh";
+                source_execution_simulation: "source_execution_simulation";
+                source_fee_quote: "source_fee_quote";
+            }>;
+            chainRole: z.ZodEnum<{
+                source: "source";
+                destination: "destination";
+            }>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+            category: z.ZodEnum<{
+                simulation: "simulation";
+                deployment_refresh: "deployment_refresh";
+                account_nonce: "account_nonce";
+                fee_quote: "fee_quote";
+            }>;
+            method: z.ZodNullable<z.ZodEnum<{
+                eth_chainId: "eth_chainId";
+                eth_getBlockByNumber: "eth_getBlockByNumber";
+                eth_getBalance: "eth_getBalance";
+                eth_getCode: "eth_getCode";
+                eth_getStorageAt: "eth_getStorageAt";
+                eth_getTransactionCount: "eth_getTransactionCount";
+                eth_call: "eth_call";
+                eth_estimateGas: "eth_estimateGas";
+                eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+                debug_traceTransaction: "debug_traceTransaction";
+            }>>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     usageLease: z.ZodNullable<z.ZodUnknown>;
@@ -1433,6 +1509,44 @@ export declare const operationSchema: z.ZodObject<{
                 }, z.core.$strict>;
                 rpcOrigin: z.ZodString;
             }, z.core.$strict>>;
+            preSignRpc: z.ZodOptional<z.ZodObject<{
+                schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
+                phase: z.ZodLiteral<"pre_sign_guard">;
+                effectRole: z.ZodEnum<{
+                    bridge: "bridge";
+                    approval: "approval";
+                }>;
+                stage: z.ZodEnum<{
+                    source_deployment_refresh: "source_deployment_refresh";
+                    destination_deployment_refresh: "destination_deployment_refresh";
+                    source_account_refresh: "source_account_refresh";
+                    source_execution_simulation: "source_execution_simulation";
+                    source_fee_quote: "source_fee_quote";
+                }>;
+                chainRole: z.ZodEnum<{
+                    source: "source";
+                    destination: "destination";
+                }>;
+                chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+                category: z.ZodEnum<{
+                    simulation: "simulation";
+                    deployment_refresh: "deployment_refresh";
+                    account_nonce: "account_nonce";
+                    fee_quote: "fee_quote";
+                }>;
+                method: z.ZodNullable<z.ZodEnum<{
+                    eth_chainId: "eth_chainId";
+                    eth_getBlockByNumber: "eth_getBlockByNumber";
+                    eth_getBalance: "eth_getBalance";
+                    eth_getCode: "eth_getCode";
+                    eth_getStorageAt: "eth_getStorageAt";
+                    eth_getTransactionCount: "eth_getTransactionCount";
+                    eth_call: "eth_call";
+                    eth_estimateGas: "eth_estimateGas";
+                    eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+                    debug_traceTransaction: "debug_traceTransaction";
+                }>>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         usageLease: z.ZodNullable<z.ZodUnknown>;
     }, z.core.$strict>>;
@@ -1579,6 +1693,44 @@ export declare const operationSchema: z.ZodObject<{
                 timestampAtomic: z.ZodString;
             }, z.core.$strict>;
             rpcOrigin: z.ZodString;
+        }, z.core.$strict>>;
+        preSignRpc: z.ZodOptional<z.ZodObject<{
+            schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
+            phase: z.ZodLiteral<"pre_sign_guard">;
+            effectRole: z.ZodEnum<{
+                bridge: "bridge";
+                approval: "approval";
+            }>;
+            stage: z.ZodEnum<{
+                source_deployment_refresh: "source_deployment_refresh";
+                destination_deployment_refresh: "destination_deployment_refresh";
+                source_account_refresh: "source_account_refresh";
+                source_execution_simulation: "source_execution_simulation";
+                source_fee_quote: "source_fee_quote";
+            }>;
+            chainRole: z.ZodEnum<{
+                source: "source";
+                destination: "destination";
+            }>;
+            chainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>, z.ZodLiteral<59144>]>;
+            category: z.ZodEnum<{
+                simulation: "simulation";
+                deployment_refresh: "deployment_refresh";
+                account_nonce: "account_nonce";
+                fee_quote: "fee_quote";
+            }>;
+            method: z.ZodNullable<z.ZodEnum<{
+                eth_chainId: "eth_chainId";
+                eth_getBlockByNumber: "eth_getBlockByNumber";
+                eth_getBalance: "eth_getBalance";
+                eth_getCode: "eth_getCode";
+                eth_getStorageAt: "eth_getStorageAt";
+                eth_getTransactionCount: "eth_getTransactionCount";
+                eth_call: "eth_call";
+                eth_estimateGas: "eth_estimateGas";
+                eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+                debug_traceTransaction: "debug_traceTransaction";
+            }>>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     usageLease: z.ZodNullable<z.ZodUnknown>;

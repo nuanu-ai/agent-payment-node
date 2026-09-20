@@ -4,7 +4,8 @@ import { validateEconomics } from "../transfer-policy.js";
 import { bridgeNativePrincipal } from "./asset-registry.js";
 import { bridgeDeployment } from "./deployments.js";
 import type { BridgeAccountSnapshot, BridgeEnvelope, BridgeFeeCeiling, BridgeMaterialization, BridgeTransaction, DecodedBridgeCall } from "./model.js";
-import type { BridgeOperationRecord } from "./operation-model.js";
+import { ApnError } from "../errors.js";
+import type { BridgeOperationRecord, BridgePreSignRpcCategory, BridgePreSignRpcFailure, BridgePreSignRpcMethod, BridgePreSignRpcStage } from "./operation-model.js";
 import type { BridgeRpcPort } from "./ports.js";
 import { approvalData } from "./transaction.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_MIN_REMAINING_MS,
@@ -93,24 +94,51 @@ function assertProtocolTime(m: BridgeMaterialization, decoded: DecodedBridgeCall
 export function assertBridgeRemaining(op: BridgeOperationRecord, now: number): void {
   if (Date.parse(op.intent.expiresAt) - now < BRIDGE_MIN_REMAINING_MS) bridgeFailure("APN_REPREPARE_REQUIRED", "bridge_validity_remaining");
 }
+const PRE_SIGN_RPC_METHODS = new Set<BridgePreSignRpcMethod>(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode",
+  "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "debug_traceTransaction"]);
+async function preSignRpc<T>(input: Omit<BridgePreSignRpcFailure, "schemaVersion" | "phase" | "method">, work: () => Promise<T>): Promise<T> {
+  try { return await work(); }
+  catch (error) {
+    if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS") throw error;
+    const candidate = error.details?.rpcMethod;
+    const method = typeof candidate === "string" && PRE_SIGN_RPC_METHODS.has(candidate as BridgePreSignRpcMethod)
+      ? candidate as BridgePreSignRpcMethod : null;
+    const context: BridgePreSignRpcFailure = { schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard", ...input, method };
+    throw new ApnError("APN_RPC_AMBIGUOUS", "Bridge pre-sign RPC transport is unavailable.", {
+      rpcStage: context.stage, rpcChainRole: context.chainRole, rpcChainId: context.chainId.toString(),
+      rpcCategory: context.category, ...(method === null ? {} : { rpcMethod: method }), effectRole: context.effectRole,
+    });
+  }
+}
+function rpcBoundary(role: "approval" | "bridge", stage: BridgePreSignRpcStage, chainRole: "source" | "destination",
+  chainId: number, category: BridgePreSignRpcCategory) {
+  return { effectRole: role, stage, chainRole, chainId, category } as const;
+}
 export async function guardBridgeEffect(op: BridgeOperationRecord, role: "approval" | "bridge", source: BridgeRpcPort, destination: BridgeRpcPort, now: () => number): Promise<void> {
   assertBridgeRemaining(op, now());
   const i = op.intent, m = i.materialization, effect = op.effects.find((e) => e.role === role);
   if (op.terminal || effect === undefined || effect.submissionAttempts !== 0) bridgeFailure("APN_OPERATION_BLOCKED", "bridge_first_send_only");
   if (source.origin !== i.sourceRpcOrigin || destination.origin !== i.destinationRpcOrigin || source.chainId !== m.request.fromChainId ||
     destination.chainId !== m.request.toChainId) bridgeFailure("APN_RPC_CONFIG", "bridge_frozen_RPC_origin");
-  const [sourceDeployment, destinationDeployment] = await Promise.all([source.deployment(m.tool, m.request.toChainId, m.request.fromToken), destination.deployment(m.tool, m.request.fromChainId, m.request.toToken)]);
+  const [sourceDeployment, destinationDeployment] = await Promise.all([
+    preSignRpc(rpcBoundary(role, "source_deployment_refresh", "source", source.chainId, "deployment_refresh"),
+      async () => await source.deployment(m.tool, m.request.toChainId, m.request.fromToken)),
+    preSignRpc(rpcBoundary(role, "destination_deployment_refresh", "destination", destination.chainId, "deployment_refresh"),
+      async () => await destination.deployment(m.tool, m.request.fromChainId, m.request.toToken)),
+  ]);
   for (const [frozen, current] of [[i.sourceDeployment, sourceDeployment], [i.destinationDeployment, destinationDeployment]] as const) {
     if (current.contractHash !== frozen.contractHash || current.codeHash !== frozen.codeHash || current.configurationHash !== frozen.configurationHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_drift");
   }
-  const account = await source.account(m.sender, m.approvalAddress, m.request.fromToken), envelope = effect.envelope, c = envelope.economics;
+  const account = await preSignRpc(rpcBoundary(role, "source_account_refresh", "source", source.chainId, "account_nonce"),
+    async () => await source.account(m.sender, m.approvalAddress, m.request.fromToken)), envelope = effect.envelope, c = envelope.economics;
   assertProtocolTime(m, i.decoded, account);
   if (account.latestNonceAtomic !== c.nonceAtomic || account.pendingNonceAtomic !== c.nonceAtomic) bridgeFailure("APN_OPERATION_BLOCKED", "bridge_nonce_changed");
   const expectedAllowance = role === "approval" || bridgeNativePrincipal(m.request) ? "0" : m.request.amountAtomic;
   if (account.allowanceAtomic !== expectedAllowance) bridgeFailure("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "bridge_exact_allowance_changed");
   if (BigInt(account.balanceAtomic) < BigInt(m.request.amountAtomic)) bridgeFailure("APN_INSUFFICIENT_ASSET", "source_asset_balance");
-  const estimate = await source.estimate({ chainId: envelope.chainId, from: envelope.from, to: envelope.to, data: envelope.data,
-    valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic });
+  const estimate = await preSignRpc(rpcBoundary(role, "source_execution_simulation", "source", source.chainId, "simulation"),
+    async () => await source.estimate({ chainId: envelope.chainId, from: envelope.from, to: envelope.to, data: envelope.data,
+      valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic }));
   // `c` is the owner-approved maximum: the preparation quote raised by the stated headroom. A fresh estimate inside
   // that maximum proceeds on the signed envelope; only an estimate above the approved maximum ends the operation.
   if (bridgeUint(estimate.gasLimitAtomic, true) > BigInt(c.gasLimitAtomic) || BigInt(estimate.maxFeePerGasAtomic) > BigInt(c.maxFeePerGasAtomic) ||
@@ -122,7 +150,8 @@ export async function guardBridgeEffect(op: BridgeOperationRecord, role: "approv
       if (proof === null || proof.status !== "success") bridgeFailure("APN_OPERATION_BLOCKED", "earlier_effect_unresolved");
       paid += BigInt(proof.actualTotalFeeWei) + BigInt(e.envelope.valueAtomic);
     } else {
-      const quote = await source.feeQuote(e.envelope);
+      const quote = await preSignRpc(rpcBoundary(role, "source_fee_quote", "source", source.chainId, "fee_quote"),
+        async () => await source.feeQuote(e.envelope));
       if (quote.chainId !== e.envelope.chainId || quote.rpcOrigin !== i.sourceRpcOrigin ||
         quote.maximumExecutionFeeWei !== e.envelope.economics.maximumGasCostAtomic) bridgeFailure("APN_RPC_PROTOCOL", "fresh_fee_quote_identity");
       unpaid += BigInt(quote.totalQuoteWei) + BigInt(e.envelope.valueAtomic);

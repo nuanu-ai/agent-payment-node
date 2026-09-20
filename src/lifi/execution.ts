@@ -4,7 +4,7 @@ import type { StateStore } from "../state.js";
 import { assertBridgeRemaining, guardBridgeEffect } from "./economics.js";
 import { validateMaterial } from "./effect-store.js";
 import { BridgeObservation, replaceEffect, type BridgeSave } from "./observation.js";
-import type { BridgeOperationRecord } from "./operation-model.js";
+import type { BridgeOperationRecord, BridgePreSignRpcFailure } from "./operation-model.js";
 import { assertBridgeOwner } from "./owner.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { publicBridgeOperation } from "./receipt.js";
@@ -111,8 +111,9 @@ export class BridgeExecution {
   }
   private async haltUnsent(op: BridgeOperationRecord, error: unknown, existingReason?: string): Promise<BridgeOperationRecord> {
     const reason = existingReason ?? `unsent_${error instanceof ApnError ? error.code.toLowerCase() : "guard_unavailable"}`;
+    const preSignRpc = preSignRpcFailure(error);
     if (op.effects.some((e) => e.phase === "signing_started")) bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_committed_signing_material_unresolved");
-    if (op.effects.every((e) => e.submissionAttempts === 0)) return await this.save(op, { state: "failed_before_effect", failure: { reason, residualAllowance: null } });
+    if (op.effects.every((e) => e.submissionAttempts === 0)) return await this.save(op, { state: "failed_before_effect", failure: { reason, residualAllowance: null, ...(preSignRpc === null ? {} : { preSignRpc }) } });
     if (op.effects[0]?.role === "approval" && op.effects[0].phase === "safe_success" && op.effects.at(-1)!.submissionAttempts === 0) return await this.terminalFailure(op, "failed_after_approval", reason);
     return await this.save(op, { state: "unknown_finality", failure: { reason, residualAllowance: null } });
   }
@@ -122,4 +123,15 @@ export class BridgeExecution {
     catch { return await this.save(op, { state: "unknown_finality", failure: { reason, residualAllowance: null } }); }
     return await this.save(op, { state, failure: { reason, residualAllowance } });
   }
+}
+function preSignRpcFailure(error: unknown): BridgePreSignRpcFailure | null {
+  if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS") return null;
+  const d = error.details;
+  if (d === undefined || typeof d.rpcStage !== "string" || typeof d.rpcChainRole !== "string" || typeof d.rpcChainId !== "string" ||
+    typeof d.rpcCategory !== "string" || typeof d.effectRole !== "string") return null;
+  return { schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard",
+    effectRole: d.effectRole as BridgePreSignRpcFailure["effectRole"], stage: d.rpcStage as BridgePreSignRpcFailure["stage"],
+    chainRole: d.rpcChainRole as BridgePreSignRpcFailure["chainRole"], chainId: Number(d.rpcChainId),
+    category: d.rpcCategory as BridgePreSignRpcFailure["category"],
+    method: typeof d.rpcMethod === "string" ? d.rpcMethod as BridgePreSignRpcFailure["method"] : null };
 }
