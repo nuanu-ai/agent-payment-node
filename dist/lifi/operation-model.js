@@ -8,7 +8,7 @@ export function retainedUnsentBridgeRpcFailure(op) {
         return null;
     return failure;
 }
-export const BRIDGE_TERMINAL = ["completed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"];
+export const BRIDGE_TERMINAL = ["completed", "destination_failed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"];
 export function bridgeIntentBinding(operation) {
     return { schemaVersion: operation.schemaVersion, kind: operation.kind, profileHash: operation.profileHash,
         operationId: operation.operationId, idempotencyHash: operation.idempotencyHash, requestHash: operation.requestHash,

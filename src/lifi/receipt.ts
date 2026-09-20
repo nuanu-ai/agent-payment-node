@@ -13,6 +13,7 @@ export function bridgeNextActions(op: BridgeOperationRecord): readonly string[] 
 }
 export function bridgeProofClass(op: BridgeOperationRecord): string {
   if (op.state === "completed") return "rpc_safe_correlated";
+  if (op.state === "destination_failed") return "rpc_safe_destination_terminal";
   if (op.state === "failed_confirmed_revert" || op.state === "failed_after_approval") return "rpc_safe_source";
   if (op.effects.some((e) => e.submissionAttempts === 1)) return "effect_observation_pending";
   return "durable_pre_effect";

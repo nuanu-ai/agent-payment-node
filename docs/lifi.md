@@ -35,10 +35,15 @@ Preparation refreshes the Fly signer allowlist, Fly/Core linkage and whitelist,
 Receiver Executor/SpokePool immutables, Across buffers, contract code and the
 Vault pool registration with the complete five-token list, exact order, WETH as
 the input token and WBNB as the output token. Completion requires
-the canonical Across message hash and a safe BNB transaction with exactly one
-Executor-to-self native trace transfer at or above the owner floor plus the
-matching native balance delta. The Receiver recovery branch that transfers
-unswapped WETH is recorded as a non-BNB outcome and cannot satisfy completion.
+the canonical Across message hash and a safe BNB transaction whose complete
+bounded callTracer subtree matches the pinned SpokePool, Receiver, Executor,
+Fly, Core, Vault, pool swap, WBNB unwrap and native-return hierarchy. The digest
+covers the entire validated subtree. Vault output must equal the unwrap amount;
+retention math must equal the Fly-to-Executor and Executor-to-self value; and the
+self balance delta must cover that delivery. Recovery of unswapped WETH,
+below-floor output, a protocol graph mismatch and unavailable evidence remain
+distinct durable outcomes across restart. Only `completed_native` completes the
+native BNB delivery.
 The retained fixture is
 `tests/core/lifi-fixtures/bnb-composite-fly-20260921.json`; it is read-only
 evidence and its expired amounts and deadlines are never used as a live quote.
