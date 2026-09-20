@@ -76,8 +76,8 @@ export class StargateNativeService {
     const signer = await this.local.port(profile, owner), { source, destination } = this.remote();
     return {
       sourceCall: (method, params) => source.call(method, params), destinationCall: (method, params) => destination.call(method, params),
-      destinationBalance: async recipient => {
-        const block = record(await destination.call("eth_getBlockByNumber", ["safe", false]));
+      destinationBalance: async (recipient, finalityTag) => {
+        const block = record(await destination.call("eth_getBlockByNumber", [finalityTag, false]));
         return { balanceAtomic: quantity(await destination.call("eth_getBalance", [recipient, block.number])).toString(),
           blockNumberAtomic: quantity(block.number).toString(), blockHash: hash(block.hash) };
       },
@@ -92,7 +92,7 @@ export class StargateNativeService {
           maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() };
       }, signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async operation => await new TtyStargateNativeApproval().approve(operation),
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; },
-      waitSourceReceipt: async transactionHash => await confirmedStargateSourceReceipt(source, transactionHash),
+      waitSourceReceipt: async (transactionHash, finalityTag) => await confirmedStargateSourceReceipt(source, transactionHash, finalityTag),
       observeDestination: async input => await observeStargateDestination(destination, input), now: this.now,
     };
   }
@@ -105,27 +105,28 @@ export class StargateNativeService {
   }
 }
 
-export async function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex): Promise<StargateConfirmedReceipt | null> {
+export async function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex,
+  finalityTag: StargateConfirmedReceipt["finality"]): Promise<StargateConfirmedReceipt | null> {
   const raw = await rpc.call("eth_getTransactionReceipt", [transactionHash]); if (raw === null) return null;
-  const receipt = record(raw), safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false]));
-  if (quantity(receipt.blockNumber) > quantity(safe.number)) return null;
+  const receipt = record(raw), finalityHead = record(await rpc.call("eth_getBlockByNumber", [finalityTag, false]));
+  if (quantity(receipt.blockNumber) > quantity(finalityHead.number)) return null;
   const canonical = record(await rpc.call("eth_getBlockByNumber", [receipt.blockNumber, false]));
   if (hash(canonical.hash) !== hash(receipt.blockHash)) throw new ApnError("APN_RPC_PROTOCOL", "Stargate source receipt is not in the canonical safe chain.");
   const logs = Array.isArray(receipt.logs) ? receipt.logs.map(value => { const log = record(value); return { address: getAddress(String(log.address)),
     topics: (log.topics as unknown[]).map(hash), data: String(log.data) as Hex }; }) : blocked("receipt_logs");
   return { transactionHash: hash(receipt.transactionHash), status: quantity(receipt.status) === 1n ? "success" : "reverted",
-    blockNumberAtomic: quantity(receipt.blockNumber).toString(), blockHash: hash(receipt.blockHash), finality: "safe", logs };
+    blockNumberAtomic: quantity(receipt.blockNumber).toString(), blockHash: hash(receipt.blockHash), finality: finalityTag, logs };
 }
 
 export async function observeStargateDestination(rpc: Pick<StargateJsonRpc, "call">,
   input: Parameters<StargateNativeExecutionPorts["observeDestination"]>[0]) {
   if (input.destinationPool !== DESTINATION_POOL || input.sourceEid !== 30101) blocked("destination_binding");
-  const safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false])), baselineTag = `0x${BigInt(input.fromBlockNumberAtomic).toString(16)}`,
+  const finalityHead = record(await rpc.call("eth_getBlockByNumber", [input.finalityTag, false])), baselineTag = `0x${BigInt(input.fromBlockNumberAtomic).toString(16)}`,
     baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false])), topic = encodeEventTopics({ abi: STARGATE_SEND_ABI,
     eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
   if (hash(baseline.hash) !== input.fromBlockHash) throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline is no longer canonical.");
   const raw = await rpc.call("eth_getLogs", [{ address: DESTINATION_POOL,
-    fromBlock: baselineTag, toBlock: safe.number, topics: topic }]);
+    fromBlock: baselineTag, toBlock: finalityHead.number, topics: topic }]);
   if (!Array.isArray(raw)) blocked("destination_logs");
   for (const value of raw) {
     const log = record(value);
@@ -138,11 +139,11 @@ export async function observeStargateDestination(rpc: Pick<StargateJsonRpc, "cal
         sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30101 as const, recipient: input.recipient,
         destinationTransactionHash: hash(log.transactionHash), logIndexAtomic: quantity(log.logIndex).toString(),
         amountReceivedAtomic: event.args.amountReceivedLD.toString(), blockNumberAtomic: quantity(log.blockNumber).toString(),
-        blockHash: hash(log.blockHash), finality: "safe" as const };
+        blockHash: hash(log.blockHash), finality: input.finalityTag };
     } catch { /* skip unrelated/malformed candidates */ }
   }
-  const after = quantity(await rpc.call("eth_getBalance", [input.recipient, safe.number])); const before = BigInt(input.balanceBeforeAtomic);
+  const after = quantity(await rpc.call("eth_getBalance", [input.recipient, finalityHead.number])); const before = BigInt(input.balanceBeforeAtomic);
   return after >= before ? { mode: "balance_delta" as const, recipient: input.recipient, balanceBeforeAtomic: before.toString(),
-    balanceAfterAtomic: after.toString(), deltaAtomic: (after - before).toString(), blockNumberAtomic: quantity(safe.number).toString(),
-    blockHash: hash(safe.hash), finality: "safe" as const } : null;
+    balanceAfterAtomic: after.toString(), deltaAtomic: (after - before).toString(), blockNumberAtomic: quantity(finalityHead.number).toString(),
+    blockHash: hash(finalityHead.hash), finality: input.finalityTag } : null;
 }

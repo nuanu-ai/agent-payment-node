@@ -3,6 +3,7 @@ import type { EvmRpcCall } from "../evm-ports.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
+import { type StargateV2FinalityTag, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { type StargateV2QuoteEvidence } from "./quote.js";
 export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality";
 export interface StargateNativeTransition {
@@ -31,6 +32,7 @@ export interface StargateNativeOperation {
     readonly recipient: Address;
     readonly amountAtomic: string;
     readonly maxNativeDebitAtomic: string;
+    readonly finalityPolicy: StargateV2RouteFinalityPolicy;
     readonly sourcePool: Address;
     readonly destinationPool: Address;
     readonly sourceEid: 30101;
@@ -60,7 +62,7 @@ export interface StargateSourceReceipt {
     readonly transactionHash: Hex;
     readonly blockNumberAtomic: string;
     readonly blockHash: Hex;
-    readonly finality: "safe";
+    readonly finality: StargateV2FinalityTag;
     readonly guid: Hex;
     readonly amountSentAtomic: string;
     readonly amountReceivedAtomic: string;
@@ -75,14 +77,14 @@ export type StargateDestinationEvidence = Readonly<{
     logIndexAtomic: string;
     blockNumberAtomic: string;
     blockHash: Hex;
-    finality: "safe";
+    finality: StargateV2FinalityTag;
     recipient: Address;
     amountReceivedAtomic: string;
 }> | Readonly<{
     mode: "balance_delta";
     blockNumberAtomic: string;
     blockHash: Hex;
-    finality: "safe";
+    finality: StargateV2FinalityTag;
     recipient: Address;
     balanceBeforeAtomic: string;
     balanceAfterAtomic: string;
@@ -114,13 +116,13 @@ export interface StargateConfirmedReceipt {
     readonly status: "success" | "reverted";
     readonly blockNumberAtomic: string;
     readonly blockHash: Hex;
-    readonly finality: "safe";
+    readonly finality: StargateV2FinalityTag;
     readonly logs: readonly StargateRawLog[];
 }
 export interface StargateNativeExecutionPorts {
     readonly sourceCall: EvmRpcCall;
     readonly destinationCall: EvmRpcCall;
-    readonly destinationBalance: (recipient: Address) => Promise<Readonly<{
+    readonly destinationBalance: (recipient: Address, finalityTag: StargateV2FinalityTag) => Promise<Readonly<{
         balanceAtomic: string;
         blockNumberAtomic: string;
         blockHash: Hex;
@@ -143,7 +145,7 @@ export interface StargateNativeExecutionPorts {
     }>>;
     readonly approve: (operation: StargateNativeOperation) => Promise<void>;
     readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
-    readonly waitSourceReceipt: (transactionHash: Hex) => Promise<StargateConfirmedReceipt | null>;
+    readonly waitSourceReceipt: (transactionHash: Hex, finalityTag: StargateV2FinalityTag) => Promise<StargateConfirmedReceipt | null>;
     readonly observeDestination: (input: Readonly<{
         sourceTransactionHash: Hex;
         guid: Hex;
@@ -154,6 +156,7 @@ export interface StargateNativeExecutionPorts {
         balanceBeforeAtomic: string;
         fromBlockNumberAtomic: string;
         fromBlockHash: Hex;
+        finalityTag: StargateV2FinalityTag;
     }>) => Promise<StargateDestinationEvidence | null>;
     readonly now?: () => number;
 }
@@ -201,6 +204,7 @@ export interface StargateNativeCanonicalReceipt {
     readonly recipient: Address;
     readonly principalAtomic: string;
     readonly nativeMessageFeeAtomic: string;
+    readonly finalityPolicy: StargateV2RouteFinalityPolicy;
     readonly totalValueAtomic: string;
     readonly maximumDebitAtomic: string;
     readonly quoteHash: string;

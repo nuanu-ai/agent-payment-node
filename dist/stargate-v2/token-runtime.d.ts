@@ -51,6 +51,7 @@ export declare class StargateTokenService {
         executor: `0x${string}`;
         executorNativeCapAtomic: string;
         policy: import("./token-execution.js").StargateTokenPolicyBinding;
+        finalityPolicy: import("./finality-policy.js").StargateV2RouteFinalityPolicy;
         quoteHash: string;
         approvalTransactionHash: `0x${string}` | null;
         residualAllowanceAtomic: string;
