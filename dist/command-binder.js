@@ -3,6 +3,7 @@ import { parseCatalogArgv, parseCatalogInput, } from "./command-catalog.js";
 import { ApnError } from "./errors.js";
 import { evmChain, evmDecimals, evmToken } from "./evm-asset.js";
 import { listedEvmAsset } from "./evm-direct-allowlist.js";
+import { directEvmChain } from "./evm-direct-networks.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
 import { chainDecimal } from "./chain-policy.js";
 import { solanaAddress } from "./solana/rpc.js";
@@ -295,7 +296,7 @@ function bindNetwork(options) {
 function bindAsset(options) {
     const decimals = bindDecimals(options);
     return {
-        chainId: evmChain(value(options, "--chain")), token: evmToken(value(options, "--asset")),
+        chainId: directEvmChain(value(options, "--chain")), token: evmToken(value(options, "--asset")),
         ...(decimals === undefined ? {} : { decimals }),
     };
 }
