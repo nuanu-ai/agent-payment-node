@@ -6,6 +6,7 @@ import { BridgeObservation, replaceEffect } from "./observation.js";
 import { assertBridgeOwner } from "./owner.js";
 import { publicBridgeOperation } from "./receipt.js";
 import { bridgeFailure } from "./validation.js";
+import { BridgeAllowlistGate } from "./allowlist.js";
 export class BridgeExecution {
     state;
     source;
@@ -43,8 +44,17 @@ export class BridgeExecution {
         catch (error) {
             return await this.haltUnsent(op, error);
         }
+        let usageLease = null;
+        if (op.intent.allowlist !== null) {
+            try {
+                usageLease = await this.allowlist().reserve(op);
+            }
+            catch (error) {
+                return await this.haltUnsent(op, error);
+            }
+        }
         op = await this.save(op, { state: "execution_pending", approval: { policy: "apn.bridge.foreground-approval.v1",
-                fingerprint: op.fingerprint, approvedAt: new Date(this.now()).toISOString(), expiresAt: op.intent.expiresAt } });
+                fingerprint: op.fingerprint, approvedAt: new Date(this.now()).toISOString(), expiresAt: op.intent.expiresAt }, usageLease });
         return await this.run(op);
     }
     async run(op) {
@@ -140,7 +150,12 @@ export class BridgeExecution {
     }
     async guard(op, role) {
         await assertBridgeOwner(this.state, op.intent);
+        if (op.intent.allowlist !== null)
+            await this.allowlist().confirm(op.intent.profile, op.intent.materialization.request, op.intent.materialization.tool, op.intent.allowlist);
         await guardBridgeEffect(op, role, this.source, this.destination, this.now);
+    }
+    allowlist() {
+        return new BridgeAllowlistGate({ state: this.state, clock: { now: () => new Date(this.now()) } });
     }
     async haltUnsent(op, error, existingReason) {
         const reason = existingReason ?? `unsent_${error instanceof ApnError ? error.code.toLowerCase() : "guard_unavailable"}`;

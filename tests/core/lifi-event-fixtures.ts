@@ -58,7 +58,9 @@ export function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourc
       const beforeBlock = { numberAtomic: "122", hash: `0x${"bc".repeat(32)}` as Hex, timestampAtomic: "1" };
       const afterBlock = { numberAtomic: result.blockNumberAtomic, hash: result.blockHash, timestampAtomic: "2" };
       return { ...result, nativeBalance: { recipient: d.recipient, beforeBlock, afterBlock, beforeBalanceAtomic: "100",
-        afterBalanceAtomic: (100n + BigInt(c.outputAmountAtomic)).toString(), deltaAtomic: c.outputAmountAtomic } };
+        afterBalanceAtomic: (100n + BigInt(c.outputAmountAtomic)).toString(), deltaAtomic: c.outputAmountAtomic },
+        nativeTransfer: { transactionHash: result.transactionHash, from: emitter, to: d.recipient, valueAtomic: c.outputAmountAtomic,
+          traceHash: "a".repeat(64) } };
     }
     return receipt(d.destinationChainId, [fill,
       eventLog(d.destinationToken, "Transfer", { from: fillType === 2 ? emitter : PAYER, to: d.recipient, value: BigInt(c.outputAmountAtomic) })]);

@@ -10,7 +10,7 @@ export declare function publicFacilitatorOperation(op: FacilitatorOperationRecor
     custody: "local_software";
     route: "x402_exact_eip3009_public_facilitator";
     fingerprint: string;
-    state: "completed" | "awaiting_approval" | "abandoned_unknown" | "failed_before_effect" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
+    state: "failed_before_effect" | "awaiting_approval" | "abandoned_unknown" | "completed" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
     terminal: boolean;
     proof_class: string;
     reason: string;
@@ -62,13 +62,13 @@ export declare function publicFacilitatorOperation(op: FacilitatorOperationRecor
         requirement_hash: string;
         verify: {
             started_at: string;
-            outcome: "pending" | "unknown" | "rejected" | "accepted";
+            outcome: "unknown" | "pending" | "rejected" | "accepted";
             response_hash: string | null;
             transaction_hash: `0x${string}` | null;
         } | null;
         settle: {
             started_at: string;
-            outcome: "pending" | "unknown" | "rejected" | "accepted";
+            outcome: "unknown" | "pending" | "rejected" | "accepted";
             response_hash: string | null;
             transaction_hash: `0x${string}` | null;
         } | null;
@@ -102,7 +102,7 @@ export declare function facilitatorReceipt(op: FacilitatorOperationRecord): {
     custody: "local_software";
     route: "x402_exact_eip3009_public_facilitator";
     fingerprint: string;
-    state: "completed" | "awaiting_approval" | "abandoned_unknown" | "failed_before_effect" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
+    state: "failed_before_effect" | "awaiting_approval" | "abandoned_unknown" | "completed" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
     terminal: boolean;
     proof_class: string;
     reason: string;
@@ -154,13 +154,13 @@ export declare function facilitatorReceipt(op: FacilitatorOperationRecord): {
         requirement_hash: string;
         verify: {
             started_at: string;
-            outcome: "pending" | "unknown" | "rejected" | "accepted";
+            outcome: "unknown" | "pending" | "rejected" | "accepted";
             response_hash: string | null;
             transaction_hash: `0x${string}` | null;
         } | null;
         settle: {
             started_at: string;
-            outcome: "pending" | "unknown" | "rejected" | "accepted";
+            outcome: "unknown" | "pending" | "rejected" | "accepted";
             response_hash: string | null;
             transaction_hash: `0x${string}` | null;
         } | null;

@@ -1,0 +1,170 @@
+import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
+import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
+import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { AssetUsageLedger, assetUsageReservationId, } from "../asset-usage-ledger.js";
+import { ApnError } from "../errors.js";
+import { bridgeAssetRow } from "./asset-registry.js";
+import { bridgeAddress, bridgeFailure, bridgeSame, bridgeUint } from "./validation.js";
+export const BRIDGE_ALLOWLIST_SCHEMA = "apn.bridge-allowlist.v1";
+export const LIFI_ACROSS_BRIDGE_MECHANISM = Object.freeze({ provider: "lifi", reference: "across-v4" });
+export class BridgeAllowlistGate {
+    context;
+    ledger;
+    constructor(context) {
+        this.context = context;
+        this.ledger = new AssetUsageLedger(context.state.root);
+    }
+    async admit(profile, owner, request, tool) {
+        if (request.recipient !== owner)
+            refuse("bridge_self_recipient_required", "Bridge execution is limited to the bound profile owner's own address.");
+        if (tool !== "across")
+            refuse("bridge_mechanism_mismatch", "This executable bridge lane requires the exact LI.FI/Across mechanism.");
+        const subject = bridgeSubject(owner, request), active = await this.active(profile, owner);
+        const usage = await this.ledger.usage(identity(subject), this.context.clock.now());
+        const evaluation = { chain: subject.chain, asset: subject.asset, rail: "bridge", amountAtomic: request.amountAtomic,
+            dailyUsageAtomic: usage.amountAtomic, asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() };
+        const admission = evaluate(active.registry, evaluation);
+        exactMechanism(admission.asset.mechanismPins?.bridge);
+        return { schemaVersion: BRIDGE_ALLOWLIST_SCHEMA, policyDigest: active.digest, policyRevision: active.revision,
+            ...subject, mechanism: LIFI_ACROSS_BRIDGE_MECHANISM };
+    }
+    async confirm(profile, request, tool, bindingValue) {
+        const binding = validateBridgeAllowlistBinding(bindingValue), subject = bridgeSubject(binding.account, request);
+        if (request.recipient !== binding.selfRecipient || request.recipient !== binding.account || !bridgeSame(subject, {
+            account: binding.account, chain: binding.chain, asset: binding.asset, amountAtomic: binding.amountAtomic, selfRecipient: binding.selfRecipient,
+        }))
+            refuse("bridge_binding_changed", "The bridge owner, recipient, asset, or amount differs from the prepared owner binding.");
+        if (tool !== "across")
+            refuse("bridge_mechanism_mismatch", "This executable bridge lane requires the exact LI.FI/Across mechanism.");
+        const active = await this.active(profile, binding.account);
+        if (active.digest !== binding.policyDigest || active.revision !== binding.policyRevision) {
+            refuse("allowlist_policy_changed", "The active owner allowlist policy changed after bridge preparation; prepare a new bridge operation.");
+        }
+        const admission = evaluate(active.registry, { chain: binding.chain, asset: binding.asset, rail: "bridge", amountAtomic: binding.amountAtomic,
+            dailyUsageAtomic: "0", asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() });
+        exactMechanism(admission.asset.mechanismPins?.bridge);
+        return active;
+    }
+    async reserve(op) {
+        const request = op.intent.materialization.request, binding = validateBridgeAllowlistBinding(op.intent.allowlist);
+        const active = await this.confirm(op.intent.profile, request, op.intent.materialization.tool, binding);
+        try {
+            return await this.ledger.reserve({ ...identity(binding), registry: active.registry, rail: "bridge", amountAtomic: binding.amountAtomic,
+                idempotencyKey: bridgeUsageKey(op.operationId), now: this.context.clock.now() });
+        }
+        catch (error) {
+            return mapCap(error);
+        }
+    }
+    async follow(op, target) {
+        const frozen = op.usageLease;
+        if (frozen === null || target === "reserved")
+            return;
+        const binding = validateBridgeAllowlistBinding(op.intent.allowlist), expectedId = assetUsageReservationId(identity(binding), bridgeUsageKey(op.operationId));
+        if (frozen.reservationId !== expectedId || frozen.policyDigest !== binding.policyDigest || frozen.amountAtomic !== binding.amountAtomic ||
+            frozen.state !== "reserved" || !bridgeSame(identity(frozen), identity(binding)))
+            bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_lease_binding");
+        let current = await this.ledger.load(identity(binding), expectedId);
+        if (current === null)
+            bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_lease_missing");
+        if (current.state === target)
+            return;
+        if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(current.state)) {
+            bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_terminal_conflict");
+        }
+        const move = async (state, outcome = false) => {
+            current = await this.ledger.transition({ ...identity(binding), reservationId: expectedId, policyDigest: binding.policyDigest, state,
+                now: this.context.clock.now(), ...(outcome ? { outcomeDigest: domainHash("apn.bridge-usage-outcome.v1", canonicalJson({
+                        operationId: op.operationId, state, integrityHash: op.integrityHash,
+                    })) } : {}) });
+        };
+        if (target === "submitted") {
+            if (current.state === "reserved")
+                await move("submitted");
+            return;
+        }
+        if (target === "unknown_finality") {
+            if (current.state === "reserved")
+                await move("submitted");
+            if (current.state === "submitted")
+                await move("unknown_finality");
+            return;
+        }
+        if (target === "failed_before_effect") {
+            if (current.state !== "reserved")
+                bridgeFailure("APN_STATE_CORRUPT", "bridge_usage_release_after_effect");
+            await move(target, true);
+            return;
+        }
+        if (target === "failed_confirmed_revert" && current.state === "reserved")
+            await move("submitted");
+        await move(target, true);
+    }
+    async active(profile, owner) {
+        const active = await loadActiveAssetPolicyRegistry(this.context, profile);
+        if (active === null)
+            refuse("allowlist_policy_required", "Bridge execution requires an owner-activated allowlist policy for this profile.");
+        if (active.accounts.evm !== owner)
+            refuse("allowlist_account_mismatch", "The active owner allowlist policy names a different EVM account.");
+        return active;
+    }
+}
+export function validateBridgeAllowlistBinding(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "policyDigest", "policyRevision", "account", "chain", "asset",
+        "amountAtomic", "selfRecipient", "mechanism"]) || !isPlainRecord(value.asset) || !exactKeys(value.asset, ["kind", "identifier"])) {
+        bridgeFailure("APN_STATE_CORRUPT", "bridge_allowlist_binding");
+    }
+    const binding = value;
+    if (binding.schemaVersion !== BRIDGE_ALLOWLIST_SCHEMA || !/^[a-f0-9]{64}$/u.test(binding.policyDigest) ||
+        !Number.isSafeInteger(binding.policyRevision) || binding.policyRevision < 1 || binding.account !== binding.selfRecipient ||
+        bridgeAddress(binding.account, "APN_STATE_CORRUPT") !== binding.account || !/^eip155:(?:1|8453|42161)$/u.test(binding.chain) ||
+        (binding.asset.kind === "native" ? binding.asset.identifier !== null : bridgeAddress(binding.asset.identifier, "APN_STATE_CORRUPT") !== binding.asset.identifier) ||
+        bridgeUint(binding.amountAtomic, true, "APN_STATE_CORRUPT") < 1n || !bridgeSame(binding.mechanism, LIFI_ACROSS_BRIDGE_MECHANISM)) {
+        bridgeFailure("APN_STATE_CORRUPT", "bridge_allowlist_binding");
+    }
+    return binding;
+}
+export function bridgeUsageTarget(op) {
+    if (op.usageLease === null)
+        return "reserved";
+    if (op.state === "completed")
+        return "finalized";
+    if (op.state === "failed_before_effect")
+        return "failed_before_effect";
+    if (op.state === "failed_after_approval" || op.state === "failed_confirmed_revert")
+        return "failed_confirmed_revert";
+    if (op.state === "unknown_finality" || op.effects.some((effect) => effect.phase === "unknown_finality"))
+        return "unknown_finality";
+    return op.effects.some((effect) => effect.submissionAttempts === 1) ? "submitted" : "reserved";
+}
+function bridgeSubject(account, request) {
+    const row = bridgeAssetRow(request.fromChainId, request.fromToken);
+    return { account, chain: `eip155:${request.fromChainId}`, asset: row.kind === "native"
+            ? { kind: "native", identifier: null } : { kind: "token", identifier: row.address },
+        amountAtomic: request.amountAtomic, selfRecipient: request.recipient };
+}
+function identity(value) { return { account: value.account, chain: value.chain, asset: value.asset }; }
+function bridgeUsageKey(operationId) { return `apn.bridge-usage:${operationId}`; }
+function exactMechanism(value) {
+    if (!bridgeSame(value, LIFI_ACROSS_BRIDGE_MECHANISM))
+        refuse("bridge_mechanism_mismatch", "The owner policy lacks the exact LI.FI/Across bridge mechanism pin.");
+}
+function evaluate(registry, input) {
+    try {
+        return evaluateAssetPolicy(registry, input);
+    }
+    catch (error) {
+        return mapCap(error);
+    }
+}
+function mapCap(error) {
+    if (error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED") {
+        if (error.message.includes("daily cap"))
+            refuse("allowlist_daily_cap_exceeded", error.message);
+        if (error.message.includes("per-transfer cap"))
+            refuse("allowlist_per_transfer_cap_exceeded", error.message);
+    }
+    throw error;
+}
+function refuse(reason, message) { throw new ApnError("APN_ALLOWLIST_REFUSED", message, { reason, rail: "bridge" }); }
+//# sourceMappingURL=allowlist.js.map

@@ -331,6 +331,13 @@ export declare const destinationProofSchema: z.ZodObject<{
         afterBalanceAtomic: z.ZodString;
         deltaAtomic: z.ZodString;
     }, z.core.$strict>>;
+    nativeTransfer: z.ZodNullable<z.ZodObject<{
+        transactionHash: z.ZodString;
+        from: z.ZodString;
+        to: z.ZodString;
+        valueAtomic: z.ZodString;
+        traceHash: z.ZodString;
+    }, z.core.$strict>>;
     safeBlock: z.ZodObject<{
         numberAtomic: z.ZodString;
         hash: z.ZodString;
@@ -793,6 +800,13 @@ export declare const transitionSchema: z.ZodObject<{
             afterBalanceAtomic: z.ZodString;
             deltaAtomic: z.ZodString;
         }, z.core.$strict>>;
+        nativeTransfer: z.ZodNullable<z.ZodObject<{
+            transactionHash: z.ZodString;
+            from: z.ZodString;
+            to: z.ZodString;
+            valueAtomic: z.ZodString;
+            traceHash: z.ZodString;
+        }, z.core.$strict>>;
         safeBlock: z.ZodObject<{
             numberAtomic: z.ZodString;
             hash: z.ZodString;
@@ -840,6 +854,7 @@ export declare const transitionSchema: z.ZodObject<{
             rpcOrigin: z.ZodString;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
+    usageLease: z.ZodNullable<z.ZodUnknown>;
 }, z.core.$strict>;
 export declare const operationSchema: z.ZodObject<{
     schemaVersion: z.ZodLiteral<"apn.bridge-operation.v1">;
@@ -1142,6 +1157,7 @@ export declare const operationSchema: z.ZodObject<{
         expiresAt: z.ZodString;
         policyHash: z.ZodString;
         implicitProtocolFeeAtomic: z.ZodString;
+        allowlist: z.ZodNullable<z.ZodUnknown>;
     }, z.core.$strict>;
     transitions: z.ZodArray<z.ZodObject<{
         effects: z.ZodArray<z.ZodObject<{
@@ -1364,6 +1380,13 @@ export declare const operationSchema: z.ZodObject<{
                 afterBalanceAtomic: z.ZodString;
                 deltaAtomic: z.ZodString;
             }, z.core.$strict>>;
+            nativeTransfer: z.ZodNullable<z.ZodObject<{
+                transactionHash: z.ZodString;
+                from: z.ZodString;
+                to: z.ZodString;
+                valueAtomic: z.ZodString;
+                traceHash: z.ZodString;
+            }, z.core.$strict>>;
             safeBlock: z.ZodObject<{
                 numberAtomic: z.ZodString;
                 hash: z.ZodString;
@@ -1411,6 +1434,7 @@ export declare const operationSchema: z.ZodObject<{
                 rpcOrigin: z.ZodString;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
+        usageLease: z.ZodNullable<z.ZodUnknown>;
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     state: z.ZodEnum<{
@@ -1503,6 +1527,13 @@ export declare const operationSchema: z.ZodObject<{
             afterBalanceAtomic: z.ZodString;
             deltaAtomic: z.ZodString;
         }, z.core.$strict>>;
+        nativeTransfer: z.ZodNullable<z.ZodObject<{
+            transactionHash: z.ZodString;
+            from: z.ZodString;
+            to: z.ZodString;
+            valueAtomic: z.ZodString;
+            traceHash: z.ZodString;
+        }, z.core.$strict>>;
         safeBlock: z.ZodObject<{
             numberAtomic: z.ZodString;
             hash: z.ZodString;
@@ -1550,4 +1581,5 @@ export declare const operationSchema: z.ZodObject<{
             rpcOrigin: z.ZodString;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
+    usageLease: z.ZodNullable<z.ZodUnknown>;
 }, z.core.$strict>;

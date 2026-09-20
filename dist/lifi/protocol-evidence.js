@@ -164,12 +164,13 @@ function acrossDestination(source, decoded, receipt) {
         fail("slow_fill_credit");
     if (decoded.destinationToken === BRIDGE_ZERO_ADDRESS) {
         const balance = decoded.destinationChainId === 59144 ? nativeBalanceProof(decoded, receipt) : null;
+        const transfer = decoded.destinationChainId === 59144 ? nativeTransferProof(decoded, receipt, emitter, c.outputAmountAtomic) : null;
         // The pinned SpokePool unwraps a native fill and sends the value to the recipient; the value send itself has no
         // log, so the credit is proved by the exact relay tuple plus the unwrap of exactly the output from the SpokePool.
         nativeMovement(decoded.destinationChainId, receipt, "unwrap", c.outputAmountAtomic);
         if (balance !== null && BigInt(balance.deltaAtomic) < BigInt(c.outputAmountAtomic))
             fail("native_destination_balance");
-        return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic, balance);
+        return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic, balance, transfer);
     }
     const transfers = events(receipt, decoded.destinationToken, EVENT_TOPICS.transfer, "Transfer");
     const delivered = transfers.filter((x) => x.to === decoded.recipient);
@@ -193,7 +194,7 @@ function stargateDestination(source, decoded, receipt) {
     const delivered = transfers.filter((x) => x.to === decoded.recipient);
     if (delivered.length !== 1 || delivered[0].from !== emitter || delivered[0].value !== received.amountReceivedLD)
         fail("destination_token_movement");
-    return destinationResult(source, decoded, receipt, received.amountReceivedLD.toString(), null, null, null, null);
+    return destinationResult(source, decoded, receipt, received.amountReceivedLD.toString(), null, null, null, null, null);
 }
 /**
  * One exact wrapped-native movement by the Across SpokePool. WETH9 logs `Deposit(dst)` / `Withdrawal(src)`; Arbitrum's
@@ -216,12 +217,19 @@ function nativeMovement(chainId, receipt, direction, amountAtomic) {
     if (matches !== 1)
         fail(direction === "wrap" ? "native_source_wrap" : "native_destination_unwrap");
 }
-function destinationResult(source, decoded, receipt, amountAtomic, fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance) {
+function destinationResult(source, decoded, receipt, amountAtomic, fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance, nativeTransfer = null) {
     return {
         tool: decoded.tool, chainId: receipt.chainId, transactionHash: receipt.transactionHash, blockNumberAtomic: receipt.blockNumberAtomic,
         blockHash: receipt.blockHash, recipient: decoded.recipient, token: decoded.destinationToken, amountAtomic,
-        correlationHash: sha256(canonicalJson(source.correlation)), logsHash: logsHash(receipt.logs), fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance,
+        correlationHash: sha256(canonicalJson(source.correlation)), logsHash: logsHash(receipt.logs), fillType, relayerCredit, repaymentChainIdAtomic, nativeBalance, nativeTransfer,
     };
+}
+function nativeTransferProof(decoded, receipt, emitter, amountAtomic) {
+    const proof = receipt.nativeTransfer;
+    if (proof === undefined || proof === null || proof.transactionHash !== receipt.transactionHash || proof.from !== emitter ||
+        proof.to !== decoded.recipient || proof.valueAtomic !== amountAtomic || !/^[a-f0-9]{64}$/u.test(proof.traceHash))
+        fail("native_destination_transfer");
+    return proof;
 }
 function nativeBalanceProof(decoded, receipt) {
     const proof = receipt.nativeBalance;

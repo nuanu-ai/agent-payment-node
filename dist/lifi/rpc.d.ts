@@ -62,7 +62,11 @@ export declare class BridgeRpc implements BridgeRpcPort {
     estimate(transaction: BridgeTransaction): Promise<import("../ports.js").FeeEstimate>;
     feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<import("../evm-ports.js").EvmFeeQuote>;
     send(raw: Hex): Promise<Hex>;
-    observe(hash: Hex, expected?: BridgeEnvelope, nativeRecipient?: Address): Promise<{
+    observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{
+        recipient: Address;
+        from: Address;
+        amountAtomic: string;
+    }>): Promise<{
         transaction: BridgeTransactionProof;
         receipt: BridgeProtocolReceipt;
     } | null>;
