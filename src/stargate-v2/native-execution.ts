@@ -256,7 +256,7 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   journal: StargateNativeJournal): Promise<StargateNativeOperation> {
   let operation = await journal.load(operationId); if (operation === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
   if (["submission_started", "submitted", "unknown_finality"].includes(operation.phase)) return await observeOnly(operation, ports, journal);
-  if (operation.phase === "observed") return operation;
+  if (operation.phase === "observed") return operation; if (operation.finalityPolicyProvenance === "derived_legacy_v1") fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
   const now = ports.now ?? Date.now;
   if (Date.parse(operation.expiresAt) <= now()) fail("APN_REPREPARE_REQUIRED", "expired");
   if (operation.phase === "prepared") {
@@ -461,9 +461,9 @@ function validateRecord(value: unknown): StargateNativeOperation {
 function assertLegacyNativeLane(record: StargateNativeOperation): void {
   const route = record.quote?.route;
   if (record.sourcePool !== SOURCE_POOL || record.destinationPool !== DESTINATION_POOL || record.sourceEid !== SOURCE_EID ||
-    record.destinationEid !== DESTINATION_EID || record.envelope?.chainId !== SOURCE_CHAIN || route?.sourceChainId !== SOURCE_CHAIN ||
-    route.destinationChainId !== DESTINATION_CHAIN || route.sourceEid !== SOURCE_EID || route.destinationEid !== DESTINATION_EID ||
-    route.sourcePool !== SOURCE_POOL || route.destinationPool !== DESTINATION_POOL || route.asset !== "ETH") fail("APN_STATE_CORRUPT", "legacy_lane");
+    record.destinationEid !== DESTINATION_EID || record.envelope?.chainId !== SOURCE_CHAIN || record.envelope.from !== record.owner || record.envelope.to !== SOURCE_POOL || route?.sourceChainId !== SOURCE_CHAIN ||
+    route.destinationChainId !== DESTINATION_CHAIN || route.sourceEid !== SOURCE_EID || route.destinationEid !== DESTINATION_EID || record.quote.recipient !== record.owner ||
+    route.sourcePool !== SOURCE_POOL || route.destinationPool !== DESTINATION_POOL || route.sourceToken !== zeroAddress || route.destinationToken !== zeroAddress || route.asset !== "ETH") fail("APN_STATE_CORRUPT", "legacy_lane");
 }
 function validateAdvance(previous: StargateNativeOperation | null, next: StargateNativeOperation): void {
   if (previous === null) { if (next.phase !== "prepared" || next.transitions.length !== 1) fail("APN_STATE_CORRUPT", "initial_state"); return; }

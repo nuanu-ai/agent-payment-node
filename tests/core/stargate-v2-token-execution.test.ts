@@ -100,6 +100,9 @@ test("legacy v1 prepared token fixture loads locally with the historical all-saf
   await seedTokenFixture(temporary.root,legacyTokenFixture(prepared)); const loaded=await new FileStargateTokenJournal(temporary.root,state).load(prepared.operationId);
   assert.equal(loaded?.schemaVersion,"apn.stargate-v2-token-operation.v1"); assert.equal(loaded?.finalityPolicyProvenance,"derived_legacy_v1");
   assert.deepEqual(loaded?.finalityPolicy,{version:"apn.stargate-v2-finality.legacy-safe-v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"safe"}});
+  const journal=new FileStargateTokenJournal(temporary.root,state);
+  await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,journal),(e:any)=>e.code==="APN_OPERATION_BLOCKED"&&e.details.reason==="legacy_operation_nonresumable");
+  await assert.rejects(cleanupStargateV2Token(prepared.operationId,s.ports,journal),(e:any)=>e.code==="APN_OPERATION_BLOCKED"&&e.details.reason==="cleanup_not_required");
   assert.deepEqual(s.counts(),{sends:0,signs:0,approvals:0});
 });
 test("legacy v1 token unknown finality remains safe-only observation with no resend", async (t) => {
@@ -126,6 +129,10 @@ test("v2 token missing policy, policy drift, and ambiguous legacy lanes are corr
   await assert.rejects(journal.load(driftOp.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT");
   const laneSetup=setup(),laneOp=legacyTokenFixture(await prepareStargateV2Token(request({idempotencyKey:"legacy-token-lane-drift"}),laneSetup.ports,laneSetup.journal));
   const {integrityHash:_li,...laneBody}=structuredClone(laneOp),badLane={...laneBody,quote:{...laneBody.quote,route:{...laneBody.quote.route,destinationChainId:130}}}; await seedTokenFixture(temporary.root,{...badLane,integrityHash:hashObject(badLane)} as StargateTokenOperation);
+  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT");
+  const {integrityHash:_ei,...executorBody}=laneOp,badExecutor={...executorBody,executor:STARGATE_TOKEN_DESTINATION_EXECUTOR}; await seedTokenFixture(temporary.root,{...badExecutor,integrityHash:hashObject(badExecutor)} as StargateTokenOperation);
+  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT");
+  const {integrityHash:_ti,...targetBody}=laneOp,badTarget={...targetBody,sendEnvelope:{...targetBody.sendEnvelope,to:STARGATE_TOKEN_DESTINATION_POOL}}; await seedTokenFixture(temporary.root,{...badTarget,integrityHash:hashObject(badTarget)} as StargateTokenOperation);
   await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT"); assert.deepEqual(laneSetup.counts(),{sends:0,signs:0,approvals:0});
 });
 test("zero native drop emits no options and remains cap checked", async () => { const s=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request({idempotencyKey:"token-only-route",nativeDropAtomic:"0"}),s.ports,s.journal); assert.equal(op.options,"0x"); assert.equal(op.nativeDropAtomic,"0"); });
