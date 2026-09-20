@@ -20,17 +20,21 @@ const KEY = `0x${"11".repeat(32)}` as Hex, ACCOUNT = privateKeyToAccount(KEY), O
 const BLOCK = `0x${"ab".repeat(32)}` as Hex, DEST_BLOCK = `0x${"cd".repeat(32)}` as Hex, GUID = `0x${"ef".repeat(32)}` as Hex;
 const AMOUNT = 100_000n, DROP = 50_000_000_000_000_000n, FEE = 1000n, NATIVE_CAP = 100_000_000_000_000_000n;
 function legacyTokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
-  const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, bridgeSimulation: _simulation, feeApproval: _fees, ...current } = operation;
+  const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, bridgeSimulation: _simulation, feeApproval: _fees,
+    approvalFinalityWindowMs: _window, approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline,
+    postApprovalQuote: _post, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v1" as const };
   return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
 }
 function currentV2TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
-  const { integrityHash: _integrity, bridgeSimulation: _simulation, feeApproval: _fees, ...current } = operation;
+  const { integrityHash: _integrity, bridgeSimulation: _simulation, feeApproval: _fees, approvalFinalityWindowMs: _window,
+    approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline, postApprovalQuote: _post, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v2" as const };
   return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
 }
 function currentV3TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
-  const { integrityHash: _integrity, feeApproval: _fees, ...current } = operation;
+  const { integrityHash: _integrity, feeApproval: _fees, approvalFinalityWindowMs: _window,
+    approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline, postApprovalQuote: _post, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v3" as const };
   return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
 }
@@ -38,18 +42,23 @@ async function seedTokenFixture(root: string, operation: StargateTokenOperation)
   const directory = join(root, "stargate-v2-token"); await mkdir(directory, { recursive: true, mode: 0o700 });
   await writeFile(join(directory, `${operation.operationId}.json`), `${canonicalJson(operation)}\n`, { mode: 0o600 });
 }
-class MemoryJournal implements StargateTokenJournal { value: StargateTokenOperation | null = null; history: StargateTokenOperation[] = []; private tail = Promise.resolve();
+class MemoryJournal implements StargateTokenJournal { value: StargateTokenOperation | null = null; history: StargateTokenOperation[] = []; private tail = Promise.resolve(); private failed = false;
+  constructor(private readonly failPhaseOnce?: string, private readonly failAfterSave = false) {}
   async load(id: string) { return this.value?.operationId === id ? structuredClone(this.value) : null; }
-  async save(op: StargateTokenOperation) { this.value = structuredClone(op); this.history.push(structuredClone(op)); }
+  async save(op: StargateTokenOperation) { if (this.failPhaseOnce === op.phase && !this.failed && !this.failAfterSave) { this.failed=true; throw new Error("journal crash"); }
+    this.value = structuredClone(op); this.history.push(structuredClone(op)); if (this.failPhaseOnce === op.phase && !this.failed) { this.failed=true; throw new Error("journal crash"); } }
   async withLock<T>(_id: string, work: () => Promise<T>) { const prior = this.tail; let release!:()=>void; this.tail = new Promise<void>(r=>release=r); await prior; try { return await work(); } finally { release(); } }
   async withOwnerChainLock<T>(_owner: `0x${string}`, _chainId: number, work: () => Promise<T>) { return await work(); }
 }
 function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: number; legacy?: boolean; bridgeRevert?: boolean;
   residualAfterBridge?: boolean; advanceNonceOnSend?: boolean; preflightNonceDrift?: boolean; reserveError?: boolean; signErrorOnce?: boolean;
   bridgeSimulationRevert?: boolean; bridgeEstimateGas?: bigint; feeSpikeAfterApproval?: boolean; preparedMaxFee?: bigint; preparedPriority?: bigint; freshPriorityAfterApproval?: bigint;
+  approvalPendingPolls?: number; approveAdvancesMs?: number; postApprovalMinimumOutput?: bigint; postApprovalFee?: bigint;
+  postApprovalNativeCap?: bigint; confirmPolicyErrorAfterApproval?: boolean; nowMs?: number; saveErrorPhaseOnce?: string; saveErrorAfterSave?: boolean;
   followErrorOnce?: "submitted"|"unknown_finality"|"finalized"|"failed_before_effect"|"failed_confirmed_revert";
   destinationMutation?: "guid"|"native"|"token" } = {}) {
-  let allowance = options.allowance ?? 0n, approvalConsumed = false, sends = 0, signs = 0, approvals = 0, receiptCalls = 0, nonce = 7n;
+  let allowance = options.allowance ?? 0n, approvalConsumed = false, sends = 0, signs = 0, approvals = 0, receiptCalls = 0, approvalPolls = 0, nonce = 7n;
+  let nowMs = options.nowMs ?? 2_000_000_000_000;
   let preparedApprovals = 0, preparedBridges = 0, bridgeEstimates = 0, bridgeCalls = 0;
   let usageState: "reserved"|"submitted"|"unknown_finality"|"finalized"|"failed_before_effect"|"failed_confirmed_revert" = "reserved", followFailed = false;
   const sourceCall: StargateTokenExecutionPorts["sourceCall"] = async (method, params) => {
@@ -66,10 +75,11 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     if (method !== "eth_call") throw new Error(`unexpected ${method}`);
     const data = (params[0] as { data: Hex }).data;
     try { const d = decodeFunctionData({ abi: STARGATE_QUOTE_ABI, data });
-      if (d.functionName === "quoteOFT") return encodeAbiParameters(STARGATE_QUOTE_OFT_OUTPUT, [{ minAmountLD: 1n, maxAmountLD: 10_000_000n }, [], { amountSentLD: AMOUNT, amountReceivedLD: AMOUNT }]);
-      return encodeAbiParameters(STARGATE_QUOTE_SEND_OUTPUT, [{ nativeFee: FEE, lzTokenFee: 0n }]);
+      if (d.functionName === "quoteOFT") { const received=approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT;
+        return encodeAbiParameters(STARGATE_QUOTE_OFT_OUTPUT, [{ minAmountLD: 1n, maxAmountLD: 10_000_000n }, received===AMOUNT?[]:[{feeAmountLD:received-AMOUNT,description:"fresh quote degradation"}], { amountSentLD: AMOUNT, amountReceivedLD: received }]); }
+      return encodeAbiParameters(STARGATE_QUOTE_SEND_OUTPUT, [{ nativeFee: approvalConsumed ? (options.postApprovalFee ?? FEE) : FEE, lzTokenFee: 0n }]);
     } catch { /* another ABI */ }
-    try { const d = decodeFunctionData({ abi: LAYERZERO_EXECUTOR_ABI, data }); if (d.functionName === "dstConfig") return encodeFunctionResult({ abi: LAYERZERO_EXECUTOR_ABI, functionName: "dstConfig", result: [1n, 10000, 0n, options.nativeCap ?? NATIVE_CAP, 1n] }); } catch {}
+    try { const d = decodeFunctionData({ abi: LAYERZERO_EXECUTOR_ABI, data }); if (d.functionName === "dstConfig") return encodeFunctionResult({ abi: LAYERZERO_EXECUTOR_ABI, functionName: "dstConfig", result: [1n, 10000, 0n, approvalConsumed ? (options.postApprovalNativeCap ?? options.nativeCap ?? NATIVE_CAP) : (options.nativeCap ?? NATIVE_CAP), 1n] }); } catch {}
     try { const d = decodeFunctionData({ abi: STARGATE_ERC20_ABI, data });
       if (d.functionName === "allowance") return encodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "allowance", result: allowance });
       if (d.functionName === "balanceOf") return encodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", result: 1_000_000n });
@@ -81,7 +91,7 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     if (d.functionName === "sharedDecimals") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sharedDecimals", result: 6 });
     if (d.functionName === "status") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "status", result: 1 });
     if (d.functionName === "stargateType") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "stargateType", result: 0 });
-    if (d.functionName === "sendToken") { bridgeCalls++; if (options.bridgeSimulationRevert) throw new Error("sendToken reverted"); return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", result: [{ guid: GUID, nonce: 1n, fee: { nativeFee: FEE, lzTokenFee: 0n } }, { amountSentLD: AMOUNT, amountReceivedLD: AMOUNT }, { ticketId: 0n, passengerBytes: "0x" }] }); }
+    if (d.functionName === "sendToken") { bridgeCalls++; if (options.bridgeSimulationRevert) throw new Error("sendToken reverted"); const received=approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT; return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", result: [{ guid: GUID, nonce: 1n, fee: { nativeFee: approvalConsumed ? (options.postApprovalFee ?? FEE) : FEE, lzTokenFee: 0n } }, { amountSentLD: AMOUNT, amountReceivedLD: received }, { ticketId: 0n, passengerBytes: "0x" }] }); }
     throw new Error("unknown call");
   };
   const destinationCall: StargateTokenExecutionPorts["destinationCall"] = async (method, params) => {
@@ -93,28 +103,29 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     if (d.functionName === "status") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "status", result: 1 });
     if (d.functionName === "stargateType") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "stargateType", result: 0 }); throw new Error("dest");
   };
-  const journal = new MemoryJournal(); const ports: StargateTokenExecutionPorts = { sourceCall, destinationCall,
+  const journal = new MemoryJournal(options.saveErrorPhaseOnce, options.saveErrorAfterSave); const ports: StargateTokenExecutionPorts = { sourceCall, destinationCall,
     destinationBalances: async () => ({ tokenAtomic: "500000", nativeAtomic: "1000000000000000000", blockNumberAtomic: "9", blockHash: DEST_BLOCK }),
     prepareEnvelope: async tx => { let bridge = false; try { bridge = decodeFunctionData({ abi: STARGATE_SEND_ABI, data: tx.data }).functionName === "sendToken"; } catch {}
       if (bridge) { preparedBridges++; if (allowance === 0n) throw new Error("0x7c75c3d2 Transfer_TransferFailed"); } else preparedApprovals++;
-      return { nonceAtomic: tx.nonceAtomic ?? "7", gasLimitAtomic: "100000", maxFeePerGasAtomic: (options.preparedMaxFee ?? 2n).toString(), maxPriorityFeePerGasAtomic: (options.preparedPriority ?? 1n).toString(), nativeBalanceAtomic: "9000000000000000000" }; },
+      return { nonceAtomic: tx.nonceAtomic ?? (approvalConsumed ? "8" : "7"), gasLimitAtomic: "100000", maxFeePerGasAtomic: (options.preparedMaxFee ?? 2n).toString(), maxPriorityFeePerGasAtomic: (options.preparedPriority ?? 1n).toString(), nativeBalanceAtomic: "9000000000000000000" }; },
     signer: { kind: "imported_evm_signer", address: OWNER, signTransaction: async tx => { signs++; if (options.signErrorOnce && signs === 1) throw new Error("signing failed"); if (options.legacy) return await ACCOUNT.signTransaction({ type: "legacy", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), gasPrice: BigInt(tx.maxFeePerGasAtomic) }); return await ACCOUNT.signTransaction({ type: "eip1559", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [] }); } },
-    signerIdentity: async () => ({ profile: "owner", address: OWNER }), approve: async () => { approvals++; }, approveCleanup: async () => { approvals++; },
-    admitPolicy: async () => ({ policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM }), confirmPolicy: async () => {},
+    signerIdentity: async () => ({ profile: "owner", address: OWNER }), approve: async () => { approvals++; nowMs += options.approveAdvancesMs ?? 0; }, approveCleanup: async () => { approvals++; },
+    admitPolicy: async () => ({ policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM }), confirmPolicy: async () => { if (approvalConsumed && options.confirmPolicyErrorAfterApproval) throw new Error("policy drift"); },
     reserveUsage: async () => { if (options.reserveError) throw new Error("usage cap race"); usageState = "reserved"; return usageState; },
     followUsage: async (_op, target) => { if (options.followErrorOnce === target && !followFailed) { followFailed = true; throw new Error("usage transition crash"); }
       usageState = target; return usageState; },
     sendRawTransaction: async raw => { sends++; if (options.sendErrorAt === sends) throw new Error("timeout"); if (options.advanceNonceOnSend) nonce++; return keccak256(raw); },
-    waitSourceReceipt: async tx => { receiptCalls++; if (receiptCalls === 1 && (options.allowance ?? 0n) === 0n) { allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [] }; }
+    waitSourceReceipt: async tx => { receiptCalls++; if (["cleanup_submission_started","cleanup_submitted","cleanup_unknown_finality"].includes(journal.value?.phase ?? "")) { allowance=0n; return { transactionHash:tx,status:"success",blockNumberAtomic:"22",blockHash:BLOCK,finality:"safe",logs:[] }; }
+      if (!approvalConsumed && (options.allowance ?? 0n) === 0n) { approvalPolls++; if (approvalPolls <= (options.approvalPendingPolls ?? 0)) return null; allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [] }; }
       if (options.bridgeRevert && receiptCalls === 1) return { transactionHash: tx, status: "reverted", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [] };
-      if (!options.residualAfterBridge || receiptCalls > 1) allowance = 0n; const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", args: { guid: GUID, fromAddress: OWNER } }) as readonly Hex[]; const data = encodeAbiParameters(parseAbiParameters("uint32 dstEid,uint256 amountSentLD,uint256 amountReceivedLD"), [30109, AMOUNT, AMOUNT]); return { transactionHash: tx, status: "success", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [{ address: STARGATE_TOKEN_SOURCE_POOL, topics, data }] }; },
-    observeDestination: async input => ({ emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: options.destinationMutation === "guid" ? BLOCK : input.guid, sourceEid: 30111, destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0", blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: input.finalityTag, recipient: input.recipient, amountReceivedAtomic: AMOUNT.toString(), tokenBalanceBeforeAtomic: input.tokenBalanceBeforeAtomic, tokenBalanceAfterAtomic: (BigInt(input.tokenBalanceBeforeAtomic) + (options.destinationMutation === "token" ? 1n : AMOUNT)).toString(), tokenDeltaAtomic: (options.destinationMutation === "token" ? 1n : AMOUNT).toString(), nativeBalanceBeforeAtomic: input.nativeBalanceBeforeAtomic, nativeBalanceAfterAtomic: (BigInt(input.nativeBalanceBeforeAtomic) + (options.destinationMutation === "native" ? 1n : DROP)).toString(), nativeDeltaAtomic: (options.destinationMutation === "native" ? 1n : DROP).toString(), nativeDrop: { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: "1", success: true } }), now: () => 2_000_000_000_000 };
-  return { ports, journal, counts: () => ({ sends, signs, approvals }), simulations: () => ({ preparedApprovals, preparedBridges, bridgeEstimates, bridgeCalls }) };
+      if (!options.residualAfterBridge || receiptCalls > 1) allowance = 0n; const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", args: { guid: GUID, fromAddress: OWNER } }) as readonly Hex[]; const received=approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT; const data = encodeAbiParameters(parseAbiParameters("uint32 dstEid,uint256 amountSentLD,uint256 amountReceivedLD"), [30109, AMOUNT, received]); return { transactionHash: tx, status: "success", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [{ address: STARGATE_TOKEN_SOURCE_POOL, topics, data }] }; },
+    observeDestination: async input => ({ emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: options.destinationMutation === "guid" ? BLOCK : input.guid, sourceEid: 30111, destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0", blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: input.finalityTag, recipient: input.recipient, amountReceivedAtomic: (approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT).toString(), tokenBalanceBeforeAtomic: input.tokenBalanceBeforeAtomic, tokenBalanceAfterAtomic: (BigInt(input.tokenBalanceBeforeAtomic) + (options.destinationMutation === "token" ? 1n : BigInt(input.minimumAmountAtomic))).toString(), tokenDeltaAtomic: (options.destinationMutation === "token" ? 1n : BigInt(input.minimumAmountAtomic)).toString(), nativeBalanceBeforeAtomic: input.nativeBalanceBeforeAtomic, nativeBalanceAfterAtomic: (BigInt(input.nativeBalanceBeforeAtomic) + (options.destinationMutation === "native" ? 1n : DROP)).toString(), nativeDeltaAtomic: (options.destinationMutation === "native" ? 1n : DROP).toString(), nativeDrop: { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: "1", success: true } }), now: () => nowMs };
+  return { ports, journal, counts: () => ({ sends, signs, approvals }), simulations: () => ({ preparedApprovals, preparedBridges, bridgeEstimates, bridgeCalls }), advance: (ms:number) => { nowMs += ms; } };
 }
 const request = (changes: Partial<Parameters<typeof prepareStargateV2Token>[0]> = {}) => ({ profile: "owner", owner: OWNER, recipient: OWNER, amountAtomic: AMOUNT.toString(), nativeDropAtomic: DROP.toString(), minOutputAtomic: "99000", maxNativeDebitAtomic: "10000000000000000", idempotencyKey: "stargate-token-001", ...changes });
 
 test("Type-3 native-drop bytes and pinned contracts are exact", () => { const encoded = encodeStargateNativeDrop(DROP.toString(), OWNER); assert.equal(encoded, `0x000301003102${DROP.toString(16).padStart(32,"0")}${OWNER.slice(2).toLowerCase().padStart(64,"0")}`); assert.equal(STARGATE_TOKEN_SOURCE_EXECUTOR, getAddress("0x2D2ea0697bdbede3F01553D2Ae4B8d0c486B666e")); });
-test("prepare freezes staged simulation and a budget-bounded gas ceiling without simulating sendToken at zero allowance", async () => { const s=setup(), op=await prepareStargateV2Token(request(),s.ports,s.journal); assert.equal(op.schemaVersion,"apn.stargate-v2-token-operation.v4"); assert.deepEqual(op.feeApproval,{provenance:"exact_snapshot",quotedMaxFeePerGasWei:"2",quotedMaxPriorityFeePerGasWei:"1",approvedMaxFeePerGasWei:"2",approvedMaxPriorityFeePerGasWei:"1"}); assert.equal(op.finalityPolicyProvenance,"pinned_v2"); assert.equal(op.allowanceRequired,true); assert.deepEqual(op.bridgeSimulation,{mode:"pending_post_approval",prepareStatus:"pending_post_approval",gasCeilingAtomic:op.sendEnvelope.gasLimitAtomic}); assert.equal(op.approvalEnvelope?.nonceAtomic,"7"); assert.equal(op.sendEnvelope.nonceAtomic,"8"); assert.equal(op.sendEnvelope.valueAtomic,FEE.toString()); assert.deepEqual(op.finalityPolicy,{version:"apn.stargate-v2-finality.v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"finalized"}}); const approval=decodeFunctionData({abi:STARGATE_ERC20_ABI,data:op.approvalEnvelope!.data}); assert.deepEqual(approval.args,[STARGATE_TOKEN_SOURCE_POOL,AMOUNT]); const send=decodeFunctionData({abi:STARGATE_SEND_ABI,data:op.sendEnvelope.data}); assert.equal(send.functionName,"sendToken"); if (send.functionName !== "sendToken") throw new Error("unexpected"); assert.equal(send.args[0].extraOptions,op.options); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:0,bridgeEstimates:0,bridgeCalls:0}); assert.ok(BigInt(op.maximumDebitAtomic)<=BigInt(op.maxNativeDebitAtomic)); assert.equal(s.counts().sends,0); });
+test("prepare freezes staged simulation and a budget-bounded gas ceiling without simulating sendToken at zero allowance", async () => { const s=setup(), op=await prepareStargateV2Token(request(),s.ports,s.journal); assert.equal(op.schemaVersion,"apn.stargate-v2-token-operation.v5"); assert.equal(op.approvalFinalityWindowMs,1_800_000); assert.deepEqual(op.feeApproval,{provenance:"exact_snapshot",quotedMaxFeePerGasWei:"2",quotedMaxPriorityFeePerGasWei:"1",approvedMaxFeePerGasWei:"2",approvedMaxPriorityFeePerGasWei:"1"}); assert.equal(op.finalityPolicyProvenance,"pinned_v2"); assert.equal(op.allowanceRequired,true); assert.deepEqual(op.bridgeSimulation,{mode:"pending_post_approval",prepareStatus:"pending_post_approval",gasCeilingAtomic:op.sendEnvelope.gasLimitAtomic}); assert.equal(op.approvalEnvelope?.nonceAtomic,"7"); assert.equal(op.sendEnvelope.nonceAtomic,"8"); assert.equal(op.sendEnvelope.valueAtomic,FEE.toString()); assert.deepEqual(op.finalityPolicy,{version:"apn.stargate-v2-finality.v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"finalized"}}); const approval=decodeFunctionData({abi:STARGATE_ERC20_ABI,data:op.approvalEnvelope!.data}); assert.deepEqual(approval.args,[STARGATE_TOKEN_SOURCE_POOL,AMOUNT]); const send=decodeFunctionData({abi:STARGATE_SEND_ABI,data:op.sendEnvelope.data}); assert.equal(send.functionName,"sendToken"); if (send.functionName !== "sendToken") throw new Error("unexpected"); assert.equal(send.args[0].extraOptions,op.options); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:0,bridgeEstimates:0,bridgeCalls:0}); assert.ok(BigInt(op.maximumDebitAtomic)<=BigInt(op.maxNativeDebitAtomic)); assert.equal(s.counts().sends,0); });
 test("legacy v1 prepared token fixture loads locally with the historical all-safe policy", async (t) => {
   const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
   const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"legacy-token-prepared"}),s.ports,s.journal);
@@ -172,7 +183,7 @@ test("v2 token missing policy, policy drift, and ambiguous legacy lanes are corr
 });
 test("zero native drop emits no options and remains cap checked", async () => { const s=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request({idempotencyKey:"token-only-route",nativeDropAtomic:"0"}),s.ports,s.journal); assert.equal(op.options,"0x"); assert.equal(op.nativeDropAtomic,"0"); });
 test("existing exact allowance keeps exact prepare simulation while residual or cap overflow fail closed", async () => { const exact=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request(),exact.ports,exact.journal); assert.equal(op.allowanceRequired,false); assert.equal(op.approvalEnvelope,undefined); assert.deepEqual(op.bridgeSimulation,{mode:"exact_at_prepare",prepareStatus:"succeeded",gasCeilingAtomic:"100000"}); assert.deepEqual(exact.simulations(),{preparedApprovals:0,preparedBridges:1,bridgeEstimates:0,bridgeCalls:0}); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"residual-allowance"}),setup({allowance:1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="residual_allowance_cleanup_required"); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"native-cap-over"}),setup({nativeCap:DROP-1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="native_drop_cap_exceeded"); });
-test("approval and bridge effects are separately marked, exact, observed, and canonical", async () => { const s=setup(), prepared=await prepareStargateV2Token(request(),s.ports,s.journal), observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.equal(observed.residualAllowanceAtomic,"0"); assert.equal(observed.usageState,"finalized"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.deepEqual(observed.transitions.map(x=>x.phase),["prepared","approved","allowance_submission_started","allowance_submitted","allowance_observed","submission_started","submitted","observed"]); assert.match(stargateV2TokenCanonicalReceipt(observed).evidenceHash,/^[a-f0-9]{64}$/u); });
+test("approval and bridge effects are separately marked, exact, observed, and canonical", async () => { const s=setup(), prepared=await prepareStargateV2Token(request(),s.ports,s.journal), observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.equal(observed.residualAllowanceAtomic,"0"); assert.equal(observed.usageState,"finalized"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.deepEqual(observed.transitions.map(x=>x.phase),["prepared","approved","allowance_submission_started","allowance_submitted","allowance_observed","post_approval_quote_bound","submission_started","submitted","observed"]); const receipt=stargateV2TokenCanonicalReceipt(observed); assert.equal(receipt.schemaVersion,"apn.stargate-v2-token-receipt.v2"); assert.match(receipt.quoteLifecycle!.postApprovalQuoteHash!,/^[a-f0-9]{64}$/u); assert.match(receipt.evidenceHash,/^[a-f0-9]{64}$/u); });
 
 test("owner fee ceilings freeze quoted and approved pairs and admit movement within both ceilings", async () => {
   const s=setup({preparedPriority:0n,freshPriorityAfterApproval:1n});
@@ -209,6 +220,13 @@ test("TTY approval displays quoted and approved fee pairs", async () => {
   let printed=""; const phrase=approvalCode("bridge",op.integrityHash);
   const tty=new TtyStargateTokenApproval({isTerminal:()=>true,openTerminal:async()=>({fd:1,write:async(value:string)=>{printed+=value;},read:async function*(){yield Buffer.from(`${phrase}\n`);},close:async()=>{}})});
   await tty.approve(op); assert.match(printed,/quoted max\/priority: 2 \/ 1/u); assert.match(printed,/approved max\/priority: 4 \/ 2/u); assert.match(printed,/owner_ceiling/u);
+  assert.match(printed,/30 minutes/u); assert.match(printed,/preparation quote is never used/u);
+  assert.match(printed,/Initial quoted Polygon USDC output: 100000/u);
+  assert.match(printed,/Owner-approved minimum Polygon USDC output: 99000; maximum quote loss: 1000 atomic USDC/u);
+  assert.match(printed,/Initial quoted LayerZero fee: 1000 wei ETH/u);
+  assert.match(printed,/Owner-approved source native debit cap: 10000000000000000 wei ETH/u);
+  assert.match(printed,/output and LayerZero fee may change/u);
+  assert.doesNotMatch(printed,/minimum Polygon USDC: 100000/u);
 });
 
 test("sufficient allowance path signs the owner approved ceiling pair without an approval transaction", async () => {
@@ -256,11 +274,68 @@ test("v4 FileJournal rejects malformed zero and inverted fee bindings", async (t
   }
 });
 
-test("post-approval exact estimate and eth_call pass before one bridge signature", async () => { const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"staged-pass"}),s.ports,s.journal); const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:0,bridgeEstimates:1,bridgeCalls:1}); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); const receipt=stargateV2TokenCanonicalReceipt(observed); assert.equal(receipt.bridgeSimulation.mode,"pending_post_approval"); assert.equal(receipt.bridgeSimulation.gasCeilingAtomic,prepared.sendEnvelope.gasLimitAtomic); });
+test("post-approval exact estimate and eth_call pass before one bridge signature", async () => { const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"staged-pass"}),s.ports,s.journal); const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:1,bridgeEstimates:2,bridgeCalls:2}); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); const receipt=stargateV2TokenCanonicalReceipt(observed); assert.equal(receipt.bridgeSimulation.mode,"pending_post_approval"); assert.equal(receipt.bridgeSimulation.gasCeilingAtomic,prepared.sendEnvelope.gasLimitAtomic); });
+
+test("safe approval lag beyond the preparation TTL binds one fresh quote and sends one bridge", async () => {
+  const s=setup({approvalPendingPolls:1}),prepared=await prepareStargateV2Token(request({idempotencyKey:"safe-lag-requote",ttlMs:60_000}),s.ports,s.journal);
+  assert.equal((await executeStargateV2Token(prepared.operationId,s.ports,s.journal)).phase,"allowance_unknown_finality");
+  s.advance(90_000); const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal);
+  assert.equal(observed.phase,"observed"); assert.ok(Date.parse(observed.approvalFinalityDeadline!)>Date.parse(observed.expiresAt));
+  assert.match(observed.postApprovalQuote!.quote.quoteHash,/^[a-f0-9]{64}$/u); assert.match(observed.postApprovalQuote!.snapshotHash,/^[a-f0-9]{64}$/u);
+  assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1});
+  assert.equal(observed.transitions.filter(x=>x.phase==="post_approval_quote_bound").length,1);
+  assert.equal(observed.transitions.filter(x=>x.phase==="submission_started").length,1);
+});
+
+test("owner floor explicitly consents to a post-approval quote down from 100000 to 99000", async () => {
+  const s=setup({postApprovalMinimumOutput:99_000n}),prepared=await prepareStargateV2Token(request({idempotencyKey:"requote-owner-floor-accepted"}),s.ports,s.journal);
+  const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed");
+  assert.equal(observed.postApprovalQuote?.ownerApprovedMinimumOutputAtomic,"99000");
+  assert.equal(observed.postApprovalQuote?.ownerApprovedMaximumQuoteLossAtomic,"1000");
+  const receipt=stargateV2TokenCanonicalReceipt(observed); assert.equal(receipt.minimumOutputAtomic,"99000");
+  assert.equal(receipt.quoteLifecycle!.initialQuotedOutputAtomic,"100000");
+  assert.equal(receipt.quoteLifecycle!.ownerApprovedMinimumOutputAtomic,"99000");
+  assert.equal(receipt.quoteLifecycle!.ownerApprovedMaximumQuoteLossAtomic,"1000");
+  assert.equal(receipt.quoteLifecycle!.postApprovalQuotedOutputAtomic,"99000");
+  assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1});
+});
+
+test("approval finality beyond the bounded window enters forced cleanup without bridge signing", async () => {
+  const s=setup({approvalPendingPolls:5}),prepared=await prepareStargateV2Token(request({idempotencyKey:"safe-lag-window-expired"}),s.ports,s.journal);
+  assert.equal((await executeStargateV2Token(prepared.operationId,s.ports,s.journal)).phase,"allowance_unknown_finality");
+  s.advance(1_800_001); const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal);
+  assert.equal(required.phase,"cleanup_required"); assert.equal(required.cleanupReason,"approval_finality_deadline_passed");
+  assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1}); assert.equal(required.postApprovalQuote,undefined);
+  const cleaned=await cleanupStargateV2Token(prepared.operationId,s.ports,s.journal);assert.equal(cleaned.phase,"cleaned");assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:2});
+});
+
+test("foreground approval that returns after preparation expiry cannot create an approval marker", async () => {
+  const s=setup({approveAdvancesMs:16_000}),prepared=await prepareStargateV2Token(request({idempotencyKey:"approval-marker-expired",ttlMs:15_000}),s.ports,s.journal);
+  await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),(e:any)=>e.details?.reason==="approval_completed_after_prepare_expiry");
+  assert.equal(s.journal.value?.phase,"prepared"); assert.deepEqual(s.counts(),{sends:0,signs:0,approvals:1});
+});
+
+for (const [name,options,reason] of [
+  ["minimum-output-one-below-owner-floor",{postApprovalMinimumOutput:98_999n},"post_approval_quote_post_approval_minimum_output"],
+  ["executor-cap",{postApprovalNativeCap:DROP-1n},"post_approval_quote_post_approval_native_drop_cap"],
+  ["native-debit",{postApprovalFee:10_000_000_000_000_000n},"post_approval_quote_post_approval_max_native_debit"],
+] as const) test(`fresh post-approval ${name} degradation enters cleanup`,async()=>{const s=setup(options),prepared=await prepareStargateV2Token(request({idempotencyKey:`requote-${name}`}),s.ports,s.journal);const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal);assert.equal(required.phase,"cleanup_required");assert.equal(required.cleanupReason,reason);assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1});});
+
+test("post-approval policy drift enters cleanup before quote persistence",async()=>{const s=setup({confirmPolicyErrorAfterApproval:true}),prepared=await prepareStargateV2Token(request({idempotencyKey:"requote-policy-drift"}),s.ports,s.journal);const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal);assert.equal(required.phase,"cleanup_required");assert.equal(required.cleanupReason,"post_approval_quote_unavailable");assert.equal(required.postApprovalQuote,undefined);assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1});});
+
+test("a persisted post-approval quote that expires before signing requires cleanup",async()=>{const s=setup({saveErrorPhaseOnce:"post_approval_quote_bound",saveErrorAfterSave:true}),prepared=await prepareStargateV2Token(request({idempotencyKey:"requote-expired-before-sign"}),s.ports,s.journal);await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),/journal crash/u);assert.equal(s.journal.value?.phase,"post_approval_quote_bound");s.advance(60_001);const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal);assert.equal(required.phase,"cleanup_required");assert.equal(required.cleanupReason,"post_approval_quote_expired");assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1});});
+
+test("crash before quote persistence re-quotes idempotently and crash at bridge marker never duplicates the bridge send",async()=>{
+  const quoteCrash=setup({saveErrorPhaseOnce:"post_approval_quote_bound"}),first=await prepareStargateV2Token(request({idempotencyKey:"requote-persist-crash"}),quoteCrash.ports,quoteCrash.journal);await assert.rejects(executeStargateV2Token(first.operationId,quoteCrash.ports,quoteCrash.journal),/journal crash/u);assert.equal(quoteCrash.journal.value?.phase,"allowance_observed");assert.equal((await executeStargateV2Token(first.operationId,quoteCrash.ports,quoteCrash.journal)).phase,"observed");assert.deepEqual(quoteCrash.counts(),{sends:2,signs:2,approvals:1});
+  const markerCrash=setup({saveErrorPhaseOnce:"submission_started"}),second=await prepareStargateV2Token(request({idempotencyKey:"bridge-marker-crash"}),markerCrash.ports,markerCrash.journal);await assert.rejects(executeStargateV2Token(second.operationId,markerCrash.ports,markerCrash.journal),/journal crash/u);assert.equal(markerCrash.journal.value?.phase,"post_approval_quote_bound");assert.equal((await executeStargateV2Token(second.operationId,markerCrash.ports,markerCrash.journal)).phase,"observed");assert.deepEqual(markerCrash.counts(),{sends:2,signs:3,approvals:1});assert.equal(markerCrash.journal.history.filter(x=>x.phase==="submission_started").length,1);
+});
+
+test("stored post-approval quote tampering is rejected by nested integrity and owner-floor binding",async(t)=>{const temporary=await temporaryState();t.after(temporary.cleanup);const state=new StateStore(temporary.root);await state.initialize();const s=setup({saveErrorPhaseOnce:"post_approval_quote_bound",saveErrorAfterSave:true}),prepared=await prepareStargateV2Token(request({idempotencyKey:"requote-integrity"}),s.ports,s.journal);await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),/journal crash/u);const saved=s.journal.value!;const mutated={...saved,postApprovalQuote:{...saved.postApprovalQuote!,expiresAt:new Date(Date.parse(saved.postApprovalQuote!.expiresAt)+1).toISOString()}};const {integrityHash:_old,...body}=mutated;await seedTokenFixture(temporary.root,{...body,integrityHash:hashObject(body)} as StargateTokenOperation);await assert.rejects(new FileStargateTokenJournal(temporary.root,state).load(saved.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT"&&e.details.reason==="post_approval_quote_integrity");
+  const {snapshotHash:_snapshot,...snapshotBody}=saved.postApprovalQuote!;const reboundBody={...snapshotBody,ownerApprovedMinimumOutputAtomic:"98000"};const reboundSnapshot={...reboundBody,snapshotHash:hashObject(reboundBody)};const rebound={...saved,postApprovalQuote:reboundSnapshot};const {integrityHash:_outer,...reboundOperationBody}=rebound;await seedTokenFixture(temporary.root,{...reboundOperationBody,integrityHash:hashObject(reboundOperationBody)} as StargateTokenOperation);await assert.rejects(new FileStargateTokenJournal(temporary.root,state).load(saved.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT"&&e.details.reason==="post_approval_quote_binding");});
 
 for (const [name, options, reason] of [
-  ["revert", {bridgeSimulationRevert:true}, "send_simulation"],
-  ["over-ceiling", {bridgeEstimateGas:5_000_001n}, "gas_limit"],
+  ["revert", {bridgeSimulationRevert:true}, "post_approval_quote_post_approval_send_simulation"],
+  ["over-ceiling", {bridgeEstimateGas:5_000_001n}, "post_approval_quote_post_approval_gas_limit"],
   ["fee-spike", {feeSpikeAfterApproval:true}, "fee_spike"],
 ] as const) test(`post-approval ${name} enters cleanup with zero bridge effects`, async () => { const s=setup(options), prepared=await prepareStargateV2Token(request({idempotencyKey:`staged-${name}`}),s.ports,s.journal); const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(required.phase,"cleanup_required"); assert.equal(required.cleanupReason,reason); assert.equal(s.counts().sends,1); assert.equal(s.counts().signs,1); assert.equal(required.transactionHash,undefined); const cleaned=await cleanupStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(cleaned.phase,"cleaned"); });
 

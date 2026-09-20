@@ -92,6 +92,8 @@ function serviceRecoveryHarness(phase: string, usageTarget?: string) {
 
 test("service observe admits every read-only usage and cleanup recovery path without signing or sending", async () => {
   const cases = [
+    { phase: "allowance_observed" },
+    { phase: "post_approval_quote_bound" },
     { phase: "observed", target: "finalized", state: "finalized" },
     { phase: "cleanup_required", target: "failed_before_effect", state: "failed_before_effect" },
     { phase: "cleaned" },
