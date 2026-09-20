@@ -1,5 +1,5 @@
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
-import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeFeeAsset, bridgeNativeCoin, bridgeNativePrincipal, bridgeQuoteDestination } from "./asset-registry.js";
+import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeFeeAsset, bridgeNativeCoin, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeSame, bridgeUint } from "./validation.js";
@@ -120,7 +120,7 @@ function parseBridgeMaterialization(selected, response, request, sender, quoteOn
 }
 export function validateRouteEconomics(m) {
     const r = m.request, amount = bridgeUint(r.amountAtomic, true), output = bridgeUint(m.quotedOutputAtomic, true), minimum = bridgeUint(m.minimumOutputAtomic, true);
-    const conversion = bridgeCrossNativeConversion(r);
+    const conversion = bridgeNativeDenominationConversion(r);
     if ((!conversion && (output > amount || amount - minimum > bridgeUint(r.maxRouteFeeAtomic))) || minimum > output || minimum < bridgeUint(r.minOutputAtomic, true) ||
         (output - minimum) * 10000n > output * BigInt(r.slippageBps))
         bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_output_or_token_fee_limit");

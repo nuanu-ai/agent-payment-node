@@ -24,7 +24,7 @@ export const isoSchema = z.string().refine((v) => { try {
 catch {
     return false;
 } });
-export const chainSchema = z.union([z.literal(1), z.literal(56), z.literal(8453), z.literal(42161), z.literal(59144)]);
+export const chainSchema = z.union([z.literal(1), z.literal(56), z.literal(143), z.literal(8453), z.literal(42161), z.literal(59144)]);
 export const destinationChainSchema = z.union([chainSchema, z.literal(10), z.literal(137), z.literal(43114), z.literal(130)]);
 export const toolSchema = z.enum(["across", "stargateV2"]);
 export const opaqueSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$/u);

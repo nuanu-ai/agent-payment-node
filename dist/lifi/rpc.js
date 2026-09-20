@@ -15,8 +15,9 @@ const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "vie
     { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }];
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction", "eth_sendRawTransaction"]);
 const LINEA_TRACE_PROBE_TRANSACTION = "0x4352433956109d31ab50db9547f16bcb90f3545f793ed40f75716ccd9a360efd";
+const MONAD_TRACE_PROBE_TRANSACTION = "0x9ff1560ef67d7253df2663b897452abe6644f6d6cb746743253822c264d13440";
 export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 56: "APN_BNB_RPC_URL", 8453: "APN_BASE_RPC_URL",
-    42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" };
+    143: "APN_MONAD_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" };
 /** The single explicit Ethereum-family RPC reader: endpoint only from its named environment variable, public HTTPS, no query. */
 export function bridgeRpcCall(chainId, environment, options = {}) {
     bridgeChain(chainId, "APN_RPC_CONFIG");
@@ -125,12 +126,23 @@ export class BridgeRpc {
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_configuration_changed");
             configuration.push({ ...row, expected: observed });
         }
-        if (this.chainId === 59144 && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
-            const trace = evmRpcRecord(await this.call("debug_traceTransaction", [LINEA_TRACE_PROBE_TRANSACTION,
+        if ((this.chainId === 143 || this.chainId === 59144) && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
+            const probe = this.chainId === 143 ? {
+                transaction: MONAD_TRACE_PROBE_TRANSACTION,
+                from: "0x6f49a8f621353f12378d0046e7d7e4b9b249dc9e",
+                to: "0x0000000000000000000000000000000000001000",
+                value: 18000000000000000000n,
+            } : {
+                transaction: LINEA_TRACE_PROBE_TRANSACTION,
+                from: "0x9629fe86f04e735923e8542ddd9f265f576e7421",
+                to: "0xbcc016e2a79d509d2b776827ed986568d9b56d59",
+                value: 243939205000000000n,
+            };
+            const trace = evmRpcRecord(await this.call("debug_traceTransaction", [probe.transaction,
                 { tracer: "callTracer", tracerConfig: { onlyTopCall: true, withLog: false } }]));
-            if (trace.type !== "CALL" || evmRpcAddress(trace.from).toLowerCase() !== "0x9629fe86f04e735923e8542ddd9f265f576e7421" ||
-                evmRpcAddress(trace.to).toLowerCase() !== "0xbcc016e2a79d509d2b776827ed986568d9b56d59" || evmRpcQuantity(trace.value) !== 243939205000000000n) {
-                bridgeFailure("APN_PROVIDER_PROTOCOL", "linea_trace_capability_changed");
+            if (trace.type !== "CALL" || evmRpcAddress(trace.from).toLowerCase() !== probe.from ||
+                evmRpcAddress(trace.to).toLowerCase() !== probe.to || evmRpcQuantity(trace.value) !== probe.value) {
+                bridgeFailure("APN_PROVIDER_PROTOCOL", "native_destination_trace_capability_changed");
             }
         }
         await this.recheck(at);

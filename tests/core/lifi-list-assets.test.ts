@@ -29,6 +29,7 @@ const USDT = getAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7");
 const USDT0_ARBITRUM = getAddress("0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9");
 const WETH = { 1: getAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), 8453: getAddress("0x4200000000000000000000000000000000000006"),
   42161: getAddress("0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"), 56: getAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
+  143: getAddress("0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A"),
   59144: getAddress("0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f") } as const;
 const SPOKE = { 1: getAddress("0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5"), 8453: getAddress("0x09aea4b2242abC8bb4BB78D537A67a245A7bEC64"),
   42161: getAddress("0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A") } as const;
@@ -64,7 +65,7 @@ test("the bridge registry is the frozen list's exact identities; WBTC stays a le
   for (const chainId of BRIDGE_CHAINS) {
     const row = BRIDGE_ASSET_REGISTRY[chainId], native = assets.find((a) => a.chain === row.caip2 && a.kind === "native")!;
     assert.equal(row.nativeCoin.symbol, native.symbol); assert.equal(row.nativeCoin.decimals, native.decimals);
-    const peers = { 1: [56, 8453, 42161, 59144], 56: [1], 8453: [1, 42161], 42161: [1, 8453], 59144: [1] } as const;
+    const peers = { 1: [56, 143, 8453, 42161, 59144], 56: [1], 143: [1], 8453: [1, 42161], 42161: [1, 8453], 59144: [1] } as const;
     assert.deepEqual([...row.nativeCoin.peers].sort(), [...peers[chainId]].sort());
     assert.equal(row.nativeCoin.wrapped.address, WETH[chainId]);
     assert.equal(bridgeAssetRow(chainId, BRIDGE_ZERO_ADDRESS), row.nativeCoin);

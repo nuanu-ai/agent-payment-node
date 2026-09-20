@@ -7,7 +7,7 @@ import type { BridgeRouteRequest, BridgeTool } from "./model.js";
  * decimals count and contract pin the rail trusts is a row here; nothing else in `src/lifi/**` may carry its own
  * copy. A row exists only when its on-chain identity can be pinned the way canonical USDC already is.
  */
-export declare const BRIDGE_CHAINS: readonly [1, 56, 8453, 42161, 59144];
+export declare const BRIDGE_CHAINS: readonly [1, 56, 143, 8453, 42161, 59144];
 /**
  * Quote-only destinations whose exact allowlist USDC identity and LI.FI calldata shape were captured from the
  * public quote API. They may be discovered and decoded, but are deliberately absent from `BRIDGE_CHAINS`: no RPC,
@@ -95,7 +95,7 @@ export interface BridgeNativeCoin {
     readonly symbol: string;
     readonly coinKey: string;
     readonly decimals: 18;
-    readonly pairKey: "eth" | "bnb";
+    readonly pairKey: "eth" | "bnb" | "mon";
     readonly acrossSupported: true;
     readonly stargate: null;
     readonly peers: readonly BridgeChainId[];
@@ -179,6 +179,10 @@ export declare function bridgeAssetAddress(asset: BridgeAsset): Address;
 export declare function bridgeFeeAsset(asset: BridgeAsset): Address | "native";
 export declare function bridgeNativePrincipal(request: Pick<BridgeRouteRequest, "fromToken">): boolean;
 export declare function bridgeCrossNativeConversion(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">): boolean;
+/** The only reviewed native principal lanes whose source and destination coins use different denominations. */
+export declare function bridgeNativeDenominationConversion(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">): boolean;
+/** Native destinations that require a provider named transaction plus exact trace and balance proof. */
+export declare function bridgeProviderBoundNativeDestination(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">): boolean;
 /** Both legs must share a pair key, decimals and each other's chain as a peer: native pairs with native, a token with its own. */
 export declare function bridgeAssetPair(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">, code?: ErrorCode): {
     readonly from: BridgeAsset;
