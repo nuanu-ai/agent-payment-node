@@ -106,8 +106,10 @@ import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory
 import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
 import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
 import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
+import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 
 export interface RuntimeFactoryOptions {
+  readonly stargateNative?: StargateNativeService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
@@ -255,6 +257,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       : undefined
   );
   const clock = options.clock ?? { now: () => new Date() };
+  const stargateNative = options.stargateNative ?? (bound.request.command.startsWith("stargate.native.")
+    ? new StargateNativeService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
   // Keyless Uniswap is built per swap.uniswap.* command, like bridge and 1Click. Only CLI approve gets a terminal;
   // MCP intercepts approve/execute with a CLI handoff before this factory runs.
   const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.") && options.uniswap === undefined
@@ -277,6 +281,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     : undefined);
   return new ApnCore({
     state,
+    ...(stargateNative === undefined ? {} : { stargateNative }),
     // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
     ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
       portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },

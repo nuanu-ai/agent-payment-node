@@ -284,6 +284,33 @@ export declare const STARGATE_SEND_ABI: readonly [{
         readonly type: "uint8";
     }];
 }, {
+    readonly type: "function";
+    readonly name: "status";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "uint8";
+    }];
+}, {
+    readonly type: "function";
+    readonly name: "paths";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly name: "eid";
+        readonly type: "uint32";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "uint64";
+    }];
+}, {
+    readonly type: "function";
+    readonly name: "stargateType";
+    readonly stateMutability: "pure";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "uint8";
+    }];
+}, {
     readonly type: "event";
     readonly name: "OFTSent";
     readonly inputs: readonly [{

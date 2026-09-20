@@ -274,7 +274,7 @@
       "asset": "ETH",
       "token": "0x0000000000000000000000000000000000000000",
       "pool": "0x77b2043768d28E9C9aB44E1aBfC95944bcE57931",
-      "kind": "oft",
+      "kind": "StargatePoolNative",
       "localDecimals": 18,
       "sharedDecimals": 6
     },
@@ -304,7 +304,7 @@
       "asset": "ETH",
       "token": "0x0000000000000000000000000000000000000000",
       "pool": "0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7",
-      "kind": "oft",
+      "kind": "StargatePoolNative",
       "localDecimals": 18,
       "sharedDecimals": 6
     },
@@ -324,7 +324,7 @@
       "asset": "ETH",
       "token": "0x0000000000000000000000000000000000000000",
       "pool": "0xA45B5130f36CDcA45667738e2a258AB09f4A5f7F",
-      "kind": "oft",
+      "kind": "StargatePoolNative",
       "localDecimals": 18,
       "sharedDecimals": 6
     },
@@ -344,7 +344,7 @@
       "asset": "ETH",
       "token": "0x0000000000000000000000000000000000000000",
       "pool": "0xe8CDF27AcD73a434D661C84887215F7598e7d0d3",
-      "kind": "oft",
+      "kind": "StargatePoolNative",
       "localDecimals": 18,
       "sharedDecimals": 6
     },
@@ -394,7 +394,7 @@
       "asset": "ETH",
       "token": "0x0000000000000000000000000000000000000000",
       "pool": "0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7",
-      "kind": "oft",
+      "kind": "StargatePoolNative",
       "localDecimals": 18,
       "sharedDecimals": 6
     }
@@ -550,6 +550,44 @@
       "type": "function",
       "name": "sharedDecimals",
       "stateMutability": "view",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "uint8"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "status",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "uint8"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "paths",
+      "stateMutability": "view",
+      "inputs": [
+        {
+          "name": "eid",
+          "type": "uint32"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "uint64"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "stargateType",
+      "stateMutability": "pure",
       "inputs": [],
       "outputs": [
         {
