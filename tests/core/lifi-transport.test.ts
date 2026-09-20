@@ -6,6 +6,7 @@ import { syncBuiltinESMExports } from "node:module";
 import test, { type TestContext } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { BridgeHttps } from "../../src/lifi/https.js";
+import { LifiProvider } from "../../src/lifi/provider.js";
 
 function mockWire(t: TestContext) {
   const requests: Array<{ endpoint: URL; options: any; body: unknown; respond: (status: number, headers: Record<string, string>, chunks: Buffer[], event?: string) => void; destroyCount: number }> = [];
@@ -46,6 +47,41 @@ test("LI.FI transport pins public DNS, sends exact JSON once with default TLS an
   wire.setDns([{ address: "8.8.8.8", family: 4 }]); wire.setRemote("1.1.1.1");
   const failure = assert.rejects(transport.request("https://relay.example/v1/routes", "GET", null, 64, "APN_HTTP_CONFIG"), { code: "APN_PROVIDER_UNAVAILABLE" });
   await failure; assert.equal(wire.requests.length, 2); assert.equal(wire.requests[1]!.destroyCount, 1);
+});
+
+test("optional LI.FI API key is sent only to the fixed API base and is not serialized", async (t) => {
+  const wire = mockWire(t), secret = "lifi-api-key-secret-canary";
+  const transport = new BridgeHttps(undefined, secret);
+  const fixed = transport.request("https://li.quest/v1/status", "GET", null, 64, "APN_HTTP_CONFIG");
+  await nextTurn();
+  assert.equal(wire.requests[0]!.options.headers["x-lifi-api-key"], secret);
+  wire.requests[0]!.respond(200, {}, [Buffer.from("{}")]); await fixed;
+
+  const outsideBase = transport.request("https://li.quest/v2/status", "GET", null, 64, "APN_HTTP_CONFIG");
+  await nextTurn(); assert.equal(wire.requests[1]!.options.headers["x-lifi-api-key"], undefined);
+  wire.requests[1]!.respond(200, {}, [Buffer.from("{}")]); await outsideBase;
+  const otherOrigin = transport.request("https://relay.example/v1/status", "GET", null, 64, "APN_HTTP_CONFIG");
+  await nextTurn(); assert.equal(wire.requests[2]!.options.headers["x-lifi-api-key"], undefined);
+  wire.requests[2]!.respond(200, {}, [Buffer.from("{}")]); await otherOrigin;
+
+  assert.doesNotMatch(JSON.stringify(transport), new RegExp(secret, "u"));
+});
+
+test("LifiProvider reads APN_LIFI_API_KEY at construction and keeps it out of artifacts", async (t) => {
+  const wire = mockWire(t), secret = "lifi-provider-secret-canary", previous = process.env.APN_LIFI_API_KEY;
+  t.after(() => { if (previous === undefined) delete process.env.APN_LIFI_API_KEY; else process.env.APN_LIFI_API_KEY = previous; });
+  process.env.APN_LIFI_API_KEY = secret;
+  const provider = new LifiProvider();
+  const withKey = provider.status({ transactionHash: `0x${"ab".repeat(32)}`, tool: "across", fromChainId: 1, toChainId: 8453 });
+  await nextTurn(); assert.equal(wire.requests[0]!.options.headers["x-lifi-api-key"], secret);
+  wire.requests[0]!.respond(200, {}, [Buffer.from("{}")]); await withKey;
+  assert.doesNotMatch(JSON.stringify(provider), new RegExp(secret, "u"));
+
+  delete process.env.APN_LIFI_API_KEY;
+  const publicProvider = new LifiProvider();
+  const withoutKey = publicProvider.status({ transactionHash: `0x${"cd".repeat(32)}`, tool: "across", fromChainId: 1, toChainId: 8453 });
+  await nextTurn(); assert.equal(wire.requests[1]!.options.headers["x-lifi-api-key"], undefined);
+  wire.requests[1]!.respond(200, {}, [Buffer.from("{}")]); await withoutKey;
 });
 
 test("LI.FI transport rejects redirects, compression, declared/streamed oversize, invalid UTF-8 and interrupted bodies without retry", async (t) => {
