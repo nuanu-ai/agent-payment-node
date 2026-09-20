@@ -24,6 +24,29 @@ function record(value) {
         throw new ApnError("APN_RPC_PROTOCOL", "Malformed Stargate RPC object.");
     return value;
 }
+function bytes(value) {
+    if (typeof value !== "string" || !/^0x(?:[0-9a-fA-F]{2})*$/u.test(value))
+        throw new ApnError("APN_RPC_PROTOCOL", "Malformed Stargate RPC bytes.");
+    return value.toLowerCase();
+}
+function transactionByHash(value, requested) {
+    const expected = hash(requested), transaction = record(value);
+    try {
+        const found = hash(transaction.hash);
+        if (found !== expected)
+            throw new ApnError("APN_RPC_PROTOCOL", "Stargate RPC transaction hash mismatch.");
+        return { hash: found, to: getAddress(String(transaction.to)), input: bytes(transaction.input),
+            blockHash: hash(transaction.blockHash), blockNumber: `0x${quantity(transaction.blockNumber).toString(16)}` };
+    }
+    catch (error) {
+        if (error instanceof ApnError)
+            throw error;
+        throw new ApnError("APN_RPC_PROTOCOL", "Malformed Stargate RPC transaction.");
+    }
+}
+const STARGATE_RPC_METHODS = ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount",
+    "eth_getCode", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionReceipt",
+    "eth_getTransactionByHash", "eth_getLogs"];
 export class StargateJsonRpc {
     https;
     sequence = 0;
@@ -38,16 +61,20 @@ export class StargateJsonRpc {
         this.origin = parsed.origin;
     }
     async call(method, params) {
-        if (!["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount", "eth_getCode", "eth_call",
-            "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionReceipt", "eth_getLogs"].includes(method))
+        if (!STARGATE_RPC_METHODS.includes(method))
             blocked("rpc_method");
+        if (method === "eth_getTransactionByHash") {
+            if (params.length !== 1)
+                throw new ApnError("APN_RPC_PROTOCOL", "Malformed Stargate transaction lookup.");
+            hash(params[0]);
+        }
         const id = String(++this.sequence), response = await this.https.request(this.endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 2 * 1024 * 1024, "APN_RPC_CONFIG");
         if (response.status !== 200)
             blocked("rpc_status");
         const body = record(JSON.parse(response.body));
         if (body.jsonrpc !== "2.0" || String(body.id) !== id || !Object.hasOwn(body, "result") || Object.hasOwn(body, "error"))
             blocked("rpc_result");
-        return body.result;
+        return method === "eth_getTransactionByHash" ? transactionByHash(body.result, params[0]) : body.result;
     }
 }
 export class StargateNativeService {
