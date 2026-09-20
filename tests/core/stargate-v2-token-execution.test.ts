@@ -5,25 +5,33 @@ import test from "node:test";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, getAddress, keccak256, parseAbiParameters, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
+import { approvalCode } from "../../src/approval-code.js";
+import { bindArgv } from "../../src/command-binder.js";
 import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_QUOTE_ABI, STARGATE_QUOTE_OFT_OUTPUT, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
 import { cleanupStargateV2Token, encodeStargateNativeDrop, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, stargateV2TokenCanonicalReceipt,
   STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_MECHANISM,
   STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_POOL,
   STARGATE_TOKEN_SOURCE_TOKEN, type StargateTokenExecutionPorts, type StargateTokenJournal, type StargateTokenOperation } from "../../src/stargate-v2/token-execution.js";
 import { StateStore } from "../../src/state.js";
+import { TtyStargateTokenApproval } from "../../src/stargate-v2/token-tty.js";
 import { temporaryState } from "./helpers.js";
 
 const KEY = `0x${"11".repeat(32)}` as Hex, ACCOUNT = privateKeyToAccount(KEY), OWNER = ACCOUNT.address;
 const BLOCK = `0x${"ab".repeat(32)}` as Hex, DEST_BLOCK = `0x${"cd".repeat(32)}` as Hex, GUID = `0x${"ef".repeat(32)}` as Hex;
 const AMOUNT = 100_000n, DROP = 50_000_000_000_000_000n, FEE = 1000n, NATIVE_CAP = 100_000_000_000_000_000n;
 function legacyTokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
-  const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, bridgeSimulation: _simulation, ...current } = operation;
+  const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, bridgeSimulation: _simulation, feeApproval: _fees, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v1" as const };
   return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
 }
 function currentV2TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
-  const { integrityHash: _integrity, bridgeSimulation: _simulation, ...current } = operation;
+  const { integrityHash: _integrity, bridgeSimulation: _simulation, feeApproval: _fees, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v2" as const };
+  return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
+}
+function currentV3TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
+  const { integrityHash: _integrity, feeApproval: _fees, ...current } = operation;
+  const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v3" as const };
   return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
 }
 async function seedTokenFixture(root: string, operation: StargateTokenOperation): Promise<void> {
@@ -38,7 +46,7 @@ class MemoryJournal implements StargateTokenJournal { value: StargateTokenOperat
 }
 function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: number; legacy?: boolean; bridgeRevert?: boolean;
   residualAfterBridge?: boolean; advanceNonceOnSend?: boolean; preflightNonceDrift?: boolean; reserveError?: boolean; signErrorOnce?: boolean;
-  bridgeSimulationRevert?: boolean; bridgeEstimateGas?: bigint; feeSpikeAfterApproval?: boolean;
+  bridgeSimulationRevert?: boolean; bridgeEstimateGas?: bigint; feeSpikeAfterApproval?: boolean; preparedMaxFee?: bigint; preparedPriority?: bigint; freshPriorityAfterApproval?: bigint;
   followErrorOnce?: "submitted"|"unknown_finality"|"finalized"|"failed_before_effect"|"failed_confirmed_revert";
   destinationMutation?: "guid"|"native"|"token" } = {}) {
   let allowance = options.allowance ?? 0n, approvalConsumed = false, sends = 0, signs = 0, approvals = 0, receiptCalls = 0, nonce = 7n;
@@ -50,7 +58,7 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     if (method === "eth_getCode") return "0x60016000";
     if (method === "eth_getBalance") return "0x1fffffffffffff";
     if (method === "eth_getTransactionCount") return `0x${(options.preflightNonceDrift ? 8n : (approvalConsumed ? 8n : nonce)).toString(16)}`;
-    if (method === "eth_maxPriorityFeePerGas") return "0x1";
+    if (method === "eth_maxPriorityFeePerGas") return `0x${(approvalConsumed && options.freshPriorityAfterApproval !== undefined ? options.freshPriorityAfterApproval : (options.preparedPriority ?? 1n)).toString(16)}`;
     if (method === "eth_estimateGas") { const data = (params[0] as { data: Hex }).data; let send = false;
       try { send = decodeFunctionData({ abi: STARGATE_SEND_ABI, data }).functionName === "sendToken"; } catch {}
       if (send) { bridgeEstimates++; if (allowance === 0n) throw new Error("0x7c75c3d2 Transfer_TransferFailed"); return `0x${(options.bridgeEstimateGas ?? 90_000n).toString(16)}`; }
@@ -89,7 +97,7 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     destinationBalances: async () => ({ tokenAtomic: "500000", nativeAtomic: "1000000000000000000", blockNumberAtomic: "9", blockHash: DEST_BLOCK }),
     prepareEnvelope: async tx => { let bridge = false; try { bridge = decodeFunctionData({ abi: STARGATE_SEND_ABI, data: tx.data }).functionName === "sendToken"; } catch {}
       if (bridge) { preparedBridges++; if (allowance === 0n) throw new Error("0x7c75c3d2 Transfer_TransferFailed"); } else preparedApprovals++;
-      return { nonceAtomic: tx.nonceAtomic ?? "7", gasLimitAtomic: "100000", maxFeePerGasAtomic: "2", maxPriorityFeePerGasAtomic: "1", nativeBalanceAtomic: "9000000000000000000" }; },
+      return { nonceAtomic: tx.nonceAtomic ?? "7", gasLimitAtomic: "100000", maxFeePerGasAtomic: (options.preparedMaxFee ?? 2n).toString(), maxPriorityFeePerGasAtomic: (options.preparedPriority ?? 1n).toString(), nativeBalanceAtomic: "9000000000000000000" }; },
     signer: { kind: "imported_evm_signer", address: OWNER, signTransaction: async tx => { signs++; if (options.signErrorOnce && signs === 1) throw new Error("signing failed"); if (options.legacy) return await ACCOUNT.signTransaction({ type: "legacy", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), gasPrice: BigInt(tx.maxFeePerGasAtomic) }); return await ACCOUNT.signTransaction({ type: "eip1559", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [] }); } },
     signerIdentity: async () => ({ profile: "owner", address: OWNER }), approve: async () => { approvals++; }, approveCleanup: async () => { approvals++; },
     admitPolicy: async () => ({ policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM }), confirmPolicy: async () => {},
@@ -106,7 +114,7 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
 const request = (changes: Partial<Parameters<typeof prepareStargateV2Token>[0]> = {}) => ({ profile: "owner", owner: OWNER, recipient: OWNER, amountAtomic: AMOUNT.toString(), nativeDropAtomic: DROP.toString(), minOutputAtomic: "99000", maxNativeDebitAtomic: "10000000000000000", idempotencyKey: "stargate-token-001", ...changes });
 
 test("Type-3 native-drop bytes and pinned contracts are exact", () => { const encoded = encodeStargateNativeDrop(DROP.toString(), OWNER); assert.equal(encoded, `0x000301003102${DROP.toString(16).padStart(32,"0")}${OWNER.slice(2).toLowerCase().padStart(64,"0")}`); assert.equal(STARGATE_TOKEN_SOURCE_EXECUTOR, getAddress("0x2D2ea0697bdbede3F01553D2Ae4B8d0c486B666e")); });
-test("prepare freezes staged simulation and a budget-bounded gas ceiling without simulating sendToken at zero allowance", async () => { const s=setup(), op=await prepareStargateV2Token(request(),s.ports,s.journal); assert.equal(op.schemaVersion,"apn.stargate-v2-token-operation.v3"); assert.equal(op.finalityPolicyProvenance,"pinned_v2"); assert.equal(op.allowanceRequired,true); assert.deepEqual(op.bridgeSimulation,{mode:"pending_post_approval",prepareStatus:"pending_post_approval",gasCeilingAtomic:op.sendEnvelope.gasLimitAtomic}); assert.equal(op.approvalEnvelope?.nonceAtomic,"7"); assert.equal(op.sendEnvelope.nonceAtomic,"8"); assert.equal(op.sendEnvelope.valueAtomic,FEE.toString()); assert.deepEqual(op.finalityPolicy,{version:"apn.stargate-v2-finality.v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"finalized"}}); const approval=decodeFunctionData({abi:STARGATE_ERC20_ABI,data:op.approvalEnvelope!.data}); assert.deepEqual(approval.args,[STARGATE_TOKEN_SOURCE_POOL,AMOUNT]); const send=decodeFunctionData({abi:STARGATE_SEND_ABI,data:op.sendEnvelope.data}); assert.equal(send.functionName,"sendToken"); if (send.functionName !== "sendToken") throw new Error("unexpected"); assert.equal(send.args[0].extraOptions,op.options); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:0,bridgeEstimates:0,bridgeCalls:0}); assert.ok(BigInt(op.maximumDebitAtomic)<=BigInt(op.maxNativeDebitAtomic)); assert.equal(s.counts().sends,0); });
+test("prepare freezes staged simulation and a budget-bounded gas ceiling without simulating sendToken at zero allowance", async () => { const s=setup(), op=await prepareStargateV2Token(request(),s.ports,s.journal); assert.equal(op.schemaVersion,"apn.stargate-v2-token-operation.v4"); assert.deepEqual(op.feeApproval,{provenance:"exact_snapshot",quotedMaxFeePerGasWei:"2",quotedMaxPriorityFeePerGasWei:"1",approvedMaxFeePerGasWei:"2",approvedMaxPriorityFeePerGasWei:"1"}); assert.equal(op.finalityPolicyProvenance,"pinned_v2"); assert.equal(op.allowanceRequired,true); assert.deepEqual(op.bridgeSimulation,{mode:"pending_post_approval",prepareStatus:"pending_post_approval",gasCeilingAtomic:op.sendEnvelope.gasLimitAtomic}); assert.equal(op.approvalEnvelope?.nonceAtomic,"7"); assert.equal(op.sendEnvelope.nonceAtomic,"8"); assert.equal(op.sendEnvelope.valueAtomic,FEE.toString()); assert.deepEqual(op.finalityPolicy,{version:"apn.stargate-v2-finality.v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"finalized"}}); const approval=decodeFunctionData({abi:STARGATE_ERC20_ABI,data:op.approvalEnvelope!.data}); assert.deepEqual(approval.args,[STARGATE_TOKEN_SOURCE_POOL,AMOUNT]); const send=decodeFunctionData({abi:STARGATE_SEND_ABI,data:op.sendEnvelope.data}); assert.equal(send.functionName,"sendToken"); if (send.functionName !== "sendToken") throw new Error("unexpected"); assert.equal(send.args[0].extraOptions,op.options); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:0,bridgeEstimates:0,bridgeCalls:0}); assert.ok(BigInt(op.maximumDebitAtomic)<=BigInt(op.maxNativeDebitAtomic)); assert.equal(s.counts().sends,0); });
 test("legacy v1 prepared token fixture loads locally with the historical all-safe policy", async (t) => {
   const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
   const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"legacy-token-prepared"}),s.ports,s.journal);
@@ -138,6 +146,12 @@ test("current v2 exact-allowance journal remains executable without the v3 simul
   await seedTokenFixture(temporary.root,currentV2TokenFixture(prepared)); const journal=new FileStargateTokenJournal(temporary.root,state);
   const observed=await executeStargateV2Token(prepared.operationId,s.ports,journal); assert.equal(observed.phase,"observed"); assert.equal(observed.schemaVersion,"apn.stargate-v2-token-operation.v2"); assert.equal(observed.bridgeSimulation,undefined);
 });
+test("current v3 staged journal remains executable with derived exact fee ceilings", async (t) => {
+  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
+  const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"v3-current-compatible"}),s.ports,s.journal);
+  await seedTokenFixture(temporary.root,currentV3TokenFixture(prepared)); const journal=new FileStargateTokenJournal(temporary.root,state);
+  const observed=await executeStargateV2Token(prepared.operationId,s.ports,journal); assert.equal(observed.phase,"observed"); assert.equal(observed.schemaVersion,"apn.stargate-v2-token-operation.v3"); assert.equal(observed.feeApproval,undefined);
+});
 test("v2 token missing policy, policy drift, and ambiguous legacy lanes are corrupt before effects", async (t) => {
   const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize(); const journal=new FileStargateTokenJournal(temporary.root,state);
   const missingSetup=setup(),missing=await prepareStargateV2Token(request({idempotencyKey:"v2-token-missing-policy"}),missingSetup.ports,missingSetup.journal);
@@ -160,6 +174,55 @@ test("zero native drop emits no options and remains cap checked", async () => { 
 test("existing exact allowance keeps exact prepare simulation while residual or cap overflow fail closed", async () => { const exact=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request(),exact.ports,exact.journal); assert.equal(op.allowanceRequired,false); assert.equal(op.approvalEnvelope,undefined); assert.deepEqual(op.bridgeSimulation,{mode:"exact_at_prepare",prepareStatus:"succeeded",gasCeilingAtomic:"100000"}); assert.deepEqual(exact.simulations(),{preparedApprovals:0,preparedBridges:1,bridgeEstimates:0,bridgeCalls:0}); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"residual-allowance"}),setup({allowance:1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="residual_allowance_cleanup_required"); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"native-cap-over"}),setup({nativeCap:DROP-1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="native_drop_cap_exceeded"); });
 test("approval and bridge effects are separately marked, exact, observed, and canonical", async () => { const s=setup(), prepared=await prepareStargateV2Token(request(),s.ports,s.journal), observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.equal(observed.residualAllowanceAtomic,"0"); assert.equal(observed.usageState,"finalized"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.deepEqual(observed.transitions.map(x=>x.phase),["prepared","approved","allowance_submission_started","allowance_submitted","allowance_observed","submission_started","submitted","observed"]); assert.match(stargateV2TokenCanonicalReceipt(observed).evidenceHash,/^[a-f0-9]{64}$/u); });
 
+test("owner fee ceilings freeze quoted and approved pairs and admit movement within both ceilings", async () => {
+  const s=setup({preparedPriority:0n,freshPriorityAfterApproval:1n});
+  const prepared=await prepareStargateV2Token(request({idempotencyKey:"fee-ceiling-inside",maxFeePerGasWei:"4",maxPriorityFeePerGasWei:"2"}),s.ports,s.journal);
+  assert.deepEqual(prepared.feeApproval,{provenance:"owner_ceiling",quotedMaxFeePerGasWei:"2",quotedMaxPriorityFeePerGasWei:"0",approvedMaxFeePerGasWei:"4",approvedMaxPriorityFeePerGasWei:"2"});
+  assert.equal(prepared.approvalEnvelope?.maxFeePerGasAtomic,"4"); assert.equal(prepared.sendEnvelope.maxPriorityFeePerGasAtomic,"2");
+  const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed");
+  assert.deepEqual(stargateV2TokenCanonicalReceipt(observed).feeApproval,prepared.feeApproval);
+});
+
+test("fee ceiling pair validation rejects missing, malformed, inverted, and below-quote values", async () => {
+  for (const changes of [
+    {maxFeePerGasWei:"4"}, {maxPriorityFeePerGasWei:"2"}, {maxFeePerGasWei:"0",maxPriorityFeePerGasWei:"1"},
+    {maxFeePerGasWei:"04",maxPriorityFeePerGasWei:"1"}, {maxFeePerGasWei:"2",maxPriorityFeePerGasWei:"3"},
+    {maxFeePerGasWei:"1",maxPriorityFeePerGasWei:"1"}, {maxFeePerGasWei:"2",maxPriorityFeePerGasWei:"0"},
+  ]) { const s=setup(); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:`bad-fees-${JSON.stringify(changes)}`.replaceAll(/[^A-Za-z0-9._:-]/gu,"x").slice(0,128),...changes}),s.ports,s.journal),(e:any)=>e.code==="APN_INVALID_INPUT"); }
+});
+
+test("approved max fee drives staged debit division with integer rounding", async () => {
+  const cap=15_000_002n,s=setup(),op=await prepareStargateV2Token(request({idempotencyKey:"fee-ceiling-rounding",maxNativeDebitAtomic:cap.toString(),maxFeePerGasWei:"3",maxPriorityFeePerGasWei:"1"}),s.ports,s.journal);
+  const approval=100_000n*3n,expected=(cap-approval-FEE)/3n; assert.equal(op.sendEnvelope.gasLimitAtomic,expected.toString());
+  assert.equal(op.maximumDebitAtomic,(approval+FEE+expected*3n).toString()); assert.ok(BigInt(op.maximumDebitAtomic)<=cap);
+});
+
+test("CLI binds fee ceilings only when supplied and exposes both API fields", () => {
+  const base=["stargate","token","prepare","--profile","owner","--amount-atomic","100000","--min-output-atomic","99000","--max-native-debit-atomic","10000000","--idempotency-key","cli-fees-001"];
+  assert.equal((bindArgv(base).request as any).maxFeePerGasWei,undefined);
+  const request=(bindArgv([...base,"--max-fee-per-gas-wei","4","--max-priority-fee-per-gas-wei","2"]).request as any);
+  assert.equal(request.maxFeePerGasWei,"4"); assert.equal(request.maxPriorityFeePerGasWei,"2");
+});
+
+test("TTY approval displays quoted and approved fee pairs", async () => {
+  const s=setup(),op=await prepareStargateV2Token(request({idempotencyKey:"tty-fee-ceilings",maxFeePerGasWei:"4",maxPriorityFeePerGasWei:"2"}),s.ports,s.journal);
+  let printed=""; const phrase=approvalCode("bridge",op.integrityHash);
+  const tty=new TtyStargateTokenApproval({isTerminal:()=>true,openTerminal:async()=>({fd:1,write:async(value:string)=>{printed+=value;},read:async function*(){yield Buffer.from(`${phrase}\n`);},close:async()=>{}})});
+  await tty.approve(op); assert.match(printed,/quoted max\/priority: 2 \/ 1/u); assert.match(printed,/approved max\/priority: 4 \/ 2/u); assert.match(printed,/owner_ceiling/u);
+});
+
+test("sufficient allowance path signs the owner approved ceiling pair without an approval transaction", async () => {
+  const s=setup({allowance:AMOUNT}),prepared=await prepareStargateV2Token(request({idempotencyKey:"fee-ceiling-sufficient-allowance",maxFeePerGasWei:"4",maxPriorityFeePerGasWei:"2"}),s.ports,s.journal);
+  assert.equal(prepared.approvalEnvelope,undefined); assert.equal(prepared.sendEnvelope.maxFeePerGasAtomic,"4"); assert.equal(prepared.sendEnvelope.maxPriorityFeePerGasAtomic,"2");
+  const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1});
+});
+
+test("v4 integrity validation rejects inconsistent approved fee provenance before effects", async (t) => {
+  const temporary=await temporaryState();t.after(temporary.cleanup);const state=new StateStore(temporary.root);await state.initialize();const s=setup();const op=await prepareStargateV2Token(request({idempotencyKey:"fee-binding-corrupt",maxFeePerGasWei:"4",maxPriorityFeePerGasWei:"2"}),s.ports,s.journal);
+  const {integrityHash:_integrity,...body}=op,bad={...body,feeApproval:{...op.feeApproval!,approvedMaxFeePerGasWei:"3"}};await seedTokenFixture(temporary.root,{...bad,integrityHash:hashObject(bad)} as StargateTokenOperation);
+  await assert.rejects(new FileStargateTokenJournal(temporary.root,state).load(op.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT"&&e.details.reason==="fee_approval_binding");assert.deepEqual(s.counts(),{sends:0,signs:0,approvals:0});
+});
+
 test("post-approval exact estimate and eth_call pass before one bridge signature", async () => { const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"staged-pass"}),s.ports,s.journal); const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:0,bridgeEstimates:1,bridgeCalls:1}); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); const receipt=stargateV2TokenCanonicalReceipt(observed); assert.equal(receipt.bridgeSimulation.mode,"pending_post_approval"); assert.equal(receipt.bridgeSimulation.gasCeilingAtomic,prepared.sendEnvelope.gasLimitAtomic); });
 
 for (const [name, options, reason] of [
@@ -167,6 +230,11 @@ for (const [name, options, reason] of [
   ["over-ceiling", {bridgeEstimateGas:5_000_001n}, "gas_limit"],
   ["fee-spike", {feeSpikeAfterApproval:true}, "fee_spike"],
 ] as const) test(`post-approval ${name} enters cleanup with zero bridge effects`, async () => { const s=setup(options), prepared=await prepareStargateV2Token(request({idempotencyKey:`staged-${name}`}),s.ports,s.journal); const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(required.phase,"cleanup_required"); assert.equal(required.cleanupReason,reason); assert.equal(s.counts().sends,1); assert.equal(s.counts().signs,1); assert.equal(required.transactionHash,undefined); const cleaned=await cleanupStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(cleaned.phase,"cleaned"); });
+
+for (const [name,options,fees] of [
+  ["max-fee",{feeSpikeAfterApproval:true},{maxFeePerGasWei:"2",maxPriorityFeePerGasWei:"2"}],
+  ["priority-fee",{freshPriorityAfterApproval:3n},{maxFeePerGasWei:"4",maxPriorityFeePerGasWei:"2"}],
+] as const) test(`fresh ${name} above its owner ceiling requires cleanup before bridge signing`,async()=>{const s=setup(options),prepared=await prepareStargateV2Token(request({idempotencyKey:`ceiling-${name}`,...fees}),s.ports,s.journal);const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal);assert.equal(required.phase,"cleanup_required");assert.equal(required.cleanupReason,"fee_spike");assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1});});
 
 test("staged total debit includes approval gas, message value, and protocol-bounded bridge ceiling", async () => { const cap=10_500_000n, s=setup(), op=await prepareStargateV2Token(request({idempotencyKey:"staged-debit-math",maxNativeDebitAtomic:cap.toString()}),s.ports,s.journal); const approval=BigInt(op.approvalEnvelope!.gasLimitAtomic)*BigInt(op.approvalEnvelope!.maxFeePerGasAtomic), bridge=BigInt(op.sendEnvelope.gasLimitAtomic)*BigInt(op.sendEnvelope.maxFeePerGasAtomic); assert.equal(BigInt(op.maximumDebitAtomic),approval+FEE+bridge); assert.ok(BigInt(op.maximumDebitAtomic)<=cap); const budget=(cap-approval-FEE)/2n; assert.equal(op.bridgeSimulation?.gasCeilingAtomic,(budget>5_000_000n?5_000_000n:budget).toString()); });
 test("ambiguous approval is durable and concurrent/repeated execute never resends", async () => { const s=setup({sendErrorAt:1}), prepared=await prepareStargateV2Token(request(),s.ports,s.journal); const [a,b]=await Promise.all([executeStargateV2Token(prepared.operationId,s.ports,s.journal),executeStargateV2Token(prepared.operationId,s.ports,s.journal)]); assert.equal(a.phase,"allowance_unknown_finality"); assert.equal(b.phase,"observed"); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); assert.equal(s.journal.history.filter(x=>x.phase==="allowance_submission_started").length,1); });

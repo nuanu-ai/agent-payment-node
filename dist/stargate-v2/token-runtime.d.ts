@@ -20,6 +20,8 @@ export declare class StargateTokenService {
         minOutputAtomic: string;
         maxNativeDebitAtomic: string;
         idempotencyKey: string;
+        maxFeePerGasWei?: string;
+        maxPriorityFeePerGasWei?: string;
     }>): Promise<StargateTokenOperation>;
     execute(id: string): Promise<StargateTokenOperation>;
     cleanup(id: string): Promise<StargateTokenOperation>;
@@ -53,6 +55,19 @@ export declare class StargateTokenService {
         policy: import("./token-execution.js").StargateTokenPolicyBinding;
         finalityPolicy: import("./finality-policy.js").StargateV2RouteFinalityPolicy;
         quoteHash: string;
+        feeApproval: Readonly<{
+            readonly provenance: "exact_snapshot" | "owner_ceiling";
+            readonly quotedMaxFeePerGasWei: string;
+            readonly quotedMaxPriorityFeePerGasWei: string;
+            readonly approvedMaxFeePerGasWei: string;
+            readonly approvedMaxPriorityFeePerGasWei: string;
+        }> | {
+            provenance: "legacy_exact_snapshot";
+            quotedMaxFeePerGasWei: string;
+            quotedMaxPriorityFeePerGasWei: string;
+            approvedMaxFeePerGasWei: string;
+            approvedMaxPriorityFeePerGasWei: string;
+        };
         bridgeSimulation: Readonly<{
             readonly mode: "exact_at_prepare" | "pending_post_approval";
             readonly prepareStatus: "succeeded" | "pending_post_approval";
