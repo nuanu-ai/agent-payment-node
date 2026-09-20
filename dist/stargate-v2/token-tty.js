@@ -18,6 +18,8 @@ export class TtyStargateTokenApproval {
             `Quoted LayerZero fee: ${op.quote.quote.nativeMessageFeeAtomic} wei ETH; maximum source native debit: ${op.maximumDebitAtomic} wei ETH`,
             `Source token/pool: ${op.sourceToken} / ${op.sourcePool}; destination token/pool: ${op.destinationToken} / ${op.destinationPool}`,
             `Allowance: ${op.allowanceRequired ? `separate exact approval for ${op.amountAtomic}` : "already exactly equal to principal"}`,
+            `Bridge simulation: ${op.bridgeSimulation?.mode ?? "legacy_exact_at_prepare"}; prepare status: ${op.bridgeSimulation?.prepareStatus ?? "legacy_succeeded"}; frozen gas ceiling: ${op.bridgeSimulation?.gasCeilingAtomic ?? op.sendEnvelope.gasLimitAtomic}`,
+            ...(op.bridgeSimulation?.mode === "pending_post_approval" ? ["The bridge has not simulated successfully yet. After the approval is safe, APN must revalidate and exactly simulate it within this ceiling before signing."] : []),
             `Policy digest/revision: ${op.policy.policyDigest} / ${op.policy.policyRevision}`,
             `Quote: ${op.quote.quoteHash}; options: ${op.options}`,
             `Expires: ${op.expiresAt}`,
