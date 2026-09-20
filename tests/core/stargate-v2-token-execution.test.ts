@@ -91,7 +91,7 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     if (d.functionName === "sharedDecimals") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sharedDecimals", result: 6 });
     if (d.functionName === "status") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "status", result: 1 });
     if (d.functionName === "stargateType") return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "stargateType", result: 0 });
-    if (d.functionName === "sendToken") { bridgeCalls++; if (options.bridgeSimulationRevert) throw new Error("sendToken reverted"); return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", result: [{ guid: GUID, nonce: 1n, fee: { nativeFee: FEE, lzTokenFee: 0n } }, { amountSentLD: AMOUNT, amountReceivedLD: AMOUNT }, { ticketId: 0n, passengerBytes: "0x" }] }); }
+    if (d.functionName === "sendToken") { bridgeCalls++; if (options.bridgeSimulationRevert) throw new Error("sendToken reverted"); const received=approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT; return encodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", result: [{ guid: GUID, nonce: 1n, fee: { nativeFee: approvalConsumed ? (options.postApprovalFee ?? FEE) : FEE, lzTokenFee: 0n } }, { amountSentLD: AMOUNT, amountReceivedLD: received }, { ticketId: 0n, passengerBytes: "0x" }] }); }
     throw new Error("unknown call");
   };
   const destinationCall: StargateTokenExecutionPorts["destinationCall"] = async (method, params) => {
@@ -118,7 +118,7 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     waitSourceReceipt: async tx => { receiptCalls++; if (["cleanup_submission_started","cleanup_submitted","cleanup_unknown_finality"].includes(journal.value?.phase ?? "")) { allowance=0n; return { transactionHash:tx,status:"success",blockNumberAtomic:"22",blockHash:BLOCK,finality:"safe",logs:[] }; }
       if (!approvalConsumed && (options.allowance ?? 0n) === 0n) { approvalPolls++; if (approvalPolls <= (options.approvalPendingPolls ?? 0)) return null; allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [] }; }
       if (options.bridgeRevert && receiptCalls === 1) return { transactionHash: tx, status: "reverted", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [] };
-      if (!options.residualAfterBridge || receiptCalls > 1) allowance = 0n; const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", args: { guid: GUID, fromAddress: OWNER } }) as readonly Hex[]; const data = encodeAbiParameters(parseAbiParameters("uint32 dstEid,uint256 amountSentLD,uint256 amountReceivedLD"), [30109, AMOUNT, AMOUNT]); return { transactionHash: tx, status: "success", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [{ address: STARGATE_TOKEN_SOURCE_POOL, topics, data }] }; },
+      if (!options.residualAfterBridge || receiptCalls > 1) allowance = 0n; const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", args: { guid: GUID, fromAddress: OWNER } }) as readonly Hex[]; const received=approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT; const data = encodeAbiParameters(parseAbiParameters("uint32 dstEid,uint256 amountSentLD,uint256 amountReceivedLD"), [30109, AMOUNT, received]); return { transactionHash: tx, status: "success", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [{ address: STARGATE_TOKEN_SOURCE_POOL, topics, data }] }; },
     observeDestination: async input => ({ emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: options.destinationMutation === "guid" ? BLOCK : input.guid, sourceEid: 30111, destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0", blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: input.finalityTag, recipient: input.recipient, amountReceivedAtomic: (approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT).toString(), tokenBalanceBeforeAtomic: input.tokenBalanceBeforeAtomic, tokenBalanceAfterAtomic: (BigInt(input.tokenBalanceBeforeAtomic) + (options.destinationMutation === "token" ? 1n : BigInt(input.minimumAmountAtomic))).toString(), tokenDeltaAtomic: (options.destinationMutation === "token" ? 1n : BigInt(input.minimumAmountAtomic)).toString(), nativeBalanceBeforeAtomic: input.nativeBalanceBeforeAtomic, nativeBalanceAfterAtomic: (BigInt(input.nativeBalanceBeforeAtomic) + (options.destinationMutation === "native" ? 1n : DROP)).toString(), nativeDeltaAtomic: (options.destinationMutation === "native" ? 1n : DROP).toString(), nativeDrop: { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: "1", success: true } }), now: () => nowMs };
   return { ports, journal, counts: () => ({ sends, signs, approvals }), simulations: () => ({ preparedApprovals, preparedBridges, bridgeEstimates, bridgeCalls }), advance: (ms:number) => { nowMs += ms; } };
 }
@@ -221,6 +221,12 @@ test("TTY approval displays quoted and approved fee pairs", async () => {
   const tty=new TtyStargateTokenApproval({isTerminal:()=>true,openTerminal:async()=>({fd:1,write:async(value:string)=>{printed+=value;},read:async function*(){yield Buffer.from(`${phrase}\n`);},close:async()=>{}})});
   await tty.approve(op); assert.match(printed,/quoted max\/priority: 2 \/ 1/u); assert.match(printed,/approved max\/priority: 4 \/ 2/u); assert.match(printed,/owner_ceiling/u);
   assert.match(printed,/30 minutes/u); assert.match(printed,/preparation quote is never used/u);
+  assert.match(printed,/Initial quoted Polygon USDC output: 100000/u);
+  assert.match(printed,/Owner-approved minimum Polygon USDC output: 99000; maximum quote loss: 1000 atomic USDC/u);
+  assert.match(printed,/Initial quoted LayerZero fee: 1000 wei ETH/u);
+  assert.match(printed,/Owner-approved source native debit cap: 10000000000000000 wei ETH/u);
+  assert.match(printed,/output and LayerZero fee may change/u);
+  assert.doesNotMatch(printed,/minimum Polygon USDC: 100000/u);
 });
 
 test("sufficient allowance path signs the owner approved ceiling pair without an approval transaction", async () => {
@@ -281,6 +287,19 @@ test("safe approval lag beyond the preparation TTL binds one fresh quote and sen
   assert.equal(observed.transitions.filter(x=>x.phase==="submission_started").length,1);
 });
 
+test("owner floor explicitly consents to a post-approval quote down from 100000 to 99000", async () => {
+  const s=setup({postApprovalMinimumOutput:99_000n}),prepared=await prepareStargateV2Token(request({idempotencyKey:"requote-owner-floor-accepted"}),s.ports,s.journal);
+  const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed");
+  assert.equal(observed.postApprovalQuote?.ownerApprovedMinimumOutputAtomic,"99000");
+  assert.equal(observed.postApprovalQuote?.ownerApprovedMaximumQuoteLossAtomic,"1000");
+  const receipt=stargateV2TokenCanonicalReceipt(observed); assert.equal(receipt.minimumOutputAtomic,"99000");
+  assert.equal(receipt.quoteLifecycle!.initialQuotedOutputAtomic,"100000");
+  assert.equal(receipt.quoteLifecycle!.ownerApprovedMinimumOutputAtomic,"99000");
+  assert.equal(receipt.quoteLifecycle!.ownerApprovedMaximumQuoteLossAtomic,"1000");
+  assert.equal(receipt.quoteLifecycle!.postApprovalQuotedOutputAtomic,"99000");
+  assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1});
+});
+
 test("approval finality beyond the bounded window enters forced cleanup without bridge signing", async () => {
   const s=setup({approvalPendingPolls:5}),prepared=await prepareStargateV2Token(request({idempotencyKey:"safe-lag-window-expired"}),s.ports,s.journal);
   assert.equal((await executeStargateV2Token(prepared.operationId,s.ports,s.journal)).phase,"allowance_unknown_finality");
@@ -297,7 +316,7 @@ test("foreground approval that returns after preparation expiry cannot create an
 });
 
 for (const [name,options,reason] of [
-  ["minimum-output",{postApprovalMinimumOutput:98_000n},"post_approval_quote_post_approval_minimum_output"],
+  ["minimum-output-one-below-owner-floor",{postApprovalMinimumOutput:98_999n},"post_approval_quote_post_approval_minimum_output"],
   ["executor-cap",{postApprovalNativeCap:DROP-1n},"post_approval_quote_post_approval_native_drop_cap"],
   ["native-debit",{postApprovalFee:10_000_000_000_000_000n},"post_approval_quote_post_approval_max_native_debit"],
 ] as const) test(`fresh post-approval ${name} degradation enters cleanup`,async()=>{const s=setup(options),prepared=await prepareStargateV2Token(request({idempotencyKey:`requote-${name}`}),s.ports,s.journal);const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal);assert.equal(required.phase,"cleanup_required");assert.equal(required.cleanupReason,reason);assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1});});
@@ -311,7 +330,8 @@ test("crash before quote persistence re-quotes idempotently and crash at bridge 
   const markerCrash=setup({saveErrorPhaseOnce:"submission_started"}),second=await prepareStargateV2Token(request({idempotencyKey:"bridge-marker-crash"}),markerCrash.ports,markerCrash.journal);await assert.rejects(executeStargateV2Token(second.operationId,markerCrash.ports,markerCrash.journal),/journal crash/u);assert.equal(markerCrash.journal.value?.phase,"post_approval_quote_bound");assert.equal((await executeStargateV2Token(second.operationId,markerCrash.ports,markerCrash.journal)).phase,"observed");assert.deepEqual(markerCrash.counts(),{sends:2,signs:3,approvals:1});assert.equal(markerCrash.journal.history.filter(x=>x.phase==="submission_started").length,1);
 });
 
-test("stored post-approval quote tampering is rejected by nested integrity",async(t)=>{const temporary=await temporaryState();t.after(temporary.cleanup);const state=new StateStore(temporary.root);await state.initialize();const s=setup({saveErrorPhaseOnce:"post_approval_quote_bound",saveErrorAfterSave:true}),prepared=await prepareStargateV2Token(request({idempotencyKey:"requote-integrity"}),s.ports,s.journal);await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),/journal crash/u);const saved=s.journal.value!;const mutated={...saved,postApprovalQuote:{...saved.postApprovalQuote!,expiresAt:new Date(Date.parse(saved.postApprovalQuote!.expiresAt)+1).toISOString()}};const {integrityHash:_old,...body}=mutated;await seedTokenFixture(temporary.root,{...body,integrityHash:hashObject(body)} as StargateTokenOperation);await assert.rejects(new FileStargateTokenJournal(temporary.root,state).load(saved.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT"&&e.details.reason==="post_approval_quote_integrity");});
+test("stored post-approval quote tampering is rejected by nested integrity and owner-floor binding",async(t)=>{const temporary=await temporaryState();t.after(temporary.cleanup);const state=new StateStore(temporary.root);await state.initialize();const s=setup({saveErrorPhaseOnce:"post_approval_quote_bound",saveErrorAfterSave:true}),prepared=await prepareStargateV2Token(request({idempotencyKey:"requote-integrity"}),s.ports,s.journal);await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),/journal crash/u);const saved=s.journal.value!;const mutated={...saved,postApprovalQuote:{...saved.postApprovalQuote!,expiresAt:new Date(Date.parse(saved.postApprovalQuote!.expiresAt)+1).toISOString()}};const {integrityHash:_old,...body}=mutated;await seedTokenFixture(temporary.root,{...body,integrityHash:hashObject(body)} as StargateTokenOperation);await assert.rejects(new FileStargateTokenJournal(temporary.root,state).load(saved.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT"&&e.details.reason==="post_approval_quote_integrity");
+  const {snapshotHash:_snapshot,...snapshotBody}=saved.postApprovalQuote!;const reboundBody={...snapshotBody,ownerApprovedMinimumOutputAtomic:"98000"};const reboundSnapshot={...reboundBody,snapshotHash:hashObject(reboundBody)};const rebound={...saved,postApprovalQuote:reboundSnapshot};const {integrityHash:_outer,...reboundOperationBody}=rebound;await seedTokenFixture(temporary.root,{...reboundOperationBody,integrityHash:hashObject(reboundOperationBody)} as StargateTokenOperation);await assert.rejects(new FileStargateTokenJournal(temporary.root,state).load(saved.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT"&&e.details.reason==="post_approval_quote_binding");});
 
 for (const [name, options, reason] of [
   ["revert", {bridgeSimulationRevert:true}, "post_approval_quote_post_approval_send_simulation"],

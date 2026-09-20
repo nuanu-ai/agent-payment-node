@@ -707,6 +707,8 @@ async function createPostApprovalQuote(op, ports) {
         fail("APN_REPREPARE_REQUIRED", "post_approval_quote_expired");
     const body = { schemaVersion: "apn.stargate-v2-token-post-approval-quote.v1",
         quotedAt: new Date(quotedAtMs).toISOString(), expiresAt: new Date(expiresAtMs).toISOString(), quote, quoteBlock: quote.block,
+        ownerApprovedMinimumOutputAtomic: op.minOutputAtomic,
+        ownerApprovedMaximumQuoteLossAtomic: (BigInt(op.amountAtomic) - BigInt(op.minOutputAtomic)).toString(),
         finalityPolicy: op.finalityPolicy, executorNativeCapAtomic: cap.toString(), sourceCodeHash: source.poolCodeHash,
         destinationCodeHash: destination.poolCodeHash, sourceTokenCodeHash: source.tokenCodeHash,
         destinationTokenCodeHash: destination.tokenCodeHash, policy: op.policy,
@@ -912,6 +914,8 @@ function validatePostApprovalQuote(op, snapshot) {
     }
     if (!validIso(snapshot.quotedAt) || !validIso(snapshot.expiresAt) || snapshot.quote.recipient !== op.recipient ||
         snapshot.quote.quote.requestedAmountAtomic !== op.amountAtomic || snapshot.quote.quote.amountSentAtomic !== op.amountAtomic ||
+        snapshot.ownerApprovedMinimumOutputAtomic !== op.minOutputAtomic ||
+        snapshot.ownerApprovedMaximumQuoteLossAtomic !== (BigInt(op.amountAtomic) - BigInt(op.minOutputAtomic)).toString() ||
         BigInt(snapshot.quote.quote.minimumOutputAtomic) < BigInt(op.minOutputAtomic) ||
         canonicalJson(snapshot.finalityPolicy) !== canonicalJson(op.finalityPolicy) || canonicalJson(snapshot.policy) !== canonicalJson(op.policy) ||
         BigInt(snapshot.executorNativeCapAtomic) < BigInt(op.nativeDropAtomic) || snapshot.sourceCodeHash !== op.sourceCodeHash ||
@@ -1095,10 +1099,16 @@ export function stargateV2TokenCanonicalReceipt(input) {
         options: op.options, executor: op.executor, executorNativeCapAtomic: op.postApprovalQuote?.executorNativeCapAtomic ?? op.executorNativeCapAtomic, policy: op.policy,
         finalityPolicy: op.finalityPolicy, quoteHash: effectiveQuote.quoteHash,
         ...(op.schemaVersion === "apn.stargate-v2-token-operation.v5" ? { quoteLifecycle: {
+                ownerApprovedMinimumOutputAtomic: op.minOutputAtomic,
+                ownerApprovedMaximumQuoteLossAtomic: (BigInt(op.amountAtomic) - BigInt(op.minOutputAtomic)).toString(),
+                initialQuotedOutputAtomic: op.quote.quote.minimumOutputAtomic,
+                initialQuotedNativeMessageFeeAtomic: op.quote.quote.nativeMessageFeeAtomic,
                 prepareQuoteHash: op.quote.quoteHash, prepareExpiresAt: op.expiresAt, approvalFinalityWindowMs: op.approvalFinalityWindowMs,
                 approvalSubmissionStartedAt: op.approvalSubmissionStartedAt ?? null, approvalFinalityDeadline: op.approvalFinalityDeadline ?? null,
                 postApprovalQuoteHash: op.postApprovalQuote?.snapshotHash ?? null, postApprovalQuoteBlock: op.postApprovalQuote?.quoteBlock ?? null,
-                postApprovalQuoteExpiresAt: op.postApprovalQuote?.expiresAt ?? null
+                postApprovalQuoteExpiresAt: op.postApprovalQuote?.expiresAt ?? null,
+                postApprovalQuotedOutputAtomic: op.postApprovalQuote?.quote.quote.minimumOutputAtomic ?? null,
+                postApprovalQuotedNativeMessageFeeAtomic: op.postApprovalQuote?.quote.quote.nativeMessageFeeAtomic ?? null
             } } : {}),
         feeApproval: op.feeApproval ?? { provenance: "legacy_exact_snapshot", quotedMaxFeePerGasWei: op.sendEnvelope.maxFeePerGasAtomic, quotedMaxPriorityFeePerGasWei: op.sendEnvelope.maxPriorityFeePerGasAtomic, approvedMaxFeePerGasWei: op.sendEnvelope.maxFeePerGasAtomic, approvedMaxPriorityFeePerGasWei: op.sendEnvelope.maxPriorityFeePerGasAtomic },
         bridgeSimulation: op.bridgeSimulation ?? { mode: "legacy_exact_at_prepare", prepareStatus: "legacy_succeeded",
