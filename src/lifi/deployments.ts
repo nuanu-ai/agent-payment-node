@@ -46,7 +46,8 @@ const ACROSS: Readonly<Partial<Record<BridgeChainId, Across>>> = {
     implementation: code("0x3266a6de0f3533b042ffdb1a8183168422be7349", "0x67f63f0bce352f1c92ead8a198ebf1b2861659d75524f6a0fc0fdf4cd73fc5c3"),
   },
   59144: {
-    spoke: code("0xEf4998E4cda2232c5f1824Eac8C5060F28BfAEeC", "0x020e6beeb2805a62c4bedee022067700a57a2fa6793db6f7773ad94bb6dfb633"),
+    spoke: code("0x7E63A5f1a8F0B4d0934B2f2327DAED3F6bb2ee75", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
+    implementation: code("0x263c0E973fd0Ca9dE57bb22a91C57Fc367A81915", "0x87a80b6ff28516c1df2d3a3be7f4945d04ec7538cc500074a1f90a7306cae1ed"),
   },
 };
 
