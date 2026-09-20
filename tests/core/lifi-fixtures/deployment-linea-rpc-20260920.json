@@ -131,6 +131,32 @@
       "response": {
         "result": "0x0000000000000000000000000000000000000000000000000000000000005460"
       }
+    },
+    {
+      "request": {
+        "method": "debug_traceTransaction",
+        "params": [
+          "0x4352433956109d31ab50db9547f16bcb90f3545f793ed40f75716ccd9a360efd",
+          {
+            "tracer": "callTracer",
+            "tracerConfig": {
+              "onlyTopCall": true,
+              "withLog": false
+            }
+          }
+        ]
+      },
+      "response": {
+        "result": {
+          "from": "0x9629fe86f04e735923e8542ddd9f265f576e7421",
+          "gas": "0x186a0",
+          "gasUsed": "0x5208",
+          "to": "0xbcc016e2a79d509d2b776827ed986568d9b56d59",
+          "input": "0x",
+          "value": "0x362a56a1cd0f200",
+          "type": "CALL"
+        }
+      }
     }
   ]
 }

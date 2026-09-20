@@ -7,7 +7,7 @@ import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
-import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { BridgeAllowlistGate, LIFI_ACROSS_BRIDGE_MECHANISM } from "../../src/lifi/allowlist.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { LIFI_SYNTHETIC_SENDER } from "./lifi-helpers.js";
@@ -35,7 +35,7 @@ test("immutable anonymous Linea capture binds the exact real quote and materiali
 
 test("immutable Linea RPC baseline verifies the exact safe-block SpokePool, WETH and buffers", async () => {
   const raw = await readFile(resolve("tests/core/lifi-fixtures/deployment-linea-rpc-20260920.json"), "utf8");
-  assert.equal(sha256(raw), "6799a93c2d0f0c59e48c02227222f1a6c22dcc65e2676e565c42d632e7a22327");
+  assert.equal(sha256(raw), "6c98ae74d2f011a07551157d5038fcd0c59fb4e8e97add08fe9bb95fc2a85d45");
   const capture = JSON.parse(raw) as any;
   assert.equal(capture.mode, "public_read_only_no_signing_no_send");
   assert.deepEqual(capture.safeBlock, { number: "0x1e9a3ec",
@@ -48,6 +48,11 @@ test("immutable Linea RPC baseline verifies the exact safe-block SpokePool, WETH
     timestampAtomic: BigInt(capture.safeBlock.timestamp).toString() };
   const proof = await new BridgeRpc(59144, capture.rpcOrigin, call).deployment("across", 1, BRIDGE_ZERO_ADDRESS, block);
   assert.equal(proof.block.hash, capture.safeBlock.hash); assert.equal(proof.chainId, 59144); assert.equal(proof.peerChainId, 1);
+  const unavailable: EvmRpcCall = async (method, params) => {
+    if (method === "debug_traceTransaction") throw new Error("method unavailable");
+    return await call(method, params);
+  };
+  await assert.rejects(new BridgeRpc(59144, capture.rpcOrigin, unavailable).deployment("across", 1, BRIDGE_ZERO_ADDRESS, block));
 });
 
 test("Linea native Across executes one exact EIP-1559 source effect and completes only with safe native delta proof", async (t) => {
@@ -155,6 +160,60 @@ test("Linea shared usage reservation is atomic, survives unknown outcome, and bl
   const capped = await u.core.execute({ command: "bridge.prepare", profile: u.profile, quote: (nextRoutes.data as any).quote_hash,
     route: (nextRoutes.data as any).routes[0].route_id, idempotencyKey: "linea-unknown-second-001" });
   assert.equal(capped.ok, false); assert.equal(capped.error?.code, "APN_OPERATION_BLOCKED");
+});
+
+test("Linea reconciles an exact reservation after a crash before the operation save", async (t) => {
+  const amount = "200000000000000";
+  for (const outcome of ["rejected", "expired", "policy-drift", "completed"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await lifiFixture(temporary.root, "eth-linea", {
+      policy: { maximumPerTransferAtomic: amount, dailyLimitAtomic: amount },
+    });
+    if (outcome === "completed") s.provider.statusValue = "completed_observed";
+    const prepared = await s.prepare("across", `linea-crash-${outcome}`), binding = prepared.operation.intent.allowlist!;
+    const identity = { account: binding.account, chain: binding.chain, asset: binding.asset };
+    const reservationId = assetUsageReservationId(identity, `apn.bridge-usage:${prepared.id}`);
+    const repository = s.core.bridges.records as any, persist = repository.persist.bind(repository);
+    let injected = false;
+    repository.persist = async (op: any) => {
+      if (!injected && op.state === "execution_pending" && op.usageLease !== null) {
+        injected = true; throw new Error("fault_after_usage_reserve_before_operation_save");
+      }
+      return await persist(op);
+    };
+    const crashed = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+    assert.equal(crashed.ok, false); assert.equal(injected, true);
+    const unchanged = (await s.core.bridges.records.findOperation(prepared.id))!;
+    assert.equal(unchanged.state, "awaiting_approval"); assert.equal(unchanged.usageLease, null);
+    const ledger = new AssetUsageLedger(temporary.root), orphan = await ledger.load(identity, reservationId);
+    assert.equal(orphan?.state, "reserved");
+    assert.equal((await ledger.usage(identity, s.now)).amountAtomic, amount);
+    repository.persist = persist;
+
+    if (outcome === "rejected") s.approval.accepted = false;
+    if (outcome === "expired") s.now.setTime(Date.parse(unchanged.intent.expiresAt) + 1);
+    if (outcome === "policy-drift") await activateDirectPolicy(temporary.root, s.profile, {
+      accounts: { evm: LIFI_SYNTHETIC_SENDER }, now: new Date(s.now.getTime() + 1), admissions: [{
+        chain: "eip155:1", kind: "native", rail: "bridge", maximumPerTransferAtomic: (BigInt(amount) * 2n).toString(),
+        dailyLimitAtomic: (BigInt(amount) * 2n).toString(), mechanism: LIFI_ACROSS_BRIDGE_MECHANISM,
+      }],
+    });
+    const retried = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+    assert.equal(retried.ok, true, retried.error?.message);
+    const record = (await s.core.bridges.records.findOperation(prepared.id))!;
+    const recovered = await ledger.load(identity, reservationId);
+    if (outcome === "completed") {
+      assert.equal(record.state, "completed"); assert.equal(record.usageLease?.reservationId, reservationId);
+      assert.equal(recovered?.state, "finalized");
+      assert.equal((await ledger.usage(identity, s.now)).amountAtomic, amount);
+      assert.equal(s.source.submissions.length, 1);
+    } else {
+      assert.equal(record.state, "failed_before_effect"); assert.equal(record.usageLease, null);
+      assert.equal(recovered?.state, "failed_before_effect");
+      assert.equal((await ledger.usage(identity, s.now)).amountAtomic, "0");
+      assert.equal(s.source.submissions.length, 0);
+    }
+  }
 });
 
 test("Linea execution refuses active policy drift before signing or sending", async (t) => {
