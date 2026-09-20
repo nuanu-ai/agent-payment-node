@@ -482,6 +482,19 @@ test("actual compiled CLI ignores caller HOME and leaves effective-user APN stat
   await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
 });
 
+test("actual compiled Stargate status needs no RPC environment and creates no state", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const effectiveRoot = resolve(userInfo().homedir, ".apn");
+  const before = await treeDigest(effectiveRoot), environment = { ...process.env };
+  delete environment.APN_ETHEREUM_RPC_URL; delete environment.APN_UNICHAIN_RPC_URL;
+  const result = spawnSync(resolve("bin/apn.js"), ["stargate", "native", "status", "--operation", "d".repeat(64)], {
+    encoding: "utf8", cwd: temporary.base, env: environment,
+  });
+  assert.equal(result.status, 1, result.stderr ?? result.error?.message); assert.equal(result.stderr, "");
+  const envelope = JSON.parse(result.stdout) as { readonly ok: boolean; readonly error: { readonly code: string } };
+  assert.equal(envelope.ok, false); assert.equal(envelope.error.code, "APN_OPERATION_NOT_FOUND");
+  assert.equal(await treeDigest(effectiveRoot), before); await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
+});
+
 test("actual compiled discovery is raw and no-effect with empty or unwritable caller HOME", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);

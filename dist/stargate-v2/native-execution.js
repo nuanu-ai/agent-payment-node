@@ -65,7 +65,7 @@ export class FileStargateNativeJournal {
     }
     async withLock(id, work) {
         await this.locks.initialize();
-        return await this.locks.withLocks([`stargate-native:${id}`], work);
+        return await this.locks.withLocks([`stargate-native:${id}`], work, { waitMs: 30_000 });
     }
     async load(id) {
         try {

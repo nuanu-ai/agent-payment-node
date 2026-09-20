@@ -46,16 +46,15 @@ export class StargateJsonRpc {
 }
 
 export class StargateNativeService {
-  private readonly source: StargateJsonRpc; private readonly destination: StargateJsonRpc;
+  private source?: StargateJsonRpc; private destination?: StargateJsonRpc;
   private readonly journal: FileStargateNativeJournal; private readonly local: LocalStargateNativeSigner;
-  constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>,
+  constructor(private readonly state: StateStore, wrapping: WrappingSecretPort,
+    private readonly environment: Readonly<Record<string, string | undefined>>,
     private readonly now: () => number = Date.now) {
-    const source = environment.APN_ETHEREUM_RPC_URL, destination = environment.APN_UNICHAIN_RPC_URL;
-    if (source === undefined || destination === undefined) blocked("APN_ETHEREUM_RPC_URL_and_APN_UNICHAIN_RPC_URL_required");
-    this.source = new StargateJsonRpc(source); this.destination = new StargateJsonRpc(destination);
     this.journal = new FileStargateNativeJournal(state.root, state); this.local = new LocalStargateNativeSigner(state, wrapping);
   }
   async prepare(input: Readonly<{ profile: string; amountAtomic: string; maxNativeDebitAtomic: string; idempotencyKey: string }>): Promise<StargateNativeOperation> {
+    this.remote();
     await this.state.initialize(); const identity = await this.local.identity(input.profile), ports = await this.ports(identity.profile, identity.address);
     return await prepareStargateV2NativeEth({ ...input, owner: identity.address, recipient: identity.address }, ports, this.journal);
   }
@@ -74,7 +73,7 @@ export class StargateNativeService {
     const found = await this.journal.load(id); if (found === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stargate native operation was not found."); return found;
   }
   private async ports(profile: string, owner: Address): Promise<StargateNativeExecutionPorts> {
-    const signer = await this.local.port(profile, owner), source = this.source, destination = this.destination;
+    const signer = await this.local.port(profile, owner), { source, destination } = this.remote();
     return {
       sourceCall: (method, params) => source.call(method, params), destinationCall: (method, params) => destination.call(method, params),
       destinationBalance: async recipient => {
@@ -96,6 +95,13 @@ export class StargateNativeService {
       waitSourceReceipt: async transactionHash => await confirmedStargateSourceReceipt(source, transactionHash),
       observeDestination: async input => await observeStargateDestination(destination, input), now: this.now,
     };
+  }
+  private remote(): Readonly<{ source: StargateJsonRpc; destination: StargateJsonRpc }> {
+    if (this.source !== undefined && this.destination !== undefined) return { source: this.source, destination: this.destination };
+    const source = this.environment.APN_ETHEREUM_RPC_URL, destination = this.environment.APN_UNICHAIN_RPC_URL;
+    if (source === undefined || destination === undefined) blocked("APN_ETHEREUM_RPC_URL_and_APN_UNICHAIN_RPC_URL_required");
+    this.source = new StargateJsonRpc(source); this.destination = new StargateJsonRpc(destination);
+    return { source: this.source, destination: this.destination };
   }
 }
 
