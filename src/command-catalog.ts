@@ -73,7 +73,6 @@ export interface CommandDefinition {
   readonly recovery: readonly { readonly command_path: readonly string[]; readonly when: string }[];
   readonly examples: readonly string[];
 }
-
 const noDefault = { kind: "none" } as const;
 const defaultProfile = { kind: "literal", value: "default" } as const;
 const completedStates = { terminal: ["completed", "classified_failure"], non_terminal: [] } as const;
@@ -108,7 +107,6 @@ const permissionStates = {
   terminal: ["active", "disabled", "expired", "revoked", "drift_blocked", "forgotten", "classified_failure"],
   non_terminal: ["pending_consent", "grant_committed_pending_profile"],
 } as const;
-
 const profileOptional = option("--profile", "profile", false, defaultProfile, ["matches_[a-z0-9][a-z0-9._-]{0,63}"], "public");
 const profileRequired = option("--profile", "profile", true, noDefault, ["matches_[a-z0-9][a-z0-9._-]{0,63}"], "public");
 const rpcRequired = option("--rpc-url", "https_url", true, noDefault, [
@@ -124,6 +122,8 @@ const httpOptions = [
 const httpSynopsis = " [--method <method>] [--headers-json <json>] [--body-base64 <base64>]";
 export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_GROUPS,
   ...SUNSWAP_COMMAND_GROUPS, ...JUPITER_COMMAND_GROUPS, ...ORCA_COMMAND_GROUPS,
+  { path: ["stargate"], summary: "Execute the pinned Stargate V2 Ethereum ETH to Unichain ETH lane.", kind: "group" },
+  { path: ["stargate", "native"], summary: "Prepare, submit and observe one exact self transfer.", kind: "group" },
   { path: ["gasless"], summary: "Transfer USDC with gas paid from the total USDC budget.", kind: "group" },
   { path: ["gasless", "transfer"], summary: "Prepare and approve a USDC fee transfer.", kind: "group" },
   { path: ["bridge"], summary: "Discover, prepare and recover finite LI.FI cross-chain routes.", kind: "group" },
@@ -145,6 +145,11 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GRO
   { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ] as const;
 const BASE_COMMANDS: readonly CommandDefinition[] = [
+  command(["stargate", "native", "prepare"], "apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>", "Freeze a fresh quote and exact Ethereum Stargate sendToken envelope.", [profileRequired, option("--amount-atomic", "wei", true, noDefault, ["positive_integer", "dust_free_quote_amount"], "operator_input"), option("--max-native-debit-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_128_safe_ascii_characters"], "operator_input")], "payment_prepare", "Reads both chains and writes a crash-durable unsigned operation.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [{ command_path: ["stargate", "native", "execute"], when: "After reviewing the frozen operation." }], ["apn stargate native prepare --profile owner --amount-atomic 10000000000000000 --max-native-debit-atomic 12000000000000000 --idempotency-key eth-unichain-0001"]),
+  command(["stargate", "native", "execute"], "apn stargate native execute --operation <operation-id>", "Foreground-confirm and submit or observe an exact prepared transfer.", [operationRequired], "payment_submit", "May sign and submit exactly once after fresh preflight checks.", "foreground_tty", "Immediately before the attempt marker and signing.", { terminal: ["observed"], non_terminal: ["approved", "submission_started", "submitted", "unknown_finality"] }, [{ command_path: ["stargate", "native", "status"], when: "To inspect durable state without signing or resending." }], ["apn stargate native execute --operation <operation-id>"]),
+  command(["stargate", "native", "observe"], "apn stargate native observe --operation <operation-id>", "Observe safe source and destination evidence for one prior submission attempt.", [operationRequired], "network_read", "Reads both chains and may durably advance only the named attempted operation; never signs or resends.", "prior_operation_authorization", "The immutable submission_started marker and transaction hash are the authorization boundary.", { terminal: ["observed"], non_terminal: ["submitted", "unknown_finality"] }, [], ["apn stargate native observe --operation <operation-id>"]),
+  command(["stargate", "native", "status"], "apn stargate native status --operation <operation-id>", "Read one durable Stargate native operation.", [operationRequired], "local_read", "Reads one journal record.", "none", "Never.", { terminal: ["observed"], non_terminal: ["prepared", "approved", "submission_started", "submitted", "unknown_finality"] }, [], ["apn stargate native status --operation <operation-id>"]),
+  command(["stargate", "native", "receipt"], "apn stargate native receipt --operation <operation-id>", "Read the canonical receipt after exact safe source and destination events.", [operationRequired], "local_read", "Reads one observed journal record.", "none", "Never.", { terminal: ["observed"], non_terminal: [] }, [], ["apn stargate native receipt --operation <operation-id>"]),
   ...EVM_COMMANDS,
   command(["--version"], "apn --version", "Report installed APN and CLI contract versions.", [], "none", "Reads immutable build metadata only.", "none", "Never.", completedStates, [], ["apn --version"]),
   command(["mcp", "serve"], "apn mcp serve", "Serve the selected APN commands over local MCP stdio.", [], "none", "Starts only a local child-process stdio session.", "none", "Never.", mcpServerStates, [], ["apn mcp serve"], "text"),
@@ -422,9 +427,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   ),
   command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Inspect one durable terminal receipt.", [operationRequired], "local_write", "May initialize local state and repair saved operation or receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ] as const;
-
 export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...PORTFOLIO_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...ONECLICK_COMMANDS, ...GASLESS_COMMANDS, ...ALLOWLIST_COMMANDS, ...UNISWAP_COMMANDS, ...SUNSWAP_COMMANDS, ...JUPITER_COMMANDS, ...ORCA_COMMANDS];
-
 export const COMMAND_MANIFEST = {
   schema_version: "apn.command-manifest.v1",
   product: "agent-payment-node",
@@ -451,9 +454,7 @@ export const COMMAND_MANIFEST = {
   groups: COMMAND_GROUPS,
   commands: COMMANDS,
 } as const;
-
 validateCommandManifest(COMMAND_MANIFEST);
-
 function command(
   path: readonly string[],
   synopsis: string,
@@ -487,7 +488,6 @@ function command(
     examples,
   };
 }
-
 function option(
   name: `--${string}`,
   type: ScalarType,

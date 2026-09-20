@@ -33,8 +33,9 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "stargate", "stargate native", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
+  "stargate native prepare", "stargate native execute", "stargate native observe", "stargate native status", "stargate native receipt",
   "wallet balance-asset",
   "pay transfer prepare-asset",
   "--version",
@@ -479,6 +480,19 @@ test("actual compiled CLI ignores caller HOME and leaves effective-user APN stat
   });
   assert.equal(await treeDigest(effectiveRoot), before, "HOME is ignored by design; the effective-user ~/.apn tree must remain unchanged");
   await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
+});
+
+test("actual compiled Stargate status needs no RPC environment and creates no state", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const effectiveRoot = resolve(userInfo().homedir, ".apn");
+  const before = await treeDigest(effectiveRoot), environment = { ...process.env };
+  delete environment.APN_ETHEREUM_RPC_URL; delete environment.APN_UNICHAIN_RPC_URL;
+  const result = spawnSync(resolve("bin/apn.js"), ["stargate", "native", "status", "--operation", "d".repeat(64)], {
+    encoding: "utf8", cwd: temporary.base, env: environment,
+  });
+  assert.equal(result.status, 1, result.stderr ?? result.error?.message); assert.equal(result.stderr, "");
+  const envelope = JSON.parse(result.stdout) as { readonly ok: boolean; readonly error: { readonly code: string } };
+  assert.equal(envelope.ok, false); assert.equal(envelope.error.code, "APN_OPERATION_NOT_FOUND");
+  assert.equal(await treeDigest(effectiveRoot), before); await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
 });
 
 test("actual compiled discovery is raw and no-effect with empty or unwritable caller HOME", async (t) => {

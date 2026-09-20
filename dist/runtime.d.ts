@@ -27,7 +27,9 @@ import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapRuntime } from "./swap/runtime.js";
 import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
+import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 export interface CoreDependencies {
+    readonly stargateNative?: StargateNativeService;
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.uniswap.quote";
@@ -76,6 +78,7 @@ export interface CoreDependencies {
     readonly operationAbandonApproval?: OperationAbandonApprovalPort;
 }
 export declare class RuntimeContext {
+    readonly stargateNative?: StargateNativeService;
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.uniswap.quote";

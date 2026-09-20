@@ -4,6 +4,7 @@ import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
+    stargateNative;
     portfolio;
     uniswapRuntime;
     sunswapRuntime;
@@ -49,6 +50,8 @@ export class RuntimeContext {
     coinbaseRpcInstance;
     initialized;
     constructor(dependencies) {
+        if (dependencies.stargateNative !== undefined)
+            this.stargateNative = dependencies.stargateNative;
         if (dependencies.portfolio !== undefined)
             this.portfolio = dependencies.portfolio;
         if (dependencies.uniswapRuntime !== undefined)
