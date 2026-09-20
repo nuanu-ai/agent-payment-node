@@ -16,7 +16,21 @@
       "finality tag is selected only by chain ID",
       "unavailable selected finality fails closed",
       "no safe-to-latest or finalized-to-safe/latest fallback"
-    ]
+    ],
+    "currentOperationSchemas": [
+      "apn.stargate-v2-native-operation.v2",
+      "apn.stargate-v2-token-operation.v2"
+    ],
+    "legacyCompatibility": {
+      "operationSchemas": [
+        "apn.stargate-v2-native-operation.v1",
+        "apn.stargate-v2-token-operation.v1"
+      ],
+      "version": "apn.stargate-v2-finality.legacy-safe-v1",
+      "blockTag": "safe",
+      "provenance": "derived_legacy_v1",
+      "rule": "raw-integrity-valid exact historical lanes only; normalize in memory after verifying the raw saved integrity"
+    }
   },
   "sources": [
     {
@@ -704,8 +718,15 @@
     },
     "destinationProofEvent": {
       "signature": "NativeDropApplied((uint32,bytes32,uint64),uint32,address,(address,uint256)[],bool[])",
-      "originFields": ["srcEid", "sender", "nonce"],
-      "paramsFields": ["receiver", "amount"],
+      "originFields": [
+        "srcEid",
+        "sender",
+        "nonce"
+      ],
+      "paramsFields": [
+        "receiver",
+        "amount"
+      ],
       "source": "LayerZero-v2@9c741e7f9790639537b1710a203bcdfd73b0b9ac/packages/layerzero-v2/evm/messagelib/contracts/interfaces/IExecutor.sol"
     },
     "capGetter": "dstConfig(uint32):(uint64,uint16,uint128,uint128,uint64)",
