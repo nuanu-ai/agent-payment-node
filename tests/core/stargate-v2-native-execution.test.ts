@@ -134,6 +134,8 @@ const request = (changes: Partial<Parameters<typeof prepareStargateV2NativeEth>[
 test("prepares only Ethereum native ETH to Unichain self with exact sendToken calldata and total value", async () => {
   const s = setup(), op = await prepareStargateV2NativeEth(request(), s.ports, s.journal);
   assert.equal(op.phase, "prepared"); assert.equal(op.sourceEid, 30101); assert.equal(op.destinationEid, 30320);
+  assert.deepEqual(op.finalityPolicy, { version: "apn.stargate-v2-finality.v1", source: { chainId: 1, blockTag: "safe" },
+    destination: { chainId: 130, blockTag: "safe" } });
   assert.equal(op.envelope.to, SOURCE); assert.equal(op.totalValueAtomic, (AMOUNT + FEE).toString());
   assert.equal(op.maximumDebitAtomic, (AMOUNT + FEE + 200_000n).toString());
   const decoded = decodeFunctionData({ abi: STARGATE_SEND_ABI, data: op.envelope.data });

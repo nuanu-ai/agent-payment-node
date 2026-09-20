@@ -105,7 +105,7 @@ export class StargateTokenService {
         const signer = await this.local.port(profile, owner), { source, destination } = this.remote();
         const tokenAt = async (rpc, token, account, tag) => decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", data: await rpc.call("eth_call", [{ to: token, data: encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", args: [account] }) }, tag]) });
         return { sourceCall: (m, p) => source.call(m, p), destinationCall: (m, p) => destination.call(m, p),
-            destinationBalances: async (recipient) => { const block = record(await destination.call("eth_getBlockByNumber", ["safe", false])); return { tokenAtomic: (await tokenAt(destination, STARGATE_TOKEN_DESTINATION_TOKEN, recipient, String(block.number))).toString(), nativeAtomic: quantity(await destination.call("eth_getBalance", [recipient, block.number])).toString(), blockNumberAtomic: quantity(block.number).toString(), blockHash: hash(block.hash) }; },
+            destinationBalances: async (recipient, finalityTag) => { const block = record(await destination.call("eth_getBlockByNumber", [finalityTag, false])); return { tokenAtomic: (await tokenAt(destination, STARGATE_TOKEN_DESTINATION_TOKEN, recipient, String(block.number))).toString(), nativeAtomic: quantity(await destination.call("eth_getBalance", [recipient, block.number])).toString(), blockNumberAtomic: quantity(block.number).toString(), blockHash: hash(block.hash) }; },
             prepareEnvelope: async (tx) => {
                 if (quantity(await source.call("eth_chainId", [])) !== 10n)
                     throw new ApnError("APN_CHAIN_MISMATCH", "Optimism RPC identity changed.");
@@ -134,7 +134,7 @@ export class StargateTokenService {
             reserveUsage: async (op) => await this.reserveUsage(op),
             followUsage: async (op, target) => await this.followUsage(op, target),
             sendRawTransaction: async (raw) => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw))
-                throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash) => await confirmedStargateSourceReceipt(source, txHash),
+                throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateSourceReceipt(source, txHash, finalityTag),
             observeDestination: async (input) => await observeStargateTokenDestination(destination, input, tokenAt), now: this.now };
     }
     async reserveUsage(op) {
@@ -181,16 +181,16 @@ function assertServiceUsageTarget(op) {
         throw new ApnError("APN_STATE_CORRUPT", "The Stargate token usage reconciliation target is incompatible with the journal phase.");
 }
 export async function observeStargateTokenDestination(rpc, input, tokenAt) {
-    const safe = record(await rpc.call("eth_getBlockByNumber", ["safe", false])), topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
+    const finalityHead = record(await rpc.call("eth_getBlockByNumber", [input.finalityTag, false])), topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
     const baselineTag = `0x${BigInt(input.fromBlockNumberAtomic).toString(16)}`, baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false]));
     if (hash(baseline.hash) !== input.fromBlockHash)
         throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline is no longer canonical.");
-    const logs = await rpc.call("eth_getLogs", [{ address: STARGATE_TOKEN_DESTINATION_POOL, fromBlock: baselineTag, toBlock: safe.number, topics }]);
+    const logs = await rpc.call("eth_getLogs", [{ address: STARGATE_TOKEN_DESTINATION_POOL, fromBlock: baselineTag, toBlock: finalityHead.number, topics }]);
     if (!Array.isArray(logs))
         blocked("destination_logs");
     const dropTopics = encodeEventTopics({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied" });
     const dropLogs = BigInt(input.nativeDropAtomic) === 0n ? [] : await rpc.call("eth_getLogs", [{ address: STARGATE_TOKEN_DESTINATION_EXECUTOR,
-            fromBlock: baselineTag, toBlock: safe.number, topics: dropTopics }]);
+            fromBlock: baselineTag, toBlock: finalityHead.number, topics: dropTopics }]);
     if (!Array.isArray(dropLogs))
         blocked("destination_native_drop_logs");
     const readToken = tokenAt ?? (async (client, token, account, tag) => decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", data: await client.call("eth_call", [{ to: token, data: encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", args: [account] }) }, tag]) }));
@@ -225,11 +225,11 @@ export async function observeStargateTokenDestination(rpc, input, tokenAt) {
                     continue;
                 nativeDrop = matching[0];
             }
-            const [tokenAfter, nativeAfter] = await Promise.all([readToken(rpc, STARGATE_TOKEN_DESTINATION_TOKEN, input.recipient, String(safe.number)), rpc.call("eth_getBalance", [input.recipient, safe.number]).then(quantity)]);
+            const [tokenAfter, nativeAfter] = await Promise.all([readToken(rpc, STARGATE_TOKEN_DESTINATION_TOKEN, input.recipient, String(finalityHead.number)), rpc.call("eth_getBalance", [input.recipient, finalityHead.number]).then(quantity)]);
             const tokenBefore = BigInt(input.tokenBalanceBeforeAtomic), nativeBefore = BigInt(input.nativeBalanceBeforeAtomic);
             if (tokenAfter < tokenBefore || nativeAfter < nativeBefore)
                 return null;
-            return { emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30111, destinationTransactionHash: hash(log.transactionHash), logIndexAtomic: quantity(log.logIndex).toString(), blockNumberAtomic: quantity(log.blockNumber).toString(), blockHash: hash(log.blockHash), finality: "safe", recipient: input.recipient, amountReceivedAtomic: event.args.amountReceivedLD.toString(), tokenBalanceBeforeAtomic: tokenBefore.toString(), tokenBalanceAfterAtomic: tokenAfter.toString(), tokenDeltaAtomic: (tokenAfter - tokenBefore).toString(), nativeBalanceBeforeAtomic: nativeBefore.toString(), nativeBalanceAfterAtomic: nativeAfter.toString(), nativeDeltaAtomic: (nativeAfter - nativeBefore).toString(), ...(nativeDrop === undefined ? {} : { nativeDrop }) };
+            return { emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30111, destinationTransactionHash: hash(log.transactionHash), logIndexAtomic: quantity(log.logIndex).toString(), blockNumberAtomic: quantity(log.blockNumber).toString(), blockHash: hash(log.blockHash), finality: input.finalityTag, recipient: input.recipient, amountReceivedAtomic: event.args.amountReceivedLD.toString(), tokenBalanceBeforeAtomic: tokenBefore.toString(), tokenBalanceAfterAtomic: tokenAfter.toString(), tokenDeltaAtomic: (tokenAfter - tokenBefore).toString(), nativeBalanceBeforeAtomic: nativeBefore.toString(), nativeBalanceAfterAtomic: nativeAfter.toString(), nativeDeltaAtomic: (nativeAfter - nativeBefore).toString(), ...(nativeDrop === undefined ? {} : { nativeDrop }) };
         }
         catch { /* unrelated candidate */ }
     }

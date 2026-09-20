@@ -76,6 +76,7 @@ function serviceRecoveryHarness(phase: string, usageTarget?: string) {
   let signs = 0, sends = 0;
   const operation: any = { operationId: "f".repeat(64), profile: "owner", owner: OWNER, amountAtomic: "100", phase,
     transitions: [{ phase, at: "2026-09-20T10:00:00.000Z", reason: "fixture" }], transactionHash: TX,
+    finalityPolicy: { version: "apn.stargate-v2-finality.v1", source: { chainId: 10, blockTag: "safe" }, destination: { chainId: 137, blockTag: "finalized" } },
     cleanupTransactionHash: OTHER_TX, policy: { policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM },
     ...(usageTarget === undefined ? {} : { usageTarget }), integrityHash: "b".repeat(64) };
   const journal: any = { value: operation, load: async () => structuredClone(journal.value), save: async (value: any) => { journal.value = structuredClone(value); },
@@ -128,7 +129,8 @@ function destinationRpc(mutation?: "success" | "receiver" | "amount" | "transact
   ]);
   return { call: async (method: string, params: readonly any[]) => {
     if (method === "eth_getBlockByNumber") {
-      if (params[0] === "safe") return { number: "0x20", hash: SAFE };
+      if (params[0] === "safe" || params[0] === "latest") throw new Error(`weaker finality tag ${params[0]} forbidden`);
+      if (params[0] === "finalized") return { number: "0x20", hash: SAFE };
       if (params[0] === "0x9") return { number: "0x9", hash: mutation === "baseline" ? SAFE : BASELINE };
       return { number: "0x1f", hash: EVENT_BLOCK };
     }
@@ -144,11 +146,22 @@ function destinationRpc(mutation?: "success" | "receiver" | "amount" | "transact
 
 const destinationInput = { sourceTransactionHash: TX, guid: GUID, recipient: OWNER, sourceEid: 30111 as const,
   destinationPool: STARGATE_TOKEN_DESTINATION_POOL, minimumAmountAtomic: "100", tokenBalanceBeforeAtomic: "1000000",
-  nativeBalanceBeforeAtomic: "1000000", nativeDropAtomic: DROP.toString(), fromBlockNumberAtomic: "9", fromBlockHash: BASELINE };
+  nativeBalanceBeforeAtomic: "1000000", nativeDropAtomic: DROP.toString(), fromBlockNumberAtomic: "9", fromBlockHash: BASELINE,
+  finalityTag: "finalized" as const };
 
 test("native-drop completion binds the successful pinned Executor event and canonical baseline", async () => {
   const evidence = await observeStargateTokenDestination(destinationRpc() as any, destinationInput);
+  assert.equal(evidence?.finality, "finalized");
   assert.equal(evidence?.nativeDrop?.executor, STARGATE_TOKEN_DESTINATION_EXECUTOR); assert.equal(evidence?.nativeDrop?.success, true);
+});
+
+test("Polygon finalized unavailability fails closed without safe or latest fallback", async () => {
+  const tags: string[] = [], rpc = { call: async (method: string, params: readonly any[]) => {
+    if (method === "eth_getBlockByNumber") { tags.push(String(params[0])); throw new Error("finalized unavailable"); }
+    throw new Error(`unexpected ${method}`);
+  } };
+  await assert.rejects(observeStargateTokenDestination(rpc as any, destinationInput), /finalized unavailable/u);
+  assert.deepEqual(tags, ["finalized"]);
 });
 
 for (const mutation of ["success", "receiver", "amount", "transaction", "guid"] as const) test(`native-drop ${mutation} mismatch refuses unrelated balance growth`, async () => {

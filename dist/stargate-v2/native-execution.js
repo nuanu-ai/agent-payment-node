@@ -8,6 +8,7 @@ import { ApnError } from "../errors.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "./abi.js";
+import { assertStargateV2RouteFinalityPolicy, stargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct } from "./quote.js";
 const SOURCE_CHAIN = 1;
 const DESTINATION_CHAIN = 130;
@@ -207,14 +208,15 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
         fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
     if (uint(prepared.nativeBalanceAtomic) < maximumDebit)
         fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
-    const destination = await ports.destinationBalance(recipient);
+    const finalityPolicy = stargateV2RouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN);
+    const destination = await ports.destinationBalance(recipient, finalityPolicy.destination.blockTag);
     uint(destination.balanceAtomic);
     uint(destination.blockNumberAtomic);
     hex32(destination.blockHash);
     const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
     const body = {
         schemaVersion: "apn.stargate-v2-native-operation.v1", operationId, profile, profileHash, idempotencyHash,
-        owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), sourcePool: SOURCE_POOL,
+        owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), finalityPolicy, sourcePool: SOURCE_POOL,
         destinationPool: DESTINATION_POOL, sourceEid: SOURCE_EID, destinationEid: DESTINATION_EID, quote, sourceCodeHash: config.codeHash,
         destinationCodeHash: destinationConfig.codeHash,
         destinationBalanceBeforeAtomic: destination.balanceAtomic, destinationBalanceBlock: { numberAtomic: destination.blockNumberAtomic, hash: destination.blockHash },
@@ -297,7 +299,7 @@ async function observeOnly(input, ports, journal) {
     let operation = input;
     if (operation.transactionHash === undefined)
         fail("APN_STATE_CORRUPT", "attempt_without_hash");
-    const receipt = await ports.waitSourceReceipt(operation.transactionHash);
+    const receipt = await ports.waitSourceReceipt(operation.transactionHash, operation.finalityPolicy.source.blockTag);
     if (receipt === null) {
         if (operation.phase !== "unknown_finality") {
             operation = transition(operation, "unknown_finality", "source_receipt_not_safe", (ports.now ?? Date.now)());
@@ -310,7 +312,7 @@ async function observeOnly(input, ports, journal) {
         recipient: operation.recipient, sourceEid: SOURCE_EID,
         destinationPool: DESTINATION_POOL, minimumAmountAtomic: source.amountReceivedAtomic,
         balanceBeforeAtomic: operation.destinationBalanceBeforeAtomic, fromBlockNumberAtomic: operation.destinationBalanceBlock.numberAtomic,
-        fromBlockHash: operation.destinationBalanceBlock.hash });
+        fromBlockHash: operation.destinationBalanceBlock.hash, finalityTag: operation.finalityPolicy.destination.blockTag });
     if (destination === null) {
         if (operation.sourceReceipt === undefined) {
             const transitions = operation.phase === "submitted" ? operation.transitions : [...operation.transitions,
@@ -329,7 +331,7 @@ async function observeOnly(input, ports, journal) {
     return operation;
 }
 function sourceReceipt(operation, receipt) {
-    if (receipt.status !== "success" || receipt.finality !== "safe" || receipt.transactionHash !== operation.transactionHash)
+    if (receipt.status !== "success" || receipt.finality !== operation.finalityPolicy.source.blockTag || receipt.transactionHash !== operation.transactionHash)
         fail("APN_RPC_PROTOCOL", "source_receipt");
     const events = receipt.logs.flatMap(log => {
         if (address(log.address) !== SOURCE_POOL)
@@ -350,10 +352,10 @@ function sourceReceipt(operation, receipt) {
         event.amountReceivedLD.toString() !== operation.quote.quote.minimumOutputAtomic)
         fail("APN_RPC_PROTOCOL", "source_oft_sent_binding");
     return { transactionHash: operation.transactionHash, blockNumberAtomic: uint(receipt.blockNumberAtomic).toString(), blockHash: hex32(receipt.blockHash),
-        finality: "safe", guid: hex32(event.guid), amountSentAtomic: event.amountSentLD.toString(), amountReceivedAtomic: event.amountReceivedLD.toString() };
+        finality: operation.finalityPolicy.source.blockTag, guid: hex32(event.guid), amountSentAtomic: event.amountSentLD.toString(), amountReceivedAtomic: event.amountReceivedLD.toString() };
 }
 function validateDestination(operation, source, evidence) {
-    if (evidence.finality !== "safe" || address(evidence.recipient) !== operation.recipient)
+    if (evidence.finality !== operation.finalityPolicy.destination.blockTag || address(evidence.recipient) !== operation.recipient)
         fail("APN_RPC_PROTOCOL", "destination_binding");
     uint(evidence.blockNumberAtomic);
     hex32(evidence.blockHash);
@@ -491,6 +493,7 @@ function validateRecord(value) {
     const record = value, { integrityHash, ...body } = record;
     if (hashObject(body) !== integrityHash || record.transitions.at(-1)?.phase !== record.phase || record.operationId.length !== 64)
         fail("APN_STATE_CORRUPT", "integrity");
+    assertStargateV2RouteFinalityPolicy(record.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
     const order = ["prepared", "approved", "submission_started", "submitted", "observed"];
     for (let i = 1; i < record.transitions.length; i++) {
         const a = record.transitions[i - 1].phase, b = record.transitions[i].phase;
@@ -530,7 +533,7 @@ export function stargateV2NativeCanonicalReceipt(operationInput) {
     const body = { schemaVersion: "apn.stargate-v2-native-receipt.v1", operationId: operation.operationId,
         profile: operation.profile, route: { sourceChainId: SOURCE_CHAIN, sourceEid: SOURCE_EID, sourcePool: SOURCE_POOL,
             destinationChainId: DESTINATION_CHAIN, destinationEid: DESTINATION_EID, destinationPool: DESTINATION_POOL },
-        owner: operation.owner, recipient: operation.recipient, principalAtomic: operation.amountAtomic,
+        owner: operation.owner, recipient: operation.recipient, principalAtomic: operation.amountAtomic, finalityPolicy: operation.finalityPolicy,
         nativeMessageFeeAtomic: operation.quote.quote.nativeMessageFeeAtomic, totalValueAtomic: operation.totalValueAtomic,
         maximumDebitAtomic: operation.maximumDebitAtomic, quoteHash: operation.quote.quoteHash,
         source: operation.sourceReceipt, destination: operation.destinationEvidence };

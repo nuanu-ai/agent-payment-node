@@ -1,6 +1,23 @@
 {
   "schemaVersion": "apn.stargate-v2-official-source.v1",
   "recordedAt": "2026-09-20",
+  "finalityPolicy": {
+    "version": "apn.stargate-v2-finality.v1",
+    "blockTags": {
+      "1": "safe",
+      "10": "safe",
+      "130": "safe",
+      "137": "finalized",
+      "8453": "safe",
+      "42161": "safe",
+      "43114": "safe"
+    },
+    "rules": [
+      "finality tag is selected only by chain ID",
+      "unavailable selected finality fails closed",
+      "no safe-to-latest or finalized-to-safe/latest fallback"
+    ]
+  },
   "sources": [
     {
       "name": "Stargate V2 official deployments and ABI",
