@@ -15,8 +15,9 @@ import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtim
 import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token,
   reconcileStargateV2TokenUsage, stargateV2TokenCanonicalReceipt,
   STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM,
-  LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_MESSAGING_CODE_HASH,
+  LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH,
   STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN,
+  STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH,
   type StargateTokenDestinationEvidence, type StargateTokenEnvelope, type StargateTokenExecutionPorts, type StargateTokenOperation } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
 
@@ -111,7 +112,7 @@ function assertServiceUsageTarget(op: StargateTokenOperation): void {
 }
 
 export async function confirmedStargateTokenSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex,
-  finalityTag: Parameters<typeof confirmedStargateSourceReceipt>[2], expectedCodeHash: Hex = STARGATE_TOKEN_MESSAGING_CODE_HASH) {
+  finalityTag: Parameters<typeof confirmedStargateSourceReceipt>[2], expectedCodeHash: Hex = STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH) {
   const receipt = await confirmedStargateSourceReceipt(rpc, transactionHash, finalityTag); if (receipt === null) return null;
   if (receipt.logs.some(log => log.address === LAYERZERO_ENDPOINT_V2)) {
     const code = await rpc.call("eth_getCode", [STARGATE_TOKEN_SOURCE_MESSAGING, finalityTag]);
@@ -140,7 +141,7 @@ async function destinationLogs(rpc: Pick<StargateJsonRpc, "call">, addresses: re
 function logPosition(log: Record<string, unknown>) { return [quantity(log.blockNumber), quantity(log.logIndex)] as const; }
 function atOrBefore(a: Record<string, unknown>, b: Record<string, unknown>) { const x = logPosition(a), y = logPosition(b); return x[0] < y[0] || (x[0] === y[0] && x[1] <= y[1]); }
 
-export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>, expectedCodeHash: Hex = STARGATE_TOKEN_MESSAGING_CODE_HASH): Promise<StargateTokenDestinationEvidence | null> {
+export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>, expectedCodeHash: Hex = STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH): Promise<StargateTokenDestinationEvidence | null> {
   const finalityHead = record(await rpc.call("eth_getBlockByNumber", [input.finalityTag, false])), head = quantity(finalityHead.number);
   const baselineNumber = BigInt(input.fromBlockNumberAtomic), baselineTag = `0x${baselineNumber.toString(16)}`;
   const baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false]));
