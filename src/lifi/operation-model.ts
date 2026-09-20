@@ -11,7 +11,7 @@ import type { BridgeAllowlistBinding } from "./allowlist.js";
 
 export type BridgeState = "awaiting_approval" | "execution_pending" | "source_pending" |
   "destination_pending" | "unknown_finality" | "completed" | "failed_before_effect" |
-  "failed_after_approval" | "failed_confirmed_revert";
+  "destination_failed" | "failed_after_approval" | "failed_confirmed_revert";
 export type BridgeEffectPhase = "unsealed" | "signing_started" | "sealed" | "submitting" |
   "submitted_pending" | "unknown_finality" | "included_success" | "included_revert" |
   "safe_success" | "safe_revert";
@@ -120,7 +120,7 @@ export function retainedUnsentBridgeRpcFailure(op: Pick<BridgeOperationRecord, "
     approval?.role !== "approval" || approval.submissionAttempts !== 1) return null;
   return failure;
 }
-export const BRIDGE_TERMINAL: readonly BridgeState[] = ["completed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"];
+export const BRIDGE_TERMINAL: readonly BridgeState[] = ["completed", "destination_failed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"];
 export function bridgeIntentBinding(operation: Pick<BridgeOperationRecord, "schemaVersion" | "kind" | "profileHash" | "operationId" | "idempotencyHash" | "requestHash" | "intent" | "effects">) {
   return { schemaVersion: operation.schemaVersion, kind: operation.kind, profileHash: operation.profileHash,
     operationId: operation.operationId, idempotencyHash: operation.idempotencyHash, requestHash: operation.requestHash,

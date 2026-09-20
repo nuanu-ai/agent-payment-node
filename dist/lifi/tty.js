@@ -34,6 +34,11 @@ export class TtyBridgeApproval {
             `LI.FI route: ${s.route.route_id}; tool: ${s.route.tool}`, `Source chain: eip155:${s.transfer.fromChainId}`,
             `Destination chain: eip155:${s.transfer.toChainId}`, `Source ${from.symbol}: ${from.token}`, `Destination ${to.symbol}: ${to.token}`,
             `Sender: ${s.transfer.sender}`, `Recipient: ${s.transfer.recipient}`, ...economics,
+            ...(s.route.composite === undefined ? [] : [
+                `Destination program: Across ReceiverAcrossV4 -> LI.FI Executor -> Fly WETH/WBNB pool -> native BNB`,
+                `Fly payload: ${s.route.composite.payload_hash}; deadline ${s.route.composite.deadline_atomic}; maximum retention ${s.route.composite.maximum_retention_bps} basis points`,
+                "Recovery outcome: a destination swap failure may return unswapped WETH; APN does not count that as native BNB completion.",
+            ]),
             `Unitemized protocol fee: ${s.fees.implicit_protocol_token_fee_atomic} ${from.symbol} atomic`,
             `Allowance at prepare: ${s.transfer.allowance_atomic_at_prepare} atomic`, `Spender: ${s.transfer.spender}`,
             ...(native ? ["Native principal: sent as the bridge transaction value; no approval effect; approval cap 0."]

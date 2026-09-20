@@ -18,6 +18,7 @@ export declare class BridgeObservation {
         rpcOrigin: string;
     }>;
     private finish;
+    private finishDestinationFailure;
     private destinationCandidate;
     private scan;
     private waiting;

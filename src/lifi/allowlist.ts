@@ -135,7 +135,7 @@ export function validateBridgeAllowlistBinding(value: unknown): BridgeAllowlistB
 }
 
 export function bridgeUsageTarget(op: BridgeOperationRecord): BridgeUsageTarget {
-  if (op.state === "completed") return "finalized";
+  if (op.state === "completed" || op.state === "destination_failed") return "finalized";
   if (op.state === "failed_before_effect") return "failed_before_effect";
   if (op.state === "failed_after_approval" || op.state === "failed_confirmed_revert") return "failed_confirmed_revert";
   if (op.state === "unknown_finality" || op.effects.some((effect) => effect.phase === "unknown_finality")) return "unknown_finality";

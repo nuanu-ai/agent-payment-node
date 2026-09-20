@@ -75,7 +75,7 @@ export interface AcrossCall {
     readonly quoteTimestamp: string;
     readonly fillDeadline: string;
     readonly exclusivityParameter: string;
-    readonly message: "0x";
+    readonly message: Hex;
 }
 export interface StargateCall {
     readonly kind: "stargateV2";
@@ -112,6 +112,8 @@ export interface DecodedBridgeCall {
     readonly sourceValueAtomic: string;
     readonly dataHash: string;
     readonly protocol: AcrossCall | StargateCall;
+    /** Present only for the reviewed Ethereum native -> BNB native Across/Fly composite lane. */
+    readonly composite?: import("./bnb-composite.js").BnbCompositeCall;
 }
 export interface BridgeBlock {
     readonly numberAtomic: string;
@@ -165,6 +167,16 @@ export interface BridgeProtocolReceipt {
     readonly logs: readonly BridgeLog[];
     readonly nativeBalance?: BridgeNativeBalanceProof | null;
     readonly nativeTransfer?: BridgeNativeTransferProof | null;
+    readonly compositeTrace?: BridgeCompositeTraceProof | null;
+}
+export interface BridgeCompositeTraceProof {
+    readonly outcome: "completed_native" | "recovered_weth" | "below_floor" | "protocol_mismatch";
+    readonly transactionHash: Hex;
+    readonly inputAmountAtomic: string;
+    readonly vaultOutputAtomic: string | null;
+    readonly deliveredAmountAtomic: string;
+    readonly retainedAmountAtomic: string;
+    readonly traceHash: string;
 }
 export interface BridgeNativeTransferProof {
     readonly transactionHash: Hex;
@@ -196,7 +208,7 @@ export interface AcrossCorrelation {
     readonly quoteTimestamp: string;
     readonly fillDeadline: string;
     readonly exclusivityDeadline: string;
-    readonly message: "0x";
+    readonly message: Hex;
 }
 export interface StargateCorrelation {
     readonly kind: "stargateV2";
@@ -236,6 +248,7 @@ export interface BridgeDestinationProof {
     readonly repaymentChainIdAtomic: string | null;
     readonly nativeBalance: BridgeNativeBalanceProof | null;
     readonly nativeTransfer: BridgeNativeTransferProof | null;
+    readonly compositeTrace?: BridgeCompositeTraceProof | null;
 }
 /** The stated headroom the owner approves: `economics` is `quoted * (1 + headroomBps/10_000)`, rounded up. */
 export interface BridgeFeeCeiling {

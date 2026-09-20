@@ -21,7 +21,7 @@ export function bridgeCapabilities(profile?: string) {
           transfer_fee: asset.transferFee, listing: asset.listing,
           peers: asset.peers.map((peer) => BRIDGE_ASSET_REGISTRY[peer].caip2) })) };
     }),
-    tools: [{ tool: "across", variant: "Across V4, empty message, no exclusivity", decoder_implemented: true },
+    tools: [{ tool: "across", variant: "Across V4 direct empty-message or exact Ethereum-to-BNB ReceiverAcrossV4/Fly program", decoder_implemented: true },
       { tool: "stargateV2", variant: "Stargate V2 Taxi, empty compose/options", decoder_implemented: true }],
     selected_direct_lane: { from_chain: "eip155:8453", from_token: BASE_SOLANA_CIRCLE_V2_CANDIDATE.fromToken,
       to_chain: BASE_SOLANA_CIRCLE_V2_CANDIDATE.toChain, to_token: BASE_SOLANA_CIRCLE_V2_CANDIDATE.toToken,
@@ -53,7 +53,6 @@ export function bridgeCapabilities(profile?: string) {
     ],
     rpc_environment: Object.fromEntries(BRIDGE_CHAINS.map((id) => [BRIDGE_ASSET_REGISTRY[id].caip2, BRIDGE_ASSET_REGISTRY[id].rpcEnvironment])),
     inventory_only: [{ tool: "polymer", reason: "protocol_unproved_unique_source_destination_correlation" },
-      { asset: "native_BNB_eip155:56", reason: "composite_Across_destination_call_and_Fly_swap_execution_unreviewed" },
       { asset: "native_principal_via_stargateV2", reason: "stargate_native_pool_not_reviewed" },
       { asset: "USDT_eip155:1", reason: "frozen_list_names_no_USDT_on_Base_or_Arbitrum_One" },
       { asset: "unlisted_token", reason: "not_on_the_frozen_allowlist_dataset" },

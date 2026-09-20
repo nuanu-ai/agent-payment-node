@@ -80,7 +80,7 @@ export const txProofSchema = z.strictObject({ chainId: chainSchema, transactionH
 const acrossCorrelationSchema = z.strictObject({ kind: z.literal("across"), depositId: uintSchema, originChainId: chainSchema,
     destinationChainId: chainSchema, inputToken: wordSchema, outputToken: wordSchema, inputAmountAtomic: uintSchema,
     outputAmountAtomic: uintSchema, depositor: wordSchema, recipient: wordSchema, exclusiveRelayer: wordSchema,
-    quoteTimestamp: uintSchema, fillDeadline: uintSchema, exclusivityDeadline: uintSchema, message: z.literal("0x") });
+    quoteTimestamp: uintSchema, fillDeadline: uintSchema, exclusivityDeadline: uintSchema, message: hexSchema });
 const stargateCorrelationSchema = z.strictObject({ kind: z.literal("stargateV2"), guid: wordSchema,
     sourceEid: z.number().int().positive().safe(), destinationEid: z.number().int().positive().safe(), sender: addressSchema,
     recipient: addressSchema, amountSentAtomic: uintSchema, amountReceivedAtomic: uintSchema });
@@ -95,6 +95,9 @@ export const destinationProofSchema = z.strictObject({ tool: toolSchema, chainId
         beforeBalanceAtomic: uintSchema, afterBalanceAtomic: uintSchema, deltaAtomic: uintSchema }).nullable(),
     nativeTransfer: z.strictObject({ transactionHash: wordSchema, from: addressSchema, to: addressSchema,
         valueAtomic: uintSchema, traceHash: hashSchema }).nullable(),
+    compositeTrace: z.strictObject({ outcome: z.enum(["completed_native", "recovered_weth", "below_floor", "protocol_mismatch"]),
+        transactionHash: wordSchema, inputAmountAtomic: uintSchema, vaultOutputAtomic: uintSchema.nullable(),
+        deliveredAmountAtomic: uintSchema, retainedAmountAtomic: uintSchema, traceHash: hashSchema }).nullable().optional(),
     safeBlock: blockSchema, rpcOrigin: originSchema, transactionProofHash: hashSchema });
 export const scanSchema = z.strictObject({ startBlock: blockSchema, nextBlockAtomic: uintSchema, previousEndBlock: blockSchema.nullable() });
 export const providerObservationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "completed_observed", "partial_observed", "refund_observed", "failed_observed", "unknown"]),
@@ -113,7 +116,7 @@ export const failureSchema = z.strictObject({ reason: reasonSchema,
     residualAllowanceStatus: z.enum(["unavailable", "observed"]).optional(),
     preSignRpc: preSignRpcFailureSchema.optional() });
 export const consentSchema = z.strictObject({ policy: z.literal("apn.bridge.foreground-approval.v1"), fingerprint: hashSchema, approvedAt: isoSchema, expiresAt: isoSchema });
-export const stateSchema = z.enum(["awaiting_approval", "execution_pending", "source_pending", "destination_pending", "unknown_finality", "completed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"]);
+export const stateSchema = z.enum(["awaiting_approval", "execution_pending", "source_pending", "destination_pending", "unknown_finality", "completed", "destination_failed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"]);
 export const phaseSchema = z.enum(["unsealed", "signing_started", "sealed", "submitting", "submitted_pending", "unknown_finality", "included_success", "included_revert", "safe_success", "safe_revert"]);
 const effectFields = { role: z.enum(["approval", "bridge"]), phase: phaseSchema, transactionHash: wordSchema.nullable(),
     sealedMaterialHash: hashSchema.nullable(), submittedAt: isoSchema.nullable(), submissionAttempts: z.union([z.literal(0), z.literal(1)]), includedProof: txProofSchema.nullable(), safeProof: txProofSchema.nullable() };

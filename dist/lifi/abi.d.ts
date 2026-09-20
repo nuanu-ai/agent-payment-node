@@ -736,4 +736,50 @@ export declare const deploymentAbi: readonly [{
     readonly outputs: readonly [{
         readonly type: "bool";
     }];
+}, {
+    readonly name: "internalCallers";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "caller";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "bool";
+    }];
+}, {
+    readonly name: "coreAddress";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "address";
+    }];
+}, {
+    readonly name: "weth";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "address";
+    }];
+}, {
+    readonly name: "whitelist";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "caller";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "bool";
+    }];
+}, {
+    readonly name: "EXECUTOR";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "address";
+    }];
 }];

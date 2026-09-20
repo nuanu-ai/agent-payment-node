@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { decodeEventLog, encodeAbiParameters, encodeEventTopics, getAbiItem, getAddress, type AbiParameter } from "viem";
+import { decodeEventLog, encodeAbiParameters, encodeEventTopics, getAbiItem, getAddress, keccak256, type AbiParameter } from "viem";
+import { BNB_COMPOSITE } from "../../src/lifi/bnb-composite.js";
 import type { Address, Hex } from "../../src/model.js";
 import type { BridgeChainId } from "../../src/lifi/chains.js";
 import { bridgeEventsAbi, FEE_FORWARDER, FEE_RECIPIENT } from "../../src/lifi/abi.js";
@@ -29,7 +30,7 @@ export function makeSourceReceipt(d: DecodedBridgeCall): BridgeProtocolReceipt {
     inputToken: d.protocol.sendingAssetId, outputToken: d.protocol.receivingAssetId, inputAmount: BigInt(d.bridgeAmountAtomic),
     outputAmount: BigInt(d.protocol.outputAmountAtomic), destinationChainId: BigInt(d.destinationChainId), depositId: BigInt(d.sourceChainId),
     quoteTimestamp: Number(d.protocol.quoteTimestamp), fillDeadline: Number(d.protocol.fillDeadline), exclusivityDeadline: 0,
-    depositor: d.protocol.refundAddress, recipient: d.protocol.receiverAddress, exclusiveRelayer: d.protocol.exclusiveRelayer, message: "0x",
+    depositor: d.protocol.refundAddress, recipient: d.protocol.receiverAddress, exclusiveRelayer: d.protocol.exclusiveRelayer, message: d.protocol.message,
   }));
   else logs.push(eventLog(emitter, "OFTSent", {
     guid: guid(d.sourceChainId), dstEid: d.protocol.dstEid, fromAddress: BRIDGE_DIAMOND,
@@ -46,10 +47,21 @@ export function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourc
       inputToken: c.inputToken, outputToken: c.outputToken, inputAmount: BigInt(c.inputAmountAtomic), outputAmount: BigInt(c.outputAmountAtomic),
       repaymentChainId: fillType === 2 ? 0n : BigInt(d.destinationChainId), originChainId: BigInt(c.originChainId), depositId: BigInt(c.depositId),
       fillDeadline: Number(c.fillDeadline), exclusivityDeadline: Number(c.exclusivityDeadline), exclusiveRelayer: c.exclusiveRelayer,
-      relayer: fillType === 2 ? BRIDGE_ZERO_WORD : addressWord(RELAYER), depositor: c.depositor, recipient: c.recipient, messageHash: BRIDGE_ZERO_WORD,
-      relayExecutionInfo: { updatedRecipient: c.recipient, updatedMessageHash: BRIDGE_ZERO_WORD, updatedOutputAmount: BigInt(c.outputAmountAtomic), fillType },
+      relayer: fillType === 2 ? BRIDGE_ZERO_WORD : addressWord(RELAYER), depositor: c.depositor, recipient: c.recipient,
+      messageHash: d.composite === undefined ? BRIDGE_ZERO_WORD : keccak256(c.message),
+      relayExecutionInfo: { updatedRecipient: c.recipient, updatedMessageHash: d.composite === undefined ? BRIDGE_ZERO_WORD : keccak256(c.message), updatedOutputAmount: BigInt(c.outputAmountAtomic), fillType },
     });
     if (d.destinationToken === BRIDGE_ZERO_ADDRESS) {
+      if (d.composite !== undefined) {
+        const amount = d.composite.expectedOutputAtomic, result = receipt(d.destinationChainId, [fill]);
+        const beforeBlock = { numberAtomic: "122", hash: `0x${"bc".repeat(32)}` as Hex, timestampAtomic: "1" };
+        return { ...result, nativeBalance: { recipient: d.recipient, beforeBlock,
+          afterBlock: { numberAtomic: result.blockNumberAtomic, hash: result.blockHash, timestampAtomic: "2" }, beforeBalanceAtomic: "100",
+          afterBalanceAtomic: (100n + BigInt(amount)).toString(), deltaAtomic: amount },
+          nativeTransfer: null, compositeTrace: { outcome: "completed_native", transactionHash: result.transactionHash,
+            inputAmountAtomic: d.composite.inputAmountAtomic, vaultOutputAtomic: amount, deliveredAmountAtomic: amount,
+            retainedAmountAtomic: "0", traceHash: "a".repeat(64) } };
+      }
       const wrapped = BRIDGE_ASSET_REGISTRY[d.destinationChainId].nativeCoin.wrapped;
       const unwrap = wrapped.events === "weth9" ? eventLog(wrapped.address, "Withdrawal", { src: emitter, wad: BigInt(c.outputAmountAtomic) })
         : eventLog(wrapped.address, "Transfer", { from: emitter, to: BRIDGE_ZERO_ADDRESS, value: BigInt(c.outputAmountAtomic) });
@@ -78,7 +90,7 @@ function receipt(chainId: BridgeChainId, logs: readonly BridgeLog[]): BridgeProt
 
 function bridgeData(d: DecodedBridgeCall): Json {
   return { transactionId: d.transactionId, bridge: d.bridgeName, integrator: d.integrator, referrer: d.referrer, sendingAssetId: d.sourceToken,
-    receiver: d.recipient, minAmount: BigInt(d.bridgeAmountAtomic), destinationChainId: BigInt(d.destinationChainId), hasSourceSwaps: true, hasDestinationCall: false };
+    receiver: d.recipient, minAmount: BigInt(d.bridgeAmountAtomic), destinationChainId: BigInt(d.destinationChainId), hasSourceSwaps: true, hasDestinationCall: d.composite !== undefined };
 }
 
 export function eventLog(address: Address, eventName: string, args: Json): BridgeLog {

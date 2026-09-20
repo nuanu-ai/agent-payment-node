@@ -5,6 +5,7 @@ import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER, FEE_FORWARDER_NATIVE_S
 import type { BridgeMaterialization, DecodedBridgeCall } from "./model.js";
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_QUOTE_DESTINATIONS, bridgeAssetRow, bridgeFeeAsset, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
+import { BNB_COMPOSITE, decodeBnbCompositeMessage } from "./bnb-composite.js";
 
 type BridgeData = Readonly<{
   transactionId: Hex; bridge: string; integrator: string; referrer: Address; sendingAssetId: Address;
@@ -43,7 +44,7 @@ export function decodeBridgeCall(materialization: BridgeMaterialization): Decode
   const nativeConversion = bridgeNativeDenominationConversion(request);
   if (quotedOutput < minimumOutput || minimumOutput < BigInt(request.minOutputAtomic) ||
     (!nativeConversion && (sourceAmount < quotedOutput || sourceAmount - minimumOutput > BigInt(request.maxRouteFeeAtomic))) ||
-    (quotedOutput - minimumOutput) * 10_000n > quotedOutput * BigInt(request.slippageBps)) fail("output_economics");
+    (quotedOutput - minimumOutput) * 10_000n > quotedOutput * BigInt(request.slippageBps) + 9_999n) fail("output_economics");
 
   const selector = data.slice(0, 10) as Hex;
   if (mQuotedDestination(request.toChainId) && !bridgeQuoteDestination(request.toChainId).tools.includes(materialization.tool as never)) fail("destination_tool_quote_unavailable");
@@ -68,26 +69,31 @@ export function decodeBridgeCall(materialization: BridgeMaterialization): Decode
 }
 
 function decodeAcross(m: BridgeMaterialization, bridge: BridgeData, swaps: readonly SwapData[], across: AcrossData, data: Hex, sourceAmount: bigint, minimum: bigint, value: bigint): DecodedBridgeCall {
-  const common = decodeCommon(m, bridge, swaps, sourceAmount);
+  const bnb = m.request.fromChainId === 1 && m.request.toChainId === 56;
+  const common = decodeCommon(m, bridge, swaps, sourceAmount, bnb);
   const receiverWord = addressWord(m.request.recipient), senderWord = addressWord(m.sender);
   // Across carries a native leg as the chain's pinned wrapped-native token: the facet deposits it, the fill unwraps it.
   const native = bridgeNativePrincipal(m.request), denominationConversion = bridgeNativeDenominationConversion(m.request);
   const inputWord = addressWord(native ? BRIDGE_ASSET_REGISTRY[m.request.fromChainId].nativeCoin.wrapped.address : m.request.fromToken);
-  const outputWord = addressWord(native ? BRIDGE_ASSET_REGISTRY[m.request.toChainId].nativeCoin.wrapped.address : m.request.toToken);
-  if (value !== (native ? sourceAmount : 0n) || across.receiverAddress.toLowerCase() !== receiverWord || across.refundAddress.toLowerCase() !== senderWord ||
+  const outputWord = addressWord(bnb ? BNB_COMPOSITE.weth : native ? BRIDGE_ASSET_REGISTRY[m.request.toChainId].nativeCoin.wrapped.address : m.request.toToken);
+  const composite = bnb ? decodeBnbCompositeMessage(across.message, bridge.transactionId, m.request.recipient) : undefined;
+  const expectedReceiver = bnb ? addressWord(BNB_COMPOSITE.receiver) : receiverWord;
+  if (value !== (native ? sourceAmount : 0n) || across.receiverAddress.toLowerCase() !== expectedReceiver || across.refundAddress.toLowerCase() !== senderWord ||
     across.sendingAssetId.toLowerCase() !== inputWord || across.receivingAssetId.toLowerCase() !== outputWord ||
-    across.exclusiveRelayer.toLowerCase() !== BRIDGE_ZERO_WORD || across.exclusivityParameter !== 0 || across.message !== "0x" ||
+    across.exclusiveRelayer.toLowerCase() !== BRIDGE_ZERO_WORD || across.exclusivityParameter !== 0 || (!bnb && across.message !== "0x") ||
     across.outputAmountMultiplier <= 0n || (!denominationConversion && across.outputAmountMultiplier > 1_000_000_000_000_000_000n) ||
     across.outputAmount !== bridge.minAmount * across.outputAmountMultiplier / 1_000_000_000_000_000_000n ||
-    across.outputAmount !== minimum || across.quoteTimestamp >= across.fillDeadline) fail("across_semantics");
+    (!bnb && across.outputAmount !== minimum) || (bnb && (composite!.minimumOutputAtomic !== minimum.toString() ||
+      composite!.expectedOutputAtomic !== m.quotedOutputAtomic || BigInt(composite!.inputAmountAtomic) > across.outputAmount)) ||
+    across.quoteTimestamp >= across.fillDeadline) fail("across_semantics");
   validateFeeRows(m, common.fee, value, "across");
   return result(m, data, ACROSS_SELECTOR, bridge, common.fee, {
     kind: "across", receiverAddress: bridgeHex(across.receiverAddress, 32, 32), refundAddress: bridgeHex(across.refundAddress, 32, 32),
     sendingAssetId: bridgeHex(across.sendingAssetId, 32, 32), receivingAssetId: bridgeHex(across.receivingAssetId, 32, 32),
     outputAmountAtomic: across.outputAmount.toString(), outputAmountMultiplier: across.outputAmountMultiplier.toString(),
     exclusiveRelayer: bridgeHex(across.exclusiveRelayer, 32, 32), quoteTimestamp: String(across.quoteTimestamp),
-    fillDeadline: String(across.fillDeadline), exclusivityParameter: String(across.exclusivityParameter), message: "0x",
-  }, common.bridgeAmount, value.toString());
+    fillDeadline: String(across.fillDeadline), exclusivityParameter: String(across.exclusivityParameter), message: bridgeHex(across.message, 4096),
+  }, common.bridgeAmount, value.toString(), composite);
 }
 
 function decodeStargate(m: BridgeMaterialization, bridge: BridgeData, swaps: readonly SwapData[], stargate: StargateData, data: Hex, sourceAmount: bigint, minimum: bigint, value: bigint): DecodedBridgeCall {
@@ -106,11 +112,11 @@ function decodeStargate(m: BridgeMaterialization, bridge: BridgeData, swaps: rea
   }, common.bridgeAmount, value.toString());
 }
 
-function decodeCommon(m: BridgeMaterialization, bridge: BridgeData, swaps: readonly SwapData[], sourceAmount: bigint): { fee: bigint; bridgeAmount: bigint } {
+function decodeCommon(m: BridgeMaterialization, bridge: BridgeData, swaps: readonly SwapData[], sourceAmount: bigint, destinationCall = false): { fee: bigint; bridgeAmount: bigint } {
   const request = m.request;
   if (bridge.transactionId.toLowerCase() === BRIDGE_ZERO_WORD || bridge.bridge !== m.tool || bridge.integrator !== "lifi-api" ||
     bridge.referrer !== BRIDGE_ZERO_ADDRESS || bridge.sendingAssetId !== request.fromToken || bridge.receiver !== request.recipient ||
-    bridge.destinationChainId !== BigInt(request.toChainId) || !bridge.hasSourceSwaps || bridge.hasDestinationCall || bridge.minAmount <= 0n || bridge.minAmount >= sourceAmount || swaps.length !== 1) fail("bridge_data");
+    bridge.destinationChainId !== BigInt(request.toChainId) || !bridge.hasSourceSwaps || bridge.hasDestinationCall !== destinationCall || bridge.minAmount <= 0n || bridge.minAmount >= sourceAmount || swaps.length !== 1) fail("bridge_data");
   const swap = swaps[0]!;
   if (swap.callTo !== FEE_FORWARDER || swap.approveTo !== FEE_FORWARDER || swap.sendingAssetId !== request.fromToken ||
     swap.receivingAssetId !== request.fromToken || swap.fromAmount !== sourceAmount || !swap.requiresDeposit) fail("fee_swap");
@@ -148,14 +154,14 @@ function validateFeeRows(m: BridgeMaterialization, forwardedFee: bigint, value: 
       (tool === "across" ? native !== 0 : native !== 1)) fail("fee_reconciliation");
 }
 
-function result(m: BridgeMaterialization, data: Hex, selector: Hex, bridge: BridgeData, fee: bigint, protocol: DecodedBridgeCall["protocol"], bridgeAmount: bigint, sourceValueAtomic: string): DecodedBridgeCall {
+function result(m: BridgeMaterialization, data: Hex, selector: Hex, bridge: BridgeData, fee: bigint, protocol: DecodedBridgeCall["protocol"], bridgeAmount: bigint, sourceValueAtomic: string, composite?: DecodedBridgeCall["composite"]): DecodedBridgeCall {
   return {
     tool: m.tool, selector, transactionId: bridgeHex(bridge.transactionId, 32, 32), bridgeName: m.tool,
     integrator: "lifi-api", referrer: BRIDGE_ZERO_ADDRESS, sender: m.sender, recipient: m.request.recipient,
     sourceChainId: m.request.fromChainId, destinationChainId: m.request.toChainId, sourceToken: m.request.fromToken,
     destinationToken: m.request.toToken, sourceAmountAtomic: m.request.amountAtomic, bridgeAmountAtomic: bridgeAmount.toString(),
     feeAmountAtomic: fee.toString(), feeRecipient: FEE_RECIPIENT, minimumOutputAtomic: m.minimumOutputAtomic,
-    sourceValueAtomic, dataHash: sha256(Buffer.from(data.slice(2), "hex")), protocol,
+    sourceValueAtomic, dataHash: sha256(Buffer.from(data.slice(2), "hex")), protocol, ...(composite === undefined ? {} : { composite }),
   };
 }
 

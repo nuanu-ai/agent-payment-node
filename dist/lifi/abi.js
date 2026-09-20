@@ -64,5 +64,10 @@ export const deploymentAbi = parseAbi([
     "function basisPointsRate() view returns (uint256)",
     "function maximumFee() view returns (uint256)",
     "function deprecated() view returns (bool)",
+    "function internalCallers(address caller) view returns (bool)",
+    "function coreAddress() view returns (address)",
+    "function weth() view returns (address)",
+    "function whitelist(address caller) view returns (bool)",
+    "function EXECUTOR() view returns (address)",
 ]);
 //# sourceMappingURL=abi.js.map

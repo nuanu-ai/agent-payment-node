@@ -2,7 +2,7 @@ import type { BridgeAccountSnapshot, BridgeBlock, BridgeDeploymentIdentity, Brid
 import type { Hex } from "../model.js";
 import type { AssetUsageReservation } from "../asset-usage-ledger.js";
 import type { BridgeAllowlistBinding } from "./allowlist.js";
-export type BridgeState = "awaiting_approval" | "execution_pending" | "source_pending" | "destination_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_after_approval" | "failed_confirmed_revert";
+export type BridgeState = "awaiting_approval" | "execution_pending" | "source_pending" | "destination_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "destination_failed" | "failed_after_approval" | "failed_confirmed_revert";
 export type BridgeEffectPhase = "unsealed" | "signing_started" | "sealed" | "submitting" | "submitted_pending" | "unknown_finality" | "included_success" | "included_revert" | "safe_success" | "safe_revert";
 export interface BridgeIntent {
     readonly profile: string;
