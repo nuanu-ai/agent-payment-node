@@ -72,6 +72,50 @@ test("concurrent reservations serialize the shared daily cap", async (t) => {
   assert.equal((await ledger.usage(identity, now)).amountAtomic, "100");
 });
 
+function serviceRecoveryHarness(phase: string, usageTarget?: string) {
+  let signs = 0, sends = 0;
+  const operation: any = { operationId: "f".repeat(64), profile: "owner", owner: OWNER, amountAtomic: "100", phase,
+    transitions: [{ phase, at: "2026-09-20T10:00:00.000Z", reason: "fixture" }], transactionHash: TX,
+    cleanupTransactionHash: OTHER_TX, policy: { policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM },
+    ...(usageTarget === undefined ? {} : { usageTarget }), integrityHash: "b".repeat(64) };
+  const journal: any = { value: operation, load: async () => structuredClone(journal.value), save: async (value: any) => { journal.value = structuredClone(value); },
+    withLock: async (_id: string, work: () => Promise<any>) => await work(), withOwnerChainLock: async (_owner: string, _chain: number, work: () => Promise<any>) => await work() };
+  const ports: any = { signer: { kind: "imported_evm_signer", address: OWNER, signTransaction: async () => { signs++; throw new Error("must not sign"); } },
+    sendRawTransaction: async () => { sends++; throw new Error("must not send"); }, reserveUsage: async () => "reserved",
+    followUsage: async (_op: any, target: string) => target, waitSourceReceipt: async () => null, now: () => Date.parse("2026-09-20T10:00:01.000Z") };
+  const service = new StargateTokenService(new StateStore("/tmp/apn-unused-service-recovery"), {} as any, {});
+  (service as any).journal = journal; (service as any).ports = async () => ports;
+  (service as any).reserveUsage = async () => "reserved"; (service as any).followUsage = async (_op: any, target: string) => target;
+  return { service, journal, effects: () => ({ signs, sends }) };
+}
+
+test("service observe admits every read-only usage and cleanup recovery path without signing or sending", async () => {
+  const cases = [
+    { phase: "observed", target: "finalized", state: "finalized" },
+    { phase: "cleanup_required", target: "failed_before_effect", state: "failed_before_effect" },
+    { phase: "cleaned" },
+    { phase: "unknown_finality", state: "unknown_finality" },
+    { phase: "cleanup_required", target: "failed_confirmed_revert", state: "failed_confirmed_revert" },
+    { phase: "cleanup_unknown_finality" },
+  ];
+  for (const entry of cases) {
+    const h = serviceRecoveryHarness(entry.phase, entry.target), result: any = await h.service.observe("f".repeat(64));
+    assert.equal(result.phase, entry.phase); if (entry.state !== undefined) assert.equal(result.usageState, entry.state);
+    assert.equal(result.usageTarget, undefined); assert.deepEqual(h.effects(), { signs: 0, sends: 0 });
+  }
+});
+
+test("service status and receipt reconcile legal terminal targets and reject illegal phase bindings", async () => {
+  const status = serviceRecoveryHarness("observed", "finalized"), result: any = await status.service.status("f".repeat(64));
+  assert.equal(result.usageState, "finalized"); assert.equal(result.usageTarget, undefined); assert.deepEqual(status.effects(), { signs: 0, sends: 0 });
+  const receipt = serviceRecoveryHarness("observed", "finalized"); await assert.rejects(receipt.service.receipt("f".repeat(64)));
+  assert.equal(receipt.journal.value.usageState, "finalized"); assert.equal(receipt.journal.value.usageTarget, undefined); assert.deepEqual(receipt.effects(), { signs: 0, sends: 0 });
+  for (const entrypoint of ["observe", "status", "receipt"] as const) {
+    const illegal = serviceRecoveryHarness("prepared", "finalized"); await assert.rejects(illegal.service[entrypoint]("f".repeat(64)), (error: any) => error.code === "APN_STATE_CORRUPT");
+    assert.deepEqual(illegal.effects(), { signs: 0, sends: 0 });
+  }
+});
+
 function destinationRpc(mutation?: "success" | "receiver" | "amount" | "transaction" | "guid" | "baseline") {
   const oftGuid = mutation === "guid" ? (`0x${"35".repeat(32)}` as Hex) : GUID;
   const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: oftGuid, toAddress: OWNER } });
