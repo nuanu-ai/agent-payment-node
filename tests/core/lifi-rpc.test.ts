@@ -10,7 +10,7 @@ import type { EvmRpcCall } from "../../src/evm-ports.js";
 import type { Hex } from "../../src/model.js";
 import { BridgeRpc } from "../../src/lifi/rpc.js";
 import { bridgeActualFees } from "../../src/lifi/rpc-fees.js";
-import { verifyRpcTransaction } from "../../src/lifi/rpc-transaction.js";
+import { evmTransactionSignatureScalar, verifyRpcTransaction } from "../../src/lifi/rpc-transaction.js";
 import { verifyBridgeSigned } from "../../src/lifi/transaction.js";
 import { BRIDGE_DIAMOND } from "../../src/lifi/validation.js";
 import type { BridgeEnvelope } from "../../src/lifi/model.js";
@@ -46,6 +46,33 @@ for (let type = 0; type < TYPES.length; type++) test(`LI.FI RPC reconstructs and
   for (const mutation of [{ from: LIFI_RECIPIENT }, { input: "0x12345679" }, { chainId: "0x2105" }, { value: "0x1" }, { gas: "0x61a81" }, { r: word(0n) }]) {
     await assert.rejects(verifyRpcTransaction({ ...s.rpc, ...mutation }, 1, s.hash), { code: "APN_RPC_PROTOCOL" });
   }
+});
+
+test("LI.FI RPC normalizes the live-shaped 63-nibble Linea signature scalar only", () => {
+  assert.equal(
+    evmTransactionSignatureScalar("0xa14cfaff82b616ed2005432c18914f1eb8992902de9c8282859eb186c9413aa"),
+    "0x0a14cfaff82b616ed2005432c18914f1eb8992902de9c8282859eb186c9413aa",
+  );
+  const canonical = `0x${"12".repeat(32)}`;
+  assert.equal(evmTransactionSignatureScalar(canonical), canonical);
+  const order = "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141";
+  for (const invalid of [undefined, "", "0x", "0x0", "0x00", "0xg", `0x${"1".repeat(65)}`, `0x${order}`, `0x${"f".repeat(64)}`]) {
+    assert.throws(() => evmTransactionSignatureScalar(invalid), { code: "APN_RPC_PROTOCOL" });
+  }
+});
+
+test("LI.FI RPC reconstructs the exact transaction hash and sender from a short signature scalar", async () => {
+  let selected: Awaited<ReturnType<typeof signedRpcTransaction>> | undefined;
+  for (let nonce = 0; nonce < 256; nonce++) {
+    const candidate = await signedRpcTransaction(2, nonce);
+    if ((candidate.rpc.s as string).startsWith("0x0")) { selected = candidate; break; }
+  }
+  assert.ok(selected, "deterministic signing fixture must produce a leading-zero s scalar");
+  const shortened = { ...selected.rpc, s: `0x${(selected.rpc.s as string).slice(3)}` };
+  assert.equal((shortened.s as string).length, 65);
+  const verified = await verifyRpcTransaction(shortened, 1, selected.hash);
+  assert.equal(verified.from, LIFI_SYNTHETIC_SENDER);
+  assert.equal(keccak256(selected.raw), selected.hash);
 });
 
 test("LI.FI source signature validation accepts canonical zero nonce and priority while rejecting any frozen-field change", async () => {
