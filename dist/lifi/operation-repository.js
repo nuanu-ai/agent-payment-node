@@ -3,7 +3,7 @@ import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import {} from "./operation-model.js";
 import { bridgeCorrupt, validateBridgeContinuity, validateBridgeOperation } from "./operation-validation.js";
-import { bridgeReceipt } from "./receipt.js";
+import { bridgeReceipt, currentBridgeReceiptCandidates } from "./receipt.js";
 import { legacyBridgeReceiptCandidates } from "./receipt.js";
 import { bridgeAtTransition } from "./transitions.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
@@ -155,7 +155,8 @@ function validateReceipt(value, op) {
     if (hashObject(body) !== receipt_hash)
         bridgeCorrupt();
     const index = op.transitions.findIndex((_, i) => bridgeAtTransition(op, i).integrityHash === value.operation_binding_hash);
-    if (index < 0 || !bridgeSame(value, bridgeReceipt(bridgeAtTransition(op, index))))
+    if (index < 0 || !currentBridgeReceiptCandidates(bridgeAtTransition(op, index))
+        .some((candidate) => bridgeSame(value, candidate)))
         bridgeCorrupt();
 }
 //# sourceMappingURL=operation-repository.js.map

@@ -4,13 +4,23 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { keccak256 } from "viem";
-import { hashObject } from "../../src/canonical.js";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { OperationService } from "../../src/operation-service.js";
 import { transitionBridge } from "../../src/lifi/transitions.js";
 import { bridgeReceipt } from "../../src/lifi/receipt.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
+import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import { LIFI_DESTINATION_HASH, LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
+
+function previousCurrentReceipt(op: BridgeOperationRecord): Record<string, any> {
+  const previous = structuredClone(bridgeReceipt(op)) as Record<string, any>;
+  delete previous.receipt_hash;
+  delete previous.asset_bounds;
+  previous.fees.token_loss_bound_atomic =
+    (BigInt(op.intent.materialization.request.amountAtomic) - BigInt(op.intent.materialization.minimumOutputAtomic)).toString();
+  return { ...previous, receipt_hash: hashObject(previous) };
+}
 
 for (const pair of ["eth-base", "base-arb", "arb-eth"] as const) for (const tool of ["across", "stargateV2"] as const) {
   test(`LI.FI ${tool} ${pair} selected route completes with independently correlated dual-chain proof`, async (t) => {
@@ -161,4 +171,33 @@ test("LI.FI history, immutable effect identities and derived receipt corruption 
   await writeFile(join(temporary.root, "bridge-receipts", operation.profileHash, `${id}.json`), JSON.stringify(receipt), { mode: 0o600 });
   assert.equal((await s.core.execute({ command: "receipt.get", operationId: id })).error?.code, "APN_STATE_CORRUPT");
   assert.equal(s.source.submissions.length, 0);
+});
+
+test("LI.FI pre-asset-bounds current-v1 receipt upgrades atomically without custody or effects", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "eth-linea");
+  const { id, operation } = await s.prepare("across", "current-v1-receipt-upgrade");
+  const receiptPath = join(temporary.root, "bridge-receipts", operation.profileHash, `${id}.json`);
+  const previous = previousCurrentReceipt(operation), forged = structuredClone(previous);
+  forged.transfer.amountAtomic = (BigInt(forged.transfer.amountAtomic) + 1n).toString();
+  delete forged.receipt_hash; forged.receipt_hash = hashObject(forged);
+  await writeFile(receiptPath, `${canonicalJson(forged)}\n`, { mode: 0o600 });
+  await assert.rejects(s.core.bridges.records.repairReceipt(operation), { code: "APN_STATE_CORRUPT" });
+
+  await writeFile(receiptPath, `${canonicalJson(previous)}\n`, { mode: 0o600 });
+  await assert.rejects(s.core.bridges.records.loadReceipt(operation.profileHash, id), { code: "APN_OPERATION_BLOCKED" });
+  const calls = s.source.calls.length, submissions = s.source.submissions.length;
+  const materializations = s.provider.materializeCalls, wraps = s.wrapping.loads;
+  let custodyAccesses = 0;
+  s.custody.load = async () => { custodyAccesses++; throw new Error("custody must stay closed"); };
+  s.custody.seal = async () => { custodyAccesses++; throw new Error("custody must stay closed"); };
+  const loaded = await s.core.bridges.records.loadOperation(operation.profileHash, id); assert.ok(loaded);
+  await s.core.bridges.records.repairReceipt(loaded);
+
+  const repaired = await s.core.bridges.records.loadReceipt(operation.profileHash, id) as any;
+  assert.notEqual(repaired.receipt_hash, previous.receipt_hash);
+  assert.equal(repaired.asset_bounds.same_denomination, true);
+  assert.deepEqual([custodyAccesses, s.wrapping.loads, s.source.calls.length, s.source.submissions.length, s.provider.materializeCalls],
+    [0, wraps, calls, submissions, materializations]);
+  assert.deepEqual(repaired, bridgeReceipt(operation));
 });

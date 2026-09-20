@@ -161,3 +161,16 @@ export function bridgeReceipt(op: BridgeOperationRecord) {
   return { ...body, receipt_hash: hashObject(body) };
 }
 export type BridgeReceipt = ReturnType<typeof bridgeReceipt>;
+
+/** Exact current-v1 receipt emitted before denomination-aware asset bounds were added. */
+export function previousCurrentBridgeReceipt(op: BridgeOperationRecord): Record<string, unknown> {
+  const previous = structuredClone(bridgeReceipt(op)) as Record<string, any>;
+  delete previous.receipt_hash;
+  delete previous.asset_bounds;
+  previous.fees.token_loss_bound_atomic =
+    (BigInt(op.intent.materialization.request.amountAtomic) - BigInt(op.intent.materialization.minimumOutputAtomic)).toString();
+  return { ...previous, receipt_hash: hashObject(previous) };
+}
+export function currentBridgeReceiptCandidates(op: BridgeOperationRecord): readonly unknown[] {
+  return [bridgeReceipt(op), previousCurrentBridgeReceipt(op)];
+}

@@ -144,4 +144,16 @@ export function bridgeReceipt(op) {
     const body = { ...publicBridgeOperation(op), schema_version: "apn.bridge-receipt.v1", operation_binding_hash: op.integrityHash };
     return { ...body, receipt_hash: hashObject(body) };
 }
+/** Exact current-v1 receipt emitted before denomination-aware asset bounds were added. */
+export function previousCurrentBridgeReceipt(op) {
+    const previous = structuredClone(bridgeReceipt(op));
+    delete previous.receipt_hash;
+    delete previous.asset_bounds;
+    previous.fees.token_loss_bound_atomic =
+        (BigInt(op.intent.materialization.request.amountAtomic) - BigInt(op.intent.materialization.minimumOutputAtomic)).toString();
+    return { ...previous, receipt_hash: hashObject(previous) };
+}
+export function currentBridgeReceiptCandidates(op) {
+    return [bridgeReceipt(op), previousCurrentBridgeReceipt(op)];
+}
 //# sourceMappingURL=receipt.js.map

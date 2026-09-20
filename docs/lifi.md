@@ -211,7 +211,7 @@ touches Base. A row with no peer is refused as `asset_has_no_listed_peer`.
 | Any Stargate pool other than `assetId 1` | the pool has not been reviewed the way USDC was |
 | Any fee-on-transfer or rebasing token | the exact-amount `Transfer` proof cannot hold |
 | A proxy with no stable implementation, admin or beacon slot | there is nothing to pin an upgrade against |
-| A fourth EVM chain | `EvmChainId` in `src/evm-asset.ts` is workspace-wide and touches every rail, receipt schema and conflict domain; that is a separate change |
+| Any EVM chain absent from `BRIDGE_CHAINS` | no reviewed registry row, deployment proof, RPC policy, destination observation or finite execution path exists for it |
 
 RPC URLs must use public HTTPS without URL credentials, query parameters or
 fragments. APN verifies the exact chain ID, pins resolved public addresses and
