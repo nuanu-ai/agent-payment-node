@@ -1,0 +1,402 @@
+{
+  "schemaVersion": "apn.stargate-v2-official-source.v1",
+  "recordedAt": "2026-09-20",
+  "sources": [
+    {
+      "name": "Stargate V2 official deployments and ABI",
+      "url": "https://github.com/stargate-protocol/stargate-v2",
+      "commit": "ce598b8d16472cd76ee47d30b8a40bc5c1b667bb",
+      "path": "packages/stg-evm-v2/deployments"
+    },
+    {
+      "name": "LayerZero official address book",
+      "url": "https://github.com/LayerZero-Labs/lz-address-book",
+      "commit": "7c800d680072ae6cc50edf95711fa601974a4a70",
+      "paths": [
+        "src/generated/LZAddresses.sol",
+        "src/generated/STGAddresses.sol"
+      ]
+    },
+    {
+      "name": "Stargate V2 transfer implementation",
+      "url": "https://github.com/stargate-protocol/stargate-v2/blob/ce598b8d16472cd76ee47d30b8a40bc5c1b667bb/packages/stg-evm-v2/src/StargateBase.sol",
+      "commit": "ce598b8d16472cd76ee47d30b8a40bc5c1b667bb"
+    },
+    {
+      "name": "LayerZero OFT permissionless quote reference",
+      "url": "https://docs.layerzero.network/v2/developers/evm/stablecoin-oft/rbac-reference",
+      "retrievedAt": "2026-09-20"
+    }
+  ],
+  "abi": [
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint32",
+              "name": "dstEid",
+              "type": "uint32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "to",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint256",
+              "name": "amountLD",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "minAmountLD",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes",
+              "name": "extraOptions",
+              "type": "bytes"
+            },
+            {
+              "internalType": "bytes",
+              "name": "composeMsg",
+              "type": "bytes"
+            },
+            {
+              "internalType": "bytes",
+              "name": "oftCmd",
+              "type": "bytes"
+            }
+          ],
+          "internalType": "struct SendParam",
+          "name": "_sendParam",
+          "type": "tuple"
+        }
+      ],
+      "name": "quoteOFT",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "minAmountLD",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "maxAmountLD",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct OFTLimit",
+          "name": "limit",
+          "type": "tuple"
+        },
+        {
+          "components": [
+            {
+              "internalType": "int256",
+              "name": "feeAmountLD",
+              "type": "int256"
+            },
+            {
+              "internalType": "string",
+              "name": "description",
+              "type": "string"
+            }
+          ],
+          "internalType": "struct OFTFeeDetail[]",
+          "name": "oftFeeDetails",
+          "type": "tuple[]"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "amountSentLD",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "amountReceivedLD",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct OFTReceipt",
+          "name": "receipt",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint32",
+              "name": "dstEid",
+              "type": "uint32"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "to",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint256",
+              "name": "amountLD",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "minAmountLD",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes",
+              "name": "extraOptions",
+              "type": "bytes"
+            },
+            {
+              "internalType": "bytes",
+              "name": "composeMsg",
+              "type": "bytes"
+            },
+            {
+              "internalType": "bytes",
+              "name": "oftCmd",
+              "type": "bytes"
+            }
+          ],
+          "internalType": "struct SendParam",
+          "name": "_sendParam",
+          "type": "tuple"
+        },
+        {
+          "internalType": "bool",
+          "name": "_payInLzToken",
+          "type": "bool"
+        }
+      ],
+      "name": "quoteSend",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "nativeFee",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lzTokenFee",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct MessagingFee",
+          "name": "fee",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "blockers": [
+    {
+      "chainId": 137,
+      "asset": "POL",
+      "token": "native",
+      "reason": "official Stargate Polygon deployment has no native POL contract"
+    },
+    {
+      "chainId": 56,
+      "asset": "BNB",
+      "token": "native",
+      "reason": "official Stargate BSC deployment has USDC and USDT pools, while the active distribution contains native BNB only"
+    },
+    {
+      "chainId": 43114,
+      "asset": "AVAX",
+      "token": "native",
+      "reason": "official Stargate Avalanche deployment has no native AVAX contract"
+    },
+    {
+      "chainId": 130,
+      "asset": "USDC",
+      "token": "0x078D782b760474a361dDA0AF3839290b0EF57AD6",
+      "reason": "official Stargate Unichain deployment contains ETH only"
+    },
+    {
+      "chainId": 59144,
+      "asset": "ETH",
+      "token": "native",
+      "reason": "official Stargate V2 deployment registry contains no linea-mainnet directory"
+    },
+    {
+      "chainId": 59144,
+      "asset": "USDC",
+      "token": "0x176211869cA2b568f2A7D4EE941E073a821EE1ff",
+      "reason": "official Stargate V2 deployment registry contains no linea-mainnet directory"
+    },
+    {
+      "chainId": 143,
+      "asset": "MON",
+      "token": "native",
+      "reason": "official Stargate V2 deployment registry contains monad-testnet only and no monad-mainnet deployment"
+    },
+    {
+      "chainId": 143,
+      "asset": "USDC",
+      "token": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+      "reason": "official Stargate V2 deployment registry contains monad-testnet only and no monad-mainnet deployment"
+    },
+    {
+      "chainId": 1329,
+      "asset": "SEI",
+      "token": "native",
+      "reason": "official Stargate Sei deployment has no native SEI contract"
+    },
+    {
+      "chainId": 1329,
+      "asset": "USDC",
+      "token": "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392",
+      "reason": "official Stargate USDC.n token 0x3894085Ef7Ff0f0aeDf52E2A2704928d1Ec074F1 does not match the active USDC token"
+    }
+  ],
+  "deployments": [
+    {
+      "chainId": 1,
+      "eid": 30101,
+      "asset": "ETH",
+      "token": "0x0000000000000000000000000000000000000000",
+      "pool": "0x77b2043768d28E9C9aB44E1aBfC95944bcE57931",
+      "kind": "oft",
+      "localDecimals": 18,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 1,
+      "eid": 30101,
+      "asset": "USDC",
+      "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "pool": "0xc026395860Db2d07ee33e05fE50ed7bD583189C7",
+      "kind": "pool",
+      "localDecimals": 6,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 1,
+      "eid": 30101,
+      "asset": "USDT",
+      "token": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "pool": "0x933597a323Eb81cAe705C5bC29985172fd5A3973",
+      "kind": "pool",
+      "localDecimals": 6,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 8453,
+      "eid": 30184,
+      "asset": "ETH",
+      "token": "0x0000000000000000000000000000000000000000",
+      "pool": "0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7",
+      "kind": "oft",
+      "localDecimals": 18,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 8453,
+      "eid": 30184,
+      "asset": "USDC",
+      "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "pool": "0x27a16dc786820B16E5c9028b75B99F6f604b5d26",
+      "kind": "pool",
+      "localDecimals": 6,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 42161,
+      "eid": 30110,
+      "asset": "ETH",
+      "token": "0x0000000000000000000000000000000000000000",
+      "pool": "0xA45B5130f36CDcA45667738e2a258AB09f4A5f7F",
+      "kind": "oft",
+      "localDecimals": 18,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 42161,
+      "eid": 30110,
+      "asset": "USDC",
+      "token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+      "pool": "0xe8CDF27AcD73a434D661C84887215F7598e7d0d3",
+      "kind": "pool",
+      "localDecimals": 6,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 10,
+      "eid": 30111,
+      "asset": "ETH",
+      "token": "0x0000000000000000000000000000000000000000",
+      "pool": "0xe8CDF27AcD73a434D661C84887215F7598e7d0d3",
+      "kind": "oft",
+      "localDecimals": 18,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 10,
+      "eid": 30111,
+      "asset": "USDC",
+      "token": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+      "pool": "0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0",
+      "kind": "pool",
+      "localDecimals": 6,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 137,
+      "eid": 30109,
+      "asset": "USDC",
+      "token": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+      "pool": "0x9Aa02D4Fae7F58b8E8f34c66E756cC734DAc7fe4",
+      "kind": "pool",
+      "localDecimals": 6,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 43114,
+      "eid": 30106,
+      "asset": "USDC",
+      "token": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+      "pool": "0x5634c4a5FEd09819E3c46D86A965Dd9447d86e47",
+      "kind": "pool",
+      "localDecimals": 6,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 43114,
+      "eid": 30106,
+      "asset": "USDT",
+      "token": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+      "pool": "0x12dC9256Acc9895B076f6638D628382881e62CeE",
+      "kind": "pool",
+      "localDecimals": 6,
+      "sharedDecimals": 6
+    },
+    {
+      "chainId": 130,
+      "eid": 30320,
+      "asset": "ETH",
+      "token": "0x0000000000000000000000000000000000000000",
+      "pool": "0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7",
+      "kind": "oft",
+      "localDecimals": 18,
+      "sharedDecimals": 6
+    }
+  ]
+}
