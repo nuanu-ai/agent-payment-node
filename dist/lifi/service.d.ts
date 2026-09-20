@@ -4,12 +4,21 @@ import type { BridgeIntent } from "./operation-model.js";
 import { BridgeOperationRepository } from "./operation-repository.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcFactory, LifiProviderPort } from "./ports.js";
 import { BridgePreparation } from "./prepare.js";
-import { type StoredPublicBridgeOperation, type BridgeReceipt } from "./receipt.js";
+import { type StoredPublicBridgeOperation, type BridgeReceipt, type PublicBridgeOperation } from "./receipt.js";
+import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
 export interface BridgeDependencies {
     readonly provider: LifiProviderPort;
     readonly rpcFor: BridgeRpcFactory;
     readonly custody: BridgeCustodyPort;
     readonly approval?: BridgeApprovalPort;
+}
+export interface BridgeDeploymentMigrationResult {
+    readonly schema_version: BridgeDeploymentMigrationAudit["schemaVersion"];
+    readonly status: "migrated" | "already_current";
+    readonly proof_class: "local_journal_migration";
+    readonly operation: PublicBridgeOperation;
+    readonly audit: BridgeDeploymentMigrationAudit;
+    readonly next_actions: readonly string[];
 }
 export declare class BridgeService {
     private readonly context;
@@ -581,10 +590,12 @@ export declare class BridgeService {
     }>;
     status(operationId: string): Promise<StoredPublicBridgeOperation>;
     receipt(operationId: string): Promise<BridgeReceipt | Record<string, unknown>>;
+    repairDeployment(operationId: string): Promise<BridgeDeploymentMigrationResult>;
     private dependencies;
     private preparation;
     private execution;
     private save;
     private followUsage;
     private locked;
+    private deploymentMigrationLocked;
 }
