@@ -52,8 +52,11 @@ export class StargateTokenService {
   }
   async execute(id: string) { const op = await this.required(id); return await executeStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
   async cleanup(id: string) { const op = await this.required(id); return await cleanupStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
-  async observe(id: string) { const op = await this.required(id); if (op.usageTarget !== "reserved" && !["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "submission_started", "submitted", "unknown_finality", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase)) throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate token operation can be observed."); return await observeStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
-  async status(id: string) { const op = await this.required(id); if (op.usageTarget === undefined) return op;
+  async observe(id: string) { const op = await this.required(id); assertServiceUsageTarget(op);
+    if (["observed", "cleanup_required", "cleaned"].includes(op.phase)) return op.usageTarget === undefined ? op : await this.status(id);
+    if (op.usageTarget === undefined && !["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality", "cleaned"].includes(op.phase)) throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted or recoverable Stargate token operation can be observed.");
+    return await observeStargateV2Token(id, await this.ports(op.profile, op.owner), this.journal); }
+  async status(id: string) { const op = await this.required(id); assertServiceUsageTarget(op); if (op.usageTarget === undefined) return op;
     return await reconcileStargateV2TokenUsage(id, { reserveUsage: value => this.reserveUsage(value), followUsage: (value, target) => this.followUsage(value, target) }, this.journal); }
   async receipt(id: string) { return stargateV2TokenCanonicalReceipt(await this.status(id)); }
   private async required(id: string) { const op = await this.journal.load(id); if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stargate token operation was not found."); return op; }
@@ -95,6 +98,15 @@ export class StargateTokenService {
     return (await this.usage.transition({ ...identity, reservationId, policyDigest: current.policyDigest, state: target, now: new Date(this.now()), ...outcome })).state;
   }
   private remote() { if (this.source !== undefined && this.destination !== undefined) return { source: this.source, destination: this.destination }; const source = this.env.APN_OPTIMISM_RPC_URL, destination = this.env.APN_POLYGON_RPC_URL; if (source === undefined || destination === undefined) blocked("APN_OPTIMISM_RPC_URL_and_APN_POLYGON_RPC_URL_required"); this.source = new StargateJsonRpc(source); this.destination = new StargateJsonRpc(destination); return { source: this.source, destination: this.destination }; }
+}
+
+function assertServiceUsageTarget(op: StargateTokenOperation): void {
+  if (op.usageTarget === undefined) return;
+  const legal: Readonly<Record<NonNullable<StargateTokenOperation["usageTarget"]>, readonly StargateTokenOperation["phase"][]>> = {
+    reserved: ["approved", "allowance_observed", "cleanup_required"], submitted: ["submitted"], unknown_finality: ["unknown_finality"],
+    finalized: ["observed"], failed_before_effect: ["cleanup_required"], failed_confirmed_revert: ["cleanup_required"],
+  };
+  if (!legal[op.usageTarget].includes(op.phase)) throw new ApnError("APN_STATE_CORRUPT", "The Stargate token usage reconciliation target is incompatible with the journal phase.");
 }
 
 export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>): Promise<StargateTokenDestinationEvidence | null> {
