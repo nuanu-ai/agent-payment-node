@@ -280,6 +280,20 @@ test("nonzero signed priority fee is refused when the frozen fee is zero", async
   assert.equal(s.journal.value?.phase, "approved"); assert.equal(s.counts().sends, 0);
 });
 
+test("EIP-7702 transaction with matching fees and authorization is refused", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-eip7702" }), s.ports, s.journal);
+  const account = privateKeyToAccount(PRIVATE_KEY);
+  (s.ports as any).signer = { kind: "imported_evm_signer", address: OWNER, signTransaction: async (tx: any) =>
+    await account.signTransaction({ type: "eip7702", chainId: 1, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic),
+      nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic),
+      maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [], authorizationList: [
+        await account.signAuthorization({ chainId: 1, contractAddress: SOURCE, nonce: 0 }),
+      ] }) };
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_RPC_PROTOCOL" && error.details.reason === "signed_transaction_type");
+  assert.equal(s.journal.value?.phase, "approved"); assert.equal(s.counts().sends, 0);
+});
+
 test("balance delta cannot finalize destination delivery", async () => {
   const s = setup(), prepared = await prepareStargateV2NativeEth(request(), s.ports, s.journal);
   (s.ports as any).observeDestination = async (input: any) => ({ mode: "balance_delta", blockNumberAtomic: "31", blockHash: DEST_BLOCK,
