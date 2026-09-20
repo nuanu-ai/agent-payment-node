@@ -2,7 +2,7 @@ import { type Hex } from "viem";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { Address } from "../model.js";
 import type { StateStore } from "../state.js";
-import { StargateJsonRpc } from "./native-runtime.js";
+import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtime.js";
 import { type StargateTokenDestinationEvidence, type StargateTokenExecutionPorts, type StargateTokenOperation } from "./token-execution.js";
 export declare class StargateTokenService {
     private readonly state;
@@ -108,4 +108,5 @@ export declare class StargateTokenService {
     private followUsage;
     private remote;
 }
-export declare function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>): Promise<StargateTokenDestinationEvidence | null>;
+export declare function confirmedStargateTokenSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex, finalityTag: Parameters<typeof confirmedStargateSourceReceipt>[2], expectedCodeHash?: Hex): Promise<import("./native-execution.js").StargateConfirmedReceipt | null>;
+export declare function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>, expectedCodeHash?: Hex): Promise<StargateTokenDestinationEvidence | null>;

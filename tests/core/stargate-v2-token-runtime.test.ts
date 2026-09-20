@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { encodeAbiParameters, encodeEventTopics, encodeFunctionResult, getAddress, pad, parseAbiParameters, type Hex } from "viem";
+import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, encodeFunctionResult, getAddress, keccak256, pad, parseAbiParameters, type Hex } from "viem";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { StateStore } from "../../src/state.js";
-import { LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
-import { STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN,
-  STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "../../src/stargate-v2/token-execution.js";
-import { observeStargateTokenDestination, StargateTokenService } from "../../src/stargate-v2/token-runtime.js";
+import { LAYERZERO_ENDPOINT_V2_ABI, LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
+import { LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN,
+  STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "../../src/stargate-v2/token-execution.js";
+import { confirmedStargateTokenSourceReceipt, observeStargateTokenDestination, StargateTokenService } from "../../src/stargate-v2/token-runtime.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
@@ -14,6 +14,13 @@ const OWNER = getAddress("0x1111111111111111111111111111111111111111");
 const TX = `0x${"12".repeat(32)}` as Hex, OTHER_TX = `0x${"13".repeat(32)}` as Hex, GUID = `0x${"34".repeat(32)}` as Hex;
 const BASELINE = `0x${"56".repeat(32)}` as Hex, EVENT_BLOCK = `0x${"78".repeat(32)}` as Hex, SAFE = `0x${"9a".repeat(32)}` as Hex;
 const DROP = 50_000n;
+
+test("token source receipt verifies pinned TokenMessaging code when PacketSent is present",async()=>{
+  const topics=encodeEventTopics({abi:LAYERZERO_ENDPOINT_V2_ABI,eventName:"PacketSent"}),data=encodeAbiParameters(parseAbiParameters("bytes encodedPayload,bytes options,address sendLibrary"),["0x01","0x",OWNER]);
+  const source=(code:Hex)=>({call:async(method:string)=>{if(method==="eth_getTransactionReceipt")return{transactionHash:TX,status:"0x1",blockNumber:"0xa",blockHash:EVENT_BLOCK,logs:[{address:LAYERZERO_ENDPOINT_V2,topics,data}]};if(method==="eth_getBlockByNumber")return{number:"0xa",hash:EVENT_BLOCK};if(method==="eth_getCode")return code;throw new Error(method);}});
+  assert.ok(await confirmedStargateTokenSourceReceipt(source(TEST_CODE) as any,TX,"safe",TEST_CODE_HASH));
+  await assert.rejects(confirmedStargateTokenSourceReceipt(source("0x6002") as any,TX,"safe",TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
+});
 
 function bridgeAdmission(mechanism: Readonly<{ provider: string; reference: string }> = STARGATE_TOKEN_MECHANISM, dailyLimitAtomic = "150") {
   return { chain: "eip155:10", kind: "token" as const, identifier: STARGATE_TOKEN_SOURCE_TOKEN, rail: "bridge" as const,
@@ -119,29 +126,54 @@ test("service status and receipt reconcile legal terminal targets and reject ill
   }
 });
 
-function destinationRpc(mutation?: "success" | "receiver" | "amount" | "transaction" | "guid" | "baseline") {
-  const oftGuid = mutation === "guid" ? (`0x${"35".repeat(32)}` as Hex) : GUID;
-  const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: oftGuid, toAddress: OWNER } });
+type DestinationMutation = "nonce" | "sender" | "oapp" | "guid" | "duplicate-drop" | "duplicate-delivery" | "failed-drop" | "noncanonical" | "bad-order" | "baseline" | "provider-error" | "dedup" | "low-balances";
+const TEST_CODE = "0x6001" as Hex, TEST_CODE_HASH = keccak256(TEST_CODE), PACKET_NONCE = 27308n;
+const sourcePacket = { srcEid: 30111 as const, sender: pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }), nonceAtomic: PACKET_NONCE.toString(),
+  dstEid: 30109 as const, receiver: pad(STARGATE_TOKEN_DESTINATION_MESSAGING, { size: 32 }) };
+function destinationRpc(mode: "split" | "combined" = "split", mutation?: DestinationMutation) {
+  const ranges: { from: bigint; to: bigint }[] = [], deliveryBlock = 304n;
+  const dropBlock = mutation === "bad-order" ? 305n : (mode === "combined" ? deliveryBlock : 209n);
+  const dropTx = mode === "combined" ? TX : OTHER_TX;
+  const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: GUID, toAddress: OWNER } });
   const oftData = encodeAbiParameters(parseAbiParameters("uint32 srcEid,uint256 amountReceivedLD"), [30111, 100n]);
+  const origin = { srcEid: 30111, sender: mutation === "sender" ? pad(OWNER, { size: 32 }) : sourcePacket.sender,
+    nonce: mutation === "nonce" ? PACKET_NONCE + 1n : PACKET_NONCE };
   const dropTopics = encodeEventTopics({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied" });
   const dropData = encodeAbiParameters(parseAbiParameters("(uint32 srcEid,bytes32 sender,uint64 nonce) origin,uint32 dstEid,address oapp,(address receiver,uint256 amount)[] params,bool[] success"), [
-    { srcEid: 30111, sender: pad(STARGATE_TOKEN_SOURCE_POOL, { size: 32 }), nonce: 7n }, 30109, STARGATE_TOKEN_DESTINATION_POOL,
-    [{ receiver: mutation === "receiver" ? getAddress("0x2222222222222222222222222222222222222222") : OWNER, amount: mutation === "amount" ? DROP - 1n : DROP }],
-    [mutation !== "success"],
+    origin, 30109, mutation === "oapp" ? STARGATE_TOKEN_DESTINATION_POOL : STARGATE_TOKEN_DESTINATION_MESSAGING,
+    [{ receiver: OWNER, amount: DROP }], [mutation !== "failed-drop"],
   ]);
-  return { call: async (method: string, params: readonly any[]) => {
+  const deliveredTopics = encodeEventTopics({ abi: LAYERZERO_ENDPOINT_V2_ABI, eventName: "PacketDelivered" });
+  const deliveredData = encodeAbiParameters(parseAbiParameters("(uint32 srcEid,bytes32 sender,uint64 nonce) origin,address receiver"), [origin, STARGATE_TOKEN_DESTINATION_MESSAGING]);
+  const blockHash = (block: bigint) => mutation === "noncanonical" && block === deliveryBlock ? OTHER_TX : (block === deliveryBlock ? EVENT_BLOCK : SAFE);
+  const log = (address: string, topics: readonly Hex[], data: Hex, tx: Hex, index: bigint, block: bigint) => ({ address, topics, data,
+    transactionHash: tx, logIndex: `0x${index.toString(16)}`, blockNumber: `0x${block.toString(16)}`, blockHash: blockHash(block) });
+  const oft = log(STARGATE_TOKEN_DESTINATION_POOL, oftTopics as readonly Hex[], oftData, TX, 2n, deliveryBlock);
+  const delivered = log(LAYERZERO_ENDPOINT_V2, deliveredTopics as readonly Hex[], deliveredData, TX, 3n, deliveryBlock);
+  const drop = log(STARGATE_TOKEN_DESTINATION_EXECUTOR, dropTopics as readonly Hex[], dropData, dropTx, mode === "combined" ? 1n : 7n, dropBlock);
+  const byAddress: Record<string, any[]> = { [STARGATE_TOKEN_DESTINATION_POOL]: [oft], [LAYERZERO_ENDPOINT_V2]: [delivered],
+    [STARGATE_TOKEN_DESTINATION_EXECUTOR]: [drop] };
+  if (mutation === "duplicate-drop") byAddress[STARGATE_TOKEN_DESTINATION_EXECUTOR]!.push({ ...drop, logIndex: "0x8" });
+  if (mutation === "duplicate-delivery") byAddress[LAYERZERO_ENDPOINT_V2]!.push({ ...delivered, logIndex: "0x4" });
+  if (mutation === "dedup") for (const rows of Object.values(byAddress)) rows.push(structuredClone(rows[0]));
+  const executeData = encodeFunctionData({ abi: LAYERZERO_EXECUTOR_ABI, functionName: "execute302", args: [{ receiver: STARGATE_TOKEN_DESTINATION_MESSAGING,
+    origin, guid: mutation === "guid" ? OTHER_TX : GUID, message: "0x0100", extraData: "0x", gasLimit: 170_000n }] });
+  return { ranges, call: async (method: string, params: readonly any[]) => {
     if (method === "eth_getBlockByNumber") {
-      if (params[0] === "safe" || params[0] === "latest") throw new Error(`weaker finality tag ${params[0]} forbidden`);
-      if (params[0] === "finalized") return { number: "0x20", hash: SAFE };
-      if (params[0] === "0x9") return { number: "0x9", hash: mutation === "baseline" ? SAFE : BASELINE };
-      return { number: "0x1f", hash: EVENT_BLOCK };
+      const tag = String(params[0]); if (tag === "safe" || tag === "latest") throw new Error(`weaker finality tag ${tag} forbidden`);
+      if (tag === "finalized") return { number: "0x150", hash: SAFE };
+      if (tag === "0x9") return { number: "0x9", hash: mutation === "baseline" ? SAFE : BASELINE };
+      const number = BigInt(tag); return { number: tag, hash: number === deliveryBlock ? EVENT_BLOCK : SAFE };
     }
-    if (method === "eth_getLogs") return params[0].address === STARGATE_TOKEN_DESTINATION_POOL
-      ? [{ address: STARGATE_TOKEN_DESTINATION_POOL, topics: oftTopics, data: oftData, transactionHash: TX, logIndex: "0x1", blockNumber: "0x1f", blockHash: EVENT_BLOCK }]
-      : [{ address: STARGATE_TOKEN_DESTINATION_EXECUTOR, topics: dropTopics, data: dropData,
-          transactionHash: mutation === "transaction" ? OTHER_TX : TX, logIndex: "0x2", blockNumber: "0x1f", blockHash: EVENT_BLOCK }];
-    if (method === "eth_getBalance") return `0x${(1_000_000n + DROP).toString(16)}`;
-    if (method === "eth_call") return encodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", result: 1_000_100n });
+    if (method === "eth_getCode") return TEST_CODE;
+    if (method === "eth_getLogs") { const filter = params[0], from = BigInt(filter.fromBlock), to = BigInt(filter.toBlock); ranges.push({ from, to });
+      if (to - from + 1n > 100n) throw new Error("provider rejects ranges above 100 blocks");
+      if (mutation === "provider-error" && from === 209n) throw new Error("provider range failure");
+      return Object.values(byAddress).flat().filter(row => BigInt(row.blockNumber) >= from && BigInt(row.blockNumber) <= to);
+    }
+    if (method === "eth_getTransactionByHash") return { hash: TX, blockHash: EVENT_BLOCK, blockNumber: `0x${deliveryBlock.toString(16)}`, to: STARGATE_TOKEN_DESTINATION_EXECUTOR, input: executeData };
+    if (method === "eth_getBalance") return `0x${(mutation === "low-balances" ? 1n : 1_000_000n + DROP).toString(16)}`;
+    if (method === "eth_call") return encodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", result: mutation === "low-balances" ? 1n : 1_000_100n });
     throw new Error(method);
   } };
 }
@@ -149,12 +181,35 @@ function destinationRpc(mutation?: "success" | "receiver" | "amount" | "transact
 const destinationInput = { sourceTransactionHash: TX, guid: GUID, recipient: OWNER, sourceEid: 30111 as const,
   destinationPool: STARGATE_TOKEN_DESTINATION_POOL, minimumAmountAtomic: "100", tokenBalanceBeforeAtomic: "1000000",
   nativeBalanceBeforeAtomic: "1000000", nativeDropAtomic: DROP.toString(), fromBlockNumberAtomic: "9", fromBlockHash: BASELINE,
-  finalityTag: "finalized" as const };
+  sourcePacket, finalityTag: "finalized" as const };
 
-test("native-drop completion binds the successful pinned Executor event and canonical baseline", async () => {
-  const evidence = await observeStargateTokenDestination(destinationRpc() as any, destinationInput);
-  assert.equal(evidence?.finality, "finalized");
-  assert.equal(evidence?.nativeDrop?.executor, STARGATE_TOKEN_DESTINATION_EXECUTOR); assert.equal(evidence?.nativeDrop?.success, true);
+for (const mode of ["split", "combined"] as const) test(`live-shaped ${mode} finalized native drop and delivery bind one packet`, async () => {
+  const rpc = destinationRpc(mode), evidence = await observeStargateTokenDestination(rpc as any, destinationInput, undefined, TEST_CODE_HASH);
+  assert.equal(evidence?.finality, "finalized"); assert.equal(evidence?.packetDelivery?.nonceAtomic, PACKET_NONCE.toString());
+  assert.equal(evidence?.nativeDrop?.nonceAtomic, PACKET_NONCE.toString());
+  assert.equal(evidence?.nativeDrop?.transactionHash, mode === "split" ? OTHER_TX : TX);
+});
+
+test("destination scanner uses complete inclusive <=100-block chunks and deduplicates identical provider rows", async () => {
+  const rpc = destinationRpc("split", "dedup"), evidence = await observeStargateTokenDestination(rpc as any, destinationInput, undefined, TEST_CODE_HASH);
+  assert.ok(evidence); assert.deepEqual(rpc.ranges.map(row=>[row.from,row.to]),[[9n,108n],[109n,208n],[209n,308n],[309n,336n]]);
+});
+
+test("destination scanner propagates a bounded provider chunk error without weakening or skipping", async () => {
+  const rpc=destinationRpc("split","provider-error"); await assert.rejects(observeStargateTokenDestination(rpc as any,destinationInput,undefined,TEST_CODE_HASH),/provider range failure/u);
+  assert.equal(rpc.ranges.every(row=>row.to-row.from+1n<=100n),true);
+});
+
+test("destination scanner refuses a finalized horizon above its 256-query ceiling",async()=>{
+  let queries=0;const rpc={call:async(method:string,params:readonly any[])=>{if(method==="eth_getBlockByNumber")return params[0]==="finalized"?{number:"0x6409",hash:SAFE}:{number:"0x9",hash:BASELINE};if(method==="eth_getCode")return TEST_CODE;if(method==="eth_getLogs"){queries++;return [];}throw new Error(method);}};
+  await assert.rejects(observeStargateTokenDestination(rpc as any,destinationInput,undefined,TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_CONFIG"&&error.details.reason==="destination_scan_range");assert.equal(queries,0);
+});
+
+for (const mutation of ["nonce","sender","oapp","guid","duplicate-drop","duplicate-delivery","failed-drop","noncanonical","bad-order"] as const)
+  test(`${mutation} packet/drop/delivery evidence fails closed`,async()=>assert.equal(await observeStargateTokenDestination(destinationRpc("split",mutation) as any,destinationInput,undefined,TEST_CODE_HASH),null));
+
+test("post-finality balances are corroborative and cannot replace or invalidate exact packet events",async()=>{
+  const evidence=await observeStargateTokenDestination(destinationRpc("split","low-balances") as any,destinationInput,undefined,TEST_CODE_HASH);assert.ok(evidence);assert.ok(BigInt(evidence!.tokenDeltaAtomic)<0n);assert.ok(BigInt(evidence!.nativeDeltaAtomic)<0n);
 });
 
 test("Polygon finalized unavailability fails closed without safe or latest fallback", async () => {
@@ -162,14 +217,10 @@ test("Polygon finalized unavailability fails closed without safe or latest fallb
     if (method === "eth_getBlockByNumber") { tags.push(String(params[0])); throw new Error("finalized unavailable"); }
     throw new Error(`unexpected ${method}`);
   } };
-  await assert.rejects(observeStargateTokenDestination(rpc as any, destinationInput), /finalized unavailable/u);
+  await assert.rejects(observeStargateTokenDestination(rpc as any, destinationInput, undefined, TEST_CODE_HASH), /finalized unavailable/u);
   assert.deepEqual(tags, ["finalized"]);
 });
 
-for (const mutation of ["success", "receiver", "amount", "transaction", "guid"] as const) test(`native-drop ${mutation} mismatch refuses unrelated balance growth`, async () => {
-  assert.equal(await observeStargateTokenDestination(destinationRpc(mutation) as any, destinationInput), null);
-});
-
 test("destination baseline hash mismatch refuses reorged evidence", async () => {
-  await assert.rejects(observeStargateTokenDestination(destinationRpc("baseline") as any, destinationInput), (error: any) => error.code === "APN_RPC_PROTOCOL");
+  await assert.rejects(observeStargateTokenDestination(destinationRpc("split","baseline") as any, destinationInput, undefined, TEST_CODE_HASH), (error: any) => error.code === "APN_RPC_PROTOCOL");
 });
