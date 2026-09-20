@@ -2,6 +2,7 @@ import { type Hex } from "viem";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
+import { type StargateV2FinalityPolicyProvenance, type StargateV2FinalityTag, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { type StargateV2QuoteEvidence } from "./quote.js";
 export declare const STARGATE_TOKEN_SOURCE_CHAIN: 10;
 export declare const STARGATE_TOKEN_DESTINATION_CHAIN: 137;
@@ -42,7 +43,7 @@ export interface StargateTokenSourceReceipt {
     readonly transactionHash: Hex;
     readonly blockNumberAtomic: string;
     readonly blockHash: Hex;
-    readonly finality: "safe";
+    readonly finality: StargateV2FinalityTag;
     readonly guid: Hex;
     readonly amountSentAtomic: string;
     readonly amountReceivedAtomic: string;
@@ -56,7 +57,7 @@ export interface StargateTokenDestinationEvidence {
     readonly logIndexAtomic: string;
     readonly blockNumberAtomic: string;
     readonly blockHash: Hex;
-    readonly finality: "safe";
+    readonly finality: StargateV2FinalityTag;
     readonly recipient: Address;
     readonly amountReceivedAtomic: string;
     readonly tokenBalanceBeforeAtomic: string;
@@ -80,13 +81,15 @@ export interface StargateTokenPolicyBinding {
     }>;
 }
 export interface StargateTokenOperation {
-    readonly schemaVersion: "apn.stargate-v2-token-operation.v1";
+    readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;
     readonly idempotencyHash: string;
     readonly owner: Address;
     readonly recipient: Address;
+    readonly finalityPolicy: StargateV2RouteFinalityPolicy;
+    readonly finalityPolicyProvenance: StargateV2FinalityPolicyProvenance;
     readonly amountAtomic: string;
     readonly nativeDropAtomic: string;
     readonly maxNativeDebitAtomic: string;
@@ -162,13 +165,13 @@ export interface StargateTokenConfirmedReceipt {
     readonly status: "success" | "reverted";
     readonly blockNumberAtomic: string;
     readonly blockHash: Hex;
-    readonly finality: "safe";
+    readonly finality: StargateV2FinalityTag;
     readonly logs: readonly StargateTokenRawLog[];
 }
 export interface StargateTokenExecutionPorts {
     readonly sourceCall: EvmRpcCall;
     readonly destinationCall: EvmRpcCall;
-    readonly destinationBalances: (recipient: Address) => Promise<Readonly<{
+    readonly destinationBalances: (recipient: Address, finalityTag: StargateV2FinalityTag) => Promise<Readonly<{
         tokenAtomic: string;
         nativeAtomic: string;
         blockNumberAtomic: string;
@@ -203,7 +206,7 @@ export interface StargateTokenExecutionPorts {
     readonly reserveUsage: (operation: StargateTokenOperation) => Promise<StargateTokenUsageState>;
     readonly followUsage: (operation: StargateTokenOperation, state: Exclude<StargateTokenUsageState, "reserved">) => Promise<StargateTokenUsageState>;
     readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
-    readonly waitSourceReceipt: (transactionHash: Hex) => Promise<StargateTokenConfirmedReceipt | null>;
+    readonly waitSourceReceipt: (transactionHash: Hex, finalityTag: StargateV2FinalityTag) => Promise<StargateTokenConfirmedReceipt | null>;
     readonly observeDestination: (input: Readonly<{
         sourceTransactionHash: Hex;
         guid: Hex;
@@ -216,6 +219,7 @@ export interface StargateTokenExecutionPorts {
         nativeDropAtomic: string;
         fromBlockNumberAtomic: string;
         fromBlockHash: Hex;
+        finalityTag: StargateV2FinalityTag;
     }>) => Promise<StargateTokenDestinationEvidence | null>;
     readonly now?: () => number;
 }
@@ -269,6 +273,7 @@ export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOper
     executor: `0x${string}`;
     executorNativeCapAtomic: string;
     policy: StargateTokenPolicyBinding;
+    finalityPolicy: StargateV2RouteFinalityPolicy;
     quoteHash: string;
     approvalTransactionHash: `0x${string}` | null;
     residualAllowanceAtomic: string;

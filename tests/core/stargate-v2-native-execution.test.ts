@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,6 +9,7 @@ import {
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_OFT_OUTPUT, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
 import {
   executeStargateV2NativeEth, FileStargateNativeJournal, prepareStargateV2NativeEth, stargateV2NativeCanonicalReceipt, type StargateNativeExecutionPorts,
@@ -25,6 +26,16 @@ const DEST_BLOCK = `0x${"cd".repeat(32)}` as Hex;
 const GUID = `0x${"ef".repeat(32)}` as Hex;
 const AMOUNT = 1_000_000_000_000n;
 const FEE = 100n;
+
+function legacyNativeFixture(operation: StargateNativeOperation): StargateNativeOperation {
+  const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, ...current } = operation;
+  const body = { ...current, schemaVersion: "apn.stargate-v2-native-operation.v1" as const };
+  return { ...body, integrityHash: hashObject(body) } as StargateNativeOperation;
+}
+async function seedNativeFixture(root: string, operation: StargateNativeOperation): Promise<void> {
+  const directory = join(root, "stargate-v2-native"); await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(directory, `${operation.operationId}.json`), `${canonicalJson(operation)}\n`, { mode: 0o600 });
+}
 
 class MemoryJournal implements StargateNativeJournal {
   value: StargateNativeOperation | null = null;
@@ -133,7 +144,10 @@ const request = (changes: Partial<Parameters<typeof prepareStargateV2NativeEth>[
 
 test("prepares only Ethereum native ETH to Unichain self with exact sendToken calldata and total value", async () => {
   const s = setup(), op = await prepareStargateV2NativeEth(request(), s.ports, s.journal);
-  assert.equal(op.phase, "prepared"); assert.equal(op.sourceEid, 30101); assert.equal(op.destinationEid, 30320);
+  assert.equal(op.phase, "prepared"); assert.equal(op.schemaVersion, "apn.stargate-v2-native-operation.v2");
+  assert.equal(op.finalityPolicyProvenance, "pinned_v2"); assert.equal(op.sourceEid, 30101); assert.equal(op.destinationEid, 30320);
+  assert.deepEqual(op.finalityPolicy, { version: "apn.stargate-v2-finality.v1", source: { chainId: 1, blockTag: "safe" },
+    destination: { chainId: 130, blockTag: "safe" } });
   assert.equal(op.envelope.to, SOURCE); assert.equal(op.totalValueAtomic, (AMOUNT + FEE).toString());
   assert.equal(op.maximumDebitAtomic, (AMOUNT + FEE + 200_000n).toString());
   const decoded = decodeFunctionData({ abi: STARGATE_SEND_ABI, data: op.envelope.data });
@@ -170,6 +184,45 @@ test("foreground approval, attempt marker, exact hash, source event and destinat
   assert.equal(s.envelope()?.valueAtomic, (AMOUNT + FEE).toString());
   const receipt = stargateV2NativeCanonicalReceipt(observed);
   assert.equal(receipt.schemaVersion, "apn.stargate-v2-native-receipt.v1"); assert.match(receipt.evidenceHash, /^[a-f0-9]{64}$/u);
+});
+
+test("legacy v1 prepared native execute is nonresumable before approval, signing, or send", async (t) => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), "apn-stargate-legacy-native-")); t.after(async () => await rm(root, { recursive: true, force: true }));
+  const state = new StateStore(root); await state.initialize(); const s = setup();
+  const prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "legacy-native-prepared" }), s.ports, s.journal);
+  await seedNativeFixture(root, legacyNativeFixture(prepared));
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, new FileStargateNativeJournal(root, state)),
+    (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details.reason === "legacy_operation_nonresumable");
+  assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 0 });
+});
+
+test("legacy v1 observed native fixture keeps raw integrity and derives the historical safe receipt policy", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "legacy-native-observed" }), s.ports, s.journal);
+  const observed = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal), legacy = legacyNativeFixture(observed);
+  const receipt = stargateV2NativeCanonicalReceipt(legacy);
+  assert.deepEqual(receipt.finalityPolicy, { version: "apn.stargate-v2-finality.legacy-safe-v1",
+    source: { chainId: 1, blockTag: "safe" }, destination: { chainId: 130, blockTag: "safe" } });
+  assert.equal(receipt.source.finality, "safe"); assert.equal(receipt.destination.finality, "safe");
+});
+
+test("v2 native records require the policy and reject rehashed policy drift", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-policy-corruption" }), s.ports, s.journal);
+  const observed = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
+  const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, ...missingBody } = observed;
+  await assert.rejects(async () => stargateV2NativeCanonicalReceipt({ ...missingBody, integrityHash: hashObject(missingBody) } as StargateNativeOperation),
+    (error: any) => error.code === "APN_STATE_CORRUPT");
+  const driftBody = { ...observed, finalityPolicy: { ...observed.finalityPolicy,
+    destination: { chainId: 130 as const, blockTag: "finalized" as const } } };
+  const { integrityHash: _old, ...drift } = driftBody;
+  await assert.rejects(async () => stargateV2NativeCanonicalReceipt({ ...drift, integrityHash: hashObject(drift) } as StargateNativeOperation),
+    (error: any) => error.code === "APN_STATE_CORRUPT");
+  const legacy = legacyNativeFixture(observed), { integrityHash: _legacyHash, ...legacyBody } = legacy;
+  const targetDrift = { ...legacyBody, envelope: { ...legacyBody.envelope, to: DESTINATION } };
+  await assert.rejects(async () => stargateV2NativeCanonicalReceipt({ ...targetDrift, integrityHash: hashObject(targetDrift) } as StargateNativeOperation),
+    (error: any) => error.code === "APN_STATE_CORRUPT");
+  const recipientDrift = { ...legacyBody, recipient: DESTINATION };
+  await assert.rejects(async () => stargateV2NativeCanonicalReceipt({ ...recipientDrift, integrityHash: hashObject(recipientDrift) } as StargateNativeOperation),
+    (error: any) => error.code === "APN_STATE_CORRUPT");
 });
 
 test("ambiguous send is durable unknown_finality and repeated execute observes without signing or resend", async () => {
