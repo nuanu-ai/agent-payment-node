@@ -232,6 +232,15 @@ async function executeLocked(id, ports, journal) {
     if (op === null)
         fail("APN_OPERATION_BLOCKED", "operation_missing");
     const now = ports.now ?? Date.now;
+    if (op.finalityPolicyProvenance === "derived_legacy_v1") {
+        if (["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted"].includes(op.phase))
+            return await observeAllowance(op, ports, journal);
+        if (["submission_started", "unknown_finality", "submitted"].includes(op.phase))
+            return await observeBridge(op, ports, journal);
+        if (op.phase === "observed" || op.phase === "cleaned" || op.phase === "cleanup_required")
+            return op;
+        fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
+    }
     op = await reconcileUsageOrCleanup(op, ports, journal);
     if (op.phase === "observed" || op.phase === "cleaned" || op.phase === "cleanup_required")
         return op;
@@ -428,6 +437,8 @@ export async function cleanupStargateV2Token(id, ports, journal) {
             return op;
         if (op.phase !== "cleanup_required")
             fail("APN_OPERATION_BLOCKED", "cleanup_not_required");
+        if (op.finalityPolicyProvenance === "derived_legacy_v1" && op.residualAllowanceAtomic !== op.amountAtomic)
+            fail("APN_OPERATION_BLOCKED", "legacy_cleanup_not_proven");
         const allowance = await readAllowance(ports.sourceCall, op.owner, "pending");
         if (allowance === 0n)
             return await finishCleanup({ ...op, residualAllowanceAtomic: "0" }, ports, journal, "zero_residual_allowance_proven");
@@ -738,7 +749,7 @@ function validateRecord(value) {
             fail("APN_STATE_CORRUPT", "transition");
     return record;
 }
-function assertLegacyTokenLane(record) { const route = record.quote?.route; if (record.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || record.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || record.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || record.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || record.sourceEid !== STARGATE_TOKEN_SOURCE_EID || record.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || record.sendEnvelope?.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || route?.sourceChainId !== STARGATE_TOKEN_SOURCE_CHAIN || route?.destinationChainId !== STARGATE_TOKEN_DESTINATION_CHAIN || route?.sourceEid !== STARGATE_TOKEN_SOURCE_EID || route?.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || route?.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || route?.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || route?.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || route?.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || route?.asset !== "USDC")
+function assertLegacyTokenLane(record) { const route = record.quote?.route, approval = record.approvalEnvelope, cleanup = record.cleanupEnvelope; if (record.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || record.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || record.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || record.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || record.sourceEid !== STARGATE_TOKEN_SOURCE_EID || record.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || record.executor !== STARGATE_TOKEN_SOURCE_EXECUTOR || record.sendEnvelope?.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || record.sendEnvelope.from !== record.owner || record.sendEnvelope.to !== STARGATE_TOKEN_SOURCE_POOL || (approval !== undefined && (approval.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || approval.from !== record.owner || approval.to !== STARGATE_TOKEN_SOURCE_TOKEN)) || (cleanup !== undefined && (cleanup.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || cleanup.from !== record.owner || cleanup.to !== STARGATE_TOKEN_SOURCE_TOKEN)) || route?.sourceChainId !== STARGATE_TOKEN_SOURCE_CHAIN || route?.destinationChainId !== STARGATE_TOKEN_DESTINATION_CHAIN || route?.sourceEid !== STARGATE_TOKEN_SOURCE_EID || route?.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || route?.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || route?.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || route?.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || route?.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || record.quote?.recipient !== record.owner || route?.asset !== "USDC")
     fail("APN_STATE_CORRUPT", "legacy_lane"); }
 function validateAdvance(previous, next) {
     if (previous === null) {

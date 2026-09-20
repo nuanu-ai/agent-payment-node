@@ -245,6 +245,8 @@ async function executeLocked(operationId, ports, journal) {
         return await observeOnly(operation, ports, journal);
     if (operation.phase === "observed")
         return operation;
+    if (operation.finalityPolicyProvenance === "derived_legacy_v1")
+        fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
     const now = ports.now ?? Date.now;
     if (Date.parse(operation.expiresAt) <= now())
         fail("APN_REPREPARE_REQUIRED", "expired");
@@ -530,9 +532,9 @@ function validateRecord(value) {
 function assertLegacyNativeLane(record) {
     const route = record.quote?.route;
     if (record.sourcePool !== SOURCE_POOL || record.destinationPool !== DESTINATION_POOL || record.sourceEid !== SOURCE_EID ||
-        record.destinationEid !== DESTINATION_EID || record.envelope?.chainId !== SOURCE_CHAIN || route?.sourceChainId !== SOURCE_CHAIN ||
-        route.destinationChainId !== DESTINATION_CHAIN || route.sourceEid !== SOURCE_EID || route.destinationEid !== DESTINATION_EID ||
-        route.sourcePool !== SOURCE_POOL || route.destinationPool !== DESTINATION_POOL || route.asset !== "ETH")
+        record.destinationEid !== DESTINATION_EID || record.envelope?.chainId !== SOURCE_CHAIN || record.envelope.from !== record.owner || record.envelope.to !== SOURCE_POOL || route?.sourceChainId !== SOURCE_CHAIN ||
+        route.destinationChainId !== DESTINATION_CHAIN || route.sourceEid !== SOURCE_EID || route.destinationEid !== DESTINATION_EID || record.quote.recipient !== record.owner ||
+        route.sourcePool !== SOURCE_POOL || route.destinationPool !== DESTINATION_POOL || route.sourceToken !== zeroAddress || route.destinationToken !== zeroAddress || route.asset !== "ETH")
         fail("APN_STATE_CORRUPT", "legacy_lane");
 }
 function validateAdvance(previous, next) {
