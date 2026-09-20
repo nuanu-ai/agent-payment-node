@@ -64,6 +64,12 @@ function projectBridgeOperation(op, legacy) {
                 quoted_fee_wei: e.fee_quote.totalQuoteWei, included_fee_wei: e.included_proof?.actualTotalFeeWei ?? null })) },
         effects, source_proof: op.sourceProof, destination_proof: op.destinationProof,
         provider_observation: op.providerObservation, residual_allowance: op.failure?.residualAllowance ?? null,
+        ...(op.failure?.preSignRpc === undefined ? {} : { pre_sign_rpc_failure: {
+                schema_version: op.failure.preSignRpc.schemaVersion, phase: op.failure.preSignRpc.phase,
+                effect_role: op.failure.preSignRpc.effectRole, stage: op.failure.preSignRpc.stage,
+                chain_role: op.failure.preSignRpc.chainRole, chain_id: op.failure.preSignRpc.chainId,
+                category: op.failure.preSignRpc.category, method: op.failure.preSignRpc.method,
+            } }),
         rpc_origins: { source: i.sourceRpcOrigin, destination: i.destinationRpcOrigin },
         deployments: { source: i.sourceDeployment, destination: i.destinationDeployment },
         policy: { identity: "apn.bridge.foreground-approval.v1", policy_hash: i.policyHash,

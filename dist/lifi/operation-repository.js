@@ -149,8 +149,7 @@ export class BridgeOperationRepository extends SecureStateStore {
     }
 }
 function validateReceipt(value, op) {
-    if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint ||
-        !bridgeSame(Object.keys(value).sort(), Object.keys(bridgeReceipt(op)).sort()))
+    if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint)
         bridgeCorrupt();
     const { receipt_hash, ...body } = value;
     if (hashObject(body) !== receipt_hash)

@@ -189,6 +189,17 @@ function validateSnapshot(op: BridgeOperationRecord, s: BridgeTransition, legacy
   }
   if (s.state === "completed" && (s.effects.some((e) => e.phase !== "safe_success") || s.destinationProof === null || s.sourceProof === null)) bridgeCorrupt();
   if (s.state === "failed_before_effect" && (s.effects.some((e) => e.submissionAttempts !== 0 || e.phase === "signing_started") || s.failure === null)) bridgeCorrupt();
+  if (s.failure?.preSignRpc !== undefined) {
+    const d = s.failure.preSignRpc, request = op.intent.materialization.request;
+    const expectedChain = d.chainRole === "source" ? request.fromChainId : request.toChainId;
+    const expectedCategory = d.stage.endsWith("deployment_refresh") ? "deployment_refresh"
+      : d.stage === "source_account_refresh" ? "account_nonce"
+      : d.stage === "source_execution_simulation" ? "simulation" : "fee_quote";
+    if (s.failure.reason !== "unsent_apn_rpc_ambiguous" || s.state !== "failed_before_effect" ||
+      d.chainId !== expectedChain || d.category !== expectedCategory ||
+      (d.stage.startsWith("source_") ? d.chainRole !== "source" : d.chainRole !== "destination") ||
+      !s.effects.some((effect) => effect.role === d.effectRole)) bridgeCorrupt();
+  }
   if (s.state === "failed_after_approval" && (approval?.phase !== "safe_success" || bridge.submissionAttempts !== 0 || bridge.phase === "signing_started" || s.failure === null)) bridgeCorrupt();
   if (s.state === "failed_confirmed_revert") {
     const index = s.effects.findIndex((e) => e.phase === "safe_revert");

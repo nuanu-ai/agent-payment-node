@@ -159,10 +159,11 @@ export class BridgeExecution {
     }
     async haltUnsent(op, error, existingReason) {
         const reason = existingReason ?? `unsent_${error instanceof ApnError ? error.code.toLowerCase() : "guard_unavailable"}`;
+        const preSignRpc = preSignRpcFailure(error);
         if (op.effects.some((e) => e.phase === "signing_started"))
             bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_committed_signing_material_unresolved");
         if (op.effects.every((e) => e.submissionAttempts === 0))
-            return await this.save(op, { state: "failed_before_effect", failure: { reason, residualAllowance: null } });
+            return await this.save(op, { state: "failed_before_effect", failure: { reason, residualAllowance: null, ...(preSignRpc === null ? {} : { preSignRpc }) } });
         if (op.effects[0]?.role === "approval" && op.effects[0].phase === "safe_success" && op.effects.at(-1).submissionAttempts === 0)
             return await this.terminalFailure(op, "failed_after_approval", reason);
         return await this.save(op, { state: "unknown_finality", failure: { reason, residualAllowance: null } });
@@ -177,5 +178,18 @@ export class BridgeExecution {
         }
         return await this.save(op, { state, failure: { reason, residualAllowance } });
     }
+}
+function preSignRpcFailure(error) {
+    if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS")
+        return null;
+    const d = error.details;
+    if (d === undefined || typeof d.rpcStage !== "string" || typeof d.rpcChainRole !== "string" || typeof d.rpcChainId !== "string" ||
+        typeof d.rpcCategory !== "string" || typeof d.effectRole !== "string")
+        return null;
+    return { schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard",
+        effectRole: d.effectRole, stage: d.rpcStage,
+        chainRole: d.rpcChainRole, chainId: Number(d.rpcChainId),
+        category: d.rpcCategory,
+        method: typeof d.rpcMethod === "string" ? d.rpcMethod : null };
 }
 //# sourceMappingURL=execution.js.map
