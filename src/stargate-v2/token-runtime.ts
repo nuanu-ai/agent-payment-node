@@ -46,7 +46,7 @@ export class StargateTokenService {
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly env: Readonly<Record<string, string | undefined>>, private readonly now: () => number = Date.now) {
     this.journal = new FileStargateTokenJournal(state.root, state); this.local = new LocalStargateTokenSigner(state, wrapping); this.usage = new AssetUsageLedger(state.root);
   }
-  async prepare(input: Readonly<{ profile: string; amountAtomic: string; nativeDropAtomic: string; minOutputAtomic: string; maxNativeDebitAtomic: string; idempotencyKey: string }>) {
+  async prepare(input: Readonly<{ profile: string; amountAtomic: string; nativeDropAtomic: string; minOutputAtomic: string; maxNativeDebitAtomic: string; idempotencyKey: string; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string }>) {
     this.remote(); await this.state.initialize(); const identity = await this.local.identity(input.profile), ports = await this.ports(identity.profile, identity.address);
     return await prepareStargateV2Token({ ...input, owner: identity.address, recipient: identity.address }, ports, this.journal);
   }
