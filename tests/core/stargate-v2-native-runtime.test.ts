@@ -60,9 +60,29 @@ test("StargateNativeService status is a true local read with no RPC call or jour
     transitions: [{ phase: "prepared", at: "2026-01-01T00:00:00.000Z", reason: "fixture" }] } as any;
   // Use a test-local journal seam because this assertion targets service routing, not record validation.
   (service as any).journal = { load: async () => operation };
-  (service as any).source.call = async () => { throw new Error("source RPC called"); };
-  (service as any).destination.call = async () => { throw new Error("destination RPC called"); };
   assert.equal((await service.status(operation.operationId)).phase, "prepared");
+});
+
+test("StargateNativeService requires RPC capability lazily only for remote commands", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const state = new StateStore(temporary.root);
+  const service = new StargateNativeService(state, { load: async () => Buffer.alloc(32) } as any, {});
+  await assert.rejects(service.prepare({ profile: "owner", amountAtomic: "1", maxNativeDebitAtomic: "2", idempotencyKey: "missing-rpc" }),
+    (error: any) => error.code === "APN_RPC_CONFIG" && error.details.reason === "APN_ETHEREUM_RPC_URL_and_APN_UNICHAIN_RPC_URL_required");
+  (service as any).required = async () => ({ phase: "submitted", profile: "owner", owner: OWNER });
+  await assert.rejects(service.observe("a".repeat(64)), (error: any) => error.code === "APN_RPC_CONFIG");
+});
+
+test("production factory fails remote prepare on missing RPC capability before state creation", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const missingRoot = `${temporary.root}-missing`;
+  const ethereum = process.env.APN_ETHEREUM_RPC_URL, unichain = process.env.APN_UNICHAIN_RPC_URL;
+  delete process.env.APN_ETHEREUM_RPC_URL; delete process.env.APN_UNICHAIN_RPC_URL;
+  t.after(() => { if (ethereum === undefined) delete process.env.APN_ETHEREUM_RPC_URL; else process.env.APN_ETHEREUM_RPC_URL = ethereum;
+    if (unichain === undefined) delete process.env.APN_UNICHAIN_RPC_URL; else process.env.APN_UNICHAIN_RPC_URL = unichain; });
+  const bound = bindArgv(["stargate", "native", "prepare", "--profile", "owner", "--amount-atomic", "1",
+    "--max-native-debit-atomic", "2", "--idempotency-key", "missing-rpc"]);
+  const result = await createApnCore(bound, { stateRoot: missingRoot }).execute(bound.request);
+  assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_RPC_CONFIG");
+  await assert.rejects(import("node:fs/promises").then(fs => fs.stat(missingRoot)), (error: any) => error.code === "ENOENT");
 });
 
 test("CLI binding dispatches status locally and observe explicitly through the Stargate service", async (t) => {

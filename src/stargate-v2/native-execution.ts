@@ -126,7 +126,7 @@ export class FileStargateNativeJournal implements StargateNativeJournal {
   }
   async withLock<T>(id: string, work: () => Promise<T>): Promise<T> {
     await this.locks.initialize();
-    return await this.locks.withLocks([`stargate-native:${id}`], work);
+    return await this.locks.withLocks([`stargate-native:${id}`], work, { waitMs: 30_000 });
   }
   async load(id: string): Promise<StargateNativeOperation | null> {
     try {

@@ -13,9 +13,10 @@ export declare class StargateJsonRpc {
 }
 export declare class StargateNativeService {
     private readonly state;
+    private readonly environment;
     private readonly now;
-    private readonly source;
-    private readonly destination;
+    private source?;
+    private destination?;
     private readonly journal;
     private readonly local;
     constructor(state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>, now?: () => number);
@@ -31,6 +32,7 @@ export declare class StargateNativeService {
     receipt(operationId: string): Promise<import("./native-execution.js").StargateNativeCanonicalReceipt>;
     private required;
     private ports;
+    private remote;
 }
 export declare function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex): Promise<StargateConfirmedReceipt | null>;
 export declare function observeStargateDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateNativeExecutionPorts["observeDestination"]>[0]): Promise<{

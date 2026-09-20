@@ -290,16 +290,18 @@ test("fresh exact-call gas estimate cannot exceed the frozen gas limit", async (
 test("production file journal advisory lock permits exactly one concurrent broadcast", async (t) => {
   const root = await mkdtemp(join(await realpath(tmpdir()), "apn-stargate-file-journal-")); t.after(async () => await rm(root, { recursive: true, force: true }));
   const state = new StateStore(root); await state.initialize();
-  const journal = new FileStargateNativeJournal(root, state), s = setup();
-  const prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-file-concurrent" }), s.ports, s.journal);
-  await journal.save(prepared);
-  const results = await Promise.allSettled([
-    executeStargateV2NativeEth(prepared.operationId, s.ports, journal),
-    executeStargateV2NativeEth(prepared.operationId, s.ports, journal),
-  ]);
-  assert.equal(results.filter(result => result.status === "fulfilled" && result.value.phase === "observed").length, 2);
-  assert.deepEqual(s.counts(), { sends: 1, signs: 1, approvals: 1 });
-  assert.equal((await journal.load(prepared.operationId))?.phase, "observed");
+  const journal = new FileStargateNativeJournal(root, state);
+  for (let index = 0; index < 8; index++) {
+    const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: `native-file-concurrent-${index}` }), s.ports, s.journal);
+    await journal.save(prepared);
+    const results = await Promise.all([
+      executeStargateV2NativeEth(prepared.operationId, s.ports, journal),
+      executeStargateV2NativeEth(prepared.operationId, s.ports, journal),
+    ]);
+    assert.deepEqual(results.map(result => result.phase), ["observed", "observed"]);
+    assert.deepEqual(s.counts(), { sends: 1, signs: 1, approvals: 1 });
+    assert.equal((await journal.load(prepared.operationId))?.phase, "observed");
+  }
 });
 
 test("production file journal lock is released by process crash while its stable lock file remains", async (t) => {
@@ -314,9 +316,10 @@ test("production file journal lock is released by process crash while its stable
   t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
   await new Promise<void>((resolve, reject) => { child.stdout!.once("data", () => resolve()); child.once("error", reject);
     child.once("exit", code => reject(new Error(`lock holder exited before ready: ${code}`))); });
-  await assert.rejects(journal.withLock(id, async () => undefined), (error: any) => error.code === "APN_STATE_BUSY");
+  let acquired = false; const contender = journal.withLock(id, async () => { acquired = true; });
+  await new Promise<void>(resolve => setTimeout(resolve, 50)); assert.equal(acquired, false);
   child.kill("SIGKILL"); await new Promise<void>(resolve => child.once("exit", () => resolve()));
-  await journal.withLock(id, async () => undefined);
+  await contender; assert.equal(acquired, true);
 });
 
 test("production file journal absent-record load is a true local read without directory creation", async (t) => {
