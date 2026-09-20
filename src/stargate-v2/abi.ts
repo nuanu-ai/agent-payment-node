@@ -84,3 +84,31 @@ export const STARGATE_SEND_ABI = [
     { name: "toAddress", type: "address", indexed: true }, { name: "amountReceivedLD", type: "uint256", indexed: false },
   ] },
 ] as const;
+
+/** Minimal ERC-20 surface used by the token lane. */
+export const STARGATE_ERC20_ABI = [
+  { type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address", name: "owner" }, { type: "address", name: "spender" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address", name: "account" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "approve", stateMutability: "nonpayable", inputs: [{ type: "address", name: "spender" }, { type: "uint256", name: "amount" }], outputs: [{ type: "bool" }] },
+] as const;
+
+/** Executor DstConfig getter pinned to LayerZero-v2 Executor.sol. */
+export const LAYERZERO_EXECUTOR_ABI = [{
+  type: "function", name: "dstConfig", stateMutability: "view", inputs: [{ type: "uint32", name: "dstEid" }], outputs: [
+    { type: "uint64", name: "lzReceiveBaseGas" }, { type: "uint16", name: "multiplierBps" },
+    { type: "uint128", name: "floorMarginUSD" }, { type: "uint128", name: "nativeCap" },
+    { type: "uint64", name: "lzComposeBaseGas" },
+  ],
+}, {
+  type: "event", name: "NativeDropApplied", inputs: [
+    { name: "origin", type: "tuple", indexed: false, components: [
+      { name: "srcEid", type: "uint32" }, { name: "sender", type: "bytes32" }, { name: "nonce", type: "uint64" },
+    ] },
+    { name: "dstEid", type: "uint32", indexed: false },
+    { name: "oapp", type: "address", indexed: false },
+    { name: "params", type: "tuple[]", indexed: false, components: [
+      { name: "receiver", type: "address" }, { name: "amount", type: "uint256" },
+    ] },
+    { name: "success", type: "bool[]", indexed: false },
+  ],
+}] as const;

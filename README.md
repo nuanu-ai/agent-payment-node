@@ -609,6 +609,12 @@ apn stargate native execute --operation <operation-id>
 apn stargate native observe --operation <operation-id>
 apn stargate native status --operation <operation-id>
 apn stargate native receipt --operation <operation-id>
+apn stargate token prepare --profile <profile> --amount-atomic <usdc> [--native-drop-atomic <wei>] --min-output-atomic <usdc> --max-native-debit-atomic <wei> --idempotency-key <key>
+apn stargate token execute --operation <operation-id>
+apn stargate token cleanup --operation <operation-id>
+apn stargate token observe --operation <operation-id>
+apn stargate token status --operation <operation-id>
+apn stargate token receipt --operation <operation-id>
 apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>]
 apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] --to <address> --amount <decimal> --max-fee-wei <wei> [--priority-fee-wei <wei>] --idempotency-key <key>
 apn --version

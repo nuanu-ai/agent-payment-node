@@ -1,7 +1,4 @@
-import type { CommandOutcome, CommandRequest, OutputEnvelope } from "./commands.js";
-import { isPlainRecord } from "./canonical.js";
-import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
-import { failureEnvelope, successEnvelope } from "./output.js";
+import type { CommandOutcome, CommandRequest, OutputEnvelope } from "./commands.js";import { isPlainRecord } from "./canonical.js";import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { failureEnvelope, successEnvelope } from "./output.js";
 import { RuntimeContext, type CoreDependencies } from "./runtime.js";
 import { TransferService } from "./transfer-service.js";
 import { WalletService } from "./wallet-service.js";
@@ -174,6 +171,20 @@ export class ApnCore {
         if (request.command === "stargate.native.execute") return operationOutcome(await service.execute(request.operationId));
         if (request.command === "stargate.native.observe") return operationOutcome(await service.observe(request.operationId));
         if (request.command === "stargate.native.status") return operationOutcome(await service.status(request.operationId));
+        return receiptOutcome(await service.receipt(request.operationId));
+      }
+      case "stargate.token.prepare": {
+        const service = this.context.stargateToken;
+        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate token runtime is unavailable.");
+        return operationOutcome(await service.prepare(request));
+      }
+      case "stargate.token.execute": case "stargate.token.cleanup": case "stargate.token.observe": case "stargate.token.status": case "stargate.token.receipt": {
+        const service = this.context.stargateToken;
+        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate token runtime is unavailable.");
+        if (request.command === "stargate.token.execute") return operationOutcome(await service.execute(request.operationId));
+        if (request.command === "stargate.token.cleanup") return operationOutcome(await service.cleanup(request.operationId));
+        if (request.command === "stargate.token.observe") return operationOutcome(await service.observe(request.operationId));
+        if (request.command === "stargate.token.status") return operationOutcome(await service.status(request.operationId));
         return receiptOutcome(await service.receipt(request.operationId));
       }
       case "swap.uniswap.inventory": case "swap.uniswap.quote": case "swap.uniswap.prepare": case "swap.uniswap.status": case "swap.uniswap.approve": case "swap.uniswap.execute": return await executeUniswapCommand(request, this.context);
@@ -419,7 +430,6 @@ export class ApnCore {
       }
     }
   }
-
   private async prepareGasless(request: Extract<CommandRequest, { command: "gasless.transfer.prepare" }>) {
     const key = canonicalIdempotencyKey(request.idempotencyKey);
     const existing = await this.operations.findIdempotency(this.context.state.idempotencyHash(key));
@@ -438,7 +448,6 @@ export class ApnCore {
     return await this.gasless.prepare({ ...request, request: { ...request.request,
       chainId: gaslessChain(request.request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE") } });
   }
-
   private async gaslessProvider(input: string): Promise<"local" | "metamask-agent-wallet" | "metamask-smart-account" | "coinbase-agentic-wallet"> {
     const profile = canonicalProfile(input);
     const stored = await this.context.state.loadProviderProfile(this.context.state.profileHash(profile));
@@ -449,7 +458,6 @@ export class ApnCore {
     return mmFail("mm_gasless_capability_unavailable");
   }
 }
-
 function dataOutcome(data: unknown, fallbackProofClass: string): CommandOutcome {
   const artifact = artifactMetadata(data);
   return {
@@ -460,7 +468,6 @@ function dataOutcome(data: unknown, fallbackProofClass: string): CommandOutcome 
     nextActions: artifact.nextActions,
   };
 }
-
 function operationOutcome(operation: unknown): CommandOutcome {
   const artifact = artifactMetadata(operation);
   return {
@@ -471,7 +478,6 @@ function operationOutcome(operation: unknown): CommandOutcome {
     nextActions: artifact.nextActions,
   };
 }
-
 function receiptOutcome(receipt: unknown): CommandOutcome {
   const artifact = artifactMetadata(receipt);
   return {
@@ -482,7 +488,6 @@ function receiptOutcome(receipt: unknown): CommandOutcome {
     nextActions: artifact.nextActions,
   };
 }
-
 function artifactMetadata(value: unknown): { readonly proofClass?: string; readonly nextActions: readonly string[] } {
   const record = isPlainRecord(value) ? value : {};
   const proofClass = typeof record.proof_class === "string"

@@ -153,6 +153,7 @@ export interface StargateNativeExecutionPorts {
         minimumAmountAtomic: string;
         balanceBeforeAtomic: string;
         fromBlockNumberAtomic: string;
+        fromBlockHash: Hex;
     }>) => Promise<StargateDestinationEvidence | null>;
     readonly now?: () => number;
 }
@@ -160,6 +161,7 @@ export interface StargateNativeJournal {
     load(operationId: string): Promise<StargateNativeOperation | null>;
     save(next: StargateNativeOperation): Promise<void>;
     withLock<T>(operationId: string, work: () => Promise<T>): Promise<T>;
+    withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
 }
 export declare class FileStargateNativeJournal implements StargateNativeJournal {
     private readonly root;
@@ -167,6 +169,7 @@ export declare class FileStargateNativeJournal implements StargateNativeJournal 
     constructor(root: string, locks?: Pick<StateStore, "initialize" | "withLocks">);
     private path;
     withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
+    withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
     load(id: string): Promise<StargateNativeOperation | null>;
     save(nextInput: StargateNativeOperation): Promise<void>;
 }

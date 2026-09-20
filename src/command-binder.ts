@@ -73,6 +73,15 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
       case "stargate native observe": return { request: { command: "stargate.native.observe", operationId: value(options, "--operation") } };
       case "stargate native status": return { request: { command: "stargate.native.status", operationId: value(options, "--operation") } };
       case "stargate native receipt": return { request: { command: "stargate.native.receipt", operationId: value(options, "--operation") } };
+      case "stargate token prepare": return { request: { command: "stargate.token.prepare", profile: value(options, "--profile"),
+        amountAtomic: value(options, "--amount-atomic"), nativeDropAtomic: value(options, "--native-drop-atomic"),
+        minOutputAtomic: value(options, "--min-output-atomic"), maxNativeDebitAtomic: value(options, "--max-native-debit-atomic"),
+        idempotencyKey: value(options, "--idempotency-key") } };
+      case "stargate token execute": return { request: { command: "stargate.token.execute", operationId: value(options, "--operation") } };
+      case "stargate token cleanup": return { request: { command: "stargate.token.cleanup", operationId: value(options, "--operation") } };
+      case "stargate token observe": return { request: { command: "stargate.token.observe", operationId: value(options, "--operation") } };
+      case "stargate token status": return { request: { command: "stargate.token.status", operationId: value(options, "--operation") } };
+      case "stargate token receipt": return { request: { command: "stargate.token.receipt", operationId: value(options, "--operation") } };
       default: throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported Stargate native command.");
     }
   }
