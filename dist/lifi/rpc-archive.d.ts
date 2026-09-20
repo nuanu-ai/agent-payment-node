@@ -8,6 +8,7 @@ import type { BridgeChainId } from "./chains.js";
 export declare const BRIDGE_ARCHIVE_RPC_ENV: {
     readonly 1: "APN_ETHEREUM_ARCHIVE_RPC_URL";
     readonly 56: "APN_BNB_ARCHIVE_RPC_URL";
+    readonly 143: "APN_MONAD_ARCHIVE_RPC_URL";
     readonly 8453: "APN_BASE_ARCHIVE_RPC_URL";
     readonly 42161: "APN_ARBITRUM_ARCHIVE_RPC_URL";
     readonly 59144: "APN_LINEA_ARCHIVE_RPC_URL";

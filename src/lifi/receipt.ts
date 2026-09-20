@@ -23,6 +23,25 @@ export function publicBridgeOperation(op: BridgeOperationRecord) {
 }
 function projectBridgeOperation(op: BridgeOperationRecord, legacy: boolean) {
   const i = op.intent, m = i.materialization;
+  const fromAsset = bridgeAssetRow(m.request.fromChainId, m.request.fromToken, "APN_STATE_CORRUPT");
+  const toAsset = bridgeAssetRow(m.request.toChainId, m.request.toToken, "APN_STATE_CORRUPT");
+  const from = assetProjection(m.request.fromChainId, m.request.fromToken);
+  const to = assetProjection(m.request.toChainId, m.request.toToken);
+  const sameDenomination = fromAsset.pairKey === toAsset.pairKey && fromAsset.decimals === toAsset.decimals;
+  const nativePrincipal = bridgeNativePrincipal(m.request);
+  const assetBounds = {
+    binding: "intent.materialization.request" as const,
+    same_denomination: sameDenomination,
+    source: { chain: from.chain, asset: from.token, symbol: from.symbol, decimals: from.decimals,
+      principal_debit_atomic: m.request.amountAtomic, route_fee_cap_atomic: m.request.maxRouteFeeAtomic,
+      route_fee_included_in_principal: true,
+      native_execution_fee_cap_atomic: m.request.maxNativeDebitWei,
+      maximum_total_native_debit_atomic: nativePrincipal
+        ? (BigInt(m.request.amountAtomic) + BigInt(m.request.maxNativeDebitWei)).toString() : null },
+    destination: { chain: to.chain, asset: to.token, symbol: to.symbol, decimals: to.decimals,
+      expected_output_atomic: m.quotedOutputAtomic, minimum_output_atomic: m.minimumOutputAtomic,
+      owner_minimum_output_atomic: m.request.minOutputAtomic },
+  };
   const effects = op.effects.map((e) => ({
     role: e.role, phase: e.phase, envelope_hash: e.envelope.envelopeHash, transaction_hash: e.transactionHash,
     submission_attempts: e.submissionAttempts, submitted_at: e.submittedAt,
@@ -43,8 +62,8 @@ function projectBridgeOperation(op: BridgeOperationRecord, legacy: boolean) {
       request_hash: m.requestHash, response_hash: m.responseHash, route_hash: m.routeHash, step_hash: m.stepHash,
       materialized_step_hash: m.materializedStepHash, transaction_digest: m.transactionDigest,
       lifi_transaction_id: i.decoded.transactionId, included_step_identities: m.includedStepIdentities },
-    asset: { from: assetProjection(m.request.fromChainId, m.request.fromToken),
-      to: assetProjection(m.request.toChainId, m.request.toToken), native_principal_admitted: bridgeNativePrincipal(m.request) },
+    asset: { from, to, native_principal_admitted: nativePrincipal },
+    ...(legacy ? {} : { asset_bounds: assetBounds }),
     transfer: { ...m.request, sender: m.sender, quoted_output_atomic: m.quotedOutputAtomic,
       minimum_output_atomic: m.minimumOutputAtomic, actual_source_atomic: op.sourceProof?.sourceAmountAtomic ?? null,
       actual_output_atomic: op.destinationProof?.amountAtomic ?? null, allowance_atomic_at_prepare: i.sourceAccount.allowanceAtomic,
@@ -54,7 +73,8 @@ function projectBridgeOperation(op: BridgeOperationRecord, legacy: boolean) {
         approved_maximum_execution_fee_wei: effects.reduce((sum, e) => sum + BigInt(e.economics.maximumGasCostAtomic), 0n).toString(),
         quoted_execution_fee_wei: effects.reduce((sum, e) => sum + BigInt(e.economics.gasLimitAtomic) * BigInt(e.fee_ceiling.quotedMaxFeePerGasAtomic), 0n).toString(),
         statement: "Prices are quoted at preparation and raised by this stated headroom. You approve the maximum, not the quote: the signed envelope, the native debit cap and the pre-send check all use the maximum, and a fresh estimate above it refuses the send instead of repricing it." },
-      token_loss_bound_atomic: (BigInt(m.request.amountAtomic) - BigInt(m.minimumOutputAtomic)).toString(),
+      token_loss_bound_atomic: sameDenomination
+        ? (BigInt(m.request.amountAtomic) - BigInt(m.minimumOutputAtomic)).toString() : null,
       native_debit_cap_wei: m.request.maxNativeDebitWei, total_native_fee_enforced_onchain: false,
       native_value_refund_verified: false, approval_gas_nonrefundable: true,
       known_source_fees_wei: knownFees, actual_source_fees_wei: unresolvedFees.length === 0 ? knownFees : null,
@@ -141,3 +161,16 @@ export function bridgeReceipt(op: BridgeOperationRecord) {
   return { ...body, receipt_hash: hashObject(body) };
 }
 export type BridgeReceipt = ReturnType<typeof bridgeReceipt>;
+
+/** Exact current-v1 receipt emitted before denomination-aware asset bounds were added. */
+export function previousCurrentBridgeReceipt(op: BridgeOperationRecord): Record<string, unknown> {
+  const previous = structuredClone(bridgeReceipt(op)) as Record<string, any>;
+  delete previous.receipt_hash;
+  delete previous.asset_bounds;
+  previous.fees.token_loss_bound_atomic =
+    (BigInt(op.intent.materialization.request.amountAtomic) - BigInt(op.intent.materialization.minimumOutputAtomic)).toString();
+  return { ...previous, receipt_hash: hashObject(previous) };
+}
+export function currentBridgeReceiptCandidates(op: BridgeOperationRecord): readonly unknown[] {
+  return [bridgeReceipt(op), previousCurrentBridgeReceipt(op)];
+}
