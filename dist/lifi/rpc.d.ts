@@ -2,7 +2,7 @@ import type { BridgeChainId } from "./chains.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import { BridgeHttps } from "./https.js";
-import type { BridgeBlock, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
+import type { BridgeBlock, BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 import type { BridgeRpcFactory, BridgeRpcPort } from "./ports.js";
 import { RpcReadSession, type RpcBatchReadItem } from "./rpc-session.js";
 export { RpcReadSession } from "./rpc-session.js";
@@ -148,6 +148,11 @@ export declare class BridgeRpc implements BridgeRpcPort {
         transaction: BridgeTransactionProof;
         receipt: BridgeProtocolReceipt;
     } | null>;
+    observeDestination(hash: Hex, nativeDelivery?: Parameters<NonNullable<BridgeRpcPort["observeDestination"]>>[1]): Promise<{
+        transaction: BridgeDestinationTransactionProof;
+        receipt: BridgeProtocolReceipt;
+    } | null>;
+    private observeCanonical;
     logs(input: Parameters<BridgeRpcPort["logs"]>[0]): Promise<{
         transactionHash: `0x${string}`;
         blockNumberAtomic: string;

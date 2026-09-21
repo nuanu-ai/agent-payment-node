@@ -10,7 +10,11 @@ export declare class BridgeExecution {
     private readonly now;
     private readonly save;
     private readonly observation;
-    constructor(state: StateStore, source: BridgeRpcPort, destination: BridgeRpcPort, provider: LifiProviderPort, custody: BridgeCustodyPort, now: () => number, save: BridgeSave);
+    constructor(state: StateStore, source: BridgeRpcPort, destination: BridgeRpcPort, provider: LifiProviderPort, custody: BridgeCustodyPort, now: () => number, save: BridgeSave, observationRpc?: Readonly<{
+        source: () => BridgeRpcPort;
+        destination: () => BridgeRpcPort;
+        residual: () => BridgeRpcPort;
+    }>);
     approve(op: BridgeOperationRecord, approval: BridgeApprovalPort): Promise<BridgeOperationRecord>;
     run(op: BridgeOperationRecord): Promise<BridgeOperationRecord>;
     private guard;

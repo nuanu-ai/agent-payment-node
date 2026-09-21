@@ -15,8 +15,10 @@ export class BridgeExecution {
   private readonly observation: BridgeObservation;
   constructor(private readonly state: StateStore, private readonly source: BridgeRpcPort,
     private readonly destination: BridgeRpcPort, provider: LifiProviderPort, private readonly custody: BridgeCustodyPort,
-    private readonly now: () => number, private readonly save: BridgeSave) {
-    this.observation = new BridgeObservation(source, destination, provider, save);
+    private readonly now: () => number, private readonly save: BridgeSave, observationRpc: Readonly<{
+      source: () => BridgeRpcPort; destination: () => BridgeRpcPort; residual: () => BridgeRpcPort;
+    }> = { source: () => source, destination: () => destination, residual: () => source }) {
+    this.observation = new BridgeObservation(observationRpc.source, observationRpc.destination, provider, save, observationRpc.residual);
   }
   async approve(op: BridgeOperationRecord, approval: BridgeApprovalPort): Promise<BridgeOperationRecord> {
     if (op.terminal || op.state !== "awaiting_approval") return op;

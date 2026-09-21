@@ -496,6 +496,12 @@ export class BridgeRpc {
         return hash;
     }
     async observe(hash, expected, nativeDelivery) {
+        return await this.observeCanonical(hash, expected, nativeDelivery, true);
+    }
+    async observeDestination(hash, nativeDelivery) {
+        return await this.observeCanonical(hash, undefined, nativeDelivery, false);
+    }
+    async observeCanonical(hash, expected, nativeDelivery, includeFees) {
         await this.assertChain();
         bridgeHex(hash, 32, 32, "APN_RPC_PROTOCOL");
         const [rawTx, rawReceipt] = await Promise.all([this.call("eth_getTransactionByHash", [hash]), this.call("eth_getTransactionReceipt", [hash])]);
@@ -520,8 +526,10 @@ export class BridgeRpc {
         const identity = await verifyRpcTransaction(tx, this.chainId, hash, expected);
         if (evmRpcAddress(r.from) !== identity.from || evmRpcAddress(r.to) !== identity.to)
             bridgeFailure("APN_RPC_PROTOCOL", "receipt_sender_target");
-        const logs = parseReceiptLogs(r.logs, hash, block, index), fees = await bridgeActualFees(this.chainId, r, block, this.call);
-        if (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) || BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic))
+        const logs = parseReceiptLogs(r.logs, hash, block, index);
+        const fees = includeFees ? await bridgeActualFees(this.chainId, r, block, this.call) : null;
+        if (fees !== null && (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) ||
+            BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic)))
             bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
         let nativeBalance = null;
         let nativeTransfer = null;
@@ -562,7 +570,7 @@ export class BridgeRpc {
         }
         await this.assertChain();
         return { transaction: { chainId: this.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: this.origin, ...identity,
-                ...fees, status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
+                ...(fees ?? {}), status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
             receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer, compositeTrace } };
     }
     async logs(input) {
