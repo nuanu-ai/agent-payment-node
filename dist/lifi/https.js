@@ -56,7 +56,7 @@ function isLifiApiEndpoint(endpoint) {
 }
 function failure(code, reason) {
     const error = code === "APN_RPC_CONFIG" ? "APN_RPC_AMBIGUOUS" : "APN_PROVIDER_UNAVAILABLE";
-    return new ApnError(error, `Bridge transport failed: ${reason}.`);
+    return new ApnError(error, `Bridge transport failed: ${reason}.`, { transportReason: reason });
 }
 function send(endpoint, method, body, addresses, maximumBytes, remaining, code, lifiApiKey) {
     return new Promise((resolve, reject) => {

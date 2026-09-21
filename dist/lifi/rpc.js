@@ -15,6 +15,11 @@ import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbCompositeTrace, verifyBnbPoolC
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }];
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction", "eth_sendRawTransaction"]);
+const RETRYABLE_READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt",
+    "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash",
+    "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction"]);
+const TRANSIENT_TRANSPORT_REASONS = new Set(["DNS_deadline", "request_deadline", "request_interrupted", "response_aborted", "response_interrupted"]);
+const MAX_READ_ATTEMPTS = 3;
 const LINEA_TRACE_PROBE_TRANSACTION = "0x4352433956109d31ab50db9547f16bcb90f3545f793ed40f75716ccd9a360efd";
 const MONAD_TRACE_PROBE_TRANSACTION = "0x9ff1560ef67d7253df2663b897452abe6644f6d6cb746743253822c264d13440";
 export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 56: "APN_BNB_RPC_URL", 8453: "APN_BASE_RPC_URL",
@@ -55,18 +60,26 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
             }
             catch (error) {
                 if (error instanceof ApnError && error.code === "APN_RPC_AMBIGUOUS") {
-                    throw new ApnError("APN_RPC_AMBIGUOUS", "Bridge RPC transport is unavailable.", { rpcMethod: method });
+                    const reason = error.details?.transportReason;
+                    if (RETRYABLE_READ_METHODS.has(method) && typeof reason === "string" && TRANSIENT_TRANSPORT_REASONS.has(reason) && attempt + 1 < MAX_READ_ATTEMPTS) {
+                        await wait(1_000 * (attempt + 1));
+                        continue;
+                    }
+                    throw new ApnError("APN_RPC_AMBIGUOUS", "Bridge RPC transport is unavailable.", {
+                        rpcMethod: method, ...(typeof reason === "string" && TRANSIENT_TRANSPORT_REASONS.has(reason)
+                            ? { attempts: (attempt + 1).toString(), transportReason: reason } : {}),
+                    });
                 }
                 throw error;
             }
-            if (response.status === 429 && chainId === 8453 && method !== "eth_sendRawTransaction" && attempt < 2) {
-                await wait(attempt === 0 ? 1_000 : 2_000);
+            if (RETRYABLE_READ_METHODS.has(method) && isTransientHttpStatus(response.status) && attempt + 1 < MAX_READ_ATTEMPTS) {
+                await wait(1_000 * (attempt + 1));
                 continue;
             }
             if (response.status === 429)
-                bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_HTTP_429");
+                throw rpcHttpFailure("bridge_RPC_HTTP_429", method, response.status, attempt + 1);
             if (response.status !== 200)
-                bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_HTTP_status");
+                throw rpcHttpFailure("bridge_RPC_HTTP_status", method, response.status, attempt + 1);
             const r = evmRpcRecord(bridgeJson(response.body, 1024 * 1024));
             if (r.jsonrpc !== "2.0" || r.id !== id || !Object.hasOwn(r, "result") || Object.hasOwn(r, "error"))
                 bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
@@ -282,6 +295,12 @@ export class BridgeRpc {
         if (!bridgeSame(await this.block(block.numberAtomic), block))
             bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
     }
+}
+function isTransientHttpStatus(status) { return status === 408 || status === 429 || status >= 500 && status <= 599; }
+function rpcHttpFailure(reason, method, status, attempts) {
+    return new ApnError("APN_RPC_PROTOCOL", `Bridge validation failed: ${reason}.`, {
+        rpcMethod: method, httpStatus: status.toString(), attempts: attempts.toString(),
+    });
 }
 function exactNativeTransfer(value, transactionHash, expected) {
     if ((expected.amountAtomic === undefined) === (expected.minimumAmountAtomic === undefined))
