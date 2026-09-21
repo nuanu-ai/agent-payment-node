@@ -5,6 +5,7 @@ import test from "node:test";
 import { decodeFunctionData, encodeFunctionData } from "viem";
 import { canonicalJson } from "../../src/canonical.js";
 import { acrossBridgeAbi } from "../../src/lifi/abi.js";
+import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import { bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { addressWord } from "./lifi-event-fixtures.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_SENDER, LifiTestProvider, lifiFixture, lifiSteps } from "./lifi-helpers.js";
@@ -15,6 +16,16 @@ type Capture = { chainId: 1 | 8453 | 42161; requests: Array<{ request: { method:
 
 async function prepareSpy(now: Date) {
   const fixture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/deployment-rpc-20260908.json"), "utf8")) as { chains: Capture[] };
+  const runtimes = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/wrapped-native-runtime-blockscout-20260922.json"), "utf8")) as {
+    contracts: Array<{ chainId: number; address: string; deployedBytecode: string }>;
+  };
+  const runtime = new Map(runtimes.contracts.map((row) => [`${row.chainId}:${row.address.toLowerCase()}`, row.deployedBytecode]));
+  const nativeReads = new Map<string, string>();
+  for (const [chainId, peerChainId] of [[1, 8453], [8453, 1]] as const) {
+    for (const row of bridgeDeployment(chainId, peerChainId, "across", "0x0000000000000000000000000000000000000000").reads) {
+      nativeReads.set(canonicalJson([chainId, row.kind, row.address.toLowerCase(), row.data]), row.expected);
+    }
+  }
   const chainByHost: Record<string, 1 | 8453 | 42161> = {
     "eth-primary.example": 1, "eth-archive.example": 1, "base-primary.example": 8453,
     "base-archive.example": 8453, "arb-primary.example": 42161, "arb-archive.example": 42161,
@@ -41,11 +52,21 @@ async function prepareSpy(now: Date) {
     if (item.method === "eth_maxPriorityFeePerGas") return "0x3b9aca00";
     if (item.method === "eth_getBalance") return "0xde0b6b3a7640000";
     if (item.method === "eth_getTransactionCount") return "0x7";
-    if (item.method === "eth_estimateGas") return "0x493e0";
+    if (item.method === "eth_estimateGas") return "0x186a0";
+    if (item.method === "eth_getCode") {
+      const code = runtime.get(`${chainId}:${String(item.params[0]).toLowerCase()}`);
+      if (code !== undefined) return code;
+    }
     if (item.method === "eth_call") {
-      const data = String((item.params[0] as { data?: unknown }).data ?? "");
+      const call = item.params[0] as { to?: unknown; data?: unknown }, data = String(call.data ?? "");
+      const expected = nativeReads.get(canonicalJson([chainId, "call", String(call.to).toLowerCase(), data]));
+      if (expected !== undefined) return expected;
       if (data.startsWith("0x70a08231")) return `0x${(100_000_000n).toString(16).padStart(64, "0")}`;
       return `0x${"0".repeat(64)}`;
+    }
+    if (item.method === "eth_getStorageAt") {
+      const expected = nativeReads.get(canonicalJson([chainId, "storage", String(item.params[0]).toLowerCase(), item.params[1]]));
+      if (expected !== undefined) return expected;
     }
     throw new Error(`Unstubbed RPC ${chainId} ${canonicalJson([item.method, item.params])}`);
   };
@@ -80,13 +101,16 @@ async function nativeEthBase(now: Date): Promise<LifiTestProvider> {
 for (const flow of [
   { pair: "eth-base" as const, tool: "across" as const, archiveSizes: [17, 25], native: true },
   { pair: "base-arb" as const, tool: "stargateV2" as const, archiveSizes: [33, 25], native: false },
-]) (flow.native ? test.skip : test)(`LI.FI ${flow.pair} ${flow.tool} complete prepare uses six RPC batches and one materialization`, async (t) => {
+]) test(`LI.FI ${flow.pair} ${flow.tool} complete prepare uses six RPC batches and one materialization`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
     const now = new Date(flow.native ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z");
     const spy = await prepareSpy(now); const provider = flow.native ? await nativeEthBase(now) : undefined;
-    const f = await lifiFixture(temporary.root, flow.pair, { rpcFor: spy.rpcFor, now, ...(provider === undefined ? {} : { provider }) });
+    const f = await lifiFixture(temporary.root, flow.pair, { rpcFor: spy.rpcFor, now,
+      ...(provider === undefined ? {} : { provider, maxNativeDebitWei: "3000000000000000" }) });
     const prepared = await f.prepare(flow.tool);
     assert.ok(prepared.operation); assert.equal(f.provider.materializeCalls, 1);
+    assert.match(prepared.operation.intent.sourceDeployment.codeHash, /^[0-9a-f]{64}$/u);
+    assert.match(prepared.operation.intent.destinationDeployment.codeHash, /^[0-9a-f]{64}$/u);
     assert.equal(spy.calls.length, 6);
     const archive = spy.calls.filter((call) => call.host.includes("archive"));
     assert.deepEqual(archive.map((call) => call.items.length), flow.archiveSizes);
