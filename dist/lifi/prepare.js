@@ -64,22 +64,24 @@ export class BridgePreparation {
             // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary.
             const session = new RpcReadSession({ now: this.o.now });
             const source = this.o.rpcFor(quote.request.fromChainId, session), destination = this.o.rpcFor(quote.request.toChainId, session);
-            await Promise.all([source.assertChain(), destination.assertChain()]);
-            const response = await this.o.provider.materialize(selected.step), preparedAt = new Date(this.o.now()).toISOString();
+            const [sourceSafeBlock, destinationSafeBlock, response] = await Promise.all([
+                source.block("safe"), destination.block("safe"), this.o.provider.materialize(selected.step),
+            ]), preparedAt = new Date(this.o.now()).toISOString();
             const parsed = materializeBridgeRoute(selected, response, quote.request, quote.owner.address), m = parsed.materialization, decoded = decodeBridgeCall(m);
             if (decoded.composite !== undefined)
                 await verifyFlyHeaderSignature(decoded.composite, BNB_COMPOSITE.signer);
-            const [sourceDeployment, destinationDeployment, sourceAccount, destinationStartBlock] = await Promise.all([
-                source.deployment(m.tool, m.request.toChainId, m.request.fromToken), destination.deployment(m.tool, m.request.fromChainId, m.request.toToken),
-                source.account(m.sender, m.approvalAddress, m.request.fromToken), destination.block("safe"),
+            const [sourceDeployment, destinationDeployment] = await Promise.all([
+                source.deployment(m.tool, m.request.toChainId, m.request.fromToken, sourceSafeBlock),
+                destination.deployment(m.tool, m.request.fromChainId, m.request.toToken, destinationSafeBlock),
             ]);
+            const sourceAccount = await source.account(m.sender, m.approvalAddress, m.request.fromToken);
             if (parsed.providerNonceAtomic !== null && parsed.providerNonceAtomic !== (BigInt(sourceAccount.latestNonceAtomic) + (bridgeApprovalRequired(m.request, sourceAccount.allowanceAtomic) ? 1n : 0n)).toString())
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "provider_nonce_conflict");
             const envelopes = await freezeBridgeEnvelopes(m, sourceAccount, source);
             const expiresAt = bridgeExpiry(m, decoded, sourceAccount, preparedAt, this.o.now());
             const operation = newBridgeOperation({ profileHash, operationId, idempotencyHash, requestHash,
                 intent: { profile, quoteHash, owner: quote.owner, providerBinding: quote.providerBinding, materialization: m, decoded,
-                    sourceDeployment, destinationDeployment, sourceAccount, destinationStartBlock,
+                    sourceDeployment, destinationDeployment, sourceAccount, destinationStartBlock: destinationSafeBlock,
                     sourceRpcOrigin: source.origin, destinationRpcOrigin: destination.origin, preparedAt, expiresAt,
                     policyHash: hashObject({ identity: "apn.bridge.foreground-approval.v1", request: m.request }),
                     implicitProtocolFeeAtomic: parsed.implicitProtocolFeeAtomic, allowlist },

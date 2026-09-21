@@ -7,7 +7,9 @@ import type { EvmChainId } from "../../src/evm-asset.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 import { FEE_FORWARDER, FEE_RECIPIENT } from "../../src/lifi/abi.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
-import { BridgeRpc } from "../../src/lifi/rpc.js";
+import { BridgeRpc, RpcReadSession, type RpcBatchReadItem } from "../../src/lifi/rpc.js";
+import { bridgeDeployment } from "../../src/lifi/deployments.js";
+import { BASE_FEE_CONTRACT } from "../../src/lifi/rpc-fees.js";
 import type { BridgeTool } from "../../src/lifi/model.js";
 
 type Entry = { request: { method: string; params: unknown[] }; response: { result: unknown } };
@@ -19,6 +21,20 @@ assert.equal(sha256(raw), "a07fc84d38e22270965e4a43c4e42fec426256afdebe4de5a8f78
 const fixture = JSON.parse(raw) as { chains: Capture[]; verification: { fixtureRequestCount: number; allChainsPassed: boolean } };
 /** The capture was recorded for canonical USDC, which is the registry row every replay pins. */
 const usdc = (chainId: EvmChainId) => BRIDGE_ASSET_REGISTRY[chainId].tokens.find((row) => row.symbol === "USDC")!.address;
+
+test("LI.FI prepare phases fit the exact two-chain proof batches and seven-request ceiling", () => {
+  const zero = "0x0000000000000000000000000000000000000000";
+  const proofItems = (chainId: EvmChainId, peerChainId: EvmChainId, tool: BridgeTool, token: string) => {
+    const contract = bridgeDeployment(chainId, peerChainId, tool, token as `0x${string}`);
+    return contract.code.length + contract.reads.length + 1 + (chainId === 8453 ? BASE_FEE_CONTRACT.code.length + BASE_FEE_CONTRACT.reads.length : 0);
+  };
+  assert.equal(proofItems(1, 8453, "across", zero), 16);
+  assert.equal(proofItems(8453, 1, "across", zero), 24);
+  assert.equal(proofItems(8453, 42161, "stargateV2", usdc(8453)), 32);
+  assert.equal(proofItems(42161, 8453, "stargateV2", usdc(42161)), 24);
+  const phaseARequests = 2, phaseBRequests = 2, maximumSourcePhaseCRequests = 3;
+  assert.equal(phaseARequests + phaseBRequests + maximumSourcePhaseCRequests, 7);
+});
 function replay(capture: Capture, changed?: Entry) {
   const values = new Map<string, unknown>(), calls: Array<{ method: string; params: readonly unknown[] }> = [];
   for (const entry of capture.requests) {
@@ -34,6 +50,14 @@ function replay(capture: Capture, changed?: Entry) {
   return { rpc: new BridgeRpc(capture.chainId, capture.rpcOrigin, call), calls, call };
 }
 
+function batchedReplay(capture: Capture) {
+  const baseline = replay(capture), session = new RpcReadSession({ wait: async () => {} });
+  const attempt = async (items: readonly { method: string; params: readonly unknown[] }[]) => await Promise.all(items.map(async (item) => await baseline.call(item.method, item.params)));
+  const batchFactory = (bound: RpcReadSession) => async (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[]) =>
+    await bound.readBatch(capture.rpcOrigin, capture.chainId, items.map((item) => ({ ...item, batchAttempt: attempt })));
+  return { rpc: new BridgeRpc(capture.chainId, capture.rpcOrigin, baseline.call, session, baseline.call, undefined, batchFactory), session };
+}
+
 test("LI.FI frozen deployment capture preserves the independently observed owner-versus-recipient mismatch", () => {
   assert.equal(fixture.verification.fixtureRequestCount, 119); assert.equal(fixture.verification.allChainsPassed, false);
   for (const chain of fixture.chains) {
@@ -43,6 +67,17 @@ test("LI.FI frozen deployment capture preserves the independently observed owner
     assert.equal(owner.response.result, "0x00000000000000000000000008647cc950813966142a416d40c382e2c5db73bb");
     assert.notEqual((owner.response.result as string).slice(-40), FEE_RECIPIENT.slice(2).toLowerCase());
   }
+});
+
+test("LI.FI Base and Arbitrum Stargate deployment proofs execute as one <=32-item HTTP batch per chain", async () => {
+  const base = fixture.chains.find((chain) => chain.chainId === 8453)!, arb = fixture.chains.find((chain) => chain.chainId === 42161)!;
+  const source = batchedReplay(base), destination = batchedReplay(arb);
+  await source.rpc.deployment("stargateV2", 42161, usdc(8453));
+  await destination.rpc.deployment("stargateV2", 8453, usdc(42161));
+  assert.equal(source.session.telemetry().httpRequests, 2); assert.equal(destination.session.telemetry().httpRequests, 2);
+  assert.equal(source.session.telemetry().batchCount, 2); assert.equal(destination.session.telemetry().batchCount, 2);
+  assert.equal(source.session.telemetry().logicalItems, 34); // chain + safe header, then exact 32-item proof/recheck phase
+  assert.equal(destination.session.telemetry().logicalItems, 26); // chain + safe header, then exact 24-item proof/recheck phase
 });
 
 for (const chain of fixture.chains) {
@@ -81,7 +116,7 @@ for (const chain of fixture.chains) {
       let chainCalls = 0;
       const call: EvmRpcCall = async (method, params) => {
         const value = await baseline.call(method, params);
-        if (failure === "chain" && method === "eth_chainId" && ++chainCalls >= 5) return "0xa";
+        if (failure === "chain" && method === "eth_chainId" && ++chainCalls >= 4) return "0xa";
         if (failure === "block" && method === "eth_getBlockByNumber" && params[0] === chain.safeBlock.number) return { ...(value as object), hash: `0x${"ff".repeat(32)}` };
         return value;
       };
