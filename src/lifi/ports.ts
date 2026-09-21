@@ -1,4 +1,5 @@
 import type { BridgeChainId } from "./chains.js";
+import type { RpcReadSession } from "./rpc.js";
 import type { EvmFeeQuote } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import type { FeeEstimate } from "../ports.js";
@@ -13,6 +14,8 @@ import type {
 export interface LifiResponse {
   readonly status: number;
   readonly body: string;
+  /** A minimal response header surface used only for bounded Retry-After handling. */
+  readonly headers?: Readonly<Record<string, string | readonly string[] | undefined>>;
 }
 export interface LifiProviderPort {
   inventory(): Promise<Readonly<Record<"chains" | "tokens" | "tools" | "connections", LifiResponse>>>;
@@ -38,7 +41,7 @@ export interface BridgeRpcPort {
   } | null>;
   logs(input: { readonly fromBlockAtomic: string; readonly toBlockAtomic: string; readonly address: Address; readonly topics: readonly (Hex | null)[] }): Promise<readonly { readonly transactionHash: Hex; readonly blockNumberAtomic: string; readonly blockHash: Hex }[]>;
 }
-export type BridgeRpcFactory = (chainId: BridgeChainId) => BridgeRpcPort;
+export type BridgeRpcFactory = (chainId: BridgeChainId, session?: RpcReadSession) => BridgeRpcPort;
 export interface BridgeSealedMaterial {
   readonly schemaVersion: "apn.bridge-effect.v1";
   readonly profileHash: string;
