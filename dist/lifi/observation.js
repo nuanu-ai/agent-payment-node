@@ -7,6 +7,7 @@ import { BNB_COMPOSITE } from "./bnb-composite.js";
 import { bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { approvalIncluded } from "./transaction.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
+import { ApnError } from "../errors.js";
 export class BridgeObservation {
     source;
     destination;
@@ -35,20 +36,23 @@ export class BridgeObservation {
                     }
                 }
             }
-            catch {
+            catch (error) {
                 reliable = false;
-                op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? { reason: "source_observation_unavailable", residualAllowance: null } });
+                op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? observationFailure(effect.role, error instanceof ApnError ? error.code : "APN_INTERNAL") });
                 continue;
             }
             if (observation === null) {
                 reliable = false;
                 if (effect.safeProof !== null) {
-                    op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? { reason: "safe_source_observation_conflict", residualAllowance: null } });
+                    op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? {
+                            ...observationFailure(effect.role, "APN_RECEIPT_NOT_FOUND"), reason: "safe_source_observation_conflict"
+                        } });
                 }
                 else {
                     op = await this.save(op, { state: "unknown_finality", effects: replaceEffect(op, {
                             ...effect, phase: "unknown_finality", includedProof: null, safeProof: null,
-                        }), ...(effect.role === "bridge" ? { sourceProof: null } : {}) });
+                        }), ...(effect.role === "bridge" ? { sourceProof: null } : {}),
+                        failure: retainedUnsentBridgeRpcFailure(op) ?? observationFailure(effect.role, "APN_RECEIPT_NOT_FOUND") });
                 }
                 continue;
             }
@@ -79,7 +83,8 @@ export class BridgeObservation {
                     continue;
                 }
             }
-            op = await this.save(op, { state: reliable ? "source_pending" : "unknown_finality", sourceProof, effects: replaceEffect(op, {
+            op = await this.save(op, { state: reliable ? "source_pending" : "unknown_finality", sourceProof,
+                failure: reliable ? retainedUnsentBridgeRpcFailure(op) : op.failure, effects: replaceEffect(op, {
                     ...current, phase, includedProof: transaction, safeProof: transaction.safeBlock === null ? null : transaction,
                 }) });
         }
@@ -265,6 +270,11 @@ export class BridgeObservation {
             current.configurationHash !== frozen.configurationHash || !bridgeSame(current.block, proof.block))
             bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_identity");
     }
+}
+function observationFailure(effectRole, code) {
+    return { reason: "source_observation_unavailable", residualAllowance: null,
+        observationRpc: { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
+            stage: "source_observation", effectRole, code } };
 }
 class BnbProtocolMismatch extends Error {
 }
