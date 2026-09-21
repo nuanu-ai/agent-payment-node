@@ -146,7 +146,8 @@ export class BridgeService {
   }
   private execution(op: BridgeOperationRecord) {
     const d = this.dependencies(), m = op.intent.materialization;
-    const session = new RpcReadSession({ now: () => this.context.clock.now().getTime() });
+    const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 13, maxHttpAttempts: 13,
+      archiveDeploymentBatchMaxItems: 3 });
     return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session),
       d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch));
   }
