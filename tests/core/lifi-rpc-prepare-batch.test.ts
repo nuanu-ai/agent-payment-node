@@ -120,4 +120,14 @@ for (const flow of [
     assert.equal(primary.filter((call) => call.items.some((item) => item.method === "eth_getBalance")).length, 1);
     assert.equal(primary.filter((call) => call.items.some((item) => item.method === "eth_estimateGas")).length, 1);
     assert.ok(primary.every((call) => !call.items.some((item) => item.method === "eth_getBalance" && item.params[1] === "latest")));
+    for (const call of primary) {
+      const stateTag = call.items.find((item) => item.method === "eth_getBalance")?.params[1];
+      const baseFeeCalls = call.items.filter((item) => item.method === "eth_call" &&
+        ["0x420000000000000000000000000000000000000f", "0x4200000000000000000000000000000000000015"]
+          .includes(String((item.params[0] as { to?: unknown }).to).toLowerCase()));
+      if (baseFeeCalls.length > 0) {
+        assert.equal(baseFeeCalls.length, 3); assert.notEqual(stateTag, undefined);
+        assert.ok(baseFeeCalls.every((item) => item.params[1] === stateTag && item.params[1] !== "latest"));
+      }
+    }
 });
