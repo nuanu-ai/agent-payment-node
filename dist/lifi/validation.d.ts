@@ -1,4 +1,4 @@
-import { type ErrorCode } from "../errors.js";
+import { type ErrorCode, type ErrorDetails } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 export declare const BRIDGE_MAX_CALLDATA_BYTES: number;
 export declare const BRIDGE_MAX_SIGNED_BYTES: number;
@@ -16,7 +16,7 @@ export declare const BRIDGE_FEE_HEADROOM_BPS = 5000;
 export declare const BRIDGE_DIAMOND: `0x${string}`;
 export declare const BRIDGE_ZERO_ADDRESS: Address;
 export declare const BRIDGE_ZERO_WORD: Hex;
-export declare function bridgeFailure(code: ErrorCode, reason: string): never;
+export declare function bridgeFailure(code: ErrorCode, reason: string, details?: ErrorDetails): never;
 export declare function bridgeRecord(value: unknown, code?: ErrorCode): Record<string, unknown>;
 export declare function bridgeExact(value: unknown, keys: readonly string[], code?: ErrorCode): Record<string, unknown>;
 export declare function bridgeUint(value: unknown, positive?: boolean, code?: ErrorCode): bigint;

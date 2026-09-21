@@ -174,9 +174,34 @@ test("a native principal freezes one bridge effect: no approval, cap zero, princ
   const capped = (wei: bigint) => ({ ...m, request: { ...m.request, maxNativeDebitWei: wei.toString() } });
   const effects = await freezeBridgeEnvelopes(capped(fee), account(BigInt(ONE_MILLI_ETH) + fee), rpc);
   assert.deepEqual(effects.map((e) => [e.role, e.valueAtomic, e.provisionalGas, e.economics.nonceAtomic]), [["bridge", ONE_MILLI_ETH, false, "5"]]);
-  await assert.rejects(freezeBridgeEnvelopes(capped(fee - 1n), account(BigInt(ONE_MILLI_ETH) + fee), rpc), /aggregate_native_debit/u);
-  await assert.rejects(freezeBridgeEnvelopes(capped(fee), account(BigInt(ONE_MILLI_ETH) + fee - 1n), rpc), /aggregate_native_funding/u);
-  await assert.rejects(freezeBridgeEnvelopes(capped(fee), account(BigInt(ONE_MILLI_ETH) - 1n), rpc), /source_asset_balance/u);
+  let aggregateError: any;
+  await assert.rejects(freezeBridgeEnvelopes(capped(fee - 1n), account(BigInt(ONE_MILLI_ETH) + fee), rpc), (error: unknown) => {
+    aggregateError = error;
+    return error instanceof Error && /aggregate_native_debit/u.test(error.message);
+  });
+  assert.deepEqual(aggregateError.details, {
+    reason: "aggregate_native_debit", offendingPredicate: "feeDebitWei > maxNativeDebitWei",
+    gasLimitAtomic: m.transaction.gasLimitAtomic, maxFeePerGasAtomic: "3000000000", maxPriorityFeePerGasAtomic: "1500000000",
+    feeQuoteTotalWei: fee.toString(), nativePrincipalWei: ONE_MILLI_ETH, feeDebitWei: fee.toString(), effectValueWei: ONE_MILLI_ETH,
+    aggregateDebitWei: (fee + BigInt(ONE_MILLI_ETH)).toString(), maxNativeDebitWei: (fee - 1n).toString(),
+    sourceBalanceWei: (BigInt(ONE_MILLI_ETH) + fee).toString(), sourceBalanceFloorWei: (fee + BigInt(ONE_MILLI_ETH)).toString(),
+  });
+  assert.equal(/https?:|0x|calldata|params|secret|private/u.test(JSON.stringify(aggregateError.details)), false);
+  let fundingError: any;
+  await assert.rejects(freezeBridgeEnvelopes(capped(fee), account(BigInt(ONE_MILLI_ETH) + fee - 1n), rpc), (error: unknown) => {
+    fundingError = error;
+    return error instanceof Error && /aggregate_native_funding/u.test(error.message);
+  });
+  assert.equal(fundingError.details?.sourceBalanceWei, (BigInt(ONE_MILLI_ETH) + fee - 1n).toString());
+  assert.equal(fundingError.details?.sourceBalanceFloorWei, (fee + BigInt(ONE_MILLI_ETH)).toString());
+  assert.equal(fundingError.details?.offendingPredicate, "aggregateDebitWei > sourceBalanceWei");
+  let assetError: any;
+  await assert.rejects(freezeBridgeEnvelopes(capped(fee), account(BigInt(ONE_MILLI_ETH) - 1n), rpc), (error: unknown) => {
+    assetError = error;
+    return error instanceof Error && /source_asset_balance/u.test(error.message);
+  });
+  assert.equal(assetError.details?.sourceBalanceWei, (BigInt(ONE_MILLI_ETH) - 1n).toString());
+  assert.equal(assetError.details?.sourceBalanceFloorWei, ONE_MILLI_ETH);
   assert.throws(() => bridgeApprovalRequired(m.request, "1"), /native_principal_allowance/u);
 });
 
