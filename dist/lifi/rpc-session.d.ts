@@ -2,15 +2,13 @@ import type { EvmRpcCall } from "../evm-ports.js";
 import type { BridgeChainId } from "./chains.js";
 export declare const MAX_READ_ATTEMPTS = 2;
 export declare const RPC_RETRY_DELAY_MS = 2000;
-export type RpcBatchAttempt = (items: readonly Readonly<{
-    method: string;
-    params: readonly unknown[];
-}>[]) => Promise<readonly unknown[]>;
+export declare const RPC_BATCH_MAX_ITEMS = 33;
+export type RpcBatchAttempt = (canonicalBody: string) => Promise<unknown>;
 export interface RpcBatchReadItem<T = unknown> {
     readonly method: string;
     readonly params: readonly unknown[];
     readonly cachePolicy?: "auto" | "immutable" | "snapshot" | "none";
-    readonly expectedDecoder?: (value: unknown) => T;
+    readonly decoder: (value: unknown) => T;
     /** Transport-owned whole-batch attempt. All uncached items in one readBatch call must use the same function. */
     readonly batchAttempt: RpcBatchAttempt;
 }
@@ -61,6 +59,7 @@ export declare class RpcReadSession {
     private readonly deadline;
     private readonly cache;
     private readonly inflight;
+    private readonly batchInflight;
     private readonly origins;
     private readonly queue;
     private active;
@@ -83,6 +82,7 @@ export declare class RpcReadSession {
     readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{
         readonly [K in keyof T]: unknown;
     }>;
+    private executeBatch;
     private key;
     private reserveLogical;
     private reserveRequest;

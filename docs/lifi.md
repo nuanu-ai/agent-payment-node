@@ -248,12 +248,16 @@ uses default TLS verification. It freezes both RPC origins in the intent.
 LI.FI uses the fixed `https://li.quest/v1` origin. Both transports have bounded
 JSON bodies, two concurrent requests, a 15-second request deadline, and no
 redirects or automatic retries. Bridge preparation uses one command-scoped RPC
-read session across the source and destination: identical concurrent reads are
-singleflighted, immutable block-pinned reads and the captured `safe`/`finalized`
-header are reused, and mutable latest, pending, balance, nonce, fee and estimate
-reads are never retained across an approval or signing boundary. The session is
-bounded at 64 unique reads, 72 HTTP attempts and 180 seconds. It allows one
-request per RPC origin at least 750ms apart and two requests globally.
+read session across the source and destination. Strict JSON-RPC batches contain
+at most 33 items; identical ordered batches are singleflighted, and every
+response is decoded before any eligible result enters the cache. Deployment
+state is read at the frozen block from the owner configured archive endpoint,
+with that archive's chain identity inside the same batch. Source account state
+is pinned to one numeric latest header while the pending nonce remains
+explicitly pending. Mutable account, fee and estimate data is never retained
+across an approval or signing boundary. A session permits at most 96 logical
+items, 8 HTTP requests, 10 HTTP attempts and 180 seconds. It allows one request
+per RPC origin at least 750ms apart and two requests globally.
 
 Operators must not run a separate synthetic RPC capability preflight before the
 real `bridge prepare`. The prepare command performs the exact chain, deployment,

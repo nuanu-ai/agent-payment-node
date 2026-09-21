@@ -11,11 +11,12 @@ import { RpcReadSession } from "./rpc.js";
 import { BridgeQuoteRepository, newBridgeQuote } from "./quote-repository.js";
 import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from "./routes.js";
 import { newBridgeOperation } from "./transitions.js";
-import { bridgeExecutionDestination, validateBridgeRequest } from "./asset-registry.js";
+import { bridgeExecutionDestination, bridgeNativePrincipal, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
 import { BNB_COMPOSITE, verifyFlyHeaderSignature } from "./bnb-composite.js";
+import { approvalData } from "./transaction.js";
 export class BridgePreparation {
     o;
     constructor(o) {
@@ -74,7 +75,9 @@ export class BridgePreparation {
                 source.deployment(m.tool, m.request.toChainId, m.request.fromToken, sourceSafeBlock),
                 destination.deployment(m.tool, m.request.fromChainId, m.request.toToken, destinationSafeBlock),
             ]);
-            const sourceAccount = await source.account(m.sender, m.approvalAddress, m.request.fromToken);
+            const planned = bridgeNativePrincipal(m.request) ? [m.transaction] : [{ chainId: m.request.fromChainId,
+                    from: m.sender, to: m.request.fromToken, data: approvalData(m.approvalAddress, m.request.amountAtomic), valueAtomic: "0", gasLimitAtomic: "0" }];
+            const sourceAccount = await source.account(m.sender, m.approvalAddress, m.request.fromToken, planned);
             if (parsed.providerNonceAtomic !== null && parsed.providerNonceAtomic !== (BigInt(sourceAccount.latestNonceAtomic) + (bridgeApprovalRequired(m.request, sourceAccount.allowanceAtomic) ? 1n : 0n)).toString())
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "provider_nonce_conflict");
             const envelopes = await freezeBridgeEnvelopes(m, sourceAccount, source);

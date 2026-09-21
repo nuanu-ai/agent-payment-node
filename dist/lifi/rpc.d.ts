@@ -23,7 +23,7 @@ export declare function bridgeRpcCall(chainId: BridgeChainId, environment: Reado
     readonly call: EvmRpcCall;
     readonly attempt: EvmRpcCall;
     readonly sessionCall: (session: RpcReadSession) => EvmRpcCall;
-    readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[]) => Promise<readonly unknown[]>;
+    readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive") => Promise<readonly unknown[]>;
 };
 export declare function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options?: {
     readonly transport?: Pick<BridgeHttps, "request">;
@@ -36,7 +36,10 @@ export declare class BridgeRpc implements BridgeRpcPort {
     private readonly call;
     private readonly batchCall;
     private commandLatestBlock?;
-    constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall, sessionCall?: (session: RpcReadSession) => EvmRpcCall, sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[]) => Promise<readonly unknown[]>);
+    private commandPrices?;
+    private commandFeeInputs?;
+    private readonly preparedEstimates;
+    constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall, sessionCall?: (session: RpcReadSession) => EvmRpcCall, sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive") => Promise<readonly unknown[]>);
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
     deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<{
@@ -50,7 +53,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         configurationHash: string;
     }>;
     /** A native principal's balance is the native balance itself and its allowance is the constant zero: nothing is approved. */
-    account(owner: Address, spender: Address, token: Address): Promise<{
+    account(owner: Address, spender: Address, token: Address, planned?: readonly BridgeTransaction[]): Promise<{
         chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
         rpcOrigin: string;
         block: BridgeBlock;
@@ -63,10 +66,10 @@ export declare class BridgeRpc implements BridgeRpcPort {
         latestNonceAtomic: string;
         pendingNonceAtomic: string;
     }>;
-    prices(): Promise<{
+    prices(): Promise<Readonly<{
         maxFeePerGasAtomic: string;
         maxPriorityFeePerGasAtomic: string;
-    }>;
+    }>>;
     estimate(transaction: BridgeTransaction): Promise<import("../ports.js").FeeEstimate>;
     feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<import("../evm-ports.js").EvmFeeQuote | {
         l1DataFeeUpperWei: string;

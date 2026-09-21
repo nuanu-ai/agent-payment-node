@@ -181,7 +181,9 @@ export async function guardBridgeEffect(op, role, source, destination, now) {
         if (current.contractHash !== frozen.contractHash || current.codeHash !== frozen.codeHash || current.configurationHash !== frozen.configurationHash)
             bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_drift");
     }
-    const account = await preSignRpc(rpcBoundary(role, "source_account_refresh", "source", source.chainId, "account_nonce"), async () => await source.account(m.sender, m.approvalAddress, m.request.fromToken)), envelope = effect.envelope, c = envelope.economics;
+    const envelope = effect.envelope, c = envelope.economics;
+    const account = await preSignRpc(rpcBoundary(role, "source_account_refresh", "source", source.chainId, "account_nonce"), async () => await source.account(m.sender, m.approvalAddress, m.request.fromToken, [{ chainId: envelope.chainId, from: envelope.from,
+            to: envelope.to, data: envelope.data, valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic }]));
     assertProtocolTime(m, i.decoded, account);
     if (account.latestNonceAtomic !== c.nonceAtomic || account.pendingNonceAtomic !== c.nonceAtomic)
         bridgeFailure("APN_OPERATION_BLOCKED", "bridge_nonce_changed");

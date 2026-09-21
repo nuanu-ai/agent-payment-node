@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { bridgeRpcCall, RpcReadSession } from "../../src/lifi/rpc.js";
+import { ApnError } from "../../src/errors.js";
 import { bridgeArchiveEndpoint, isHistoricalStateRead } from "../../src/lifi/rpc-archive.js";
 
 function fixture(chainIds: Readonly<Record<string, string>> = {}) {
@@ -84,6 +85,53 @@ test("session-bound archive chain checks do not reuse the primary chain identity
   await assert.rejects(call("eth_getCode", [DIAMOND, "0x18c9a42"]),
     { code: "APN_RPC_CONFIG", message: /bridge_archive_RPC_chain/u });
   assert.deepEqual(f.calls, [{ host: "archive.example", method: "eth_chainId" }]);
+});
+
+test("one deployment batch routes every numeric read and its chain identity to the archive", async () => {
+  const calls: Array<{ host: string; methods: string[] }> = [];
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    const request = JSON.parse(body!) as Array<{ id: string; method: string }>;
+    calls.push({ host: new URL(endpoint).host, methods: request.map((item) => item.method) });
+    return { status: 200, body: JSON.stringify(request.map((item) => ({ jsonrpc: "2.0", id: item.id,
+      result: item.method === "eth_chainId" ? "0x1" : item.method === "eth_getBlockByNumber"
+        ? { number: "0x10", hash: `0x${"1".repeat(64)}`, timestamp: "0x20" } : "0x60" }))) };
+  } };
+  const descriptor = bridgeRpcCall(1, withArchive, { transport });
+  const batch = descriptor.sessionBatchCall(new RpcReadSession({ wait: async () => {} }));
+  const decodeChain = (value: unknown) => {
+    if (value !== "0x1") throw new ApnError("APN_CHAIN_MISMATCH", "wrong archive chain");
+    return value;
+  };
+  await batch([
+    { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: decodeChain },
+    { method: "eth_getCode", params: [DIAMOND, "0x10"], cachePolicy: "immutable", decoder: String },
+    { method: "eth_getStorageAt", params: [DIAMOND, "0x0", "0x10"], cachePolicy: "immutable", decoder: String },
+    { method: "eth_getBlockByNumber", params: ["0x10", false], cachePolicy: "immutable", decoder: Object },
+  ], "archive");
+  assert.deepEqual(calls, [{ host: "archive.example", methods: ["eth_chainId", "eth_getCode", "eth_getStorageAt", "eth_getBlockByNumber"] }]);
+});
+
+test("wrong archive chain aborts the whole batch without caching any deployment item", async () => {
+  let wrong = true; const bodies: string[] = [];
+  const transport = { request: async (_endpoint: string, _verb: string, body: string | null) => {
+    bodies.push(body!); const request = JSON.parse(body!) as Array<{ id: string; method: string }>;
+    return { status: 200, body: JSON.stringify(request.map((item) => ({ jsonrpc: "2.0", id: item.id,
+      result: item.method === "eth_chainId" ? (wrong ? "0x2105" : "0x1") : "0x60" }))) };
+  } };
+  const session = new RpcReadSession({ wait: async () => {} });
+  const batch = bridgeRpcCall(1, withArchive, { transport }).sessionBatchCall(session);
+  const items = [
+    { method: "eth_chainId", params: [], cachePolicy: "immutable" as const, decoder: (value: unknown) => {
+      if (value !== "0x1") throw new ApnError("APN_CHAIN_MISMATCH", "wrong archive chain");
+      return value;
+    } },
+    { method: "eth_getCode", params: [DIAMOND, "0x10"], cachePolicy: "immutable" as const, decoder: String },
+  ];
+  await assert.rejects(batch(items, "archive"), { code: "APN_CHAIN_MISMATCH" });
+  wrong = false; await batch(items, "archive");
+  assert.equal(bodies.length, 2);
+  assert.equal((JSON.parse(bodies[1]!) as unknown[]).length, 2);
+  assert.equal(session.telemetry().cacheHits, 0);
 });
 
 test("archive endpoints follow the bound RPC rules: public HTTPS and no query", () => {
