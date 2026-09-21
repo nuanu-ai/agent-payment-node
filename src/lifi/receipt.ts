@@ -95,6 +95,10 @@ function projectBridgeOperation(op: BridgeOperationRecord, legacy: boolean) {
       chain_role: op.failure.preSignRpc.chainRole, chain_id: op.failure.preSignRpc.chainId,
       category: op.failure.preSignRpc.category, method: op.failure.preSignRpc.method,
     } }),
+    ...(op.failure?.observationRpc === undefined ? {} : { observation_rpc_failure: {
+      schema_version: op.failure.observationRpc.schemaVersion, stage: op.failure.observationRpc.stage,
+      effect_role: op.failure.observationRpc.effectRole, code: op.failure.observationRpc.code,
+    } }),
     rpc_origins: { source: i.sourceRpcOrigin, destination: i.destinationRpcOrigin },
     deployments: { source: i.sourceDeployment, destination: i.destinationDeployment },
     policy: { identity: "apn.bridge.foreground-approval.v1", policy_hash: i.policyHash,

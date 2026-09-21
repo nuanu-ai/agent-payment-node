@@ -4,6 +4,7 @@ import type { Hex } from "../../src/model.js";
 import { bridgeReceipt } from "../../src/lifi/receipt.js";
 import { temporaryState } from "./helpers.js";
 import { LIFI_DESTINATION_HASH, lifiFixture } from "./lifi-helpers.js";
+import { ApnError } from "../../src/errors.js";
 
 test("LI.FI Across slow-fill delivery persists an empty repayment credit and reserve-funded exact output", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
@@ -88,12 +89,29 @@ for (const role of ["approval", "bridge"] as const) test(`LI.FI included ${role}
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
   const current = (await s.core.bridges.records.findOperation(id))!;
   assert.equal(current.state, "unknown_finality"); assert.equal(current.effects.find((e) => e.role === role)!.includedProof, null);
+  assert.equal(current.failure?.reason, "source_observation_unavailable");
+  assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
+    stage: "source_observation", effectRole: role, code: "APN_RECEIPT_NOT_FOUND" });
   assert.equal(current.destinationProof, null); assert.equal(current.terminal, false);
   assert.deepEqual(current.effects.map((e) => e.transactionHash), before.effects.map((e) => e.transactionHash));
   if (role === "bridge") assert.equal(current.sourceProof, null);
   s.source.missingHashes.clear(); s.source.safeApproval = true; s.source.safeBridge = true;
   const recovered = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(recovered.ok, true, recovered.error?.message);
   assert.equal((recovered.operation as { state: string }).state, "completed"); assert.equal(s.source.submissions.length, 2);
+});
+
+test("LI.FI source observation errors replace stale projection with a bounded safe diagnostic", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
+  const { id } = await s.prepare();
+  s.source.observe = async () => { throw new ApnError("APN_RPC_AMBIGUOUS", "synthetic unavailable", { transportReason: "timeout" }); };
+  const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
+  const current = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(current.state, "unknown_finality"); assert.equal(current.failure?.reason, "source_observation_unavailable");
+  assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
+    stage: "source_observation", effectRole: "approval", code: "APN_RPC_AMBIGUOUS" });
+  const receipt = bridgeReceipt(current) as ReturnType<typeof bridgeReceipt> & { observation_rpc_failure?: unknown };
+  assert.deepEqual(receipt.observation_rpc_failure, { schema_version: "apn.bridge-observation-rpc-failure.v1",
+    stage: "source_observation", effect_role: "approval", code: "APN_RPC_AMBIGUOUS" });
 });
 
 test("LI.FI contradiction to safe source evidence preserves it and waits for the original canonical proof", async (t) => {

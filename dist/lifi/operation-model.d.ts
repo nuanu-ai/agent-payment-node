@@ -1,5 +1,6 @@
 import type { BridgeAccountSnapshot, BridgeBlock, BridgeDeploymentIdentity, BridgeDestinationProof, BridgeDestinationScan, BridgeEnvelope, BridgeMaterialization, BridgeOwner, BridgeProviderBinding, BridgeProviderObservation, BridgeResidualAllowance, BridgeSourceProof, BridgeTransactionProof, DecodedBridgeCall } from "./model.js";
 import type { Hex } from "../model.js";
+import type { ErrorCode } from "../errors.js";
 import type { AssetUsageReservation } from "../asset-usage-ledger.js";
 import type { BridgeAllowlistBinding } from "./allowlist.js";
 export type BridgeState = "awaiting_approval" | "execution_pending" | "source_pending" | "destination_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "destination_failed" | "failed_after_approval" | "failed_confirmed_revert";
@@ -45,6 +46,13 @@ export interface BridgeFailure {
     readonly residualAllowance: BridgeResidualAllowance | null;
     readonly residualAllowanceStatus?: "unavailable" | "observed";
     readonly preSignRpc?: BridgePreSignRpcFailure;
+    readonly observationRpc?: BridgeObservationRpcFailure;
+}
+export interface BridgeObservationRpcFailure {
+    readonly schemaVersion: "apn.bridge-observation-rpc-failure.v1";
+    readonly stage: "source_observation";
+    readonly effectRole: "approval" | "bridge";
+    readonly code: ErrorCode | null;
 }
 export type BridgePreSignRpcStage = "source_deployment_refresh" | "destination_deployment_refresh" | "source_account_refresh" | "source_execution_simulation" | "source_fee_quote";
 export type BridgePreSignRpcCategory = "deployment_refresh" | "account_nonce" | "simulation" | "fee_quote";
