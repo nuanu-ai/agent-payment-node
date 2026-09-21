@@ -46,10 +46,13 @@ function same(left, right) { return canonicalJson(left) === canonicalJson(right)
 function blocked(reason) {
     throw new ApnError("APN_OPERATION_BLOCKED", "The saved operation is not eligible for the recognized historical Base USDC deployment migration.", { reason });
 }
-export function assertBaseDeploymentMigrationProof(operation, source, sourceDeployment, destination, destinationDeployment) {
+export function assertBaseDeploymentMigrationProof(operation, source, sourceDeployment, destination, destinationDeployment, sourceFinalityBlock, destinationFinalityBlock) {
     const c = BASE_DEPLOYMENT_MIGRATION_CANDIDATE;
+    if (!same(sourceFinalityBlock, c.sourceSafeBlock) || !same(destinationFinalityBlock, c.destinationSafeBlock))
+        blocked("finality_block_mismatch");
     const finalized = (proof, minimum) => proof.status === "success" && proof.safeBlock !== null &&
-        BigInt(proof.safeBlock.numberAtomic) >= BigInt(minimum.numberAtomic);
+        BigInt(proof.safeBlock.numberAtomic) >= BigInt(minimum.numberAtomic) &&
+        (proof.safeBlock.numberAtomic !== minimum.numberAtomic || same(proof.safeBlock, minimum));
     if (source.transaction.chainId !== 1 || source.transaction.transactionHash !== c.sourceTransactionHash ||
         source.transaction.rpcOrigin !== c.verifiedSourceDeployment.rpcOrigin || !same(source.transaction.block, c.sourceBlock) ||
         !finalized(source.transaction, c.sourceSafeBlock))
@@ -88,7 +91,7 @@ export function assertBaseDeploymentMigrationProof(operation, source, sourceDepl
         parsedDestination.blockHash !== c.destinationBlock.hash || parsedDestination.recipient !== c.route.recipient ||
         parsedDestination.token !== c.route.toToken || parsedDestination.amountAtomic !== c.route.outputAmountAtomic)
         blocked("destination_correlation_mismatch");
-    return { ...parsedDestination, safeBlock: c.destinationSafeBlock, rpcOrigin: c.newDestinationDeployment.rpcOrigin,
+    return { ...parsedDestination, safeBlock: destinationFinalityBlock, rpcOrigin: c.newDestinationDeployment.rpcOrigin,
         transactionProofHash: c.destinationTransactionProofHash };
 }
 export function migrateBaseDeploymentOperation(operation, destinationProof) {
