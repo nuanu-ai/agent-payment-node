@@ -49,21 +49,75 @@ test("a null primary receipt falls back once through a chain-checked archive", a
   ]);
 });
 
-test("a known historical receipt HTTP 403 falls back to the explicit archive", async () => {
+test("the exact Base PublicNode historical receipt capability response falls back to the explicit archive", async () => {
   const calls: Array<{ host: string; method: string }> = [];
   const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
     const request = JSON.parse(body!) as { id: string; method: string }; const host = new URL(endpoint).host;
     calls.push({ host, method: request.method });
-    if (host === "primary.example" && request.method === "eth_getTransactionReceipt") return { status: 403, body: "archive token required" };
+    if (host === "base-rpc.publicnode.com" && request.method === "eth_getTransactionReceipt") {
+      return { status: 403, body: "  Archive requests require a personal token  " };
+    }
     return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id,
-      result: request.method === "eth_chainId" ? "0x1" : "archive-receipt" }) };
+      result: request.method === "eth_chainId" ? "0x2105" : "archive-receipt" }) };
   } };
-  assert.equal(await bridgeRpcCall(1, withArchive, { transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]), "archive-receipt");
+  const environment = { APN_BASE_RPC_URL: "https://base-rpc.publicnode.com:443/", APN_BASE_ARCHIVE_RPC_URL: "https://archive.example" };
+  assert.equal(await bridgeRpcCall(8453, environment, { transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]), "archive-receipt");
   assert.deepEqual(calls, [
-    { host: "primary.example", method: "eth_getTransactionReceipt" },
+    { host: "base-rpc.publicnode.com", method: "eth_getTransactionReceipt" },
     { host: "archive.example", method: "eth_chainId" },
     { host: "archive.example", method: "eth_getTransactionReceipt" },
   ]);
+});
+
+for (const row of [
+  { name: "generic HTTP 403 credential rejection", chainId: 8453 as const,
+    environment: { APN_BASE_RPC_URL: "https://base-rpc.publicnode.com", APN_BASE_ARCHIVE_RPC_URL: "https://archive.example" },
+    status: 403, message: "invalid API credential" },
+  { name: "exact phrase on a non-Base chain", chainId: 1 as const, environment: withArchive,
+    status: 403, message: "archive requests require a personal token" },
+  { name: "exact phrase on another Base origin", chainId: 8453 as const,
+    environment: { APN_BASE_RPC_URL: "https://base-other.example", APN_BASE_ARCHIVE_RPC_URL: "https://archive.example" },
+    status: 403, message: "archive requests require a personal token" },
+  { name: "HTTP 401 even with the exact phrase", chainId: 8453 as const,
+    environment: { APN_BASE_RPC_URL: "https://base-rpc.publicnode.com", APN_BASE_ARCHIVE_RPC_URL: "https://archive.example" },
+    status: 401, message: "archive requests require a personal token" },
+] as const) test(`${row.name} never falls back`, async () => {
+  const calls: string[] = [];
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    calls.push(new URL(endpoint).host); JSON.parse(body!);
+    return { status: row.status, body: row.message };
+  } };
+  await assert.rejects(bridgeRpcCall(row.chainId, row.environment, { transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]),
+    (error: unknown) => { assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_RPC_PROTOCOL");
+      assert.equal(error.details?.httpStatus, row.status.toString()); return true; });
+  assert.equal(calls.length, 1); assert.notEqual(calls[0], "archive.example");
+});
+
+for (const message of ["archive token required for this credential", "historical receipt unavailable: authorization required"]) {
+  test(`credentialed JSON-RPC rejection never falls back: ${message}`, async () => {
+    const calls: string[] = [];
+    const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+      calls.push(new URL(endpoint).host); const request = JSON.parse(body!) as { id: string };
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id,
+        error: { code: -32000, message } }) };
+    } };
+    await assert.rejects(bridgeRpcCall(8453, { APN_BASE_RPC_URL: "https://base-rpc.publicnode.com",
+      APN_BASE_ARCHIVE_RPC_URL: "https://archive.example" }, { transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]),
+      { code: "APN_RPC_PROTOCOL" });
+    assert.deepEqual(calls, ["base-rpc.publicnode.com"]);
+  });
+}
+
+test("a capability error without the classified receipt reason fails closed", async () => {
+  const calls: string[] = [];
+  const transport = { request: async (endpoint: string) => {
+    calls.push(new URL(endpoint).host);
+    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "unclassified capability error", { rpcMethod: "eth_getTransactionReceipt" });
+  } };
+  await assert.rejects(bridgeRpcCall(8453, { APN_BASE_RPC_URL: "https://base-rpc.publicnode.com",
+    APN_BASE_ARCHIVE_RPC_URL: "https://archive.example" }, { transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]),
+    { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
+  assert.deepEqual(calls, ["base-rpc.publicnode.com"]);
 });
 
 test("an explicit pruned-history JSON-RPC error falls back without accepting arbitrary protocol errors", async () => {
@@ -89,7 +143,7 @@ test("primary and archive receipt unavailability has a stable bounded error", as
   const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
     const request = JSON.parse(body!) as { id: string; method: string }; const host = new URL(endpoint).host;
     calls.push({ host, method: request.method });
-    if (host === "primary.example") return { status: 403, body: "archive token required" };
+    if (host === "primary.example") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: null }) };
     if (request.method === "eth_chainId") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: "0x1" }) };
     return { status: 503, body: "archive unavailable" };
   } };
