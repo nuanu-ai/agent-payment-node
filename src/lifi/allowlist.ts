@@ -9,13 +9,17 @@ import { ApnError } from "../errors.js";
 import type { RuntimeContext } from "../runtime.js";
 import type { BridgeRouteRequest } from "./model.js";
 import type { BridgeOperationRecord } from "./operation-model.js";
-import { bridgeAssetRow } from "./asset-registry.js";
+import { bridgeAssetRow, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { bridgeAddress, bridgeFailure, bridgeSame, bridgeUint } from "./validation.js";
 
 export const BRIDGE_ALLOWLIST_SCHEMA = "apn.bridge-allowlist.v1" as const;
 export const LIFI_ACROSS_BRIDGE_MECHANISM = Object.freeze({ provider: "lifi", reference: "across-v4" }) as Readonly<{
   provider: "lifi"; reference: "across-v4";
 }>;
+export const LIFI_STARGATE_BRIDGE_MECHANISM = Object.freeze({ provider: "lifi", reference: "stargate-v2-taxi" }) as Readonly<{
+  provider: "lifi"; reference: "stargate-v2-taxi";
+}>;
+export type LifiBridgeMechanism = typeof LIFI_ACROSS_BRIDGE_MECHANISM | typeof LIFI_STARGATE_BRIDGE_MECHANISM;
 
 export interface BridgeAllowlistBinding {
   readonly schemaVersion: typeof BRIDGE_ALLOWLIST_SCHEMA;
@@ -26,7 +30,7 @@ export interface BridgeAllowlistBinding {
   readonly asset: AssetUsageIdentity["asset"];
   readonly amountAtomic: string;
   readonly selfRecipient: string;
-  readonly mechanism: typeof LIFI_ACROSS_BRIDGE_MECHANISM;
+  readonly mechanism: LifiBridgeMechanism;
 }
 
 export type BridgeUsageTarget = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
@@ -38,31 +42,37 @@ export class BridgeAllowlistGate {
   }
 
   async admit(profile: string, owner: string, request: BridgeRouteRequest, tool: string): Promise<BridgeAllowlistBinding> {
-    if (request.recipient !== owner) refuse("bridge_self_recipient_required", "Bridge execution is limited to the bound profile owner's own address.");
-    if (tool !== "across") refuse("bridge_mechanism_mismatch", "This executable bridge lane requires the exact LI.FI/Across mechanism.");
+    if (bridgeProviderBoundNativeDestination(request) && request.recipient !== owner) {
+      refuse("bridge_self_recipient_required", "This native destination is limited to the bound profile owner's own address.");
+    }
+    const mechanism = bridgeMechanism(tool);
     const subject = bridgeSubject(owner, request), active = await this.active(profile, owner);
     const usage = await this.ledger.usage(identity(subject), this.context.clock.now());
     const evaluation = { chain: subject.chain, asset: subject.asset, rail: "bridge" as const, amountAtomic: request.amountAtomic,
       dailyUsageAtomic: usage.amountAtomic, asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() };
     const admission = evaluate(active.registry, evaluation);
-    exactMechanism(admission.asset.mechanismPins?.bridge);
+    exactMechanism(admission.asset.mechanismPins?.bridge, mechanism);
     return { schemaVersion: BRIDGE_ALLOWLIST_SCHEMA, policyDigest: active.digest, policyRevision: active.revision,
-      ...subject, mechanism: LIFI_ACROSS_BRIDGE_MECHANISM };
+      ...subject, mechanism };
   }
 
   async confirm(profile: string, request: BridgeRouteRequest, tool: string, bindingValue: unknown): Promise<ActiveAssetPolicy> {
     const binding = validateBridgeAllowlistBinding(bindingValue), subject = bridgeSubject(binding.account, request);
-    if (request.recipient !== binding.selfRecipient || request.recipient !== binding.account || !bridgeSame(subject, {
+    if (request.recipient !== binding.selfRecipient || !bridgeSame(subject, {
       account: binding.account, chain: binding.chain, asset: binding.asset, amountAtomic: binding.amountAtomic, selfRecipient: binding.selfRecipient,
     })) refuse("bridge_binding_changed", "The bridge owner, recipient, asset, or amount differs from the prepared owner binding.");
-    if (tool !== "across") refuse("bridge_mechanism_mismatch", "This executable bridge lane requires the exact LI.FI/Across mechanism.");
+    if (bridgeProviderBoundNativeDestination(request) && request.recipient !== binding.account) {
+      refuse("bridge_self_recipient_required", "This native destination is limited to the bound profile owner's own address.");
+    }
+    const mechanism = bridgeMechanism(tool);
+    if (!bridgeSame(binding.mechanism, mechanism)) refuse("bridge_mechanism_mismatch", "The prepared bridge mechanism differs from the selected LI.FI route.");
     const active = await this.active(profile, binding.account);
     if (active.digest !== binding.policyDigest || active.revision !== binding.policyRevision) {
       refuse("allowlist_policy_changed", "The active owner allowlist policy changed after bridge preparation; prepare a new bridge operation.");
     }
     const admission = evaluate(active.registry, { chain: binding.chain, asset: binding.asset, rail: "bridge", amountAtomic: binding.amountAtomic,
       dailyUsageAtomic: "0", asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() });
-    exactMechanism(admission.asset.mechanismPins?.bridge);
+    exactMechanism(admission.asset.mechanismPins?.bridge, mechanism);
     return active;
   }
 
@@ -111,7 +121,14 @@ export class BridgeAllowlistGate {
   }
 
   private async active(profile: string, owner: string): Promise<ActiveAssetPolicy> {
-    const active = await loadActiveAssetPolicyRegistry(this.context, profile);
+    let active: ActiveAssetPolicy | null;
+    try { active = await loadActiveAssetPolicyRegistry(this.context, profile); }
+    catch (error) {
+      if (error instanceof ApnError && error.details?.reason === "allowlist_policy_expired") {
+        refuse("allowlist_policy_expired", "The active owner allowlist policy has expired; prepare under a new revision.");
+      }
+      throw error;
+    }
     if (active === null) refuse("allowlist_policy_required", "Bridge execution requires an owner-activated allowlist policy for this profile.");
     if (active.accounts.evm !== owner) refuse("allowlist_account_mismatch", "The active owner allowlist policy names a different EVM account.");
     return active;
@@ -125,10 +142,11 @@ export function validateBridgeAllowlistBinding(value: unknown): BridgeAllowlistB
   }
   const binding = value as unknown as BridgeAllowlistBinding;
   if (binding.schemaVersion !== BRIDGE_ALLOWLIST_SCHEMA || !/^[a-f0-9]{64}$/u.test(binding.policyDigest) ||
-      !Number.isSafeInteger(binding.policyRevision) || binding.policyRevision < 1 || binding.account !== binding.selfRecipient ||
+      !Number.isSafeInteger(binding.policyRevision) || binding.policyRevision < 1 ||
       bridgeAddress(binding.account, "APN_STATE_CORRUPT") !== binding.account || !/^eip155:(?:1|8453|42161)$/u.test(binding.chain) ||
       (binding.asset.kind === "native" ? binding.asset.identifier !== null : bridgeAddress(binding.asset.identifier, "APN_STATE_CORRUPT") !== binding.asset.identifier) ||
-      bridgeUint(binding.amountAtomic, true, "APN_STATE_CORRUPT") < 1n || !bridgeSame(binding.mechanism, LIFI_ACROSS_BRIDGE_MECHANISM)) {
+      bridgeAddress(binding.selfRecipient, "APN_STATE_CORRUPT") !== binding.selfRecipient ||
+      bridgeUint(binding.amountAtomic, true, "APN_STATE_CORRUPT") < 1n || !isBridgeMechanism(binding.mechanism)) {
     bridgeFailure("APN_STATE_CORRUPT", "bridge_allowlist_binding");
   }
   return binding;
@@ -151,8 +169,16 @@ function bridgeSubject(account: string, request: BridgeRouteRequest) {
 }
 function identity(value: AssetUsageIdentity): AssetUsageIdentity { return { account: value.account, chain: value.chain, asset: value.asset }; }
 function bridgeUsageKey(operationId: string): string { return `apn.bridge-usage:${operationId}`; }
-function exactMechanism(value: unknown): void {
-  if (!bridgeSame(value, LIFI_ACROSS_BRIDGE_MECHANISM)) refuse("bridge_mechanism_mismatch", "The owner policy lacks the exact LI.FI/Across bridge mechanism pin.");
+export function bridgeMechanism(tool: string): LifiBridgeMechanism {
+  if (tool === "across") return LIFI_ACROSS_BRIDGE_MECHANISM;
+  if (tool === "stargateV2") return LIFI_STARGATE_BRIDGE_MECHANISM;
+  return refuse("bridge_mechanism_mismatch", "The LI.FI bridge tool has no owner-approved mechanism identity.");
+}
+function isBridgeMechanism(value: unknown): value is LifiBridgeMechanism {
+  return bridgeSame(value, LIFI_ACROSS_BRIDGE_MECHANISM) || bridgeSame(value, LIFI_STARGATE_BRIDGE_MECHANISM);
+}
+function exactMechanism(value: unknown, expected: LifiBridgeMechanism): void {
+  if (!bridgeSame(value, expected)) refuse("bridge_mechanism_mismatch", "The owner policy lacks the exact LI.FI bridge mechanism pin.");
 }
 function evaluate(registry: unknown, input: Parameters<typeof evaluateAssetPolicy>[1]) {
   try { return evaluateAssetPolicy(registry, input); } catch (error) { return mapCap(error); }
