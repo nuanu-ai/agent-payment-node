@@ -149,12 +149,15 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         return bridgeJson(response.body, 1024 * 1024);
     };
     const sessionBatchCall = (session) => async (items, route = "primary") => {
-        if (route === "archive" && items.some((item) => !isArchiveBatchItem(item.method, item.params))) {
+        if (route !== "primary" && items.some((item) => !isArchiveBatchItem(item.method, item.params))) {
             bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_method");
         }
-        const target = route === "archive" ? distinctArchive ?? missingHistoricalArchive() : endpoint;
+        const target = route !== "primary" ? distinctArchive ?? missingHistoricalArchive() : endpoint;
         const attempt = async (body) => await batchAttempt(target, body, session.currentTime());
-        return await session.readBatch(target.toString(), chainId, items.map((item) => ({ ...item, batchAttempt: attempt })));
+        const bound = items.map((item) => ({ ...item, batchAttempt: attempt }));
+        return route === "archive_deployment"
+            ? await session.readArchiveDeploymentBatch(target.toString(), chainId, bound)
+            : await session.readBatch(target.toString(), chainId, bound);
     };
     const sessionArchiveReceipt = async (session, method, params) => {
         const values = await sessionBatchCall(session)([
@@ -280,7 +283,8 @@ export class BridgeRpc {
             ...extraItems,
             { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
         ];
-        const values = this.batchCall === undefined ? await Promise.all(items.map(async (item) => item.decoder(await this.call(item.method, item.params)))) : await this.batchCall(items, "archive");
+        const values = this.batchCall === undefined ? await Promise.all(items.map(async (item) => item.decoder(await this.call(item.method, item.params))))
+            : await this.batchCall(items, block === undefined ? "archive" : "archive_deployment");
         let offset = 0;
         if (values[offset++] !== BigInt(this.chainId))
             throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
