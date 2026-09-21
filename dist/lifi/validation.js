@@ -18,8 +18,8 @@ export const BRIDGE_DIAMOND = getAddress("0x1231DEB6f5749EF6cE6943a275A1D3E7486F
 export const BRIDGE_ZERO_ADDRESS = `0x${"0".repeat(40)}`;
 export const BRIDGE_ZERO_WORD = `0x${"0".repeat(64)}`;
 const MAX_UINT = (1n << 256n) - 1n;
-export function bridgeFailure(code, reason) {
-    throw new ApnError(code, `Bridge validation failed: ${reason}.`);
+export function bridgeFailure(code, reason, details) {
+    throw new ApnError(code, `Bridge validation failed: ${reason}.`, details === undefined ? undefined : { reason, ...details });
 }
 export function bridgeRecord(value, code = "APN_PROVIDER_PROTOCOL") {
     if (!isPlainRecord(value))
