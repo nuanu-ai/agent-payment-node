@@ -46,8 +46,10 @@ export declare class RpcReadSession {
     private readonly methods;
     constructor(options?: RpcReadSessionOptions);
     telemetry(): RpcReadTelemetry;
-    wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt?: EvmRpcCall, cacheIdentity?: string): EvmRpcCall;
-    read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall, cacheIdentity?: string): Promise<unknown>;
+    /** Current command clock, used by transports for deterministic Retry-After date parsing. */
+    currentTime(): number;
+    wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt?: EvmRpcCall): EvmRpcCall;
+    read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown>;
     private retry;
     private schedule;
     private pump;

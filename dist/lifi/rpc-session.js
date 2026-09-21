@@ -56,15 +56,17 @@ export class RpcReadSession {
             remainingHttpAttempts: Math.max(0, this.maxHttpAttempts - this.totalAttempts), deadline: this.deadline,
             ...(this.retryAfterMs === undefined ? {} : { retryAfterMs: this.retryAfterMs }) };
     }
-    wrap(origin, chainId, call, oneAttempt = call, cacheIdentity = origin) {
+    /** Current command clock, used by transports for deterministic Retry-After date parsing. */
+    currentTime() { return this.now(); }
+    wrap(origin, chainId, call, oneAttempt = call) {
         return async (method, params) => {
             if (method === "eth_sendRawTransaction")
                 return await submitDirect(method, params, oneAttempt);
-            return await this.read(origin, chainId, method, params, oneAttempt, cacheIdentity);
+            return await this.read(origin, chainId, method, params, oneAttempt);
         };
     }
-    async read(origin, chainId, method, params, oneAttempt, cacheIdentity = origin) {
-        const key = hashObject({ origin: rpcEndpointIdentity(cacheIdentity), chainId, method, params });
+    async read(origin, chainId, method, params, oneAttempt) {
+        const key = hashObject({ origin: rpcEndpointIdentity(origin), chainId, method, params });
         const cached = this.cache.get(key);
         if (cached !== undefined || this.cache.has(key)) {
             this.dedupHits += 1;

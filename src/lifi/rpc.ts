@@ -17,7 +17,7 @@ import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
 import { BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
 import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbCompositeTrace, verifyBnbPoolConfiguration } from "./bnb-composite.js";
-import { approvedTransportReason, MAX_READ_ATTEMPTS, parseRetryAfter, RpcHttpFailure, RpcReadSession, rpcEndpointIdentity, RPC_RETRY_DELAY_MS } from "./rpc-session.js";
+import { approvedTransportReason, MAX_READ_ATTEMPTS, parseRetryAfter, RpcHttpFailure, RpcReadSession, RPC_RETRY_DELAY_MS } from "./rpc-session.js";
 export { RpcReadSession } from "./rpc-session.js";
 export type { RpcReadSessionOptions, RpcReadTelemetry } from "./rpc-session.js";
 
@@ -34,7 +34,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   readonly transport?: Pick<BridgeHttps, "request">;
   readonly wait?: (milliseconds: number) => Promise<void>;
 } = {}): { readonly origin: string; readonly call: EvmRpcCall; readonly attempt: EvmRpcCall;
-  readonly sessionIdentity: string; readonly sessionCall: (session: RpcReadSession) => EvmRpcCall } {
+  readonly sessionCall: (session: RpcReadSession) => EvmRpcCall } {
   bridgeChain(chainId, "APN_RPC_CONFIG");
   const transport = options.transport ?? new BridgeHttps();
   const wait = options.wait ?? (async (milliseconds: number) => await new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
@@ -57,7 +57,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     await archiveChain;
     return await retryDirect(method, params, () => oneAttempt(archive, method, params), wait);
   };
-  const oneAttempt = async (target: URL, method: string, params: readonly unknown[]): Promise<unknown> => {
+  const oneAttempt = async (target: URL, method: string, params: readonly unknown[], now = Date.now()): Promise<unknown> => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
     const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
     let response: LifiResponse;
@@ -66,50 +66,49 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
       if (error instanceof ApnError && error.code === "APN_RPC_AMBIGUOUS") throw error;
       throw error;
     }
-    if (response.status !== 200) throw new RpcHttpFailure(method, response.status, parseRetryAfter(response.headers, Date.now()));
+    if (response.status !== 200) throw new RpcHttpFailure(method, response.status, parseRetryAfter(response.headers, now));
     const r = evmRpcRecord(bridgeJson(response.body, 1024 * 1024));
     if (r.jsonrpc !== "2.0" || r.id !== id || !Object.hasOwn(r, "result") || Object.hasOwn(r, "error")) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
     return r.result;
   };
-  const sessionIdentity = rpcEndpointIdentity(endpoint.toString());
   const sessionCall = (session: RpcReadSession): EvmRpcCall => async (method, params) => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
-    const primaryAttempt = (m: string, p: readonly unknown[]) => oneAttempt(endpoint, m, p);
+    const primaryAttempt = (m: string, p: readonly unknown[]) => oneAttempt(endpoint, m, p, session.currentTime());
     if (method === "eth_sendRawTransaction") return await submitDirect(method, params, primaryAttempt);
     if (archive === null || !isHistoricalStateRead(method, params)) {
-      return await session.read(endpoint.toString(), chainId, method, params, primaryAttempt, sessionIdentity);
+      return await session.read(endpoint.toString(), chainId, method, params, primaryAttempt);
     }
-    const archiveIdentity = rpcEndpointIdentity(archive.toString()), archiveAttempt = (m: string, p: readonly unknown[]) => oneAttempt(archive, m, p);
-    const archiveChain = await session.read(archive.toString(), chainId, "eth_chainId", [], archiveAttempt, archiveIdentity);
+    const archiveAttempt = (m: string, p: readonly unknown[]) => oneAttempt(archive, m, p, session.currentTime());
+    const archiveChain = await session.read(archive.toString(), chainId, "eth_chainId", [], archiveAttempt);
     if (evmRpcQuantity(archiveChain) !== BigInt(chainId)) bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
-    return await session.read(archive.toString(), chainId, method, params, archiveAttempt, archiveIdentity);
+    return await session.read(archive.toString(), chainId, method, params, archiveAttempt);
   };
-  return { origin: endpoint.origin, call, attempt: (method, params) => oneAttempt(endpoint, method, params), sessionIdentity, sessionCall };
+  return { origin: endpoint.origin, call, attempt: (method, params) => oneAttempt(endpoint, method, params), sessionCall };
 }
 export function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options: {
   readonly transport?: Pick<BridgeHttps, "request">;
   readonly wait?: (milliseconds: number) => Promise<void>;
 } = {}): BridgeRpcFactory {
-  const cache = new Map<BridgeChainId, { origin: string; call: EvmRpcCall; attempt: EvmRpcCall; sessionIdentity: string; sessionCall: (session: RpcReadSession) => EvmRpcCall; base?: BridgeRpcPort }>(), transport = options.transport ?? new BridgeHttps();
+  const cache = new Map<BridgeChainId, { origin: string; call: EvmRpcCall; attempt: EvmRpcCall; sessionCall: (session: RpcReadSession) => EvmRpcCall; base?: BridgeRpcPort }>(), transport = options.transport ?? new BridgeHttps();
   return (chainId, session) => {
     bridgeChain(chainId, "APN_RPC_CONFIG");
     const existing = cache.get(chainId);
     if (existing !== undefined) {
       if (session === undefined) return existing.base!;
-      return new BridgeRpc(chainId, existing.origin, existing.call, session, existing.attempt, existing.sessionIdentity, existing.sessionCall);
+      return new BridgeRpc(chainId, existing.origin, existing.call, session, existing.attempt, existing.sessionCall);
     }
-    const { origin, call, attempt, sessionIdentity, sessionCall } = bridgeRpcCall(chainId, environment, { ...options, transport });
+    const { origin, call, attempt, sessionCall } = bridgeRpcCall(chainId, environment, { ...options, transport });
     const base = new BridgeRpc(chainId, origin, call);
-    cache.set(chainId, { origin, call, attempt, sessionIdentity, sessionCall, base });
-    return session === undefined ? base : new BridgeRpc(chainId, origin, call, session, attempt, sessionIdentity, sessionCall);
+    cache.set(chainId, { origin, call, attempt, sessionCall, base });
+    return session === undefined ? base : new BridgeRpc(chainId, origin, call, session, attempt, sessionCall);
   };
 }
 export class BridgeRpc implements BridgeRpcPort {
   private readonly evm: EvmRpc;
   private readonly call: EvmRpcCall;
   constructor(readonly chainId: BridgeChainId, readonly origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall,
-    sessionIdentity?: string, sessionCall?: (session: RpcReadSession) => EvmRpcCall) {
-    bridgeChain(chainId); this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call, sessionIdentity);
+    sessionCall?: (session: RpcReadSession) => EvmRpcCall) {
+    bridgeChain(chainId); this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call);
     this.evm = new EvmRpc(this.call, origin, 16 * 1024);
   }
   async assertChain(): Promise<void> { await this.evm.assertChain(this.chainId); }

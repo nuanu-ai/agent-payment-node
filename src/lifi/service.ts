@@ -20,6 +20,7 @@ import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
 import { bridgeProtocolEmitter } from "./deployments.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation,
   type BaseDeploymentMigrationAudit } from "./base-deployment-migration.js";
+import { RpcReadSession } from "./rpc.js";
 
 export interface BridgeDependencies {
   readonly provider: LifiProviderPort;
@@ -77,6 +78,7 @@ export class BridgeService {
   async repairDeployment(operationId: string) {
     return await this.deploymentMigrationLocked(operationId, async (op) => {
       const raw = isLegacyBridgeOperation(op) ? op.raw : op;
+      const session = new RpcReadSession({ now: () => this.context.clock.now().getTime() });
       if (raw.operationId === BASE_DEPLOYMENT_MIGRATION_CANDIDATE.operationId) {
         if (!isLegacyBridgeOperation(op)) {
           const eligible = migrateBaseDeploymentOperation(raw);
@@ -85,7 +87,7 @@ export class BridgeService {
         }
         const d = this.context.bridge;
         if (d === undefined) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bridge_runtime_unavailable");
-        const request = raw.intent.materialization.request, source = d.rpcFor(request.fromChainId), destination = d.rpcFor(request.toChainId);
+        const request = raw.intent.materialization.request, source = d.rpcFor(request.fromChainId, session), destination = d.rpcFor(request.toChainId, session);
         if (source.origin !== BASE_DEPLOYMENT_MIGRATION_CANDIDATE.verifiedSourceDeployment.rpcOrigin ||
           destination.origin !== BASE_DEPLOYMENT_MIGRATION_CANDIDATE.newDestinationDeployment.rpcOrigin) {
           bridgeFailure("APN_OPERATION_BLOCKED", "migration_rpc_origin_mismatch");
@@ -117,7 +119,7 @@ export class BridgeService {
       }
       const d = this.context.bridge;
       if (d === undefined) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bridge_runtime_unavailable");
-      const rpc = d.rpcFor(op.intent.materialization.request.toChainId), request = op.intent.materialization.request;
+      const rpc = d.rpcFor(op.intent.materialization.request.toChainId, session), request = op.intent.materialization.request;
       if (rpc.origin !== op.intent.destinationRpcOrigin) bridgeFailure("APN_OPERATION_BLOCKED", "migration_rpc_origin_mismatch");
       const hash = op.providerObservation?.destinationTransactionHash;
       if (typeof hash !== "string" || !hash.startsWith("0x")) bridgeFailure("APN_OPERATION_BLOCKED", "migration_destination_transaction_missing");
@@ -144,7 +146,8 @@ export class BridgeService {
   }
   private execution(op: BridgeOperationRecord) {
     const d = this.dependencies(), m = op.intent.materialization;
-    return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId), d.rpcFor(m.request.toChainId),
+    const session = new RpcReadSession({ now: () => this.context.clock.now().getTime() });
+    return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session),
       d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch));
   }
   private async save(op: BridgeOperationRecord, patch: Partial<BridgeMutable>) {

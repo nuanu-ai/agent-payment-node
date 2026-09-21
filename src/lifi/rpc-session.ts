@@ -73,15 +73,18 @@ export class RpcReadSession {
       ...(this.retryAfterMs === undefined ? {} : { retryAfterMs: this.retryAfterMs }) };
   }
 
-  wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt: EvmRpcCall = call, cacheIdentity = origin): EvmRpcCall {
+  /** Current command clock, used by transports for deterministic Retry-After date parsing. */
+  currentTime(): number { return this.now(); }
+
+  wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt: EvmRpcCall = call): EvmRpcCall {
     return async (method, params) => {
       if (method === "eth_sendRawTransaction") return await submitDirect(method, params, oneAttempt);
-      return await this.read(origin, chainId, method, params, oneAttempt, cacheIdentity);
+      return await this.read(origin, chainId, method, params, oneAttempt);
     };
   }
 
-  async read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall, cacheIdentity = origin): Promise<unknown> {
-    const key = hashObject({ origin: rpcEndpointIdentity(cacheIdentity), chainId, method, params });
+  async read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown> {
+    const key = hashObject({ origin: rpcEndpointIdentity(origin), chainId, method, params });
     const cached = this.cache.get(key);
     if (cached !== undefined || this.cache.has(key)) { this.dedupHits += 1; return cloneRpcValue(cached); }
     const current = this.inflight.get(key);

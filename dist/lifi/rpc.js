@@ -12,7 +12,7 @@ import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
 import { BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHex, bridgeJson, bridgeSame, bridgeUint } from "./validation.js";
 import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbCompositeTrace, verifyBnbPoolConfiguration } from "./bnb-composite.js";
-import { approvedTransportReason, MAX_READ_ATTEMPTS, parseRetryAfter, RpcHttpFailure, RpcReadSession, rpcEndpointIdentity, RPC_RETRY_DELAY_MS } from "./rpc-session.js";
+import { approvedTransportReason, MAX_READ_ATTEMPTS, parseRetryAfter, RpcHttpFailure, RpcReadSession, RPC_RETRY_DELAY_MS } from "./rpc-session.js";
 export { RpcReadSession } from "./rpc-session.js";
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }];
@@ -51,7 +51,7 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         await archiveChain;
         return await retryDirect(method, params, () => oneAttempt(archive, method, params), wait);
     };
-    const oneAttempt = async (target, method, params) => {
+    const oneAttempt = async (target, method, params, now = Date.now()) => {
         if (!READ_METHODS.has(method))
             bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
         const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
@@ -65,29 +65,28 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
             throw error;
         }
         if (response.status !== 200)
-            throw new RpcHttpFailure(method, response.status, parseRetryAfter(response.headers, Date.now()));
+            throw new RpcHttpFailure(method, response.status, parseRetryAfter(response.headers, now));
         const r = evmRpcRecord(bridgeJson(response.body, 1024 * 1024));
         if (r.jsonrpc !== "2.0" || r.id !== id || !Object.hasOwn(r, "result") || Object.hasOwn(r, "error"))
             bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
         return r.result;
     };
-    const sessionIdentity = rpcEndpointIdentity(endpoint.toString());
     const sessionCall = (session) => async (method, params) => {
         if (!READ_METHODS.has(method))
             bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
-        const primaryAttempt = (m, p) => oneAttempt(endpoint, m, p);
+        const primaryAttempt = (m, p) => oneAttempt(endpoint, m, p, session.currentTime());
         if (method === "eth_sendRawTransaction")
             return await submitDirect(method, params, primaryAttempt);
         if (archive === null || !isHistoricalStateRead(method, params)) {
-            return await session.read(endpoint.toString(), chainId, method, params, primaryAttempt, sessionIdentity);
+            return await session.read(endpoint.toString(), chainId, method, params, primaryAttempt);
         }
-        const archiveIdentity = rpcEndpointIdentity(archive.toString()), archiveAttempt = (m, p) => oneAttempt(archive, m, p);
-        const archiveChain = await session.read(archive.toString(), chainId, "eth_chainId", [], archiveAttempt, archiveIdentity);
+        const archiveAttempt = (m, p) => oneAttempt(archive, m, p, session.currentTime());
+        const archiveChain = await session.read(archive.toString(), chainId, "eth_chainId", [], archiveAttempt);
         if (evmRpcQuantity(archiveChain) !== BigInt(chainId))
             bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
-        return await session.read(archive.toString(), chainId, method, params, archiveAttempt, archiveIdentity);
+        return await session.read(archive.toString(), chainId, method, params, archiveAttempt);
     };
-    return { origin: endpoint.origin, call, attempt: (method, params) => oneAttempt(endpoint, method, params), sessionIdentity, sessionCall };
+    return { origin: endpoint.origin, call, attempt: (method, params) => oneAttempt(endpoint, method, params), sessionCall };
 }
 export function bridgeRpcFactory(environment, options = {}) {
     const cache = new Map(), transport = options.transport ?? new BridgeHttps();
@@ -97,12 +96,12 @@ export function bridgeRpcFactory(environment, options = {}) {
         if (existing !== undefined) {
             if (session === undefined)
                 return existing.base;
-            return new BridgeRpc(chainId, existing.origin, existing.call, session, existing.attempt, existing.sessionIdentity, existing.sessionCall);
+            return new BridgeRpc(chainId, existing.origin, existing.call, session, existing.attempt, existing.sessionCall);
         }
-        const { origin, call, attempt, sessionIdentity, sessionCall } = bridgeRpcCall(chainId, environment, { ...options, transport });
+        const { origin, call, attempt, sessionCall } = bridgeRpcCall(chainId, environment, { ...options, transport });
         const base = new BridgeRpc(chainId, origin, call);
-        cache.set(chainId, { origin, call, attempt, sessionIdentity, sessionCall, base });
-        return session === undefined ? base : new BridgeRpc(chainId, origin, call, session, attempt, sessionIdentity, sessionCall);
+        cache.set(chainId, { origin, call, attempt, sessionCall, base });
+        return session === undefined ? base : new BridgeRpc(chainId, origin, call, session, attempt, sessionCall);
     };
 }
 export class BridgeRpc {
@@ -110,11 +109,11 @@ export class BridgeRpc {
     origin;
     evm;
     call;
-    constructor(chainId, origin, call, session, oneAttempt, sessionIdentity, sessionCall) {
+    constructor(chainId, origin, call, session, oneAttempt, sessionCall) {
         this.chainId = chainId;
         this.origin = origin;
         bridgeChain(chainId);
-        this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call, sessionIdentity);
+        this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call);
         this.evm = new EvmRpc(this.call, origin, 16 * 1024);
     }
     async assertChain() { await this.evm.assertChain(this.chainId); }

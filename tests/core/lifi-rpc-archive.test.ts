@@ -77,6 +77,15 @@ test("an archive reader on another chain is refused before any historical read",
   assert.deepEqual(f.calls, [{ host: "archive.example", method: "eth_chainId" }]);
 });
 
+test("session-bound archive chain checks do not reuse the primary chain identity", async () => {
+  const f = fixture({ "archive.example": "0x2105" });
+  const descriptor = bridgeRpcCall(1, withArchive, { transport: f.transport });
+  const call = descriptor.sessionCall(new RpcReadSession({ wait: async () => {} }));
+  await assert.rejects(call("eth_getCode", [DIAMOND, "0x18c9a42"]),
+    { code: "APN_RPC_CONFIG", message: /bridge_archive_RPC_chain/u });
+  assert.deepEqual(f.calls, [{ host: "archive.example", method: "eth_chainId" }]);
+});
+
 test("archive endpoints follow the bound RPC rules: public HTTPS and no query", () => {
   assert.throws(() => bridgeRpcCall(1, { ...primary, APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example/?key=secret" }),
     { code: "APN_RPC_CONFIG", message: /bridge_archive_RPC_query_forbidden/u });
