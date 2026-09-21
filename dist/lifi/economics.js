@@ -73,7 +73,7 @@ export async function freezeBridgeEnvelopes(m, account, rpc) {
         bridgeFailure("APN_OPERATION_BLOCKED", "pending_source_nonce");
     if (BigInt(account.balanceAtomic) < amount)
         bridgeFailure("APN_INSUFFICIENT_ASSET", "source_asset_balance", bridgeNativePrincipal(m.request) ? feeBudgetDetails("sourceBalanceWei < sourceBalanceFloorWei", { sourceBalanceWei: account.balanceAtomic, sourceBalanceFloorWei: amount }) : undefined);
-    const effects = [];
+    const drafts = [];
     if (approval) {
         const transaction = { chainId: m.request.fromChainId, from: m.sender, to: m.request.fromToken,
             data: approvalData(m.approvalAddress, m.request.amountAtomic), valueAtomic: "0", gasLimitAtomic: "0" };
@@ -81,20 +81,25 @@ export async function freezeBridgeEnvelopes(m, account, rpc) {
         const economics = validateEconomics(account.latestNonceAtomic, { ...fees, ...approved });
         if (BigInt(economics.gasLimitAtomic) > BRIDGE_MAX_GAS)
             bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "approval_gas_ceiling", feeEstimateDetails("gasLimitAtomic > maxGasLimitAtomic", fees.gasLimitAtomic, economics.gasLimitAtomic, economics.maxFeePerGasAtomic, economics.maxPriorityFeePerGasAtomic, { maxGasLimitAtomic: BRIDGE_MAX_GAS }));
-        const body = { role: "approval", ...transaction, economics, feeQuote: await rpc.feeQuote({ economics }),
-            provisionalGas: false, feeCeiling: approved.feeCeiling };
+        const body = { role: "approval", ...transaction, economics, provisionalGas: false, feeCeiling: approved.feeCeiling };
         const { gasLimitAtomic: _gas, ...envelope } = body;
-        effects.push({ ...envelope, envelopeHash: hashObject(envelope) });
+        drafts.push(envelope);
     }
     const fees = approval ? { ...await rpc.prices(), gasLimitAtomic: m.transaction.gasLimitAtomic } : await rpc.estimate(m.transaction);
     if (bridgeUint(fees.gasLimitAtomic, true) > BigInt(m.transaction.gasLimitAtomic))
         bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_estimate_over_ceiling", feeEstimateDetails("estimatedGasAtomic > gasLimitAtomic", fees.gasLimitAtomic, m.transaction.gasLimitAtomic, fees.maxFeePerGasAtomic, fees.maxPriorityFeePerGasAtomic));
     const approved = bridgeApprovedPrices(fees);
-    const economics = validateEconomics((BigInt(account.latestNonceAtomic) + BigInt(effects.length)).toString(), { ...fees, ...approved, gasLimitAtomic: m.transaction.gasLimitAtomic });
+    const economics = validateEconomics((BigInt(account.latestNonceAtomic) + BigInt(drafts.length)).toString(), { ...fees, ...approved, gasLimitAtomic: m.transaction.gasLimitAtomic });
     const { gasLimitAtomic: _gas, ...transaction } = m.transaction;
-    const body = { role: "bridge", ...transaction, economics, feeQuote: await rpc.feeQuote({ economics }),
-        provisionalGas: approval, feeCeiling: approved.feeCeiling };
-    effects.push({ ...body, envelopeHash: hashObject(body) });
+    drafts.push({ role: "bridge", ...transaction, economics, provisionalGas: approval, feeCeiling: approved.feeCeiling });
+    const feeInputs = drafts.map((draft) => ({ economics: draft.economics }));
+    const quotes = rpc.feeQuotes === undefined ? await Promise.all(feeInputs.map(async (input) => await rpc.feeQuote(input))) : await rpc.feeQuotes(feeInputs);
+    if (quotes.length !== drafts.length)
+        bridgeFailure("APN_RPC_PROTOCOL", "bridge_fee_quote_count");
+    const effects = drafts.map((draft, index) => {
+        const body = { ...draft, feeQuote: quotes[index] };
+        return { ...body, envelopeHash: hashObject(body) };
+    });
     const total = effects.reduce((sum, e) => sum + BigInt(e.feeQuote.totalQuoteWei) + BigInt(e.valueAtomic), 0n);
     if (total - principal > BigInt(m.request.maxNativeDebitWei))
         bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "aggregate_native_debit", aggregateFeeBudgetDetails(effects, principal, m.request.maxNativeDebitWei, account.nativeBalanceWei));
@@ -176,7 +181,9 @@ export async function guardBridgeEffect(op, role, source, destination, now) {
         if (current.contractHash !== frozen.contractHash || current.codeHash !== frozen.codeHash || current.configurationHash !== frozen.configurationHash)
             bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_drift");
     }
-    const account = await preSignRpc(rpcBoundary(role, "source_account_refresh", "source", source.chainId, "account_nonce"), async () => await source.account(m.sender, m.approvalAddress, m.request.fromToken)), envelope = effect.envelope, c = envelope.economics;
+    const envelope = effect.envelope, c = envelope.economics;
+    const account = await preSignRpc(rpcBoundary(role, "source_account_refresh", "source", source.chainId, "account_nonce"), async () => await source.account(m.sender, m.approvalAddress, m.request.fromToken, [{ chainId: envelope.chainId, from: envelope.from,
+            to: envelope.to, data: envelope.data, valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic }]));
     assertProtocolTime(m, i.decoded, account);
     if (account.latestNonceAtomic !== c.nonceAtomic || account.pendingNonceAtomic !== c.nonceAtomic)
         bridgeFailure("APN_OPERATION_BLOCKED", "bridge_nonce_changed");
