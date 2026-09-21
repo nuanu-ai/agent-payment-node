@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ApnError } from "../../src/errors.js";
 import { BridgeRpc, RpcReadSession, bridgeRpcCall } from "../../src/lifi/rpc.js";
+import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 
 const block = (number = "0x10") => ({ number, hash: `0x${"a".repeat(64)}`, timestamp: "0x1", baseFeePerGas: "0x1", transactions: [] });
 
@@ -143,7 +144,7 @@ test("RPC session fails closed at unique call, attempt and deadline budgets", as
 
 test("RPC session rejects the 65th representative unique read before HTTP", async () => {
   let calls = 0;
-  const session = new RpcReadSession({ maxUniqueCalls: 64, wait: async () => {} });
+  const session = new RpcReadSession({ maxUniqueCalls: 64, maxHttpRequests: 64, maxHttpAttempts: 64, wait: async () => {} });
   const call = session.wrap("https://budget.example", 1, async () => { calls += 1; return "0x1"; });
   for (let i = 1; i <= 64; i += 1) await call("eth_getCode", ["0x1", `0x${i.toString(16)}`]);
   await assert.rejects(call("eth_getCode", ["0x1", "0x41"]), { code: "APN_RPC_BUDGET_EXCEEDED" });
@@ -197,4 +198,144 @@ test("raw transaction submission makes one attempt and bypasses session schedule
   const rpc = new BridgeRpc(8453, descriptor.origin, descriptor.call, new RpcReadSession(), descriptor.attempt);
   await assert.rejects(rpc.send("0x02"), { code: "APN_RPC_PROTOCOL" });
   assert.equal(calls, 1); assert.equal(new RpcReadSession().telemetry().totalAttempts, 0);
+});
+
+test("RPC batch maps out-of-order ids exactly and rejects missing, duplicate, extra, suberror and non-array responses without fallback", async () => {
+  const cases: Array<{ name: string; shape: (requests: Array<{ id: string }>) => unknown; code: string }> = [
+    { name: "missing", shape: (r) => [{ jsonrpc: "2.0", id: r[0]!.id, result: "0x1" }], code: "APN_RPC_PROTOCOL" },
+    { name: "duplicate", shape: (r) => [{ jsonrpc: "2.0", id: r[0]!.id, result: "0x1" }, { jsonrpc: "2.0", id: r[0]!.id, result: "0x2" }], code: "APN_RPC_PROTOCOL" },
+    { name: "extra", shape: (r) => [{ jsonrpc: "2.0", id: r[0]!.id, result: "0x1" }, { jsonrpc: "2.0", id: "999", result: "0x2" }], code: "APN_RPC_PROTOCOL" },
+    { name: "suberror", shape: (r) => [{ jsonrpc: "2.0", id: r[0]!.id, result: "0x1" }, { jsonrpc: "2.0", id: r[1]!.id, error: { code: -32000, message: "failed" } }], code: "APN_RPC_PROTOCOL" },
+    { name: "non-array", shape: () => ({ jsonrpc: "2.0", id: "1", error: { code: -32600, message: "batch unsupported" } }), code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" },
+  ];
+  for (const row of cases) {
+    let requests = 0;
+    const transport = { request: async (_endpoint: string, _method: string, body: string) => {
+      requests += 1; const parsed = JSON.parse(body) as Array<{ id: string }>;
+      return { status: 200, body: JSON.stringify(row.shape(parsed)) };
+    } };
+    const descriptor = bridgeRpcCall(1, { APN_ETHEREUM_RPC_URL: "https://ethereum.example" }, { transport });
+    const batch = descriptor.sessionBatchCall(new RpcReadSession({ wait: async () => {} }));
+    await assert.rejects(batch([
+      { method: "eth_chainId", params: [], cachePolicy: "immutable" },
+      { method: "eth_getBlockByNumber", params: ["safe", false], cachePolicy: "immutable" },
+    ]), (error: unknown) => error instanceof ApnError && error.code === row.code, row.name);
+    assert.equal(requests, 1, row.name);
+  }
+
+  const transport = { request: async (_endpoint: string, _method: string, body: string) => {
+    const parsed = JSON.parse(body) as Array<{ id: string; method: string }>;
+    return { status: 200, body: JSON.stringify([...parsed].reverse().map((request) => ({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "eth_chainId" ? "0x1" : block() }))) };
+  } };
+  const descriptor = bridgeRpcCall(1, { APN_ETHEREUM_RPC_URL: "https://ethereum.example" }, { transport });
+  const result = await descriptor.sessionBatchCall(new RpcReadSession({ wait: async () => {} }))([
+    { method: "eth_chainId", params: [], cachePolicy: "immutable" },
+    { method: "eth_getBlockByNumber", params: ["safe", false], cachePolicy: "immutable" },
+  ]);
+  assert.equal(result[0], "0x1"); assert.deepEqual(result[1], block());
+});
+
+test("RPC batch enforces 32/96/8/10/deadline bounds and removes cached immutable keys before HTTP", async () => {
+  let calls = 0;
+  const attempt = async (items: readonly { method: string }[]) => { calls += 1; return items.map(() => "0x1"); };
+  const item = (index: number) => ({ method: "eth_getCode", params: ["0x1", `0x${index.toString(16)}`], cachePolicy: "immutable" as const, batchAttempt: attempt });
+  await assert.rejects(new RpcReadSession().readBatch("https://rpc.example", 1, Array.from({ length: 33 }, (_, i) => item(i))), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(calls, 0);
+
+  const logical = new RpcReadSession({ maxHttpRequests: 8, wait: async () => {} });
+  for (let page = 0; page < 3; page += 1) await logical.readBatch("https://rpc.example", 1, Array.from({ length: 32 }, (_, i) => item(page * 32 + i)));
+  await assert.rejects(logical.readBatch("https://rpc.example", 1, [item(97)]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(logical.telemetry().logicalItems, 96);
+
+  const requests = new RpcReadSession({ maxLogicalItems: 96, maxHttpRequests: 8, wait: async () => {} });
+  for (let i = 0; i < 8; i += 1) await requests.readBatch("https://rpc.example", 1, [item(200 + i)]);
+  await assert.rejects(requests.readBatch("https://rpc.example", 1, [item(300)]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(requests.telemetry().httpRequests, 8);
+
+  let attemptNumber = 0;
+  const retryAttempt = async (items: readonly { method: string }[]) => {
+    attemptNumber += 1;
+    if (attemptNumber % 2 === 1) throw new ApnError("APN_RPC_AMBIGUOUS", "timeout", { transportReason: "request_deadline" });
+    return items.map(() => "0x1");
+  };
+  const attempts = new RpcReadSession({ maxHttpRequests: 8, maxHttpAttempts: 10, wait: async () => {} });
+  for (let i = 0; i < 5; i += 1) await attempts.readBatch("https://rpc.example", 1, [{ ...item(400 + i), batchAttempt: retryAttempt }]);
+  await assert.rejects(attempts.readBatch("https://rpc.example", 1, [{ ...item(500), batchAttempt: retryAttempt }]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(attempts.telemetry().httpAttempts, 10);
+
+  let now = 0;
+  const deadline = new RpcReadSession({ deadlineMs: 1, now: () => now, wait: async () => {} });
+  await deadline.readBatch("https://rpc.example", 1, [{ ...item(600), batchAttempt: async (items) => { now = 1; return items.map(() => "0x1"); } }]);
+  await assert.rejects(deadline.readBatch("https://rpc.example", 1, [item(601)]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+
+  let observedSizes: number[] = [];
+  const cachedAttempt = async (items: readonly { method: string }[]) => { observedSizes.push(items.length); return items.map(() => "0x1"); };
+  const cached = new RpcReadSession({ wait: async () => {} });
+  const first = { ...item(700), batchAttempt: cachedAttempt }, second = { ...item(701), batchAttempt: cachedAttempt };
+  await cached.readBatch("https://rpc.example", 1, [first]);
+  await cached.readBatch("https://rpc.example", 1, [first, second]);
+  assert.deepEqual(observedSizes, [1, 1]); assert.equal(cached.telemetry().cacheHits, 1);
+});
+
+test("whole RPC batch treats 429 as one attempt and retries a transient response at most once", async () => {
+  for (const status of [400, 429, 503]) {
+    let calls = 0;
+    const transport = { request: async (_endpoint: string, _method: string, body: string) => {
+      calls += 1; const request = JSON.parse(body) as Array<{ id: string }>;
+      if (calls === 1) return { status, body: "", ...(status === 429 ? { headers: { "retry-after": "1" } } : {}) };
+      return { status: 200, body: JSON.stringify(request.map((item) => ({ jsonrpc: "2.0", id: item.id, result: "0x1" }))) };
+    } };
+    const descriptor = bridgeRpcCall(1, { APN_ETHEREUM_RPC_URL: "https://ethereum.example" }, { transport });
+    const session = new RpcReadSession({ wait: async () => {} }), batch = descriptor.sessionBatchCall(session);
+    if (status === 400) await assert.rejects(batch([{ method: "eth_chainId", params: [], cachePolicy: "immutable" }]), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
+    else if (status === 429) await assert.rejects(batch([{ method: "eth_chainId", params: [], cachePolicy: "immutable" }]), { code: "APN_RPC_RATE_LIMITED" });
+    else assert.deepEqual(await batch([{ method: "eth_chainId", params: [], cachePolicy: "immutable" }]), ["0x1"]);
+    assert.equal(calls, status === 503 ? 2 : 1); assert.equal(session.telemetry().httpRequests, 1);
+    assert.equal(session.telemetry().httpAttempts, status === 503 ? 2 : 1);
+  }
+});
+
+test("Base source mutable snapshot, estimate and two-effect fee inputs use three fresh command batches", async () => {
+  const owner = `0x${"11".repeat(20)}` as `0x${string}`, token = BRIDGE_ASSET_REGISTRY[8453].tokens.find((row) => row.symbol === "USDC")!.address,
+    spender = `0x${"33".repeat(20)}` as `0x${string}`, hash = `0x${"44".repeat(32)}`;
+  const header = { number: "0x100", hash, timestamp: "0x10", baseFeePerGas: "0x2", transactions: [] };
+  let transportCalls = 0;
+  const attempt = async (items: readonly { method: string; params: readonly unknown[] }[]) => {
+    transportCalls += 1;
+    return items.map((item) => {
+      if (item.method === "eth_chainId") return "0x2105";
+      if (item.method === "eth_getBlockByNumber") return header;
+      if (item.method === "eth_getBalance") return "0x100000000000000000";
+      if (item.method === "eth_getTransactionCount") return "0x7";
+      if (item.method === "eth_estimateGas") return "0x10000";
+      if (item.method === "eth_maxPriorityFeePerGas") return "0x1";
+      if (item.method === "eth_call") return `0x${"0".repeat(64)}`;
+      throw new Error(`unexpected ${item.method}`);
+    });
+  };
+  const make = () => {
+    const session = new RpcReadSession({ wait: async () => {} });
+    const batchFactory = (bound: RpcReadSession) => async (items: readonly Omit<import("../../src/lifi/rpc.js").RpcBatchReadItem, "batchAttempt">[]) =>
+      await bound.readBatch("https://base.example", 8453, items.map((item) => ({ ...item, batchAttempt: attempt })));
+    const rpc = new BridgeRpc(8453, "https://base.example", async () => { throw new Error("serial fallback forbidden"); }, session,
+      async () => { throw new Error("serial fallback forbidden"); }, undefined, batchFactory);
+    return { rpc, session };
+  };
+  const first = make();
+  const account = await first.rpc.account(owner, spender, token);
+  assert.equal(account.latestNonceAtomic, "7");
+  const estimate = await first.rpc.estimate({ chainId: 8453, from: owner, to: spender, data: "0x", valueAtomic: "0", gasLimitAtomic: "0" });
+  assert.equal(estimate.gasLimitAtomic, "65536");
+  await first.rpc.prices();
+  const common = { maxFeePerGasAtomic: "5", maxPriorityFeePerGasAtomic: "1" };
+  const quotes = await first.rpc.feeQuotes([
+    { economics: { ...common, nonceAtomic: "7", gasLimitAtomic: "65536", maximumGasCostAtomic: "327680" } },
+    { economics: { ...common, nonceAtomic: "8", gasLimitAtomic: "300000", maximumGasCostAtomic: "1500000" } },
+  ]);
+  assert.equal(quotes.length, 2); assert.equal(first.session.telemetry().httpRequests, 3); assert.equal(first.session.telemetry().batchCount, 3);
+  assert.equal(transportCalls, 3);
+
+  const fresh = make(); await fresh.rpc.account(owner, spender, token);
+  assert.equal(fresh.session.telemetry().httpRequests, 1); assert.equal(transportCalls, 4);
 });

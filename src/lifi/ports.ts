@@ -33,6 +33,7 @@ export interface BridgeRpcPort {
   prices(): Promise<Pick<FeeEstimate, "maxFeePerGasAtomic" | "maxPriorityFeePerGasAtomic">>;
   estimate(transaction: BridgeTransaction): Promise<FeeEstimate>;
   feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<EvmFeeQuote>;
+  feeQuotes?(envelopes: readonly Pick<BridgeEnvelope, "economics">[]): Promise<readonly EvmFeeQuote[]>;
   send(rawTransaction: Hex): Promise<Hex>;
   observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string;
     composite?: Readonly<{ message: Hex; call: BnbCompositeCall }> }>): Promise<{

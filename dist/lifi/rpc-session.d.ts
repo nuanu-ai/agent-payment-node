@@ -2,23 +2,48 @@ import type { EvmRpcCall } from "../evm-ports.js";
 import type { BridgeChainId } from "./chains.js";
 export declare const MAX_READ_ATTEMPTS = 2;
 export declare const RPC_RETRY_DELAY_MS = 2000;
+export type RpcBatchAttempt = (items: readonly Readonly<{
+    method: string;
+    params: readonly unknown[];
+}>[]) => Promise<readonly unknown[]>;
+export interface RpcBatchReadItem<T = unknown> {
+    readonly method: string;
+    readonly params: readonly unknown[];
+    readonly cachePolicy?: "auto" | "immutable" | "snapshot" | "none";
+    readonly expectedDecoder?: (value: unknown) => T;
+    /** Transport-owned whole-batch attempt. All uncached items in one readBatch call must use the same function. */
+    readonly batchAttempt: RpcBatchAttempt;
+}
 export interface RpcReadSessionOptions {
-    readonly maxUniqueCalls?: number;
+    readonly maxLogicalItems?: number;
+    readonly maxHttpRequests?: number;
     readonly maxHttpAttempts?: number;
     readonly deadlineMs?: number;
+    /** Backward-compatible alias. */
+    readonly maxUniqueCalls?: number;
     readonly now?: () => number;
     readonly wait?: (milliseconds: number) => Promise<void>;
 }
 export interface RpcReadTelemetry {
-    readonly uniqueCalls: number;
-    readonly totalAttempts: number;
+    readonly logicalItems: number;
+    readonly httpRequests: number;
+    readonly httpAttempts: number;
+    readonly batchCount: number;
+    readonly batchItemsByMethod: Readonly<Record<string, number>>;
     readonly dedupHits: number;
+    readonly cacheHits: number;
     readonly singleflightHits: number;
-    readonly perMethod: Readonly<Record<string, number>>;
-    readonly remainingUniqueCalls: number;
+    readonly endpointIdentities: readonly string[];
+    readonly remainingLogicalItems: number;
+    readonly remainingHttpRequests: number;
     readonly remainingHttpAttempts: number;
     readonly deadline: number;
     readonly retryAfterMs?: number;
+    /** Backward-compatible telemetry aliases. */
+    readonly uniqueCalls: number;
+    readonly totalAttempts: number;
+    readonly perMethod: Readonly<Record<string, number>>;
+    readonly remainingUniqueCalls: number;
 }
 export declare class RpcHttpFailure extends Error {
     readonly method: string;
@@ -28,7 +53,8 @@ export declare class RpcHttpFailure extends Error {
 }
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export declare class RpcReadSession {
-    private readonly maxUniqueCalls;
+    private readonly maxLogicalItems;
+    private readonly maxHttpRequests;
     private readonly maxHttpAttempts;
     private readonly now;
     private readonly wait;
@@ -38,23 +64,32 @@ export declare class RpcReadSession {
     private readonly origins;
     private readonly queue;
     private active;
-    private uniqueCalls;
-    private totalAttempts;
+    private logicalItems;
+    private httpRequests;
+    private httpAttempts;
+    private batchCount;
     private dedupHits;
+    private cacheHits;
     private singleflightHits;
     private retryAfterMs;
     private readonly methods;
+    private readonly endpoints;
     constructor(options?: RpcReadSessionOptions);
     telemetry(): RpcReadTelemetry;
-    /** Current command clock, used by transports for deterministic Retry-After date parsing. */
     currentTime(): number;
     wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt?: EvmRpcCall): EvmRpcCall;
     read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown>;
+    /** Strict whole-batch read. Cached exact immutable/snapshot keys are removed before the one HTTP request. */
+    readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{
+        readonly [K in keyof T]: unknown;
+    }>;
+    private key;
+    private reserveLogical;
+    private reserveRequest;
     private retry;
     private schedule;
     private pump;
     private runScheduled;
-    private assertBeforeUnique;
     private assertBeforeAttempt;
     private assertBeforeQueue;
     private assertBeforeWait;
