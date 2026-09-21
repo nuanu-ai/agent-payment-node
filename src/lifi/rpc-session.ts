@@ -191,35 +191,37 @@ export class RpcReadSession {
     const attempt = pending[0]![1].item.batchAttempt;
     if (pending.some(([, entry]) => entry.item.batchAttempt !== attempt)) throw new ApnError("APN_RPC_CONFIG", "RPC batch transport identity is inconsistent.");
     for (const [, entry] of pending) this.reserveLogical(entry.item.method);
-    this.reserveRequest("batch"); this.batchCount += 1;
+    const rpcMethod = pending.length === 1 ? pending[0]![1].item.method : "batch";
+    this.reserveRequest(rpcMethod); this.batchCount += pending.length === 1 ? 0 : 1;
     const requests = pending.map(([, entry], index) => ({ jsonrpc: "2.0", id: String(index + 1), method: entry.item.method, params: entry.item.params }));
-    const body = canonicalJson(requests), response = await this.retry(origin, "batch", async () => await attempt(body));
-    if (!Array.isArray(response)) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.");
-    if (response.length !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch result count is invalid.");
+    const body = canonicalJson(requests.length === 1 ? requests[0] : requests), response = await this.retry(origin, rpcMethod, async () => await attempt(body));
+    const responses = requests.length === 1 ? [response] : response;
+    if (!Array.isArray(responses)) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod });
+    if (responses.length !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch result count is invalid.", { rpcMethod });
     const raw = new Array<unknown>(pending.length), seen = new Set<string>();
-    for (const candidate of response) {
-      if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.");
+    for (const candidate of responses) {
+      if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.", { rpcMethod });
       const row = candidate as Record<string, unknown>, id = row.id;
       if (row.jsonrpc !== "2.0" || typeof id !== "string" || !/^[1-9][0-9]*$/u.test(id) || seen.has(id)) {
-        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.");
+        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod });
       }
       const offset = Number(id) - 1;
-      if (!Number.isSafeInteger(offset) || offset < 0 || offset >= pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.");
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset >= pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod });
       seen.add(id);
       if (Object.hasOwn(row, "error")) {
         const error = row.error;
         if (typeof error === "object" && error !== null && !Array.isArray(error) &&
             [-32600, -32601].includes((error as Record<string, unknown>).code as number)) {
-          throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.");
+          throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod });
         }
-        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch contains a JSON-RPC sub-error.");
+        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch contains a JSON-RPC sub-error.", { rpcMethod });
       }
       if (!Object.hasOwn(row, "result") || Object.keys(row).some((key) => !["jsonrpc", "id", "result"].includes(key))) {
-        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.");
+        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.", { rpcMethod });
       }
       raw[offset] = row.result;
     }
-    if (seen.size !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.");
+    if (seen.size !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod });
     // Validate every caller's decoder against the raw response before mutating the cache.
     for (let index = 0; index < pending.length; index += 1) {
       const [, entry] = pending[index]!, rawValue = cloneRpcValue(raw[index]);
