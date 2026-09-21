@@ -47,19 +47,37 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   const endpoint = parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "Bridge RPC endpoint", 2048);
   if (endpoint.search !== "") bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_query_forbidden");
   const archive = bridgeArchiveEndpoint(chainId, environment);
+  const distinctArchive = archive !== null && archive.origin !== endpoint.origin ? archive : null;
   let sequence = 0n, archiveChain: Promise<void> | undefined;
   const call: EvmRpcCall = async (method, params) => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
     if (method === "eth_sendRawTransaction") return await submitDirect(method, params, (m, p) => oneAttempt(endpoint, m, p));
+    if (method === "eth_getTransactionReceipt" && isArchiveRead(method, params)) {
+      let primary: unknown;
+      try { primary = await retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait); }
+      catch (error) {
+        if (distinctArchive === null || !isReceiptFallbackError(error)) throw error;
+        return await archiveReceipt(method, params, distinctArchive);
+      }
+      if (primary !== null || distinctArchive === null) return primary;
+      return await archiveReceipt(method, params, distinctArchive);
+    }
     if (archive === null || !isArchiveRead(method, params)) return await retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait);
+    return await archiveRead(method, params, archive);
+  };
+  const assertArchiveChain = async (target: URL): Promise<void> => {
     if (archiveChain === undefined) archiveChain = (async () => {
-      if (evmRpcQuantity(await retryDirect("eth_chainId", [], () => oneAttempt(archive, "eth_chainId", []), wait)) !== BigInt(chainId)) {
+      if (evmRpcQuantity(await retryDirect("eth_chainId", [], () => oneAttempt(target, "eth_chainId", []), wait)) !== BigInt(chainId)) {
         bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
       }
     })();
     await archiveChain;
-    return await retryDirect(method, params, () => oneAttempt(archive, method, params), wait);
   };
+  const archiveRead = async (method: string, params: readonly unknown[], target: URL): Promise<unknown> => {
+    await assertArchiveChain(target);
+    return await retryDirect(method, params, () => oneAttempt(target, method, params), wait);
+  };
+  const archiveReceipt = archiveRead;
   const oneAttempt = async (target: URL, method: string, params: readonly unknown[], now = Date.now()): Promise<unknown> => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
     const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
@@ -69,9 +87,23 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
       if (error instanceof ApnError && error.code === "APN_RPC_AMBIGUOUS") throw error;
       throw error;
     }
-    if (response.status !== 200) throw new RpcHttpFailure(method, response.status, parseRetryAfter(response.headers, now));
+    if (response.status !== 200) {
+      if (response.status === 403 && knownBasePublicNodeReceiptCapability(chainId, target, method, response.body)) {
+        throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC historical receipt read is unavailable.",
+          { rpcMethod: method, reason: "historical_receipt_unavailable" });
+      }
+      throw new RpcHttpFailure(method, response.status, parseRetryAfter(response.headers, now));
+    }
     const r = evmRpcRecord(bridgeJson(response.body, 1024 * 1024));
-    if (r.jsonrpc !== "2.0" || r.id !== id || !Object.hasOwn(r, "result") || Object.hasOwn(r, "error")) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
+    if (r.jsonrpc !== "2.0" || r.id !== id) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
+    if (Object.hasOwn(r, "error")) {
+      if (method === "eth_getTransactionReceipt" && historicalReceiptUnavailable(r.error, chainId, target, method)) {
+        throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC historical receipt read is unavailable.",
+          { rpcMethod: method, reason: "historical_receipt_unavailable" });
+      }
+      bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
+    }
+    if (!Object.hasOwn(r, "result")) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
     return r.result;
   };
   const batchAttempt = async (target: URL, body: string, now = Date.now()): Promise<unknown> => {
@@ -85,13 +117,26 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
     const primaryAttempt = (m: string, p: readonly unknown[]) => oneAttempt(endpoint, m, p, session.currentTime());
     if (method === "eth_sendRawTransaction") return await submitDirect(method, params, primaryAttempt);
+    if (method === "eth_getTransactionReceipt" && isArchiveRead(method, params)) {
+      let primary: unknown;
+      try { primary = await session.read(endpoint.toString(), chainId, method, params, primaryAttempt); }
+      catch (error) {
+        if (distinctArchive === null || !isReceiptFallbackError(error)) throw error;
+        return await sessionArchiveReceipt(session, method, params, distinctArchive);
+      }
+      if (primary !== null || distinctArchive === null) return primary;
+      return await sessionArchiveReceipt(session, method, params, distinctArchive);
+    }
     if (archive === null || !isArchiveRead(method, params)) {
       return await session.read(endpoint.toString(), chainId, method, params, primaryAttempt);
     }
-    const archiveAttempt = (m: string, p: readonly unknown[]) => oneAttempt(archive, m, p, session.currentTime());
-    const archiveChain = await session.read(archive.toString(), chainId, "eth_chainId", [], archiveAttempt);
-    if (evmRpcQuantity(archiveChain) !== BigInt(chainId)) bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
-    return await session.read(archive.toString(), chainId, method, params, archiveAttempt);
+    return await sessionArchiveReceipt(session, method, params, archive);
+  };
+  const sessionArchiveReceipt = async (session: RpcReadSession, method: string, params: readonly unknown[], target: URL): Promise<unknown> => {
+    const archiveAttempt = (m: string, p: readonly unknown[]) => oneAttempt(target, m, p, session.currentTime());
+    const chain = await session.read(target.toString(), chainId, "eth_chainId", [], archiveAttempt);
+    if (evmRpcQuantity(chain) !== BigInt(chainId)) bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
+    return await session.read(target.toString(), chainId, method, params, archiveAttempt);
   };
   const sessionBatchCall = (session: RpcReadSession) => async (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route: "primary" | "archive" = "primary") => {
     const target = route === "archive" && archive !== null ? archive : endpoint;
@@ -483,5 +528,45 @@ function rpcHttpFailure(reason: string, method: string, status: number, attempts
   return new ApnError("APN_RPC_PROTOCOL", `Bridge validation failed: ${reason}.`, {
     rpcMethod: method, httpStatus: status.toString(), attempts: attempts.toString(),
   });
+}
+function isReceiptFallbackError(error: unknown): boolean {
+  if (!(error instanceof ApnError)) return false;
+  if (error.code === "APN_PROVIDER_CAPABILITY_UNAVAILABLE") {
+    return error.details?.reason === "historical_receipt_unavailable" && error.details.rpcMethod === "eth_getTransactionReceipt";
+  }
+  if (["APN_RPC_AMBIGUOUS", "APN_RPC_RATE_LIMITED", "APN_PROVIDER_UNAVAILABLE"].includes(error.code)) return true;
+  if (error.code !== "APN_RPC_PROTOCOL") return false;
+  const status = Number(error.details?.httpStatus);
+  return status === 408 || status >= 500 && status <= 599;
+}
+const BASE_PUBLICNODE_ARCHIVE_MESSAGE = "archive requests require a personal token";
+function historicalReceiptUnavailable(value: unknown, chainId: BridgeChainId, target: URL, method: string): boolean {
+  let error: Record<string, unknown>;
+  try { error = evmRpcRecord(value); } catch { return false; }
+  if (!Number.isSafeInteger(error.code) || typeof error.message !== "string" || error.message.length > 1024) return false;
+  const message = normalizeProviderMessage(error.message);
+  if (message === BASE_PUBLICNODE_ARCHIVE_MESSAGE) return isBasePublicNodeReceiptRequest(chainId, target, method);
+  if (credentialOrAuthorizationMessage(message)) return false;
+  return message.includes("missing trie node") || message.includes("pruned") ||
+    message.includes("historical") && ["unavailable", "not available", "unsupported", "not supported"].some((part) => message.includes(part));
+}
+function knownBasePublicNodeReceiptCapability(chainId: BridgeChainId, target: URL, method: string, body: string): boolean {
+  if (!isBasePublicNodeReceiptRequest(chainId, target, method)) return false;
+  const trimmed = body.trim();
+  if (normalizeProviderMessage(trimmed) === BASE_PUBLICNODE_ARCHIVE_MESSAGE) return true;
+  if (trimmed.length === 0 || trimmed.length > 4096) return false;
+  try {
+    const value = evmRpcRecord(JSON.parse(trimmed)), error = evmRpcRecord(value.error);
+    return typeof error.message === "string" && normalizeProviderMessage(error.message) === BASE_PUBLICNODE_ARCHIVE_MESSAGE;
+  } catch { return false; }
+}
+function isBasePublicNodeReceiptRequest(chainId: BridgeChainId, target: URL, method: string): boolean {
+  return chainId === 8453 && method === "eth_getTransactionReceipt" &&
+    target.origin === "https://base-rpc.publicnode.com" && target.pathname === "/" && target.search === "";
+}
+function normalizeProviderMessage(message: string): string { return message.trim().toLowerCase(); }
+function credentialOrAuthorizationMessage(message: string): boolean {
+  return ["token", "credential", "api key", "apikey", "unauthorized", "forbidden", "authorization", "authentication", "access denied"]
+    .some((part) => message.includes(part));
 }
 function quantity(n: bigint): Hex { return `0x${n.toString(16)}`; }

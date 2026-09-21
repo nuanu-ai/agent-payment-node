@@ -215,6 +215,12 @@ export declare class BridgeService {
         updated_at: string;
         expires_at: string;
         next_actions: readonly string[];
+        observation_rpc_failure?: {
+            schema_version: "apn.bridge-observation-rpc-failure.v1";
+            stage: "source_observation";
+            effect_role: "bridge" | "approval";
+            code: import("../errors.js").ErrorCode | null;
+        };
         pre_sign_rpc_failure?: {
             schema_version: "apn.bridge-presign-rpc-failure.v1";
             phase: "pre_sign_guard";
@@ -418,6 +424,12 @@ export declare class BridgeService {
         updated_at: string;
         expires_at: string;
         next_actions: readonly string[];
+        observation_rpc_failure?: {
+            schema_version: "apn.bridge-observation-rpc-failure.v1";
+            stage: "source_observation";
+            effect_role: "bridge" | "approval";
+            code: import("../errors.js").ErrorCode | null;
+        };
         pre_sign_rpc_failure?: {
             schema_version: "apn.bridge-presign-rpc-failure.v1";
             phase: "pre_sign_guard";
