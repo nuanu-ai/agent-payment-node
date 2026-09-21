@@ -70,17 +70,22 @@ test("LI.FI bridge sends after included approval without waiting for safe, and c
   assert.equal((resumed.operation as { state: string }).state, "completed"); assert.equal(s.source.submissions.length, 2);
 });
 
-test("LI.FI approval and resume bind fresh command-local RPC sessions", async (t) => {
+test("LI.FI observation phases use independent lazy bounded RPC sessions", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   s.source.safeApproval = false;
   const { id } = await s.prepare(); s.rpcSessions.length = 0;
   const first = await s.core.execute({ command: "bridge.approve", operationId: id });
-  assert.equal(first.ok, true, first.error?.message); assert.ok(s.rpcSessions.length >= 2);
-  const approvalSession = s.rpcSessions[0]; assert.ok(approvalSession); assert.ok(s.rpcSessions.every((session) => session === approvalSession));
+  assert.equal(first.ok, true, first.error?.message); assert.ok(s.rpcSessions.length >= 3);
+  const approvalSession = s.rpcSessions[0]; assert.ok(approvalSession); assert.equal(s.rpcSessions[1], approvalSession);
+  const approvalUnique = [...new Set(s.rpcSessions)]; assert.equal(approvalUnique.length, 2);
+  assert.deepEqual(approvalUnique.map((session) => session.telemetry().remainingHttpRequests), [13, 13]);
   s.source.safeApproval = true; s.rpcSessions.length = 0;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
-  assert.equal(resumed.ok, true, resumed.error?.message); assert.ok(s.rpcSessions.length >= 2);
-  const resumeSession = s.rpcSessions[0]; assert.ok(resumeSession); assert.ok(s.rpcSessions.every((session) => session === resumeSession));
+  assert.equal(resumed.ok, true, resumed.error?.message); assert.ok(s.rpcSessions.length >= 5);
+  const resumeSession = s.rpcSessions[0]; assert.ok(resumeSession); assert.equal(s.rpcSessions[1], resumeSession);
+  const resumeUnique = [...new Set(s.rpcSessions)]; assert.equal(resumeUnique.length, 4);
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [13, 13, 16, 2]);
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [13, 13, 16, 3]);
   assert.notEqual(resumeSession, approvalSession);
 });
 
