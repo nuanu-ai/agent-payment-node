@@ -1,6 +1,7 @@
 import { getAddress } from "viem";
 import type { ErrorCode } from "../errors.js";
-import { BRIDGE_CHAIN_IDS, BRIDGE_EXECUTION_CHAIN_IDS, type BridgeChainId, type BridgeExecutionChainId } from "./chains.js";
+import { BRIDGE_CHAIN_IDS, BRIDGE_EXECUTION_CHAIN_IDS, BRIDGE_EXECUTION_SOURCE_CHAIN_IDS,
+  type BridgeChainId, type BridgeExecutionChainId, type BridgeExecutionSourceChainId } from "./chains.js";
 import type { Address, Hex } from "../model.js";
 import type { BridgeRouteRequest, BridgeTool } from "./model.js";
 import { assertBridgeRegistryListed, bridgeTokenListed } from "./asset-listing.js";
@@ -238,6 +239,13 @@ export function bridgeDestinationChain(value: unknown, code: ErrorCode = "APN_PR
 }
 export function bridgeExecutionDestination(value: unknown): value is BridgeExecutionChainId {
   return typeof value === "number" && BRIDGE_EXECUTION_CHAIN_IDS.includes(value as BridgeExecutionChainId);
+}
+/** A source needs the reviewed LI.FI Diamond and FeeForwarder path; destination-only proof support is insufficient. */
+export function bridgeExecutionSource(value: unknown): value is BridgeExecutionSourceChainId {
+  return typeof value === "number" && BRIDGE_EXECUTION_SOURCE_CHAIN_IDS.includes(value as BridgeExecutionSourceChainId);
+}
+export function bridgeExecutionSourceCaip2(value: unknown): boolean {
+  return typeof value === "string" && BRIDGE_EXECUTION_SOURCE_CHAIN_IDS.some((chainId) => value === `eip155:${chainId}`);
 }
 export function bridgeChainRow(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeChainRow {
   return BRIDGE_ASSET_REGISTRY[bridgeChain(value, code)];

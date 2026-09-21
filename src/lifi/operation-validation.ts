@@ -11,7 +11,7 @@ import { approvalData } from "./transaction.js";
 import type { BridgeEnvelope, BridgeTransactionProof } from "./model.js";
 import { BRIDGE_FEE_RULE_HASH } from "./rpc-fees.js";
 import { assetUsageReservationId, validateAssetUsageReservation } from "../asset-usage-ledger.js";
-import { LIFI_ACROSS_BRIDGE_MECHANISM, validateBridgeAllowlistBinding } from "./allowlist.js";
+import { bridgeMechanism, validateBridgeAllowlistBinding } from "./allowlist.js";
 
 const EDGES: Readonly<Record<BridgeState, readonly BridgeState[]>> = {
   awaiting_approval: ["execution_pending", "failed_before_effect"],
@@ -76,10 +76,10 @@ function validateIntent(op: BridgeOperationRecord, legacy: boolean): void {
     op.requestHash !== hashObject({ profile: i.profile, quote: i.quoteHash, route: m.routeId })) bridgeCorrupt();
   if (!legacy) {
     const providerBoundNative = bridgeProviderBoundNativeDestination(r);
-    if (providerBoundNative !== (i.allowlist !== null) || (providerBoundNative && (r.recipient !== i.owner.address || m.tool !== "across"))) bridgeCorrupt();
+    if (providerBoundNative && (r.recipient !== i.owner.address || m.tool !== "across")) bridgeCorrupt();
     const allowlist = i.allowlist === null ? null : validateBridgeAllowlistBinding(i.allowlist);
     if (allowlist !== null && (allowlist.account !== i.owner.address || allowlist.selfRecipient !== r.recipient || allowlist.chain !== `eip155:${r.fromChainId}` ||
-      allowlist.amountAtomic !== r.amountAtomic || !bridgeSame(allowlist.mechanism, LIFI_ACROSS_BRIDGE_MECHANISM))) bridgeCorrupt();
+      allowlist.amountAtomic !== r.amountAtomic || !bridgeSame(allowlist.mechanism, bridgeMechanism(m.tool)))) bridgeCorrupt();
     if (op.usageLease !== null && allowlist !== null) {
       const usageIdentity = { account: allowlist.account, chain: allowlist.chain, asset: allowlist.asset };
       const lease = validateAssetUsageReservation(op.usageLease);

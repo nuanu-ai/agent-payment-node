@@ -8,7 +8,7 @@ import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BR
 import { approvalData } from "./transaction.js";
 import { BRIDGE_FEE_RULE_HASH } from "./rpc-fees.js";
 import { assetUsageReservationId, validateAssetUsageReservation } from "../asset-usage-ledger.js";
-import { LIFI_ACROSS_BRIDGE_MECHANISM, validateBridgeAllowlistBinding } from "./allowlist.js";
+import { bridgeMechanism, validateBridgeAllowlistBinding } from "./allowlist.js";
 const EDGES = {
     awaiting_approval: ["execution_pending", "failed_before_effect"],
     execution_pending: ["source_pending", "unknown_finality", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"],
@@ -82,11 +82,11 @@ function validateIntent(op, legacy) {
         bridgeCorrupt();
     if (!legacy) {
         const providerBoundNative = bridgeProviderBoundNativeDestination(r);
-        if (providerBoundNative !== (i.allowlist !== null) || (providerBoundNative && (r.recipient !== i.owner.address || m.tool !== "across")))
+        if (providerBoundNative && (r.recipient !== i.owner.address || m.tool !== "across"))
             bridgeCorrupt();
         const allowlist = i.allowlist === null ? null : validateBridgeAllowlistBinding(i.allowlist);
         if (allowlist !== null && (allowlist.account !== i.owner.address || allowlist.selfRecipient !== r.recipient || allowlist.chain !== `eip155:${r.fromChainId}` ||
-            allowlist.amountAtomic !== r.amountAtomic || !bridgeSame(allowlist.mechanism, LIFI_ACROSS_BRIDGE_MECHANISM)))
+            allowlist.amountAtomic !== r.amountAtomic || !bridgeSame(allowlist.mechanism, bridgeMechanism(m.tool))))
             bridgeCorrupt();
         if (op.usageLease !== null && allowlist !== null) {
             const usageIdentity = { account: allowlist.account, chain: allowlist.chain, asset: allowlist.asset };

@@ -1,5 +1,5 @@
 import type { ErrorCode } from "../errors.js";
-import { type BridgeChainId, type BridgeExecutionChainId } from "./chains.js";
+import { type BridgeChainId, type BridgeExecutionChainId, type BridgeExecutionSourceChainId } from "./chains.js";
 import type { Address, Hex } from "../model.js";
 import type { BridgeRouteRequest, BridgeTool } from "./model.js";
 /**
@@ -164,6 +164,9 @@ export declare function bridgeQuoteDestination(value: unknown, code?: ErrorCode)
 };
 export declare function bridgeDestinationChain(value: unknown, code?: ErrorCode): BridgeChainId;
 export declare function bridgeExecutionDestination(value: unknown): value is BridgeExecutionChainId;
+/** A source needs the reviewed LI.FI Diamond and FeeForwarder path; destination-only proof support is insufficient. */
+export declare function bridgeExecutionSource(value: unknown): value is BridgeExecutionSourceChainId;
+export declare function bridgeExecutionSourceCaip2(value: unknown): boolean;
 export declare function bridgeChainRow(value: unknown, code?: ErrorCode): BridgeChainRow;
 export declare function bridgeNativeCoin(chainId: unknown, code?: ErrorCode): BridgeNativeCoin;
 /** The one admission point for a bridgeable token. The zero address is the native sentinel and is never a token. */

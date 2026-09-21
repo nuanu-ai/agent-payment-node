@@ -8,6 +8,11 @@ export declare const LIFI_ACROSS_BRIDGE_MECHANISM: Readonly<{
     provider: "lifi";
     reference: "across-v4";
 }>;
+export declare const LIFI_STARGATE_BRIDGE_MECHANISM: Readonly<{
+    provider: "lifi";
+    reference: "stargate-v2-taxi";
+}>;
+export type LifiBridgeMechanism = typeof LIFI_ACROSS_BRIDGE_MECHANISM | typeof LIFI_STARGATE_BRIDGE_MECHANISM;
 export interface BridgeAllowlistBinding {
     readonly schemaVersion: typeof BRIDGE_ALLOWLIST_SCHEMA;
     readonly policyDigest: string;
@@ -17,7 +22,7 @@ export interface BridgeAllowlistBinding {
     readonly asset: AssetUsageIdentity["asset"];
     readonly amountAtomic: string;
     readonly selfRecipient: string;
-    readonly mechanism: typeof LIFI_ACROSS_BRIDGE_MECHANISM;
+    readonly mechanism: LifiBridgeMechanism;
 }
 export type BridgeUsageTarget = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
 export declare class BridgeAllowlistGate {
@@ -32,3 +37,4 @@ export declare class BridgeAllowlistGate {
 }
 export declare function validateBridgeAllowlistBinding(value: unknown): BridgeAllowlistBinding;
 export declare function bridgeUsageTarget(op: BridgeOperationRecord): BridgeUsageTarget;
+export declare function bridgeMechanism(tool: string): LifiBridgeMechanism;

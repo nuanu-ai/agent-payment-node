@@ -205,10 +205,7 @@ export declare class BridgeService {
                     identifier: string;
                 }>;
                 amount_atomic: string;
-                mechanism: Readonly<{
-                    provider: "lifi";
-                    reference: "across-v4";
-                }>;
+                mechanism: import("./allowlist.js").LifiBridgeMechanism;
                 reservation_id: string | null;
             } | null;
             identity: string;
@@ -411,10 +408,7 @@ export declare class BridgeService {
                     identifier: string;
                 }>;
                 amount_atomic: string;
-                mechanism: Readonly<{
-                    provider: "lifi";
-                    reference: "across-v4";
-                }>;
+                mechanism: import("./allowlist.js").LifiBridgeMechanism;
                 reservation_id: string | null;
             } | null;
             identity: string;
