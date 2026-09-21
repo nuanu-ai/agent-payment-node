@@ -4,7 +4,7 @@ import { BridgeHttps, LIFI_API_ORIGIN } from "./https.js";
 import type { BridgeProviderObservation, BridgeRouteRequest } from "./model.js";
 import type { LifiProviderPort, LifiResponse } from "./ports.js";
 import { railStatusIdentifier, type RailStatusIdentifier } from "../rail-status-binding.js";
-import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgePeerToken, validateBridgeRequest } from "./asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgeCrossNativeConversion, bridgePeerToken, validateBridgeRequest } from "./asset-registry.js";
 import { BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "./discovery-candidates.js";
 import { validateBridgeInventoryCandidate } from "./catalog.js";
 import { bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
@@ -117,12 +117,14 @@ export class LifiProvider implements LifiProviderPort {
   }
   async routes(request: BridgeRouteRequest, sender: Address): Promise<LifiResponse> {
     validateBridgeRequest(request);
+    const bnbComposite = bridgeCrossNativeConversion(request);
     return await this.transport.request(`${ORIGIN}/advanced/routes`, "POST", canonicalJson({
       fromChainId: request.fromChainId, toChainId: request.toChainId, fromTokenAddress: request.fromToken,
       toTokenAddress: request.toToken, fromAmount: request.amountAtomic, fromAddress: sender, toAddress: request.recipient,
-      options: { slippage: request.slippageBps / 10_000, allowSwitchChain: false, allowDestinationCall: false,
+      options: { slippage: request.slippageBps / 10_000, allowSwitchChain: false, allowDestinationCall: bnbComposite,
         executionType: "transaction", gasless: false, fee: 0, integrator: "lifi-api",
-        bridges: { allow: ["across", "stargateV2"] }, exchanges: { allow: [] } },
+        bridges: { allow: bnbComposite ? ["across"] : ["across", "stargateV2"] },
+        exchanges: { allow: bnbComposite ? ["fly"] : [] } },
     }), LIFI_ROUTE_RESPONSE_BYTES, "APN_HTTP_CONFIG");
   }
   async materialize(step: Readonly<Record<string, unknown>>): Promise<LifiResponse> {
