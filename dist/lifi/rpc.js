@@ -97,15 +97,15 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         }
         const r = evmRpcRecord(bridgeJson(response.body, 1024 * 1024));
         if (r.jsonrpc !== "2.0" || r.id !== id)
-            bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
+            bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response", { rpcMethod: method });
         if (Object.hasOwn(r, "error")) {
             if (method === "eth_getTransactionReceipt" && historicalReceiptUnavailable(r.error, chainId, target, method)) {
                 throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC historical receipt read is unavailable.", { rpcMethod: method, reason: "historical_receipt_unavailable" });
             }
-            bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
+            bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response", { rpcMethod: method });
         }
         if (!Object.hasOwn(r, "result"))
-            bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
+            bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response", { rpcMethod: method });
         return r.result;
     };
     const batchAttempt = async (target, body, now = Date.now()) => {
