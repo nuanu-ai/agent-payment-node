@@ -59,6 +59,12 @@ export class RpcHttpFailure extends Error {
   constructor(readonly method: string, readonly status: number, readonly retryAfterMs?: number) { super(`RPC HTTP ${status}`); }
 }
 
+type RpcDecoder<T = unknown> = (value: unknown) => T;
+interface BatchExecution {
+  readonly raw: readonly unknown[];
+  readonly decoded: readonly unknown[];
+}
+
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export class RpcReadSession {
   private readonly maxLogicalItems: number;
@@ -69,7 +75,7 @@ export class RpcReadSession {
   private readonly deadline: number;
   private readonly cache = new Map<string, unknown>();
   private readonly inflight = new Map<string, Promise<unknown>>();
-  private readonly batchInflight = new Map<string, Promise<readonly unknown[]>>();
+  private readonly batchInflight = new Map<string, Promise<BatchExecution>>();
   private readonly origins = new Map<string, { active: boolean; lastStart: number }>();
   private readonly queue: Array<{ origin: string; task: () => Promise<unknown>; resolve: (value: unknown) => void; reject: (error: unknown) => void }> = [];
   private active = 0;
@@ -118,22 +124,25 @@ export class RpcReadSession {
     };
   }
 
-  async read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown> {
+  async read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall,
+    decoder: RpcDecoder = identity): Promise<unknown> {
     const key = this.key(origin, chainId, method, params);
     const cached = this.cache.get(key);
-    if (cached !== undefined || this.cache.has(key)) { this.dedupHits += 1; this.cacheHits += 1; return cloneRpcValue(cached); }
+    if (cached !== undefined || this.cache.has(key)) {
+      this.dedupHits += 1; this.cacheHits += 1; return decodeRpcValue(decoder, cloneRpcValue(cached));
+    }
     const current = this.inflight.get(key);
     if (current !== undefined) {
       this.assertBeforeQueue(method); this.singleflightHits += 1;
-      return cloneRpcValue(await current);
+      return decodeRpcValue(decoder, cloneRpcValue(await current));
     }
     this.reserveLogical(method);
     this.reserveRequest(method);
     const operation = this.retry(origin, method, () => oneAttempt(method, params))
-      .then((value) => { if (isSessionCacheable(method, params, value)) this.cache.set(key, cloneRpcValue(value)); return value; })
+      .then((raw) => { if (isSessionCacheable(method, params, raw)) this.cache.set(key, cloneRpcValue(raw)); return raw; })
       .finally(() => this.inflight.delete(key));
     this.inflight.set(key, operation);
-    return cloneRpcValue(await operation);
+    return decodeRpcValue(decoder, cloneRpcValue(await operation));
   }
 
   /** Strict whole-batch read. Cached exact immutable/snapshot keys are removed before the one HTTP request. */
@@ -145,16 +154,18 @@ export class RpcReadSession {
     const current = this.batchInflight.get(batchKey);
     if (current !== undefined) {
       this.assertBeforeQueue("batch"); this.singleflightHits += 1;
-      return cloneRpcValue(await current) as { readonly [K in keyof T]: unknown };
+      const execution = await current;
+      return this.decodeBatch(items, execution.raw) as { readonly [K in keyof T]: unknown };
     }
     const operation = this.executeBatch(origin, chainId, items).finally(() => this.batchInflight.delete(batchKey));
     this.batchInflight.set(batchKey, operation);
-    return cloneRpcValue(await operation) as { readonly [K in keyof T]: unknown };
+    return cloneRpcValue((await operation).decoded) as { readonly [K in keyof T]: unknown };
   }
 
-  private async executeBatch(origin: string, chainId: BridgeChainId, items: readonly RpcBatchReadItem[]): Promise<readonly unknown[]> {
-    const results = new Array<unknown>(items.length);
-    const unique = new Map<string, { cacheKey: string; item: RpcBatchReadItem; indexes: number[] }>();
+  private async executeBatch(origin: string, chainId: BridgeChainId, items: readonly RpcBatchReadItem[]): Promise<BatchExecution> {
+    const rawResults = new Array<unknown>(items.length), decodedResults = new Array<unknown>(items.length);
+    const unique = new Map<string, { cacheKey: string; item: RpcBatchReadItem;
+      decoders: Array<{ index: number; decoder: RpcDecoder }> }>();
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
       if (typeof item.method !== "string" || item.method.length === 0 || !Array.isArray(item.params) ||
@@ -163,14 +174,18 @@ export class RpcReadSession {
       }
       const cacheKey = this.key(origin, chainId, item.method, item.params), policy = item.cachePolicy ?? "auto";
       if (policy !== "none" && this.cache.has(cacheKey)) {
-        results[index] = cloneRpcValue(this.cache.get(cacheKey)); this.cacheHits += 1; this.dedupHits += 1; continue;
+        const raw = cloneRpcValue(this.cache.get(cacheKey));
+        rawResults[index] = raw; decodedResults[index] = decodeRpcValue(item.decoder, raw);
+        this.cacheHits += 1; this.dedupHits += 1; continue;
       }
       const uniqueKey = hashObject({ cacheKey, policy }), existing = unique.get(uniqueKey);
-      if (existing !== undefined) { existing.indexes.push(index); this.dedupHits += 1; continue; }
-      unique.set(uniqueKey, { cacheKey, item, indexes: [index] });
+      if (existing !== undefined) {
+        existing.decoders.push({ index, decoder: item.decoder }); this.dedupHits += 1; continue;
+      }
+      unique.set(uniqueKey, { cacheKey, item, decoders: [{ index, decoder: item.decoder }] });
     }
     const pending = [...unique.entries()];
-    if (pending.length === 0) return results;
+    if (pending.length === 0) return { raw: rawResults, decoded: decodedResults };
     if (pending.length > RPC_BATCH_MAX_ITEMS) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC batch exceeds its item bound.",
       telemetryDetails(this.telemetry(), "batch", "maxBatchItems"));
     const attempt = pending[0]![1].item.batchAttempt;
@@ -205,22 +220,33 @@ export class RpcReadSession {
       raw[offset] = row.result;
     }
     if (seen.size !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.");
-    const decoded: unknown[] = [];
+    // Validate every caller's decoder against the raw response before mutating the cache.
     for (let index = 0; index < pending.length; index += 1) {
-      const item = pending[index]![1].item;
-      try { decoded[index] = item.decoder(raw[index]); }
-      catch (error) { if (error instanceof ApnError) throw error; throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch item decoding failed."); }
+      const [, entry] = pending[index]!, rawValue = cloneRpcValue(raw[index]);
+      for (const reference of entry.decoders) {
+        rawResults[reference.index] = cloneRpcValue(rawValue);
+        decodedResults[reference.index] = decodeRpcValue(reference.decoder, rawValue);
+      }
     }
     // Commit cache only after every response item and decoder succeeds.
     for (let index = 0; index < pending.length; index += 1) {
-      const [, entry] = pending[index]!, value = decoded[index];
+      const [, entry] = pending[index]!, value = raw[index];
       const policy = entry.item.cachePolicy ?? "auto";
       if (policy === "immutable" || policy === "snapshot" || policy === "auto" && isSessionCacheable(entry.item.method, entry.item.params, value)) {
         this.cache.set(entry.cacheKey, cloneRpcValue(value));
       }
-      for (const resultIndex of entry.indexes) results[resultIndex] = cloneRpcValue(value);
     }
-    return results;
+    return { raw: rawResults, decoded: decodedResults };
+  }
+
+  private decodeBatch(items: readonly RpcBatchReadItem[], raw: readonly unknown[]): readonly unknown[] {
+    const decoded = new Array<unknown>(items.length);
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index]!;
+      if (typeof item.decoder !== "function") throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch item is malformed.");
+      decoded[index] = decodeRpcValue(item.decoder, cloneRpcValue(raw[index]));
+    }
+    return decoded;
   }
 
   private key(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[]): string {
@@ -345,6 +371,11 @@ export function telemetryDetails(telemetry: RpcReadTelemetry, method: string, re
 }
 function positiveBound(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < 1) throw new ApnError("APN_RPC_CONFIG", `RPC ${name} bound is invalid.`); return value;
+}
+function identity(value: unknown): unknown { return value; }
+function decodeRpcValue<T>(decoder: RpcDecoder<T>, raw: unknown): T {
+  try { return decoder(raw); }
+  catch (error) { if (error instanceof ApnError) throw error; throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC item decoding failed."); }
 }
 function cloneRpcValue(value: unknown): unknown { if (value === undefined) return undefined; try { return structuredClone(value); } catch { return value; } }
 function isNumericBlockTag(value: unknown): boolean { return typeof value === "string" && /^0x[0-9a-f]+$/u.test(value); }
