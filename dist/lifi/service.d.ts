@@ -216,8 +216,12 @@ export declare class BridgeService {
         expires_at: string;
         next_actions: readonly string[];
         observation_rpc_failure?: {
+            attempts?: number;
+            http_status?: number;
+            rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;
+            reason?: import("./operation-model.js").BridgeObservationRpcReason;
             schema_version: "apn.bridge-observation-rpc-failure.v1";
-            stage: "source_observation";
+            stage: import("./operation-model.js").BridgeObservationRpcStage;
             effect_role: "bridge" | "approval";
             code: import("../errors.js").ErrorCode | null;
         };
@@ -425,8 +429,12 @@ export declare class BridgeService {
         expires_at: string;
         next_actions: readonly string[];
         observation_rpc_failure?: {
+            attempts?: number;
+            http_status?: number;
+            rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;
+            reason?: import("./operation-model.js").BridgeObservationRpcReason;
             schema_version: "apn.bridge-observation-rpc-failure.v1";
-            stage: "source_observation";
+            stage: import("./operation-model.js").BridgeObservationRpcStage;
             effect_role: "bridge" | "approval";
             code: import("../errors.js").ErrorCode | null;
         };

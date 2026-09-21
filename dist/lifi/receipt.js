@@ -101,6 +101,10 @@ function projectBridgeOperation(op, legacy) {
         ...(op.failure?.observationRpc === undefined ? {} : { observation_rpc_failure: {
                 schema_version: op.failure.observationRpc.schemaVersion, stage: op.failure.observationRpc.stage,
                 effect_role: op.failure.observationRpc.effectRole, code: op.failure.observationRpc.code,
+                ...(op.failure.observationRpc.reason === undefined ? {} : { reason: op.failure.observationRpc.reason }),
+                ...(op.failure.observationRpc.rpcMethod === undefined ? {} : { rpc_method: op.failure.observationRpc.rpcMethod }),
+                ...(op.failure.observationRpc.httpStatus === undefined ? {} : { http_status: op.failure.observationRpc.httpStatus }),
+                ...(op.failure.observationRpc.attempts === undefined ? {} : { attempts: op.failure.observationRpc.attempts }),
             } }),
         rpc_origins: { source: i.sourceRpcOrigin, destination: i.destinationRpcOrigin },
         deployments: { source: i.sourceDeployment, destination: i.destinationDeployment },
