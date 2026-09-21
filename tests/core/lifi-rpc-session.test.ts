@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ApnError } from "../../src/errors.js";
 import { BridgeRpc, RpcReadSession, bridgeRpcCall } from "../../src/lifi/rpc.js";
+import { rpcBlockValue, rpcFeeBlockValue } from "../../src/lifi/rpc-batch-codec.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 
 const block = (number = "0x10") => ({ number, hash: `0x${"a".repeat(64)}`, timestamp: "0x1", baseFeePerGas: "0x1", transactions: [] });
@@ -209,6 +210,77 @@ function batchResults(body: string, result: (request: { id: string; method: stri
   const requests = JSON.parse(body) as Array<{ id: string; method: string; params: readonly unknown[] }>;
   return requests.map((request, index) => ({ jsonrpc: "2.0", id: request.id, result: result(request, index) }));
 }
+
+test("session cache keeps raw chain IDs across serial and batch decoder modes", async () => {
+  let serialCalls = 0, batchCalls = 0;
+  const quantity = (value: unknown) => { if (typeof value !== "string") throw new ApnError("APN_RPC_PROTOCOL", "bad quantity"); return BigInt(value); };
+  const session = new RpcReadSession({ wait: async () => {} });
+  const serial = async () => { serialCalls += 1; return "0x1"; };
+  const first = await session.read("https://rpc.example", 1, "eth_chainId", [], serial, quantity);
+  const second = await session.readBatch("https://rpc.example", 1, [{ method: "eth_chainId", params: [], cachePolicy: "immutable",
+    decoder: quantity, batchAttempt: async (body) => { batchCalls += 1; return batchResults(body, () => "0x1"); } }]);
+  assert.equal(first, 1n); assert.deepEqual(second, [1n]); assert.equal(serialCalls, 1); assert.equal(batchCalls, 0);
+  assert.equal(session.telemetry().httpRequests, 1); assert.equal(session.telemetry().cacheHits, 1);
+});
+
+test("batch and serial reads independently decode one raw cache value", async () => {
+  let batchCalls = 0, serialCalls = 0;
+  const quantity = (value: unknown) => { if (typeof value !== "string") throw new ApnError("APN_RPC_PROTOCOL", "bad quantity"); return BigInt(value); };
+  const asLabel = (value: unknown) => typeof value === "string" ? `chain:${value}` : (() => { throw new ApnError("APN_RPC_PROTOCOL", "bad chain"); })();
+  const session = new RpcReadSession({ wait: async () => {} });
+  const batch = await session.readBatch("https://rpc.example", 1, [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: quantity,
+    batchAttempt: async (body) => { batchCalls += 1; return batchResults(body, () => "0x1"); } }]);
+  const serial = await session.read("https://rpc.example", 1, "eth_chainId", [], async () => { serialCalls += 1; return "wrong"; }, asLabel);
+  const secondBatch = await session.readBatch("https://rpc.example", 1, [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: asLabel,
+    batchAttempt: async (body) => { batchCalls += 1; return batchResults(body, () => "wrong"); } }]);
+  assert.deepEqual(batch, [1n]); assert.equal(serial, "chain:0x1"); assert.deepEqual(secondBatch, ["chain:0x1"]);
+  assert.equal(batchCalls, 1); assert.equal(serialCalls, 0); assert.equal(session.telemetry().httpRequests, 1);
+});
+
+test("decoder failure on a cache hit preserves the valid raw value", async () => {
+  let calls = 0;
+  const quantity = (value: unknown) => { if (typeof value !== "string") throw new ApnError("APN_RPC_PROTOCOL", "bad quantity"); return BigInt(value); };
+  const session = new RpcReadSession({ wait: async () => {} });
+  const item = (decoder: (value: unknown) => unknown) => ({ method: "eth_chainId", params: [], cachePolicy: "immutable" as const, decoder,
+    batchAttempt: async (body: string) => { calls += 1; return batchResults(body, () => "0x1"); } });
+  assert.deepEqual(await session.readBatch("https://rpc.example", 1, [item(quantity)]), [1n]);
+  await assert.rejects(session.readBatch("https://rpc.example", 1, [item(() => { throw new ApnError("APN_CHAIN_MISMATCH", "wrong chain"); })]), { code: "APN_CHAIN_MISMATCH" });
+  assert.deepEqual(await session.readBatch("https://rpc.example", 1, [item(quantity)]), [1n]);
+  assert.equal(calls, 1); assert.equal(session.telemetry().httpRequests, 1);
+});
+
+test("safe, finalized and numeric header block decoders share raw cross-mode cache entries", async () => {
+  const session = new RpcReadSession({ wait: async () => {} }); let calls = 0;
+  const cases: Array<{ tag: string; decoder: (value: unknown) => Record<string, unknown> }> = [
+    { tag: "safe", decoder: rpcBlockValue }, { tag: "finalized", decoder: rpcBlockValue }, { tag: "0x12", decoder: rpcFeeBlockValue },
+  ];
+  for (const entry of cases) {
+    const raw = block(entry.tag === "0x12" ? "0x12" : entry.tag === "safe" ? "0x10" : "0x11");
+    const serial = await session.read("https://rpc.example", 1, "eth_getBlockByNumber", [entry.tag, false], async () => { calls += 1; return raw; }, entry.decoder);
+    const batch = await session.readBatch("https://rpc.example", 1, [{ method: "eth_getBlockByNumber", params: [entry.tag, false], cachePolicy: "immutable", decoder: entry.decoder,
+      batchAttempt: async (body) => { calls += 1; return batchResults(body, () => raw); } }]);
+    assert.deepEqual(serial, raw); assert.deepEqual(batch, [raw]);
+  }
+  assert.equal(calls, cases.length); assert.equal(session.telemetry().httpRequests, cases.length); assert.equal(session.telemetry().cacheHits, cases.length);
+});
+
+test("serial assertChain followed by batch safe block uses the same session without chain mismatch", async () => {
+  let calls = 0;
+  const transport = { request: async (_endpoint: string, _method: string, body: string) => {
+    calls += 1;
+    const request = JSON.parse(body) as { id: string; method: string } | Array<{ id: string; method: string }>;
+    const rows = Array.isArray(request) ? request : [request];
+    const response = rows.map((row) => ({ jsonrpc: "2.0", id: row.id, result: row.method === "eth_chainId" ? "0x1" : block() }));
+    return { status: 200, body: JSON.stringify(Array.isArray(request) ? response : response[0]) };
+  } };
+  const descriptor = bridgeRpcCall(1, { APN_ETHEREUM_RPC_URL: "https://ethereum.example" }, { transport });
+  const session = new RpcReadSession({ wait: async () => {} });
+  const rpc = new BridgeRpc(1, descriptor.origin, descriptor.call, session, descriptor.attempt, descriptor.sessionCall, descriptor.sessionBatchCall);
+  await rpc.assertChain();
+  assert.deepEqual(await rpc.block("safe"), { numberAtomic: "16", hash: `0x${"a".repeat(64)}`, timestampAtomic: "1" });
+  assert.equal(calls, 2); assert.equal(session.telemetry().logicalItems, 2); assert.equal(session.telemetry().httpRequests, 2);
+  assert.equal(session.telemetry().batchCount, 1); assert.equal(session.telemetry().cacheHits, 1);
+});
 
 test("RPC batch maps out-of-order ids exactly and rejects missing, duplicate, extra, suberror and non-array responses without fallback", async () => {
   const cases: Array<{ name: string; shape: (requests: Array<{ id: string }>) => unknown; code: string }> = [
