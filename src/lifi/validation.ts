@@ -1,6 +1,6 @@
 import { getAddress } from "viem";
 import { canonicalJson, exactKeys, isPlainRecord } from "../canonical.js";
-import { ApnError, type ErrorCode } from "../errors.js";
+import { ApnError, type ErrorCode, type ErrorDetails } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 
 export const BRIDGE_MAX_CALLDATA_BYTES = 12 * 1024;
@@ -21,8 +21,8 @@ export const BRIDGE_ZERO_ADDRESS = `0x${"0".repeat(40)}` as Address;
 export const BRIDGE_ZERO_WORD = `0x${"0".repeat(64)}` as Hex;
 const MAX_UINT = (1n << 256n) - 1n;
 
-export function bridgeFailure(code: ErrorCode, reason: string): never {
-  throw new ApnError(code, `Bridge validation failed: ${reason}.`);
+export function bridgeFailure(code: ErrorCode, reason: string, details?: ErrorDetails): never {
+  throw new ApnError(code, `Bridge validation failed: ${reason}.`, details === undefined ? undefined : { reason, ...details });
 }
 export function bridgeRecord(value: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): Record<string, unknown> {
   if (!isPlainRecord(value)) bridgeFailure(code, "object_required");

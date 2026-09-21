@@ -4,7 +4,7 @@ import { validateEconomics } from "../transfer-policy.js";
 import { bridgeNativePrincipal } from "./asset-registry.js";
 import { bridgeDeployment } from "./deployments.js";
 import type { BridgeAccountSnapshot, BridgeEnvelope, BridgeFeeCeiling, BridgeMaterialization, BridgeTransaction, DecodedBridgeCall } from "./model.js";
-import { ApnError } from "../errors.js";
+import { ApnError, type ErrorDetails } from "../errors.js";
 import type { BridgeOperationRecord, BridgePreSignRpcCategory, BridgePreSignRpcFailure, BridgePreSignRpcMethod, BridgePreSignRpcStage } from "./operation-model.js";
 import type { BridgeRpcPort } from "./ports.js";
 import { approvalData } from "./transaction.js";
@@ -41,26 +41,69 @@ export function bridgeNativePrincipalWei(request: BridgeMaterialization["request
   return bridgeNativePrincipal(request) ? BigInt(request.amountAtomic) : 0n;
 }
 
+type FeeBudgetValue = bigint | string | undefined;
+
+/**
+ * Keeps fee guard diagnostics to bounded decimal values and a local predicate. Provider payloads, addresses,
+ * calldata, RPC origins and transport details never cross this boundary.
+ */
+function feeBudgetDetails(offendingPredicate: string, values: Readonly<Record<string, FeeBudgetValue>>): ErrorDetails {
+  const details: Record<string, string> = { offendingPredicate };
+  for (const [key, value] of Object.entries(values)) if (value !== undefined) details[key] = typeof value === "bigint" ? value.toString() : value;
+  return details;
+}
+
+function aggregateFeeBudgetDetails(effects: readonly BridgeEnvelope[], principal: bigint, maxNativeDebitWei: string,
+  sourceBalanceWei?: string): ErrorDetails {
+  const feeQuoteTotalWei = effects.reduce((sum, effect) => sum + BigInt(effect.feeQuote.totalQuoteWei), 0n);
+  const effectValueWei = effects.reduce((sum, effect) => sum + BigInt(effect.valueAtomic), 0n);
+  const aggregateDebitWei = feeQuoteTotalWei + effectValueWei;
+  const same = (pick: (effect: BridgeEnvelope) => string): string | undefined => {
+    const values = effects.map(pick);
+    return values.length > 0 && values.every((value) => value === values[0]) ? values[0] : undefined;
+  };
+  return feeBudgetDetails("feeDebitWei > maxNativeDebitWei", {
+    gasLimitAtomic: same((effect) => effect.economics.gasLimitAtomic),
+    maxFeePerGasAtomic: same((effect) => effect.economics.maxFeePerGasAtomic),
+    maxPriorityFeePerGasAtomic: same((effect) => effect.economics.maxPriorityFeePerGasAtomic),
+    feeQuoteTotalWei, nativePrincipalWei: principal, feeDebitWei: aggregateDebitWei - principal,
+    effectValueWei, aggregateDebitWei, maxNativeDebitWei, sourceBalanceWei,
+    sourceBalanceFloorWei: sourceBalanceWei === undefined ? undefined : aggregateDebitWei,
+  });
+}
+
+function feeEstimateDetails(offendingPredicate: string, estimatedGasAtomic: string, gasLimitAtomic: string,
+  maxFeePerGasAtomic: string, maxPriorityFeePerGasAtomic: string, extra: Readonly<Record<string, FeeBudgetValue>> = {}): ErrorDetails {
+  return feeBudgetDetails(offendingPredicate, { estimatedGasAtomic, gasLimitAtomic, maxFeePerGasAtomic,
+    maxPriorityFeePerGasAtomic, ...extra });
+}
+
 export async function freezeBridgeEnvelopes(m: BridgeMaterialization, account: BridgeAccountSnapshot, rpc: BridgeRpcPort): Promise<readonly BridgeEnvelope[]> {
   const amount = BigInt(m.request.amountAtomic), allowance = BigInt(account.allowanceAtomic);
   const approval = bridgeApprovalRequired(m.request, account.allowanceAtomic), principal = bridgeNativePrincipalWei(m.request);
   if (allowance !== 0n && allowance !== amount) bridgeFailure("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "residual_allowance_review_required");
   if (account.pendingNonceAtomic !== account.latestNonceAtomic) bridgeFailure("APN_OPERATION_BLOCKED", "pending_source_nonce");
-  if (BigInt(account.balanceAtomic) < amount) bridgeFailure("APN_INSUFFICIENT_ASSET", "source_asset_balance");
+  if (BigInt(account.balanceAtomic) < amount) bridgeFailure("APN_INSUFFICIENT_ASSET", "source_asset_balance",
+    bridgeNativePrincipal(m.request) ? feeBudgetDetails("sourceBalanceWei < sourceBalanceFloorWei",
+      { sourceBalanceWei: account.balanceAtomic, sourceBalanceFloorWei: amount }) : undefined);
   const effects: BridgeEnvelope[] = [];
   if (approval) {
     const transaction: BridgeTransaction = { chainId: m.request.fromChainId, from: m.sender, to: m.request.fromToken,
       data: approvalData(m.approvalAddress, m.request.amountAtomic), valueAtomic: "0", gasLimitAtomic: "0" };
     const fees = await rpc.estimate(transaction), approved = bridgeApprovedPrices(fees);
     const economics = validateEconomics(account.latestNonceAtomic, { ...fees, ...approved });
-    if (BigInt(economics.gasLimitAtomic) > BRIDGE_MAX_GAS) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "approval_gas_ceiling");
+    if (BigInt(economics.gasLimitAtomic) > BRIDGE_MAX_GAS) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "approval_gas_ceiling",
+      feeEstimateDetails("gasLimitAtomic > maxGasLimitAtomic", fees.gasLimitAtomic, economics.gasLimitAtomic,
+        economics.maxFeePerGasAtomic, economics.maxPriorityFeePerGasAtomic, { maxGasLimitAtomic: BRIDGE_MAX_GAS }));
     const body = { role: "approval" as const, ...transaction, economics, feeQuote: await rpc.feeQuote({ economics }),
       provisionalGas: false, feeCeiling: approved.feeCeiling };
     const { gasLimitAtomic: _gas, ...envelope } = body;
     effects.push({ ...envelope, envelopeHash: hashObject(envelope) });
   }
   const fees = approval ? { ...await rpc.prices(), gasLimitAtomic: m.transaction.gasLimitAtomic } : await rpc.estimate(m.transaction);
-  if (bridgeUint(fees.gasLimitAtomic, true) > BigInt(m.transaction.gasLimitAtomic)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_estimate_over_ceiling");
+  if (bridgeUint(fees.gasLimitAtomic, true) > BigInt(m.transaction.gasLimitAtomic)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_estimate_over_ceiling",
+    feeEstimateDetails("estimatedGasAtomic > gasLimitAtomic", fees.gasLimitAtomic, m.transaction.gasLimitAtomic,
+      fees.maxFeePerGasAtomic, fees.maxPriorityFeePerGasAtomic));
   const approved = bridgeApprovedPrices(fees);
   const economics = validateEconomics((BigInt(account.latestNonceAtomic) + BigInt(effects.length)).toString(),
     { ...fees, ...approved, gasLimitAtomic: m.transaction.gasLimitAtomic });
@@ -69,8 +112,11 @@ export async function freezeBridgeEnvelopes(m: BridgeMaterialization, account: B
     provisionalGas: approval, feeCeiling: approved.feeCeiling };
   effects.push({ ...body, envelopeHash: hashObject(body) });
   const total = effects.reduce((sum, e) => sum + BigInt(e.feeQuote.totalQuoteWei) + BigInt(e.valueAtomic), 0n);
-  if (total - principal > BigInt(m.request.maxNativeDebitWei)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "aggregate_native_debit");
-  if (total > BigInt(account.nativeBalanceWei)) bridgeFailure("APN_INSUFFICIENT_GAS", "aggregate_native_funding");
+  if (total - principal > BigInt(m.request.maxNativeDebitWei)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "aggregate_native_debit",
+    aggregateFeeBudgetDetails(effects, principal, m.request.maxNativeDebitWei, account.nativeBalanceWei));
+  if (total > BigInt(account.nativeBalanceWei)) bridgeFailure("APN_INSUFFICIENT_GAS", "aggregate_native_funding",
+    { ...aggregateFeeBudgetDetails(effects, principal, m.request.maxNativeDebitWei, account.nativeBalanceWei), ...feeBudgetDetails("aggregateDebitWei > sourceBalanceWei",
+      { sourceBalanceWei: account.nativeBalanceWei, sourceBalanceFloorWei: total }) });
   return effects;
 }
 export function bridgeExpiry(m: BridgeMaterialization, decoded: DecodedBridgeCall, account: BridgeAccountSnapshot, preparedAt: string, now: number): string {
@@ -148,8 +194,21 @@ export async function guardBridgeEffect(op: BridgeOperationRecord, role: "approv
       valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic }));
   // `c` is the owner-approved maximum: the preparation quote raised by the stated headroom. A fresh estimate inside
   // that maximum proceeds on the signed envelope; only an estimate above the approved maximum ends the operation.
-  if (bridgeUint(estimate.gasLimitAtomic, true) > BigInt(c.gasLimitAtomic) || BigInt(estimate.maxFeePerGasAtomic) > BigInt(c.maxFeePerGasAtomic) ||
-    BigInt(estimate.maxPriorityFeePerGasAtomic) > BigInt(c.maxPriorityFeePerGasAtomic)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "fresh_execution_estimate_over_cap");
+  if (bridgeUint(estimate.gasLimitAtomic, true) > BigInt(c.gasLimitAtomic)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "fresh_execution_estimate_over_cap",
+    feeEstimateDetails("estimatedGasAtomic > gasLimitAtomic", estimate.gasLimitAtomic, c.gasLimitAtomic,
+      estimate.maxFeePerGasAtomic, estimate.maxPriorityFeePerGasAtomic, { feeQuoteTotalWei: envelope.feeQuote.totalQuoteWei }));
+  if (BigInt(estimate.maxFeePerGasAtomic) > BigInt(c.maxFeePerGasAtomic)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "fresh_execution_estimate_over_cap",
+    feeEstimateDetails("maxFeePerGasAtomic > maxFeePerGasCeilingAtomic", estimate.gasLimitAtomic, c.gasLimitAtomic,
+      estimate.maxFeePerGasAtomic, estimate.maxPriorityFeePerGasAtomic, {
+        maxFeePerGasCeilingAtomic: c.maxFeePerGasAtomic, maxPriorityFeePerGasCeilingAtomic: c.maxPriorityFeePerGasAtomic,
+        feeQuoteTotalWei: envelope.feeQuote.totalQuoteWei,
+      }));
+  if (BigInt(estimate.maxPriorityFeePerGasAtomic) > BigInt(c.maxPriorityFeePerGasAtomic)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "fresh_execution_estimate_over_cap",
+    feeEstimateDetails("maxPriorityFeePerGasAtomic > maxPriorityFeePerGasCeilingAtomic", estimate.gasLimitAtomic, c.gasLimitAtomic,
+      estimate.maxFeePerGasAtomic, estimate.maxPriorityFeePerGasAtomic, {
+        maxFeePerGasCeilingAtomic: c.maxFeePerGasAtomic, maxPriorityFeePerGasCeilingAtomic: c.maxPriorityFeePerGasAtomic,
+        feeQuoteTotalWei: envelope.feeQuote.totalQuoteWei,
+      }));
   let paid = 0n, unpaid = 0n;
   for (const e of op.effects) {
     if (e.submissionAttempts === 1) {
@@ -164,7 +223,26 @@ export async function guardBridgeEffect(op: BridgeOperationRecord, role: "approv
       unpaid += BigInt(quote.totalQuoteWei) + BigInt(e.envelope.valueAtomic);
     }
   }
-  if (paid + unpaid - bridgeNativePrincipalWei(m.request) > BigInt(m.request.maxNativeDebitWei)) bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "fresh_aggregate_native_debit");
-  if (unpaid > BigInt(account.nativeBalanceWei)) bridgeFailure("APN_INSUFFICIENT_GAS", "fresh_native_funding");
+  const freshPrincipal = bridgeNativePrincipalWei(m.request), freshAggregateDebit = paid + unpaid;
+  if (freshAggregateDebit - freshPrincipal > BigInt(m.request.maxNativeDebitWei)) {
+    const unpaidQuoteTotal = op.effects.every((effect) => effect.submissionAttempts === 0)
+      ? unpaid - op.effects.reduce((sum, effect) => sum + BigInt(effect.envelope.valueAtomic), 0n) : undefined;
+    bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "fresh_aggregate_native_debit", {
+      ...feeBudgetDetails("feeDebitWei > maxNativeDebitWei", {
+        feeQuoteTotalWei: unpaidQuoteTotal, nativePrincipalWei: freshPrincipal, feeDebitWei: freshAggregateDebit - freshPrincipal,
+        effectValueWei: op.effects.reduce((sum, effect) => sum + BigInt(effect.envelope.valueAtomic), 0n),
+        aggregateDebitWei: freshAggregateDebit, maxNativeDebitWei: m.request.maxNativeDebitWei,
+        sourceBalanceWei: account.nativeBalanceWei, sourceBalanceFloorWei: freshAggregateDebit,
+      }),
+    });
+  }
+  if (unpaid > BigInt(account.nativeBalanceWei)) bridgeFailure("APN_INSUFFICIENT_GAS", "fresh_native_funding", {
+    ...feeBudgetDetails("aggregateDebitWei > sourceBalanceWei", {
+      nativePrincipalWei: freshPrincipal, feeDebitWei: freshAggregateDebit - freshPrincipal,
+      effectValueWei: op.effects.reduce((sum, effect) => sum + BigInt(effect.envelope.valueAtomic), 0n),
+      aggregateDebitWei: freshAggregateDebit, maxNativeDebitWei: m.request.maxNativeDebitWei,
+      sourceBalanceWei: account.nativeBalanceWei, sourceBalanceFloorWei: unpaid,
+    }),
+  });
   assertBridgeRemaining(op, now());
 }
