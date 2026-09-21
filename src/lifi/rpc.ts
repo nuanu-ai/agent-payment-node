@@ -87,11 +87,17 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
       if (error instanceof ApnError && error.code === "APN_RPC_AMBIGUOUS") throw error;
       throw error;
     }
-    if (response.status !== 200) throw new RpcHttpFailure(method, response.status, parseRetryAfter(response.headers, now));
+    if (response.status !== 200) {
+      if (response.status === 403 && knownBasePublicNodeReceiptCapability(chainId, target, method, response.body)) {
+        throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC historical receipt read is unavailable.",
+          { rpcMethod: method, reason: "historical_receipt_unavailable" });
+      }
+      throw new RpcHttpFailure(method, response.status, parseRetryAfter(response.headers, now));
+    }
     const r = evmRpcRecord(bridgeJson(response.body, 1024 * 1024));
     if (r.jsonrpc !== "2.0" || r.id !== id) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response");
     if (Object.hasOwn(r, "error")) {
-      if (method === "eth_getTransactionReceipt" && historicalReceiptUnavailable(r.error)) {
+      if (method === "eth_getTransactionReceipt" && historicalReceiptUnavailable(r.error, chainId, target, method)) {
         throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC historical receipt read is unavailable.",
           { rpcMethod: method, reason: "historical_receipt_unavailable" });
       }
@@ -525,18 +531,42 @@ function rpcHttpFailure(reason: string, method: string, status: number, attempts
 }
 function isReceiptFallbackError(error: unknown): boolean {
   if (!(error instanceof ApnError)) return false;
-  if (["APN_RPC_AMBIGUOUS", "APN_RPC_RATE_LIMITED", "APN_PROVIDER_UNAVAILABLE", "APN_PROVIDER_CAPABILITY_UNAVAILABLE"].includes(error.code)) return true;
+  if (error.code === "APN_PROVIDER_CAPABILITY_UNAVAILABLE") {
+    return error.details?.reason === "historical_receipt_unavailable" && error.details.rpcMethod === "eth_getTransactionReceipt";
+  }
+  if (["APN_RPC_AMBIGUOUS", "APN_RPC_RATE_LIMITED", "APN_PROVIDER_UNAVAILABLE"].includes(error.code)) return true;
   if (error.code !== "APN_RPC_PROTOCOL") return false;
   const status = Number(error.details?.httpStatus);
-  return status === 403 || status === 404 || status === 408 || status === 410 || status >= 500 && status <= 599;
+  return status === 408 || status >= 500 && status <= 599;
 }
-function historicalReceiptUnavailable(value: unknown): boolean {
+const BASE_PUBLICNODE_ARCHIVE_MESSAGE = "archive requests require a personal token";
+function historicalReceiptUnavailable(value: unknown, chainId: BridgeChainId, target: URL, method: string): boolean {
   let error: Record<string, unknown>;
   try { error = evmRpcRecord(value); } catch { return false; }
   if (!Number.isSafeInteger(error.code) || typeof error.message !== "string" || error.message.length > 1024) return false;
-  const message = error.message.toLowerCase();
+  const message = normalizeProviderMessage(error.message);
+  if (message === BASE_PUBLICNODE_ARCHIVE_MESSAGE) return isBasePublicNodeReceiptRequest(chainId, target, method);
+  if (credentialOrAuthorizationMessage(message)) return false;
   return message.includes("missing trie node") || message.includes("pruned") ||
-    message.includes("archive node") || message.includes("archive token") ||
-    message.includes("historical") && ["unavailable", "not available", "unsupported", "not supported", "required"].some((part) => message.includes(part));
+    message.includes("historical") && ["unavailable", "not available", "unsupported", "not supported"].some((part) => message.includes(part));
+}
+function knownBasePublicNodeReceiptCapability(chainId: BridgeChainId, target: URL, method: string, body: string): boolean {
+  if (!isBasePublicNodeReceiptRequest(chainId, target, method)) return false;
+  const trimmed = body.trim();
+  if (normalizeProviderMessage(trimmed) === BASE_PUBLICNODE_ARCHIVE_MESSAGE) return true;
+  if (trimmed.length === 0 || trimmed.length > 4096) return false;
+  try {
+    const value = evmRpcRecord(JSON.parse(trimmed)), error = evmRpcRecord(value.error);
+    return typeof error.message === "string" && normalizeProviderMessage(error.message) === BASE_PUBLICNODE_ARCHIVE_MESSAGE;
+  } catch { return false; }
+}
+function isBasePublicNodeReceiptRequest(chainId: BridgeChainId, target: URL, method: string): boolean {
+  return chainId === 8453 && method === "eth_getTransactionReceipt" &&
+    target.origin === "https://base-rpc.publicnode.com" && target.pathname === "/" && target.search === "";
+}
+function normalizeProviderMessage(message: string): string { return message.trim().toLowerCase(); }
+function credentialOrAuthorizationMessage(message: string): boolean {
+  return ["token", "credential", "api key", "apikey", "unauthorized", "forbidden", "authorization", "authentication", "access denied"]
+    .some((part) => message.includes(part));
 }
 function quantity(n: bigint): Hex { return `0x${n.toString(16)}`; }
