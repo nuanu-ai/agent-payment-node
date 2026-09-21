@@ -231,6 +231,7 @@ export class LifiTestRpc implements BridgeRpcPort {
 export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad" | "eth-bnb" = "eth-base", options: {
   now?: Date; wrapping?: LifiWrapping; provider?: LifiTestProvider; source?: LifiTestRpc; destination?: LifiTestRpc; initializeWallet?: boolean;
   rpcFor?: BridgeRpcFactory;
+  maxNativeDebitWei?: string;
   policy?: false | { readonly maximumPerTransferAtomic?: string; readonly dailyLimitAtomic?: string;
     readonly provider?: string; readonly reference?: string };
 } = {}) {
@@ -278,7 +279,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
   const native = a.fromToken.address === BRIDGE_ZERO_ADDRESS;
   const request: BridgeRouteRequest = { fromChainId: a.fromChainId, toChainId: a.toChainId, fromToken: a.fromToken.address, toToken: a.toToken.address,
     recipient: pair === "eth-linea" || pair === "eth-monad" || pair === "eth-bnb" ? LIFI_SYNTHETIC_SENDER : LIFI_RECIPIENT, amountAtomic: a.fromAmount, minOutputAtomic: native ? provider.steps[0]!.estimate.toAmountMin : "9000000",
-    maxNativeDebitWei: native ? "2000000000000000" : "20000000000000000", maxRouteFeeAtomic: native ? "100000000000000" : "1000000", slippageBps: 50 };
+    maxNativeDebitWei: options.maxNativeDebitWei ?? (native ? "2000000000000000" : "20000000000000000"), maxRouteFeeAtomic: native ? "100000000000000" : "1000000", slippageBps: 50 };
   const prepare = async (tool: BridgeTool = "across", key = "lifi-fixture-0001") => {
     if (tool !== "across" && options.policy === undefined) await activatePolicy(tool);
     const quotes = await core.execute({ command: "bridge.routes", profile, request }); assert.equal(quotes.ok, true, quotes.error?.message);
