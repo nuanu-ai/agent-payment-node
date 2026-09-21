@@ -19,6 +19,18 @@ test("RPC session key separates origins and chains while coalescing identical ch
   assert.deepEqual(session.telemetry().perMethod, { eth_chainId: 3 });
 });
 
+test("RPC session endpoint identity keeps paths distinct while omitting credentials and query strings", async () => {
+  let calls = 0;
+  const session = new RpcReadSession({ wait: async () => {} });
+  const withSecret = session.wrap("https://user:secret@rpc.example/path?key=secret", 1, async () => { calls += 1; return "0x1"; });
+  const sameEndpoint = session.wrap("https://rpc.example/path?key=another-secret", 1, async () => { calls += 1; return "0x1"; });
+  const differentPath = session.wrap("https://rpc.example/other-path", 1, async () => { calls += 1; return "0x1"; });
+  await withSecret("eth_chainId", []);
+  await sameEndpoint("eth_chainId", []);
+  await differentPath("eth_chainId", []);
+  assert.equal(calls, 2);
+});
+
 test("RPC session retains only immutable tagged reads and the safe header", async () => {
   const methods: string[] = [];
   const session = new RpcReadSession();
@@ -129,6 +141,15 @@ test("RPC session fails closed at unique call, attempt and deadline budgets", as
   await assert.rejects(bounded("eth_getBalance", ["0x1", "latest"]), { code: "APN_RPC_BUDGET_EXCEEDED" });
 });
 
+test("RPC session rejects the 65th representative unique read before HTTP", async () => {
+  let calls = 0;
+  const session = new RpcReadSession({ maxUniqueCalls: 64, wait: async () => {} });
+  const call = session.wrap("https://budget.example", 1, async () => { calls += 1; return "0x1"; });
+  for (let i = 1; i <= 64; i += 1) await call("eth_getCode", ["0x1", `0x${i.toString(16)}`]);
+  await assert.rejects(call("eth_getCode", ["0x1", "0x41"]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(calls, 64);
+});
+
 test("RPC session applies typed 429 cooldown and one retry for 408", async () => {
   let calls = 0; const waits: number[] = [];
   const transport = { request: async (_endpoint: string, _method: string, body: string) => {
@@ -152,6 +173,21 @@ test("RPC session applies typed 429 cooldown and one retry for 408", async () =>
   const retrySession = new RpcReadSession({ wait: async (milliseconds) => { retryWaits.push(milliseconds); } });
   await new BridgeRpc(8453, retryDescriptor.origin, retryDescriptor.call, retrySession, retryDescriptor.attempt).assertChain();
   assert.equal(calls, 2); assert.ok(retryWaits.includes(2_000));
+});
+
+test("RPC session parses HTTP-date Retry-After using its injected clock", async () => {
+  const now = Date.parse("Wed, 21 Oct 2015 07:28:00 GMT");
+  let calls = 0; const waits: number[] = [];
+  const transport = { request: async (_endpoint: string, _method: string, body: string) => {
+    const request = JSON.parse(body) as { id: string };
+    calls += 1;
+    if (calls === 1) return { status: 503, body: "", headers: { "retry-after": "Wed, 21 Oct 2015 07:28:05 GMT" } };
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: "0x2105" }) };
+  } };
+  const descriptor = bridgeRpcCall(8453, { APN_BASE_RPC_URL: "https://base.example" }, { transport });
+  const session = new RpcReadSession({ now: () => now, wait: async (milliseconds) => { waits.push(milliseconds); } });
+  await descriptor.sessionCall(session)("eth_chainId", []);
+  assert.equal(calls, 2); assert.ok(waits.includes(5_000));
 });
 
 test("raw transaction submission makes one attempt and bypasses session scheduler", async () => {

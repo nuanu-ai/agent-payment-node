@@ -23,7 +23,6 @@ export declare function bridgeRpcCall(chainId: BridgeChainId, environment: Reado
     readonly origin: string;
     readonly call: EvmRpcCall;
     readonly attempt: EvmRpcCall;
-    readonly sessionIdentity: string;
     readonly sessionCall: (session: RpcReadSession) => EvmRpcCall;
 };
 export declare function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options?: {
@@ -35,7 +34,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
     readonly origin: string;
     private readonly evm;
     private readonly call;
-    constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall, sessionIdentity?: string, sessionCall?: (session: RpcReadSession) => EvmRpcCall);
+    constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall, sessionCall?: (session: RpcReadSession) => EvmRpcCall);
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
     deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<{

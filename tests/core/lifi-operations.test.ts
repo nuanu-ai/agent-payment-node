@@ -70,6 +70,20 @@ test("LI.FI bridge sends after included approval without waiting for safe, and c
   assert.equal((resumed.operation as { state: string }).state, "completed"); assert.equal(s.source.submissions.length, 2);
 });
 
+test("LI.FI approval and resume bind fresh command-local RPC sessions", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
+  s.source.safeApproval = false;
+  const { id } = await s.prepare(); s.rpcSessions.length = 0;
+  const first = await s.core.execute({ command: "bridge.approve", operationId: id });
+  assert.equal(first.ok, true, first.error?.message); assert.ok(s.rpcSessions.length >= 2);
+  const approvalSession = s.rpcSessions[0]; assert.ok(approvalSession); assert.ok(s.rpcSessions.every((session) => session === approvalSession));
+  s.source.safeApproval = true; s.rpcSessions.length = 0;
+  const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(resumed.ok, true, resumed.error?.message); assert.ok(s.rpcSessions.length >= 2);
+  const resumeSession = s.rpcSessions[0]; assert.ok(resumeSession); assert.ok(s.rpcSessions.every((session) => session === resumeSession));
+  assert.notEqual(resumeSession, approvalSession);
+});
+
 test("LI.FI expiry after paid approval preserves its fee and residual allowance, halting the unsent bridge", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.source.safeApproval = false;
   const { id } = await s.prepare(); const send = s.source.send.bind(s.source);
