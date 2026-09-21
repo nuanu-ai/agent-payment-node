@@ -4,6 +4,9 @@ import type { Address, Hex } from "../model.js";
 import { BridgeHttps } from "./https.js";
 import type { BridgeBlock, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 import type { BridgeRpcFactory, BridgeRpcPort } from "./ports.js";
+import { RpcReadSession } from "./rpc-session.js";
+export { RpcReadSession } from "./rpc-session.js";
+export type { RpcReadSessionOptions, RpcReadTelemetry } from "./rpc-session.js";
 export declare const BRIDGE_RPC_ENV: {
     readonly 1: "APN_ETHEREUM_RPC_URL";
     readonly 56: "APN_BNB_RPC_URL";
@@ -19,6 +22,8 @@ export declare function bridgeRpcCall(chainId: BridgeChainId, environment: Reado
 }): {
     readonly origin: string;
     readonly call: EvmRpcCall;
+    readonly attempt: EvmRpcCall;
+    readonly sessionCall: (session: RpcReadSession) => EvmRpcCall;
 };
 export declare function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options?: {
     readonly transport?: Pick<BridgeHttps, "request">;
@@ -27,9 +32,9 @@ export declare function bridgeRpcFactory(environment: Readonly<Record<string, st
 export declare class BridgeRpc implements BridgeRpcPort {
     readonly chainId: BridgeChainId;
     readonly origin: string;
-    private readonly call;
     private readonly evm;
-    constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall);
+    private readonly call;
+    constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall, sessionCall?: (session: RpcReadSession) => EvmRpcCall);
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
     deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<{

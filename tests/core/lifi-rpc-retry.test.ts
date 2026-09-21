@@ -23,7 +23,7 @@ test("read-only Bridge RPC retries HTTP 408 then succeeds with bounded backoff",
   const rpc = bridgeRpcCall(8453, { APN_BASE_RPC_URL: "https://base.example" }, f);
   assert.equal(await rpc.call("eth_getStorageAt", ["0x0000000000000000000000000000000000000000", "0x0", "safe"]), "0x2105");
   assert.deepEqual(f.methods, ["eth_getStorageAt", "eth_getStorageAt"]);
-  assert.deepEqual(f.delays, [1_000]);
+  assert.deepEqual(f.delays, [2_000]);
 });
 test("repeated HTTP 408 preserves exact exhaustion evidence after two read retries", async () => {
   const f = fixture([408, 408, 408]);
@@ -31,15 +31,20 @@ test("repeated HTTP 408 preserves exact exhaustion evidence after two read retri
   await assert.rejects(rpc.call("eth_getTransactionReceipt", [`0x${"1".repeat(64)}`]), (error: unknown) => {
     assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_RPC_PROTOCOL");
     assert.match(error.message, /bridge_RPC_HTTP_status/u);
-    assert.deepEqual(error.details, { rpcMethod: "eth_getTransactionReceipt", httpStatus: "408", attempts: "3" });
+    assert.deepEqual(error.details, { rpcMethod: "eth_getTransactionReceipt", httpStatus: "408", attempts: "2" });
     return true;
   });
-  assert.equal(f.calls, 3); assert.deepEqual(f.delays, [1_000, 2_000]);
+  assert.equal(f.calls, 2); assert.deepEqual(f.delays, [2_000]);
 });
-for (const status of [429, 500, 503]) test(`read-only Bridge RPC retries transient HTTP ${status}`, async () => {
+for (const status of [500, 503]) test(`read-only Bridge RPC retries transient HTTP ${status}`, async () => {
   const f = fixture([status, 200]);
   await bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain();
-  assert.deepEqual(f.methods, ["eth_chainId", "eth_chainId"]); assert.deepEqual(f.delays, [1_000]);
+  assert.deepEqual(f.methods, ["eth_chainId", "eth_chainId"]); assert.deepEqual(f.delays, [2_000]);
+});
+test("read-only HTTP 429 returns a typed cooldown without retry", async () => {
+  const f = fixture([429]);
+  await assert.rejects(bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain(), { code: "APN_RPC_RATE_LIMITED" });
+  assert.deepEqual(f.methods, ["eth_chainId"]); assert.deepEqual(f.delays, []);
 });
 test("permanent HTTP 4xx is not retried", async () => {
   const f = fixture([400, 200]);
@@ -67,15 +72,15 @@ test("transient transport timeout retries reads and preserves exhaustion evidenc
     wait: async milliseconds => { delays.push(milliseconds); } });
   await assert.rejects(rpc.call("eth_getBlockByNumber", ["safe", false]), (error: unknown) => {
     assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_RPC_AMBIGUOUS");
-    assert.deepEqual(error.details, { rpcMethod: "eth_getBlockByNumber", attempts: "3", transportReason: "request_deadline" });
+    assert.deepEqual(error.details, { rpcMethod: "eth_getBlockByNumber", attempts: "2", transportReason: "request_deadline" });
     return true;
   });
-  assert.equal(calls, 3); assert.deepEqual(delays, [1_000, 2_000]);
+  assert.equal(calls, 2); assert.deepEqual(delays, [2_000]);
 });
 for (const status of [408, 429, 503]) test(`transaction submission never retries HTTP ${status}`, async () => {
   const f = fixture([status, 200]);
   const rpc = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453);
-  await assert.rejects(rpc.send("0x02"), { code: "APN_RPC_PROTOCOL" });
+  await assert.rejects(rpc.send("0x02"), { code: status === 429 ? "APN_RPC_RATE_LIMITED" : "APN_RPC_PROTOCOL" });
   assert.deepEqual(f.methods, ["eth_sendRawTransaction"]); assert.deepEqual(f.delays, []);
 });
 test("transaction submission never retries a transient transport failure", async () => {
