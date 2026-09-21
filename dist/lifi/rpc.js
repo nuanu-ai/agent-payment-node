@@ -6,7 +6,7 @@ import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, ev
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { bridgeDeployment } from "./deployments.js";
 import { BridgeHttps } from "./https.js";
-import { bridgeArchiveEndpoint, isHistoricalStateRead } from "./rpc-archive.js";
+import { bridgeArchiveEndpoint, isArchiveRead } from "./rpc-archive.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
@@ -43,7 +43,7 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
             bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
         if (method === "eth_sendRawTransaction")
             return await submitDirect(method, params, (m, p) => oneAttempt(endpoint, m, p));
-        if (archive === null || !isHistoricalStateRead(method, params))
+        if (archive === null || !isArchiveRead(method, params))
             return await retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait);
         if (archiveChain === undefined)
             archiveChain = (async () => {
@@ -92,7 +92,7 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         const primaryAttempt = (m, p) => oneAttempt(endpoint, m, p, session.currentTime());
         if (method === "eth_sendRawTransaction")
             return await submitDirect(method, params, primaryAttempt);
-        if (archive === null || !isHistoricalStateRead(method, params)) {
+        if (archive === null || !isArchiveRead(method, params)) {
             return await session.read(endpoint.toString(), chainId, method, params, primaryAttempt);
         }
         const archiveAttempt = (m, p) => oneAttempt(archive, m, p, session.currentTime());

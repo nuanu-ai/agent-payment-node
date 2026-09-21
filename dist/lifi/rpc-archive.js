@@ -3,9 +3,9 @@ import { bridgeChain } from "./asset-registry.js";
 import { bridgeFailure } from "./validation.js";
 /**
  * Owner-named archive endpoints. Public full nodes prune historical state, so re-verifying an older bridge operation's
- * frozen deployment identity or L1 fee inputs at its own block needs an archive-capable reader. The operation stays bound
- * to its original RPC origin; only state reads pinned to one explicit block go to this endpoint, and only when the owner
- * names it for that chain. Nothing is inferred or defaulted.
+ * frozen deployment identity, L1 fee inputs, or transaction receipt needs an archive-capable reader. The operation stays
+ * bound to its original RPC origin; only state reads pinned to one explicit block and exact-hash receipt reads go to this
+ * endpoint, and only when the owner names it for that chain. Nothing is inferred or defaulted.
  */
 export const BRIDGE_ARCHIVE_RPC_ENV = {
     1: "APN_ETHEREUM_ARCHIVE_RPC_URL",
@@ -37,6 +37,11 @@ export function isHistoricalStateRead(method, params) {
         return /^0x(?:0|[1-9a-f][0-9a-f]*)$/u.test(tag);
     return typeof tag === "object" && tag !== null && !Array.isArray(tag) &&
         isBlockHash(tag.blockHash);
+}
+/** The complete archive surface: exact block-pinned state plus a receipt addressed by one exact transaction hash. */
+export function isArchiveRead(method, params) {
+    return isHistoricalStateRead(method, params) ||
+        (method === "eth_getTransactionReceipt" && params.length === 1 && isBlockHash(params[0]));
 }
 function isBlockHash(value) { return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/u.test(value); }
 //# sourceMappingURL=rpc-archive.js.map
