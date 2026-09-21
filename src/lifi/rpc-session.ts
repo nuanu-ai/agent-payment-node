@@ -29,6 +29,8 @@ export interface RpcReadSessionOptions {
   readonly maxHttpRequests?: number;
   readonly maxHttpAttempts?: number;
   readonly deadlineMs?: number;
+  /** HTTP chunk bound for one atomic historical deployment read. General batches retain RPC_BATCH_MAX_ITEMS. */
+  readonly archiveDeploymentBatchMaxItems?: number;
   /** Backward-compatible alias. */
   readonly maxUniqueCalls?: number;
   readonly now?: () => number;
@@ -70,6 +72,7 @@ export class RpcReadSession {
   private readonly maxLogicalItems: number;
   private readonly maxHttpRequests: number;
   private readonly maxHttpAttempts: number;
+  private readonly archiveDeploymentBatchMaxItems: number;
   private readonly now: () => number;
   private readonly wait: (milliseconds: number) => Promise<void>;
   private readonly deadline: number;
@@ -94,6 +97,11 @@ export class RpcReadSession {
     this.maxLogicalItems = positiveBound(options.maxLogicalItems ?? options.maxUniqueCalls ?? RPC_DEFAULT_LOGICAL_ITEMS, "maxLogicalItems");
     this.maxHttpRequests = positiveBound(options.maxHttpRequests ?? RPC_DEFAULT_HTTP_REQUESTS, "maxHttpRequests");
     this.maxHttpAttempts = positiveBound(options.maxHttpAttempts ?? RPC_DEFAULT_HTTP_ATTEMPTS, "maxHttpAttempts");
+    this.archiveDeploymentBatchMaxItems = positiveBound(options.archiveDeploymentBatchMaxItems ?? RPC_BATCH_MAX_ITEMS,
+      "archiveDeploymentBatchMaxItems");
+    if (this.archiveDeploymentBatchMaxItems > RPC_BATCH_MAX_ITEMS) {
+      throw new ApnError("APN_RPC_CONFIG", "RPC archiveDeploymentBatchMaxItems bound is invalid.");
+    }
     const deadlineMs = positiveBound(options.deadlineMs ?? RPC_DEFAULT_DEADLINE_MS, "deadlineMs");
     this.now = options.now ?? (() => Date.now());
     this.wait = options.wait ?? (async (milliseconds) => await new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
@@ -147,22 +155,32 @@ export class RpcReadSession {
 
   /** Strict whole-batch read. Cached exact immutable/snapshot keys are removed before the one HTTP request. */
   async readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{ readonly [K in keyof T]: unknown }> {
+    return await this.readBatchBounded(origin, chainId, items, RPC_BATCH_MAX_ITEMS);
+  }
+
+  /** One logical archive deployment read, transported sequentially in provider-sized chunks with one atomic cache commit. */
+  async readArchiveDeploymentBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{ readonly [K in keyof T]: unknown }> {
+    return await this.readBatchBounded(origin, chainId, items, this.archiveDeploymentBatchMaxItems);
+  }
+
+  private async readBatchBounded<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T,
+    maxItemsPerRequest: number): Promise<{ readonly [K in keyof T]: unknown }> {
     if (!Array.isArray(items) || items.length === 0) return [] as unknown as { readonly [K in keyof T]: unknown };
     const batchKey = hashObject({ endpoint: rpcEndpointIdentity(origin), chainId, items: items.map((item) => ({
       key: hashObject({ method: item.method, params: item.params }), cachePolicy: item.cachePolicy ?? "auto",
-    })) });
+    })), maxItemsPerRequest });
     const current = this.batchInflight.get(batchKey);
     if (current !== undefined) {
       this.assertBeforeQueue("batch"); this.singleflightHits += 1;
       const execution = await current;
       return this.decodeBatch(items, execution.raw) as { readonly [K in keyof T]: unknown };
     }
-    const operation = this.executeBatch(origin, chainId, items).finally(() => this.batchInflight.delete(batchKey));
+    const operation = this.executeBatch(origin, chainId, items, maxItemsPerRequest).finally(() => this.batchInflight.delete(batchKey));
     this.batchInflight.set(batchKey, operation);
     return cloneRpcValue((await operation).decoded) as { readonly [K in keyof T]: unknown };
   }
 
-  private async executeBatch(origin: string, chainId: BridgeChainId, items: readonly RpcBatchReadItem[]): Promise<BatchExecution> {
+  private async executeBatch(origin: string, chainId: BridgeChainId, items: readonly RpcBatchReadItem[], maxItemsPerRequest: number): Promise<BatchExecution> {
     const rawResults = new Array<unknown>(items.length), decodedResults = new Array<unknown>(items.length);
     const unique = new Map<string, { cacheKey: string; item: RpcBatchReadItem;
       decoders: Array<{ index: number; decoder: RpcDecoder }> }>();
@@ -192,34 +210,39 @@ export class RpcReadSession {
     if (pending.some(([, entry]) => entry.item.batchAttempt !== attempt)) throw new ApnError("APN_RPC_CONFIG", "RPC batch transport identity is inconsistent.");
     for (const [, entry] of pending) this.reserveLogical(entry.item.method);
     const rpcMethod = pending.length === 1 ? pending[0]![1].item.method : "batch";
-    this.reserveRequest(rpcMethod); this.batchCount += pending.length === 1 ? 0 : 1;
     const requests = pending.map(([, entry], index) => ({ jsonrpc: "2.0", id: String(index + 1), method: entry.item.method, params: entry.item.params }));
-    const body = canonicalJson(requests.length === 1 ? requests[0] : requests), response = await this.retry(origin, rpcMethod, async () => await attempt(body));
-    const responses = requests.length === 1 ? [response] : response;
-    if (!Array.isArray(responses)) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod });
-    if (responses.length !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch result count is invalid.", { rpcMethod });
     const raw = new Array<unknown>(pending.length), seen = new Set<string>();
-    for (const candidate of responses) {
-      if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.", { rpcMethod });
-      const row = candidate as Record<string, unknown>, id = row.id;
-      if (row.jsonrpc !== "2.0" || typeof id !== "string" || !/^[1-9][0-9]*$/u.test(id) || seen.has(id)) {
-        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod });
-      }
-      const offset = Number(id) - 1;
-      if (!Number.isSafeInteger(offset) || offset < 0 || offset >= pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod });
-      seen.add(id);
-      if (Object.hasOwn(row, "error")) {
-        const error = row.error;
-        if (typeof error === "object" && error !== null && !Array.isArray(error) &&
-            [-32600, -32601].includes((error as Record<string, unknown>).code as number)) {
-          throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod });
+    for (let start = 0; start < requests.length; start += maxItemsPerRequest) {
+      const chunk = requests.slice(start, start + maxItemsPerRequest), chunkMethod = chunk.length === 1 ? chunk[0]!.method : rpcMethod;
+      this.reserveRequest(chunkMethod); this.batchCount += chunk.length === 1 ? 0 : 1;
+      const body = canonicalJson(chunk.length === 1 ? chunk[0] : chunk);
+      const response = await this.retry(origin, chunkMethod, async () => await attempt(body));
+      const responses = chunk.length === 1 ? [response] : response;
+      if (!Array.isArray(responses)) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod: chunkMethod });
+      if (responses.length !== chunk.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch result count is invalid.", { rpcMethod: chunkMethod });
+      const expected = new Set(chunk.map((request) => request.id));
+      for (const candidate of responses) {
+        if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.", { rpcMethod: chunkMethod });
+        const row = candidate as Record<string, unknown>, id = row.id;
+        if (row.jsonrpc !== "2.0" || typeof id !== "string" || !expected.has(id) || seen.has(id)) {
+          throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod: chunkMethod });
         }
-        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch contains a JSON-RPC sub-error.", { rpcMethod });
+        const offset = Number(id) - 1;
+        if (!Number.isSafeInteger(offset) || offset < start || offset >= start + chunk.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod: chunkMethod });
+        seen.add(id);
+        if (Object.hasOwn(row, "error")) {
+          const error = row.error;
+          if (typeof error === "object" && error !== null && !Array.isArray(error) &&
+              [-32600, -32601].includes((error as Record<string, unknown>).code as number)) {
+            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod: chunkMethod });
+          }
+          throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch contains a JSON-RPC sub-error.", { rpcMethod: chunkMethod });
+        }
+        if (!Object.hasOwn(row, "result") || Object.keys(row).some((key) => !["jsonrpc", "id", "result"].includes(key))) {
+          throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.", { rpcMethod: chunkMethod });
+        }
+        raw[offset] = row.result;
       }
-      if (!Object.hasOwn(row, "result") || Object.keys(row).some((key) => !["jsonrpc", "id", "result"].includes(key))) {
-        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.", { rpcMethod });
-      }
-      raw[offset] = row.result;
     }
     if (seen.size !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod });
     // Validate every caller's decoder against the raw response before mutating the cache.
