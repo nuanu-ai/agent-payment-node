@@ -12,6 +12,7 @@ import type { BridgeEnvelope, BridgeTransactionProof } from "./model.js";
 import { BRIDGE_FEE_RULE_HASH } from "./rpc-fees.js";
 import { assetUsageReservationId, validateAssetUsageReservation } from "../asset-usage-ledger.js";
 import { bridgeMechanism, validateBridgeAllowlistBinding } from "./allowlist.js";
+import { isEvmTransactionHash } from "../rail-status-binding.js";
 
 const EDGES: Readonly<Record<BridgeState, readonly BridgeState[]>> = {
   awaiting_approval: ["execution_pending", "failed_before_effect"],
@@ -196,6 +197,13 @@ function validateSnapshot(op: BridgeOperationRecord, s: BridgeTransition, legacy
       p.rpcOrigin !== op.intent.destinationRpcOrigin || BigInt(p.safeBlock.numberAtomic) < BigInt(p.blockNumberAtomic) ||
       (op.intent.decoded.composite === undefined && (BigInt(p.amountAtomic) < BigInt(m.request.minOutputAtomic) || p.amountAtomic !== (s.sourceProof.correlation.kind === "across"
         ? s.sourceProof.correlation.outputAmountAtomic : s.sourceProof.correlation.amountReceivedAtomic)))) bridgeCorrupt();
+  }
+  if (s.providerObservation?.status === "completed_observed") {
+    const p = s.providerObservation;
+    if (p.responseHash === null || !isEvmTransactionHash(p.destinationTransactionHash) || s.sourceProof === null ||
+      bridge.phase !== "safe_success" || bridge.transactionHash !== s.sourceProof.transactionHash ||
+      (s.destinationProof !== null && s.destinationProof.transactionHash !== p.destinationTransactionHash) ||
+      bridge.submittedAt === null || p.observedAt < bridge.submittedAt || p.observedAt > s.at) bridgeCorrupt();
   }
   if (s.state === "completed" && (s.effects.some((e) => e.phase !== "safe_success") || s.destinationProof === null || s.sourceProof === null ||
     (op.intent.decoded.composite !== undefined && s.destinationProof.compositeTrace?.outcome !== "completed_native"))) bridgeCorrupt();

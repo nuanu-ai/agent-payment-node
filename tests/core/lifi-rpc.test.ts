@@ -19,9 +19,9 @@ import { LIFI_RECIPIENT, LIFI_SYNTHETIC_KEY, LIFI_SYNTHETIC_SENDER } from "./lif
 type Json = Record<string, any>;
 const word = (n: bigint): Hex => `0x${n.toString(16).padStart(64, "0")}`, quantity = (n: bigint | number) => `0x${n.toString(16)}`;
 const TYPES = ["legacy", "eip2930", "eip1559", "eip4844", "eip7702"] as const;
-async function signedRpcTransaction(index = 2, nonce = 7) {
+async function signedRpcTransaction(index = 2, nonce = 7, chainId = 1) {
   const type = TYPES[index]!, account = privateKeyToAccount(LIFI_SYNTHETIC_KEY);
-  const common = { chainId: 1, to: BRIDGE_DIAMOND, nonce, gas: 400000n, value: 0n, data: "0x12345678" as Hex };
+  const common = { chainId, to: BRIDGE_DIAMOND, nonce, gas: 400000n, value: 0n, data: "0x12345678" as Hex };
   const fees = { maxFeePerGas: 2000000000n, maxPriorityFeePerGas: 0n };
   let transaction: TransactionSerializable;
   if (type === "legacy") transaction = { ...common, type, gasPrice: 2000000000n };
@@ -30,7 +30,7 @@ async function signedRpcTransaction(index = 2, nonce = 7) {
   else if (type === "eip4844") transaction = { ...common, ...fees, type, maxFeePerBlobGas: 100n, blobVersionedHashes: [`0x01${"67".repeat(31)}`], accessList: [] };
   else transaction = { ...common, ...fees, type, accessList: [], authorizationList: [await account.signAuthorization({ chainId: 1, contractAddress: LIFI_RECIPIENT, nonce: 0 })] };
   const raw = await account.signTransaction(transaction), parsed = parseTransaction(raw) as Json, hash = keccak256(raw);
-  const rpc: Json = { hash, chainId: "0x1", type: quantity(index), nonce: quantity(nonce), from: account.address, to: common.to,
+  const rpc: Json = { hash, chainId: quantity(chainId), type: quantity(index), nonce: quantity(nonce), from: account.address, to: common.to,
     gas: quantity(common.gas), value: "0x0", input: common.data, r: parsed.r, s: parsed.s, v: quantity(parsed.v ?? BigInt(parsed.yParity)),
     ...(index === 0 ? {} : { yParity: quantity(parsed.yParity), accessList: parsed.accessList ?? [] }),
     ...(index < 2 ? { gasPrice: "0x77359400" } : { maxFeePerGas: "0x77359400", maxPriorityFeePerGas: "0x0" }),
@@ -84,8 +84,8 @@ test("LI.FI source signature validation accepts canonical zero nonce and priorit
   await assert.rejects(verifyBridgeSigned(s.raw, s.hash, { ...e, economics: { ...e.economics, nonceAtomic: "1" } }), { code: "APN_PROVIDER_EFFECT_UNAVAILABLE" });
 });
 
-async function rpcObservation() {
-  const s = await signedRpcTransaction(), blockHash = `0x${"ab".repeat(32)}` as Hex;
+async function rpcObservation(chainId = 1) {
+  const s = await signedRpcTransaction(2, 7, chainId), blockHash = `0x${"ab".repeat(32)}` as Hex;
   const block: Json = { number: "0x7d0", hash: blockHash, timestamp: "0x6aa004bb", baseFeePerGas: "0x1", transactions: [s.hash] };
   const tx: Json = { ...s.rpc, blockNumber: block.number, blockHash, transactionIndex: "0x0" };
   const receipt: Json = { transactionHash: s.hash, blockNumber: block.number, blockHash, transactionIndex: "0x0", from: tx.from, to: tx.to,
@@ -94,14 +94,22 @@ async function rpcObservation() {
   const methods: string[] = [];
   const call: EvmRpcCall = async (method) => {
     methods.push(method);
-    if (method === "eth_chainId") return "0x1";
+    if (method === "eth_chainId") return quantity(chainId);
     if (method === "eth_getBlockByNumber") return block;
     if (method === "eth_getTransactionByHash") return tx;
     if (method === "eth_getTransactionReceipt") return receipt;
     throw new Error(`unexpected method: ${method}`);
   };
-  return { ...s, tx, receipt, block, methods, rpcAdapter: new BridgeRpc(1, "https://ethereum.example", call) };
+  return { ...s, tx, receipt, block, methods, rpcAdapter: new BridgeRpc(chainId as 1 | 8453, "https://ethereum.example", call) };
 }
+
+test("LI.FI bridge destination observation excludes relayer fee evidence and Base oracle reads", async () => {
+  const s = await rpcObservation(8453), observed = await s.rpcAdapter.observeDestination(s.hash); assert.ok(observed);
+  assert.equal(Object.hasOwn(observed.transaction, "actualTotalFeeWei"), false);
+  assert.equal(Object.hasOwn(observed.transaction, "feeEvidence"), false);
+  assert.equal(s.methods.some((method) => ["eth_getCode", "eth_getStorageAt", "eth_call"].includes(method)), false);
+  assert.ok(s.methods.includes("eth_getTransactionReceipt")); assert.ok(s.methods.includes("eth_getBlockByNumber"));
+});
 
 async function routedArchiveObservation(useArchive: boolean) {
   const s = await rpcObservation(), calls: Array<{ host: string; method: string; params: readonly unknown[] }> = [];

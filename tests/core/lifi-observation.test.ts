@@ -157,13 +157,16 @@ test("LI.FI destination safe-head protocol failures persist bounded diagnostics"
   assert.equal(persisted.includes("http_status"), false);
 });
 
-test("LI.FI contradiction to safe source evidence preserves it and waits for the original canonical proof", async (t) => {
+test("LI.FI validated safe source evidence resumes without source RPC", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.destination.destinationAvailable = false;
+  s.provider.statusValue = "completed_observed";
   const { id } = await s.prepare(); assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
   const previous = (await s.core.bridges.records.findOperation(id))!; s.source.missingHashes.add(previous.effects[0]!.transactionHash!);
+  const sourceCalls = s.source.calls.length, providerCalls = s.provider.statusCalls;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
-  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "unknown_finality");
+  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "destination_pending");
   assert.deepEqual(current.effects.map((e) => e.safeProof), previous.effects.map((e) => e.safeProof));
+  assert.equal(s.source.calls.length, sourceCalls); assert.equal(s.provider.statusCalls, providerCalls);
   s.source.missingHashes.clear(); s.destination.destinationAvailable = true;
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
   assert.equal((result.operation as { state: string }).state, "completed"); assert.equal(s.source.submissions.length, 2);
@@ -190,17 +193,33 @@ test("LI.FI interruption after durable destination evidence repairs its receipt 
   assert.deepEqual(await restart.core.bridges.records.loadReceipt(current.profileHash, id), bridgeReceipt(current));
 });
 
-test("LI.FI safe destination contradiction after a partial local commit never replaces delivery identity", async (t) => {
+test("LI.FI validated safe destination proof resumes locally without destination or provider RPC", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   const { id } = await s.prepare(); const repair = s.core.bridges.records.repairReceipt.bind(s.core.bridges.records);
   s.core.bridges.records.repairReceipt = async (op) => { if (op.destinationProof !== null) throw new Error("synthetic durable boundary"); await repair(op); };
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false);
   s.core.bridges.records.repairReceipt = repair; const previous = (await s.core.bridges.records.findOperation(id))!;
+  const destinationCalls = s.destination.calls.length, providerCalls = s.provider.statusCalls;
   s.destination.changedBlock = true;
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "unknown_finality");
-  assert.deepEqual(current.destinationProof, previous.destinationProof); assert.equal(current.terminal, false);
-  s.destination.changedBlock = false;
-  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
-  assert.equal((await s.core.bridges.records.findOperation(id))!.state, "completed"); assert.equal(s.source.submissions.length, 2);
+  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "completed");
+  assert.deepEqual(current.destinationProof, previous.destinationProof); assert.equal(current.terminal, true);
+  assert.equal(s.destination.calls.length, destinationCalls); assert.equal(s.provider.statusCalls, providerCalls);
+  assert.equal(s.source.submissions.length, 2);
+});
+
+test("LI.FI journals destination proof before residual failure and reuses it on retry", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
+  const { id } = await s.prepare(); const observe = s.destination.observe.bind(s.destination);
+  s.destination.observe = async (...args) => { const result = await observe(...args); if (result !== null) s.source.failAccount = true; return result; };
+  const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, true, first.error?.message);
+  const checkpoint = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(checkpoint.state, "unknown_finality"); assert.ok(checkpoint.destinationProof);
+  assert.equal(checkpoint.failure?.reason, "residual_allowance_unavailable");
+  const destinationCalls = s.destination.calls.length, providerCalls = s.provider.statusCalls;
+  s.source.failAccount = false;
+  const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
+  const completed = (await s.core.bridges.records.findOperation(id))!; assert.equal(completed.state, "completed");
+  assert.deepEqual(completed.destinationProof, checkpoint.destinationProof);
+  assert.equal(s.destination.calls.length, destinationCalls); assert.equal(s.provider.statusCalls, providerCalls);
 });

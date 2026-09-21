@@ -141,7 +141,15 @@ export class BridgeService {
         const d = this.dependencies(), m = op.intent.materialization;
         const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 13, maxHttpAttempts: 13,
             archiveDeploymentBatchMaxItems: 3 });
-        return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch));
+        const lazy = (chainId, options) => {
+            let rpc;
+            return () => rpc ??= d.rpcFor(chainId, new RpcReadSession(options));
+        };
+        const common = { now: () => this.context.clock.now().getTime(), archiveDeploymentBatchMaxItems: 3 };
+        const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 13, maxHttpAttempts: 13 });
+        const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: 16, maxHttpAttempts: 16 });
+        const residualObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 2, maxHttpAttempts: 3 });
+        return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), { source: sourceObservation, destination: destinationObservation, residual: residualObservation });
     }
     async save(op, patch) {
         const next = transitionBridge(op, patch, this.context.clock.now().toISOString());

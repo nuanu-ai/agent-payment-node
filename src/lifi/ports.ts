@@ -8,7 +8,7 @@ import type { BnbCompositeCall } from "./bnb-composite.js";
 import type {
   BridgeAccountSnapshot, BridgeBlock, BridgeDeploymentIdentity, BridgeEnvelope,
   BridgeOwner, BridgeProtocolReceipt, BridgeProviderObservation, BridgeRouteRequest,
-  BridgeTool, BridgeTransaction, BridgeTransactionProof,
+  BridgeTool, BridgeTransaction, BridgeTransactionProof, BridgeDestinationTransactionProof,
 } from "./model.js";
 
 export interface LifiResponse {
@@ -38,6 +38,12 @@ export interface BridgeRpcPort {
   observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string;
     composite?: Readonly<{ message: Hex; call: BnbCompositeCall }> }>): Promise<{
     readonly transaction: BridgeTransactionProof;
+    readonly receipt: BridgeProtocolReceipt;
+  } | null>;
+  /** Destination delivery observation omits relayer-paid transaction fee evidence. */
+  observeDestination?(transactionHash: Hex, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string;
+    composite?: Readonly<{ message: Hex; call: BnbCompositeCall }> }>): Promise<{
+    readonly transaction: BridgeDestinationTransactionProof;
     readonly receipt: BridgeProtocolReceipt;
   } | null>;
   logs(input: { readonly fromBlockAtomic: string; readonly toBlockAtomic: string; readonly address: Address; readonly topics: readonly (Hex | null)[] }): Promise<readonly { readonly transactionHash: Hex; readonly blockNumberAtomic: string; readonly blockHash: Hex }[]>;

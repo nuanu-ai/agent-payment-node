@@ -9,7 +9,7 @@ import type { Address, Hex } from "../model.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { bridgeDeployment } from "./deployments.js";
 import { BridgeHttps } from "./https.js";
-import type { BridgeBlock, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
+import type { BridgeBlock, BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 import type { BridgeRpcFactory, BridgeRpcPort, LifiResponse } from "./ports.js";
 import { bridgeArchiveEndpoint, isArchiveRead, isHistoricalStateRead } from "./rpc-archive.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
@@ -448,6 +448,16 @@ export class BridgeRpc implements BridgeRpcPort {
     return hash;
   }
   async observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Parameters<BridgeRpcPort["observe"]>[2]): Promise<{ transaction: BridgeTransactionProof; receipt: BridgeProtocolReceipt } | null> {
+    return await this.observeCanonical(hash, expected, nativeDelivery, true) as { transaction: BridgeTransactionProof; receipt: BridgeProtocolReceipt } | null;
+  }
+  async observeDestination(hash: Hex, nativeDelivery?: Parameters<NonNullable<BridgeRpcPort["observeDestination"]>>[1]): Promise<{
+    transaction: BridgeDestinationTransactionProof; receipt: BridgeProtocolReceipt } | null> {
+    return await this.observeCanonical(hash, undefined, nativeDelivery, false) as {
+      transaction: BridgeDestinationTransactionProof; receipt: BridgeProtocolReceipt } | null;
+  }
+  private async observeCanonical(hash: Hex, expected: BridgeEnvelope | undefined,
+    nativeDelivery: Parameters<BridgeRpcPort["observe"]>[2], includeFees: boolean): Promise<{
+      transaction: BridgeTransactionProof | BridgeDestinationTransactionProof; receipt: BridgeProtocolReceipt } | null> {
     await this.assertChain(); bridgeHex(hash, 32, 32, "APN_RPC_PROTOCOL");
     const [rawTx, rawReceipt] = await Promise.all([this.call("eth_getTransactionByHash", [hash]), this.call("eth_getTransactionReceipt", [hash])]);
     if (rawTx === null || rawReceipt === null) return null;
@@ -466,8 +476,10 @@ export class BridgeRpc implements BridgeRpcPort {
     if (status !== 0n && status !== 1n) bridgeFailure("APN_RPC_PROTOCOL", "receipt_status");
     const identity = await verifyRpcTransaction(tx, this.chainId, hash, expected);
     if (evmRpcAddress(r.from) !== identity.from || evmRpcAddress(r.to) !== identity.to) bridgeFailure("APN_RPC_PROTOCOL", "receipt_sender_target");
-    const logs = parseReceiptLogs(r.logs, hash, block, index), fees = await bridgeActualFees(this.chainId, r, block, this.call);
-    if (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) || BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic)) bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
+    const logs = parseReceiptLogs(r.logs, hash, block, index);
+    const fees = includeFees ? await bridgeActualFees(this.chainId, r, block, this.call) : null;
+    if (fees !== null && (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) ||
+      BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic))) bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
     let nativeBalance: BridgeProtocolReceipt["nativeBalance"] = null;
     let nativeTransfer: BridgeProtocolReceipt["nativeTransfer"] = null;
     let compositeTrace: BridgeProtocolReceipt["compositeTrace"] = null;
@@ -501,7 +513,7 @@ export class BridgeRpc implements BridgeRpcPort {
     }
     await this.assertChain();
     return { transaction: { chainId: this.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: this.origin, ...identity,
-      ...fees, status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
+      ...(fees ?? {}), status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
       receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer, compositeTrace } };
   }
   async logs(input: Parameters<BridgeRpcPort["logs"]>[0]) {
