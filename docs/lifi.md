@@ -247,7 +247,23 @@ fragments. APN verifies the exact chain ID, pins resolved public addresses and
 uses default TLS verification. It freezes both RPC origins in the intent.
 LI.FI uses the fixed `https://li.quest/v1` origin. Both transports have bounded
 JSON bodies, two concurrent requests, a 15-second request deadline, and no
-redirects or automatic retries.
+redirects or automatic retries. Bridge preparation uses one command-scoped RPC
+read session across the source and destination: identical concurrent reads are
+singleflighted, immutable block-pinned reads and the captured `safe`/`finalized`
+header are reused, and mutable latest, pending, balance, nonce, fee and estimate
+reads are never retained across an approval or signing boundary. The session is
+bounded at 64 unique reads, 72 HTTP attempts and 180 seconds. It allows one
+request per RPC origin at least 750ms apart and two requests globally.
+
+Operators must not run a separate synthetic RPC capability preflight before the
+real `bridge prepare`. The prepare command performs the exact chain, deployment,
+configuration and block identity checks that its materialized operation needs.
+HTTP 429 is a typed cooldown (`APN_RPC_RATE_LIMITED`) with a sanitized
+`retryAfterMs`; APN does not retry it. HTTP 408, 5xx and approved transport
+timeouts may receive one retry after at least two seconds when the command
+deadline still permits it. Permanent HTTP errors, JSON-RPC errors and malformed
+JSON fail immediately. A command budget or deadline failure is typed and occurs
+before another queued request, wait or attempt.
 
 The following values illustrate syntax; choose principal, recipient, output
 floor and fee limits for the intended payment. The profile must already have

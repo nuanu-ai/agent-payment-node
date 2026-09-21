@@ -85,7 +85,11 @@ function send(endpoint: URL, method: "GET" | "POST", body: string | null, addres
         chunks.push(chunk);
       });
       response.on("end", () => {
-        try { finish(null, { status, body: new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size)) }); }
+        try {
+          const retryAfter = response.headers["retry-after"];
+          finish(null, { status, body: new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size)),
+            ...(retryAfter === undefined ? {} : { headers: { "retry-after": Array.isArray(retryAfter) ? retryAfter : retryAfter } }) });
+        }
         catch { finish(failure(code, "response_utf8")); }
       });
       response.on("aborted", () => finish(failure(code, "response_aborted")));

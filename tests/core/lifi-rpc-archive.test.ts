@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bridgeRpcCall } from "../../src/lifi/rpc.js";
+import { bridgeRpcCall, RpcReadSession } from "../../src/lifi/rpc.js";
 import { bridgeArchiveEndpoint, isHistoricalStateRead } from "../../src/lifi/rpc-archive.js";
 
 function fixture(chainIds: Readonly<Record<string, string>> = {}) {
@@ -54,6 +54,19 @@ test("concurrent block-pinned reads share one archive chain check", async () => 
     { host: "archive.example", method: "eth_chainId" },
     { host: "archive.example", method: "eth_getCode" },
     { host: "archive.example", method: "eth_getStorageAt" },
+  ]);
+});
+
+test("session-bound RPC preserves archive routing while counting archive reads", async () => {
+  const f = fixture();
+  const descriptor = bridgeRpcCall(1, withArchive, { transport: f.transport });
+  const call = descriptor.sessionCall(new RpcReadSession({ wait: async () => {} }));
+  await call("eth_getCode", [DIAMOND, "0x18c9a42"]);
+  await call("eth_getCode", [DIAMOND, "latest"]);
+  assert.deepEqual(f.calls, [
+    { host: "archive.example", method: "eth_chainId" },
+    { host: "archive.example", method: "eth_getCode" },
+    { host: "primary.example", method: "eth_getCode" },
   ]);
 });
 
