@@ -3,6 +3,7 @@ import { type BridgeOperationRecord } from "./operation-model.js";
 import { type BridgeReceipt } from "./receipt.js";
 import { type LegacyBridgeOperationRecord, type StoredBridgeOperationRecord } from "./legacy-operation.js";
 import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
+import type { BaseDeploymentMigrationAudit } from "./base-deployment-migration.js";
 export declare class BridgeOperationRepository extends SecureStateStore {
     private initialized;
     private ready;
@@ -22,6 +23,10 @@ export declare class BridgeOperationRepository extends SecureStateStore {
     migrateDeployment(previous: BridgeOperationRecord, next: BridgeOperationRecord, audit: BridgeDeploymentMigrationAudit): Promise<void>;
     /** Complete or verify the derived receipt after an audit-first migration was interrupted. */
     repairMigratedDeployment(previous: BridgeOperationRecord, op: BridgeOperationRecord, audit: BridgeDeploymentMigrationAudit): Promise<void>;
+    /** One exact pre-allowlist Base journal can be promoted without relaxing normal legacy loading. */
+    migrateLegacyDeployment(previous: BridgeOperationRecord, next: BridgeOperationRecord, audit: BaseDeploymentMigrationAudit): Promise<void>;
+    /** Finish or verify the receipt replacement after the legacy operation was atomically replaced. */
+    repairMigratedLegacyDeployment(previous: BridgeOperationRecord, op: BridgeOperationRecord, audit: BaseDeploymentMigrationAudit): Promise<void>;
     loadReceipt(profileHash: string, operationId: string): Promise<BridgeReceipt>;
     loadLegacyReceipt(op: LegacyBridgeOperationRecord): Promise<Record<string, unknown>>;
     private path;
