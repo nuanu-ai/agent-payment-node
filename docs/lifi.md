@@ -428,6 +428,9 @@ signing. Submitted, ambiguous, finalized and confirmed-revert outcomes advance
 or release that one idempotent reservation. A changed policy refuses before
 signing. Provider-bound native delivery to Linea, Monad and BNB remains
 self-recipient only.
+Ethereum, Base and Arbitrum are the reviewed source chains. BNB Smart Chain,
+Monad and Linea remain destination-only and are refused before LI.FI step
+materialization when presented as a source.
 
 ```sh
 apn bridge routes --profile existing-local \

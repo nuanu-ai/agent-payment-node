@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { bridgeMechanism } from "../../src/lifi/allowlist.js";
+import { BridgeAllowlistGate, bridgeMechanism, validateBridgeAllowlistBinding } from "../../src/lifi/allowlist.js";
+import { BRIDGE_EXECUTION_SOURCE_CHAIN_IDS } from "../../src/lifi/chains.js";
+import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
+import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 import { LIFI_SYNTHETIC_SENDER, lifiFixture } from "./lifi-helpers.js";
@@ -80,5 +83,30 @@ test("common LI.FI finalized usage enforces the shared daily cap before another 
   const refused = await s.core.execute({ command: "bridge.prepare", profile: s.profile,
     quote: (routes.data as any).quote_hash, route: "route-across", idempotencyKey: "allowlist-daily-second-001" });
   assert.equal(refused.error?.details?.reason, "allowlist_daily_cap_exceeded");
+  assert.equal(s.provider.materializeCalls, materializations);
+});
+
+test("allowlist source admission and durable validation share the exact reviewed source registry", async (t) => {
+  assert.deepEqual([...BRIDGE_EXECUTION_SOURCE_CHAIN_IDS], [1, 8453, 42161]);
+  for (const pair of ["eth-base", "base-arb", "arb-eth"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await lifiFixture(temporary.root, pair), prepared = await s.prepare("across", `source-parity-${pair}`);
+    assert.ok(BRIDGE_EXECUTION_SOURCE_CHAIN_IDS.includes(s.request.fromChainId as 1 | 8453 | 42161));
+    assert.doesNotThrow(() => validateBridgeAllowlistBinding(prepared.operation.intent.allowlist));
+    assert.doesNotThrow(() => validateBridgeOperation(prepared.operation));
+  }
+});
+
+test("destination-only BNB, Monad and Linea sources refuse before provider materialization", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "eth-base"), gate = new BridgeAllowlistGate({ state: s.state, clock: { now: () => new Date(s.now) } });
+  const materializations = s.provider.materializeCalls;
+  for (const fromChainId of [56, 143, 59144] as const) {
+    await assert.rejects(gate.admit(s.profile, LIFI_SYNTHETIC_SENDER, { fromChainId, toChainId: 1,
+      fromToken: BRIDGE_ZERO_ADDRESS, toToken: BRIDGE_ZERO_ADDRESS, recipient: LIFI_SYNTHETIC_SENDER,
+      amountAtomic: "100000000000000", minOutputAtomic: "90000000000000", maxNativeDebitWei: "1000000000000000",
+      maxRouteFeeAtomic: "10000000000000", slippageBps: 50 }, "across"),
+    (error: any) => error.code === "APN_ALLOWLIST_REFUSED" && error.details?.reason === "bridge_source_execution_unreviewed");
+  }
   assert.equal(s.provider.materializeCalls, materializations);
 });

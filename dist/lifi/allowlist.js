@@ -3,7 +3,7 @@ import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
-import { bridgeAssetRow, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
+import { bridgeAssetRow, bridgeExecutionSource, bridgeExecutionSourceCaip2, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { bridgeAddress, bridgeFailure, bridgeSame, bridgeUint } from "./validation.js";
 export const BRIDGE_ALLOWLIST_SCHEMA = "apn.bridge-allowlist.v1";
 export const LIFI_ACROSS_BRIDGE_MECHANISM = Object.freeze({ provider: "lifi", reference: "across-v4" });
@@ -16,6 +16,9 @@ export class BridgeAllowlistGate {
         this.ledger = new AssetUsageLedger(context.state.root);
     }
     async admit(profile, owner, request, tool) {
+        if (!bridgeExecutionSource(request.fromChainId)) {
+            refuse("bridge_source_execution_unreviewed", "This bridge chain is destination-only and has no reviewed LI.FI source execution path.");
+        }
         if (bridgeProviderBoundNativeDestination(request) && request.recipient !== owner) {
             refuse("bridge_self_recipient_required", "This native destination is limited to the bound profile owner's own address.");
         }
@@ -144,7 +147,7 @@ export function validateBridgeAllowlistBinding(value) {
     const binding = value;
     if (binding.schemaVersion !== BRIDGE_ALLOWLIST_SCHEMA || !/^[a-f0-9]{64}$/u.test(binding.policyDigest) ||
         !Number.isSafeInteger(binding.policyRevision) || binding.policyRevision < 1 ||
-        bridgeAddress(binding.account, "APN_STATE_CORRUPT") !== binding.account || !/^eip155:(?:1|8453|42161)$/u.test(binding.chain) ||
+        bridgeAddress(binding.account, "APN_STATE_CORRUPT") !== binding.account || !bridgeExecutionSourceCaip2(binding.chain) ||
         (binding.asset.kind === "native" ? binding.asset.identifier !== null : bridgeAddress(binding.asset.identifier, "APN_STATE_CORRUPT") !== binding.asset.identifier) ||
         bridgeAddress(binding.selfRecipient, "APN_STATE_CORRUPT") !== binding.selfRecipient ||
         bridgeUint(binding.amountAtomic, true, "APN_STATE_CORRUPT") < 1n || !isBridgeMechanism(binding.mechanism)) {
