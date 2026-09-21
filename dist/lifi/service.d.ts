@@ -6,6 +6,7 @@ import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcFactory, LifiProvi
 import { BridgePreparation } from "./prepare.js";
 import { type StoredPublicBridgeOperation, type BridgeReceipt, type PublicBridgeOperation } from "./receipt.js";
 import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
+import { type BaseDeploymentMigrationAudit } from "./base-deployment-migration.js";
 export interface BridgeDependencies {
     readonly provider: LifiProviderPort;
     readonly rpcFor: BridgeRpcFactory;
@@ -13,11 +14,11 @@ export interface BridgeDependencies {
     readonly approval?: BridgeApprovalPort;
 }
 export interface BridgeDeploymentMigrationResult {
-    readonly schema_version: BridgeDeploymentMigrationAudit["schemaVersion"];
+    readonly schema_version: (BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit)["schemaVersion"];
     readonly status: "migrated" | "already_current";
     readonly proof_class: "local_journal_migration";
     readonly operation: PublicBridgeOperation;
-    readonly audit: BridgeDeploymentMigrationAudit;
+    readonly audit: BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit;
     readonly next_actions: readonly string[];
 }
 export declare class BridgeService {
