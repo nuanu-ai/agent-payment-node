@@ -440,6 +440,15 @@ export declare const failureSchema: z.ZodObject<{
             debug_traceTransaction: "debug_traceTransaction";
         }>>;
     }, z.core.$strict>>;
+    observationRpc: z.ZodOptional<z.ZodObject<{
+        schemaVersion: z.ZodLiteral<"apn.bridge-observation-rpc-failure.v1">;
+        stage: z.ZodLiteral<"source_observation">;
+        effectRole: z.ZodEnum<{
+            bridge: "bridge";
+            approval: "approval";
+        }>;
+        code: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const consentSchema: z.ZodObject<{
     policy: z.ZodLiteral<"apn.bridge.foreground-approval.v1">;
@@ -966,6 +975,15 @@ export declare const transitionSchema: z.ZodObject<{
                 eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
                 debug_traceTransaction: "debug_traceTransaction";
             }>>;
+        }, z.core.$strict>>;
+        observationRpc: z.ZodOptional<z.ZodObject<{
+            schemaVersion: z.ZodLiteral<"apn.bridge-observation-rpc-failure.v1">;
+            stage: z.ZodLiteral<"source_observation">;
+            effectRole: z.ZodEnum<{
+                bridge: "bridge";
+                approval: "approval";
+            }>;
+            code: z.ZodNullable<z.ZodString>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     usageLease: z.ZodNullable<z.ZodUnknown>;
@@ -1604,6 +1622,15 @@ export declare const operationSchema: z.ZodObject<{
                     debug_traceTransaction: "debug_traceTransaction";
                 }>>;
             }, z.core.$strict>>;
+            observationRpc: z.ZodOptional<z.ZodObject<{
+                schemaVersion: z.ZodLiteral<"apn.bridge-observation-rpc-failure.v1">;
+                stage: z.ZodLiteral<"source_observation">;
+                effectRole: z.ZodEnum<{
+                    bridge: "bridge";
+                    approval: "approval";
+                }>;
+                code: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         usageLease: z.ZodNullable<z.ZodUnknown>;
     }, z.core.$strict>>;
@@ -1807,6 +1834,15 @@ export declare const operationSchema: z.ZodObject<{
                 eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
                 debug_traceTransaction: "debug_traceTransaction";
             }>>;
+        }, z.core.$strict>>;
+        observationRpc: z.ZodOptional<z.ZodObject<{
+            schemaVersion: z.ZodLiteral<"apn.bridge-observation-rpc-failure.v1">;
+            stage: z.ZodLiteral<"source_observation">;
+            effectRole: z.ZodEnum<{
+                bridge: "bridge";
+                approval: "approval";
+            }>;
+            code: z.ZodNullable<z.ZodString>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     usageLease: z.ZodNullable<z.ZodUnknown>;

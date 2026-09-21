@@ -91,10 +91,14 @@ const preSignRpcFailureSchema = z.strictObject({
   method: z.enum(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt",
     "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "debug_traceTransaction"]).nullable(),
 });
+const observationRpcFailureSchema = z.strictObject({
+  schemaVersion: z.literal("apn.bridge-observation-rpc-failure.v1"), stage: z.literal("source_observation"),
+  effectRole: z.enum(["approval", "bridge"]), code: z.string().regex(/^APN_[A-Z0-9_]+$/u).max(64).nullable(),
+});
 export const failureSchema = z.strictObject({ reason: reasonSchema,
   residualAllowance: z.strictObject({ amountAtomic: uintSchema, block: blockSchema, rpcOrigin: originSchema }).nullable(),
   residualAllowanceStatus: z.enum(["unavailable", "observed"]).optional(),
-  preSignRpc: preSignRpcFailureSchema.optional() });
+  preSignRpc: preSignRpcFailureSchema.optional(), observationRpc: observationRpcFailureSchema.optional() });
 export const consentSchema = z.strictObject({ policy: z.literal("apn.bridge.foreground-approval.v1"), fingerprint: hashSchema, approvedAt: isoSchema, expiresAt: isoSchema });
 export const stateSchema = z.enum(["awaiting_approval", "execution_pending", "source_pending", "destination_pending", "unknown_finality", "completed", "destination_failed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"]);
 export const phaseSchema = z.enum(["unsealed", "signing_started", "sealed", "submitting", "submitted_pending", "unknown_finality", "included_success", "included_revert", "safe_success", "safe_revert"]);
