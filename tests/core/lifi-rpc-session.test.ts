@@ -207,8 +207,10 @@ const canonicalQuantity = (value: unknown) => {
   return BigInt(value);
 };
 function batchResults(body: string, result: (request: { id: string; method: string; params: readonly unknown[] }, index: number) => unknown) {
-  const requests = JSON.parse(body) as Array<{ id: string; method: string; params: readonly unknown[] }>;
-  return requests.map((request, index) => ({ jsonrpc: "2.0", id: request.id, result: result(request, index) }));
+  const parsed = JSON.parse(body) as { id: string; method: string; params: readonly unknown[] } | Array<{ id: string; method: string; params: readonly unknown[] }>;
+  const requests = Array.isArray(parsed) ? parsed : [parsed];
+  const responses = requests.map((request, index) => ({ jsonrpc: "2.0", id: request.id, result: result(request, index) }));
+  return Array.isArray(parsed) ? responses : responses[0];
 }
 
 test("session cache keeps raw chain IDs across serial and batch decoder modes", async () => {
@@ -279,7 +281,7 @@ test("serial assertChain followed by batch safe block uses the same session with
   await rpc.assertChain();
   assert.deepEqual(await rpc.block("safe"), { numberAtomic: "16", hash: `0x${"a".repeat(64)}`, timestampAtomic: "1" });
   assert.equal(calls, 2); assert.equal(session.telemetry().logicalItems, 2); assert.equal(session.telemetry().httpRequests, 2);
-  assert.equal(session.telemetry().batchCount, 1); assert.equal(session.telemetry().cacheHits, 1);
+  assert.equal(session.telemetry().batchCount, 0); assert.equal(session.telemetry().cacheHits, 1);
 });
 
 test("RPC batch maps out-of-order ids exactly and rejects missing, duplicate, extra, suberror and non-array responses without fallback", async () => {
@@ -366,7 +368,7 @@ test("RPC batch enforces 33/96/8/10/deadline bounds and removes cached immutable
   await deadline.readBatch("https://rpc.example", 1, [{ ...item(6000), batchAttempt: async (body) => { now = 1; return batchResults(body, () => "0x1"); } }]);
   await assert.rejects(deadline.readBatch("https://rpc.example", 1, [item(6001)]), { code: "APN_RPC_BUDGET_EXCEEDED" });
   const observedSizes: number[] = [];
-  const cachedAttempt = async (body: string) => { const rows = JSON.parse(body) as unknown[]; observedSizes.push(rows.length); return batchResults(body, () => "0x1"); };
+  const cachedAttempt = async (body: string) => { const rows = JSON.parse(body) as unknown; observedSizes.push(Array.isArray(rows) ? rows.length : 1); return batchResults(body, () => "0x1"); };
   const cached = new RpcReadSession({ wait: async () => {} }), first = { ...item(7000), batchAttempt: cachedAttempt }, second = { ...item(7001), batchAttempt: cachedAttempt };
   await cached.readBatch("https://rpc.example", 1, [first]); await cached.readBatch("https://rpc.example", 1, [first, second]);
   assert.deepEqual(observedSizes, [1, 1]); assert.equal(cached.telemetry().cacheHits, 1);
@@ -383,7 +385,8 @@ test("whole RPC batch uses stable retry ids/body, treats 429 as one attempt and 
     const descriptor = bridgeRpcCall(1, { APN_ETHEREUM_RPC_URL: "https://ethereum.example" }, { transport });
     const session = new RpcReadSession({ wait: async () => {} }), batch = descriptor.sessionBatchCall(session);
     const item = { method: "eth_chainId", params: [], cachePolicy: "immutable" as const, decoder: canonicalQuantity };
-    if (status === 400) await assert.rejects(batch([item]), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
+    if (status === 400) await assert.rejects(batch([item]), (error: unknown) => error instanceof ApnError &&
+      error.code === "APN_RPC_PROTOCOL" && error.details?.rpcMethod === "eth_chainId");
     else if (status === 429) await assert.rejects(batch([item]), { code: "APN_RPC_RATE_LIMITED" });
     else assert.deepEqual(await batch([item]), [1n]);
     assert.equal(calls, status === 503 ? 2 : 1); assert.equal(session.telemetry().httpRequests, 1);
