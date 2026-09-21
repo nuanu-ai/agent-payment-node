@@ -2,7 +2,7 @@ import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { type BridgeOperationRecord } from "./operation-model.js";
-import { bridgeCorrupt, validateBridgeContinuity, validateBridgeOperation } from "./operation-validation.js";
+import { bridgeCorrupt, validateBridgeContinuity, validateBridgeOperation, validateLegacyBridgeOperation } from "./operation-validation.js";
 import { bridgeReceipt, currentBridgeReceiptCandidates, type BridgeReceipt } from "./receipt.js";
 import { legacyBridgeReceiptCandidates } from "./receipt.js";
 import { bridgeAtTransition } from "./transitions.js";
@@ -10,6 +10,7 @@ import { bridgeFailure, bridgeSame } from "./validation.js";
 import { adaptLegacyBridgeOperation, isLegacyBridgeOperation,
   type LegacyBridgeOperationRecord, type StoredBridgeOperationRecord } from "./legacy-operation.js";
 import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
+import type { BaseDeploymentMigrationAudit } from "./base-deployment-migration.js";
 
 export class BridgeOperationRepository extends SecureStateStore {
   private initialized: Promise<void> | undefined;
@@ -131,6 +132,40 @@ export class BridgeOperationRepository extends SecureStateStore {
     if (!bridgeSame(savedAudit, audit)) bridgeCorrupt();
     const receiptPath = this.path("bridge-receipts", op.profileHash, op.operationId), savedReceipt = await this.readJson(receiptPath);
     if (savedReceipt !== null && !bridgeSame(savedReceipt, bridgeReceipt(previous)) && !bridgeSame(savedReceipt, bridgeReceipt(op))) bridgeCorrupt();
+    await this.ensureDirectory(`bridge-receipts/${op.profileHash}`);
+    if (!bridgeSame(savedReceipt, bridgeReceipt(op))) await this.writeJson(receiptPath, bridgeReceipt(op));
+  }
+  /** One exact pre-allowlist Base journal can be promoted without relaxing normal legacy loading. */
+  async migrateLegacyDeployment(previous: BridgeOperationRecord, next: BridgeOperationRecord, audit: BaseDeploymentMigrationAudit): Promise<void> {
+    validateLegacyBridgeOperation(previous); validateBridgeOperation(next); await this.ready();
+    const legacy = adaptLegacyBridgeOperation(previous), current = await this.loadStoredOperation(previous.profileHash, previous.operationId);
+    if (current === null || (isLegacyBridgeOperation(current) ? current.raw.integrityHash !== previous.integrityHash
+      : current.integrityHash !== next.integrityHash)) bridgeCorrupt();
+    const auditPath = `bridge-migrations/${previous.profileHash}/${previous.operationId}.json`, savedAudit = await this.readJson(auditPath);
+    if (savedAudit !== null && !bridgeSame(savedAudit, audit)) bridgeCorrupt();
+    const receiptPath = this.path("bridge-receipts", previous.profileHash, previous.operationId);
+    if (isLegacyBridgeOperation(current)) {
+      const oldReceipt = await this.readJson(receiptPath);
+      if (oldReceipt !== null && !legacyBridgeReceiptCandidates(legacy).some((candidate) => bridgeSame(oldReceipt, candidate))) bridgeCorrupt();
+      await this.ensureDirectory(`bridge-migrations/${previous.profileHash}`);
+      if (savedAudit === null) await this.writeJson(auditPath, audit);
+      await this.writeJson(this.path("bridge-operations", previous.profileHash, previous.operationId), next);
+    } else if (savedAudit === null) bridgeCorrupt();
+    await this.ensureDirectory(`bridge-receipts/${previous.profileHash}`);
+    await this.writeJson(receiptPath, bridgeReceipt(next));
+  }
+  /** Finish or verify the receipt replacement after the legacy operation was atomically replaced. */
+  async repairMigratedLegacyDeployment(previous: BridgeOperationRecord, op: BridgeOperationRecord, audit: BaseDeploymentMigrationAudit): Promise<void> {
+    validateLegacyBridgeOperation(previous); validateBridgeOperation(op); await this.ready();
+    if (op.fingerprint !== audit.newFingerprint || op.integrityHash !== audit.newIntegrityHash ||
+      op.transitions.at(-1)?.transitionHash !== audit.newTransitionRoot || previous.fingerprint !== audit.oldFingerprint ||
+      previous.integrityHash !== audit.oldIntegrityHash || previous.transitions.at(-1)?.transitionHash !== audit.oldTransitionRoot) bridgeCorrupt();
+    const savedAudit = await this.readJson(`bridge-migrations/${op.profileHash}/${op.operationId}.json`);
+    if (!bridgeSame(savedAudit, audit)) bridgeCorrupt();
+    const receiptPath = this.path("bridge-receipts", op.profileHash, op.operationId), savedReceipt = await this.readJson(receiptPath);
+    const legacy = adaptLegacyBridgeOperation(previous);
+    if (savedReceipt !== null && !legacyBridgeReceiptCandidates(legacy).some((candidate) => bridgeSame(savedReceipt, candidate)) &&
+      !bridgeSame(savedReceipt, bridgeReceipt(op))) bridgeCorrupt();
     await this.ensureDirectory(`bridge-receipts/${op.profileHash}`);
     if (!bridgeSame(savedReceipt, bridgeReceipt(op))) await this.writeJson(receiptPath, bridgeReceipt(op));
   }
