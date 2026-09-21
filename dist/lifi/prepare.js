@@ -7,6 +7,7 @@ import { bridgeApprovalRequired, bridgeExpiry, freezeBridgeEnvelopes } from "./e
 import { newBridgeEffect } from "./operation-model.js";
 import { BridgeOperationRepository } from "./operation-repository.js";
 import { assertBridgeOwner, bridgeOwner } from "./owner.js";
+import { RpcReadSession } from "./rpc.js";
 import { BridgeQuoteRepository, newBridgeQuote } from "./quote-repository.js";
 import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from "./routes.js";
 import { newBridgeOperation } from "./transitions.js";
@@ -59,7 +60,10 @@ export class BridgePreparation {
                 bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
             const allowlist = await new BridgeAllowlistGate({ state, clock: { now: () => new Date(this.o.now()) } })
                 .admit(profile, quote.owner.address, quote.request, selected.choice.tool);
-            const source = this.o.rpcFor(quote.request.fromChainId), destination = this.o.rpcFor(quote.request.toChainId);
+            // One command-scoped session covers both sides of materialization. It is intentionally discarded before
+            // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary.
+            const session = new RpcReadSession({ now: this.o.now });
+            const source = this.o.rpcFor(quote.request.fromChainId, session), destination = this.o.rpcFor(quote.request.toChainId, session);
             await Promise.all([source.assertChain(), destination.assertChain()]);
             const response = await this.o.provider.materialize(selected.step), preparedAt = new Date(this.o.now()).toISOString();
             const parsed = materializeBridgeRoute(selected, response, quote.request, quote.owner.address), m = parsed.materialization, decoded = decodeBridgeCall(m);

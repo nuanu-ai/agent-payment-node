@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bridgeRpcCall } from "../../src/lifi/rpc.js";
+import { bridgeRpcCall, RpcReadSession } from "../../src/lifi/rpc.js";
 import { bridgeArchiveEndpoint, isHistoricalStateRead } from "../../src/lifi/rpc-archive.js";
 
 function fixture(chainIds: Readonly<Record<string, string>> = {}) {
@@ -57,9 +57,31 @@ test("concurrent block-pinned reads share one archive chain check", async () => 
   ]);
 });
 
+test("session-bound RPC preserves archive routing while counting archive reads", async () => {
+  const f = fixture();
+  const descriptor = bridgeRpcCall(1, withArchive, { transport: f.transport });
+  const call = descriptor.sessionCall(new RpcReadSession({ wait: async () => {} }));
+  await call("eth_getCode", [DIAMOND, "0x18c9a42"]);
+  await call("eth_getCode", [DIAMOND, "latest"]);
+  assert.deepEqual(f.calls, [
+    { host: "archive.example", method: "eth_chainId" },
+    { host: "archive.example", method: "eth_getCode" },
+    { host: "primary.example", method: "eth_getCode" },
+  ]);
+});
+
 test("an archive reader on another chain is refused before any historical read", async () => {
   const f = fixture({ "archive.example": "0x2105" });
   await assert.rejects(bridgeRpcCall(1, withArchive, { transport: f.transport }).call("eth_getCode", [DIAMOND, "0x18c9a42"]),
+    { code: "APN_RPC_CONFIG", message: /bridge_archive_RPC_chain/u });
+  assert.deepEqual(f.calls, [{ host: "archive.example", method: "eth_chainId" }]);
+});
+
+test("session-bound archive chain checks do not reuse the primary chain identity", async () => {
+  const f = fixture({ "archive.example": "0x2105" });
+  const descriptor = bridgeRpcCall(1, withArchive, { transport: f.transport });
+  const call = descriptor.sessionCall(new RpcReadSession({ wait: async () => {} }));
+  await assert.rejects(call("eth_getCode", [DIAMOND, "0x18c9a42"]),
     { code: "APN_RPC_CONFIG", message: /bridge_archive_RPC_chain/u });
   assert.deepEqual(f.calls, [{ host: "archive.example", method: "eth_chainId" }]);
 });

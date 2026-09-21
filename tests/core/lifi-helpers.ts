@@ -16,6 +16,7 @@ import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import type { BridgeBlock, BridgeEnvelope, BridgeProviderObservation, BridgeRouteRequest, BridgeTool } from "../../src/lifi/model.js";
 import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import type { BridgeApprovalPort, BridgeRpcPort, LifiProviderPort } from "../../src/lifi/ports.js";
+import type { RpcReadSession } from "../../src/lifi/rpc.js";
 import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { BRIDGE_FEE_RULE_HASH } from "../../src/lifi/rpc-fees.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
@@ -265,8 +266,12 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
   };
   await activatePolicy("across");
   const source = options.source ?? new LifiTestRpc(a.fromChainId, now), destination = options.destination ?? new LifiTestRpc(a.toChainId, now);
-  const approval = new LifiApproval(), custody = new LocalBridgeCustody(state, wrapping, () => now.getTime());
-  const dependencies = { provider, rpcFor: (chain: BridgeChainId) => { assert.ok(chain === source.chainId || chain === destination.chainId); return chain === source.chainId ? source : destination; }, custody, approval };
+  const approval = new LifiApproval(), custody = new LocalBridgeCustody(state, wrapping, () => now.getTime()), rpcSessions: RpcReadSession[] = [];
+  const dependencies = { provider, rpcFor: (chain: BridgeChainId, session?: RpcReadSession) => {
+    assert.ok(chain === source.chainId || chain === destination.chainId);
+    if (session !== undefined) rpcSessions.push(session);
+    return chain === source.chainId ? source : destination;
+  }, custody, approval };
   const core = new ApnCore({ state, bridge: dependencies, clock: { now: () => new Date(now) } });
   const native = a.fromToken.address === BRIDGE_ZERO_ADDRESS;
   const request: BridgeRouteRequest = { fromChainId: a.fromChainId, toChainId: a.toChainId, fromToken: a.fromToken.address, toToken: a.toToken.address,
@@ -283,5 +288,5 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
     source.op = (await core.bridges.records.findOperation(id))!; destination.op = source.op;
     return { id, input, quote, operation: source.op };
   };
-  return { core, state, now, wrapping, wallets, provider, source, destination, approval, custody, dependencies, profile, request, prepare };
+  return { core, state, now, wrapping, wallets, provider, source, destination, approval, custody, dependencies, rpcSessions, profile, request, prepare };
 }
