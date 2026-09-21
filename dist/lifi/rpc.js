@@ -240,11 +240,6 @@ export class BridgeRpc {
                 { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
                 { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "snapshot", decoder: rpcFeeBlockValue },
                 ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "snapshot", decoder: rpcQuantityValue }]),
-                ...(this.chainId === 8453 ? [
-                    { method: "eth_call", params: [{ to: GAS_ORACLE, data: l1Data }, "latest"], cachePolicy: "snapshot", decoder: rpcWordValue },
-                    { method: "eth_call", params: [{ to: L1_BLOCK, data: "0x4d5d9a2a" }, "latest"], cachePolicy: "snapshot", decoder: rpcWordValue },
-                    { method: "eth_call", params: [{ to: L1_BLOCK, data: "0x16d3bc7f" }, "latest"], cachePolicy: "snapshot", decoder: rpcWordValue },
-                ] : []),
             ];
             const head = await this.batchCall(phaseOne);
             let headOffset = 0;
@@ -256,9 +251,6 @@ export class BridgeRpc {
             bridgeUint(maximum.toString(), true, "APN_RPC_PROTOCOL");
             this.commandLatestBlock = at;
             this.commandPrices = { maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
-            this.commandFeeInputs = this.chainId === 8453 ? { l1DataFeeUpperWei: head[headOffset++],
-                operatorScalar: head[headOffset++], operatorConstant: head[headOffset++] } :
-                { l1DataFeeUpperWei: 0n, operatorScalar: 0n, operatorConstant: 0n };
             const tag = quantity(BigInt(at.numberAtomic));
             const phaseTwo = [
                 { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
@@ -267,6 +259,11 @@ export class BridgeRpc {
                     { method: "eth_call", params: [{ to: token, data }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
                     { method: "eth_call", params: [{ to: token, data: allowanceData }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
                 ]),
+                ...(this.chainId === 8453 ? [
+                    { method: "eth_call", params: [{ to: GAS_ORACLE, data: l1Data }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
+                    { method: "eth_call", params: [{ to: L1_BLOCK, data: "0x4d5d9a2a" }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
+                    { method: "eth_call", params: [{ to: L1_BLOCK, data: "0x16d3bc7f" }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
+                ] : []),
                 { method: "eth_getTransactionCount", params: [owner, tag], cachePolicy: "immutable", decoder: rpcQuantityValue },
                 { method: "eth_getTransactionCount", params: [owner, "pending"], cachePolicy: "none", decoder: rpcQuantityValue },
                 ...planned.map((transaction) => ({ method: "eth_estimateGas", params: [rpcTransactionInput(transaction), tag], cachePolicy: "none", decoder: rpcQuantityValue })),
@@ -278,6 +275,9 @@ export class BridgeRpc {
                 throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
             const native = values[offset++], balance = asset.kind === "native" ? native : values[offset++];
             const allowance = asset.kind === "native" ? 0n : values[offset++];
+            this.commandFeeInputs = this.chainId === 8453 ? { l1DataFeeUpperWei: values[offset++],
+                operatorScalar: values[offset++], operatorConstant: values[offset++] } :
+                { l1DataFeeUpperWei: 0n, operatorScalar: 0n, operatorConstant: 0n };
             const latest = values[offset++], pending = values[offset++];
             for (const transaction of planned)
                 this.preparedEstimates.set(hashObject(transaction), values[offset++].toString());

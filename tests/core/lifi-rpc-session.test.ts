@@ -371,8 +371,14 @@ test("Base source C1/C2 pins state to numeric block while pending stays pending 
   const planned = { chainId: 8453 as const, from: owner, to: token, data: "0x" as const, valueAtomic: "0", gasLimitAtomic: "0" };
   const account = await rpc.account(owner, spender, token, [planned]);
   assert.equal(account.block.numberAtomic, "256"); assert.equal(account.latestNonceAtomic, "7"); assert.equal(account.pendingNonceAtomic, "7");
+  assert.equal(seen[0]!.some((row) => row.method === "eth_call"), false);
+  const feeCalls = seen[1]!.filter((row) => row.method === "eth_call" &&
+    ["0x420000000000000000000000000000000000000f", "0x4200000000000000000000000000000000000015"]
+      .includes(String((row.params[0] as { to: unknown }).to).toLowerCase()));
+  assert.equal(feeCalls.length, 3); assert.ok(feeCalls.every((row) => row.params[1] === "0x100"));
   assert.equal(seen[1]!.find((row) => row.method === "eth_getTransactionCount" && row.params[1] === "pending")!.params[1], "pending");
   assert.equal((await rpc.estimate(planned)).gasLimitAtomic, "65536"); await rpc.prices();
-  await rpc.feeQuotes([{ economics: { nonceAtomic: "7", gasLimitAtomic: "65536", maxFeePerGasAtomic: "5", maxPriorityFeePerGasAtomic: "1", maximumGasCostAtomic: "327680" } }]);
+  const quote = (await rpc.feeQuotes([{ economics: { nonceAtomic: "7", gasLimitAtomic: "65536", maxFeePerGasAtomic: "5", maxPriorityFeePerGasAtomic: "1", maximumGasCostAtomic: "327680" } }]))[0]!;
+  assert.equal(quote.blockNumberAtomic, "256"); assert.equal(quote.blockHash, hash);
   assert.equal(transportCalls, 2); assert.equal(session.telemetry().httpRequests, 2); assert.equal(session.telemetry().batchCount, 2);
 });
