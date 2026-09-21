@@ -169,6 +169,8 @@ export interface BridgeProtocolReceipt {
     readonly nativeTransfer?: BridgeNativeTransferProof | null;
     readonly compositeTrace?: BridgeCompositeTraceProof | null;
 }
+/** Canonical destination identity. Relayer-paid destination gas is deliberately excluded. */
+export type BridgeDestinationTransactionProof = Pick<BridgeTransactionProof, "chainId" | "transactionHash" | "block" | "safeBlock" | "rpcOrigin" | "from" | "to" | "nonceAtomic" | "valueAtomic" | "dataHash" | "gasLimitAtomic" | "maxFeePerGasAtomic" | "maxPriorityFeePerGasAtomic" | "status" | "logsHash">;
 export interface BridgeCompositeTraceProof {
     readonly outcome: "completed_native" | "recovered_weth" | "below_floor" | "protocol_mismatch";
     readonly transactionHash: Hex;

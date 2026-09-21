@@ -16,14 +16,14 @@ export class BridgeExecution {
     now;
     save;
     observation;
-    constructor(state, source, destination, provider, custody, now, save) {
+    constructor(state, source, destination, provider, custody, now, save, observationRpc = { source: () => source, destination: () => destination, residual: () => source }) {
         this.state = state;
         this.source = source;
         this.destination = destination;
         this.custody = custody;
         this.now = now;
         this.save = save;
-        this.observation = new BridgeObservation(source, destination, provider, save);
+        this.observation = new BridgeObservation(observationRpc.source, observationRpc.destination, provider, save, observationRpc.residual);
     }
     async approve(op, approval) {
         if (op.terminal || op.state !== "awaiting_approval")
