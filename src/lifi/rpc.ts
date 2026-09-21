@@ -11,7 +11,7 @@ import { bridgeDeployment } from "./deployments.js";
 import { BridgeHttps } from "./https.js";
 import type { BridgeBlock, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 import type { BridgeRpcFactory, BridgeRpcPort, LifiResponse } from "./ports.js";
-import { bridgeArchiveEndpoint, isHistoricalStateRead } from "./rpc-archive.js";
+import { bridgeArchiveEndpoint, isArchiveRead } from "./rpc-archive.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
@@ -51,7 +51,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   const call: EvmRpcCall = async (method, params) => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
     if (method === "eth_sendRawTransaction") return await submitDirect(method, params, (m, p) => oneAttempt(endpoint, m, p));
-    if (archive === null || !isHistoricalStateRead(method, params)) return await retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait);
+    if (archive === null || !isArchiveRead(method, params)) return await retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait);
     if (archiveChain === undefined) archiveChain = (async () => {
       if (evmRpcQuantity(await retryDirect("eth_chainId", [], () => oneAttempt(archive, "eth_chainId", []), wait)) !== BigInt(chainId)) {
         bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
@@ -85,7 +85,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
     const primaryAttempt = (m: string, p: readonly unknown[]) => oneAttempt(endpoint, m, p, session.currentTime());
     if (method === "eth_sendRawTransaction") return await submitDirect(method, params, primaryAttempt);
-    if (archive === null || !isHistoricalStateRead(method, params)) {
+    if (archive === null || !isArchiveRead(method, params)) {
       return await session.read(endpoint.toString(), chainId, method, params, primaryAttempt);
     }
     const archiveAttempt = (m: string, p: readonly unknown[]) => oneAttempt(archive, m, p, session.currentTime());
