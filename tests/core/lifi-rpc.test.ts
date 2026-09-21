@@ -8,7 +8,7 @@ import { canonicalJson, sha256 } from "../../src/canonical.js";
 import { EvmRpc } from "../../src/evm-rpc.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 import type { Hex } from "../../src/model.js";
-import { BridgeRpc } from "../../src/lifi/rpc.js";
+import { BridgeRpc, bridgeRpcCall } from "../../src/lifi/rpc.js";
 import { bridgeActualFees } from "../../src/lifi/rpc-fees.js";
 import { evmTransactionSignatureScalar, verifyRpcTransaction } from "../../src/lifi/rpc-transaction.js";
 import { verifyBridgeSigned } from "../../src/lifi/transaction.js";
@@ -102,6 +102,55 @@ async function rpcObservation() {
   };
   return { ...s, tx, receipt, block, methods, rpcAdapter: new BridgeRpc(1, "https://ethereum.example", call) };
 }
+
+async function routedArchiveObservation(useArchive: boolean) {
+  const s = await rpcObservation(), calls: Array<{ host: string; method: string; params: readonly unknown[] }> = [];
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    const request = JSON.parse(body!) as { id: string; method: string; params: readonly unknown[] };
+    calls.push({ host: new URL(endpoint).host, method: request.method, params: request.params });
+    let result: unknown;
+    if (request.method === "eth_chainId") result = "0x1";
+    else if (request.method === "eth_getTransactionByHash") result = s.tx;
+    else if (request.method === "eth_getTransactionReceipt") result = s.receipt;
+    else if (request.method === "eth_getBlockByNumber") result = s.block;
+    else throw new Error(`unexpected method: ${request.method}`);
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
+  } };
+  const environment = { APN_ETHEREUM_RPC_URL: "https://primary.example",
+    ...(useArchive ? { APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" } : {}) };
+  const descriptor = bridgeRpcCall(1, environment, { transport, wait: async () => {} });
+  return { ...s, calls, rpcAdapter: new BridgeRpc(1, descriptor.origin, descriptor.call) };
+}
+
+test("LI.FI observation accepts an owner-named archive receipt only after primary canonical block verification", async () => {
+  const s = await routedArchiveObservation(true), observed = await s.rpcAdapter.observe(s.hash); assert.ok(observed);
+  assert.equal(observed.transaction.rpcOrigin, "https://primary.example");
+  assert.deepEqual(s.calls.filter((call) => call.method === "eth_getTransactionReceipt"), [
+    { host: "archive.example", method: "eth_getTransactionReceipt", params: [s.hash] },
+  ]);
+  assert.ok(s.calls.some((call) => call.host === "archive.example" && call.method === "eth_chainId"));
+  assert.ok(s.calls.some((call) => call.host === "primary.example" && call.method === "eth_getBlockByNumber" && call.params[0] === s.block.number));
+  assert.equal(s.calls.some((call) => call.host === "primary.example" && call.method === "eth_getTransactionReceipt"), false);
+  assert.equal(s.calls.some((call) => call.method.includes("send")), false);
+});
+
+test("LI.FI archive receipt observation rejects forged transaction and noncanonical block identities", async () => {
+  const forgedTransaction = await routedArchiveObservation(true);
+  forgedTransaction.receipt.transactionHash = word(1n);
+  await assert.rejects(forgedTransaction.rpcAdapter.observe(forgedTransaction.hash), { code: "APN_RPC_PROTOCOL" });
+
+  const forgedBlock = await routedArchiveObservation(true), forgedHash = word(9n);
+  forgedBlock.receipt.blockHash = forgedHash; forgedBlock.tx.blockHash = forgedHash;
+  await assert.rejects(forgedBlock.rpcAdapter.observe(forgedBlock.hash), { code: "APN_RPC_PROTOCOL" });
+});
+
+test("LI.FI receipt observation remains on the frozen primary RPC when no archive is configured", async () => {
+  const s = await routedArchiveObservation(false), observed = await s.rpcAdapter.observe(s.hash); assert.ok(observed);
+  assert.equal(observed.transaction.rpcOrigin, "https://primary.example");
+  assert.deepEqual(s.calls.filter((call) => call.method === "eth_getTransactionReceipt").map((call) => call.host), ["primary.example"]);
+  assert.equal(s.calls.some((call) => call.host === "archive.example"), false);
+});
+
 test("LI.FI RPC requires signed transaction, canonical block membership, receipt and log identity before safe proof", async () => {
   const s = await rpcObservation(), observed = await s.rpcAdapter.observe(s.hash); assert.ok(observed);
   assert.equal(observed.transaction.safeBlock!.hash, s.block.hash); assert.equal(observed.transaction.actualTotalFeeWei, "21000000000000");
