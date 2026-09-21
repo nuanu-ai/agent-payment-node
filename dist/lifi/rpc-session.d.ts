@@ -17,6 +17,8 @@ export interface RpcReadSessionOptions {
     readonly maxHttpRequests?: number;
     readonly maxHttpAttempts?: number;
     readonly deadlineMs?: number;
+    /** HTTP chunk bound for one atomic historical deployment read. General batches retain RPC_BATCH_MAX_ITEMS. */
+    readonly archiveDeploymentBatchMaxItems?: number;
     /** Backward-compatible alias. */
     readonly maxUniqueCalls?: number;
     readonly now?: () => number;
@@ -55,6 +57,7 @@ export declare class RpcReadSession {
     private readonly maxLogicalItems;
     private readonly maxHttpRequests;
     private readonly maxHttpAttempts;
+    private readonly archiveDeploymentBatchMaxItems;
     private readonly now;
     private readonly wait;
     private readonly deadline;
@@ -83,6 +86,11 @@ export declare class RpcReadSession {
     readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{
         readonly [K in keyof T]: unknown;
     }>;
+    /** One logical archive deployment read, transported sequentially in provider-sized chunks with one atomic cache commit. */
+    readArchiveDeploymentBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{
+        readonly [K in keyof T]: unknown;
+    }>;
+    private readBatchBounded;
     private executeBatch;
     private decodeBatch;
     private key;

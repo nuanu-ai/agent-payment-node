@@ -38,7 +38,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   readonly transport?: Pick<BridgeHttps, "request">;
   readonly wait?: (milliseconds: number) => Promise<void>;
 } = {}): { readonly origin: string; readonly call: EvmRpcCall; readonly attempt: EvmRpcCall; readonly sessionCall: (session: RpcReadSession) => EvmRpcCall;
-  readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive") => Promise<readonly unknown[]> } {
+  readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment") => Promise<readonly unknown[]> } {
   bridgeChain(chainId, "APN_RPC_CONFIG");
   const transport = options.transport ?? new BridgeHttps();
   const wait = options.wait ?? (async (milliseconds: number) => await new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
@@ -135,13 +135,16 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     if (response.status !== 200) throw new RpcHttpFailure(rpcMethod, response.status, parseRetryAfter(response.headers, now));
     return bridgeJson(response.body, 1024 * 1024);
   };
-  const sessionBatchCall = (session: RpcReadSession) => async (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route: "primary" | "archive" = "primary") => {
-    if (route === "archive" && items.some((item) => !isArchiveBatchItem(item.method, item.params))) {
+  const sessionBatchCall = (session: RpcReadSession) => async (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route: "primary" | "archive" | "archive_deployment" = "primary") => {
+    if (route !== "primary" && items.some((item) => !isArchiveBatchItem(item.method, item.params))) {
       bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_method");
     }
-    const target = route === "archive" ? distinctArchive ?? missingHistoricalArchive() : endpoint;
+    const target = route !== "primary" ? distinctArchive ?? missingHistoricalArchive() : endpoint;
     const attempt: RpcBatchAttempt = async (body) => await batchAttempt(target, body, session.currentTime());
-    return await session.readBatch(target.toString(), chainId, items.map((item) => ({ ...item, batchAttempt: attempt })));
+    const bound = items.map((item) => ({ ...item, batchAttempt: attempt }));
+    return route === "archive_deployment"
+      ? await session.readArchiveDeploymentBatch(target.toString(), chainId, bound)
+      : await session.readBatch(target.toString(), chainId, bound);
   };
   const sessionArchiveReceipt = async (session: RpcReadSession, method: string, params: readonly unknown[]): Promise<unknown> => {
     const values = await sessionBatchCall(session)([
@@ -179,7 +182,7 @@ export function bridgeRpcFactory(environment: Readonly<Record<string, string | u
   readonly transport?: Pick<BridgeHttps, "request">;
   readonly wait?: (milliseconds: number) => Promise<void>;
 } = {}): BridgeRpcFactory {
-  const cache = new Map<BridgeChainId, { origin: string; call: EvmRpcCall; attempt: EvmRpcCall; sessionCall: (session: RpcReadSession) => EvmRpcCall; sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive") => Promise<readonly unknown[]>; base?: BridgeRpcPort }>(), transport = options.transport ?? new BridgeHttps();
+  const cache = new Map<BridgeChainId, { origin: string; call: EvmRpcCall; attempt: EvmRpcCall; sessionCall: (session: RpcReadSession) => EvmRpcCall; sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment") => Promise<readonly unknown[]>; base?: BridgeRpcPort }>(), transport = options.transport ?? new BridgeHttps();
   return (chainId, session) => {
     bridgeChain(chainId, "APN_RPC_CONFIG");
     const existing = cache.get(chainId);
@@ -196,14 +199,14 @@ export function bridgeRpcFactory(environment: Readonly<Record<string, string | u
 export class BridgeRpc implements BridgeRpcPort {
   private readonly evm: EvmRpc;
   private readonly call: EvmRpcCall;
-  private readonly batchCall: ((items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive") => Promise<readonly unknown[]>) | undefined;
+  private readonly batchCall: ((items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment") => Promise<readonly unknown[]>) | undefined;
   private commandLatestBlock?: BridgeBlock;
   private commandPrices?: Readonly<{ maxFeePerGasAtomic: string; maxPriorityFeePerGasAtomic: string }>;
   private commandFeeInputs?: Readonly<{ l1DataFeeUpperWei: bigint; operatorScalar: bigint; operatorConstant: bigint }>;
   private readonly preparedEstimates = new Map<string, string>();
   constructor(readonly chainId: BridgeChainId, readonly origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall,
     sessionCall?: (session: RpcReadSession) => EvmRpcCall,
-    sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive") => Promise<readonly unknown[]>) {
+    sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment") => Promise<readonly unknown[]>) {
     bridgeChain(chainId); this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call);
     this.batchCall = session === undefined ? undefined : sessionBatchCall?.(session);
     this.evm = new EvmRpc(this.call, origin, 16 * 1024);
@@ -255,7 +258,8 @@ export class BridgeRpc implements BridgeRpcPort {
       ...extraItems,
       { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
     ];
-    const values = this.batchCall === undefined ? await Promise.all(items.map(async (item) => item.decoder(await this.call(item.method, item.params)))) : await this.batchCall(items, "archive");
+    const values = this.batchCall === undefined ? await Promise.all(items.map(async (item) => item.decoder(await this.call(item.method, item.params))))
+      : await this.batchCall(items, block === undefined ? "archive" : "archive_deployment");
     let offset = 0;
     if (values[offset++] !== BigInt(this.chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
     for (const row of codeRows) {

@@ -395,6 +395,120 @@ test("whole RPC batch uses stable retry ids/body, treats 429 as one attempt and 
   }
 });
 
+test("archive deployment logical batches use sequential three-item chunks with global ids and out-of-order responses", async () => {
+  let now = 0; const bodies: string[] = [], waits: number[] = [];
+  const attempt = async (body: string) => {
+    bodies.push(body);
+    const requests = JSON.parse(body) as Array<{ id: string; params: readonly unknown[] }>;
+    return [...requests].reverse().map((request) => ({ jsonrpc: "2.0", id: request.id, result: request.params[0] }));
+  };
+  const items = Array.from({ length: 17 }, (_, index) => ({ method: "eth_getCode", params: [`value-${index}`, "0x10"],
+    cachePolicy: "immutable" as const, decoder: String, batchAttempt: attempt }));
+  const session = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 13, maxHttpAttempts: 13,
+    now: () => now, wait: async (milliseconds) => { waits.push(milliseconds); now += milliseconds; } });
+  assert.deepEqual(await session.readArchiveDeploymentBatch("https://archive.example", 1, items),
+    Array.from({ length: 17 }, (_, index) => `value-${index}`));
+  const chunks = bodies.map((body) => JSON.parse(body) as Array<{ id: string }>);
+  assert.deepEqual(chunks.map((chunk) => chunk.length), [3, 3, 3, 3, 3, 2]);
+  assert.deepEqual(chunks.map((chunk) => chunk.map((row) => row.id)),
+    [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["10", "11", "12"], ["13", "14", "15"], ["16", "17"]]);
+  assert.deepEqual(waits, [750, 750, 750, 750, 750]);
+  assert.equal(session.telemetry().httpRequests, 6); assert.equal(session.telemetry().httpAttempts, 6);
+
+  const fifteenBodies: string[] = [];
+  const fifteenAttempt = async (body: string) => { fifteenBodies.push(body); return batchResults(body, (request) => request.params[0]); };
+  const fifteen = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
+  await fifteen.readArchiveDeploymentBatch("https://archive.example", 1, items.slice(0, 15).map((item) => ({ ...item, batchAttempt: fifteenAttempt })));
+  assert.deepEqual(fifteenBodies.map((body) => (JSON.parse(body) as Array<unknown>).length), [3, 3, 3, 3, 3]);
+});
+
+test("archive deployment chunks retry only the failed chunk with its exact body and stop after a terminal failure", async () => {
+  const bodies: string[] = []; let attemptNumber = 0;
+  const attempt = async (body: string) => {
+    bodies.push(body); attemptNumber += 1;
+    if (attemptNumber === 2) throw new ApnError("APN_RPC_AMBIGUOUS", "timeout", { transportReason: "request_deadline" });
+    if (attemptNumber === 4) throw new ApnError("APN_RPC_PROTOCOL", "terminal");
+    return batchResults(body, (request) => request.params[0]);
+  };
+  const items = Array.from({ length: 9 }, (_, index) => ({ method: "eth_getCode", params: [`value-${index}`, "0x10"],
+    cachePolicy: "immutable" as const, decoder: String, batchAttempt: attempt }));
+  const session = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
+  await assert.rejects(session.readArchiveDeploymentBatch("https://archive.example", 1, items), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(bodies.length, 4); assert.equal(bodies[1], bodies[2]);
+  assert.notEqual(bodies[0], bodies[1]); assert.notEqual(bodies[2], bodies[3]);
+  assert.deepEqual((JSON.parse(bodies[3]!) as Array<{ id: string }>).map((row) => row.id), ["7", "8", "9"]);
+  assert.equal(session.telemetry().httpRequests, 3); assert.equal(session.telemetry().httpAttempts, 4);
+});
+
+test("late archive chunk HTTP, suberror and decoder failures commit no new cache entries", async () => {
+  for (const failure of ["http", "suberror", "decode"] as const) {
+    let failing = true; const bodies: string[] = [];
+    const attempt = async (body: string) => {
+      bodies.push(body); const requests = JSON.parse(body) as Array<{ id: string; params: readonly unknown[] }>;
+      if (failing && requests[0]!.id === "4") {
+        if (failure === "http") throw new ApnError("APN_RPC_PROTOCOL", "terminal HTTP failure");
+        if (failure === "suberror") return requests.map((request, index) => index === 0
+          ? { jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "failed" } }
+          : { jsonrpc: "2.0", id: request.id, result: request.params[0] });
+      }
+      return requests.map((request) => ({ jsonrpc: "2.0", id: request.id,
+        result: failure === "decode" && failing && request.id === "6" ? "malformed" : request.params[0] }));
+    };
+    const items = Array.from({ length: 6 }, (_, index) => ({ method: "eth_getCode", params: [`0x${index + 1}`, "0x10"],
+      cachePolicy: "immutable" as const, decoder: (value: unknown) => {
+        if (value === "malformed") throw new ApnError("APN_RPC_PROTOCOL", "bad value"); return String(value);
+      }, batchAttempt: attempt }));
+    const session = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
+    await assert.rejects(session.readArchiveDeploymentBatch("https://archive.example", 1, items), { code: "APN_RPC_PROTOCOL" }, failure);
+    const firstCallBodies = bodies.length; failing = false;
+    await session.readArchiveDeploymentBatch("https://archive.example", 1, items);
+    assert.deepEqual(bodies.slice(firstCallBodies).map((body) => (JSON.parse(body) as Array<unknown>).length), [3, 3], failure);
+    assert.equal(session.telemetry().cacheHits, 0, failure);
+  }
+});
+
+test("duplicate, missing and extra ids in a later archive chunk fail the whole logical batch without cache commit", async () => {
+  for (const failure of ["duplicate", "missing", "extra"] as const) {
+    let malformed = true; const sizes: number[] = [];
+    const attempt = async (body: string) => {
+      const requests = JSON.parse(body) as Array<{ id: string; params: readonly unknown[] }>; sizes.push(requests.length);
+      if (malformed && requests[0]!.id === "4") {
+        const valid = requests.map((request) => ({ jsonrpc: "2.0", id: request.id, result: request.params[0] }));
+        if (failure === "duplicate") return [valid[0], { ...valid[1], id: valid[0]!.id }, valid[2]];
+        if (failure === "missing") return valid.slice(0, 2);
+        return [valid[0], valid[1], { ...valid[2], id: "999" }];
+      }
+      return requests.map((request) => ({ jsonrpc: "2.0", id: request.id, result: request.params[0] }));
+    };
+    const items = Array.from({ length: 6 }, (_, index) => ({ method: "eth_getCode", params: [`0x${index + 1}`, "0x10"],
+      cachePolicy: "immutable" as const, decoder: String, batchAttempt: attempt }));
+    const session = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
+    await assert.rejects(session.readArchiveDeploymentBatch("https://archive.example", 1, items), { code: "APN_RPC_PROTOCOL" }, failure);
+    malformed = false; await session.readArchiveDeploymentBatch("https://archive.example", 1, items);
+    assert.deepEqual(sizes, [3, 3, 3, 3], failure); assert.equal(session.telemetry().cacheHits, 0, failure);
+  }
+});
+
+test("archive observation budget permits 11/12 requests and one transient retry without exceeding hard cap 13", async () => {
+  const item = (index: number, attempt: (body: string) => Promise<unknown>) => ({ method: "eth_getCode",
+    params: [`0x${index.toString(16)}`, "0x10"], cachePolicy: "none" as const, decoder: String, batchAttempt: attempt });
+  for (const requests of [11, 12]) {
+    let attempts = 0, retried = false;
+    const attempt = async (body: string) => {
+      attempts += 1;
+      if (!retried && attempts === requests) { retried = true; throw new ApnError("APN_RPC_AMBIGUOUS", "timeout", { transportReason: "request_deadline" }); }
+      return batchResults(body, () => "0x1");
+    };
+    const session = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
+    for (let index = 0; index < requests; index += 1) await session.readArchiveDeploymentBatch("https://archive.example", 1, [item(index, attempt)]);
+    assert.equal(session.telemetry().httpRequests, requests); assert.equal(session.telemetry().httpAttempts, requests + 1);
+  }
+  const capped = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
+  const success = async (body: string) => batchResults(body, () => "0x1");
+  for (let index = 0; index < 13; index += 1) await capped.readArchiveDeploymentBatch("https://archive.example", 1, [item(index, success)]);
+  await assert.rejects(capped.readArchiveDeploymentBatch("https://archive.example", 1, [item(99, success)]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+});
+
 test("identical batches singleflight; order and endpoint isolate keys; rejection clears inflight", async () => {
   let calls = 0, release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
