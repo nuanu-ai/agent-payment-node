@@ -29,10 +29,11 @@ export interface BridgeRpcPort {
   assertChain(): Promise<void>;
   block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
   deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<BridgeDeploymentIdentity>;
-  account(owner: Address, spender: Address, token: Address): Promise<BridgeAccountSnapshot>;
+  account(owner: Address, spender: Address, token: Address, planned?: readonly BridgeTransaction[]): Promise<BridgeAccountSnapshot>;
   prices(): Promise<Pick<FeeEstimate, "maxFeePerGasAtomic" | "maxPriorityFeePerGasAtomic">>;
   estimate(transaction: BridgeTransaction): Promise<FeeEstimate>;
   feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<EvmFeeQuote>;
+  feeQuotes?(envelopes: readonly Pick<BridgeEnvelope, "economics">[]): Promise<readonly EvmFeeQuote[]>;
   send(rawTransaction: Hex): Promise<Hex>;
   observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string;
     composite?: Readonly<{ message: Hex; call: BnbCompositeCall }> }>): Promise<{

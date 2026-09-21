@@ -1,0 +1,47 @@
+import type { Hex } from "../model.js";
+import type { BridgeChainId } from "./chains.js";
+import type { BridgeBlock, BridgeTransaction } from "./model.js";
+export declare function rpcQuantityValue(value: unknown): bigint;
+export declare function rpcExpectedChainValue(chainId: BridgeChainId): (value: unknown) => bigint;
+export declare function rpcWordValue(value: unknown): bigint;
+export declare function rpcHexValue(maximumBytes: number): (value: unknown) => Hex;
+export declare function rpcRecordValue(value: unknown): Record<string, unknown>;
+export declare function rpcBlockValue(value: unknown): Record<string, unknown>;
+export declare function rpcFeeBlockValue(value: unknown): Record<string, unknown>;
+export declare function rpcTransactionInput(transaction: BridgeTransaction): Readonly<Record<string, unknown>>;
+export declare function bridgeFeeQuote(chainId: BridgeChainId, origin: string, block: BridgeBlock, execution: bigint, l1: bigint, operator: bigint): {
+    l1DataFeeUpperWei: string;
+    operatorFeeUpperWei: string;
+    maximumExecutionFeeWei: string;
+    totalQuoteWei: string;
+    totalFeeEnforcedOnchain: false;
+    blockNumberAtomic: string;
+    blockHash: `0x${string}`;
+    rpcOrigin: string;
+    observedAt: string;
+    feeModel: "arbitrum-inclusive";
+    chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+} | {
+    l1DataFeeUpperWei: string;
+    operatorFeeUpperWei: string;
+    maximumExecutionFeeWei: string;
+    totalQuoteWei: string;
+    totalFeeEnforcedOnchain: false;
+    blockNumberAtomic: string;
+    blockHash: `0x${string}`;
+    rpcOrigin: string;
+    observedAt: string;
+    feeModel: "monad-gas-limit";
+    chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+} | {
+    l1DataFeeUpperWei: string;
+    operatorFeeUpperWei: string;
+    maximumExecutionFeeWei: string;
+    totalQuoteWei: string;
+    totalFeeEnforcedOnchain: false;
+    blockNumberAtomic: string;
+    blockHash: `0x${string}`;
+    rpcOrigin: string;
+    observedAt: string;
+    chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+};
