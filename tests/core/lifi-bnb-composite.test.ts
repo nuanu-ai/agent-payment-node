@@ -14,6 +14,7 @@ import { lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
 import { ApnCore } from "../../src/core.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { LifiProvider } from "../../src/lifi/provider.js";
 
 const fixture = JSON.parse(readFileSync(resolve("tests/core/lifi-fixtures/bnb-composite-fly-20260921.json"), "utf8")) as {
   routeResponse: { routes: Record<string, unknown>[] }; materializationRequest: Record<string, unknown>; materializationResponse: unknown;
@@ -40,9 +41,21 @@ test("strict BNB composite decoder accepts the frozen LI.FI Across -> Fly graph"
   });
 });
 
-test("fresh captured route and materialization enter the exact executable composite lane", () => {
-  const out = capturedMaterialization();
-  assert.equal(out.materialization.tool, "across");
+test("guarded BNB discovery requests only Across -> Fly and its returned plan passes strict decoding", async () => {
+  let outbound: string | null = null;
+  const provider = new LifiProvider({ async request(_endpoint, _method, body) {
+    outbound = body; return { status: 200, body: JSON.stringify(fixture.routeResponse) };
+  } });
+  const response = await provider.routes(request, request.recipient);
+  const options = JSON.parse(outbound!).options;
+  assert.equal(options.allowDestinationCall, true);
+  assert.deepEqual(options.bridges.allow, ["across"]);
+  assert.deepEqual(options.exchanges.allow, ["fly"]);
+  const route = structuredClone(fixture.routeResponse.routes[0]!) as Record<string, unknown>;
+  route.steps = [fixture.materializationRequest]; route.toAmount = "629599142133133"; route.toAmountMin = "626451146422467";
+  const selected = parseBridgeRoutes({ ...response, body: JSON.stringify({ routes: [route] }) }, request, request.recipient);
+  const out = materializeBridgeRoute(selected[0]!, { status: 200, body: JSON.stringify(fixture.materializationResponse) }, request, request.recipient);
+  assert.equal(decodeBridgeCall(out.materialization).composite?.kind, "across-fly-bnb");
 });
 
 test("canonical source message and destination trace prove BNB success while recovered WETH is terminally distinct", () => {
