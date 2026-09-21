@@ -1,4 +1,4 @@
-import type { BridgeDeploymentIdentity, BridgeProtocolReceipt, BridgeTransactionProof } from "./model.js";
+import type { BridgeBlock, BridgeDeploymentIdentity, BridgeProtocolReceipt, BridgeTransactionProof } from "./model.js";
 import { type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
 export declare const BASE_DEPLOYMENT_MIGRATION_SCHEMA: "apn.bridge-base-usdc-deployment-migration.v1";
 export declare const BASE_DEPLOYMENT_MIGRATION_CANDIDATE: Readonly<{
@@ -122,7 +122,7 @@ export interface BaseMigrationObservation {
     readonly transaction: BridgeTransactionProof;
     readonly receipt: BridgeProtocolReceipt;
 }
-export declare function assertBaseDeploymentMigrationProof(operation: BridgeOperationRecord, source: BaseMigrationObservation, sourceDeployment: BridgeDeploymentIdentity, destination: BaseMigrationObservation, destinationDeployment: BridgeDeploymentIdentity): BridgeVerifiedDestinationProof;
+export declare function assertBaseDeploymentMigrationProof(operation: BridgeOperationRecord, source: BaseMigrationObservation, sourceDeployment: BridgeDeploymentIdentity, destination: BaseMigrationObservation, destinationDeployment: BridgeDeploymentIdentity, sourceFinalityBlock: BridgeBlock, destinationFinalityBlock: BridgeBlock): BridgeVerifiedDestinationProof;
 export declare function migrateBaseDeploymentOperation(operation: BridgeOperationRecord, destinationProof?: BridgeVerifiedDestinationProof): {
     readonly operation: BridgeOperationRecord;
     readonly previousOperation: BridgeOperationRecord;

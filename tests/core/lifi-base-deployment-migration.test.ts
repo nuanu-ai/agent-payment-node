@@ -20,10 +20,13 @@ async function observation(role: "source" | "destination"): Promise<BaseMigratio
 }
 const sourceDeployment = candidate.verifiedSourceDeployment as BridgeDeploymentIdentity;
 const destinationDeployment = candidate.newDestinationDeployment as BridgeDeploymentIdentity;
+const sourceFinality = candidate.sourceSafeBlock;
+const destinationFinality = candidate.destinationSafeBlock;
 
 test("the one copied Base USDC legacy journal is exactly promoted without changing either effect", async () => {
   const old = await fixture(), source = await observation("source"), destination = await observation("destination");
-  const proof = assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment);
+  const proof = assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment,
+    sourceFinality, destinationFinality);
   const migrated = migrateBaseDeploymentOperation(old, proof);
   assert.equal(migrated.alreadyCurrent, false); validateBridgeOperation(migrated.operation);
   assert.equal(migrated.operation.fingerprint, candidate.newFingerprint);
@@ -47,23 +50,48 @@ test("the one copied Base USDC legacy journal is exactly promoted without changi
 
 test("Base migration requires finalized canonical source and fill proofs with exact Across correlation", async () => {
   const old = await fixture(), source = await observation("source"), destination = await observation("destination");
-  assert.doesNotThrow(() => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment));
+  assert.doesNotThrow(() => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment,
+    sourceFinality, destinationFinality));
   const cases: Array<() => void> = [
-    () => assertBaseDeploymentMigrationProof(old, { ...source, transaction: { ...source.transaction, safeBlock: null } }, sourceDeployment, destination, destinationDeployment),
-    () => assertBaseDeploymentMigrationProof(old, source, { ...sourceDeployment, codeHash: "0".repeat(64) }, destination, destinationDeployment),
+    () => assertBaseDeploymentMigrationProof(old, { ...source, transaction: { ...source.transaction, safeBlock: null } }, sourceDeployment,
+      destination, destinationDeployment, sourceFinality, destinationFinality),
+    () => assertBaseDeploymentMigrationProof(old, source, { ...sourceDeployment, codeHash: "0".repeat(64) }, destination,
+      destinationDeployment, sourceFinality, destinationFinality),
     () => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, { ...destination,
-      transaction: { ...destination.transaction, transactionHash: `0x${"aa".repeat(32)}` } }, destinationDeployment),
+      transaction: { ...destination.transaction, transactionHash: `0x${"aa".repeat(32)}` } }, destinationDeployment,
+      sourceFinality, destinationFinality),
     () => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination,
-      { ...destinationDeployment, configurationHash: "f".repeat(64) }),
+      { ...destinationDeployment, configurationHash: "f".repeat(64) }, sourceFinality, destinationFinality),
     () => { const forged = structuredClone(destination) as any; forged.receipt.logs[1].data = `0x${2766207n.toString(16).padStart(64, "0")}`;
-      assertBaseDeploymentMigrationProof(old, source, sourceDeployment, forged, destinationDeployment); },
+      assertBaseDeploymentMigrationProof(old, source, sourceDeployment, forged, destinationDeployment, sourceFinality, destinationFinality); },
+    () => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment,
+      { ...sourceFinality, hash: `0x${"11".repeat(32)}` }, destinationFinality),
+    () => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment,
+      { ...sourceFinality, timestampAtomic: (BigInt(sourceFinality.timestampAtomic) + 1n).toString() }, destinationFinality),
+    () => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment,
+      sourceFinality, { ...destinationFinality, hash: `0x${"22".repeat(32)}` }),
+    () => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment,
+      sourceFinality, { ...destinationFinality, timestampAtomic: (BigInt(destinationFinality.timestampAtomic) + 1n).toString() }),
+    () => assertBaseDeploymentMigrationProof(old, { ...source, transaction: { ...source.transaction,
+      safeBlock: { ...sourceFinality, hash: `0x${"33".repeat(32)}` } } }, sourceDeployment, destination, destinationDeployment,
+      sourceFinality, destinationFinality),
+    () => assertBaseDeploymentMigrationProof(old, { ...source, transaction: { ...source.transaction,
+      safeBlock: { ...sourceFinality, timestampAtomic: (BigInt(sourceFinality.timestampAtomic) + 1n).toString() } } }, sourceDeployment,
+      destination, destinationDeployment, sourceFinality, destinationFinality),
+    () => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, { ...destination, transaction: { ...destination.transaction,
+      safeBlock: { ...destinationFinality, hash: `0x${"44".repeat(32)}` } } }, destinationDeployment,
+      sourceFinality, destinationFinality),
+    () => assertBaseDeploymentMigrationProof(old, source, sourceDeployment, { ...destination, transaction: { ...destination.transaction,
+      safeBlock: { ...destinationFinality, timestampAtomic: (BigInt(destinationFinality.timestampAtomic) + 1n).toString() } } },
+      destinationDeployment, sourceFinality, destinationFinality),
   ];
   for (const run of cases) assert.throws(run, (error: unknown) => error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED");
 });
 
 test("Base candidate refuses alternate operation, route, amount, address, transaction and digests", async () => {
   const old = await fixture(), source = await observation("source"), destination = await observation("destination");
-  const proof = assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment);
+  const proof = assertBaseDeploymentMigrationProof(old, source, sourceDeployment, destination, destinationDeployment,
+    sourceFinality, destinationFinality);
   const mutations = [
     (op: any) => { op.operationId = "a".repeat(64); },
     (op: any) => { op.intent.materialization.request.toChainId = 42161; },
@@ -99,6 +127,8 @@ test("repair-deployment migrates the copied journal audit-first and is restart-i
   s.destination.observe = async (hash, expected) => { destinationObservations++; assert.equal(hash, candidate.destinationTransactionHash); assert.equal(expected, undefined); return destination; };
   s.source.deployment = async (_tool, _peer, _token, block) => { deployments++; assert.deepEqual(block, candidate.sourceBlock); return sourceDeployment; };
   s.destination.deployment = async (_tool, _peer, _token, block) => { deployments++; assert.deepEqual(block, candidate.destinationBlock); return destinationDeployment; };
+  s.source.block = async (tag) => { assert.equal(tag, sourceFinality.numberAtomic); return sourceFinality; };
+  s.destination.block = async (tag) => { assert.equal(tag, destinationFinality.numberAtomic); return destinationFinality; };
   s.source.send = s.destination.send = async () => { sends++; throw new Error("send forbidden"); };
   s.custody.load = async () => { custody++; throw new Error("custody forbidden"); };
   s.custody.seal = async () => { custody++; throw new Error("custody forbidden"); };

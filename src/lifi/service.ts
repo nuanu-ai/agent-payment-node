@@ -97,11 +97,14 @@ export class BridgeService {
           destination.observe(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.destinationTransactionHash),
         ]);
         if (sourceObserved === null || destinationObserved === null) bridgeFailure("APN_OPERATION_BLOCKED", "migration_transaction_missing");
-        const [sourceDeployment, destinationDeployment] = await Promise.all([
+        const [sourceDeployment, destinationDeployment, sourceFinalityBlock, destinationFinalityBlock] = await Promise.all([
           source.deployment("across", request.toChainId, request.fromToken, sourceObserved.transaction.block),
           destination.deployment("across", request.fromChainId, request.toToken, destinationObserved.transaction.block),
+          source.block(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.sourceSafeBlock.numberAtomic),
+          destination.block(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.destinationSafeBlock.numberAtomic),
         ]);
-        const destinationProof = assertBaseDeploymentMigrationProof(raw, sourceObserved, sourceDeployment, destinationObserved, destinationDeployment);
+        const destinationProof = assertBaseDeploymentMigrationProof(raw, sourceObserved, sourceDeployment, destinationObserved, destinationDeployment,
+          sourceFinalityBlock, destinationFinalityBlock);
         const migration = migrateBaseDeploymentOperation(raw, destinationProof);
         await this.records.migrateLegacyDeployment(raw, migration.operation, migration.audit);
         return migrationProjection(migration.operation, migration.audit, false);
