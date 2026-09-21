@@ -22,7 +22,7 @@ import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.j
 import { addressWord, eventLog, makeDestinationReceipt, makeSourceReceipt } from "./lifi-event-fixtures.js";
 import { BNB_COMPOSITE } from "../../src/lifi/bnb-composite.js";
 import { activateDirectPolicy, WIDE_CAPS } from "./direct-allowlist-helpers.js";
-import { LIFI_ACROSS_BRIDGE_MECHANISM } from "../../src/lifi/allowlist.js";
+import { bridgeMechanism } from "../../src/lifi/allowlist.js";
 
 export type LifiJson = Record<string, any>;
 export const LIFI_SYNTHETIC_KEY = `0x${"01".repeat(32)}` as Hex;
@@ -251,16 +251,19 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
     }
   }
   const provider = options.provider ?? new LifiTestProvider(await lifiSteps(pair, now), now, capturedRoutes), a = provider.steps[0]!.action;
-  if ((pair === "eth-linea" || pair === "eth-monad" || pair === "eth-bnb") && options.initializeWallet !== false && options.policy !== false) {
+  const activatePolicy = async (tool: BridgeTool) => {
+    if (options.initializeWallet === false || options.policy === false) return;
     const caps = { maximumPerTransferAtomic: options.policy?.maximumPerTransferAtomic ?? WIDE_CAPS.maximumPerTransferAtomic,
       dailyLimitAtomic: options.policy?.dailyLimitAtomic ?? WIDE_CAPS.dailyLimitAtomic };
+    const mechanism = bridgeMechanism(tool);
     await activateDirectPolicy(root, profile, { accounts: { evm: LIFI_SYNTHETIC_SENDER }, now, admissions: [{
       chain: `eip155:${a.fromChainId}`, ...(a.fromToken.address === BRIDGE_ZERO_ADDRESS ? { kind: "native" as const }
         : { kind: "token" as const, identifier: a.fromToken.address }), rail: "bridge", ...caps,
-      mechanism: { provider: options.policy?.provider ?? LIFI_ACROSS_BRIDGE_MECHANISM.provider,
-        reference: options.policy?.reference ?? LIFI_ACROSS_BRIDGE_MECHANISM.reference },
+      mechanism: { provider: options.policy?.provider ?? mechanism.provider,
+        reference: options.policy?.reference ?? mechanism.reference },
     }] });
-  }
+  };
+  await activatePolicy("across");
   const source = options.source ?? new LifiTestRpc(a.fromChainId, now), destination = options.destination ?? new LifiTestRpc(a.toChainId, now);
   const approval = new LifiApproval(), custody = new LocalBridgeCustody(state, wrapping, () => now.getTime());
   const dependencies = { provider, rpcFor: (chain: BridgeChainId) => { assert.ok(chain === source.chainId || chain === destination.chainId); return chain === source.chainId ? source : destination; }, custody, approval };
@@ -270,6 +273,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
     recipient: pair === "eth-linea" || pair === "eth-monad" || pair === "eth-bnb" ? LIFI_SYNTHETIC_SENDER : LIFI_RECIPIENT, amountAtomic: a.fromAmount, minOutputAtomic: native ? provider.steps[0]!.estimate.toAmountMin : "9000000",
     maxNativeDebitWei: native ? "2000000000000000" : "20000000000000000", maxRouteFeeAtomic: native ? "100000000000000" : "1000000", slippageBps: 50 };
   const prepare = async (tool: BridgeTool = "across", key = "lifi-fixture-0001") => {
+    if (tool !== "across" && options.policy === undefined) await activatePolicy(tool);
     const quotes = await core.execute({ command: "bridge.routes", profile, request }); assert.equal(quotes.ok, true, quotes.error?.message);
     const quote = (quotes.data as { quote_hash: string }).quote_hash;
     const routeId = provider.capturedRoutes?.routes.find((route: LifiJson) => route.steps?.[0]?.tool === tool)?.id ?? `route-${tool}`;

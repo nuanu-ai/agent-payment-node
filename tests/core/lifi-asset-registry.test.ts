@@ -153,13 +153,13 @@ for (const boundary of ["inside", "outside"] as const) {
   });
 }
 
-test("LI.FI admits a WBTC route on a second chain with its own decimals and beacon-proxy pins", async (t) => {
+test("LI.FI keeps WBTC deployment pins but refuses execution without a frozen-list owner admission", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const now = new Date("2026-09-08T12:00:00.000Z");
   const steps = retoken(await lifiSteps("arb-eth", now), [
     { from: USDC[42161], to: WBTC[42161], decimals: 8 }, { from: USDC[1], to: WBTC[1], decimals: 8 },
   ]);
-  const s = await lifiFixture(temporary.root, "arb-eth", { now, provider: new LifiTestProvider(steps, now) });
+  const s = await lifiFixture(temporary.root, "arb-eth", { now, provider: new LifiTestProvider(steps, now), policy: false });
   assert.equal(s.request.fromChainId, 42161); assert.equal(s.request.toChainId, 1);
   assert.equal(s.request.fromToken, WBTC[42161]); assert.equal(s.request.toToken, WBTC[1]);
   // The same asset has no reviewed Stargate pool, so selecting that tool fails closed on the real prepare path and
@@ -170,14 +170,9 @@ test("LI.FI admits a WBTC route on a second chain with its own decimals and beac
     quote: (quotes.data as { quote_hash: string }).quote_hash, route: "route-stargateV2", idempotencyKey: "wbtc-stargate-0001" });
   assert.equal(refused.ok, false);
   assert.equal(refused.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-  const { operation } = await s.prepare("across");
-  assert.equal(operation.intent.decoded.sourceToken, WBTC[42161]);
-  assert.equal(operation.intent.decoded.destinationToken, WBTC[1]);
-  assert.equal(operation.intent.sourceAccount.token, WBTC[42161]);
-  const receipt = bridgeReceipt(operation);
-  assert.equal(receipt.asset.from.symbol, "WBTC"); assert.equal(receipt.asset.from.decimals, 8);
-  assert.equal(receipt.asset.from.upgradeability, "beacon_proxy");
-  assert.equal(receipt.asset.to.upgradeability, "immutable");
+  const across = await s.core.execute({ command: "bridge.prepare", profile: s.profile,
+    quote: (quotes.data as { quote_hash: string }).quote_hash, route: "route-across", idempotencyKey: "wbtc-across-0001" });
+  assert.equal(across.ok, false); assert.equal(across.error?.details?.reason, "allowlist_policy_required");
   // The beacon proxy pins the proxy, its beacon and the beacon's implementation; the immutable row pins code only.
   const source = bridgeDeployment(42161, 1, "across", WBTC[42161]);
   assert.equal(source.token, WBTC[42161]);

@@ -151,8 +151,11 @@ export class BridgeExecution {
     }
     async guard(op, role) {
         await assertBridgeOwner(this.state, op.intent);
-        if (op.intent.allowlist !== null)
-            await this.allowlist().confirm(op.intent.profile, op.intent.materialization.request, op.intent.materialization.tool, op.intent.allowlist);
+        if (op.intent.allowlist === null)
+            throw new ApnError("APN_ALLOWLIST_REFUSED", "This bridge operation predates common allowlist enforcement; prepare it again under an active policy.", {
+                reason: "allowlist_binding_missing", rail: "bridge",
+            });
+        await this.allowlist().confirm(op.intent.profile, op.intent.materialization.request, op.intent.materialization.tool, op.intent.allowlist);
         await guardBridgeEffect(op, role, this.source, this.destination, this.now);
     }
     allowlist() {
