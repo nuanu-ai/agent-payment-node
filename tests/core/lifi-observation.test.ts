@@ -5,6 +5,7 @@ import { bridgeReceipt } from "../../src/lifi/receipt.js";
 import { temporaryState } from "./helpers.js";
 import { LIFI_DESTINATION_HASH, lifiFixture } from "./lifi-helpers.js";
 import { ApnError } from "../../src/errors.js";
+import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 
 test("LI.FI Across slow-fill delivery persists an empty repayment credit and reserve-funded exact output", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
@@ -112,6 +113,48 @@ test("LI.FI source observation errors replace stale projection with a bounded sa
   const receipt = bridgeReceipt(current) as ReturnType<typeof bridgeReceipt> & { observation_rpc_failure?: unknown };
   assert.deepEqual(receipt.observation_rpc_failure, { schema_version: "apn.bridge-observation-rpc-failure.v1",
     stage: "source_observation", effect_role: "approval", code: "APN_RPC_AMBIGUOUS" });
+  assert.doesNotThrow(() => validateBridgeOperation(current), "old v1 records without optional diagnostics still decode");
+});
+
+test("LI.FI source receipt protocol failures persist only allowlisted diagnostics", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
+  const { id } = await s.prepare();
+  const secret = "sk-secret-do-not-persist", endpoint = "https://user:password@rpc.example/private?api_key=secret";
+  s.source.observe = async () => { throw new ApnError("APN_RPC_PROTOCOL", `provider body ${secret} ${endpoint}`, {
+    reason: "receipt_status", rpcMethod: "eth_getTransactionReceipt", httpStatus: "502", attempts: "2",
+    secret, endpoint,
+  } as any); };
+  const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
+  const current = (await s.core.bridges.records.findOperation(id))!;
+  assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
+    stage: "source_receipt", effectRole: "approval", code: "APN_RPC_PROTOCOL", reason: "receipt_status",
+    rpcMethod: "eth_getTransactionReceipt", httpStatus: 502, attempts: 2 });
+  const projected = bridgeReceipt(current) as ReturnType<typeof bridgeReceipt> & { observation_rpc_failure?: unknown };
+  assert.deepEqual(projected.observation_rpc_failure, { schema_version: "apn.bridge-observation-rpc-failure.v1",
+    stage: "source_receipt", effect_role: "approval", code: "APN_RPC_PROTOCOL", reason: "receipt_status",
+    rpc_method: "eth_getTransactionReceipt", http_status: 502, attempts: 2 });
+  const persisted = JSON.stringify({ operation: current, projected });
+  for (const forbidden of [secret, endpoint, "password", "api_key", "provider body"]) assert.equal(persisted.includes(forbidden), false, forbidden);
+});
+
+test("LI.FI destination safe-head protocol failures persist bounded diagnostics", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
+  const { id } = await s.prepare(); s.destination.destinationAvailable = false;
+  const initial = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(initial.ok, true, initial.error?.message);
+  s.provider.hint = null;
+  s.destination.block = async () => { throw new ApnError("APN_RPC_PROTOCOL", "unsafe raw response https://rpc.example/key", {
+    reason: "bridge_block_number", rpcMethod: "eth_getBlockByNumber", httpStatus: "999", attempts: "999",
+    responseBody: "authorization: bearer secret",
+  } as any); };
+  const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
+  const current = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(current.failure?.reason, "destination_observation_unavailable");
+  assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
+    stage: "destination_safe_head", effectRole: "bridge", code: "APN_RPC_PROTOCOL", reason: "bridge_block_number",
+    rpcMethod: "eth_getBlockByNumber" });
+  const persisted = JSON.stringify(bridgeReceipt(current));
+  for (const forbidden of ["rpc.example", "authorization", "bearer", "raw response"]) assert.equal(persisted.includes(forbidden), false, forbidden);
+  assert.equal(persisted.includes("http_status"), false);
 });
 
 test("LI.FI contradiction to safe source evidence preserves it and waits for the original canonical proof", async (t) => {

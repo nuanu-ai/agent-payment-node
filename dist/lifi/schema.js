@@ -112,8 +112,22 @@ const preSignRpcFailureSchema = z.strictObject({
         "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "debug_traceTransaction"]).nullable(),
 });
 const observationRpcFailureSchema = z.strictObject({
-    schemaVersion: z.literal("apn.bridge-observation-rpc-failure.v1"), stage: z.literal("source_observation"),
+    schemaVersion: z.literal("apn.bridge-observation-rpc-failure.v1"),
+    stage: z.enum(["source_observation", "source_transaction", "source_receipt", "source_included_block", "source_safe_head",
+        "source_recheck", "source_assert_chain", "destination_observation", "destination_transaction", "destination_receipt",
+        "destination_included_block", "destination_safe_head", "destination_recheck", "destination_assert_chain", "destination_logs"]),
     effectRole: z.enum(["approval", "bridge"]), code: z.string().regex(/^APN_[A-Z0-9_]+$/u).max(64).nullable(),
+    reason: z.enum(["bridge_RPC_HTTP_status", "bridge_RPC_response", "receipt_transaction_membership",
+        "canonical_transaction_membership", "receipt_status", "receipt_sender_target", "receipt_execution_fee_bounds",
+        "bridge_block_reorg", "bridge_block_number", "destination_log_range", "destination_log_count",
+        "destination_log_identity", "destination_log_hash", "destination_scan_cursor_reorg", "destination_scan_membership",
+        "destination_scan_reorg", "destination_candidate_unresolved", "duplicate_destination_delivery",
+        "destination_not_safe_success", "destination_trace_rebind", "request_deadline", "DNS_deadline",
+        "request_interrupted", "response_aborted", "response_interrupted"]).optional(),
+    rpcMethod: z.enum(["eth_chainId", "eth_getBlockByNumber", "eth_getTransactionByHash", "eth_getTransactionReceipt",
+        "eth_getLogs", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_call", "eth_estimateGas",
+        "eth_maxPriorityFeePerGas", "debug_traceTransaction"]).optional(),
+    httpStatus: z.number().int().min(100).max(599).optional(), attempts: z.number().int().min(1).max(10).optional(),
 });
 export const failureSchema = z.strictObject({ reason: reasonSchema,
     residualAllowance: z.strictObject({ amountAtomic: uintSchema, block: blockSchema, rpcOrigin: originSchema }).nullable(),
