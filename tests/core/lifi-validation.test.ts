@@ -23,6 +23,55 @@ test("LI.FI integer parsing preserves exact USDC and wei boundaries without coer
   for (const value of [maximum + 1n, -(1n)]) assert.throws(() => bridgeUint(value.toString()), { code: "APN_PROVIDER_PROTOCOL" });
 });
 
+test("captured Base USDC to Arbitrum USDC Stargate V2 envelope stays exactly bound", async () => {
+  const captured = JSON.parse(await readFile(join("tests/core/lifi-fixtures", "lifi-base-arbitrum-usdc-stargate-step-20260921.json"), "utf8")) as any;
+  const sender = captured.request.fromAddress;
+  const request = {
+    fromChainId: captured.request.fromChainId, toChainId: captured.request.toChainId,
+    fromToken: captured.request.fromTokenAddress, toToken: captured.request.toTokenAddress,
+    recipient: captured.request.toAddress, amountAtomic: captured.request.fromAmount,
+    minOutputAtomic: captured.routeResponse.routes[0].toAmountMin,
+    maxNativeDebitWei: "120000000000000", maxRouteFeeAtomic: "1138", slippageBps: 50,
+  };
+  const selected = parseBridgeRoutes({ status: 200, body: JSON.stringify(captured.routeResponse) }, request, sender)[0]!;
+  const materialize = (step: any, boundRequest = request) => materializeBridgeRoute(selected,
+    { status: 200, body: JSON.stringify(step) }, boundRequest, sender);
+  const accepted = materialize(captured.stepResponse);
+  assert.equal(accepted.materialization.transaction.valueAtomic, "110644682401786");
+  assert.equal(accepted.materialization.transaction.gasLimitAtomic, "1469900");
+  assert.equal(accepted.materialization.transaction.chainId, 8453);
+  assert.equal(accepted.materialization.transaction.from, sender);
+  assert.equal(accepted.materialization.transaction.to, "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE");
+
+  // The failed live request capped all native debit below LI.FI's independently quoted LayerZero fee.
+  assert.throws(() => materialize(captured.stepResponse, { ...request, maxNativeDebitWei: "20000000000000" }),
+    (error: any) => error.code === "APN_PROVIDER_PROTOCOL" && error.message === "Bridge validation failed: transaction_envelope.");
+
+  const edits: Array<(step: any) => void> = [
+    (step) => { delete step.transactionRequest.to; },
+    (step) => { delete step.transactionRequest.from; },
+    (step) => { delete step.transactionRequest.data; },
+    (step) => { delete step.transactionRequest.value; },
+    (step) => { delete step.transactionRequest.chainId; },
+    (step) => { delete step.transactionRequest.gasLimit; },
+    (step) => { step.transactionRequest.authorizationList = []; },
+    (step) => { step.transactionRequest.chainId = 42161; },
+    (step) => { step.transactionRequest.from = "0x1111111111111111111111111111111111111111"; },
+    (step) => { step.transactionRequest.to = "0x1111111111111111111111111111111111111111"; },
+    (step) => { step.transactionRequest.value = "0x64a178fda7fb"; },
+    (step) => { step.transactionRequest.data = "0x00"; },
+    (step) => { step.transactionRequest.gasLimit = "0x0"; },
+    (step) => { step.transactionRequest.gasLimit = "5000001"; },
+    (step) => { step.transactionRequest.gasLimit = "0x0166dcc"; },
+    (step) => { step.transactionRequest.value = "0X64a178fda7fa"; },
+    (step) => { step.transactionRequest.gasPrice = "0x05b6670"; },
+  ];
+  for (const edit of edits) {
+    const changed = structuredClone(captured.stepResponse); edit(changed);
+    assert.throws(() => materialize(changed), { code: "APN_PROVIDER_PROTOCOL" });
+  }
+});
+
 test("LI.FI stable materialization identities and every alternate execution extension are rejected before preparing an operation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root), original = s.provider.steps[0]!;
   const selected = parseBridgeRoutes({ status: 200, body: JSON.stringify({ routes: [lifiRoute(original)] }) }, s.request, LIFI_SYNTHETIC_SENDER)[0]!;
