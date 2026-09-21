@@ -49,6 +49,7 @@ export declare class RpcHttpFailure extends Error {
     readonly retryAfterMs?: number | undefined;
     constructor(method: string, status: number, retryAfterMs?: number | undefined);
 }
+type RpcDecoder<T = unknown> = (value: unknown) => T;
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export declare class RpcReadSession {
     private readonly maxLogicalItems;
@@ -77,12 +78,13 @@ export declare class RpcReadSession {
     telemetry(): RpcReadTelemetry;
     currentTime(): number;
     wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt?: EvmRpcCall): EvmRpcCall;
-    read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown>;
+    read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall, decoder?: RpcDecoder): Promise<unknown>;
     /** Strict whole-batch read. Cached exact immutable/snapshot keys are removed before the one HTTP request. */
     readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{
         readonly [K in keyof T]: unknown;
     }>;
     private executeBatch;
+    private decodeBatch;
     private key;
     private reserveLogical;
     private reserveRequest;
@@ -104,3 +106,4 @@ export declare function rpcEndpointIdentity(endpoint: string): string;
 export declare function approvedTransportReason(error: unknown): string | undefined;
 export declare function parseRetryAfter(headers: Readonly<Record<string, string | readonly string[] | undefined>> | undefined, now: number): number | undefined;
 export declare function telemetryDetails(telemetry: RpcReadTelemetry, method: string, reason: string): Record<string, string>;
+export {};
