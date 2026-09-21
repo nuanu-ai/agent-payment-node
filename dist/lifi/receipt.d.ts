@@ -30,10 +30,7 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
                 identifier: string;
             }>;
             amount_atomic: string;
-            mechanism: Readonly<{
-                provider: "lifi";
-                reference: "across-v4";
-            }>;
+            mechanism: import("./allowlist.js").LifiBridgeMechanism;
             reservation_id: string | null;
         } | null;
         identity: string;
@@ -265,10 +262,7 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
                 identifier: string;
             }>;
             amount_atomic: string;
-            mechanism: Readonly<{
-                provider: "lifi";
-                reference: "across-v4";
-            }>;
+            mechanism: import("./allowlist.js").LifiBridgeMechanism;
             reservation_id: string | null;
         } | null;
         identity: string;

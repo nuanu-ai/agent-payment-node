@@ -10,7 +10,7 @@ import { assertBridgeOwner, bridgeOwner } from "./owner.js";
 import { BridgeQuoteRepository, newBridgeQuote } from "./quote-repository.js";
 import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from "./routes.js";
 import { newBridgeOperation } from "./transitions.js";
-import { bridgeExecutionDestination, bridgeProviderBoundNativeDestination, validateBridgeRequest } from "./asset-registry.js";
+import { bridgeExecutionDestination, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
@@ -57,10 +57,8 @@ export class BridgePreparation {
                 bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "destination_execution_unreviewed");
             if (!selected.choice.preparable)
                 bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
-            const allowlist = bridgeProviderBoundNativeDestination(quote.request)
-                ? await new BridgeAllowlistGate({ state, clock: { now: () => new Date(this.o.now()) } })
-                    .admit(profile, quote.owner.address, quote.request, selected.choice.tool)
-                : null;
+            const allowlist = await new BridgeAllowlistGate({ state, clock: { now: () => new Date(this.o.now()) } })
+                .admit(profile, quote.owner.address, quote.request, selected.choice.tool);
             const source = this.o.rpcFor(quote.request.fromChainId), destination = this.o.rpcFor(quote.request.toChainId);
             await Promise.all([source.assertChain(), destination.assertChain()]);
             const response = await this.o.provider.materialize(selected.step), preparedAt = new Date(this.o.now()).toISOString();

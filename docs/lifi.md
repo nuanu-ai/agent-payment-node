@@ -417,13 +417,17 @@ endpoints were read-only checked on 20 September 2026 and returned `callTracer`
 output. Destination deployment verification replays a pinned safe-block trace probe, so a configured
 RPC without `debug_traceTransaction` support refuses the lane before execution.
 
-Linea and Monad execution require an active owner allowlist admission for the Ethereum
-native asset on rail `bridge`, with mechanism `{ provider: "lifi", reference:
-"across-v4" }`. Preparation freezes the policy revision, owner, self recipient,
-asset, amount and mechanism. Foreground approval reserves the amount in the
-shared UTC-day usage ledger before signing. Submitted, ambiguous, finalized
-and confirmed-revert outcomes advance or release that one idempotent
-reservation. A changed policy or non-self recipient refuses before signing.
+Every executable LI.FI route requires an active owner allowlist admission for
+the exact source asset on rail `bridge`. Across uses mechanism `{ provider:
+"lifi", reference: "across-v4" }`; Stargate V2 Taxi uses `{ provider: "lifi",
+reference: "stargate-v2-taxi" }`. Preparation checks the active, unexpired
+policy before materialization and freezes its revision, owner, recipient,
+source asset, amount and exact route mechanism. Foreground approval rechecks
+that binding and reserves the amount in the shared UTC-day usage ledger before
+signing. Submitted, ambiguous, finalized and confirmed-revert outcomes advance
+or release that one idempotent reservation. A changed policy refuses before
+signing. Provider-bound native delivery to Linea, Monad and BNB remains
+self-recipient only.
 
 ```sh
 apn bridge routes --profile existing-local \
@@ -485,12 +489,14 @@ needs a listed USDT destination on an admitted chain.
 
 ## Allowlist gate for the bridge rail
 
-The frozen list bounds which identities the bridge registry may admit. Native
-delivery to Linea or Monad requires the owner allowlist policy
-(`docs/allowlist-policy.md`, rail `bridge`) with the exact Across mechanism pin.
-Prepare freezes the policy digest and revision; approval reserves source usage
-in the shared UTC-day ledger before signing and terminal state follows that
-reservation without reconstructing a policy from provider data.
+The frozen list bounds which identities the bridge registry may admit. Every
+LI.FI execution requires the owner allowlist policy (`docs/allowlist-policy.md`,
+rail `bridge`) with the exact Across or Stargate V2 Taxi mechanism pin. Prepare
+freezes the policy digest and revision; approval reserves source usage in the
+shared UTC-day ledger before signing and terminal state follows that
+reservation without reconstructing a policy from provider data. A pre-upgrade
+operation with no frozen allowlist binding remains readable, but cannot begin a
+new signature or send and must be prepared again.
 
 ## Recovery and proof
 
