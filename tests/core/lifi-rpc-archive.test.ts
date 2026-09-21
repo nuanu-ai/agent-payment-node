@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { bridgeRpcCall, RpcReadSession } from "../../src/lifi/rpc.js";
 import { ApnError } from "../../src/errors.js";
-import { bridgeArchiveEndpoint, isHistoricalStateRead } from "../../src/lifi/rpc-archive.js";
+import { bridgeArchiveEndpoint, isArchiveRead, isHistoricalStateRead } from "../../src/lifi/rpc-archive.js";
 
 function fixture(chainIds: Readonly<Record<string, string>> = {}) {
   const calls: Array<{ host: string; method: string }> = [];
@@ -19,7 +19,7 @@ const primary = { APN_ETHEREUM_RPC_URL: "https://primary.example" };
 const withArchive = { ...primary, APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
 const DIAMOND = "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE";
 
-test("block-pinned state reads go to the owner-named archive after one chain check; everything else stays on the bound RPC", async () => {
+test("block-pinned state and exact-hash receipt reads go to the owner-named archive after one chain check", async () => {
   const f = fixture();
   const rpc = bridgeRpcCall(1, withArchive, { transport: f.transport });
   assert.equal(rpc.origin, "https://primary.example");
@@ -34,14 +34,18 @@ test("block-pinned state reads go to the owner-named archive after one chain che
     { host: "archive.example", method: "eth_call" },
     { host: "archive.example", method: "eth_getStorageAt" },
     { host: "primary.example", method: "eth_getCode" },
-    { host: "primary.example", method: "eth_getTransactionReceipt" },
+    { host: "archive.example", method: "eth_getTransactionReceipt" },
   ]);
 });
 
 test("without an archive name every read stays on the bound RPC", async () => {
   const f = fixture();
   await bridgeRpcCall(1, primary, { transport: f.transport }).call("eth_getCode", [DIAMOND, "0x18c9a42"]);
-  assert.deepEqual(f.calls, [{ host: "primary.example", method: "eth_getCode" }]);
+  await bridgeRpcCall(1, primary, { transport: f.transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]);
+  assert.deepEqual(f.calls, [
+    { host: "primary.example", method: "eth_getCode" },
+    { host: "primary.example", method: "eth_getTransactionReceipt" },
+  ]);
 });
 
 test("concurrent block-pinned reads share one archive chain check", async () => {
@@ -61,19 +65,30 @@ test("concurrent block-pinned reads share one archive chain check", async () => 
 test("session-bound RPC preserves archive routing while counting archive reads", async () => {
   const f = fixture();
   const descriptor = bridgeRpcCall(1, withArchive, { transport: f.transport });
-  const call = descriptor.sessionCall(new RpcReadSession({ wait: async () => {} }));
+  const session = new RpcReadSession({ wait: async () => {} }), call = descriptor.sessionCall(session);
   await call("eth_getCode", [DIAMOND, "0x18c9a42"]);
   await call("eth_getCode", [DIAMOND, "latest"]);
+  await call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]);
   assert.deepEqual(f.calls, [
     { host: "archive.example", method: "eth_chainId" },
     { host: "archive.example", method: "eth_getCode" },
     { host: "primary.example", method: "eth_getCode" },
+    { host: "archive.example", method: "eth_getTransactionReceipt" },
   ]);
+  assert.deepEqual(session.telemetry().perMethod, { eth_chainId: 1, eth_getCode: 2, eth_getTransactionReceipt: 1 });
+  assert.equal(session.telemetry().logicalItems, 4);
 });
 
 test("an archive reader on another chain is refused before any historical read", async () => {
   const f = fixture({ "archive.example": "0x2105" });
   await assert.rejects(bridgeRpcCall(1, withArchive, { transport: f.transport }).call("eth_getCode", [DIAMOND, "0x18c9a42"]),
+    { code: "APN_RPC_CONFIG", message: /bridge_archive_RPC_chain/u });
+  assert.deepEqual(f.calls, [{ host: "archive.example", method: "eth_chainId" }]);
+});
+
+test("an archive receipt reader on another chain is refused before the receipt read", async () => {
+  const f = fixture({ "archive.example": "0x2105" });
+  await assert.rejects(bridgeRpcCall(1, withArchive, { transport: f.transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]),
     { code: "APN_RPC_CONFIG", message: /bridge_archive_RPC_chain/u });
   assert.deepEqual(f.calls, [{ host: "archive.example", method: "eth_chainId" }]);
 });
@@ -169,4 +184,8 @@ test("only exact block-pinned state reads qualify as historical", () => {
   assert.equal(isHistoricalStateRead("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]), false);
   assert.equal(isHistoricalStateRead("eth_getLogs", [{ fromBlock: "0x1", toBlock: "safe" }]), false);
   assert.equal(isHistoricalStateRead("eth_getBlockByNumber", ["0x10", false]), false);
+  assert.equal(isArchiveRead("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]), true);
+  assert.equal(isArchiveRead("eth_getTransactionReceipt", ["0xdeadbeef"]), false);
+  assert.equal(isArchiveRead("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`, "extra"]), false);
+  assert.equal(isArchiveRead("eth_sendRawTransaction", [`0x${"b".repeat(64)}`]), false);
 });
