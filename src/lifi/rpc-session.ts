@@ -10,17 +10,17 @@ const RPC_DEFAULT_HTTP_REQUESTS = 8;
 const RPC_DEFAULT_HTTP_ATTEMPTS = 10;
 const RPC_DEFAULT_DEADLINE_MS = 180_000;
 const RPC_ORIGIN_GAP_MS = 750;
-const RPC_BATCH_MAX_ITEMS = 32;
+export const RPC_BATCH_MAX_ITEMS = 33;
 const TRANSIENT_TRANSPORT_REASONS = new Set(["DNS_deadline", "request_deadline", "request_interrupted", "response_aborted", "response_interrupted"]);
 const IMMUTABLE_READ_METHODS = new Set(["eth_getBlockByNumber", "eth_getCode", "eth_getStorageAt", "eth_call", "eth_getTransactionReceipt",
   "eth_getTransactionByHash", "eth_getLogs"]);
 
-export type RpcBatchAttempt = (items: readonly Readonly<{ method: string; params: readonly unknown[] }>[]) => Promise<readonly unknown[]>;
+export type RpcBatchAttempt = (canonicalBody: string) => Promise<unknown>;
 export interface RpcBatchReadItem<T = unknown> {
   readonly method: string;
   readonly params: readonly unknown[];
   readonly cachePolicy?: "auto" | "immutable" | "snapshot" | "none";
-  readonly expectedDecoder?: (value: unknown) => T;
+  readonly decoder: (value: unknown) => T;
   /** Transport-owned whole-batch attempt. All uncached items in one readBatch call must use the same function. */
   readonly batchAttempt: RpcBatchAttempt;
 }
@@ -69,6 +69,7 @@ export class RpcReadSession {
   private readonly deadline: number;
   private readonly cache = new Map<string, unknown>();
   private readonly inflight = new Map<string, Promise<unknown>>();
+  private readonly batchInflight = new Map<string, Promise<readonly unknown[]>>();
   private readonly origins = new Map<string, { active: boolean; lastStart: number }>();
   private readonly queue: Array<{ origin: string; task: () => Promise<unknown>; resolve: (value: unknown) => void; reject: (error: unknown) => void }> = [];
   private active = 0;
@@ -138,48 +139,88 @@ export class RpcReadSession {
   /** Strict whole-batch read. Cached exact immutable/snapshot keys are removed before the one HTTP request. */
   async readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{ readonly [K in keyof T]: unknown }> {
     if (!Array.isArray(items) || items.length === 0) return [] as unknown as { readonly [K in keyof T]: unknown };
+    const batchKey = hashObject({ endpoint: rpcEndpointIdentity(origin), chainId, items: items.map((item) => ({
+      key: hashObject({ method: item.method, params: item.params }), cachePolicy: item.cachePolicy ?? "auto",
+    })) });
+    const current = this.batchInflight.get(batchKey);
+    if (current !== undefined) {
+      this.assertBeforeQueue("batch"); this.singleflightHits += 1;
+      return cloneRpcValue(await current) as { readonly [K in keyof T]: unknown };
+    }
+    const operation = this.executeBatch(origin, chainId, items).finally(() => this.batchInflight.delete(batchKey));
+    this.batchInflight.set(batchKey, operation);
+    return cloneRpcValue(await operation) as { readonly [K in keyof T]: unknown };
+  }
+
+  private async executeBatch(origin: string, chainId: BridgeChainId, items: readonly RpcBatchReadItem[]): Promise<readonly unknown[]> {
     const results = new Array<unknown>(items.length);
-    const unique = new Map<string, { item: RpcBatchReadItem; indexes: number[] }>();
+    const unique = new Map<string, { cacheKey: string; item: RpcBatchReadItem; indexes: number[] }>();
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
-      if (typeof item.method !== "string" || item.method.length === 0 || !Array.isArray(item.params) || typeof item.batchAttempt !== "function") {
+      if (typeof item.method !== "string" || item.method.length === 0 || !Array.isArray(item.params) ||
+          typeof item.decoder !== "function" || typeof item.batchAttempt !== "function") {
         throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch item is malformed.");
       }
-      const key = this.key(origin, chainId, item.method, item.params);
-      if (this.cache.has(key)) {
-        results[index] = cloneRpcValue(this.cache.get(key)); this.cacheHits += 1; this.dedupHits += 1; continue;
+      const cacheKey = this.key(origin, chainId, item.method, item.params), policy = item.cachePolicy ?? "auto";
+      if (policy !== "none" && this.cache.has(cacheKey)) {
+        results[index] = cloneRpcValue(this.cache.get(cacheKey)); this.cacheHits += 1; this.dedupHits += 1; continue;
       }
-      const existing = unique.get(key);
+      const uniqueKey = hashObject({ cacheKey, policy }), existing = unique.get(uniqueKey);
       if (existing !== undefined) { existing.indexes.push(index); this.dedupHits += 1; continue; }
-      unique.set(key, { item, indexes: [index] });
+      unique.set(uniqueKey, { cacheKey, item, indexes: [index] });
     }
     const pending = [...unique.entries()];
-    if (pending.length === 0) return results as { readonly [K in keyof T]: unknown };
+    if (pending.length === 0) return results;
     if (pending.length > RPC_BATCH_MAX_ITEMS) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC batch exceeds its item bound.",
       telemetryDetails(this.telemetry(), "batch", "maxBatchItems"));
     const attempt = pending[0]![1].item.batchAttempt;
     if (pending.some(([, entry]) => entry.item.batchAttempt !== attempt)) throw new ApnError("APN_RPC_CONFIG", "RPC batch transport identity is inconsistent.");
     for (const [, entry] of pending) this.reserveLogical(entry.item.method);
     this.reserveRequest("batch"); this.batchCount += 1;
-    const requests = pending.map(([, entry]) => ({ method: entry.item.method, params: entry.item.params }));
-    const raw = await this.retry(origin, "batch", async () => await attempt(requests));
-    if (!Array.isArray(raw) || raw.length !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch result count is invalid.");
+    const requests = pending.map(([, entry], index) => ({ jsonrpc: "2.0", id: String(index + 1), method: entry.item.method, params: entry.item.params }));
+    const body = canonicalJson(requests), response = await this.retry(origin, "batch", async () => await attempt(body));
+    if (!Array.isArray(response)) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.");
+    if (response.length !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch result count is invalid.");
+    const raw = new Array<unknown>(pending.length), seen = new Set<string>();
+    for (const candidate of response) {
+      if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.");
+      const row = candidate as Record<string, unknown>, id = row.id;
+      if (row.jsonrpc !== "2.0" || typeof id !== "string" || !/^[1-9][0-9]*$/u.test(id) || seen.has(id)) {
+        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.");
+      }
+      const offset = Number(id) - 1;
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset >= pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.");
+      seen.add(id);
+      if (Object.hasOwn(row, "error")) {
+        const error = row.error;
+        if (typeof error === "object" && error !== null && !Array.isArray(error) &&
+            [-32600, -32601].includes((error as Record<string, unknown>).code as number)) {
+          throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.");
+        }
+        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch contains a JSON-RPC sub-error.");
+      }
+      if (!Object.hasOwn(row, "result") || Object.keys(row).some((key) => !["jsonrpc", "id", "result"].includes(key))) {
+        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.");
+      }
+      raw[offset] = row.result;
+    }
+    if (seen.size !== pending.length) throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.");
     const decoded: unknown[] = [];
     for (let index = 0; index < pending.length; index += 1) {
       const item = pending[index]![1].item;
-      try { decoded[index] = item.expectedDecoder === undefined ? raw[index] : item.expectedDecoder(raw[index]); }
+      try { decoded[index] = item.decoder(raw[index]); }
       catch (error) { if (error instanceof ApnError) throw error; throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch item decoding failed."); }
     }
     // Commit cache only after every response item and decoder succeeds.
     for (let index = 0; index < pending.length; index += 1) {
-      const [key, entry] = pending[index]!, value = decoded[index];
+      const [, entry] = pending[index]!, value = decoded[index];
       const policy = entry.item.cachePolicy ?? "auto";
       if (policy === "immutable" || policy === "snapshot" || policy === "auto" && isSessionCacheable(entry.item.method, entry.item.params, value)) {
-        this.cache.set(key, cloneRpcValue(value));
+        this.cache.set(entry.cacheKey, cloneRpcValue(value));
       }
       for (const resultIndex of entry.indexes) results[resultIndex] = cloneRpcValue(value);
     }
-    return results as { readonly [K in keyof T]: unknown };
+    return results;
   }
 
   private key(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[]): string {

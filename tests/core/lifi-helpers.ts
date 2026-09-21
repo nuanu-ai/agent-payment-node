@@ -15,7 +15,7 @@ import { LocalBridgeCustody } from "../../src/lifi/custody.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import type { BridgeBlock, BridgeEnvelope, BridgeProviderObservation, BridgeRouteRequest, BridgeTool } from "../../src/lifi/model.js";
 import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
-import type { BridgeApprovalPort, BridgeRpcPort, LifiProviderPort } from "../../src/lifi/ports.js";
+import type { BridgeApprovalPort, BridgeRpcFactory, BridgeRpcPort, LifiProviderPort } from "../../src/lifi/ports.js";
 import type { RpcReadSession } from "../../src/lifi/rpc.js";
 import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { BRIDGE_FEE_RULE_HASH } from "../../src/lifi/rpc-fees.js";
@@ -230,6 +230,7 @@ export class LifiTestRpc implements BridgeRpcPort {
 }
 export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad" | "eth-bnb" = "eth-base", options: {
   now?: Date; wrapping?: LifiWrapping; provider?: LifiTestProvider; source?: LifiTestRpc; destination?: LifiTestRpc; initializeWallet?: boolean;
+  rpcFor?: BridgeRpcFactory;
   policy?: false | { readonly maximumPerTransferAtomic?: string; readonly dailyLimitAtomic?: string;
     readonly provider?: string; readonly reference?: string };
 } = {}) {
@@ -267,11 +268,12 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
   await activatePolicy("across");
   const source = options.source ?? new LifiTestRpc(a.fromChainId, now), destination = options.destination ?? new LifiTestRpc(a.toChainId, now);
   const approval = new LifiApproval(), custody = new LocalBridgeCustody(state, wrapping, () => now.getTime()), rpcSessions: RpcReadSession[] = [];
-  const dependencies = { provider, rpcFor: (chain: BridgeChainId, session?: RpcReadSession) => {
+  const fakeRpcFor = (chain: BridgeChainId, session?: RpcReadSession) => {
     assert.ok(chain === source.chainId || chain === destination.chainId);
     if (session !== undefined) rpcSessions.push(session);
     return chain === source.chainId ? source : destination;
-  }, custody, approval };
+  };
+  const dependencies = { provider, rpcFor: options.rpcFor ?? fakeRpcFor, custody, approval };
   const core = new ApnCore({ state, bridge: dependencies, clock: { now: () => new Date(now) } });
   const native = a.fromToken.address === BRIDGE_ZERO_ADDRESS;
   const request: BridgeRouteRequest = { fromChainId: a.fromChainId, toChainId: a.toChainId, fromToken: a.fromToken.address, toToken: a.toToken.address,
