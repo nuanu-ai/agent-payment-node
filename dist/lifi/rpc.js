@@ -22,7 +22,7 @@ const GAS_ORACLE = "0x420000000000000000000000000000000000000F";
 const L1_BLOCK = "0x4200000000000000000000000000000000000015";
 const GAS_ORACLE_ABI = [{ type: "function", name: "getL1FeeUpperBound", stateMutability: "view", inputs: [{ name: "size", type: "uint256" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "getOperatorFee", stateMutability: "view", inputs: [{ name: "gas", type: "uint256" }], outputs: [{ type: "uint256" }] }];
-const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction", "eth_sendRawTransaction"]);
+const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "debug_traceTransaction", "eth_sendRawTransaction"]);
 const LINEA_TRACE_PROBE_TRANSACTION = "0x4352433956109d31ab50db9547f16bcb90f3545f793ed40f75716ccd9a360efd";
 const MONAD_TRACE_PROBE_TRANSACTION = "0x9ff1560ef67d7253df2663b897452abe6644f6d6cb746743253822c264d13440";
 export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 56: "APN_BNB_RPC_URL", 8453: "APN_BASE_RPC_URL", 143: "APN_MONAD_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" };
@@ -572,28 +572,6 @@ export class BridgeRpc {
         return { transaction: { chainId: this.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: this.origin, ...identity,
                 ...(fees ?? {}), status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
             receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer, compositeTrace } };
-    }
-    async logs(input) {
-        await this.assertChain();
-        const from = bridgeUint(input.fromBlockAtomic), to = bridgeUint(input.toBlockAtomic);
-        if (from > to || to - from >= 1024n || input.topics.length < 2 || input.topics.length > 4)
-            bridgeFailure("APN_RPC_PROTOCOL", "destination_log_range");
-        const value = await this.call("eth_getLogs", [{ address: input.address, fromBlock: quantity(from), toBlock: quantity(to), topics: input.topics }]);
-        if (!Array.isArray(value) || value.length > 128)
-            bridgeFailure("APN_RPC_PROTOCOL", "destination_log_count");
-        const result = value.map((value) => {
-            const r = evmRpcRecord(value), number = evmRpcQuantity(r.blockNumber), blockHash = evmRpcHex(r.blockHash, 32), transactionHash = evmRpcHex(r.transactionHash, 32);
-            if (evmRpcAddress(r.address) !== input.address || r.removed !== false || number < from || number > to ||
-                !Array.isArray(r.topics) || r.topics.length > 4 || r.topics.length < input.topics.length ||
-                input.topics.some((v, i) => v !== null && evmRpcHex(r.topics[i], 32) !== v))
-                bridgeFailure("APN_RPC_PROTOCOL", "destination_log_identity");
-            bridgeHex(r.data, 64 * 1024, undefined, "APN_RPC_PROTOCOL");
-            if (transactionHash === BRIDGE_ZERO_WORD || blockHash === BRIDGE_ZERO_WORD)
-                bridgeFailure("APN_RPC_PROTOCOL", "destination_log_hash");
-            return { transactionHash, blockNumberAtomic: number.toString(), blockHash };
-        });
-        await this.assertChain();
-        return result;
     }
     async recheck(block) {
         if (!bridgeSame(await this.block(block.numberAtomic), block))

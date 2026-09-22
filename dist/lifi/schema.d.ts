@@ -471,6 +471,7 @@ export declare const failureSchema: z.ZodObject<{
             canonical_transaction_membership: "canonical_transaction_membership";
             receipt_status: "receipt_status";
             receipt_sender_target: "receipt_sender_target";
+            receipt_log_membership: "receipt_log_membership";
             receipt_execution_fee_bounds: "receipt_execution_fee_bounds";
             bridge_block_reorg: "bridge_block_reorg";
             bridge_block_number: "bridge_block_number";
@@ -1066,6 +1067,7 @@ export declare const transitionSchema: z.ZodObject<{
                 canonical_transaction_membership: "canonical_transaction_membership";
                 receipt_status: "receipt_status";
                 receipt_sender_target: "receipt_sender_target";
+                receipt_log_membership: "receipt_log_membership";
                 receipt_execution_fee_bounds: "receipt_execution_fee_bounds";
                 bridge_block_reorg: "bridge_block_reorg";
                 bridge_block_number: "bridge_block_number";
@@ -1771,6 +1773,7 @@ export declare const operationSchema: z.ZodObject<{
                     canonical_transaction_membership: "canonical_transaction_membership";
                     receipt_status: "receipt_status";
                     receipt_sender_target: "receipt_sender_target";
+                    receipt_log_membership: "receipt_log_membership";
                     receipt_execution_fee_bounds: "receipt_execution_fee_bounds";
                     bridge_block_reorg: "bridge_block_reorg";
                     bridge_block_number: "bridge_block_number";
@@ -2043,6 +2046,7 @@ export declare const operationSchema: z.ZodObject<{
                 canonical_transaction_membership: "canonical_transaction_membership";
                 receipt_status: "receipt_status";
                 receipt_sender_target: "receipt_sender_target";
+                receipt_log_membership: "receipt_log_membership";
                 receipt_execution_fee_bounds: "receipt_execution_fee_bounds";
                 bridge_block_reorg: "bridge_block_reorg";
                 bridge_block_number: "bridge_block_number";

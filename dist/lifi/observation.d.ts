@@ -25,7 +25,6 @@ export declare class BridgeObservation {
     private finish;
     private finishDestinationFailure;
     private destinationCandidate;
-    private scan;
     private waiting;
     private historicalDeployment;
 }

@@ -6,7 +6,7 @@ const METHODS = new Set([
 ]);
 const REASONS = new Set([
     "bridge_RPC_HTTP_status", "bridge_RPC_response", "receipt_transaction_membership",
-    "canonical_transaction_membership", "receipt_status", "receipt_sender_target",
+    "canonical_transaction_membership", "receipt_status", "receipt_sender_target", "receipt_log_membership",
     "receipt_execution_fee_bounds", "bridge_block_reorg", "bridge_block_number",
     "destination_log_range", "destination_log_count", "destination_log_identity",
     "destination_log_hash", "destination_scan_cursor_reorg", "destination_scan_membership",
