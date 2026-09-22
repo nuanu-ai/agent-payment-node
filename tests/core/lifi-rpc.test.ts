@@ -18,6 +18,8 @@ import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import { BridgeObservation } from "../../src/lifi/observation.js";
 import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
+import { bridgeReceipt } from "../../src/lifi/receipt.js";
+import { transitionBridge } from "../../src/lifi/transitions.js";
 import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
 import { MULTICALL3_ADDRESS } from "../../src/portfolio/registry.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_KEY, LIFI_SYNTHETIC_SENDER, lifiFixture } from "./lifi-helpers.js";
@@ -345,7 +347,8 @@ async function baseApprovalObservation(mode: "success" | "missing" | "reverted" 
   return { s, calls, traces, session, rpc, expected, observe: async () => await rpc.observe(s.hash, expected) };
 }
 
-async function productionBaseObservation(root: string, mode: "success" | "terminal429", limits?: { maxHttpRequests: number; maxHttpAttempts: number }) {
+async function productionBaseObservation(root: string, mode: "success" | "terminal429", limits?: { maxHttpRequests: number; maxHttpAttempts: number },
+  effectRole: "approval" | "bridge" = "approval") {
   const fixture = await lifiFixture(root, "base-arb"), prepared = (await fixture.prepare("stargateV2")).operation;
   const run = await baseApprovalObservation(mode, limits), materialization = { ...prepared.intent.materialization,
     sender: run.expected.from, approvalAddress: run.expected.to };
@@ -355,19 +358,19 @@ async function productionBaseObservation(root: string, mode: "success" | "termin
     contractHash: hashObject({ protocol: deployment, feeContract: BASE_FEE_CONTRACT }),
     codeHash: hashObject(code.map((row) => ({ address: row.address, codeHash: row.codeHash }))),
     configurationHash: hashObject([...deployment.reads, ...BASE_FEE_CONTRACT.reads].map((row) => ({ ...row, expected: row.expected }))) };
-  const approval = prepared.effects[0]!;
+  const selected = prepared.effects.find((effect) => effect.role === effectRole)!, expected = { ...run.expected, role: effectRole } as BridgeEnvelope;
   let operation = { ...prepared, state: "unknown_finality", terminal: false, failure: null,
-    intent: { ...prepared.intent, materialization, sourceDeployment }, effects: [{ ...approval, envelope: run.expected,
-      transactionHash: run.s.hash, submittedAt: prepared.createdAt, submissionAttempts: 1, phase: "unknown_finality", includedProof: null, safeProof: null },
-    prepared.effects[1]!] } as BridgeOperationRecord;
-  run.s.receipt.logs = [{ address: token, topics: [keccak256(Buffer.from("Approval(address,address,uint256)")),
+    intent: { ...prepared.intent, materialization, sourceDeployment }, effects: prepared.effects.map((effect) => effect.role === effectRole ? { ...selected, envelope: expected,
+      transactionHash: run.s.hash, submittedAt: prepared.createdAt, submissionAttempts: 1, phase: "unknown_finality", includedProof: null, safeProof: null } : effect) } as BridgeOperationRecord;
+  run.s.receipt.logs = effectRole === "bridge" ? [] : [{ address: token, topics: [keccak256(Buffer.from("Approval(address,address,uint256)")),
     `0x${"0".repeat(24)}${materialization.sender.slice(2).toLowerCase()}`,
     `0x${"0".repeat(24)}${materialization.approvalAddress.slice(2).toLowerCase()}`], data: word(BigInt(materialization.request.amountAtomic)),
     blockNumber: run.s.receipt.blockNumber, transactionHash: run.s.hash, transactionIndex: "0x0", blockHash: run.s.receipt.blockHash, logIndex: "0x0", removed: false }];
   const observer = new BridgeObservation(run.rpc, fixture.destination, fixture.provider, async (_previous, patch) => {
     operation = { ...operation, ...patch } as BridgeOperationRecord; return operation;
   });
-  return { fixture, run, execute: async () => { const result = await observer.sources(operation); operation = result.operation; return { ...result, operation }; } };
+  return { fixture, run, template: prepared,
+    execute: async () => { const result = await observer.sources(operation); operation = result.operation; return { ...result, operation }; } };
 }
 
 test("LI.FI production source observation uses the complete ordered physical trace with no resend", async (t) => {
@@ -417,7 +420,7 @@ test("LI.FI production observation persists exact retry and zero-transport budge
   assert.equal(limitedResult.reliable, false);
   assert.deepEqual(limitedResult.operation.observationTelemetry?.at(-1), {
     schemaVersion: "apn.bridge-observation-telemetry.v1", stage: "source_observation", effectRole: "approval", outcome: "failure",
-    physicalRequests: 7, httpAttempts: 8, logicalRpcItems: 18, batchCount: 1, maxBatchSize: 3,
+    physicalRequests: 8, httpAttempts: 8, logicalRpcItems: 18, batchCount: 2, maxBatchSize: 3,
     budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 2 },
     attemptsByMethodClass: { block: 2, chain: 4, code: 4, receipt: 1, transaction: 1 },
   });
@@ -430,10 +433,41 @@ test("LI.FI production observation persists exact retry and zero-transport budge
     budgetRejectedBeforeTransport: 1, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 0 },
     attemptsByMethodClass: { block: 2, chain: 2, receipt: 1, transaction: 1 },
   });
-  for (const execution of [limited, budget]) {
+  const attemptState = await temporaryState(); t.after(attemptState.cleanup);
+  const attemptBudget = await productionBaseObservation(attemptState.root, "success", { maxHttpRequests: 14, maxHttpAttempts: 6 });
+  const attemptResult = await attemptBudget.execute(), attemptTelemetry = attemptResult.operation.observationTelemetry?.at(-1)!;
+  assert.equal(attemptResult.reliable, false); assert.equal(attemptBudget.run.session.telemetry().httpRequests, 7);
+  assert.deepEqual(attemptTelemetry, {
+    schemaVersion: "apn.bridge-observation-telemetry.v1", stage: "source_observation", effectRole: "approval", outcome: "failure",
+    physicalRequests: 6, httpAttempts: 6, logicalRpcItems: 18, batchCount: 0, maxBatchSize: 1,
+    budgetRejectedBeforeTransport: 1, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 0 },
+    attemptsByMethodClass: { block: 2, chain: 2, receipt: 1, transaction: 1 },
+  });
+  assert.equal(attemptTelemetry.physicalRequests, Object.values(attemptTelemetry.attemptsByEndpointRole).reduce((sum, value) => sum + value, 0));
+  for (const execution of [limited, budget, attemptBudget]) {
     assert.equal(execution.run.calls.flatMap((call) => call.rows).some((row) => row.method === "eth_sendRawTransaction"), false);
     assert.equal(execution.fixture.source.submissions.length, 0);
   }
+});
+
+test("LI.FI source protocol evidence failures persist the consumed production trace once and project only redacted telemetry", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const prepared = await productionBaseObservation(temporary.root, "success", undefined, "bridge"), result = await prepared.execute();
+  assert.equal(result.reliable, false); assert.equal(result.operation.failure?.reason, "source_protocol_evidence_unavailable");
+  assert.equal(result.operation.observationTelemetry?.length, 1);
+  assert.deepEqual(result.operation.observationTelemetry?.[0], {
+    schemaVersion: "apn.bridge-observation-telemetry.v1", stage: "source_observation", effectRole: "bridge", outcome: "failure",
+    physicalRequests: 14, httpAttempts: 14, logicalRpcItems: 30, batchCount: 8, maxBatchSize: 3,
+    budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 8 },
+    attemptsByMethodClass: { block: 4, call: 6, chain: 3, code: 11, receipt: 1, storage: 4, transaction: 1 },
+  });
+  const projectedOperation = transitionBridge(prepared.template, { observationTelemetry: result.operation.observationTelemetry },
+    new Date(Date.parse(prepared.template.updatedAt) + 1).toISOString());
+  const projected = (bridgeReceipt(projectedOperation) as any).observation_rpc_telemetry;
+  assert.equal(projected.length, 1); assert.equal(projected[0].physical_requests, 14); assert.equal(projected[0].effect_role, "bridge");
+  const serialized = JSON.stringify(projected);
+  for (const forbidden of ["base.drpc.org", "publicnode.com", "mainnet.base.org", "authorization", "api_key"])
+    assert.equal(serialized.includes(forbidden), false, forbidden);
 });
 
 test("LI.FI Base approval observation keeps missing, reverted and 429 outcomes bounded", async () => {

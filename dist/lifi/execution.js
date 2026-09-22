@@ -184,15 +184,12 @@ export class BridgeExecution {
     async terminalFailure(op, state, reason, preSignRpc = null) {
         const retained = retainedUnsentBridgeRpcFailure(op), diagnostic = preSignRpc ?? retained?.preSignRpc ?? null;
         const failureReason = diagnostic === null ? reason : "unsent_apn_rpc_ambiguous";
-        let residualAllowance;
-        try {
-            residualAllowance = await this.observation.residual(op);
-        }
-        catch {
-            return await this.save(op, { state: "unknown_finality", failure: { reason: failureReason, residualAllowance: null,
+        const residual = await this.observation.residualObservation(op);
+        if (!residual.ok)
+            return await this.save(op, { state: "unknown_finality", observationTelemetry: residual.observationTelemetry,
+                failure: { reason: failureReason, residualAllowance: null,
                     ...(diagnostic === null ? {} : { residualAllowanceStatus: "unavailable", preSignRpc: diagnostic }) } });
-        }
-        return await this.save(op, { state, failure: { reason: failureReason, residualAllowance,
+        return await this.save(op, { state, observationTelemetry: residual.observationTelemetry, failure: { reason: failureReason, residualAllowance: residual.value,
                 ...(diagnostic === null ? {} : { residualAllowanceStatus: "observed", preSignRpc: diagnostic }) } });
     }
 }

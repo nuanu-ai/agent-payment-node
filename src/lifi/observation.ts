@@ -45,13 +45,13 @@ export class BridgeObservation {
         }
       } catch (error) {
         reliable = false;
-        op = await this.save(op, { state: "unknown_finality", observationTelemetry: appendObservationTelemetry(op, effect.role, "failure", beforeTelemetry,
+        op = await this.save(op, { state: "unknown_finality", observationTelemetry: appendObservationTelemetry(op, "source_observation", effect.role, "failure", beforeTelemetry,
           source.readTelemetry?.() ?? null), failure: retainedUnsentBridgeRpcFailure(op) ?? observationFailure(effect.role, error, "APN_INTERNAL") });
         continue;
       }
-      const observedTelemetry = appendObservationTelemetry(op, effect.role, observation === null ? "missing" : "success", beforeTelemetry,
-        source.readTelemetry?.() ?? null);
       if (observation === null) {
+        const observedTelemetry = appendObservationTelemetry(op, "source_observation", effect.role, "missing", beforeTelemetry,
+          source.readTelemetry?.() ?? null);
         reliable = false;
         if (effect.safeProof !== null) {
           op = await this.save(op, { state: "unknown_finality", observationTelemetry: observedTelemetry, failure: retainedUnsentBridgeRpcFailure(op) ?? {
@@ -66,6 +66,8 @@ export class BridgeObservation {
       }
       const { transaction, receipt } = observation;
       if (effect.safeProof !== null) {
+        const observedTelemetry = appendObservationTelemetry(op, "source_observation", effect.role, "success", beforeTelemetry,
+          source.readTelemetry?.() ?? null);
         if (transaction.safeBlock === null || !bridgeSame(proofIdentity(effect.safeProof), proofIdentity(transaction))) {
           reliable = false;
           op = await this.save(op, { state: "unknown_finality", observationTelemetry: observedTelemetry,
@@ -86,11 +88,15 @@ export class BridgeObservation {
         try { sourceProof = bridgeSourceProof(op.intent.materialization, op.intent.decoded, receipt); }
         catch {
           reliable = false;
-          op = await this.save(op, { state: "unknown_finality", failure: { reason: "source_protocol_evidence_unavailable", residualAllowance: null } });
+          op = await this.save(op, { state: "unknown_finality", observationTelemetry: appendObservationTelemetry(op, "source_observation",
+            effect.role, "failure", beforeTelemetry, source.readTelemetry?.() ?? null),
+            failure: { reason: "source_protocol_evidence_unavailable", residualAllowance: null } });
           continue;
         }
       }
-      op = await this.save(op, { state: reliable ? "source_pending" : "unknown_finality", sourceProof, observationTelemetry: observedTelemetry,
+      op = await this.save(op, { state: reliable ? "source_pending" : "unknown_finality", sourceProof,
+        observationTelemetry: appendObservationTelemetry(op, "source_observation", effect.role, "success", beforeTelemetry,
+          source.readTelemetry?.() ?? null),
         failure: reliable ? retainedUnsentBridgeRpcFailure(op) : op.failure, effects: replaceEffect(op, {
         ...current, phase, includedProof: transaction, safeProof: transaction.safeBlock === null ? null : transaction,
       }) });
@@ -116,54 +122,84 @@ export class BridgeObservation {
     const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
     if (providerBoundNative) {
       if (op.providerObservation?.status !== "completed_observed" || !isEvmTransactionHash(hint)) return await this.waiting(op);
+      const destination = this.destination(), beforeTelemetry = destination.readTelemetry?.() ?? null;
+      let proof: BridgeVerifiedDestinationProof;
       try {
-        const proof = await this.destinationCandidate(op, hint);
-        op = await this.save(op, { destinationProof: proof });
-        const outcome = proof.compositeTrace?.outcome;
-        if (outcome === undefined || outcome === null || outcome === "completed_native") return await this.finish(op, outcome ?? "delivery_correlated");
-        if (outcome === "recovered_weth" || outcome === "below_floor" || outcome === "protocol_mismatch") return await this.finishDestinationFailure(op, outcome);
-        return await this.save(op, { state: "unknown_finality", failure: { reason: "evidence_unavailable", residualAllowance: null } });
+        proof = await this.destinationCandidate(op, hint, destination);
       } catch (error) {
-        if (error instanceof DestinationPending) return await this.waiting(op);
-        if (error instanceof BnbProtocolMismatch) return await this.finishDestinationFailure(op, "protocol_mismatch");
-        return await this.save(op, { state: "unknown_finality", failure: destinationObservationFailure("evidence_unavailable", error) });
+        const telemetry = appendObservationTelemetry(op, "destination_observation", "bridge",
+          error instanceof DestinationPending ? "missing" : "failure", beforeTelemetry, destination.readTelemetry?.() ?? null);
+        if (error instanceof DestinationPending) return await this.waiting(op, telemetry);
+        if (error instanceof BnbProtocolMismatch) return await this.finishDestinationFailure(await this.save(op, { observationTelemetry: telemetry }), "protocol_mismatch");
+        return await this.save(op, { state: "unknown_finality", observationTelemetry: telemetry,
+          failure: destinationObservationFailure("evidence_unavailable", error) });
       }
+      op = await this.save(op, { destinationProof: proof, observationTelemetry: appendObservationTelemetry(op, "destination_observation",
+        "bridge", "success", beforeTelemetry, destination.readTelemetry?.() ?? null) });
+      const outcome = proof.compositeTrace?.outcome;
+      if (outcome === undefined || outcome === null || outcome === "completed_native") return await this.finish(op, outcome ?? "delivery_correlated");
+      if (outcome === "recovered_weth" || outcome === "below_floor" || outcome === "protocol_mismatch") return await this.finishDestinationFailure(op, outcome);
+      return await this.save(op, { state: "unknown_finality", failure: { reason: "evidence_unavailable", residualAllowance: null } });
     }
     // Destination correlation is bound to the provider-named transaction and its canonical receipt logs.
     if (isEvmTransactionHash(hint)) {
       let proof: BridgeVerifiedDestinationProof | null = null;
-      try { proof = await this.destinationCandidate(op, hint); }
+      const destination = this.destination(), beforeTelemetry = destination.readTelemetry?.() ?? null;
+      try { proof = await this.destinationCandidate(op, hint, destination); }
       catch (error) {
-        if (error instanceof DestinationPending) return await this.waiting(op);
-        return await this.save(op, { state: "unknown_finality", failure: destinationObservationFailure("destination_observation_unavailable", error) });
+        const telemetry = appendObservationTelemetry(op, "destination_observation", "bridge",
+          error instanceof DestinationPending ? "missing" : "failure", beforeTelemetry, destination.readTelemetry?.() ?? null);
+        if (error instanceof DestinationPending) return await this.waiting(op, telemetry);
+        return await this.save(op, { state: "unknown_finality", observationTelemetry: telemetry,
+          failure: destinationObservationFailure("destination_observation_unavailable", error) });
       }
-      if (proof !== null) return await this.finish(await this.save(op, { destinationProof: proof }));
+      if (proof !== null) return await this.finish(await this.save(op, { destinationProof: proof,
+        observationTelemetry: appendObservationTelemetry(op, "destination_observation", "bridge", "success", beforeTelemetry,
+          destination.readTelemetry?.() ?? null) }));
     }
     return await this.waiting(op);
   }
 
   async residual(op: BridgeOperationRecord) {
-    const m = op.intent.materialization, account = await this.residualSource().account(m.sender, m.approvalAddress, m.request.fromToken);
+    const observed = await this.residualObservation(op);
+    if (!observed.ok) throw observed.error;
+    return observed.value;
+  }
+  async residualObservation(op: BridgeOperationRecord) {
+    const source = this.residualSource(), beforeTelemetry = source.readTelemetry?.() ?? null;
+    try {
+      const value = await this.residualFrom(op, source);
+      return { ok: true as const, value, observationTelemetry: appendObservationTelemetry(op, "residual_observation", "bridge", "success",
+        beforeTelemetry, source.readTelemetry?.() ?? null) };
+    } catch (error) {
+      return { ok: false as const, error, observationTelemetry: appendObservationTelemetry(op, "residual_observation", "bridge", "failure",
+        beforeTelemetry, source.readTelemetry?.() ?? null) };
+    }
+  }
+  private async residualFrom(op: BridgeOperationRecord, source: BridgeRpcPort) {
+    const m = op.intent.materialization, account = await source.account(m.sender, m.approvalAddress, m.request.fromToken);
     if (account.chainId !== m.request.fromChainId || account.rpcOrigin !== op.intent.sourceRpcOrigin ||
       account.owner !== m.sender || account.token !== m.request.fromToken || account.spender !== m.approvalAddress) bridgeFailure("APN_RPC_PROTOCOL", "residual_allowance_identity");
     return { amountAtomic: account.allowanceAtomic, block: account.block, rpcOrigin: account.rpcOrigin };
   }
   private async finish(op: BridgeOperationRecord, reason = "delivery_correlated"): Promise<BridgeOperationRecord> {
-    let residualAllowance;
-    try { residualAllowance = await this.residual(op); }
-    catch { return await this.save(op, { state: "unknown_finality", failure: { reason: "residual_allowance_unavailable", residualAllowance: null } }); }
-    return await this.save(op, { state: "completed", failure: { reason, residualAllowance } });
+    const residual = await this.residualObservation(op);
+    if (!residual.ok) return await this.save(op, { state: "unknown_finality", observationTelemetry: residual.observationTelemetry,
+      failure: { reason: "residual_allowance_unavailable", residualAllowance: null } });
+    return await this.save(op, { state: "completed", observationTelemetry: residual.observationTelemetry,
+      failure: { reason, residualAllowance: residual.value } });
   }
   private async finishDestinationFailure(op: BridgeOperationRecord, reason: "recovered_weth" | "below_floor" | "protocol_mismatch"): Promise<BridgeOperationRecord> {
-    try { return await this.save(op, { state: "destination_failed", failure: { reason, residualAllowance: await this.residual(op), residualAllowanceStatus: "observed" } }); }
-    catch { return await this.save(op, { state: "destination_failed", failure: { reason, residualAllowance: null, residualAllowanceStatus: "unavailable" } }); }
+    const residual = await this.residualObservation(op);
+    return await this.save(op, { state: "destination_failed", observationTelemetry: residual.observationTelemetry,
+      failure: residual.ok ? { reason, residualAllowance: residual.value, residualAllowanceStatus: "observed" } :
+        { reason, residualAllowance: null, residualAllowanceStatus: "unavailable" } });
   }
-  private async destinationCandidate(op: BridgeOperationRecord, hash: Hex): Promise<BridgeVerifiedDestinationProof> {
+  private async destinationCandidate(op: BridgeOperationRecord, hash: Hex, destination: BridgeRpcPort): Promise<BridgeVerifiedDestinationProof> {
     const request = op.intent.materialization.request;
     const proveNativeDelta = bridgeProviderBoundNativeDestination(request);
     const bnb = op.intent.decoded.composite !== undefined;
     let canonical = null;
-    const destination = this.destination();
     const observe = async (transactionHash: Hex, nativeDelivery?: Parameters<BridgeRpcPort["observe"]>[2]) =>
       destination.observeDestination === undefined
         ? await destination.observe(transactionHash, undefined, nativeDelivery)
@@ -190,10 +226,10 @@ export class BridgeObservation {
     return { ...proof, safeBlock, rpcOrigin: destination.origin,
       transactionProofHash: hashObject(proofIdentity(found.transaction)) };
   }
-  private async waiting(op: BridgeOperationRecord): Promise<BridgeOperationRecord> {
+  private async waiting(op: BridgeOperationRecord, observationTelemetry?: BridgeMutable["observationTelemetry"]): Promise<BridgeOperationRecord> {
     const provider = op.providerObservation?.status;
     const exceptional = provider !== undefined && !["not_found", "pending", "completed_observed"].includes(provider);
-    return await this.save(op, { state: exceptional ? "unknown_finality" : "destination_pending",
+    return await this.save(op, { state: exceptional ? "unknown_finality" : "destination_pending", ...(observationTelemetry === undefined ? {} : { observationTelemetry }),
       failure: exceptional ? { reason: `provider_${provider}_unproved`, residualAllowance: null } : null });
   }
   private async historicalDeployment(op: BridgeOperationRecord, rpc: BridgeRpcPort,
@@ -206,26 +242,34 @@ export class BridgeObservation {
       current.configurationHash !== frozen.configurationHash || !bridgeSame(current.block, proof.block)) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_identity");
   }
 }
-function appendObservationTelemetry(op: BridgeOperationRecord, effectRole: "approval" | "bridge", outcome: "success" | "missing" | "failure",
+function appendObservationTelemetry(op: BridgeOperationRecord, stage: "source_observation" | "destination_observation" | "residual_observation",
+  effectRole: "approval" | "bridge", outcome: "success" | "missing" | "failure",
   before: RpcReadTelemetry | null, after: RpcReadTelemetry | null) {
   const existing = op.observationTelemetry ?? [];
   if (after === null) return existing;
   const prior = before ?? zeroTelemetry(after.deadline), deltaRecord = (current: Readonly<Record<string, number>>, previous: Readonly<Record<string, number>>) =>
     Object.fromEntries(Object.keys(current).sort().map((key) => [key, Math.max(0, (current[key] ?? 0) - (previous[key] ?? 0))]));
-  return [...existing, { schemaVersion: "apn.bridge-observation-telemetry.v1" as const, stage: "source_observation" as const, effectRole, outcome,
-    physicalRequests: Math.max(0, after.httpRequests - prior.httpRequests), httpAttempts: Math.max(0, after.httpAttempts - prior.httpAttempts),
+  const roleAttempts = { primary: Math.max(0, after.attemptsByEndpointRole.primary - prior.attemptsByEndpointRole.primary),
+    receipt: Math.max(0, after.attemptsByEndpointRole.receipt - prior.attemptsByEndpointRole.receipt),
+    archive: Math.max(0, after.attemptsByEndpointRole.archive - prior.attemptsByEndpointRole.archive) };
+  return [...existing, { schemaVersion: "apn.bridge-observation-telemetry.v1" as const, stage, effectRole, outcome,
+    physicalRequests: roleAttempts.primary + roleAttempts.receipt + roleAttempts.archive,
+    httpAttempts: Math.max(0, after.httpAttempts - prior.httpAttempts),
     logicalRpcItems: Math.max(0, after.logicalItems - prior.logicalItems), batchCount: Math.max(0, after.batchCount - prior.batchCount),
-    maxBatchSize: after.maxBatchSize, budgetRejectedBeforeTransport: Math.max(0, after.budgetRejectedBeforeTransport - prior.budgetRejectedBeforeTransport),
-    attemptsByEndpointRole: { primary: Math.max(0, after.attemptsByEndpointRole.primary - prior.attemptsByEndpointRole.primary),
-      receipt: Math.max(0, after.attemptsByEndpointRole.receipt - prior.attemptsByEndpointRole.receipt),
-      archive: Math.max(0, after.attemptsByEndpointRole.archive - prior.attemptsByEndpointRole.archive) },
+    maxBatchSize: invocationMaxBatchSize(after.attemptsByBatchSize, prior.attemptsByBatchSize),
+    budgetRejectedBeforeTransport: Math.max(0, after.budgetRejectedBeforeTransport - prior.budgetRejectedBeforeTransport),
+    attemptsByEndpointRole: roleAttempts,
     attemptsByMethodClass: deltaRecord(after.attemptsByMethodClass, prior.attemptsByMethodClass) }];
 }
 function zeroTelemetry(deadline: number): RpcReadTelemetry {
   return { logicalItems: 0, httpRequests: 0, httpAttempts: 0, batchCount: 0, batchItemsByMethod: {}, dedupHits: 0, cacheHits: 0,
     singleflightHits: 0, endpointIdentities: [], remainingLogicalItems: 0, remainingHttpRequests: 0, remainingHttpAttempts: 0, deadline,
     uniqueCalls: 0, totalAttempts: 0, perMethod: {}, remainingUniqueCalls: 0, attemptsByEndpointRole: { primary: 0, receipt: 0, archive: 0 },
-    attemptsByMethodClass: {}, maxBatchSize: 0, budgetRejectedBeforeTransport: 0 };
+    attemptsByMethodClass: {}, attemptsByBatchSize: {}, maxBatchSize: 0, budgetRejectedBeforeTransport: 0 };
+}
+function invocationMaxBatchSize(current: Readonly<Record<string, number>>, previous: Readonly<Record<string, number>>): number {
+  return Object.keys(current).map(Number).filter((size) => Number.isSafeInteger(size) && size > 0 &&
+    (current[String(size)] ?? 0) > (previous[String(size)] ?? 0)).reduce((maximum, size) => Math.max(maximum, size), 0);
 }
 function observationFailure(effectRole: "approval" | "bridge", error: unknown, fallbackCode: ErrorCode | null = null) {
   return { reason: "source_observation_unavailable", residualAllowance: null,
