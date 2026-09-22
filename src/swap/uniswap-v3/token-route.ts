@@ -90,7 +90,7 @@ export function encodeUniswapTokenApproval(tokenAddress: string, amount: string)
     readonly data: Hex;
     readonly amount: string;
 } {
-    const to = token(tokenAddress), value = uint(amount).toString();
+    const to = token(tokenAddress), value = approvalAmount(amount).toString();
     return { to, spender: UNISWAP_V3_SWAP_ROUTER,
         data: encodeFunctionData({ abi: ERC20, functionName: "approve", args: [UNISWAP_V3_SWAP_ROUTER, BigInt(value)] }), amount: value };
 }
@@ -130,5 +130,6 @@ function uint(value: string) { try {
 catch {
     return invalid("Uniswap amount is invalid.");
 } }
+function approvalAmount(value: string) { try { return parseAtomic(value); } catch { return invalid("Uniswap approval amount is invalid."); } }
 function invalid(message: string): never { throw new ApnError("APN_INVALID_INPUT", message); }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

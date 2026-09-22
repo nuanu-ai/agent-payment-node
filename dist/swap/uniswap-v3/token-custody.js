@@ -5,6 +5,7 @@ import { EncryptedWalletStore } from "../../encrypted-wallet-store.js";
 import { ApnError } from "../../errors.js";
 import { evmRpcHex, evmRpcQuantity } from "../../evm-rpc-codec.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
+import { UniswapTokenJournal } from "./token-operation.js";
 import { encodeUniswapTokenApproval } from "./token-route.js";
 import { UniswapTokenNonceStore } from "./token-nonce.js";
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
@@ -16,6 +17,7 @@ export class UniswapTokenCustody {
     wallets;
     effects;
     nonces;
+    operations;
     constructor(state, wrapping, call, now) {
         this.state = state;
         this.call = call;
@@ -23,13 +25,25 @@ export class UniswapTokenCustody {
         this.wallets = new EncryptedWalletStore(state, wrapping);
         this.effects = new UniswapTokenEffectJournal(state.root);
         this.nonces = new UniswapTokenNonceStore(state.root);
+        this.operations = new UniswapTokenJournal(state.root);
     }
     async withAccountLock(account, work) {
         return await this.state.withLocks([`uniswap-token-account:${domainHash("apn.uniswap-token-account-lock.v1", account)}`], work);
     }
     async allocateNonce(op, kind) {
         const pending = evmRpcQuantity(await this.call("eth_getTransactionCount", [op.account, "pending"]));
-        return await this.nonces.allocate(op, kind, pending);
+        return await this.nonces.allocate(op, kind, pending, async (operationId, effectKind) => await this.hasDurableEffect(operationId, effectKind));
+    }
+    async releaseNonce(op, kind, nonce) {
+        await this.nonces.release(op, kind, nonce, async (operationId, effectKind) => await this.hasDurableEffect(operationId, effectKind));
+    }
+    async commitNonce(op, kind, nonce) { await this.nonces.commit(op, kind, nonce); }
+    async hasDurableEffect(operationId, kind) {
+        const op = await this.operations.load(operationId);
+        if (op === null)
+            return false;
+        const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
+        return attempt?.transactionHash !== null && attempt?.transactionHash !== undefined || await this.effects.load(op, kind) !== null;
     }
     async currentAllowance(op) {
         const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account, op.route.router] });

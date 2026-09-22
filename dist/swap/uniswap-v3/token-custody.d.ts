@@ -3,7 +3,7 @@ import type { EvmRpcCall } from "../../evm-ports.js";
 import type { WrappingSecretPort } from "../../macos-keychain.js";
 import type { StateStore } from "../../state.js";
 import type { TokenEffectKind, TokenSealedEffect } from "./token-execution.js";
-import type { UniswapTokenOperation } from "./token-operation.js";
+import { type UniswapTokenOperation } from "./token-operation.js";
 export interface TokenTransactionEnvelope {
     readonly chainId: 1;
     readonly from: string;
@@ -23,9 +23,13 @@ export declare class UniswapTokenCustody {
     private readonly wallets;
     private readonly effects;
     private readonly nonces;
+    private readonly operations;
     constructor(state: StateStore, wrapping: WrappingSecretPort, call: EvmRpcCall, now: () => Date);
     withAccountLock<T>(account: string, work: () => Promise<T>): Promise<T>;
     allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
+    releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+    commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+    private hasDurableEffect;
     currentAllowance(op: UniswapTokenOperation): Promise<string>;
     seal(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect>;
     private sealUnlocked;

@@ -10,12 +10,14 @@ export class UniswapTokenSigningGuard {
     call;
     usage;
     now;
+    verifyPins;
     wallets;
-    constructor(state, wrapping, call, usage, now) {
+    constructor(state, wrapping, call, usage, now, verifyPins = verifyUniswapTokenRoutePins) {
         this.state = state;
         this.call = call;
         this.usage = usage;
         this.now = now;
+        this.verifyPins = verifyPins;
         this.wallets = new EncryptedWalletStore(state, wrapping);
     }
     async confirm(material) {
@@ -70,7 +72,7 @@ export class UniswapTokenSigningGuard {
         if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n)
             throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token signing requires Ethereum chain 1.");
         const block = await evmRpcBlock(this.call, "latest");
-        await verifyUniswapTokenRoutePins(this.call, block.tag);
+        await this.verifyPins(this.call, block.tag);
         if (router === token || !Number.isSafeInteger(deadline))
             corrupt("Uniswap token signing material changed.");
         if (evmRpcQuantity(await this.call("eth_getBalance", [account, block.tag])) < BigInt(nativeCap))

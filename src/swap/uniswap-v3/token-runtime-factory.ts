@@ -6,6 +6,7 @@ import type { WrappingSecretPort } from "../../macos-keychain.js";
 import type { ClockPort } from "../../ports.js";
 import type { StateStore } from "../../state.js";
 import { exactChainConsent } from "../../tty-approval.js";
+import type { TtyTransferApprovalOptions } from "../../tty-approval.js";
 import { UniswapTokenQuoteBuilder } from "./token-builder.js";
 import { UniswapTokenCustody } from "./token-custody.js";
 import type { UniswapTokenCommandRuntime, UniswapTokenExecutionPorts } from "./token-execution.js";
@@ -18,25 +19,28 @@ import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
 
 export function createUniswapTokenRuntime(input: { readonly state: StateStore; readonly wrapping: WrappingSecretPort;
-  readonly clock: ClockPort; readonly call: EvmRpcCall; readonly foreground: "approve" | "cleanup" | "refuse" }): UniswapTokenCommandRuntime {
+  readonly clock: ClockPort; readonly call: EvmRpcCall; readonly foreground: "approve" | "cleanup" | "refuse";
+  readonly tty?: TtyTransferApprovalOptions; readonly verifyPins?: (call: EvmRpcCall, tag: import("viem").Hex) => Promise<void> }): UniswapTokenCommandRuntime {
   const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()),
     observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call), ledger = new AssetUsageLedger(state.root),
-    usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now());
+    usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
   const ports: UniswapTokenExecutionPorts & { confirm(material: import("./token-material.js").UniswapTokenMaterial): Promise<void> } = {
     now: () => clock.now(), withAccountLock: async (account, work) => await custody.withAccountLock(account, work),
     allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),
+    releaseNonce: async (op, kind, nonce) => { await custody.releaseNonce(op, kind, nonce); },
+    commitNonce: async (op, kind, nonce) => { await custody.commitNonce(op, kind, nonce); },
     guard: async (op, kind, nonce) => await guard.inspect(op, kind, nonce), reserveUsage: async (op) => await usage.reserve(op),
     currentUsage: async (op) => await usage.current(op), followUsage: async (op, target) => await usage.follow(op, target),
     revalidate: async (op) => await revalidator.revalidate(op), seal: async (op, kind, nonce) => await custody.seal(op, kind, nonce),
     send: async (op, kind) => await custody.send(op, kind), observe: async (op, kind, hash) => await observer.observe(op, kind, hash),
-    foregroundApprove: async (op) => await foreground(input.foreground === "approve", op, false, clock.now()),
-    foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now()), confirm: async (material) => await guard.confirm(material),
+    foregroundApprove: async (op) => await foreground(input.foreground === "approve", op, false, clock.now(), input.tty),
+    foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty), confirm: async (material) => await guard.confirm(material),
   };
   const admit = async (request: Parameters<UniswapTokenQuoteBuilder["quote"]>[0], now: Date) => await usage.admitQuote(request, now);
   return new InstalledUniswapTokenRuntime(new UniswapTokenQuoteBuilder(call, materials, admit, () => clock.now()), materials,
     new UniswapTokenJournal(state.root), ports);
 }
-async function foreground(enabled: boolean, op: UniswapTokenOperation, cleanup: boolean, now: Date) {
+async function foreground(enabled: boolean, op: UniswapTokenOperation, cleanup: boolean, now: Date, tty: TtyTransferApprovalOptions = {}) {
   if (!enabled) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Uniswap token approval must continue in the foreground CLI.",
     { reason: "swap_foreground_cli_required" });
   const lines = cleanup ? ["Agent Payment Node Uniswap token allowance cleanup", `Profile: ${op.profile}`, `Operation: ${op.operationId}`,
@@ -47,6 +51,6 @@ async function foreground(enabled: boolean, op: UniswapTokenOperation, cleanup: 
       `Aggregate native debit cap: ${op.maximumNativeDebitWei} wei`, `Deadline: ${new Date(op.route.deadline * 1000).toISOString()}`,
       "Approval, swap, and any explicit cleanup are independently signed and broadcast at most once."];
   await exactChainConsent(lines, approvalCode("swap", op.integrityHash, cleanup ? "cleanup" : "execute"),
-    cleanup ? new Date(now.getTime() + 300_000).toISOString() : new Date(op.route.deadline * 1000).toISOString(), {});
+    cleanup ? new Date(now.getTime() + 300_000).toISOString() : new Date(op.route.deadline * 1000).toISOString(), tty);
 }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

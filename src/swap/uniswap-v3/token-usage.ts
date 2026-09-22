@@ -58,10 +58,7 @@ export class UniswapTokenUsage {
   }
 
   async confirmCleanup(op: UniswapTokenOperation): Promise<void> {
-    const active = await this.active(op.profile, op.account), now = this.clock.now();
-    if (active.digest !== op.policyDigest) blocked("The active token swap policy changed.", "uniswap_token_policy_changed");
     await this.current(op);
-    await this.ledger.usage(identityOf(op), now);
   }
 
   async current(op: UniswapTokenOperation): Promise<TokenUsageBinding> {

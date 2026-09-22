@@ -26,6 +26,8 @@ test("approval is exact input to the admitted router and route mutation is rejec
   const decoded = decodeFunctionData({ abi: approve, data: approval.data });
   assert.equal(approval.to, UNISWAP_USDC); assert.equal(approval.spender, UNISWAP_V3_SWAP_ROUTER);
   assert.deepEqual(decoded.args, [UNISWAP_V3_SWAP_ROUTER, 1_000_000n]);
+  assert.deepEqual(decodeFunctionData({ abi: approve, data: encodeUniswapTokenApproval(UNISWAP_USDC, "0").data }).args,
+    [UNISWAP_V3_SWAP_ROUTER, 0n]);
   const route = createUniswapTokenRoute({ inputToken: UNISWAP_USDC, outputToken: ETHEREUM_USDT, recipient: RECIPIENT,
     amountIn: "1000000", amountOutMinimum: "990000", deadline: 1_900_000_000 });
   assert.throws(() => validateUniswapTokenRoute({ ...route, amountIn: "1000001" }), { code: "APN_INVALID_INPUT" });

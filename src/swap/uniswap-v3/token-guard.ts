@@ -16,7 +16,8 @@ const ERC20 = parseAbi(["function allowance(address owner,address spender) view 
 export class UniswapTokenSigningGuard {
   private readonly wallets: EncryptedWalletStore;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly call: EvmRpcCall,
-    private readonly usage: UniswapTokenUsage, private readonly now: () => Date) { this.wallets = new EncryptedWalletStore(state, wrapping); }
+    private readonly usage: UniswapTokenUsage, private readonly now: () => Date,
+    private readonly verifyPins: (call: EvmRpcCall, tag: Hex) => Promise<void> = verifyUniswapTokenRoutePins) { this.wallets = new EncryptedWalletStore(state, wrapping); }
 
   async confirm(material: UniswapTokenMaterial): Promise<void> {
     await this.usage.confirmMaterial(material); await this.wallet(material.profile, material.account);
@@ -58,7 +59,7 @@ export class UniswapTokenSigningGuard {
 
   private async common(account: string, token: string, router: string, deadline: number, nativeCap: string) {
     if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token signing requires Ethereum chain 1.");
-    const block = await evmRpcBlock(this.call, "latest"); await verifyUniswapTokenRoutePins(this.call, block.tag);
+    const block = await evmRpcBlock(this.call, "latest"); await this.verifyPins(this.call, block.tag);
     if (router === token || !Number.isSafeInteger(deadline)) corrupt("Uniswap token signing material changed.");
     if (evmRpcQuantity(await this.call("eth_getBalance", [account, block.tag])) < BigInt(nativeCap)) blocked("Native fee balance is below the approved bound.", "uniswap_token_native_balance");
     return block;
