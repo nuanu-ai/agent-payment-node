@@ -142,7 +142,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     return bridgeJson(response.body, 1024 * 1024);
   };
   const sessionBatchCall = (session: RpcReadSession) => async (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route: "primary" | "archive" | "archive_deployment" | "receipt" = "primary") => {
-    if (route === "receipt" && items.some((item) => !isReceiptBatchItem(item.method, item.params))) {
+    if (route === "receipt" && !isReceiptBatchShape(items)) {
       bridgeFailure("APN_RPC_CONFIG", "bridge_receipt_RPC_method");
     }
     if (route !== "primary" && route !== "receipt" && items.some((item) => !isArchiveBatchItem(item.method, item.params))) {
@@ -661,8 +661,11 @@ function isArchiveBatchItem(method: string, params: readonly unknown[]): boolean
   if (method === "debug_traceTransaction") return params.length === 2 && typeof params[0] === "string" && /^0x[0-9a-fA-F]{64}$/u.test(params[0]);
   return isArchiveRead(method, params);
 }
-function isReceiptBatchItem(method: string, params: readonly unknown[]): boolean {
-  return method === "eth_chainId" && params.length === 0 || method === "eth_getTransactionReceipt" && isArchiveRead(method, params);
+function isReceiptBatchShape(items: readonly { readonly method: string; readonly params: readonly unknown[] }[]): boolean {
+  if (items.length !== 2) return false;
+  const [chain, receipt] = items;
+  return chain?.method === "eth_chainId" && chain.params.length === 0 && receipt?.method === "eth_getTransactionReceipt" &&
+    receipt.params.length === 1 && typeof receipt.params[0] === "string" && /^0x[0-9a-f]{64}$/u.test(receipt.params[0]);
 }
 function rpcArchiveChainValue(chainId: BridgeChainId): (value: unknown) => bigint {
   return (value) => {

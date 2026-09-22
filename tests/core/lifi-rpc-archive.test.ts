@@ -140,18 +140,32 @@ test("wrong explicit receipt chain fails and state remains isolated on the archi
   ]);
 });
 
-test("receipt route refuses logs and state before the explicit receipt endpoint transport", async () => {
+test("receipt route accepts only the exact ordered chain identity and canonical receipt pair before transport", async () => {
   let receiptCalls = 0;
   const environment = { ...withArchive, APN_ETHEREUM_RECEIPT_RPC_URL: "https://receipt.example" };
-  const transport = { request: async (endpoint: string) => { if (new URL(endpoint).host === "receipt.example") receiptCalls += 1;
-    throw new Error("transport must remain unused"); } };
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    assert.equal(new URL(endpoint).host, "receipt.example"); receiptCalls += 1;
+    const requests = JSON.parse(body!) as Array<{ id: string; method: string }>;
+    assert.deepEqual(requests.map((item) => item.method), ["eth_chainId", "eth_getTransactionReceipt"]);
+    return { status: 200, body: JSON.stringify(requests.map((request) => ({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "eth_chainId" ? "0x1" : RECEIPT }))) };
+  } };
   const batch = bridgeRpcCall(1, environment, { transport }).sessionBatchCall(new RpcReadSession({ wait: async () => {} }));
-  for (const item of [
-    { method: "eth_getLogs", params: [{}] }, { method: "eth_getCode", params: [DIAMOND, "0x10"] },
-    { method: "eth_getBlockByNumber", params: ["latest", false] }, { method: "eth_sendRawTransaction", params: ["0x02"] },
-  ]) await assert.rejects(batch([{ ...item, cachePolicy: "none", decoder: String }], "receipt"),
+  const item = (method: string, params: readonly unknown[]) => ({ method, params, cachePolicy: "none" as const, decoder: (value: unknown) => value });
+  const chain = item("eth_chainId", []), receipt = item("eth_getTransactionReceipt", [TRANSACTION_HASH]);
+  const rejected = [
+    [], [chain], [receipt], [receipt, chain], [chain, chain], [receipt, receipt], [chain, receipt, receipt],
+    [chain, item("eth_getLogs", [{}])], [chain, item("eth_getCode", [DIAMOND, "0x10"])],
+    [chain, item("eth_getBlockByNumber", ["latest", false])], [chain, item("eth_sendRawTransaction", ["0x02"])],
+    [item("eth_chainId", ["extra"]), receipt], [chain, item("eth_getTransactionReceipt", [TRANSACTION_HASH, "extra"])],
+    [chain, item("eth_getTransactionReceipt", ["0xdeadbeef"])],
+    [chain, item("eth_getTransactionReceipt", [`0x${"B".repeat(64)}`])],
+  ];
+  for (const shape of rejected) await assert.rejects(batch(shape, "receipt"),
     { code: "APN_RPC_CONFIG", message: /bridge_receipt_RPC_method/u });
   assert.equal(receiptCalls, 0);
+  assert.deepEqual(await batch([chain, receipt], "receipt"), ["0x1", RECEIPT]);
+  assert.equal(receiptCalls, 1);
 });
 
 test("the exact Ethereum PublicNode historical receipt capability response falls back only from its root origin", async () => {
