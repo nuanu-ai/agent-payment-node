@@ -1,5 +1,6 @@
 import type { RpcReadTelemetry } from "../../lifi/rpc.js";
 import { SecureStateStore } from "../../secure-state-store.js";
+import type { TokenPrimaryPoolTelemetry } from "./token-rpc-pool.js";
 export interface TokenRpcBudgetRow {
     readonly reservation: string;
     readonly command: string;
@@ -12,6 +13,7 @@ export interface TokenRpcBudgetRow {
     readonly methodClasses: Readonly<Record<string, number>> | null;
     readonly batchSizes: Readonly<Record<string, number>> | null;
     readonly budgetRejects: number | null;
+    readonly primaryPool?: TokenPrimaryPoolTelemetry | null;
 }
 interface BudgetRecord {
     readonly schemaVersion: "apn.uniswap-token-rpc-budget.v1";
@@ -22,7 +24,7 @@ interface BudgetRecord {
 export declare const TOKEN_OPERATION_RPC_CAP = 64;
 export declare class UniswapTokenRpcBudgetJournal extends SecureStateStore {
     reserve(binding: string, command: string, cap: number, requestSessionCap?: number, budgetClass?: NonNullable<TokenRpcBudgetRow["budgetClass"]>): Promise<string>;
-    settle(binding: string, reservation: string, telemetry: RpcReadTelemetry | null, effects: number): Promise<void>;
+    settle(binding: string, reservation: string, telemetry: RpcReadTelemetry | null, effects: number, primaryPool?: TokenPrimaryPoolTelemetry): Promise<void>;
     linkQuote(from: string, to: string): Promise<void>;
     reconcile(binding: string): Promise<void>;
     load(binding: string): Promise<BudgetRecord | null>;

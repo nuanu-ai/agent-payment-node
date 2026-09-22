@@ -22,10 +22,11 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
     inventory() { return this.builder.inventory(); }
     async quote(request: Extract<CommandRequest, {
         readonly command: "swap.uniswap-token.quote";
-    }>) { const result = await this.builder.quote(request) as { readonly quoteHash: string };
-      if (this.rpcBudget !== undefined) { const reservation = await this.rpcBudget.reserve(result.quoteHash, request.command, 8, 8, "quote");
-        await this.rpcBudget.settle(result.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); }
-      return result; }
+    }>) { const binding = domainHash("apn.uniswap-token-quote-attempt.v1", canonicalJson(request));
+      const cap = this.poolCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote"); let result: { readonly quoteHash: string } | undefined;
+      try { result = await this.builder.quote(request) as { readonly quoteHash: string }; return result; }
+      finally { if (reservation !== undefined) { await this.rpcBudget!.settle(binding, reservation, this.rpc?.telemetry?.() ?? null,
+          this.rpc?.effectAttempts?.() ?? 0, this.rpc?.primaryPoolTelemetry?.()); if (result !== undefined) await this.rpcBudget!.linkQuote(binding, result.quoteHash); } } }
     async prepare(request: Prepare) {
         const material = await this.materials.load(request.quoteHash);
         if (material === null)
@@ -36,9 +37,10 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
             blocked("Token quote expired.", "uniswap_token_quote_expired");
         const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
             quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
-        const reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, 9, 9, "prepare");
+        const cap = this.poolCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
         try { await this.ports.confirm(material); }
-        finally { if (reservation !== undefined) await this.rpcBudget!.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); }
+        finally { if (reservation !== undefined) await this.rpcBudget!.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null,
+          this.rpc?.effectAttempts?.() ?? 0, this.rpc?.primaryPoolTelemetry?.()); }
         await this.rpcBudget?.linkQuote(request.quoteHash, operationId);
         const prior = await this.journal.load(operationId);
         if (prior !== null) { await this.rpcBudget?.reconcile(operationId); return prior; }
@@ -49,18 +51,22 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
             mechanismDigest: material.mechanismDigest, now: this.ports.now() }));
         await this.rpcBudget?.reconcile(operationId); return saved;
     }
-    async approve(id: string) { return await this.budgeted(id, "swap.uniswap-token.approve", async () => [14, 14, "approval_effect"] as const, async () => await this.execution.approve(id)); }
+    async approve(id: string) { return await this.budgeted(id, "swap.uniswap-token.approve", async () => { const cap = this.poolCap(14);
+      return [cap, cap, "approval_effect"] as const; }, async () => await this.execution.approve(id)); }
     async execute(id: string) { return await this.budgeted(id, "swap.uniswap-token.execute", async () => {
       const phase = (await this.journal.load(id))?.phase;
-      return phase === "approved" || phase === "approval_observed" ? [24, 24, "swap_effect"] as const : [0, 24, "recovery"] as const;
+      const cap = 24;
+      return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] as const : [0, cap, "recovery"] as const;
     }, async () => await this.execution.execute(id)); }
-    async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, 8, "recovery"] as const, async () => await this.execution.status(id)); }
-    async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, 14, "recovery"] as const, async () => await this.execution.cleanup(id)); }
+    async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(8), "recovery"] as const, async () => await this.execution.status(id)); }
+    async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"] as const, async () => await this.execution.cleanup(id)); }
     private async budgeted<T>(id: string, command: string,
       budget: () => Promise<readonly [number, number, NonNullable<import("./token-rpc-budget.js").TokenRpcBudgetRow["budgetClass"]>]>, work: () => Promise<T>) {
       return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => { const [cap, requestSessionCap, budgetClass] = await budget();
         if (this.rpcBudget === undefined) return await work();
         await this.rpcBudget.reconcile(id); const reservation = await this.rpcBudget.reserve(id, command, cap, requestSessionCap, budgetClass); try { return await work(); }
-        finally { await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); } }); }
+        finally { await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0,
+          this.rpc?.primaryPoolTelemetry?.()); } }); }
+    private poolCap(base: number) { return base + (this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
 }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

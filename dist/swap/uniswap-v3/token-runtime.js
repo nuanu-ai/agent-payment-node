@@ -24,12 +24,20 @@ export class InstalledUniswapTokenRuntime {
     }
     inventory() { return this.builder.inventory(); }
     async quote(request) {
-        const result = await this.builder.quote(request);
-        if (this.rpcBudget !== undefined) {
-            const reservation = await this.rpcBudget.reserve(result.quoteHash, request.command, 8, 8, "quote");
-            await this.rpcBudget.settle(result.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
+        const binding = domainHash("apn.uniswap-token-quote-attempt.v1", canonicalJson(request));
+        const cap = this.poolCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote");
+        let result;
+        try {
+            result = await this.builder.quote(request);
+            return result;
         }
-        return result;
+        finally {
+            if (reservation !== undefined) {
+                await this.rpcBudget.settle(binding, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0, this.rpc?.primaryPoolTelemetry?.());
+                if (result !== undefined)
+                    await this.rpcBudget.linkQuote(binding, result.quoteHash);
+            }
+        }
     }
     async prepare(request) {
         const material = await this.materials.load(request.quoteHash);
@@ -41,13 +49,13 @@ export class InstalledUniswapTokenRuntime {
             blocked("Token quote expired.", "uniswap_token_quote_expired");
         const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
             quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
-        const reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, 9, 9, "prepare");
+        const cap = this.poolCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
         try {
             await this.ports.confirm(material);
         }
         finally {
             if (reservation !== undefined)
-                await this.rpcBudget.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
+                await this.rpcBudget.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0, this.rpc?.primaryPoolTelemetry?.());
         }
         await this.rpcBudget?.linkQuote(request.quoteHash, operationId);
         const prior = await this.journal.load(operationId);
@@ -63,15 +71,21 @@ export class InstalledUniswapTokenRuntime {
         await this.rpcBudget?.reconcile(operationId);
         return saved;
     }
-    async approve(id) { return await this.budgeted(id, "swap.uniswap-token.approve", async () => [14, 14, "approval_effect"], async () => await this.execution.approve(id)); }
+    async approve(id) {
+        return await this.budgeted(id, "swap.uniswap-token.approve", async () => {
+            const cap = this.poolCap(14);
+            return [cap, cap, "approval_effect"];
+        }, async () => await this.execution.approve(id));
+    }
     async execute(id) {
         return await this.budgeted(id, "swap.uniswap-token.execute", async () => {
             const phase = (await this.journal.load(id))?.phase;
-            return phase === "approved" || phase === "approval_observed" ? [24, 24, "swap_effect"] : [0, 24, "recovery"];
+            const cap = 24;
+            return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] : [0, cap, "recovery"];
         }, async () => await this.execution.execute(id));
     }
-    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, 8, "recovery"], async () => await this.execution.status(id)); }
-    async cleanup(id) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, 14, "recovery"], async () => await this.execution.cleanup(id)); }
+    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(8), "recovery"], async () => await this.execution.status(id)); }
+    async cleanup(id) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"], async () => await this.execution.cleanup(id)); }
     async budgeted(id, command, budget, work) {
         return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => {
             const [cap, requestSessionCap, budgetClass] = await budget();
@@ -83,10 +97,11 @@ export class InstalledUniswapTokenRuntime {
                 return await work();
             }
             finally {
-                await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
+                await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0, this.rpc?.primaryPoolTelemetry?.());
             }
         });
     }
+    poolCap(base) { return base + (this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
 }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-runtime.js.map

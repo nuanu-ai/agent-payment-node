@@ -26,7 +26,9 @@ export class RpcProviderScheduler {
   private readonly families = new Map<string, { active: boolean; lastStart: number; cooldownUntil: number }>();
   private readonly queue: ScheduledRpcRead[] = [];
   private active = 0;
-  constructor(private readonly coordinator?: RpcProviderPacingCoordinator, private readonly pacingNow?: () => number) {}
+  constructor(private readonly coordinator?: RpcProviderPacingCoordinator, private readonly pacingNow?: () => number,
+    private readonly cooldownMode: "wait" | "reject" = "wait",
+    private readonly cooldownFailures: "rate_limit" | "transient" = "rate_limit") {}
 
   schedule(origin: string, now: () => number, wait: (milliseconds: number) => Promise<void>, beforeWait: (milliseconds: number) => void,
     task: () => Promise<unknown>): Promise<unknown> {
@@ -55,6 +57,9 @@ export class RpcProviderScheduler {
         if (before < lastStart) throw new ApnError("APN_RPC_CONFIG", "RPC scheduler clock moved backwards.", {
           reason: "rpc_scheduler_clock_rollback", providerFamily: entry.family,
         });
+        if (this.cooldownMode === "reject" && cooldownUntil > before) {
+          throw new ApnError("APN_PROVIDER_UNAVAILABLE", "RPC provider is cooling down.", { reason: "rpc_provider_cooldown" });
+        }
         const nextAllowed = Math.max(lastStart + RPC_ORIGIN_GAP_MS, cooldownUntil), delay = Math.max(0, nextAllowed - before);
         entry.beforeWait(delay); if (delay > 0) await entry.wait(delay);
         let current = clock();
@@ -71,10 +76,13 @@ export class RpcProviderScheduler {
         await saveStart(state.lastStart);
         try { return await entry.task(); }
         catch (error) {
-          if (error instanceof RpcHttpFailure && error.status === 429) {
+          const transportCooldown = this.cooldownFailures === "transient" && transientTransport(error), httpCooldown = error instanceof RpcHttpFailure &&
+            (error.status === 429 || this.cooldownFailures === "transient" && error.status >= 500 && error.status <= 599);
+          if (httpCooldown || transportCooldown) {
             const observed = clock();
             if (observed < current) throw schedulerClockRollback(entry.family);
-            const effectiveCooldown = Math.min(30_000, Math.max(RPC_RETRY_DELAY_MS, error.retryAfterMs ?? 0));
+            const effectiveCooldown = error instanceof RpcHttpFailure && error.status === 429
+              ? Math.min(30_000, Math.max(RPC_RETRY_DELAY_MS, error.retryAfterMs ?? 0)) : 5_000;
             state.cooldownUntil = Math.max(state.cooldownUntil, observed + effectiveCooldown);
             await saveCooldownUntil(state.cooldownUntil);
           }
@@ -86,6 +94,13 @@ export class RpcProviderScheduler {
     } catch (error) { entry.reject(error); }
     finally { state.active = false; this.active -= 1; this.pump(); }
   }
+}
+
+function transientTransport(error: unknown): boolean {
+  if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS") return false;
+  const reason = error.details?.transportReason;
+  return typeof reason === "string" && ["DNS_deadline", "request_deadline", "request_interrupted", "response_aborted", "response_interrupted"]
+    .includes(reason);
 }
 
 export function rpcOriginIdentity(origin: string): string { try { return new URL(origin).origin; } catch { return "invalid-origin"; } }
