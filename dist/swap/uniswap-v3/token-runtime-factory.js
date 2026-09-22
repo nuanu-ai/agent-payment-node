@@ -14,7 +14,7 @@ import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
 export function createUniswapTokenRuntime(input) {
     const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call), ledger = new AssetUsageLedger(state.root), usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
     const ports = {
-        now: () => clock.now(), withAccountLock: async (account, work) => await custody.withAccountLock(account, work),
+        now: () => clock.now(), withAccountLock: async (op, work) => await custody.withAccountLock(op, work),
         allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),
         releaseNonce: async (op, kind, nonce) => { await custody.releaseNonce(op, kind, nonce); },
         commitNonce: async (op, kind, nonce) => { await custody.commitNonce(op, kind, nonce); },

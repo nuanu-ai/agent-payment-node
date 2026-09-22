@@ -18,7 +18,7 @@ export interface UniswapTokenExecutionPorts {
     now(): Date;
     foregroundApprove(operation: UniswapTokenOperation): Promise<void>;
     foregroundCleanup(operation: UniswapTokenOperation): Promise<void>;
-    withAccountLock<T>(account: string, work: () => Promise<T>): Promise<T>;
+    withAccountLock<T>(operation: UniswapTokenOperation, work: () => Promise<T>): Promise<T>;
     allocateNonce(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
     currentAllowance(operation: UniswapTokenOperation): Promise<string>;
     releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;

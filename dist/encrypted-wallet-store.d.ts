@@ -29,6 +29,8 @@ export interface WalletSecretState {
     directEffects: Record<string, DirectEffectMaterial>;
     x402Effects: Record<string, X402EffectMaterial>;
 }
+/** One kernel-backed critical section owns every encrypted local-wallet mutation for a profile. */
+export declare function walletCustodyLock(state: StateStore, profileInput: string): string;
 export declare class EncryptedWalletStore {
     private readonly state;
     private readonly wrappingSecret;

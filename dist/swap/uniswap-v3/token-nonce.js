@@ -4,7 +4,7 @@ import { ApnError } from "../../errors.js";
 import { SecureStateStore } from "../../secure-state-store.js";
 /** Called while the shared account custody lock is held. Only reservations without a durable signed-effect marker may be reclaimed. */
 export class UniswapTokenNonceStore extends SecureStateStore {
-    async allocate(op, kind, pending, durable) {
+    async allocate(op, kind, pending, durable, occupied = []) {
         await this.initialize();
         await this.ensureDirectory("uniswap-token-nonces");
         const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path), current = raw === null ? empty(account) : validate(raw, account), slot = nonceSlot(op.operationId, kind), prior = current.reservations[slot];
@@ -19,9 +19,9 @@ export class UniswapTokenNonceStore extends SecureStateStore {
             else
                 delete reservations[key];
         }
-        const occupied = new Set(Object.values(reservations).map((reservation) => reservation.nonce));
+        const unavailable = new Set([...Object.values(reservations).map((reservation) => reservation.nonce), ...occupied.map(String)]);
         let nonce = pending;
-        while (occupied.has(nonce.toString()))
+        while (unavailable.has(nonce.toString()))
             nonce += 1n;
         reservations[slot] = { operationId: op.operationId, kind, nonce: nonce.toString(), state: "reserved" };
         await this.writeJson(path, { schemaVersion: "apn.uniswap-token-nonces.v2", account, reservations }, raw === null);

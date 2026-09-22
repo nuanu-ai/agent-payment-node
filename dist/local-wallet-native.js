@@ -6,7 +6,7 @@ import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID } from "./constants.js";
-import { EncryptedWalletStore, } from "./encrypted-wallet-store.js";
+import { EncryptedWalletStore, walletCustodyLock, } from "./encrypted-wallet-store.js";
 import { ApnError } from "./errors.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "./evm-asset.js";
 import { parseEvmNativeIntent } from "./evm-native-intent.js";
@@ -33,8 +33,7 @@ export class LocalWalletNative {
             throw protocol("Unsupported custody request version.");
         await this.state.initialize();
         const profile = requestProfile(request.payload);
-        const profileHash = this.state.profileHash(profile);
-        return await this.state.withLocks([`custody:${profileHash}`], async () => {
+        return await this.state.withLocks([walletCustodyLock(this.state, profile)], async () => {
             switch (request.operation) {
                 case "wallet.ensure": return await this.ensureWallet(profile);
                 case "wallet.import": return await this.importWallet(profile, request.payload);
