@@ -6,8 +6,10 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { UniswapTokenCustody } from "../../src/swap/uniswap-v3/token-custody.js";
+import { UniswapTokenEffectJournal } from "../../src/swap/uniswap-v3/token-effects.js";
+import { UniswapTokenExecution, type TokenEffectKind } from "../../src/swap/uniswap-v3/token-execution.js";
 import { UniswapTokenNonceStore } from "../../src/swap/uniswap-v3/token-nonce.js";
-import { newUniswapTokenOperation, tokenAttempt, transitionUniswapToken, UniswapTokenJournal } from "../../src/swap/uniswap-v3/token-operation.js";
+import { newUniswapTokenOperation, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
 import { createUniswapTokenRoute, UNISWAP_TOKEN_MECHANISM_PIN, verifyUniswapTokenUsdtState } from "../../src/swap/uniswap-v3/token-route.js";
 import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
 import { UniswapTokenUsage } from "../../src/swap/uniswap-v3/token-usage.js";
@@ -43,6 +45,32 @@ function quoteRequest() { return { command: "swap.uniswap-token.quote" as const,
   sourceToken: UNISWAP_USDC, outputToken: ETHEREUM_USDT, amountAtomic: "1000000", minimumOutputAtomic: "990000",
   approvalCapAtomic: "1000000", deadline: 1_900_000_000, maxApprovalGasLimit: "100000", maxSwapGasLimit: "100000",
   maxCleanupGasLimit: "100000", maxFeePerGas: "2", maxPriorityFeePerGas: "1", maxNativeDebitWei: "600000" }; }
+
+class FailOnceEffectJournal extends UniswapTokenEffectJournal {
+  failed = false;
+  override async seal(op: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: Hex, envelope: object, now: Date) {
+    if (!this.failed) { this.failed = true; throw new Error("injected post-wallet-save failure"); }
+    return await super.seal(op, kind, transactionHash, envelope, now);
+  }
+}
+async function production(root: string, now: Date, account: string, key: Hex, allowanceInput: string) {
+  const state = new StateStore(root), master = Buffer.alloc(32, 73), wrapping = { load: async () => Buffer.from(master), create: async () => Buffer.from(master) };
+  await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("token-swap", key, account);
+  let allowance = allowanceInput, phrase = ""; const sends: Hex[] = [], word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
+  const call = async (method: string, params: readonly unknown[]) => {
+    if (method === "eth_getTransactionCount") return "0x7"; if (method === "eth_chainId") return "0x1";
+    if (method === "eth_getBlockByNumber") return { number: "0x64", hash: `0x${"b".repeat(64)}`, baseFeePerGas: "0x0" };
+    if (method === "eth_getBalance") return "0x100000";
+    if (method === "eth_call") { const data = String((params[0] as { data?: string }).data ?? "");
+      return data.startsWith("0xdd62ed3e") ? word(BigInt(allowance)) : data.startsWith("0x70a08231") ? word(2_000_000n) : "0x"; }
+    if (method === "eth_estimateGas") return "0x5208"; if (method === "eth_maxPriorityFeePerGas") return "0x1";
+    if (method === "eth_sendRawTransaction") { const raw = params[0] as Hex; sends.push(raw); return keccak256(raw); }
+    if (method === "eth_getTransactionByHash" || method === "eth_getTransactionReceipt") return null; throw new Error(method);
+  };
+  const terminal = async () => ({ fd: 1, write: async (screen: string) => { phrase = /Type ([a-z0-9-]+) and/u.exec(screen)?.[1] ?? ""; },
+    read: async function* () { yield Buffer.from(`${phrase}\n`); }, close: async () => undefined });
+  return { state, wrapping, call, sends, setAllowance: (value: string) => { allowance = value; }, tty: { isTerminal: () => true, openTerminal: terminal }, now };
+}
 
 test("token usage atomically enforces the daily source cap across concurrent operations", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await setup(temporary.root);
@@ -120,6 +148,46 @@ test("production token runtime allows explicit cleanup after owner policy revoca
     tty: { isTerminal: () => true, openTerminal: terminal }, verifyPins: async () => undefined });
   const newPrepared = await journal.save(operation(s.policy.policyDigest, "9", account)); await assert.rejects(approveRuntime.approve(newPrepared.operationId),
     (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "swap_owner_admission_required");
+});
+
+test("production execute durably routes non-exact live allowance drift into explicit cleanup", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "2");
+  const journal = new UniswapTokenJournal(temporary.root), prepared = await journal.save(operation(s.policy.policyDigest, "4", account)), usage = await s.usage.reserve(prepared);
+  const approved = await journal.save(transitionUniswapToken(prepared, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now));
+  const runtime = createUniswapTokenRuntime({ ...p, clock: { now: () => now }, foreground: "cleanup", verifyPins: async () => undefined });
+  let op = await runtime.execute(approved.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "approval_allowance_drift");
+  assert.equal(op.usageState, "reserved"); assert.equal(p.sends.length, 0);
+  op = await runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.equal(op.usageState, "reserved"); assert.equal(p.sends.length, 1);
+});
+
+test("post-wallet-save journal failure commits nonce and restart repairs and broadcasts the cached effect once", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "0"),
+    effects = new FailOnceEffectJournal(temporary.root), journal = new UniswapTokenJournal(temporary.root), prepared = await journal.save(operation(s.policy.policyDigest, "5", account)),
+    usage = await s.usage.reserve(prepared), approved = await journal.save(transitionUniswapToken(prepared, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)),
+    firstCustody = new UniswapTokenCustody(p.state, p.wrapping, p.call, () => now, effects);
+  const ports = (custody: UniswapTokenCustody) => ({ now: () => now, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
+    withAccountLock: async <T>(op: UniswapTokenOperation, work: () => Promise<T>) => await custody.withAccountLock(op, work),
+    allocateNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind) => await custody.allocateNonce(op, kind),
+    releaseNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => { await custody.releaseNonce(op, kind, nonce); },
+    commitNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => { await custody.commitNonce(op, kind, nonce); },
+    currentAllowance: async (op: UniswapTokenOperation) => await custody.currentAllowance(op), guard: async () => undefined, revalidate: async () => undefined,
+    reserveUsage: async (op: UniswapTokenOperation) => await s.usage.reserve(op), currentUsage: async (op: UniswapTokenOperation) => await s.usage.current(op),
+    followUsage: async (op: UniswapTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert") => await s.usage.follow(op, target),
+    seal: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => await custody.seal(op, kind, nonce),
+    probeSealed: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => await custody.probeSealed(op, kind, nonce),
+    send: async (op: UniswapTokenOperation, kind: TokenEffectKind) => await custody.send(op, kind), observe: async () => null });
+  const first = new UniswapTokenExecution(journal, ports(firstCustody));
+  await assert.rejects(first.execute(approved.operationId), /injected post-wallet-save failure/u); assert.equal(effects.failed, true);
+  const interrupted = await journal.load(prepared.operationId); assert.equal(interrupted?.phase, "approval_submission_started");
+  assert.equal(interrupted?.approvalAttempt?.nonce, "7"); assert.equal(interrupted?.approvalAttempt?.transactionHash, null); assert.equal(p.sends.length, 0);
+  const other = operation(s.policy.policyDigest, "6", account), custody = new UniswapTokenCustody(p.state, p.wrapping, p.call, () => now);
+  assert.equal(await custody.withAccountLock(other, async () => await custody.allocateNonce(other, "approval")), "8");
+  const restarted = new UniswapTokenExecution(journal, ports(custody));
+  let recovered = await restarted.execute(prepared.operationId); assert.equal(recovered.phase, "approval_submitted"); assert.equal(recovered.approvalAttempt?.nonce, "7");
+  assert.match(recovered.approvalAttempt?.transactionHash ?? "", /^0x[a-f0-9]{64}$/u); assert.equal(p.sends.length, 1);
+  recovered = await restarted.execute(prepared.operationId); assert.equal(recovered.phase, "approval_submitted"); assert.equal(p.sends.length, 1);
 });
 
 test("token and native custody share nonce ownership and preserve both encrypted effects across restart", async (t) => {

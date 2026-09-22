@@ -21,6 +21,7 @@ export function createUniswapTokenRuntime(input) {
         guard: async (op, kind, nonce) => await guard.inspect(op, kind, nonce), reserveUsage: async (op) => await usage.reserve(op),
         currentUsage: async (op) => await usage.current(op), followUsage: async (op, target) => await usage.follow(op, target),
         revalidate: async (op) => await revalidator.revalidate(op), seal: async (op, kind, nonce) => await custody.seal(op, kind, nonce),
+        probeSealed: async (op, kind, nonce) => await custody.probeSealed(op, kind, nonce),
         send: async (op, kind) => await custody.send(op, kind), observe: async (op, kind, hash) => await observer.observe(op, kind, hash),
         foregroundApprove: async (op) => await foreground(input.foreground === "approve", op, false, clock.now(), input.tty),
         foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty), confirm: async (material) => await guard.confirm(material),

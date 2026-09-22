@@ -28,6 +28,7 @@ async function fixture(root: string, allowance = "0") {
     currentUsage: async (op: { usageReservationId: string | null; usageState: any }) => ({ reservationId: op.usageReservationId!, state: op.usageState }),
     followUsage: async (_op: unknown, target: any) => ({ reservationId: "d".repeat(64), state: target }),
     seal: async (_op: unknown, kind: TokenEffectKind) => { if (rejectSeal) throw new Error("sign failed"); return { transactionHash: kind === "approval" ? H("1") : kind === "swap" ? H("2") : H("3"), envelopeHash: "e".repeat(64) }; },
+    probeSealed: async () => null,
     send: async (_op: unknown, kind: TokenEffectKind) => { sends.push(kind); return sendResult; },
     observe: async (_op: unknown, _kind: TokenEffectKind, hash: string) => observations.get(hash) ?? null };
   return { runtime: new UniswapTokenExecution(journal, ports), journal, operation, sends, observations,
@@ -53,7 +54,8 @@ test("ambiguous approval and swap are never resent after restart", async (t) => 
     reserveUsage: async () => ({ reservationId: "d".repeat(64), state: "reserved" as const }),
     currentUsage: async (current) => ({ reservationId: current.usageReservationId!, state: current.usageState! }),
     followUsage: async (_current, target) => ({ reservationId: "d".repeat(64), state: target }),
-    seal: async () => { throw new Error("must not sign"); }, send: async () => { throw new Error("must not resend"); }, observe: async () => null });
+    seal: async () => { throw new Error("must not sign"); }, probeSealed: async () => null,
+    send: async () => { throw new Error("must not resend"); }, observe: async () => null });
   op = await restarted.execute(op.operationId); assert.equal(op.phase, "approval_unknown_finality"); assert.deepEqual(f.sends, ["approval"]);
   assert.equal(f.revalidations(), 0);
 });
@@ -74,7 +76,7 @@ test("restart never signs an attempt whose reusable nonce was reassigned", async
     foregroundCleanup: async () => undefined, withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(),
     allocateNonce: async () => "8", releaseNonce: async (_op, kind, nonce) => { released.push(`${kind}:${nonce}`); }, commitNonce: async () => undefined,
     currentAllowance: async () => "0", guard: async () => undefined, revalidate: async () => undefined, reserveUsage: async () => usage,
-    currentUsage: async () => usage, followUsage: async () => usage, seal: async () => { throw new Error("must not sign"); },
+    currentUsage: async () => usage, followUsage: async () => usage, seal: async () => { throw new Error("must not sign"); }, probeSealed: async () => null,
     send: async () => { throw new Error("must not send"); }, observe: async () => null });
   op = await restarted.execute(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "approval_nonce_reservation_lost");
   assert.deepEqual(released, ["approval:8"]);
