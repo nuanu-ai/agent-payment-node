@@ -143,7 +143,8 @@ export class BridgeService {
     }
     execution(op) {
         const d = this.dependencies(), m = op.intent.materialization;
-        // The first token guard spends 24 requests: two safe heads, 11+9 Base/Arbitrum archive chunks and two account batches.
+        // The modeled worst-case first token guard spends 19 requests: two safe heads, 6+9 Ethereum/Base archive chunks and two account batches.
+        // Base/Arbitrum Stargate spends 16: two safe heads, 7+5 archive chunks and two account batches.
         // Four later guards reuse immutable evidence and spend one mutable account/simulation batch each.
         const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 28, maxHttpAttempts: 30,
             archiveDeploymentBatchMaxItems: 3 });
