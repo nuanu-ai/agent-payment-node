@@ -21,7 +21,7 @@ export const BASE_FEE_CONTRACT = {
         { kind: "call", address: GPO, data: "0x105d0b81", expected: `0x${"0".repeat(63)}1` },
     ],
 };
-export async function bridgeActualFees(chainId, receipt, block, call) {
+export async function bridgeActualFees(chainId, receipt, block, call, basePinnedReader) {
     const gas = evmRpcQuantity(receipt.gasUsed), price = evmRpcQuantity(receipt.effectiveGasPrice), type = evmRpcQuantity(receipt.type);
     if (gas > (1n << 64n) - 1n || ![0n, 1n, 2n, 3n, 4n].includes(type))
         bridgeFailure("APN_RPC_PROTOCOL", "receipt_fee_shape");
@@ -33,13 +33,18 @@ export async function bridgeActualFees(chainId, receipt, block, call) {
             bridgeFailure("APN_RPC_PROTOCOL", "unsupported_Base_blob_transaction");
         l1 = evmRpcQuantity(receipt.l1Fee);
         const pinned = { blockHash: block.hash, requireCanonical: true };
-        await verifyBaseFeeDeployment(call, block);
         const data = `0x275aedd2${gas.toString(16).padStart(64, "0")}`;
-        const [rawReturn, rawScalar, rawConstant] = await Promise.all([
-            call("eth_call", [{ from: BRIDGE_ZERO_ADDRESS, to: GPO, data }, pinned]),
-            call("eth_call", [{ from: BRIDGE_ZERO_ADDRESS, to: L1_BLOCK, data: "0x4d5d9a2a" }, pinned]),
-            call("eth_call", [{ from: BRIDGE_ZERO_ADDRESS, to: L1_BLOCK, data: "0x16d3bc7f" }, pinned]),
-        ]);
+        let rawReturn, rawScalar, rawConstant;
+        if (basePinnedReader === undefined) {
+            await verifyBaseFeeDeployment(call, block);
+            [rawReturn, rawScalar, rawConstant] = await Promise.all([
+                call("eth_call", [{ from: BRIDGE_ZERO_ADDRESS, to: GPO, data }, pinned]),
+                call("eth_call", [{ from: BRIDGE_ZERO_ADDRESS, to: L1_BLOCK, data: "0x4d5d9a2a" }, pinned]),
+                call("eth_call", [{ from: BRIDGE_ZERO_ADDRESS, to: L1_BLOCK, data: "0x16d3bc7f" }, pinned]),
+            ]);
+        }
+        else
+            ({ rawReturn, rawScalar, rawConstant } = await basePinnedReader(gas, block));
         operator = evmRpcWord(rawReturn);
         const scalar = evmRpcWord(rawScalar), constant = evmRpcWord(rawConstant);
         if (scalar >= 1n << 32n || constant >= 1n << 64n || gas * scalar * 100n + constant !== operator)

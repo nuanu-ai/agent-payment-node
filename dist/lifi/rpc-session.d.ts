@@ -44,6 +44,11 @@ export interface RpcReadTelemetry {
     readonly remainingHttpAttempts: number;
     readonly deadline: number;
     readonly retryAfterMs?: number;
+    readonly attemptsByEndpointRole: Readonly<Record<"primary" | "receipt" | "archive", number>>;
+    readonly attemptsByMethodClass: Readonly<Record<string, number>>;
+    readonly attemptsByBatchSize: Readonly<Record<string, number>>;
+    readonly maxBatchSize: number;
+    readonly budgetRejectedBeforeTransport: number;
     /** Backward-compatible telemetry aliases. */
     readonly uniqueCalls: number;
     readonly totalAttempts: number;
@@ -95,9 +100,15 @@ export declare class RpcReadSession {
     private retryAfterMs;
     private readonly methods;
     private readonly endpoints;
+    private readonly roleAttempts;
+    private readonly methodClassAttempts;
+    private readonly batchSizeAttempts;
+    private maxBatchSize;
+    private budgetRejectedBeforeTransport;
     constructor(options?: RpcReadSessionOptions);
     telemetry(): RpcReadTelemetry;
     currentTime(): number;
+    recordPhysicalAttempt(endpointRole: "primary" | "receipt" | "archive", methods: readonly string[]): void;
     wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt?: EvmRpcCall): EvmRpcCall;
     read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall, decoder?: RpcDecoder): Promise<unknown>;
     /** Strict whole-batch read. Cached exact immutable/snapshot keys are removed before the one HTTP request. */
@@ -120,6 +131,7 @@ export declare class RpcReadSession {
     private reserveRequest;
     private retry;
     private schedule;
+    private recordAttemptShape;
     private assertBeforeAttempt;
     private assertBeforeQueue;
     private assertBeforeWait;

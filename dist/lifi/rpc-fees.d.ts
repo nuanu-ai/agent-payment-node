@@ -43,7 +43,13 @@ export declare const BASE_FEE_CONTRACT: {
         readonly expected: Hex;
     }];
 };
-export declare function bridgeActualFees(chainId: BridgeChainId, receipt: Readonly<Record<string, unknown>>, block: BridgeBlock, call: EvmRpcCall): Promise<{
+export interface BaseFeePinnedValues {
+    readonly rawReturn: unknown;
+    readonly rawScalar: unknown;
+    readonly rawConstant: unknown;
+}
+export type BaseFeePinnedReader = (gas: bigint, block: BridgeBlock) => Promise<BaseFeePinnedValues>;
+export declare function bridgeActualFees(chainId: BridgeChainId, receipt: Readonly<Record<string, unknown>>, block: BridgeBlock, call: EvmRpcCall, basePinnedReader?: BaseFeePinnedReader): Promise<{
     gasUsedAtomic: string;
     effectiveGasPriceAtomic: string;
     executionFeeWei: string;

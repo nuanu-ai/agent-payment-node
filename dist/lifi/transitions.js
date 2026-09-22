@@ -6,7 +6,7 @@ export function newBridgeOperation(input) {
     const immutable = { schemaVersion: "apn.bridge-operation.v1", kind: "bridge_route", ...input };
     const fingerprint = hashObject(bridgeIntentBinding(immutable));
     const mutable = { state: "awaiting_approval", approval: null, effects: input.effects, sourceProof: null,
-        destinationProof: null, providerObservation: null, failure: null, usageLease: null,
+        destinationProof: null, providerObservation: null, failure: null, usageLease: null, observationTelemetry: [],
         destinationScan: { startBlock: input.intent.destinationStartBlock, nextBlockAtomic: input.intent.destinationStartBlock.numberAtomic, previousEndBlock: null } };
     const transition = { ...bridgeSnapshot(mutable), at: input.intent.preparedAt, previousHash: fingerprint };
     const result = sealBridgeOperation({ ...immutable, ...mutable, fingerprint, createdAt: input.intent.preparedAt,

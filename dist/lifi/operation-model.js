@@ -22,7 +22,8 @@ export function bridgeSnapshot(value) {
     return { state: value.state, approval: value.approval,
         effects: value.effects.map(({ envelope, ...effect }) => ({ ...effect, envelopeHash: envelope.envelopeHash })),
         sourceProof: value.sourceProof, destinationProof: value.destinationProof,
-        providerObservation: value.providerObservation, destinationScan: value.destinationScan, failure: value.failure, usageLease: value.usageLease };
+        providerObservation: value.providerObservation, destinationScan: value.destinationScan, failure: value.failure, usageLease: value.usageLease,
+        ...(value.observationTelemetry === undefined ? {} : { observationTelemetry: value.observationTelemetry }) };
 }
 export function sealBridgeOperation(value) {
     return { ...value, integrityHash: hashObject(value) };

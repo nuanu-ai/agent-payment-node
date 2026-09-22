@@ -1119,6 +1119,45 @@ export declare const transitionSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     usageLease: z.ZodNullable<z.ZodUnknown>;
+    observationTelemetry: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        schemaVersion: z.ZodLiteral<"apn.bridge-observation-telemetry.v1">;
+        stage: z.ZodEnum<{
+            source_observation: "source_observation";
+            destination_observation: "destination_observation";
+            residual_observation: "residual_observation";
+        }>;
+        effectRole: z.ZodEnum<{
+            bridge: "bridge";
+            approval: "approval";
+        }>;
+        outcome: z.ZodEnum<{
+            success: "success";
+            missing: "missing";
+            failure: "failure";
+        }>;
+        physicalRequests: z.ZodNumber;
+        httpAttempts: z.ZodNumber;
+        logicalRpcItems: z.ZodNumber;
+        batchCount: z.ZodNumber;
+        maxBatchSize: z.ZodNumber;
+        budgetRejectedBeforeTransport: z.ZodNumber;
+        attemptsByEndpointRole: z.ZodObject<{
+            primary: z.ZodNumber;
+            receipt: z.ZodNumber;
+            archive: z.ZodNumber;
+        }, z.core.$strict>;
+        attemptsByMethodClass: z.ZodObject<{
+            chain: z.ZodOptional<z.ZodNumber>;
+            transaction: z.ZodOptional<z.ZodNumber>;
+            receipt: z.ZodOptional<z.ZodNumber>;
+            block: z.ZodOptional<z.ZodNumber>;
+            code: z.ZodOptional<z.ZodNumber>;
+            storage: z.ZodOptional<z.ZodNumber>;
+            call: z.ZodOptional<z.ZodNumber>;
+            logs: z.ZodOptional<z.ZodNumber>;
+            other: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strict>;
+    }, z.core.$strict>>>;
 }, z.core.$strict>;
 export declare const operationSchema: z.ZodObject<{
     schemaVersion: z.ZodLiteral<"apn.bridge-operation.v1">;
@@ -1831,6 +1870,45 @@ export declare const operationSchema: z.ZodObject<{
             }, z.core.$strict>>;
         }, z.core.$strict>>;
         usageLease: z.ZodNullable<z.ZodUnknown>;
+        observationTelemetry: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            schemaVersion: z.ZodLiteral<"apn.bridge-observation-telemetry.v1">;
+            stage: z.ZodEnum<{
+                source_observation: "source_observation";
+                destination_observation: "destination_observation";
+                residual_observation: "residual_observation";
+            }>;
+            effectRole: z.ZodEnum<{
+                bridge: "bridge";
+                approval: "approval";
+            }>;
+            outcome: z.ZodEnum<{
+                success: "success";
+                missing: "missing";
+                failure: "failure";
+            }>;
+            physicalRequests: z.ZodNumber;
+            httpAttempts: z.ZodNumber;
+            logicalRpcItems: z.ZodNumber;
+            batchCount: z.ZodNumber;
+            maxBatchSize: z.ZodNumber;
+            budgetRejectedBeforeTransport: z.ZodNumber;
+            attemptsByEndpointRole: z.ZodObject<{
+                primary: z.ZodNumber;
+                receipt: z.ZodNumber;
+                archive: z.ZodNumber;
+            }, z.core.$strict>;
+            attemptsByMethodClass: z.ZodObject<{
+                chain: z.ZodOptional<z.ZodNumber>;
+                transaction: z.ZodOptional<z.ZodNumber>;
+                receipt: z.ZodOptional<z.ZodNumber>;
+                block: z.ZodOptional<z.ZodNumber>;
+                code: z.ZodOptional<z.ZodNumber>;
+                storage: z.ZodOptional<z.ZodNumber>;
+                call: z.ZodOptional<z.ZodNumber>;
+                logs: z.ZodOptional<z.ZodNumber>;
+                other: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strict>;
+        }, z.core.$strict>>>;
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     state: z.ZodEnum<{
@@ -2110,5 +2188,44 @@ export declare const operationSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     usageLease: z.ZodNullable<z.ZodUnknown>;
+    observationTelemetry: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        schemaVersion: z.ZodLiteral<"apn.bridge-observation-telemetry.v1">;
+        stage: z.ZodEnum<{
+            source_observation: "source_observation";
+            destination_observation: "destination_observation";
+            residual_observation: "residual_observation";
+        }>;
+        effectRole: z.ZodEnum<{
+            bridge: "bridge";
+            approval: "approval";
+        }>;
+        outcome: z.ZodEnum<{
+            success: "success";
+            missing: "missing";
+            failure: "failure";
+        }>;
+        physicalRequests: z.ZodNumber;
+        httpAttempts: z.ZodNumber;
+        logicalRpcItems: z.ZodNumber;
+        batchCount: z.ZodNumber;
+        maxBatchSize: z.ZodNumber;
+        budgetRejectedBeforeTransport: z.ZodNumber;
+        attemptsByEndpointRole: z.ZodObject<{
+            primary: z.ZodNumber;
+            receipt: z.ZodNumber;
+            archive: z.ZodNumber;
+        }, z.core.$strict>;
+        attemptsByMethodClass: z.ZodObject<{
+            chain: z.ZodOptional<z.ZodNumber>;
+            transaction: z.ZodOptional<z.ZodNumber>;
+            receipt: z.ZodOptional<z.ZodNumber>;
+            block: z.ZodOptional<z.ZodNumber>;
+            code: z.ZodOptional<z.ZodNumber>;
+            storage: z.ZodOptional<z.ZodNumber>;
+            call: z.ZodOptional<z.ZodNumber>;
+            logs: z.ZodOptional<z.ZodNumber>;
+            other: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strict>;
+    }, z.core.$strict>>>;
 }, z.core.$strict>;
 export declare const legacyBridgeOperationSchema: z.ZodType<unknown>;

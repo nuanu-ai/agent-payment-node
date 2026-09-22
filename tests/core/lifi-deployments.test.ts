@@ -57,7 +57,14 @@ function replay(capture: Capture, changed?: Entry) {
         success: true, returnData: await call("eth_call", [{ to: entry.target, data: entry.callData }, params[1]]) as Hex,
       }))) });
     }
-    assert.ok(values.has(key), `Uncaptured RPC request ${key}`); return structuredClone(values.get(key));
+    if (values.has(key)) return structuredClone(values.get(key));
+    const normalized = structuredClone(params) as unknown[];
+    const last = normalized.at(-1);
+    if (typeof last === "object" && last !== null && !Array.isArray(last) && (last as { blockHash?: unknown }).blockHash === capture.safeBlock.hash) {
+      normalized[normalized.length - 1] = capture.safeBlock.number;
+    }
+    const normalizedKey = canonicalJson([method, normalized]);
+    assert.ok(values.has(normalizedKey), `Uncaptured RPC request ${key}`); return structuredClone(values.get(normalizedKey));
   };
   return { rpc: new BridgeRpc(capture.chainId, capture.rpcOrigin, call), calls, call };
 }
@@ -91,7 +98,7 @@ test("LI.FI Base and Arbitrum Stargate deployment proofs execute as one bounded 
   await destination.rpc.deployment("stargateV2", 8453, usdc(42161));
   assert.equal(source.session.telemetry().httpRequests, 2); assert.equal(destination.session.telemetry().httpRequests, 2);
   assert.equal(source.session.telemetry().batchCount, 2); assert.equal(destination.session.telemetry().batchCount, 2);
-  assert.equal(source.session.telemetry().logicalItems, 20); // safe head plus compact 19-item deployment proof
+  assert.equal(source.session.telemetry().logicalItems, 21); // safe head plus compact 20-item deployment proof
   assert.equal(destination.session.telemetry().logicalItems, 16); // safe head plus compact 15-item deployment proof
 });
 
@@ -126,7 +133,7 @@ test("LI.FI Base Stargate deployment sends sequential archive requests of at mos
   assert.equal(requests.length, 8);
   assert.equal(requests[0]!.host, "base-primary.example"); assert.equal(requests[0]!.items.length, 2);
   assert.ok(requests.slice(1).every((request) => request.host === "base-archive.example" && request.items.length <= 3));
-  assert.deepEqual(requests.slice(1).map((request) => request.items.length), [3, 3, 3, 3, 3, 3, 1]);
+  assert.deepEqual(requests.slice(1).map((request) => request.items.length), [3, 3, 3, 3, 3, 3, 2]);
   assert.equal(requests[1]!.items[0]!.method, "eth_chainId");
   assert.ok(requests.slice(1).flatMap((request) => request.items).slice(1)
     .every((item) => item.method === "eth_getCode" || item.method === "eth_getStorageAt" || item.method === "eth_call" || item.method === "eth_getBlockByNumber"));
