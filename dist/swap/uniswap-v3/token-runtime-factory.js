@@ -1,5 +1,4 @@
-import { evaluateAssetPolicy } from "../../asset-policy-registry.js";
-import { loadActiveAssetPolicyRegistry } from "../../allowlist-active-policy.js";
+import { AssetUsageLedger } from "../../asset-usage-ledger.js";
 import { approvalCode } from "../../approval-code.js";
 import { ApnError } from "../../errors.js";
 import { exactChainConsent } from "../../tty-approval.js";
@@ -9,26 +8,22 @@ import { SavedUniswapTokenMaterialStore } from "./token-material.js";
 import { UniswapTokenJournal } from "./token-operation.js";
 import { UniswapTokenObserver } from "./token-observer.js";
 import { UniswapTokenRevalidator } from "./token-revalidation.js";
+import { UniswapTokenSigningGuard } from "./token-guard.js";
+import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
 export function createUniswapTokenRuntime(input) {
-    const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call);
+    const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call), ledger = new AssetUsageLedger(state.root), usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now());
     const ports = {
-        now: () => clock.now(), currentNonce: async (account) => await custody.currentNonce(account), currentAllowance: async (op) => await custody.currentAllowance(op),
+        now: () => clock.now(), withAccountLock: async (account, work) => await custody.withAccountLock(account, work),
+        allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),
+        guard: async (op, kind, nonce) => await guard.inspect(op, kind, nonce), reserveUsage: async (op) => await usage.reserve(op),
+        currentUsage: async (op) => await usage.current(op), followUsage: async (op, target) => await usage.follow(op, target),
         revalidate: async (op) => await revalidator.revalidate(op), seal: async (op, kind, nonce) => await custody.seal(op, kind, nonce),
         send: async (op, kind) => await custody.send(op, kind), observe: async (op, kind, hash) => await observer.observe(op, kind, hash),
         foregroundApprove: async (op) => await foreground(input.foreground === "approve", op, false, clock.now()),
-        foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now()), confirm: async () => undefined,
+        foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now()), confirm: async (material) => await guard.confirm(material),
     };
-    const admit = async (request, now) => {
-        const active = await loadActiveAssetPolicyRegistry({ state, clock }, request.profile);
-        if (active === null)
-            blocked("An active owner allowlist is required.", "swap_owner_admission_required");
-        for (const [identifier, amountAtomic] of [[request.sourceToken, request.amountAtomic], [request.outputToken, request.minimumOutputAtomic]]) {
-            evaluateAssetPolicy(active.registry, { chain: "eip155:1", asset: { kind: "token", identifier }, rail: "swap", amountAtomic,
-                dailyUsageAtomic: "0", asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-        }
-        return active.digest;
-    };
+    const admit = async (request, now) => await usage.admitQuote(request, now);
     return new InstalledUniswapTokenRuntime(new UniswapTokenQuoteBuilder(call, materials, admit, () => clock.now()), materials, new UniswapTokenJournal(state.root), ports);
 }
 async function foreground(enabled, op, cleanup, now) {

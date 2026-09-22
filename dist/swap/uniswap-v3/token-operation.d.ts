@@ -1,4 +1,5 @@
 import { SecureStateStore } from "../../secure-state-store.js";
+import type { AssetUsageState } from "../../asset-usage-ledger.js";
 import { type UniswapTokenRoute } from "./token-route.js";
 export declare const UNISWAP_TOKEN_OPERATION_SCHEMA: "apn.uniswap-token-operation.v1";
 export declare const UNISWAP_TOKEN_RECEIPT_SCHEMA: "apn.uniswap-token-receipt.v1";
@@ -45,6 +46,8 @@ export interface UniswapTokenOperation {
     readonly policyDigest: string;
     readonly mechanismDigest: string;
     readonly accumulatedNativeDebitWei: string;
+    readonly usageReservationId: string | null;
+    readonly usageState: AssetUsageState | null;
     readonly createdAt: string;
     readonly updatedAt: string;
     readonly approvalAttempt: UniswapTokenAttempt | null;
@@ -55,7 +58,7 @@ export interface UniswapTokenOperation {
     readonly previousIntegrityHash: string | null;
     readonly integrityHash: string;
 }
-export declare function newUniswapTokenOperation(input: Omit<UniswapTokenOperation, "schemaVersion" | "phase" | "createdAt" | "updatedAt" | "accumulatedNativeDebitWei" | "approvalAttempt" | "swapAttempt" | "cleanupAttempt" | "cleanupReason" | "receipt" | "previousIntegrityHash" | "integrityHash"> & {
+export declare function newUniswapTokenOperation(input: Omit<UniswapTokenOperation, "schemaVersion" | "phase" | "createdAt" | "updatedAt" | "accumulatedNativeDebitWei" | "usageReservationId" | "usageState" | "approvalAttempt" | "swapAttempt" | "cleanupAttempt" | "cleanupReason" | "receipt" | "previousIntegrityHash" | "integrityHash"> & {
     readonly now: Date;
 }): UniswapTokenOperation;
 export declare function validateUniswapTokenOperation(value: unknown): UniswapTokenOperation;

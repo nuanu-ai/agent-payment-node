@@ -6,6 +6,7 @@ import { ApnError } from "../../errors.js";
 import { evmRpcHex, evmRpcQuantity } from "../../evm-rpc-codec.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
 import { encodeUniswapTokenApproval } from "./token-route.js";
+import { UniswapTokenNonceStore } from "./token-nonce.js";
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
 /** Local encrypted-wallet custody plus the durable one-way broadcast boundary. */
 export class UniswapTokenCustody {
@@ -14,14 +15,22 @@ export class UniswapTokenCustody {
     now;
     wallets;
     effects;
+    nonces;
     constructor(state, wrapping, call, now) {
         this.state = state;
         this.call = call;
         this.now = now;
         this.wallets = new EncryptedWalletStore(state, wrapping);
         this.effects = new UniswapTokenEffectJournal(state.root);
+        this.nonces = new UniswapTokenNonceStore(state.root);
     }
-    async currentNonce(account) { return evmRpcQuantity(await this.call("eth_getTransactionCount", [account, "pending"])).toString(); }
+    async withAccountLock(account, work) {
+        return await this.state.withLocks([`uniswap-token-account:${domainHash("apn.uniswap-token-account-lock.v1", account)}`], work);
+    }
+    async allocateNonce(op, kind) {
+        const pending = evmRpcQuantity(await this.call("eth_getTransactionCount", [op.account, "pending"]));
+        return await this.nonces.allocate(op, kind, pending);
+    }
     async currentAllowance(op) {
         const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account, op.route.router] });
         return BigInt(evmRpcHex(await this.call("eth_call", [{ to: op.route.inputToken, data }, "latest"]), 32)).toString();

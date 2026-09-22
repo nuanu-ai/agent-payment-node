@@ -17,14 +17,19 @@ async function fixture(root: string, allowance = "0") {
     approvalCapAtomic: "1000000", allowanceAtPrepare: allowance, approvalGas: gas, swapGas: gas, cleanupGas: gas,
     maximumNativeDebitWei: "600000", policyDigest: domainHash("p", "p"), mechanismDigest: domainHash("m", "m"), now: NOW }));
   const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance,
-    sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0;
+    sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0, rejectRevalidation = false;
   const ports = { now: () => NOW, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
-    currentNonce: async () => String(7 + sends.length), currentAllowance: async () => currentAllowance, revalidate: async () => { revalidations += 1; },
+    withAccountLock: async <T>(_account: string, work: () => Promise<T>) => await work(), allocateNonce: async () => String(7 + sends.length),
+    currentAllowance: async () => currentAllowance, guard: async () => undefined, revalidate: async () => { revalidations += 1; if (rejectRevalidation) throw new Error("drift"); },
+    reserveUsage: async () => ({ reservationId: "d".repeat(64), state: "reserved" as const }),
+    currentUsage: async (op: { usageReservationId: string | null; usageState: any }) => ({ reservationId: op.usageReservationId!, state: op.usageState }),
+    followUsage: async (_op: unknown, target: any) => ({ reservationId: "d".repeat(64), state: target }),
     seal: async (_op: unknown, kind: TokenEffectKind) => ({ transactionHash: kind === "approval" ? H("1") : kind === "swap" ? H("2") : H("3"), envelopeHash: "e".repeat(64) }),
     send: async (_op: unknown, kind: TokenEffectKind) => { sends.push(kind); return sendResult; },
     observe: async (_op: unknown, _kind: TokenEffectKind, hash: string) => observations.get(hash) ?? null };
   return { runtime: new UniswapTokenExecution(journal, ports), journal, operation, sends, observations,
     allowance: (v: string) => { currentAllowance = v; }, sendResult: (v: "accepted" | "ambiguous") => { sendResult = v; },
+    rejectRevalidation: () => { rejectRevalidation = true; },
     revalidations: () => revalidations };
 }
 test("exact approval then swap finalizes with zero allowance and bounded debit", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
@@ -39,7 +44,11 @@ test("exact approval then swap finalizes with zero allowance and bounded debit",
 test("ambiguous approval and swap are never resent after restart", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   f.sendResult("ambiguous"); let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "approval_unknown_finality");
   const restarted = new UniswapTokenExecution(new UniswapTokenJournal(temp.root), { now: () => NOW, foregroundApprove: async () => undefined,
-    foregroundCleanup: async () => undefined, currentNonce: async () => "99", currentAllowance: async () => "0", revalidate: async () => undefined,
+    foregroundCleanup: async () => undefined, withAccountLock: async <T>(_account: string, work: () => Promise<T>) => await work(),
+    allocateNonce: async () => "99", currentAllowance: async () => "0", guard: async () => undefined, revalidate: async () => undefined,
+    reserveUsage: async () => ({ reservationId: "d".repeat(64), state: "reserved" as const }),
+    currentUsage: async (current) => ({ reservationId: current.usageReservationId!, state: current.usageState! }),
+    followUsage: async (_current, target) => ({ reservationId: "d".repeat(64), state: target }),
     seal: async () => { throw new Error("must not sign"); }, send: async () => { throw new Error("must not resend"); }, observe: async () => null });
   op = await restarted.execute(op.operationId); assert.equal(op.phase, "approval_unknown_finality"); assert.deepEqual(f.sends, ["approval"]);
   assert.equal(f.revalidations(), 0);
@@ -53,4 +62,12 @@ test("mismatched allowance refuses and reverted swap requires explicit cleanup",
   op = await g.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.deepEqual(g.sends, ["swap", "cleanup"]);
   g.observations.set(H("3"), { status: "success", transactionHash: H("3"), gasDebitWei: "50", allowanceAtomic: "0" }); g.allowance("0");
   op = await g.runtime.status(op.operationId); assert.equal(op.phase, "cleaned");
+});
+test("post-approval revalidation drift durably requires explicit cleanup and never signs the swap", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); let op = await f.runtime.approve(f.operation.operationId);
+  f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" }); f.allowance("1000000");
+  op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "approval_observed"); f.rejectRevalidation();
+  op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "post_approval_revalidation_failed");
+  assert.deepEqual(f.sends, ["approval"]); assert.equal((await f.journal.load(op.operationId))?.phase, "cleanup_required");
+  op = await f.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.deepEqual(f.sends, ["approval", "cleanup"]);
 });

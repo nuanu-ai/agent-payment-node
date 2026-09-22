@@ -11,6 +11,7 @@ import { UniswapTokenEffectJournal } from "./token-effects.js";
 import type { TokenEffectKind, TokenSealedEffect } from "./token-execution.js";
 import type { TokenGasEnvelope, UniswapTokenOperation } from "./token-operation.js";
 import { encodeUniswapTokenApproval } from "./token-route.js";
+import { UniswapTokenNonceStore } from "./token-nonce.js";
 
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
 export interface TokenTransactionEnvelope { readonly chainId: 1; readonly from: string; readonly to: string; readonly data: Hex;
@@ -20,10 +21,18 @@ export interface TokenTransactionEnvelope { readonly chainId: 1; readonly from: 
 export class UniswapTokenCustody {
   private readonly wallets: EncryptedWalletStore;
   private readonly effects: UniswapTokenEffectJournal;
+  private readonly nonces: UniswapTokenNonceStore;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly call: EvmRpcCall,
-    private readonly now: () => Date) { this.wallets = new EncryptedWalletStore(state, wrapping); this.effects = new UniswapTokenEffectJournal(state.root); }
+    private readonly now: () => Date) { this.wallets = new EncryptedWalletStore(state, wrapping); this.effects = new UniswapTokenEffectJournal(state.root);
+    this.nonces = new UniswapTokenNonceStore(state.root); }
 
-  async currentNonce(account: string) { return evmRpcQuantity(await this.call("eth_getTransactionCount", [account, "pending"])).toString(); }
+  async withAccountLock<T>(account: string, work: () => Promise<T>): Promise<T> {
+    return await this.state.withLocks([`uniswap-token-account:${domainHash("apn.uniswap-token-account-lock.v1", account)}`], work);
+  }
+  async allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind) {
+    const pending = evmRpcQuantity(await this.call("eth_getTransactionCount", [op.account, "pending"]));
+    return await this.nonces.allocate(op, kind, pending);
+  }
   async currentAllowance(op: UniswapTokenOperation) {
     const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account as Hex, op.route.router] });
     return BigInt(evmRpcHex(await this.call("eth_call", [{ to: op.route.inputToken, data }, "latest"]), 32)).toString();
