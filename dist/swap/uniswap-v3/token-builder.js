@@ -26,7 +26,7 @@ export class UniswapTokenQuoteBuilder {
     }
     async quote(input) {
         const request = valid(input), at = this.now(), seconds = Math.floor(at.getTime() / 1000);
-        if (request.deadline <= seconds || request.deadline - seconds > 1_800)
+        if (request.deadline <= seconds || request.deadline - seconds > 1800)
             invalid("Uniswap token deadline must be in the next 30 minutes.");
         if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n)
             throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token route requires Ethereum chain 1.");
@@ -92,21 +92,25 @@ function valid(input) {
         maxApprovalGas, maxSwapGas, maxCleanupGas, maxFee, maxPriority, maxNativeDebit };
 }
 function gas(gasLimit, maxFeePerGas, maxPriorityFeePerGas) { return { gasLimit: gasLimit.toString(), maxFeePerGas: maxFeePerGas.toString(), maxPriorityFeePerGas: maxPriorityFeePerGas.toString() }; }
-function address(value) { try {
-    const result = getAddress(value);
-    if (result !== value)
-        throw new Error();
-    return result;
+function address(value) {
+    try {
+        const result = getAddress(value);
+        if (result !== value)
+            throw new Error();
+        return result;
+    }
+    catch {
+        return invalid("Uniswap token address is invalid.");
+    }
 }
-catch {
-    return invalid("Uniswap token address is invalid.");
-} }
-function uint(value, positive = true) { try {
-    return parseAtomic(value, { positive });
+function uint(value, positive = true) {
+    try {
+        return parseAtomic(value, { positive });
+    }
+    catch {
+        return invalid("Uniswap token integer is invalid.");
+    }
 }
-catch {
-    return invalid("Uniswap token integer is invalid.");
-} }
 function invalid(message) { throw new ApnError("APN_INVALID_INPUT", message); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-builder.js.map

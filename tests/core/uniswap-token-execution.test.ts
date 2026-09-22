@@ -41,6 +41,7 @@ test("mismatched allowance refuses and reverted swap requires explicit cleanup",
   const other = await temporaryState(); t.after(other.cleanup); const g = await fixture(other.root, "1000000"); let op = await g.runtime.approve(g.operation.operationId);
   assert.equal(op.phase, "submitted"); g.observations.set(H("2"), { status: "reverted", transactionHash: H("2"), gasDebitWei: "100", allowanceAtomic: "1000000" });
   op = await g.runtime.status(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.deepEqual(g.sends, ["swap"]);
+  op = await g.runtime.execute(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.deepEqual(g.sends, ["swap"]);
   op = await g.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.deepEqual(g.sends, ["swap", "cleanup"]);
   g.observations.set(H("3"), { status: "success", transactionHash: H("3"), gasDebitWei: "50", allowanceAtomic: "0" }); g.allowance("0");
   op = await g.runtime.status(op.operationId); assert.equal(op.phase, "cleaned");

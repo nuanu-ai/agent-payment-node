@@ -19,19 +19,19 @@ const TRON_RECIPIENT = "TTJxU3P8rHycAyFY4kVtGNfmnMH4ezcuM9";
 const SOLANA_OWNER = WRAPPED_SOL_MINT;
 
 const FAMILIES = [
-  { path: "swap ethereum uniswap", command: "swap.uniswap" },
-  { path: "swap ethereum uniswap-token", command: "swap.uniswap-token" },
-  { path: "swap tron sunswap", command: "swap.sunswap" },
-  { path: "swap solana jupiter", command: "swap.jupiter" },
-  { path: "swap solana orca", command: "swap.orca" },
+  { path: "swap ethereum uniswap", command: "swap.uniswap", cleanup: false },
+  { path: "swap ethereum uniswap-token", command: "swap.uniswap-token", cleanup: true },
+  { path: "swap tron sunswap", command: "swap.sunswap", cleanup: false },
+  { path: "swap solana jupiter", command: "swap.jupiter", cleanup: false },
+  { path: "swap solana orca", command: "swap.orca", cleanup: false },
 ] as const;
 const ACTIONS = ["inventory", "quote", "prepare", "status", "approve", "execute"] as const;
 
-test("the guarded swap catalog and MCP projection expose exactly six parity actions for all five families", () => {
+test("guarded swap families expose six parity actions plus explicit token cleanup", () => {
   const catalog = COMMANDS.filter((row) => row.path[0] === "swap");
-  assert.deepEqual(catalog.map((row) => row.path.join(" ")), FAMILIES.flatMap((family) => ACTIONS.map((action) => `${family.path} ${action}`)));
+  assert.deepEqual(catalog.map((row) => row.path.join(" ")), FAMILIES.flatMap((family) => [...ACTIONS, ...(family.cleanup ? ["cleanup"] : [])].map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
-  assert.equal(tools.length, 30);
+  assert.equal(tools.length, 31);
   assert.deepEqual(tools.map((row) => row.command), catalog);
   for (const command of catalog) {
     const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "))!;

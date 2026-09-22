@@ -533,7 +533,7 @@ canonical Ethereum USDC and USDT through the original V3 SwapRouter. It admits
 only the bidirectional fee-100 pool, approves exactly `amountIn` to that router,
 uses `exactInputSingle` with transaction value zero, and budgets approval,
 swap, and explicit cleanup gas. Native-input command shapes remain unchanged.
-MCP exposes all six commands; `approve` and `execute` hand off to the
+MCP exposes all seven commands; `approve`, `execute`, and `cleanup` hand off to the
 foreground CLI.
 
 `apn swap tron sunswap` swaps native TRX for TRON USDT through the pinned
@@ -710,6 +710,7 @@ apn swap ethereum uniswap-token prepare --profile <profile> --quote <string> --i
 apn swap ethereum uniswap-token status --operation <operation_id>
 apn swap ethereum uniswap-token approve --operation <operation_id>
 apn swap ethereum uniswap-token execute --operation <operation_id>
+apn swap ethereum uniswap-token cleanup --operation <operation_id>
 apn swap tron sunswap inventory
 apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --fee-limit-sun <wei> --deadline <string>
 apn swap tron sunswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>

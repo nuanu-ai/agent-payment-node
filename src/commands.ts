@@ -27,7 +27,7 @@ export type CommandRequest =
       readonly maxCleanupGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string;
       readonly maxNativeDebitWei: string }
   | { readonly command: "swap.uniswap-token.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
-  | { readonly command: "swap.uniswap-token.status" | "swap.uniswap-token.approve" | "swap.uniswap-token.execute";
+  | { readonly command: "swap.uniswap-token.status" | "swap.uniswap-token.approve" | "swap.uniswap-token.execute" | "swap.uniswap-token.cleanup";
       readonly operationId: string }
   | { readonly command: "swap.sunswap.inventory" }
   | { readonly command: "swap.sunswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;

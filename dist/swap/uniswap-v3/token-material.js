@@ -54,16 +54,21 @@ export class SavedUniswapTokenMaterialStore extends SecureStateStore {
     }
     path(hash) { return `uniswap-token-quotes/${hash}.json`; }
 }
-function gas(value) { if (!isPlainRecord(value) || !exactKeys(value, ["gasLimit", "maxFeePerGas", "maxPriorityFeePerGas"]) || uint(value.maxPriorityFeePerGas) > uint(value.maxFeePerGas))
-    fail("Uniswap token gas envelope is invalid."); return uint(value.gasLimit) * uint(value.maxFeePerGas); }
-function uint(value) { try {
-    if (typeof value !== "string")
-        throw new Error();
-    return parseAtomic(value);
+function gas(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["gasLimit", "maxFeePerGas", "maxPriorityFeePerGas"]) || uint(value.maxPriorityFeePerGas) > uint(value.maxFeePerGas))
+        fail("Uniswap token gas envelope is invalid.");
+    return uint(value.gasLimit) * uint(value.maxFeePerGas);
 }
-catch {
-    return fail("Uniswap token integer is invalid.");
-} }
+function uint(value) {
+    try {
+        if (typeof value !== "string")
+            throw new Error();
+        return parseAtomic(value);
+    }
+    catch {
+        return fail("Uniswap token integer is invalid.");
+    }
+}
 function instant(value) { const time = Date.parse(value); return Number.isFinite(time) && new Date(time).toISOString() === value; }
 function fail(message) { throw new ApnError("APN_STATE_CORRUPT", message); }
 //# sourceMappingURL=token-material.js.map

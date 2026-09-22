@@ -75,7 +75,7 @@ export type CommandRequest = {
     readonly quoteHash: string;
     readonly idempotencyKey: string;
 } | {
-    readonly command: "swap.uniswap-token.status" | "swap.uniswap-token.approve" | "swap.uniswap-token.execute";
+    readonly command: "swap.uniswap-token.status" | "swap.uniswap-token.approve" | "swap.uniswap-token.execute" | "swap.uniswap-token.cleanup";
     readonly operationId: string;
 } | {
     readonly command: "swap.sunswap.inventory";
