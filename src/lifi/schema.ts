@@ -110,6 +110,15 @@ const observationRpcFailureSchema = z.strictObject({
   httpStatus: z.number().int().min(100).max(599).optional(), attempts: z.number().int().min(1).max(10).optional(),
   endpointRole: z.enum(["primary", "receipt", "archive"]).optional(),
 });
+const observationTelemetrySchema = z.strictObject({
+  schemaVersion: z.literal("apn.bridge-observation-telemetry.v1"), stage: z.enum(["source_observation", "destination_observation"]),
+  effectRole: z.enum(["approval", "bridge"]), outcome: z.enum(["success", "missing", "failure"]),
+  physicalRequests: z.number().int().min(0).max(10_000), httpAttempts: z.number().int().min(0).max(10_000),
+  logicalRpcItems: z.number().int().min(0).max(100_000), batchCount: z.number().int().min(0).max(10_000),
+  maxBatchSize: z.number().int().min(0).max(33), budgetRejectedBeforeTransport: z.number().int().min(0).max(10_000),
+  attemptsByEndpointRole: z.strictObject({ primary: z.number().int().min(0), receipt: z.number().int().min(0), archive: z.number().int().min(0) }),
+  attemptsByMethodClass: z.record(z.enum(["chain", "transaction", "receipt", "block", "code", "storage", "call", "logs", "other"]), z.number().int().min(0)),
+});
 export const failureSchema = z.strictObject({ reason: reasonSchema,
   residualAllowance: z.strictObject({ amountAtomic: uintSchema, block: blockSchema, rpcOrigin: originSchema }).nullable(),
   residualAllowanceStatus: z.enum(["unavailable", "observed"]).optional(),
@@ -123,7 +132,8 @@ export const effectSchema = z.strictObject({ ...effectFields, envelope: envelope
 const effectSnapshotSchema = z.strictObject({ ...effectFields, envelopeHash: hashSchema });
 const mutableFields = { state: stateSchema, approval: consentSchema.nullable(), sourceProof: sourceProofSchema.nullable(),
   destinationProof: destinationProofSchema.nullable(), providerObservation: providerObservationSchema.nullable(),
-  destinationScan: scanSchema, failure: failureSchema.nullable(), usageLease: z.unknown().nullable() };
+  destinationScan: scanSchema, failure: failureSchema.nullable(), usageLease: z.unknown().nullable(),
+  observationTelemetry: z.array(observationTelemetrySchema).max(512).optional() };
 export const transitionSchema = z.strictObject({ ...mutableFields, effects: z.array(effectSnapshotSchema).min(1).max(2),
   at: isoSchema, previousHash: hashSchema, transitionHash: hashSchema });
 export const operationSchema = z.strictObject({ ...mutableFields, schemaVersion: z.literal("apn.bridge-operation.v1"), kind: z.literal("bridge_route"),

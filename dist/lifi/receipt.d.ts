@@ -3,6 +3,20 @@ import type { LegacyBridgeOperationRecord, StoredBridgeOperationRecord } from ".
 export declare function bridgeNextActions(op: BridgeOperationRecord): readonly string[];
 export declare function bridgeProofClass(op: BridgeOperationRecord): string;
 export declare function publicBridgeOperation(op: BridgeOperationRecord): {
+    observation_rpc_telemetry: {
+        schema_version: "apn.bridge-observation-telemetry.v1";
+        stage: "source_observation" | "destination_observation";
+        effect_role: "bridge" | "approval";
+        outcome: "success" | "missing" | "failure";
+        physical_requests: number;
+        http_attempts: number;
+        logical_rpc_items: number;
+        batch_count: number;
+        max_batch_size: number;
+        budget_rejected_before_transport: number;
+        attempts_by_endpoint_role: Readonly<Record<"receipt" | "primary" | "archive", number>>;
+        attempts_by_method_class: Readonly<Record<string, number>>;
+    }[];
     rpc_origins: {
         source: string;
         destination: string;
@@ -246,6 +260,20 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
     receipt_hash: string;
     schema_version: "apn.bridge-receipt.v1";
     operation_binding_hash: string;
+    observation_rpc_telemetry: {
+        schema_version: "apn.bridge-observation-telemetry.v1";
+        stage: "source_observation" | "destination_observation";
+        effect_role: "bridge" | "approval";
+        outcome: "success" | "missing" | "failure";
+        physical_requests: number;
+        http_attempts: number;
+        logical_rpc_items: number;
+        batch_count: number;
+        max_batch_size: number;
+        budget_rejected_before_transport: number;
+        attempts_by_endpoint_role: Readonly<Record<"receipt" | "primary" | "archive", number>>;
+        attempts_by_method_class: Readonly<Record<string, number>>;
+    }[];
     rpc_origins: {
         source: string;
         destination: string;

@@ -179,6 +179,20 @@ export declare class BridgeService {
     }>;
     prepare(input: Parameters<BridgePreparation["prepare"]>[0]): Promise<StoredPublicBridgeOperation>;
     approve(operationId: string): Promise<{
+        observation_rpc_telemetry: {
+            schema_version: "apn.bridge-observation-telemetry.v1";
+            stage: "source_observation" | "destination_observation";
+            effect_role: "bridge" | "approval";
+            outcome: "success" | "missing" | "failure";
+            physical_requests: number;
+            http_attempts: number;
+            logical_rpc_items: number;
+            batch_count: number;
+            max_batch_size: number;
+            budget_rejected_before_transport: number;
+            attempts_by_endpoint_role: Readonly<Record<"receipt" | "primary" | "archive", number>>;
+            attempts_by_method_class: Readonly<Record<string, number>>;
+        }[];
         rpc_origins: {
             source: string;
             destination: string;
@@ -393,6 +407,20 @@ export declare class BridgeService {
         };
     }>;
     resume(operationId: string): Promise<{
+        observation_rpc_telemetry: {
+            schema_version: "apn.bridge-observation-telemetry.v1";
+            stage: "source_observation" | "destination_observation";
+            effect_role: "bridge" | "approval";
+            outcome: "success" | "missing" | "failure";
+            physical_requests: number;
+            http_attempts: number;
+            logical_rpc_items: number;
+            batch_count: number;
+            max_batch_size: number;
+            budget_rejected_before_transport: number;
+            attempts_by_endpoint_role: Readonly<Record<"receipt" | "primary" | "archive", number>>;
+            attempts_by_method_class: Readonly<Record<string, number>>;
+        }[];
         rpc_origins: {
             source: string;
             destination: string;
