@@ -130,7 +130,6 @@ export class LifiTestRpc implements BridgeRpcPort {
   missingHashes = new Set<Hex>(); reverted = new Set<"approval" | "bridge">();
   sendTimeout = false; returnedHash: Hex | undefined; estimateGas = "300000"; gasPrice = "2000000000";
   drift = false; failObserve = false; failAccount = false; changedBlock = false; scanStart: string | undefined;
-  scanned: Parameters<BridgeRpcPort["logs"]>[0][] = []; scanRows: Awaited<ReturnType<BridgeRpcPort["logs"]>> = [];
   constructor(readonly chainId: BridgeChainId, readonly now: Date) { this.origin = `https://rpc-${chainId}.example`; this.blockTimestamp = Math.floor(now.getTime() / 1000).toString(); }
   async assertChain() { this.calls.push("chain"); }
   async block(tag: string): Promise<BridgeBlock> {
@@ -211,7 +210,6 @@ export class LifiTestRpc implements BridgeRpcPort {
     return { transaction, receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: transaction.block.numberAtomic,
       blockHash: transaction.block.hash, logs } };
   }
-  async logs(input: Parameters<BridgeRpcPort["logs"]>[0]) { this.calls.push("logs"); this.scanned.push(input); return this.scanRows; }
   private async proof(hash: Hex, e: BridgeEnvelope, safe: boolean, logs: readonly unknown[], status: "success" | "reverted", destination = false) {
     const block = await this.block("2000"), gasUsedAtomic = "21000", price = e.economics.maxFeePerGasAtomic,
       execution = BigInt(gasUsedAtomic) * BigInt(price), l1 = this.chainId === 8453 ? 500n : 0n, operator = this.chainId === 8453 ? 50n : 0n;

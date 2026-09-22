@@ -109,6 +109,7 @@ test("LI.FI bridge destination observation excludes relayer fee evidence and Bas
   assert.equal(Object.hasOwn(observed.transaction, "feeEvidence"), false);
   assert.equal(s.methods.some((method) => ["eth_getCode", "eth_getStorageAt", "eth_call"].includes(method)), false);
   assert.ok(s.methods.includes("eth_getTransactionReceipt")); assert.ok(s.methods.includes("eth_getBlockByNumber"));
+  assert.equal(s.methods.includes("eth_getLogs"), false);
 });
 
 async function routedArchiveObservation(useArchive: boolean) {
@@ -202,24 +203,18 @@ test("LI.FI RPC requires signed transaction, canonical block membership, receipt
     (s) => { s.receipt.gasUsed = "0x61a81"; }, (s) => { s.receipt.effectiveGasPrice = "0x77359401"; },
     (s) => { s.receipt.logs[0].transactionIndex = "0x1"; }, (s) => { s.receipt.logs[0].removed = true; },
     (s) => { s.receipt.logs.push(structuredClone(s.receipt.logs[0])); }, (s) => { s.receipt.logs[0].blockNumber = "0x7cf"; },
+    (s) => { s.receipt.logs[0].transactionHash = word(1n); }, (s) => { s.receipt.logs[0].blockHash = word(1n); },
+    (s) => { s.receipt.logs[0].logIndex = "malformed"; }, (s) => { s.receipt.logs[0].address = "0x01"; },
+    (s) => { s.receipt.logs[0].topics = ["0x01"]; }, (s) => { s.receipt.logs[0].data = "0x0"; },
   ];
   for (const mutate of mutations) { const s = await rpcObservation(); mutate(s); await assert.rejects(s.rpcAdapter.observe(s.hash), { code: "APN_RPC_PROTOCOL" }); }
 });
 
-test("LI.FI destination log scan enforces exact correlation, 1024-block and 128-log bounds", async () => {
-  const topic = word(5n) as Hex, hash = word(7n) as Hex, blockHash = word(8n) as Hex;
-  let rows: Json[] = [], calls = 0;
-  const rpc = new BridgeRpc(1, "https://ethereum.example", async (method) => {
-    if (method === "eth_chainId") return "0x1"; assert.equal(method, "eth_getLogs"); calls++; return rows;
-  });
-  const input = { address: LIFI_RECIPIENT, fromBlockAtomic: "1", toBlockAtomic: "1024", topics: [topic, word(6n) as Hex] };
-  await assert.rejects(rpc.logs({ ...input, toBlockAtomic: "1025" }), { code: "APN_RPC_PROTOCOL" }); assert.equal(calls, 0);
-  const valid = { address: LIFI_RECIPIENT, blockNumber: "0x2", blockHash, transactionHash: hash, topics: input.topics, removed: false, data: "0x" };
-  rows = [valid]; assert.deepEqual(await rpc.logs(input), [{ transactionHash: hash, blockNumberAtomic: "2", blockHash }]);
-  for (const change of [{ address: BRIDGE_DIAMOND }, { topics: [word(9n), word(6n)] }, { removed: true }, { blockNumber: "0x0" }, { blockHash: word(0n) }]) {
-    rows = [{ ...valid, ...change }]; await assert.rejects(rpc.logs(input), { code: "APN_RPC_PROTOCOL" });
-  }
-  rows = Array.from({ length: 129 }, () => valid); await assert.rejects(rpc.logs(input), { code: "APN_RPC_PROTOCOL" });
+test("LI.FI receipt logs accept omitted removed and preserve unrelated exact-receipt logs without a network log read", async () => {
+  const s = await rpcObservation(); delete s.receipt.logs[0].removed;
+  s.receipt.logs.push({ ...structuredClone(s.receipt.logs[0]), address: BRIDGE_DIAMOND, logIndex: "0x1", topics: [], data: "0x1234" });
+  const observed = await s.rpcAdapter.observeDestination(s.hash); assert.ok(observed);
+  assert.equal(observed.receipt.logs.length, 2); assert.equal(s.methods.includes("eth_getLogs"), false);
 });
 
 async function baseFeeFixture() {

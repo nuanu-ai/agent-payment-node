@@ -153,10 +153,5 @@ export declare class BridgeRpc implements BridgeRpcPort {
         receipt: BridgeProtocolReceipt;
     } | null>;
     private observeCanonical;
-    logs(input: Parameters<BridgeRpcPort["logs"]>[0]): Promise<{
-        transactionHash: `0x${string}`;
-        blockNumberAtomic: string;
-        blockHash: `0x${string}`;
-    }[]>;
     private recheck;
 }
