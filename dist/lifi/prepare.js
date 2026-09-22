@@ -3,11 +3,11 @@ import { OperationService } from "../operation-service.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { decodeBridgeCall } from "./decode.js";
-import { bridgeApprovalRequired, bridgeExpiry, freezeBridgeEnvelopes } from "./economics.js";
+import { bridgeApprovalPolicyHash, bridgeApprovalRequired, bridgeExpiry, freezeBridgeEnvelopes } from "./economics.js";
 import { newBridgeEffect } from "./operation-model.js";
 import { BridgeOperationRepository } from "./operation-repository.js";
 import { assertBridgeOwner, bridgeOwner } from "./owner.js";
-import { RpcReadSession } from "./rpc.js";
+import { RpcProviderScheduler, RpcReadSession } from "./rpc.js";
 import { BridgeQuoteRepository, newBridgeQuote } from "./quote-repository.js";
 import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from "./routes.js";
 import { newBridgeOperation } from "./transitions.js";
@@ -61,12 +61,11 @@ export class BridgePreparation {
                 bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
             const allowlist = await new BridgeAllowlistGate({ state, clock: { now: () => new Date(this.o.now()) } })
                 .admit(profile, quote.owner.address, quote.request, selected.choice.tool);
-            // One command-scoped session covers both sides of materialization. It is intentionally discarded before
-            // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary.
-            // Two 33-item deployment proofs require at most 22 archive requests at the public-provider bound,
-            // plus the two safe-head and two source-account batches. Attempts retain two transient-retry slots.
+            // One command-scoped read cache covers both sides of materialization. It is intentionally discarded before
+            // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary. Only the
+            // provider-family scheduler/cooldown spans phases. Cold proofs retain bounded request and retry headroom.
             const session = new RpcReadSession({ now: this.o.now, maxHttpRequests: 26, maxHttpAttempts: 28,
-                archiveDeploymentBatchMaxItems: 3 });
+                archiveDeploymentBatchMaxItems: 3, ...(this.o.providerScheduler === undefined ? {} : { providerScheduler: this.o.providerScheduler }) });
             const source = this.o.rpcFor(quote.request.fromChainId, session), destination = this.o.rpcFor(quote.request.toChainId, session);
             const [sourceSafeBlock, destinationSafeBlock, response] = await Promise.all([
                 source.block("safe"), destination.block("safe"), this.o.provider.materialize(selected.step),
@@ -89,7 +88,7 @@ export class BridgePreparation {
                 intent: { profile, quoteHash, owner: quote.owner, providerBinding: quote.providerBinding, materialization: m, decoded,
                     sourceDeployment, destinationDeployment, sourceAccount, destinationStartBlock: destinationSafeBlock,
                     sourceRpcOrigin: source.origin, destinationRpcOrigin: destination.origin, preparedAt, expiresAt,
-                    policyHash: hashObject({ identity: "apn.bridge.foreground-approval.v1", request: m.request }),
+                    policyHash: bridgeApprovalPolicyHash(m),
                     implicitProtocolFeeAtomic: parsed.implicitProtocolFeeAtomic, allowlist },
                 effects: envelopes.map(newBridgeEffect) });
             await this.o.records.persist(operation);

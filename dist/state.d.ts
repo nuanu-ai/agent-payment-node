@@ -5,6 +5,8 @@ import { SecureStateStore } from "./secure-state-store.js";
 import { type X402OperationRecord, type X402ReceiptRecord, type X402ResultRecord } from "./x402-state-integrity.js";
 export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./state-integrity.js";
 export declare class StateStore extends SecureStateStore {
+    loadRpcProviderPacing(familyHash: string): Promise<number | null>;
+    writeRpcProviderPacing(familyHash: string, lastStartMs: number): Promise<void>;
     loadWallet(profileHash: string): Promise<WalletRecord | null>;
     loadWalletArtifacts(profile: string, profileHash: string): Promise<{
         readonly stored: WalletRecord | null;
