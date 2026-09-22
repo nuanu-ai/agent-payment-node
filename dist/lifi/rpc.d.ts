@@ -16,9 +16,17 @@ export declare const BRIDGE_RPC_ENV: {
     readonly 42161: "APN_ARBITRUM_RPC_URL";
     readonly 59144: "APN_LINEA_RPC_URL";
 };
+export interface BridgeRpcRequestTrace {
+    readonly origin: string;
+    readonly endpointRole: "primary" | "receipt" | "archive";
+    readonly methods: readonly string[];
+    readonly batchSize: number;
+}
 export declare function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Record<string, string | undefined>>, options?: {
     readonly transport?: Pick<BridgeHttps, "request">;
     readonly wait?: (milliseconds: number) => Promise<void>;
+    /** Optional read-only observation hook; called from the selected production route before each physical HTTP attempt. */
+    readonly onRequest?: (trace: BridgeRpcRequestTrace) => void;
 }): {
     readonly origin: string;
     readonly call: EvmRpcCall;
@@ -29,6 +37,7 @@ export declare function bridgeRpcCall(chainId: BridgeChainId, environment: Reado
 export declare function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options?: {
     readonly transport?: Pick<BridgeHttps, "request">;
     readonly wait?: (milliseconds: number) => Promise<void>;
+    readonly onRequest?: (trace: BridgeRpcRequestTrace) => void;
 }): BridgeRpcFactory;
 export declare class BridgeRpc implements BridgeRpcPort {
     readonly chainId: BridgeChainId;
