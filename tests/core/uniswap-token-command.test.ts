@@ -5,6 +5,7 @@ import { bindArgv } from "../../src/command-binder.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import { createMcpServer } from "../../src/mcp-server.js";
+import { createApnCore } from "../../src/runtime-factory.js";
 import { ETHEREUM_USDT } from "../../src/swap/uniswap-v3/pins.js";
 import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { temporaryState } from "./helpers.js";
@@ -23,6 +24,14 @@ test("token-input CLI binds a separate exact seven-command family without wideni
     "--max-fee-per-gas", "2000000000", "--max-priority-fee-per-gas", "100000000", "--max-native-debit", "720000000000000"]).request;
   assert.equal(quote.command, "swap.uniswap-token.quote");
   assert.equal(bindArgv(["swap", "ethereum", "uniswap", "inventory"]).request.command, "swap.uniswap.inventory");
+});
+
+test("runtime factory installs the token runtime for offline inventory without resolving RPC", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const bound = bindArgv(["swap", "ethereum", "uniswap-token", "inventory"]), core = createApnCore(bound, { stateRoot: temporary.root });
+  assert.ok(core.context.uniswapTokenRuntime);
+  const result = await core.execute(bound.request);
+  assert.equal(result.ok, true); assert.equal((result.data as any).router, "0xE592427A0AEce92De3Edee1F18E0157C05861564");
 });
 
 test("MCP token approve, execute, and cleanup return exact foreground CLI handoffs", async (t) => {
