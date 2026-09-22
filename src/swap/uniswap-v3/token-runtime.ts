@@ -49,15 +49,18 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
             mechanismDigest: material.mechanismDigest, now: this.ports.now() }));
         await this.rpcBudget?.reconcile(operationId); return saved;
     }
-    async approve(id: string) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, 14, "approval_effect", async () => await this.execution.approve(id)); }
-    async execute(id: string) { const phase = (await this.journal.load(id))?.phase;
-      const budget = phase === "approved" || phase === "approval_observed" ? [24, 24, "swap_effect"] as const : [0, 24, "recovery"] as const;
-      return await this.budgeted(id, "swap.uniswap-token.execute", budget[0], budget[1], budget[2], async () => await this.execution.execute(id)); }
-    async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", 0, 8, "recovery", async () => await this.execution.status(id)); }
-    async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", 0, 14, "recovery", async () => await this.execution.cleanup(id)); }
-    private async budgeted<T>(id: string, command: string, cap: number, requestSessionCap: number,
-      budgetClass: NonNullable<import("./token-rpc-budget.js").TokenRpcBudgetRow["budgetClass"]>, work: () => Promise<T>) { if (this.rpcBudget === undefined) return await work();
-      await this.rpcBudget.reconcile(id); const reservation = await this.rpcBudget.reserve(id, command, cap, requestSessionCap, budgetClass); try { return await work(); }
-      finally { await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); } }
+    async approve(id: string) { return await this.budgeted(id, "swap.uniswap-token.approve", async () => [14, 14, "approval_effect"] as const, async () => await this.execution.approve(id)); }
+    async execute(id: string) { return await this.budgeted(id, "swap.uniswap-token.execute", async () => {
+      const phase = (await this.journal.load(id))?.phase;
+      return phase === "approved" || phase === "approval_observed" ? [24, 24, "swap_effect"] as const : [0, 24, "recovery"] as const;
+    }, async () => await this.execution.execute(id)); }
+    async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, 8, "recovery"] as const, async () => await this.execution.status(id)); }
+    async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, 14, "recovery"] as const, async () => await this.execution.cleanup(id)); }
+    private async budgeted<T>(id: string, command: string,
+      budget: () => Promise<readonly [number, number, NonNullable<import("./token-rpc-budget.js").TokenRpcBudgetRow["budgetClass"]>]>, work: () => Promise<T>) {
+      return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => { const [cap, requestSessionCap, budgetClass] = await budget();
+        if (this.rpcBudget === undefined) return await work();
+        await this.rpcBudget.reconcile(id); const reservation = await this.rpcBudget.reserve(id, command, cap, requestSessionCap, budgetClass); try { return await work(); }
+        finally { await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); } }); }
 }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

@@ -13,6 +13,7 @@ import { UniswapTokenNonceStore } from "../../src/swap/uniswap-v3/token-nonce.js
 import { occupiedUniswapTokenNonces } from "../../src/swap/uniswap-v3/token-nonce-ownership.js";
 import { newUniswapTokenOperation, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
 import { createUniswapTokenRoute, UNISWAP_TOKEN_MECHANISM_PIN, verifyUniswapTokenUsdtState } from "../../src/swap/uniswap-v3/token-route.js";
+import { InstalledUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime.js";
 import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
 import { UniswapTokenUsage } from "../../src/swap/uniswap-v3/token-usage.js";
 import { ETHEREUM_USDT, UNISWAP_V3_QUOTER_V2 } from "../../src/swap/uniswap-v3/pins.js";
@@ -249,6 +250,36 @@ test("execute from approved reserves the swap cap when exact allowance can skip 
   assert.equal(op.phase, "submitted"); assert.equal(op.approvalAttempt, null); assert.equal(op.swapAttempt?.transactionHash !== null, true); assert.equal(p.sends.length, 1);
   assert.deepEqual([row.cap, row.requestSessionCap, row.budgetClass], [24, 24, "swap_effect"]);
   assert.equal(row.physicalRequests, call.telemetry!()!.httpAttempts + call.effectAttempts!()); assert.ok(row.physicalRequests! <= row.cap);
+});
+test("concurrent status cannot advance a cap-zero execute into an unreserved swap effect", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const journal = new UniswapTokenJournal(temporary.root), budget = new UniswapTokenRpcBudgetJournal(temporary.root),
+    base = await journal.save(operation("a".repeat(64), "f")), usage = { reservationId: "b".repeat(64), state: "reserved" as const },
+    approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, NOW)),
+    attempt = { ...tokenAttempt(approved, "approval", "7", NOW), transactionHash: `0x${"1".repeat(64)}` as Hex },
+    submitted = await journal.save(transitionUniswapToken(approved, "approval_submitted", { approvalAttempt: attempt }, NOW));
+  let observeEntered!: () => void, releaseObserve!: () => void, sends = 0, seals = 0;
+  const entered = new Promise<void>((resolve) => { observeEntered = resolve; }), release = new Promise<void>((resolve) => { releaseObserve = resolve; });
+  const ports = { now: () => NOW, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
+    withAccountLock: async <T>(_op: UniswapTokenOperation, work: () => Promise<T>) => await work(), allocateNonce: async () => "8",
+    currentAllowance: async () => "1000000", releaseNonce: async () => undefined, commitNonce: async () => undefined,
+    guard: async () => undefined, revalidate: async () => undefined, reserveUsage: async () => usage,
+    currentUsage: async (op: UniswapTokenOperation) => ({ reservationId: op.usageReservationId!, state: op.usageState! }),
+    followUsage: async (_op: UniswapTokenOperation, state: any) => ({ reservationId: usage.reservationId, state }),
+    seal: async (op: UniswapTokenOperation) => { const row = (await budget.load(op.operationId))!.rows.at(-1)!;
+      assert.deepEqual([row.cap, row.budgetClass, row.physicalRequests], [24, "swap_effect", null]); seals += 1;
+      return { transactionHash: `0x${"2".repeat(64)}`, envelopeHash: "e".repeat(64) }; }, probeSealed: async () => null,
+    send: async () => { sends += 1; return "accepted" as const; },
+    observe: async (_op: UniswapTokenOperation, kind: TokenEffectKind) => { if (kind !== "approval") return null;
+      const row = (await budget.load(submitted.operationId))!.rows.at(-1)!; assert.deepEqual([row.cap, row.budgetClass], [0, "recovery"]);
+      observeEntered(); await release; return { status: "success" as const, transactionHash: attempt.transactionHash!, gasDebitWei: "1", allowanceAtomic: "1000000" }; } };
+  const rpc = { telemetry: () => null, effectAttempts: () => sends } as TokenRpcCall,
+    runtime = () => new InstalledUniswapTokenRuntime({} as any, {} as any, new UniswapTokenJournal(temporary.root), ports as any, budget, rpc);
+  const first = runtime().execute(submitted.operationId); await entered; let concurrentDone = false;
+  const concurrent = runtime().status(submitted.operationId).then((value) => { concurrentDone = true; return value; });
+  await new Promise<void>((resolve) => setImmediate(resolve)); assert.equal(concurrentDone, false); assert.equal(seals, 0); assert.equal(sends, 0);
+  releaseObserve(); assert.equal((await first).phase, "approval_observed"); assert.equal((await concurrent).phase, "approval_observed");
+  assert.equal(seals, 0); assert.equal(sends, 0); const effected = await runtime().execute(submitted.operationId);
+  assert.equal(effected.phase, "submitted"); assert.equal(seals, 1); assert.equal(sends, 1);
 });
 
 test("production token RPC phases stay within exact physical budgets through finalized swap", async (t) => {
