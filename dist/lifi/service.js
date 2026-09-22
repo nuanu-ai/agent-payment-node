@@ -28,6 +28,8 @@ export class BridgeService {
         this.providerScheduler = new RpcProviderScheduler({
             coordinate: async (family, work) => {
                 const familyHash = sha256(`rpc-provider-family\0${family}`);
+                // The lock intentionally covers the HTTP attempt. A sibling process can therefore fail with APN_STATE_BUSY
+                // when one provider request occupies the family for longer than the state store's five-second lock wait.
                 return await context.state.withLocks([`rpc-provider-family:${familyHash}`], async () => await work(await context.state.loadRpcProviderPacing(familyHash), async (value) => await context.state.writeRpcProviderPacing(familyHash, value)));
             },
         });
