@@ -27,9 +27,9 @@ const GAS_ORACLE_ABI = [{ type: "function", name: "getL1FeeUpperBound", stateMut
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "debug_traceTransaction", "eth_sendRawTransaction"]);
 // Exact selectors of reviewed, caller-independent configuration getters. Unknown calls stay as direct RPC reads.
 const DEPLOYMENT_MULTICALL_SELECTORS = new Set([
-    "0x079bd2c7", "0x105d0b81", "0x2bc5114c", "0x313ce567", "0x54fd4d50", "0x57f6dcb8", "0x5c60da1b",
+    "0x079bd2c7", "0x105d0b81", "0x2bc5114c", "0x313ce567", "0x54fd4d50", "0x57f6dcb8",
     "0x5e280f11", "0x5f6d9ae4", "0x72607537", "0x857749b0", "0x8da5cb5b", "0x9baf00f9", "0xb54501bc",
-    "0xbb0b6a53", "0xcdffacc6", "0xd8e8dbc7", "0xd999984d", "0xf6503992", "0xfb214c2f", "0xfc0c546a",
+    "0xbb0b6a53", "0xd8e8dbc7", "0xd999984d", "0xf6503992", "0xfb214c2f", "0xfc0c546a",
 ]);
 export function deploymentMulticallEligible(data) {
     return DEPLOYMENT_MULTICALL_SELECTORS.has(data.slice(0, 10));
