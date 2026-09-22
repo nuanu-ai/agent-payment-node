@@ -23,7 +23,7 @@ export declare function bridgeRpcCall(chainId: BridgeChainId, environment: Reado
     readonly call: EvmRpcCall;
     readonly attempt: EvmRpcCall;
     readonly sessionCall: (session: RpcReadSession) => EvmRpcCall;
-    readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment") => Promise<readonly unknown[]>;
+    readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>;
 };
 export declare function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options?: {
     readonly transport?: Pick<BridgeHttps, "request">;
@@ -39,7 +39,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
     private commandPrices?;
     private commandFeeInputs?;
     private readonly preparedEstimates;
-    constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall, sessionCall?: (session: RpcReadSession) => EvmRpcCall, sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment") => Promise<readonly unknown[]>);
+    constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall, sessionCall?: (session: RpcReadSession) => EvmRpcCall, sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>);
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
     deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<{
