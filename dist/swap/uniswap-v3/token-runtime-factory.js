@@ -11,8 +11,9 @@ import { UniswapTokenRevalidator } from "./token-revalidation.js";
 import { UniswapTokenSigningGuard } from "./token-guard.js";
 import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
+import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
 export function createUniswapTokenRuntime(input) {
-    const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call), ledger = new AssetUsageLedger(state.root), usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
+    const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call, input.verifyPins), ledger = new AssetUsageLedger(state.root), usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
     const ports = {
         now: () => clock.now(), withAccountLock: async (op, work) => await custody.withAccountLock(op, work),
         allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),
@@ -27,7 +28,7 @@ export function createUniswapTokenRuntime(input) {
         foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty), confirm: async (material) => await guard.confirm(material),
     };
     const admit = async (request, now) => await usage.admitQuote(request, now);
-    return new InstalledUniswapTokenRuntime(new UniswapTokenQuoteBuilder(call, materials, admit, () => clock.now()), materials, new UniswapTokenJournal(state.root), ports);
+    return new InstalledUniswapTokenRuntime(new UniswapTokenQuoteBuilder(call, materials, admit, () => clock.now(), input.verifyPins), materials, new UniswapTokenJournal(state.root), ports, new UniswapTokenRpcBudgetJournal(state.root), call);
 }
 async function foreground(enabled, op, cleanup, now, tty = {}) {
     if (!enabled)

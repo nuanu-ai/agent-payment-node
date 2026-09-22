@@ -2,12 +2,13 @@ import { decodeFunctionData, decodeFunctionResult, encodeFunctionData, getAddres
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import type { EvmRpcCall } from "../../evm-ports.js";
-import { evmRpcHex } from "../../evm-rpc-codec.js";
+import { evmRpcHex, evmRpcQuantity } from "../../evm-rpc-codec.js";
 import { parseAtomic } from "../../money.js";
 import { ETHEREUM_USDT, UNISWAP_V3_FACTORY, UNISWAP_V3_CODE_PINS, USDC_IMPLEMENTATION_PIN,
-  USDC_IMPLEMENTATION_SLOT, verifyCodePins } from "./pins.js";
+  USDC_IMPLEMENTATION_SLOT } from "./pins.js";
 import { UNISWAP_USDC } from "../uniswap-pin.js";
 import { SWAP_MECHANISM_PIN_SCHEMA, validateSwapMechanismPin } from "../pin.js";
+import { tokenBatch, type TokenRpcCall } from "./token-rpc.js";
 import { compileSwapProtocolRegistry } from "../protocol-registry.js";
 export const UNISWAP_V3_SWAP_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564" as const;
 export const UNISWAP_V3_USDC_USDT_100 = "0x3416cF6C708Da44DB2624D63ea0AAef7113527C6" as const;
@@ -95,16 +96,39 @@ export function encodeUniswapTokenApproval(tokenAddress: string, amount: string)
         data: encodeFunctionData({ abi: ERC20, functionName: "approve", args: [UNISWAP_V3_SWAP_ROUTER, BigInt(value)] }), amount: value };
 }
 export async function verifyUniswapTokenRoutePins(call: EvmRpcCall, tag: Hex): Promise<void> {
-    for (const [addressValue, hash] of [[UNISWAP_V3_SWAP_ROUTER, UNISWAP_V3_SWAP_ROUTER_CODE_HASH],
-        [UNISWAP_V3_USDC_USDT_100, UNISWAP_V3_USDC_USDT_100_CODE_HASH]] as const) {
-        if (keccak256(evmRpcHex(await call("eth_getCode", [addressValue, tag]))) !== hash)
-            blocked("Uniswap token route code pin changed.", "uniswap_code_pin_drift");
-  }
-  await verifyCodePins(call, tag, UNISWAP_V3_CODE_PINS.filter((pin) => pin.address === UNISWAP_USDC || pin.address === ETHEREUM_USDT),
-    { proxy: UNISWAP_USDC, slot: USDC_IMPLEMENTATION_SLOT, pin: USDC_IMPLEMENTATION_PIN });
-  await verifyUniswapTokenUsdtState(call, tag);
+  const rpc = call as TokenRpcCall, pins = UNISWAP_V3_CODE_PINS.filter((pin) => pin.address === UNISWAP_USDC || pin.address === ETHEREUM_USDT);
+  const first = await tokenBatch(rpc, "archive", [
+    { method: "eth_chainId", params: [], cachePolicy: "immutable" },
+    { method: "eth_getCode", params: [UNISWAP_V3_SWAP_ROUTER, tag], cachePolicy: "immutable" },
+    { method: "eth_getCode", params: [UNISWAP_V3_USDC_USDT_100, tag], cachePolicy: "immutable" },
+  ]);
+  if (evmRpcQuantity(first[0]) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token archive requires Ethereum chain 1.");
+  code(first[1], UNISWAP_V3_SWAP_ROUTER_CODE_HASH); code(first[2], UNISWAP_V3_USDC_USDT_100_CODE_HASH);
+  const second = await tokenBatch(rpc, "archive", [
+    { method: "eth_getCode", params: [pins[0]!.address, tag], cachePolicy: "immutable" },
+    { method: "eth_getCode", params: [pins[1]!.address, tag], cachePolicy: "immutable" },
+    { method: "eth_getStorageAt", params: [UNISWAP_USDC, USDC_IMPLEMENTATION_SLOT, tag], cachePolicy: "immutable" },
+  ]);
+  code(second[0], pins[0]!.codeHash); code(second[1], pins[1]!.codeHash);
+  const word = evmRpcHex(second[2], 32);
+  if (!/^0x0{24}/u.test(word) || getAddress(`0x${word.slice(26)}`) !== USDC_IMPLEMENTATION_PIN.address) blocked("USDC implementation pin changed.", "uniswap_code_pin_drift");
+  const safety = await tokenBatch(rpc, "archive", [
+    { method: "eth_getCode", params: [USDC_IMPLEMENTATION_PIN.address, tag], cachePolicy: "immutable" },
+    ...["deprecated", "basisPointsRate"].map((functionName) => ({ method: "eth_call", params: [{ to: ETHEREUM_USDT,
+      data: encodeFunctionData({ abi: USDT_SAFETY, functionName: functionName as "deprecated" | "basisPointsRate" }) }, tag], cachePolicy: "immutable" as const })),
+  ]);
+  code(safety[0], USDC_IMPLEMENTATION_PIN.codeHash);
+  assertUsdtSafety("deprecated", safety[1]); assertUsdtSafety("basisPointsRate", safety[2]);
+  const [maximumFee] = await tokenBatch(rpc, "archive", [{ method: "eth_call", params: [{ to: ETHEREUM_USDT,
+    data: encodeFunctionData({ abi: USDT_SAFETY, functionName: "maximumFee" }) }, tag], cachePolicy: "immutable" }]);
+  assertUsdtSafety("maximumFee", maximumFee);
     if (UNISWAP_V3_FACTORY !== "0x1F98431c8aD98523631AE4a59f267346ea31F984")
         throw new ApnError("APN_STATE_CORRUPT", "Uniswap factory pin changed.");
+}
+function code(value: unknown, expected: Hex) { if (keccak256(evmRpcHex(value)) !== expected) blocked("Uniswap token route code pin changed.", "uniswap_code_pin_drift"); }
+function assertUsdtSafety(functionName: "deprecated" | "basisPointsRate" | "maximumFee", value: unknown) {
+  const result = decodeFunctionResult({ abi: USDT_SAFETY, functionName, data: evmRpcHex(value, 32) });
+  if (result !== false && result !== 0n) blocked("USDT safety state changed from zero/non-deprecated.", "uniswap_code_pin_drift");
 }
 export async function verifyUniswapTokenUsdtState(call: EvmRpcCall, tag: Hex): Promise<void> {
   for (const functionName of ["deprecated", "basisPointsRate", "maximumFee"] as const) {

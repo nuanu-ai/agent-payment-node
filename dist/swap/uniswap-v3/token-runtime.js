@@ -4,21 +4,33 @@ import { swapMechanismDigest } from "../pin.js";
 import { UniswapTokenExecution } from "./token-execution.js";
 import { newUniswapTokenOperation, UniswapTokenJournal } from "./token-operation.js";
 import { UNISWAP_TOKEN_MECHANISM_PIN } from "./token-route.js";
+import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
 export class InstalledUniswapTokenRuntime {
     builder;
     materials;
     journal;
     ports;
+    rpcBudget;
+    rpc;
     execution;
-    constructor(builder, materials, journal, ports) {
+    constructor(builder, materials, journal, ports, rpcBudget, rpc) {
         this.builder = builder;
         this.materials = materials;
         this.journal = journal;
         this.ports = ports;
+        this.rpcBudget = rpcBudget;
+        this.rpc = rpc;
         this.execution = new UniswapTokenExecution(journal, ports);
     }
     inventory() { return this.builder.inventory(); }
-    async quote(request) { return await this.builder.quote(request); }
+    async quote(request) {
+        const result = await this.builder.quote(request);
+        if (this.rpcBudget !== undefined) {
+            const reservation = await this.rpcBudget.reserve(result.quoteHash, request.command, 8);
+            await this.rpcBudget.settle(result.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
+        }
+        return result;
+    }
     async prepare(request) {
         const material = await this.materials.load(request.quoteHash);
         if (material === null)
@@ -27,22 +39,45 @@ export class InstalledUniswapTokenRuntime {
             blocked("Token quote binding changed.", "uniswap_token_quote_binding");
         if (this.ports.now().getTime() >= material.route.deadline * 1000)
             blocked("Token quote expired.", "uniswap_token_quote_expired");
-        await this.ports.confirm(material);
+        const reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, 9);
+        try {
+            await this.ports.confirm(material);
+        }
+        finally {
+            if (reservation !== undefined)
+                await this.rpcBudget.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
+        }
         const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
             quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
         const prior = await this.journal.load(operationId);
         if (prior !== null)
             return prior;
-        return await this.journal.save(newUniswapTokenOperation({ operationId, profile: material.profile, account: material.account,
+        const saved = await this.journal.save(newUniswapTokenOperation({ operationId, profile: material.profile, account: material.account,
             route: material.route, approvalCapAtomic: material.approvalCapAtomic, allowanceAtPrepare: material.allowanceAtPrepare,
             approvalGas: material.approvalGas, swapGas: material.swapGas, cleanupGas: material.cleanupGas,
             maximumNativeDebitWei: material.maximumNativeDebitWei, policyDigest: material.policyDigest,
             mechanismDigest: material.mechanismDigest, now: this.ports.now() }));
+        await this.rpcBudget?.inherit(request.quoteHash, operationId);
+        return saved;
     }
-    async approve(id) { return await this.execution.approve(id); }
-    async execute(id) { return await this.execution.execute(id); }
-    async status(id) { return await this.execution.status(id); }
-    async cleanup(id) { return await this.execution.cleanup(id); }
+    async approve(id) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, async () => await this.execution.approve(id)); }
+    async execute(id) {
+        const phase = (await this.journal.load(id))?.phase, beforeEffect = phase === "approved" || phase === "approval_observed";
+        return await this.budgeted(id, "swap.uniswap-token.execute", beforeEffect ? 24 : 0, async () => await this.execution.execute(id));
+    }
+    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", 0, async () => await this.execution.status(id)); }
+    async cleanup(id) { return await this.budgeted(id, "swap.uniswap-token.cleanup", 0, async () => await this.execution.cleanup(id)); }
+    async budgeted(id, command, cap, work) {
+        if (this.rpcBudget === undefined)
+            return await work();
+        const reservation = await this.rpcBudget.reserve(id, command, cap);
+        try {
+            return await work();
+        }
+        finally {
+            await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
+        }
+    }
 }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-runtime.js.map

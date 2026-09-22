@@ -6,11 +6,16 @@ export const LIFI_API_ORIGIN = "https://li.quest/v1";
 /** Shared finite transport: public DNS pin, default TLS, no redirect or implicit retry. */
 export class BridgeHttps {
     resolveAddresses;
+    requestTimeoutMs;
     active = 0;
     waiting = [];
     #lifiApiKey;
-    constructor(resolveAddresses = resolvePublicAddresses, lifiApiKey) {
+    constructor(resolveAddresses = resolvePublicAddresses, lifiApiKey, requestTimeoutMs = 15_000) {
         this.resolveAddresses = resolveAddresses;
+        this.requestTimeoutMs = requestTimeoutMs;
+        if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 500 || requestTimeoutMs > 15_000) {
+            throw failure("APN_RPC_CONFIG", "request_timeout");
+        }
         this.#lifiApiKey = lifiApiKey === undefined || lifiApiKey === "" ? undefined : lifiApiKey;
     }
     async request(endpointInput, method, body, maximumBytes, code) {
@@ -26,12 +31,12 @@ export class BridgeHttps {
         }
         else
             this.active += 1;
-        const deadline = Date.now() + 15_000;
+        const deadline = Date.now() + this.requestTimeoutMs;
         let timeout;
         try {
             const addresses = await Promise.race([
                 this.resolveAddresses(endpoint, code, "Bridge endpoint"),
-                new Promise((_, reject) => { timeout = setTimeout(() => reject(failure(code, "DNS_deadline")), 15_000); }),
+                new Promise((_, reject) => { timeout = setTimeout(() => reject(failure(code, "DNS_deadline")), this.requestTimeoutMs); }),
             ]);
             clearTimeout(timeout);
             timeout = undefined;

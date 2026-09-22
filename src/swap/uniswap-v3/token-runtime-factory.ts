@@ -17,12 +17,14 @@ import { UniswapTokenRevalidator } from "./token-revalidation.js";
 import { UniswapTokenSigningGuard } from "./token-guard.js";
 import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
+import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
+import type { TokenRpcCall } from "./token-rpc.js";
 
 export function createUniswapTokenRuntime(input: { readonly state: StateStore; readonly wrapping: WrappingSecretPort;
   readonly clock: ClockPort; readonly call: EvmRpcCall; readonly foreground: "approve" | "cleanup" | "refuse";
   readonly tty?: TtyTransferApprovalOptions; readonly verifyPins?: (call: EvmRpcCall, tag: import("viem").Hex) => Promise<void> }): UniswapTokenCommandRuntime {
   const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()),
-    observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call), ledger = new AssetUsageLedger(state.root),
+    observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call, input.verifyPins), ledger = new AssetUsageLedger(state.root),
     usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
   const ports: UniswapTokenExecutionPorts & { confirm(material: import("./token-material.js").UniswapTokenMaterial): Promise<void> } = {
     now: () => clock.now(), withAccountLock: async (op, work) => await custody.withAccountLock(op, work),
@@ -38,8 +40,8 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
     foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty), confirm: async (material) => await guard.confirm(material),
   };
   const admit = async (request: Parameters<UniswapTokenQuoteBuilder["quote"]>[0], now: Date) => await usage.admitQuote(request, now);
-  return new InstalledUniswapTokenRuntime(new UniswapTokenQuoteBuilder(call, materials, admit, () => clock.now()), materials,
-    new UniswapTokenJournal(state.root), ports);
+  return new InstalledUniswapTokenRuntime(new UniswapTokenQuoteBuilder(call, materials, admit, () => clock.now(), input.verifyPins), materials,
+    new UniswapTokenJournal(state.root), ports, new UniswapTokenRpcBudgetJournal(state.root), call as TokenRpcCall);
 }
 async function foreground(enabled: boolean, op: UniswapTokenOperation, cleanup: boolean, now: Date, tty: TtyTransferApprovalOptions = {}) {
   if (!enabled) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Uniswap token approval must continue in the foreground CLI.",
