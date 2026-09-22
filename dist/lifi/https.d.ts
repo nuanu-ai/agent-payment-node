@@ -6,8 +6,9 @@ export declare const LIFI_API_ORIGIN = "https://li.quest/v1";
 export declare class BridgeHttps {
     #private;
     private readonly resolveAddresses;
+    private readonly requestTimeoutMs;
     private active;
     private readonly waiting;
-    constructor(resolveAddresses?: typeof resolvePublicAddresses, lifiApiKey?: string);
+    constructor(resolveAddresses?: typeof resolvePublicAddresses, lifiApiKey?: string, requestTimeoutMs?: number);
     request(endpointInput: string, method: "GET" | "POST", body: string | null, maximumBytes: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG"): Promise<LifiResponse>;
 }

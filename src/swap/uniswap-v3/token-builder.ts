@@ -3,12 +3,13 @@ import { canonicalJson, domainHash } from "../../canonical.js";
 import type { CommandRequest } from "../../commands.js";
 import { ApnError } from "../../errors.js";
 import type { EvmRpcCall } from "../../evm-ports.js";
-import { evmRpcBlock, evmRpcHex, evmRpcQuantity, recheckEvmBlock } from "../../evm-rpc-codec.js";
+import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { parseAtomic } from "../../money.js";
 import { swapMechanismDigest } from "../pin.js";
 import { UNISWAP_V3_QUOTER_V2 } from "./pins.js";
 import { createUniswapTokenMaterial, type SavedUniswapTokenMaterialStore } from "./token-material.js";
 import { createUniswapTokenRoute, encodeUniswapTokenApproval, UNISWAP_TOKEN_MECHANISM_PIN, UNISWAP_V3_SWAP_ROUTER, verifyUniswapTokenRoutePins } from "./token-route.js";
+import { tokenBatch, type TokenRpcCall } from "./token-rpc.js";
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
 const QUOTER = parseAbi(["function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)"]);
 export type UniswapTokenQuoteRequest = Extract<CommandRequest, {
@@ -16,7 +17,8 @@ export type UniswapTokenQuoteRequest = Extract<CommandRequest, {
 }>;
 export type UniswapTokenPolicyAdmission = (request: UniswapTokenQuoteRequest, now: Date) => Promise<string>;
 export class UniswapTokenQuoteBuilder {
-    constructor(private readonly call: EvmRpcCall, private readonly store: SavedUniswapTokenMaterialStore, private readonly admit: UniswapTokenPolicyAdmission, private readonly now: () => Date) { }
+    constructor(private readonly call: EvmRpcCall, private readonly store: SavedUniswapTokenMaterialStore, private readonly admit: UniswapTokenPolicyAdmission, private readonly now: () => Date,
+        private readonly verifyPins: (call: EvmRpcCall, tag: Hex) => Promise<void> = verifyUniswapTokenRoutePins) { }
     inventory() {
         return { chain: "eip155:1", router: UNISWAP_V3_SWAP_ROUTER, pair: "USDC/USDT", fee: 100,
             mechanism: UNISWAP_TOKEN_MECHANISM_PIN, approval: "exact_input_only", transactionValue: "0" };
@@ -25,31 +27,54 @@ export class UniswapTokenQuoteBuilder {
         const request = valid(input), at = this.now(), seconds = Math.floor(at.getTime() / 1000);
         if (request.deadline <= seconds || request.deadline - seconds > 1800)
             invalid("Uniswap token deadline must be in the next 30 minutes.");
-        if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n)
+        const rpc = this.call as TokenRpcCall, [chain, rawBlock] = await tokenBatch(rpc, "primary", [
+            { method: "eth_chainId", params: [], cachePolicy: "immutable" },
+            { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none" },
+        ]);
+        if (evmRpcQuantity(chain) !== 1n)
             throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token route requires Ethereum chain 1.");
-        const block = await evmRpcBlock(this.call, "latest");
-        await verifyUniswapTokenRoutePins(this.call, block.tag);
-        const policyDigest = await this.admit(input, at), allowance = await readAllowance(this.call, request.inputToken, request.account, block.tag);
-        if (allowance !== 0n && allowance !== request.amount)
-            blocked("Allowance must start at zero or the exact input amount.", "uniswap_allowance_mismatch");
+        const block = decodedBlock(rawBlock);
+        await this.verifyPins(this.call, block.tag);
+        const policyDigest = await this.admit(input, at), allowanceData = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [request.account, UNISWAP_V3_SWAP_ROUTER] });
         const quoteCall = encodeFunctionData({ abi: QUOTER, functionName: "quoteExactInputSingle", args: [{ tokenIn: request.inputToken,
                     tokenOut: request.outputToken, amountIn: request.amount, fee: 100, sqrtPriceLimitX96: 0n }] });
-        const [expected] = decodeFunctionResult({ abi: QUOTER, functionName: "quoteExactInputSingle",
-            data: evmRpcHex(await this.call("eth_call", [{ to: UNISWAP_V3_QUOTER_V2, data: quoteCall }, block.tag])) });
+        const [rawAllowance, rawQuote] = await tokenBatch(rpc, "archive", [
+            { method: "eth_call", params: [{ to: request.inputToken, data: allowanceData }, block.tag], cachePolicy: "snapshot" },
+            { method: "eth_call", params: [{ to: UNISWAP_V3_QUOTER_V2, data: quoteCall }, block.tag], cachePolicy: "snapshot" },
+        ]);
+        const allowance = decodeFunctionResult({ abi: ERC20, functionName: "allowance", data: evmRpcHex(rawAllowance, 32) });
+        if (allowance !== 0n && allowance !== request.amount)
+            blocked("Allowance must start at zero or the exact input amount.", "uniswap_allowance_mismatch");
+        const [expected] = decodeFunctionResult({ abi: QUOTER, functionName: "quoteExactInputSingle", data: evmRpcHex(rawQuote) });
         if (expected < request.minimum)
             blocked("Quoted output is below the explicit minimum.", "uniswap_output_floor");
         const route = createUniswapTokenRoute({ inputToken: request.inputToken, outputToken: request.outputToken, recipient: request.recipient,
             amountIn: request.amount.toString(), amountOutMinimum: request.minimum.toString(), deadline: request.deadline });
         const approval = encodeUniswapTokenApproval(route.inputToken, route.amountIn), approvalTx = { from: request.account, to: approval.to, data: approval.data, value: "0x0" }, swapTx = { from: request.account, to: route.router, data: route.calldata, value: "0x0" };
-        if (allowance === 0n)
-            await safeApprovalCall(this.call, approvalTx, block.tag);
-        else
-            await simulated(this.call, swapTx, block.tag, request.maxSwapGas);
-        const balance = evmRpcQuantity(await this.call("eth_getBalance", [request.account, block.tag]));
+        let rechecked: unknown, rawBalance: unknown;
+        if (allowance === 0n) {
+            const [result] = await tokenBatch(rpc, "archive", [{ method: "eth_call", params: [approvalTx, block.tag], cachePolicy: "none" }]);
+            const approvalResult = evmRpcHex(result); if (approvalResult !== "0x" && approvalResult !== `0x${"0".repeat(63)}1`)
+                blocked("Token approval simulation returned an unsafe result.", "uniswap_approval_simulation");
+            [rawBalance, rechecked] = await tokenBatch(rpc, "primary", [
+                { method: "eth_getBalance", params: [request.account, block.tag], cachePolicy: "snapshot" },
+                { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none" },
+            ]);
+        } else {
+            await tokenBatch(rpc, "archive", [{ method: "eth_call", params: [swapTx, block.tag], cachePolicy: "none" }]);
+            const [estimate, balanceValue, blockAgain] = await tokenBatch(rpc, "primary", [
+                { method: "eth_estimateGas", params: [swapTx, block.tag], cachePolicy: "none" },
+                { method: "eth_getBalance", params: [request.account, block.tag], cachePolicy: "snapshot" },
+                { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none" },
+            ]);
+            if (evmRpcQuantity(estimate) > request.maxSwapGas) blocked("Exact transaction gas estimate exceeds the owner cap.", "uniswap_gas_cap");
+            rawBalance = balanceValue; rechecked = blockAgain;
+        }
+        const balance = evmRpcQuantity(rawBalance);
         const required = (request.maxApprovalGas + request.maxSwapGas + request.maxCleanupGas) * request.maxFee;
         if (required > request.maxNativeDebit || balance < required)
             blocked("Native balance or debit cap does not cover approval, swap, and cleanup.", "uniswap_native_debit");
-        await recheckEvmBlock(this.call, block);
+        if (decodedBlock(rechecked).hash !== block.hash) throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.");
         const material = createUniswapTokenMaterial({ profile: request.profile, account: request.account, route, expectedOutputAtomic: expected.toString(),
             approvalCapAtomic: request.amount.toString(), allowanceAtPrepare: allowance.toString(),
             approvalGas: gas(request.maxApprovalGas, request.maxFee, request.maxPriority), swapGas: gas(request.maxSwapGas, request.maxFee, request.maxPriority),
@@ -64,21 +89,8 @@ export class UniswapTokenQuoteBuilder {
             policyDigest, mechanismDigest: material.mechanismDigest, signed: false, broadcast: false };
     }
 }
-async function readAllowance(call: EvmRpcCall, token: string, owner: string, tag: Hex) {
-    const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [owner as Hex, UNISWAP_V3_SWAP_ROUTER] });
-    return decodeFunctionResult({ abi: ERC20, functionName: "allowance", data: evmRpcHex(await call("eth_call", [{ to: token, data }, tag]), 32) });
-}
-async function simulated(call: EvmRpcCall, tx: object, tag: Hex, cap: bigint) {
-    await call("eth_call", [tx, tag]);
-    const estimate = evmRpcQuantity(await call("eth_estimateGas", [tx, tag]));
-    if (estimate > cap)
-        blocked("Exact transaction gas estimate exceeds the owner cap.", "uniswap_gas_cap");
-}
-async function safeApprovalCall(call: EvmRpcCall, tx: object, tag: Hex) {
-    const result = evmRpcHex(await call("eth_call", [tx, tag]));
-    if (result !== "0x" && result !== `0x${"0".repeat(63)}1`)
-        blocked("Token approval simulation returned an unsafe result.", "uniswap_approval_simulation");
-}
+function decodedBlock(value: unknown) { const raw = evmRpcRecord(value), number = evmRpcQuantity(raw.number), hash = evmRpcHex(raw.hash, 32);
+    return { tag: `0x${number.toString(16)}` as Hex, number: number.toString(), hash, raw }; }
 function valid(input: UniswapTokenQuoteRequest) {
     const account = address(input.account), recipient = address(input.recipient), inputToken = address(input.sourceToken), outputToken = address(input.outputToken);
     const amount = uint(input.amountAtomic), minimum = uint(input.minimumOutputAtomic), cap = uint(input.approvalCapAtomic), maxApprovalGas = uint(input.maxApprovalGasLimit), maxSwapGas = uint(input.maxSwapGasLimit), maxCleanupGas = uint(input.maxCleanupGasLimit), maxFee = uint(input.maxFeePerGas), maxPriority = uint(input.maxPriorityFeePerGas, false), maxNativeDebit = uint(input.maxNativeDebitWei);

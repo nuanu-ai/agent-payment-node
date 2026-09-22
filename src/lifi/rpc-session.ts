@@ -37,6 +37,8 @@ export interface RpcReadSessionOptions {
   readonly maxLogicalItems?: number;
   readonly maxHttpRequests?: number;
   readonly maxHttpAttempts?: number;
+  /** Attempts permitted for one logical read. Defaults to the established two-attempt LI.FI contract. */
+  readonly maxReadAttempts?: 1 | 2;
   readonly deadlineMs?: number;
   /** HTTP chunk bound for one atomic historical deployment read. General batches retain RPC_BATCH_MAX_ITEMS. */
   readonly archiveDeploymentBatchMaxItems?: number;
@@ -84,6 +86,7 @@ export class RpcReadSession {
   private readonly maxLogicalItems: number;
   private readonly maxHttpRequests: number;
   private readonly maxHttpAttempts: number;
+  private readonly maxReadAttempts: 1 | 2;
   private readonly archiveDeploymentBatchMaxItems: number;
   private readonly now: () => number;
   private readonly wait: (milliseconds: number) => Promise<void>;
@@ -112,6 +115,7 @@ export class RpcReadSession {
     this.maxLogicalItems = positiveBound(options.maxLogicalItems ?? options.maxUniqueCalls ?? RPC_DEFAULT_LOGICAL_ITEMS, "maxLogicalItems");
     this.maxHttpRequests = positiveBound(options.maxHttpRequests ?? RPC_DEFAULT_HTTP_REQUESTS, "maxHttpRequests");
     this.maxHttpAttempts = positiveBound(options.maxHttpAttempts ?? RPC_DEFAULT_HTTP_ATTEMPTS, "maxHttpAttempts");
+    this.maxReadAttempts = options.maxReadAttempts ?? MAX_READ_ATTEMPTS;
     this.archiveDeploymentBatchMaxItems = positiveBound(options.archiveDeploymentBatchMaxItems ?? RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS,
       "archiveDeploymentBatchMaxItems");
     if (this.archiveDeploymentBatchMaxItems > RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS) {
@@ -340,7 +344,7 @@ export class RpcReadSession {
         // Replaying the identical chunk cannot change that shape; other bounded reads retain their existing retry contract.
         const retryable = http !== undefined ? http.status === 408 || http.status === 429 || http.status >= 500 && http.status <= 599 &&
           (http.status !== 500 || retryHttp500) : transport !== undefined;
-        if (!retryable || attempt + 1 >= MAX_READ_ATTEMPTS) {
+        if (!retryable || attempt + 1 >= this.maxReadAttempts) {
           if (http !== undefined) {
             if (http.status === 429) throw this.rateLimit(method, http.retryAfterMs);
             if (method === "batch" && [400, 404, 405, 415].includes(http.status)) {

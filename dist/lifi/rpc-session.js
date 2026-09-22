@@ -23,6 +23,7 @@ export class RpcReadSession {
     maxLogicalItems;
     maxHttpRequests;
     maxHttpAttempts;
+    maxReadAttempts;
     archiveDeploymentBatchMaxItems;
     now;
     wait;
@@ -50,6 +51,7 @@ export class RpcReadSession {
         this.maxLogicalItems = positiveBound(options.maxLogicalItems ?? options.maxUniqueCalls ?? RPC_DEFAULT_LOGICAL_ITEMS, "maxLogicalItems");
         this.maxHttpRequests = positiveBound(options.maxHttpRequests ?? RPC_DEFAULT_HTTP_REQUESTS, "maxHttpRequests");
         this.maxHttpAttempts = positiveBound(options.maxHttpAttempts ?? RPC_DEFAULT_HTTP_ATTEMPTS, "maxHttpAttempts");
+        this.maxReadAttempts = options.maxReadAttempts ?? MAX_READ_ATTEMPTS;
         this.archiveDeploymentBatchMaxItems = positiveBound(options.archiveDeploymentBatchMaxItems ?? RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, "archiveDeploymentBatchMaxItems");
         if (this.archiveDeploymentBatchMaxItems > RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS) {
             throw new ApnError("APN_RPC_CONFIG", "RPC archiveDeploymentBatchMaxItems bound is invalid.");
@@ -291,7 +293,7 @@ export class RpcReadSession {
                 // Replaying the identical chunk cannot change that shape; other bounded reads retain their existing retry contract.
                 const retryable = http !== undefined ? http.status === 408 || http.status === 429 || http.status >= 500 && http.status <= 599 &&
                     (http.status !== 500 || retryHttp500) : transport !== undefined;
-                if (!retryable || attempt + 1 >= MAX_READ_ATTEMPTS) {
+                if (!retryable || attempt + 1 >= this.maxReadAttempts) {
                     if (http !== undefined) {
                         if (http.status === 429)
                             throw this.rateLimit(method, http.retryAfterMs);

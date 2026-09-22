@@ -6,7 +6,7 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { ApnError } from "../../src/errors.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
-import { UniswapTokenCustody } from "../../src/swap/uniswap-v3/token-custody.js";
+import { envelopeOf, UniswapTokenCustody } from "../../src/swap/uniswap-v3/token-custody.js";
 import { UniswapTokenEffectJournal } from "../../src/swap/uniswap-v3/token-effects.js";
 import { UniswapTokenExecution, type TokenEffectKind } from "../../src/swap/uniswap-v3/token-execution.js";
 import { UniswapTokenNonceStore } from "../../src/swap/uniswap-v3/token-nonce.js";
@@ -15,8 +15,9 @@ import { newUniswapTokenOperation, tokenAttempt, transitionUniswapToken, Uniswap
 import { createUniswapTokenRoute, UNISWAP_TOKEN_MECHANISM_PIN, verifyUniswapTokenUsdtState } from "../../src/swap/uniswap-v3/token-route.js";
 import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
 import { UniswapTokenUsage } from "../../src/swap/uniswap-v3/token-usage.js";
-import { ETHEREUM_USDT } from "../../src/swap/uniswap-v3/pins.js";
+import { ETHEREUM_USDT, UNISWAP_V3_QUOTER_V2 } from "../../src/swap/uniswap-v3/pins.js";
 import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
+import { createTokenRpc, tokenBatch, type TokenRpcCall } from "../../src/swap/uniswap-v3/token-rpc.js";
 import { StateStore } from "../../src/state.js";
 import { activateDirectPolicy, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
@@ -58,20 +59,43 @@ class FailOnceEffectJournal extends UniswapTokenEffectJournal {
 async function production(root: string, now: Date, account: string, key: Hex, allowanceInput: string) {
   const state = new StateStore(root), master = Buffer.alloc(32, 73), wrapping = { load: async () => Buffer.from(master), create: async () => Buffer.from(master) };
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("token-swap", key, account);
-  let allowance = allowanceInput, phrase = ""; const sends: Hex[] = [], word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
-  const call = async (method: string, params: readonly unknown[]) => {
+  let allowance = allowanceInput, phrase = "", observedTx: unknown = null, observedReceipt: unknown = null, finalizedSwap = false;
+  const sends: Hex[] = [], word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
+  let physical = 0, logical = 0; const rawCall = async (method: string, params: readonly unknown[]) => {
     if (method === "eth_getTransactionCount") return "0x7"; if (method === "eth_chainId") return "0x1";
+    if (method === "eth_getCode") return "0x00";
     if (method === "eth_getBlockByNumber") return { number: "0x64", hash: `0x${"b".repeat(64)}`, baseFeePerGas: "0x0" };
     if (method === "eth_getBalance") return "0x100000";
-    if (method === "eth_call") { const data = String((params[0] as { data?: string }).data ?? "");
-      return data.startsWith("0xdd62ed3e") ? word(BigInt(allowance)) : data.startsWith("0x70a08231") ? word(2_000_000n) : "0x"; }
+    if (method === "eth_call") { const tx = params[0] as { data?: string; to?: string }, data = String(tx.data ?? ""), tag = String(params[1] ?? "");
+      if (tx.to === UNISWAP_V3_QUOTER_V2) return `0x${word(1_000_000n).slice(2)}${word(0n).slice(2)}${word(0n).slice(2)}${word(0n).slice(2)}`;
+      if (data.startsWith("0xdd62ed3e")) return word(BigInt(allowance));
+      if (data.startsWith("0x70a08231")) { if (!finalizedSwap) return word(2_000_000n);
+        if (tx.to === UNISWAP_USDC) return word(tag === "0x63" ? 2_000_000n : 1_000_000n);
+        return word(tag === "0x63" ? 0n : 990_000n); }
+      return "0x"; }
     if (method === "eth_estimateGas") return "0x5208"; if (method === "eth_maxPriorityFeePerGas") return "0x1";
     if (method === "eth_sendRawTransaction") { const raw = params[0] as Hex; sends.push(raw); return keccak256(raw); }
-    if (method === "eth_getTransactionByHash" || method === "eth_getTransactionReceipt") return null; throw new Error(method);
-  };
+    if (method === "eth_getTransactionByHash") return observedTx; if (method === "eth_getTransactionReceipt") return observedReceipt; throw new Error(method);
+  }; const call = (async (method: string, params: readonly unknown[]) => { physical += 1; logical += 1; return await rawCall(method, params); }) as TokenRpcCall;
+  Object.defineProperty(call, "batch", { value: async (_route: string, items: readonly { method: string; params: readonly unknown[] }[]) => {
+    physical += 1; logical += items.length; assert.ok(items.length <= 3); return await Promise.all(items.map((item) => rawCall(item.method, item.params))); } });
   const terminal = async () => ({ fd: 1, write: async (screen: string) => { phrase = /Type ([a-z0-9-]+) and/u.exec(screen)?.[1] ?? ""; },
     read: async function* () { yield Buffer.from(`${phrase}\n`); }, close: async () => undefined });
-  return { state, wrapping, call, sends, setAllowance: (value: string) => { allowance = value; }, tty: { isTerminal: () => true, openTerminal: terminal }, now };
+  let rpcNow = now.getTime(); const sessionCall = (maxHttpRequests: number) => createTokenRpc({ environment: {
+    APN_ETHEREUM_RPC_URL: "https://rpc.example", APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example",
+  }, state, now: () => rpcNow, pacingNow: () => rpcNow, wait: async (milliseconds) => { rpcNow += milliseconds; }, maxHttpRequests,
+    deadlineMs: 300_000, transport: { request: async (_url, _method, body) => { const request = JSON.parse(body!); const rows = Array.isArray(request) ? request : [request];
+      const response = await Promise.all(rows.map(async (row: any) => ({ jsonrpc: "2.0", id: row.id, result: await rawCall(row.method, row.params) })));
+      return { status: 200, body: JSON.stringify(Array.isArray(request) ? response : response[0]) }; } } });
+  const observe = (op: UniswapTokenOperation, kind: TokenEffectKind, status: 0 | 1) => { const attempt = kind === "approval" ? op.approvalAttempt! : kind === "swap" ? op.swapAttempt! : op.cleanupAttempt!, envelope = envelopeOf(op, kind, attempt.nonce), hash = attempt.transactionHash!;
+    observedTx = { hash, chainId: "0x1", from: op.account, to: envelope.to, input: envelope.data, value: "0x0", nonce: `0x${BigInt(envelope.nonce).toString(16)}`,
+      gas: `0x${BigInt(envelope.gasLimit).toString(16)}`, maxFeePerGas: `0x${BigInt(envelope.maxFeePerGas).toString(16)}`,
+      maxPriorityFeePerGas: `0x${BigInt(envelope.maxPriorityFeePerGas).toString(16)}`, type: "0x2", blockNumber: "0x64", blockHash: `0x${"b".repeat(64)}` };
+    observedReceipt = { transactionHash: hash, from: op.account, to: envelope.to, blockNumber: "0x64", blockHash: `0x${"b".repeat(64)}`,
+      status: `0x${status}`, gasUsed: "0x5208", effectiveGasPrice: "0x1" }; finalizedSwap = kind === "swap" && status === 1; };
+  return { state, wrapping, call, sends, setAllowance: (value: string) => { allowance = value; },
+    counts: () => ({ physical, logical }), resetCounts: () => { physical = 0; logical = 0; }, sessionCall, observe,
+    clearObservation: () => { observedTx = null; observedReceipt = null; finalizedSwap = false; }, tty: { isTerminal: () => true, openTerminal: terminal }, now };
 }
 
 test("token usage atomically enforces the daily source cap across concurrent operations", async (t) => {
@@ -162,6 +186,48 @@ test("production execute durably routes non-exact live allowance drift into expl
   let op = await runtime.execute(approved.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "approval_allowance_drift");
   assert.equal(op.usageState, "reserved"); assert.equal(p.sends.length, 0);
   op = await runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.equal(op.usageState, "reserved"); assert.equal(p.sends.length, 1);
+});
+
+test("production token RPC phases stay within exact physical budgets through finalized swap", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const at = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, at, account, key, "0");
+  const pins = async (call: TokenRpcCall, tag: Hex) => { let cursor = 0;
+    await tokenBatch(call, "archive", [{ method: "eth_chainId", params: [], cachePolicy: "immutable" },
+      ...Array.from({ length: 2 }, () => ({ method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], cachePolicy: "immutable" as const }))]);
+    for (const size of [3, 3, 1]) await tokenBatch(call, "archive",
+      Array.from({ length: size }, () => ({ method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], cachePolicy: "immutable" }))); };
+  const runtime = (call: TokenRpcCall, foreground: "approve" | "cleanup" | "refuse") => createUniswapTokenRuntime({ state: p.state, wrapping: p.wrapping,
+    clock: { now: () => at }, call, foreground, tty: p.tty, verifyPins: pins });
+  const request = { ...quoteRequest(), account, recipient: account, deadline: Math.floor(at.getTime() / 1000) + 600 };
+
+  let call = p.sessionCall(8), quote = await runtime(call, "refuse").quote(request), telemetry = call.telemetry!()!;
+  assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [8, 17]);
+  call = p.sessionCall(9); let op = await runtime(call, "refuse").prepare({ command: "swap.uniswap-token.prepare", profile: "token-swap",
+    quoteHash: (quote as { quoteHash: string }).quoteHash, idempotencyKey: "rpc-budget-sequence" }); telemetry = call.telemetry!()!;
+  assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [9, 20]);
+
+  call = p.sessionCall(14); op = await runtime(call, "approve").approve(op.operationId); telemetry = call.telemetry!()!;
+  assert.equal(op.phase, "approval_submitted"); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [14, 25]);
+  call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
+  assert.equal(op.phase, "approval_submitted"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [2, 4]);
+  p.setAllowance("1000000"); p.observe(op, "approval", 1);
+  call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
+  assert.equal(op.phase, "approval_observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [6, 9]);
+
+  p.clearObservation(); call = p.sessionCall(24); op = await runtime(call, "refuse").execute(op.operationId); telemetry = call.telemetry!()!;
+  assert.equal(op.phase, "submitted", op.cleanupReason ?? undefined); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [19, 32]);
+  call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
+  assert.equal(op.phase, "submitted"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [2, 4]);
+  p.setAllowance("0"); p.observe(op, "swap", 1);
+  call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
+  assert.equal(op.phase, "observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [7, 13]);
+  assert.equal(8 + 9 + 14 + 6 + 19 + 7, 63); assert.equal(63 + 2 + 2, 67); assert.equal(op.receipt?.inputDebitAtomic, "1000000");
+
+  const journal = new UniswapTokenJournal(temporary.root), cleanupBase = await journal.save(operation(s.policy.policyDigest, "a", account)), usage = await s.usage.reserve(cleanupBase),
+    cleanupOp = await journal.save(transitionUniswapToken(cleanupBase, "cleanup_required", { usageReservationId: usage.reservationId,
+      usageState: usage.state, cleanupReason: "measured_cleanup" }, at));
+  p.setAllowance("1000000"); p.clearObservation(); call = p.sessionCall(14); const cleanup = await runtime(call, "cleanup").cleanup(cleanupOp.operationId); telemetry = call.telemetry!()!;
+  assert.equal(cleanup.phase, "cleanup_submitted"); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [14, 24]);
 });
 
 test("post-wallet-save journal failure commits nonce and restart repairs and broadcasts the cached effect once", async (t) => {
