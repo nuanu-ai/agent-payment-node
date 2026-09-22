@@ -106,14 +106,20 @@ test("token raw send is one direct attempt outside the read retry and request bu
 test("durable operation budget caps only new effects and never blocks status or cleanup recovery", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const journal = new UniswapTokenRpcBudgetJournal(temp.root), binding = "b".repeat(64);
   const telemetry = (attempts: number) => ({ ...new RpcReadSession().telemetry(), httpRequests: attempts, httpAttempts: attempts });
-  for (const [command, cap, actual] of [["quote", 8, 8], ["prepare", 9, 9], ["approve", 14, 14], ["execute", 24, 24]] as const) {
-    const reservation = await journal.reserve(binding, command, cap); await journal.settle(binding, reservation, telemetry(actual), 0);
+  for (const [command, cap, actual, budgetClass] of [["quote", 8, 8, "quote"], ["prepare", 9, 9, "prepare"],
+    ["approve", 14, 14, "approval_effect"], ["execute", 24, 24, "swap_effect"]] as const) {
+    const reservation = await journal.reserve(binding, command, cap, cap, budgetClass); await journal.settle(binding, reservation, telemetry(actual), 0);
   }
   for (const command of ["status-pending-1", "status-pending-2", "status-final", "cleanup"]) {
-    const reservation = await journal.reserve(binding, command, 0); await journal.settle(binding, reservation, telemetry(8), 0);
+    const sessionCap = command === "cleanup" ? 14 : 8, reservation = await journal.reserve(binding, command, 0, sessionCap, "recovery");
+    await journal.settle(binding, reservation, telemetry(8), 0);
   }
   await assert.rejects(journal.reserve(binding, "another-effect", 14), { code: "APN_RPC_BUDGET_EXCEEDED" });
   const rows = (await journal.load(binding))!.rows; assert.equal(rows.length, 8); assert.equal(rows.at(-1)?.physicalRequests, 8);
+  assert.deepEqual(rows.map((row) => [row.cap, row.requestSessionCap, row.budgetClass]), [
+    [8, 8, "quote"], [9, 9, "prepare"], [14, 14, "approval_effect"], [24, 24, "swap_effect"],
+    [0, 8, "recovery"], [0, 8, "recovery"], [0, 8, "recovery"], [0, 14, "recovery"],
+  ]);
   assert.doesNotMatch(JSON.stringify(rows), /https:|0x[0-9a-f]{40}|rawTransaction/u);
 });
 
@@ -129,4 +135,14 @@ test("budget merging deduplicates row identity but retains two real prepare sess
   await journal.reconcile(operation); const rows = (await journal.load(operation))!.rows;
   assert.deepEqual(rows.map((row) => row.physicalRequests), [8, 9, 9]);
   await assert.rejects(journal.reserve(operation, "approve", 39), { code: "APN_RPC_BUDGET_EXCEEDED" });
+});
+test("settlement fails closed without recording a request-session overrun", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const journal = new UniswapTokenRpcBudgetJournal(temp.root), binding = "c".repeat(64);
+  const recovery = await journal.reserve(binding, "recovery-overrun", 0, 8, "recovery"), telemetry = new RpcReadSession().telemetry();
+  await assert.rejects(journal.settle(binding, recovery, { ...telemetry, httpAttempts: 8, httpRequests: 8 }, 1),
+    (error: any) => error.code === "APN_RPC_BUDGET_EXCEEDED" && error.details?.reason === "request_session_overrun");
+  assert.equal((await journal.load(binding))!.rows[0]?.physicalRequests, null);
+  const approval = await journal.reserve(binding, "approval-overrun", 14, 14, "approval_effect");
+  await assert.rejects(journal.settle(binding, approval, { ...telemetry, httpAttempts: 14, httpRequests: 14 }, 1), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal((await journal.load(binding))!.rows[1]?.physicalRequests, null);
 });

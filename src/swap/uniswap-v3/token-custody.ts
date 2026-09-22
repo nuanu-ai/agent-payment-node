@@ -92,7 +92,13 @@ export class UniswapTokenCustody {
     } finally { this.wallets.clear(wallet.secret); }
   }
   async probeSealed(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null> {
-    const envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelopeOf(op, kind, nonce))), wallet = await this.wallets.describe(op.profile);
+    const envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelopeOf(op, kind, nonce))),
+      journaled = await this.effects.load(op, kind);
+    if (journaled !== null) {
+      if (journaled.envelopeHash !== envelopeHash) corrupt("Uniswap token effect envelope changed.");
+      return { transactionHash: journaled.transactionHash, envelopeHash };
+    }
+    const wallet = await this.wallets.describe(op.profile);
     if (wallet === null) return null;
     try { const cached = wallet.secret.directEffects[effectKey(op, kind)]; if (cached === undefined) return null;
       if (cached.payloadHash !== envelopeHash || cached.transactionHash !== cached.rawTransactionHash || keccak256(cached.rawTransaction) !== cached.transactionHash) corrupt("Uniswap token cached effect changed.");

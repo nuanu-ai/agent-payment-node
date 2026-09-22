@@ -4,6 +4,8 @@ export interface TokenRpcBudgetRow {
     readonly reservation: string;
     readonly command: string;
     readonly cap: number;
+    readonly requestSessionCap?: number;
+    readonly budgetClass?: "quote" | "prepare" | "approval_effect" | "swap_effect" | "recovery";
     readonly physicalRequests: number | null;
     readonly attempts: number | null;
     readonly logicalItems: number | null;
@@ -19,7 +21,7 @@ interface BudgetRecord {
 }
 export declare const TOKEN_OPERATION_RPC_CAP = 64;
 export declare class UniswapTokenRpcBudgetJournal extends SecureStateStore {
-    reserve(binding: string, command: string, cap: number): Promise<string>;
+    reserve(binding: string, command: string, cap: number, requestSessionCap?: number, budgetClass?: NonNullable<TokenRpcBudgetRow["budgetClass"]>): Promise<string>;
     settle(binding: string, reservation: string, telemetry: RpcReadTelemetry | null, effects: number): Promise<void>;
     linkQuote(from: string, to: string): Promise<void>;
     reconcile(binding: string): Promise<void>;

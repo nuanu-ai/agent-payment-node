@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
-import { tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
+import { sanitizeUniswapTokenFailureField, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
 export class UniswapTokenExecution {
     journal;
     ports;
@@ -15,7 +15,8 @@ export class UniswapTokenExecution {
         await this.ports.foregroundApprove(op);
         const usage = await this.ports.reserveUsage(op);
         op = await this.persist(transitionUniswapToken(op, "approved", usagePatch(usage), this.ports.now()));
-        return await this.execute(id);
+        op = await this.advanceApproval(op);
+        return approvalActive(op.phase) ? await this.observeApproval(await this.continueStart(op, "approval")) : op;
     }
     async execute(id) {
         let op = await this.syncUsage(await this.required(id));
@@ -23,12 +24,8 @@ export class UniswapTokenExecution {
             return op;
         if (this.ports.now().getTime() >= op.route.deadline * 1000 && !active(op.phase))
             return await this.cleanupRequired(op, "deadline_expired");
-        if (op.phase === "approved") {
-            const allowance = await this.ports.currentAllowance(op);
-            if (allowance !== "0" && allowance !== op.route.amountIn)
-                return await this.cleanupRequired(op, "approval_allowance_drift");
-            op = allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval");
-        }
+        if (op.phase === "approved")
+            op = await this.advanceApproval(op);
         if (approvalActive(op.phase))
             return await this.observeApproval(await this.continueStart(op, "approval"));
         if (op.phase === "approval_observed") {
@@ -44,6 +41,12 @@ export class UniswapTokenExecution {
             return await this.observeSwap(await this.continueStart(op, "swap"));
         return op;
     }
+    async advanceApproval(op) {
+        const allowance = await this.ports.currentAllowance(op);
+        if (allowance !== "0" && allowance !== op.route.amountIn)
+            return await this.cleanupRequired(op, "approval_allowance_drift");
+        return allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval");
+    }
     async status(id) {
         const op = await this.syncUsage(await this.required(id));
         if (approvalActive(op.phase))
@@ -56,11 +59,17 @@ export class UniswapTokenExecution {
     }
     async cleanup(id) {
         let op = await this.syncUsage(await this.required(id));
+        if (op.phase === "cleaned")
+            return op;
         if (op.phase !== "cleanup_required")
             blocked("Token swap cleanup is not required.", "uniswap_cleanup_phase");
         await this.ports.foregroundCleanup(op);
-        if (await this.ports.currentAllowance(op) === "0")
+        if (await this.ports.currentAllowance(op) === "0") {
+            await this.assertNoEffect(op);
+            op = await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: "zero_allowance_no_effect",
+                cleanupEvidence: cleanupEvidence("current_allowance", this.ports.now()) }, this.ports.now()));
             return await this.cleaned(op);
+        }
         op = await this.start(op, "cleanup");
         return await this.observeCleanup(await this.continueStart(op, "cleanup"));
     }
@@ -90,9 +99,9 @@ export class UniswapTokenExecution {
         try {
             await this.ports.guard(op, kind, attempt.nonce);
         }
-        catch {
+        catch (error) {
             await this.ports.releaseNonce(op, kind, attempt.nonce);
-            return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`);
+            return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase));
         }
         let sealed;
         try {
@@ -165,20 +174,36 @@ export class UniswapTokenExecution {
         return await this.cleaned(op, native);
     }
     async cleaned(op, native = op.accumulatedNativeDebitWei) {
-        const usage = op.swapAttempt?.transactionHash == null
-            ? await this.ports.followUsage(op, "failed_before_effect") : await this.ports.currentUsage(op);
-        return await this.persist(transitionUniswapToken(op, "cleaned", { accumulatedNativeDebitWei: native, ...usagePatch(usage) }, this.ports.now()));
+        const noEffect = !effectHash(op);
+        if (noEffect && (op.cleanupEvidence ?? null) === null)
+            corrupt("No-effect cleanup evidence is missing.");
+        const usage = noEffect ? await this.ports.followUsage(op, "failed_before_effect") : await this.ports.currentUsage(op);
+        return await this.persist(transitionUniswapToken(op, "cleaned", { accumulatedNativeDebitWei: native,
+            ...(noEffect ? { cleanupReason: "zero_allowance_no_effect" } : {}), ...usagePatch(usage) }, this.ports.now()));
     }
-    async cleanupRequired(op, reason, native = op.accumulatedNativeDebitWei, usage) {
+    async cleanupRequired(op, reason, native = op.accumulatedNativeDebitWei, usage, preSignFailure) {
         return await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: reason, accumulatedNativeDebitWei: native,
-            ...(usage === undefined ? {} : usagePatch(usage)) }, this.ports.now()));
+            ...(usage === undefined ? {} : usagePatch(usage)), ...(preSignFailure === undefined ? {} : { preSignFailure }) }, this.ports.now()));
     }
     async syncUsage(op) {
         if (op.usageReservationId === null)
             return op;
         const usage = await this.ports.currentUsage(op);
-        return op.usageState === usage.state && op.usageReservationId === usage.reservationId ? op :
-            await this.persist(transitionUniswapToken(op, op.phase, usagePatch(usage), this.ports.now()));
+        if (op.usageState !== usage.state || op.usageReservationId !== usage.reservationId)
+            op = await this.persist(transitionUniswapToken(op, op.phase, usagePatch(usage), this.ports.now()));
+        if (op.phase === "cleanup_required" && op.usageState === "failed_before_effect" && !effectHash(op)) {
+            await this.assertNoEffect(op);
+            return await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "zero_allowance_no_effect", accumulatedNativeDebitWei: "0",
+                cleanupEvidence: op.cleanupEvidence ?? cleanupEvidence("legacy_usage_reconciliation", this.ports.now()) }, this.ports.now()));
+        }
+        return op;
+    }
+    async assertNoEffect(op) {
+        if (effectHash(op))
+            blocked("A durable token effect forbids no-effect cleanup.", "uniswap_cleanup_effect_exists");
+        for (const [kind, attempt] of [["approval", op.approvalAttempt], ["swap", op.swapAttempt], ["cleanup", op.cleanupAttempt]])
+            if (attempt !== null && await this.ports.probeSealed(op, kind, attempt.nonce) !== null)
+                blocked("A durable token effect forbids no-effect cleanup.", "uniswap_cleanup_effect_exists");
     }
     async required(id) { const op = await this.journal.load(id); if (op === null)
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Uniswap token operation was not found."); return op; }
@@ -196,5 +221,18 @@ function active(p) { return approvalActive(p) || swapActive(p) || cleanupActive(
 function usagePatch(value) { return { usageReservationId: value.reservationId, usageState: value.state }; }
 function debit(op, added) { const total = BigInt(op.accumulatedNativeDebitWei) + BigInt(added); if (total > BigInt(op.maximumNativeDebitWei))
     blocked("Native debit exceeded the approved budget.", "uniswap_native_debit_exceeded"); return total.toString(); }
+function effectHash(op) { return [op.approvalAttempt, op.swapAttempt, op.cleanupAttempt].some((row) => row?.transactionHash !== null && row?.transactionHash !== undefined); }
+function cleanupEvidence(source, now) {
+    return { schemaVersion: "apn.uniswap-token-cleanup-evidence.v1",
+        kind: "zero_allowance_no_effect", source, observedAllowanceAtomic: "0", observedAt: now.toISOString() };
+}
+function diagnostic(error, phase) {
+    const e = error instanceof ApnError ? error : null;
+    return { code: sanitizeUniswapTokenFailureField("code", e?.code),
+        reason: sanitizeUniswapTokenFailureField("reason", e?.details?.reason ?? e?.details?.transportReason),
+        rpcMethod: sanitizeUniswapTokenFailureField("rpcMethod", e?.details?.rpcMethod),
+        endpointRole: sanitizeUniswapTokenFailureField("endpointRole", e?.details?.endpointRole), phase };
+}
+function corrupt(message) { throw new ApnError("APN_STATE_CORRUPT", message); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-execution.js.map
