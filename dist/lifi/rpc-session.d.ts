@@ -21,6 +21,8 @@ export interface RpcReadSessionOptions {
     readonly maxLogicalItems?: number;
     readonly maxHttpRequests?: number;
     readonly maxHttpAttempts?: number;
+    /** Attempts permitted for one logical read. Defaults to the established two-attempt LI.FI contract. */
+    readonly maxReadAttempts?: 1 | 2;
     readonly deadlineMs?: number;
     /** HTTP chunk bound for one atomic historical deployment read. General batches retain RPC_BATCH_MAX_ITEMS. */
     readonly archiveDeploymentBatchMaxItems?: number;
@@ -63,6 +65,7 @@ export declare class RpcReadSession {
     private readonly maxLogicalItems;
     private readonly maxHttpRequests;
     private readonly maxHttpAttempts;
+    private readonly maxReadAttempts;
     private readonly archiveDeploymentBatchMaxItems;
     private readonly now;
     private readonly wait;

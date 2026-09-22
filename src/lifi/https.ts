@@ -12,7 +12,10 @@ export class BridgeHttps {
   private readonly waiting: Array<() => void> = [];
   readonly #lifiApiKey: string | undefined;
   constructor(private readonly resolveAddresses: typeof resolvePublicAddresses = resolvePublicAddresses,
-    lifiApiKey?: string) {
+    lifiApiKey?: string, private readonly requestTimeoutMs = 15_000) {
+    if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 500 || requestTimeoutMs > 15_000) {
+      throw failure("APN_RPC_CONFIG", "request_timeout");
+    }
     this.#lifiApiKey = lifiApiKey === undefined || lifiApiKey === "" ? undefined : lifiApiKey;
   }
   async request(endpointInput: string, method: "GET" | "POST", body: string | null, maximumBytes: number,
@@ -24,12 +27,12 @@ export class BridgeHttps {
       if (this.waiting.length >= 32) throw failure(code, "concurrency_bound");
       await new Promise<void>((resolve) => this.waiting.push(resolve));
     } else this.active += 1;
-    const deadline = Date.now() + 15_000;
+    const deadline = Date.now() + this.requestTimeoutMs;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const addresses = await Promise.race([
         this.resolveAddresses(endpoint, code, "Bridge endpoint"),
-        new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(failure(code, "DNS_deadline")), 15_000); }),
+        new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(failure(code, "DNS_deadline")), this.requestTimeoutMs); }),
       ]);
       clearTimeout(timeout); timeout = undefined;
       const remaining = deadline - Date.now();
