@@ -421,7 +421,10 @@ catch {
 export function rpcProviderFamily(origin) {
     try {
         const hostname = new URL(origin).hostname.toLowerCase();
-        return hostname === "publicnode.com" || hostname.endsWith(".publicnode.com") ? "publicnode.com" : hostname;
+        if (hostname === "publicnode.com" || hostname.endsWith(".publicnode.com"))
+            return "publicnode.com";
+        const drpcSuffix = ".drpc.org", drpcLabel = hostname.endsWith(drpcSuffix) ? hostname.slice(0, -drpcSuffix.length) : "";
+        return hostname === "drpc.org" || drpcLabel !== "" && !drpcLabel.includes(".") ? "drpc.org" : hostname;
     }
     catch {
         return "invalid-origin";

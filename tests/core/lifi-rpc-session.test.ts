@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ApnError } from "../../src/errors.js";
 import { BridgeRpc, RpcProviderScheduler, RpcReadSession, bridgeRpcCall } from "../../src/lifi/rpc.js";
-import { RPC_READ_METHODS } from "../../src/lifi/rpc-session.js";
+import { RPC_READ_METHODS, RpcHttpFailure, rpcProviderFamily } from "../../src/lifi/rpc-session.js";
 import { rpcBlockValue, rpcFeeBlockValue } from "../../src/lifi/rpc-batch-codec.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 
@@ -137,6 +137,63 @@ test("shared scheduler serializes sibling provider subdomains across sessions", 
   });
   await Promise.all([base("eth_chainId", []), arbitrum("eth_chainId", [])]);
   assert.equal(maximum, 1); assert.deepEqual(waits, [750]);
+});
+
+test("shared scheduler serializes Base and Arbitrum dRPC siblings across sessions", async () => {
+  let now = 0, active = 0, maximum = 0;
+  const waits: number[] = [], scheduler = new RpcProviderScheduler();
+  const options = { providerScheduler: scheduler, now: () => now, wait: async (milliseconds: number) => { waits.push(milliseconds); now += milliseconds; } };
+  const call = (origin: string, chainId: 8453 | 42161) => new RpcReadSession(options).wrap(origin, chainId, async () => {
+    active += 1; maximum = Math.max(maximum, active); await Promise.resolve(); active -= 1; return "0x1";
+  });
+  await Promise.all([
+    call("https://base.drpc.org/archive?token=redacted", 8453)("eth_chainId", []),
+    call("https://arbitrum.drpc.org/other", 42161)("eth_chainId", []),
+  ]);
+  assert.equal(maximum, 1); assert.deepEqual(waits, [750]);
+});
+
+test("dRPC family identity covers official single-label siblings and excludes deceptive hosts", () => {
+  assert.equal(rpcProviderFamily("https://user:secret@base.drpc.org/archive?key=secret"), "drpc.org");
+  assert.equal(rpcProviderFamily("https://arbitrum.drpc.org"), "drpc.org");
+  assert.equal(rpcProviderFamily("https://ethereum.drpc.org"), "drpc.org");
+  assert.equal(rpcProviderFamily("https://drpc.org"), "drpc.org");
+  assert.equal(rpcProviderFamily("https://drpc.org.evil.example"), "drpc.org.evil.example");
+  assert.equal(rpcProviderFamily("https://evil-drpc.org"), "evil-drpc.org");
+  assert.equal(rpcProviderFamily("https://not.allowed.drpc.org"), "not.allowed.drpc.org");
+});
+
+test("dRPC family pacing persists across Ethereum, Base and Arbitrum process records without endpoint secrets", async () => {
+  let now = 10_000, persisted: number | null = null;
+  const waits: number[] = [], families: string[] = [];
+  const coordinator = { coordinate: async <T>(family: string,
+    work: (lastStart: number | null, saveStart: (value: number) => Promise<void>) => Promise<T>) => {
+    families.push(family); return await work(persisted, async (value) => { persisted = value; });
+  } };
+  const run = async (origin: string, chainId: 1 | 8453 | 42161) => {
+    const session = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
+      wait: async (milliseconds) => { waits.push(milliseconds); now += milliseconds; } });
+    await session.wrap(origin, chainId, async () => "0x1")("eth_chainId", []);
+  };
+  await run("https://user:secret@ethereum.drpc.org/rpc?key=secret", 1);
+  await run("https://base.drpc.org/archive?token=secret", 8453);
+  await run("https://arbitrum.drpc.org/", 42161);
+  assert.deepEqual(families, ["drpc.org", "drpc.org", "drpc.org"]);
+  assert.deepEqual(waits, [750, 750]); assert.equal(persisted, 11_500);
+});
+
+test("dRPC Retry-After and post-retry pacing carry to a sibling session", async () => {
+  let now = 0, attempts = 0, siblingCalls = 0;
+  const waits: number[] = [], scheduler = new RpcProviderScheduler();
+  const options = { providerScheduler: scheduler, now: () => now, wait: async (milliseconds: number) => { waits.push(milliseconds); now += milliseconds; } };
+  const base = new RpcReadSession(options);
+  await base.read("https://base.drpc.org/archive", 8453, "eth_chainId", [], async () => {
+    attempts += 1; if (attempts === 1) throw new RpcHttpFailure("eth_chainId", 429, 5_000); return "0x2105";
+  });
+  await new RpcReadSession(options).read("https://arbitrum.drpc.org/archive", 42161, "eth_chainId", [], async () => {
+    siblingCalls += 1; return "0xa4b1";
+  });
+  assert.equal(attempts, 2); assert.equal(siblingCalls, 1); assert.deepEqual(waits, [5_000, 750]);
 });
 
 test("provider-family pacing survives scheduler restart through its coordinator", async () => {
