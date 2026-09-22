@@ -10,6 +10,8 @@ import { appendTransition, sealOperation } from "./state-integrity.js";
 import { canonicalIdempotencyKey, publicOperation, validateEconomics } from "./transfer-policy.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
+import { walletCustodyLock } from "./encrypted-wallet-store.js";
+import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
 /** The shared networks keep their existing profile rule; a direct-only network is local-wallet only. */
 export async function assertDirectEvmProfile(context, profile, chainId) {
     if (chainId === undefined || isSharedEvmChain(chainId))
@@ -48,47 +50,55 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
         const existing = await operations.resolvePrepare({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash });
         if (existing !== null)
             return publicOperation(existing.record);
-        const wallet = await state.loadWallet(profileHash);
-        if (wallet === null)
-            throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-        await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
-        const amount = evmAmount(request.amount, listed.decimals);
-        // Owner caps come only from the active allowlist policy and the shared usage ledger; no policy means no transfer.
-        const allowlist = await new DirectAllowlistGate(context).admit({ profile, operationId, family: "evm", account: wallet.address,
-            chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic,
-            asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
-        const rpc = requireEvmRpc(context.requireRpc());
-        const balance = await rpc.balance(wallet.address, { ...selection, decimals: listed.decimals });
-        if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId || balance.asset.decimals !== listed.decimals ||
-            (selection.token === "native" ? balance.asset.kind !== "native" : balance.asset.address !== selection.token)) {
-            throw new ApnError("APN_ASSET_MISMATCH", "Balance does not belong to the exact selected wallet, network and asset.");
-        }
-        // An amount above the balance is an economic refusal before any gas estimate, which would fail on the same shortfall.
-        if (evmUint(balance.assetAtomic) < BigInt(amount.atomic))
-            throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
-        const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
-        const [nonce, estimated] = await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]);
-        const economics = validateEconomics(nonce, priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
-        const quote = await rpc.feeQuote(selection.chainId, economics);
-        requireEvmFunding(balance, amount.atomic, quote, maximumFeeWei);
-        const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000).toISOString();
-        const expiresAt = new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString();
-        const binding = {
-            schemaVersion: "apn.evm-direct.v1", asset: balance.asset, transactionTo: transaction.to,
-            valueAtomic: transaction.valueAtomic, maxFeeWei: maximumFeeWei, feeQuote: quote,
-        };
-        const frozen = {
-            operationId, profile, chainId: selection.chainId, token: balance.asset.address, walletAddress: wallet.address,
-            recipient, amountAtomic: amount.atomic, transactionData: transaction.data, economics, preparedAt, expiresAt, evm: binding, allowlist,
-        };
-        const initial = { at: preparedAt, state: "awaiting_approval", terminal: false, reason: "prepared_and_frozen", proofClass: "durable_pre_effect" };
-        const operation = sealOperation({
-            schemaVersion: STATE_VERSION, ...frozen, profileHash, idempotencyHash, requestHash, fingerprint: evmDirectFingerprint(frozen),
-            amountDecimal: amount.decimal, preparedBlockNumberAtomic: balance.blockNumberAtomic,
-            state: initial.state, terminal: false, reason: initial.reason, proofClass: initial.proofClass, transitions: appendTransition([], initial),
+        return await state.withLocks([walletCustodyLock(state, profile)], async () => {
+            const wallet = await state.loadWallet(profileHash);
+            if (wallet === null)
+                throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+            await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
+            const amount = evmAmount(request.amount, listed.decimals);
+            // Owner caps come only from the active allowlist policy and the shared usage ledger; no policy means no transfer.
+            const allowlist = await new DirectAllowlistGate(context).admit({ profile, operationId, family: "evm", account: wallet.address,
+                chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic,
+                asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
+            const rpc = requireEvmRpc(context.requireRpc());
+            const balance = await rpc.balance(wallet.address, { ...selection, decimals: listed.decimals });
+            if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId || balance.asset.decimals !== listed.decimals ||
+                (selection.token === "native" ? balance.asset.kind !== "native" : balance.asset.address !== selection.token)) {
+                throw new ApnError("APN_ASSET_MISMATCH", "Balance does not belong to the exact selected wallet, network and asset.");
+            }
+            // An amount above the balance is an economic refusal before any gas estimate, which would fail on the same shortfall.
+            if (evmUint(balance.assetAtomic) < BigInt(amount.atomic))
+                throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
+            const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
+            const [rpcNonce, estimated] = await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]);
+            let nonce = BigInt(rpcNonce);
+            if (selection.chainId === 1) {
+                const owned = new Set((await occupiedUniswapTokenNonces(state.root, wallet.address)).map(String));
+                while (owned.has(nonce.toString()))
+                    nonce += 1n;
+            }
+            const economics = validateEconomics(nonce.toString(), priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
+            const quote = await rpc.feeQuote(selection.chainId, economics);
+            requireEvmFunding(balance, amount.atomic, quote, maximumFeeWei);
+            const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000).toISOString();
+            const expiresAt = new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString();
+            const binding = {
+                schemaVersion: "apn.evm-direct.v1", asset: balance.asset, transactionTo: transaction.to,
+                valueAtomic: transaction.valueAtomic, maxFeeWei: maximumFeeWei, feeQuote: quote,
+            };
+            const frozen = {
+                operationId, profile, chainId: selection.chainId, token: balance.asset.address, walletAddress: wallet.address,
+                recipient, amountAtomic: amount.atomic, transactionData: transaction.data, economics, preparedAt, expiresAt, evm: binding, allowlist,
+            };
+            const initial = { at: preparedAt, state: "awaiting_approval", terminal: false, reason: "prepared_and_frozen", proofClass: "durable_pre_effect" };
+            const operation = sealOperation({
+                schemaVersion: STATE_VERSION, ...frozen, profileHash, idempotencyHash, requestHash, fingerprint: evmDirectFingerprint(frozen),
+                amountDecimal: amount.decimal, preparedBlockNumberAtomic: balance.blockNumberAtomic,
+                state: initial.state, terminal: false, reason: initial.reason, proofClass: initial.proofClass, transitions: appendTransition([], initial),
+            });
+            await persist(operation);
+            return publicOperation(operation);
         });
-        await persist(operation);
-        return publicOperation(operation);
     });
 }
 /** The owner's tip replaces the RPC suggestion; the fee cap keeps its headroom of twice the base fee, plus that tip. */
