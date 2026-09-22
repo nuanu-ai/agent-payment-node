@@ -1,10 +1,10 @@
-import { encodeFunctionData, parseAbi } from "viem";
+import { decodeFunctionResult, encodeFunctionData, parseAbi } from "viem";
 import { EncryptedWalletStore } from "../../encrypted-wallet-store.js";
 import { ApnError } from "../../errors.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { encodeUniswapTokenApproval, verifyUniswapTokenRoutePins } from "./token-route.js";
 import { UniswapTokenRevalidator } from "./token-revalidation.js";
-import { tokenBatch } from "./token-rpc.js";
+import { tokenBatch, tokenBlock, tokenChain, tokenQuantity } from "./token-rpc.js";
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)", "function balanceOf(address owner) view returns (uint256)"]);
 export class UniswapTokenSigningGuard {
     state;
@@ -73,9 +73,9 @@ export class UniswapTokenSigningGuard {
     }
     async common(account, token, router, deadline) {
         const [chain, rawBlock, rawPending] = await tokenBatch(this.call, "primary", [
-            { method: "eth_chainId", params: [], cachePolicy: "immutable" },
-            { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none" },
-            { method: "eth_getTransactionCount", params: [account, "pending"], cachePolicy: "none" },
+            { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+            { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
+            { method: "eth_getTransactionCount", params: [account, "pending"], cachePolicy: "none", decoder: tokenQuantity },
         ]);
         if (evmRpcQuantity(chain) !== 1n)
             throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token signing requires Ethereum chain 1.");
@@ -95,7 +95,8 @@ export class UniswapTokenSigningGuard {
 function request(kind, owner, token, router, tag) {
     const data = encodeFunctionData({ abi: ERC20,
         functionName: kind, args: kind === "allowance" ? [owner, router] : [owner] });
-    return { method: "eth_call", params: [{ to: token, data }, tag], cachePolicy: "snapshot" };
+    return { method: "eth_call", params: [{ to: token, data }, tag], cachePolicy: "snapshot",
+        decoder: (value) => { decodeFunctionResult({ abi: ERC20, functionName: kind, data: evmRpcHex(value, 32) }); return value; } };
 }
 function word(value) { return BigInt(evmRpcHex(value, 32)); }
 function decodedBlock(value) {
@@ -111,9 +112,9 @@ async function simulate(call, tx, tag, limit, noReturn) {
 }
 async function finish(call, block, account, nativeCap, maxFee, maxPriority) {
     const [rawNative, rawPriority, rawBlock] = await tokenBatch(call, "primary", [
-        { method: "eth_getBalance", params: [account, block.tag], cachePolicy: "snapshot" },
-        { method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none" },
-        { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none" },
+        { method: "eth_getBalance", params: [account, block.tag], cachePolicy: "snapshot", decoder: tokenQuantity },
+        { method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none", decoder: tokenQuantity },
+        { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none", decoder: tokenBlock },
     ]), base = evmRpcQuantity(block.raw.baseFeePerGas), priority = evmRpcQuantity(rawPriority);
     if (evmRpcQuantity(rawNative) < BigInt(nativeCap))
         blocked("Native fee balance is below the approved bound.", "uniswap_token_native_balance");

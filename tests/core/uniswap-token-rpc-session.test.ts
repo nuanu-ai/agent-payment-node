@@ -3,7 +3,7 @@ import test from "node:test";
 import { RpcReadSession } from "../../src/lifi/rpc.js";
 import { StateStore } from "../../src/state.js";
 import { UniswapTokenRpcBudgetJournal } from "../../src/swap/uniswap-v3/token-rpc-budget.js";
-import { createTokenRpc, tokenBatch, type TokenRpcCall } from "../../src/swap/uniswap-v3/token-rpc.js";
+import { createTokenRpc, tokenBatch, tokenChain, tokenHex, tokenQuantity, type TokenRpcCall } from "../../src/swap/uniswap-v3/token-rpc.js";
 import { UniswapTokenQuoteBuilder } from "../../src/swap/uniswap-v3/token-builder.js";
 import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { ETHEREUM_USDT, UNISWAP_V3_QUOTER_V2 } from "../../src/swap/uniswap-v3/pins.js";
@@ -11,6 +11,7 @@ import { temporaryState } from "./helpers.js";
 
 const URLS = { APN_ETHEREUM_RPC_URL: "https://rpc.example", APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
 const H = `0x${"a".repeat(64)}`;
+const identity = (value: unknown) => value;
 const ACCOUNT = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1", RECIPIENT = "0x2222222222222222222222222222222222222222";
 const word = (value: bigint) => value.toString(16).padStart(64, "0");
 
@@ -28,7 +29,7 @@ test("token quote allowance-zero and exact branches each use eight POSTs and rev
     Object.defineProperty(rpc, "batch", { value: async (_route: string, items: readonly { method: string; params: readonly unknown[] }[]) => {
       physical += 1; logical += items.length; assert.ok(items.length <= 3); return items.map((item) => value(item.method, item.params)); } });
     const pins = async (call: any, tag: any) => { for (const size of [3, 3, 3, 1]) await tokenBatch(call, "archive",
-      Array.from({ length: size }, (_, index) => ({ method: "eth_getCode", params: [`0x${String(index + 1).padStart(40, "0")}`, tag], cachePolicy: "immutable" }))); };
+      Array.from({ length: size }, (_, index) => ({ method: "eth_getCode", params: [`0x${String(index + 1).padStart(40, "0")}`, tag], cachePolicy: "immutable", decoder: identity }))); };
     const builder = new UniswapTokenQuoteBuilder(rpc, { save: async (material: unknown) => (saved = material, material) } as any,
       async () => "d".repeat(64), () => new Date("2026-09-23T00:00:00.000Z"), pins);
     await builder.quote({ command: "swap.uniswap-token.quote", profile: "p", account: ACCOUNT, recipient: RECIPIENT,
@@ -48,14 +49,36 @@ test("token production session performs one atomic max-three batch with redacted
         ? { number: "0x1", hash: H } : "0x2" })); return { status: 200, body: JSON.stringify(Array.isArray(request) ? result : result[0]) }; } },
   });
   const result = await rpc.batch!("primary", [
-    { method: "eth_chainId", params: [], cachePolicy: "immutable" },
-    { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none" },
-    { method: "eth_getBalance", params: ["0x1111111111111111111111111111111111111111", "latest"], cachePolicy: "none" },
+    { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: identity },
+    { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: identity },
+    { method: "eth_getBalance", params: ["0x1111111111111111111111111111111111111111", "latest"], cachePolicy: "none", decoder: identity },
   ]);
   assert.equal(result.length, 3); assert.equal(bodies.length, 1); assert.equal((bodies[0] as unknown[]).length, 3);
   const telemetry = rpc.telemetry!(); assert.equal(telemetry?.httpRequests, 1); assert.equal(telemetry?.httpAttempts, 1);
   assert.equal(telemetry?.logicalItems, 3); assert.equal(telemetry?.maxBatchSize, 3);
   const projected = JSON.stringify(telemetry); assert.doesNotMatch(projected, /rpc\.example|111111111111|eth_getBalance.*0x/u);
+});
+
+test("archive reads reject a non-Ethereum identity before historical evidence", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); let attempts = 0;
+  const rpc = createTokenRpc({ environment: URLS, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 2, deadlineMs: 10_000,
+    transport: { request: async (_url, _method, body) => { attempts += 1; const row = JSON.parse(body!); return { status: 200,
+      body: JSON.stringify({ jsonrpc: "2.0", id: row.id, result: row.method === "eth_chainId" ? "0x2" : "0x00" }) }; } } });
+  await assert.rejects(tokenBatch(rpc, "archive", [{ method: "eth_getCode", params: [ACCOUNT, "0x1"], cachePolicy: "immutable", decoder: tokenHex() }]),
+    { code: "APN_CHAIN_MISMATCH" });
+  assert.equal(attempts, 1); assert.equal(rpc.telemetry!()?.logicalItems, 1);
+});
+
+test("a malformed decoded batch item commits none of its cache", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); let attempts = 0;
+  const rpc = createTokenRpc({ environment: URLS, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 2, deadlineMs: 10_000,
+    transport: { request: async (_url, _method, body) => { attempts += 1; const rows = JSON.parse(body!) as any[];
+      return { status: 200, body: JSON.stringify(rows.map((row) => ({ jsonrpc: "2.0", id: row.id,
+        result: row.method === "eth_chainId" ? "0x1" : attempts === 1 ? "malformed" : "0x2" }))) }; } } });
+  const items = [{ method: "eth_chainId", params: [], cachePolicy: "immutable" as const, decoder: tokenChain },
+    { method: "eth_getBalance", params: [ACCOUNT, "0x1"], cachePolicy: "immutable" as const, decoder: tokenQuantity }];
+  await assert.rejects(tokenBatch(rpc, "primary", items), { code: "APN_RPC_PROTOCOL" });
+  const result = await tokenBatch(rpc, "primary", items); assert.equal(result[1], "0x2"); assert.equal(attempts, 2);
 });
 
 test("token reads never retry 429 and reject exhausted request budget before transport", async (t) => {
@@ -92,4 +115,18 @@ test("durable operation budget caps only new effects and never blocks status or 
   await assert.rejects(journal.reserve(binding, "another-effect", 14), { code: "APN_RPC_BUDGET_EXCEEDED" });
   const rows = (await journal.load(binding))!.rows; assert.equal(rows.length, 8); assert.equal(rows.at(-1)?.physicalRequests, 8);
   assert.doesNotMatch(JSON.stringify(rows), /https:|0x[0-9a-f]{40}|rawTransaction/u);
+});
+
+test("budget merging deduplicates row identity but retains two real prepare sessions", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const journal = new UniswapTokenRpcBudgetJournal(temp.root),
+    quote = "c".repeat(64), operation = "d".repeat(64), telemetry = (attempts: number) => ({ ...new RpcReadSession().telemetry(), httpRequests: attempts, httpAttempts: attempts });
+  const quoteRow = await journal.reserve(quote, "quote", 8); await journal.settle(quote, quoteRow, telemetry(8), 0);
+  const first = await journal.reserve(quote, "prepare", 9); await journal.settle(quote, first, telemetry(9), 0);
+  await journal.linkQuote(quote, operation);
+  await journal.linkQuote(quote, operation);
+  assert.deepEqual((await journal.load(operation))!.rows.map((row) => row.physicalRequests), [8, 9]);
+  const retry = await journal.reserve(quote, "prepare", 9); assert.notEqual(retry, first); await journal.settle(quote, retry, telemetry(9), 0);
+  await journal.reconcile(operation); const rows = (await journal.load(operation))!.rows;
+  assert.deepEqual(rows.map((row) => row.physicalRequests), [8, 9, 9]);
+  await assert.rejects(journal.reserve(operation, "approve", 39), { code: "APN_RPC_BUDGET_EXCEEDED" });
 });

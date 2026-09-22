@@ -1,22 +1,22 @@
-import { encodeFunctionData, parseAbi, type Hex } from "viem";
+import { decodeFunctionResult, encodeFunctionData, parseAbi, type Hex } from "viem";
 import { ApnError } from "../../errors.js";
 import type { EvmRpcCall } from "../../evm-ports.js";
 import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import type { TokenEffectKind, TokenEffectObservation } from "./token-execution.js";
 import type { UniswapTokenOperation } from "./token-operation.js";
 import { envelopeOf } from "./token-custody.js";
-import { tokenBatch, type TokenRpcCall } from "./token-rpc.js";
+import { tokenBatch, tokenBlock, tokenChain, type TokenRpcCall } from "./token-rpc.js";
 
-const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
+const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)", "function balanceOf(address owner) view returns (uint256)"]);
 export class UniswapTokenObserver {
   constructor(private readonly call: EvmRpcCall) {}
   async observe(op: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: string): Promise<TokenEffectObservation | null> {
     const rpc = this.call as TokenRpcCall;
     const [primary, receiptRows] = await Promise.all([
-      tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], cachePolicy: "immutable" },
-        { method: "eth_getTransactionByHash", params: [transactionHash], cachePolicy: "none" }]),
-      tokenBatch(rpc, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable" },
-        { method: "eth_getTransactionReceipt", params: [transactionHash], cachePolicy: "none" }]),
+      tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+        { method: "eth_getTransactionByHash", params: [transactionHash], cachePolicy: "none", decoder: transactionDecoder }]),
+      tokenBatch(rpc, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+        { method: "eth_getTransactionReceipt", params: [transactionHash], cachePolicy: "none", decoder: receiptDecoder }]),
     ]);
     if (evmRpcQuantity(primary[0]) !== 1n || evmRpcQuantity(receiptRows[0]) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token observer requires Ethereum chain 1.");
     const rawTx = primary[1], rawReceipt = receiptRows[1];
@@ -31,8 +31,8 @@ export class UniswapTokenObserver {
     assertEnvelope(tx, envelope);
     if (evmRpcAddress(receipt.from) !== op.account || evmRpcAddress(receipt.to) !== envelope.to) blocked("Receipt sender or target conflicts.", "uniswap_token_receipt_conflict");
     const [rawBlock, rawSafe] = await tokenBatch(rpc, "primary", [
-      { method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false], cachePolicy: "none" },
-      { method: "eth_getBlockByNumber", params: ["safe", false], cachePolicy: "none" },
+      { method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false], cachePolicy: "none", decoder: tokenBlock },
+      { method: "eth_getBlockByNumber", params: ["safe", false], cachePolicy: "none", decoder: tokenBlock },
     ]), block = decodedBlock(rawBlock), safe = decodedBlock(rawSafe);
     if (block.hash !== blockHash) blocked("Receipt block is no longer canonical.", "uniswap_token_reorg_conflict");
     if (BigInt(safe.number) < blockNumber) return null;
@@ -62,18 +62,26 @@ export class UniswapTokenObserver {
   }
 }
 function allowanceRequest(op: UniswapTokenOperation, tag: Hex) { const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account as Hex, op.route.router] });
-  return { method: "eth_call", params: [{ to: op.route.inputToken, data }, tag], cachePolicy: "none" as const }; }
+  return { method: "eth_call", params: [{ to: op.route.inputToken, data }, tag], cachePolicy: "none" as const, decoder: allowanceDecoder }; }
 function balanceRequest(token: string, account: string, tag: Hex) { return { method: "eth_call",
-  params: [{ to: token, data: `0x70a08231${account.slice(2).toLowerCase().padStart(64, "0")}` }, tag], cachePolicy: "none" as const }; }
+  params: [{ to: token, data: `0x70a08231${account.slice(2).toLowerCase().padStart(64, "0")}` }, tag], cachePolicy: "none" as const, decoder: balanceDecoder }; }
 function decodedBlock(value: unknown) { const raw = evmRpcRecord(value), number = evmRpcQuantity(raw.number), hash = evmRpcHex(raw.hash, 32);
   return { tag: `0x${number.toString(16)}` as Hex, number: number.toString(), hash }; }
 async function recheck(rpc: TokenRpcCall, block: ReturnType<typeof decodedBlock>, safe: ReturnType<typeof decodedBlock>) {
   const [a, b] = await tokenBatch(rpc, "primary", [
-    { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none" },
-    { method: "eth_getBlockByNumber", params: [safe.tag, false], cachePolicy: "none" },
+    { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none", decoder: tokenBlock },
+    { method: "eth_getBlockByNumber", params: [safe.tag, false], cachePolicy: "none", decoder: tokenBlock },
   ]);
   if (decodedBlock(a).hash !== block.hash || decodedBlock(b).hash !== safe.hash) blocked("Receipt block changed during observation.", "uniswap_token_reorg_conflict");
 }
+function allowanceDecoder(value: unknown) { decodeFunctionResult({ abi: ERC20, functionName: "allowance", data: evmRpcHex(value, 32) }); return value; }
+function balanceDecoder(value: unknown) { decodeFunctionResult({ abi: ERC20, functionName: "balanceOf", data: evmRpcHex(value, 32) }); return value; }
+function transactionDecoder(value: unknown) { if (value === null) return value; const row = evmRpcRecord(value);
+  evmRpcHex(row.hash, 32); evmRpcQuantity(row.chainId); evmRpcAddress(row.from); evmRpcAddress(row.to); evmRpcHex(row.input);
+  evmRpcQuantity(row.value); evmRpcQuantity(row.nonce); return value; }
+function receiptDecoder(value: unknown) { if (value === null) return value; const row = evmRpcRecord(value);
+  evmRpcHex(row.transactionHash, 32); evmRpcAddress(row.from); evmRpcAddress(row.to); evmRpcQuantity(row.blockNumber);
+  evmRpcHex(row.blockHash, 32); evmRpcQuantity(row.status); evmRpcQuantity(row.gasUsed); evmRpcQuantity(row.effectiveGasPrice); return value; }
 function assertEnvelope(tx: Record<string, unknown>, envelope: ReturnType<typeof envelopeOf>) {
   if (evmRpcQuantity(tx.chainId) !== 1n || evmRpcAddress(tx.from) !== envelope.from || evmRpcAddress(tx.to) !== envelope.to ||
       evmRpcHex(tx.input) !== envelope.data.toLowerCase() || evmRpcQuantity(tx.value) !== 0n || evmRpcQuantity(tx.nonce).toString() !== envelope.nonce ||

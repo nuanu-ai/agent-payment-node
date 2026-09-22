@@ -7,6 +7,7 @@ export interface TokenRpcItem {
     readonly method: string;
     readonly params: readonly unknown[];
     readonly cachePolicy?: "auto" | "immutable" | "snapshot" | "none";
+    readonly decoder: (value: unknown) => unknown;
 }
 export type TokenRpcCall = EvmRpcCall & {
     readonly batch?: (route: TokenRpcRoute, items: readonly TokenRpcItem[]) => Promise<readonly unknown[]>;
@@ -14,6 +15,11 @@ export type TokenRpcCall = EvmRpcCall & {
     readonly effectAttempts?: () => number;
 };
 export declare function tokenBatch(call: TokenRpcCall, route: TokenRpcRoute, items: readonly TokenRpcItem[]): Promise<readonly unknown[]>;
+export declare function tokenChain(value: unknown): unknown;
+export declare function tokenQuantity(value: unknown): unknown;
+export declare function tokenHex(bytes?: number): (value: unknown) => unknown;
+export declare function tokenBlock(value: unknown): unknown;
+export declare function tokenNullableRecord(value: unknown): unknown;
 export declare function createTokenRpc(input: {
     readonly environment: Readonly<Record<string, string | undefined>>;
     readonly state: StateStore;

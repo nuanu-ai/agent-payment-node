@@ -34,20 +34,20 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
             blocked("Token quote binding changed.", "uniswap_token_quote_binding");
         if (this.ports.now().getTime() >= material.route.deadline * 1000)
             blocked("Token quote expired.", "uniswap_token_quote_expired");
+        const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
+            quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
         const reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, 9);
         try { await this.ports.confirm(material); }
         finally { if (reservation !== undefined) await this.rpcBudget!.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); }
-        const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
-            quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
+        await this.rpcBudget?.linkQuote(request.quoteHash, operationId);
         const prior = await this.journal.load(operationId);
-        if (prior !== null)
-            return prior;
+        if (prior !== null) { await this.rpcBudget?.reconcile(operationId); return prior; }
         const saved = await this.journal.save(newUniswapTokenOperation({ operationId, profile: material.profile, account: material.account,
             route: material.route, approvalCapAtomic: material.approvalCapAtomic, allowanceAtPrepare: material.allowanceAtPrepare,
             approvalGas: material.approvalGas, swapGas: material.swapGas, cleanupGas: material.cleanupGas,
             maximumNativeDebitWei: material.maximumNativeDebitWei, policyDigest: material.policyDigest,
             mechanismDigest: material.mechanismDigest, now: this.ports.now() }));
-        await this.rpcBudget?.inherit(request.quoteHash, operationId); return saved;
+        await this.rpcBudget?.reconcile(operationId); return saved;
     }
     async approve(id: string) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, async () => await this.execution.approve(id)); }
     async execute(id: string) { const phase = (await this.journal.load(id))?.phase, beforeEffect = phase === "approved" || phase === "approval_observed";
@@ -55,7 +55,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
     async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", 0, async () => await this.execution.status(id)); }
     async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", 0, async () => await this.execution.cleanup(id)); }
     private async budgeted<T>(id: string, command: string, cap: number, work: () => Promise<T>) { if (this.rpcBudget === undefined) return await work();
-      const reservation = await this.rpcBudget.reserve(id, command, cap); try { return await work(); }
+      await this.rpcBudget.reconcile(id); const reservation = await this.rpcBudget.reserve(id, command, cap); try { return await work(); }
       finally { await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); } }
 }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
