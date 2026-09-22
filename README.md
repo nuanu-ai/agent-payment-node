@@ -528,6 +528,14 @@ runs in the foreground CLI only: it shows the exact screen, takes a typed
 code, and the local wallet signs and sends once. `status` only observes. See
 `docs/uniswap.md` for the pinned contracts and recovery contract.
 
+`apn swap ethereum uniswap-token` is a separate guarded ERC20-input lane for
+canonical Ethereum USDC and USDT through the original V3 SwapRouter. It admits
+only the bidirectional fee-100 pool, approves exactly `amountIn` to that router,
+uses `exactInputSingle` with transaction value zero, and budgets approval,
+swap, and explicit cleanup gas. Native-input command shapes remain unchanged.
+MCP exposes all six commands; `approve` and `execute` hand off to the
+foreground CLI.
+
 `apn swap tron sunswap` swaps native TRX for TRON USDT through the pinned
 SunSwap V2 router the same way: `quote` reads the router and pair on chain,
 encodes `swapExactETHForTokens` locally and simulates it from the owner
@@ -696,6 +704,12 @@ apn swap ethereum uniswap prepare --profile <profile> --quote <string> --idempot
 apn swap ethereum uniswap status --operation <operation_id>
 apn swap ethereum uniswap approve --operation <operation_id>
 apn swap ethereum uniswap execute --operation <operation_id>
+apn swap ethereum uniswap-token inventory
+apn swap ethereum uniswap-token quote --profile <profile> --account <address> --to <address> --source-token <address> --output-token <address> --amount <string> --minimum-output <string> --approval-cap <string> --deadline <string> --max-approval-gas-limit <wei> --max-swap-gas-limit <wei> --max-cleanup-gas-limit <wei> --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei> --max-native-debit <wei>
+apn swap ethereum uniswap-token prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
+apn swap ethereum uniswap-token status --operation <operation_id>
+apn swap ethereum uniswap-token approve --operation <operation_id>
+apn swap ethereum uniswap-token execute --operation <operation_id>
 apn swap tron sunswap inventory
 apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --fee-limit-sun <wei> --deadline <string>
 apn swap tron sunswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>

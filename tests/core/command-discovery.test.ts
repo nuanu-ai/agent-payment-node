@@ -33,7 +33,7 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "stargate native prepare", "stargate native execute", "stargate native observe", "stargate native status", "stargate native receipt",
   "stargate token prepare", "stargate token execute", "stargate token cleanup", "stargate token observe", "stargate token status", "stargate token receipt",
@@ -89,6 +89,7 @@ const EXPECTED_COMMANDS = [
   "allowlist inventory", "allowlist resolve", "allowlist policy prepare", "allowlist policy stage", "allowlist policy activate",
   "allowlist policy revoke", "allowlist policy status",
   "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare", "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
+  "swap ethereum uniswap-token inventory", "swap ethereum uniswap-token quote", "swap ethereum uniswap-token prepare", "swap ethereum uniswap-token status", "swap ethereum uniswap-token approve", "swap ethereum uniswap-token execute",
   "swap tron sunswap inventory", "swap tron sunswap quote", "swap tron sunswap prepare", "swap tron sunswap status", "swap tron sunswap approve", "swap tron sunswap execute",
   "swap solana jupiter inventory", "swap solana jupiter quote", "swap solana jupiter prepare", "swap solana jupiter status", "swap solana jupiter approve", "swap solana jupiter execute",
   "swap solana orca inventory", "swap solana orca quote", "swap solana orca prepare", "swap solana orca status", "swap solana orca approve", "swap solana orca execute",
