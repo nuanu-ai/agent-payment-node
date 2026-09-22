@@ -90,6 +90,10 @@ export declare class RpcReadSession {
     readArchiveDeploymentBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{
         readonly [K in keyof T]: unknown;
     }>;
+    /** One atomic receipt identity read. Partial cache hits never remove chainId or receipt from the logical read. */
+    readReceiptBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T, maxItemsPerRequest: 1 | 3): Promise<{
+        readonly [K in keyof T]: unknown;
+    }>;
     private readBatchBounded;
     private executeBatch;
     private decodeBatch;

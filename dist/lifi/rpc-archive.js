@@ -15,6 +15,15 @@ export const BRIDGE_ARCHIVE_RPC_ENV = {
     42161: "APN_ARBITRUM_ARCHIVE_RPC_URL",
     59144: "APN_LINEA_ARCHIVE_RPC_URL",
 };
+/** Optional receipt-only readers. These never replace the operation's frozen primary RPC identity. */
+export const BRIDGE_RECEIPT_RPC_ENV = {
+    1: "APN_ETHEREUM_RECEIPT_RPC_URL",
+    56: "APN_BNB_RECEIPT_RPC_URL",
+    143: "APN_MONAD_RECEIPT_RPC_URL",
+    8453: "APN_BASE_RECEIPT_RPC_URL",
+    42161: "APN_ARBITRUM_RECEIPT_RPC_URL",
+    59144: "APN_LINEA_RECEIPT_RPC_URL",
+};
 const TAG_INDEX = { eth_getCode: 1, eth_getStorageAt: 2, eth_call: 1 };
 export function bridgeArchiveEndpoint(chainId, environment) {
     bridgeChain(chainId, "APN_RPC_CONFIG");
@@ -26,6 +35,16 @@ export function bridgeArchiveEndpoint(chainId, environment) {
     if (endpoint.search !== "")
         bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_query_forbidden");
     return endpoint;
+}
+export function bridgeReceiptEndpoint(chainId, environment) {
+    bridgeChain(chainId, "APN_RPC_CONFIG");
+    const value = environment[BRIDGE_RECEIPT_RPC_ENV[chainId]];
+    if (value === undefined || value.length === 0)
+        return null;
+    const url = parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "Bridge receipt RPC endpoint", 2048);
+    if (url.search !== "")
+        bridgeFailure("APN_RPC_CONFIG", "bridge_receipt_RPC_query_forbidden");
+    return { url, maxItemsPerRequest: knownScalarReceiptEndpoint(chainId, url) ? 1 : 3 };
 }
 /** A state read pinned to one block number or block hash. Moving tags (latest, safe, finalized, pending) never qualify. */
 export function isHistoricalStateRead(method, params) {
@@ -44,4 +63,7 @@ export function isArchiveRead(method, params) {
         (method === "eth_getTransactionReceipt" && params.length === 1 && isBlockHash(params[0]));
 }
 function isBlockHash(value) { return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/u.test(value); }
+function knownScalarReceiptEndpoint(chainId, endpoint) {
+    return chainId === 8453 && endpoint.origin === "https://mainnet.base.org" && endpoint.pathname === "/";
+}
 //# sourceMappingURL=rpc-archive.js.map

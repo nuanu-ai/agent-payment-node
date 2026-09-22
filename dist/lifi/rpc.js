@@ -6,7 +6,7 @@ import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, ev
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { bridgeDeployment } from "./deployments.js";
 import { BridgeHttps } from "./https.js";
-import { bridgeArchiveEndpoint, isArchiveRead, isHistoricalStateRead } from "./rpc-archive.js";
+import { bridgeArchiveEndpoint, bridgeReceiptEndpoint, isArchiveRead, isHistoricalStateRead } from "./rpc-archive.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
@@ -36,8 +36,12 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
     const endpoint = parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "Bridge RPC endpoint", 2048);
     if (endpoint.search !== "")
         bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_query_forbidden");
-    const archive = bridgeArchiveEndpoint(chainId, environment);
+    const archive = bridgeArchiveEndpoint(chainId, environment), receipt = bridgeReceiptEndpoint(chainId, environment);
     const distinctArchive = archive !== null && archive.origin !== endpoint.origin ? archive : null;
+    const distinctReceipt = receipt !== null && receipt.url.origin !== endpoint.origin ? receipt : null;
+    const receiptFallback = distinctReceipt === null
+        ? distinctArchive === null ? null : { url: distinctArchive, maxItemsPerRequest: 3, role: "archive" }
+        : { ...distinctReceipt, role: "receipt" };
     let sequence = 0n, archiveChain;
     const call = async (method, params) => {
         if (!READ_METHODS.has(method))
@@ -50,13 +54,13 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
                 primary = await retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait);
             }
             catch (error) {
-                if (distinctArchive === null || !isReceiptFallbackError(error))
+                if (receiptFallback === null || !isReceiptFallbackError(error))
                     throw error;
-                return await archiveReceipt(method, params, distinctArchive);
+                return await fallbackReceipt(method, params, receiptFallback);
             }
-            if (primary !== null || distinctArchive === null)
+            if (primary !== null || receiptFallback === null)
                 return primary;
-            return await archiveReceipt(method, params, distinctArchive);
+            return await fallbackReceipt(method, params, receiptFallback);
         }
         if (isHistoricalStateRead(method, params)) {
             if (distinctArchive === null)
@@ -78,30 +82,25 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         await assertArchiveChain(target);
         return await retryDirect(method, params, () => oneAttempt(target, method, params), wait);
     };
-    const archiveReceipt = async (method, params, target) => {
-        if (archiveChain !== undefined) {
-            await archiveChain;
-            return await retryDirect(method, params, () => oneAttempt(target, method, params), wait);
-        }
+    const fallbackReceipt = async (method, params, target) => {
         const requests = [
             { jsonrpc: "2.0", id: (++sequence).toString(), method: "eth_chainId", params: [] },
             { jsonrpc: "2.0", id: (++sequence).toString(), method, params },
         ];
-        const operation = (async () => {
-            const response = await retryDirect(method, params, async () => await batchAttempt(target, canonicalJson(requests)), wait);
-            const values = decodeAtomicBatchResponse(response, requests);
-            rpcArchiveChainValue(chainId)(values[0]);
-            return values[1];
-        })();
-        archiveChain = operation.then(() => undefined);
-        void archiveChain.catch(() => undefined);
-        try {
-            return await operation;
-        }
-        catch (error) {
-            archiveChain = undefined;
-            throw error;
-        }
+        return await retryDirect(method, params, async () => {
+            let values;
+            if (target.maxItemsPerRequest === 1) {
+                const chain = await oneAttempt(target.url, requests[0].method, requests[0].params);
+                await wait(750);
+                const result = await oneAttempt(target.url, requests[1].method, requests[1].params);
+                values = [chain, result];
+            }
+            else {
+                values = decodeAtomicBatchResponse(await batchAttempt(target.url, canonicalJson(requests)), requests);
+            }
+            rpcFallbackChainValue(chainId, target.role)(values[0]);
+            return rpcReceiptFallbackValue(params[0])(values[1]);
+        }, wait);
     };
     const oneAttempt = async (target, method, params, now = Date.now()) => {
         if (!READ_METHODS.has(method))
@@ -149,21 +148,29 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         return bridgeJson(response.body, 1024 * 1024);
     };
     const sessionBatchCall = (session) => async (items, route = "primary") => {
-        if (route !== "primary" && items.some((item) => !isArchiveBatchItem(item.method, item.params))) {
+        if (route === "receipt" && items.some((item) => !isReceiptBatchItem(item.method, item.params))) {
+            bridgeFailure("APN_RPC_CONFIG", "bridge_receipt_RPC_method");
+        }
+        if (route !== "primary" && route !== "receipt" && items.some((item) => !isArchiveBatchItem(item.method, item.params))) {
             bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_method");
         }
-        const target = route !== "primary" ? distinctArchive ?? missingHistoricalArchive() : endpoint;
+        const fallback = route === "receipt" ? receiptFallback : null;
+        if (route === "receipt" && fallback === null)
+            missingHistoricalArchive();
+        const target = route === "receipt" ? fallback.url : route !== "primary" ? distinctArchive ?? missingHistoricalArchive() : endpoint;
         const attempt = async (body) => await batchAttempt(target, body, session.currentTime());
         const bound = items.map((item) => ({ ...item, batchAttempt: attempt }));
-        return route === "archive_deployment"
-            ? await session.readArchiveDeploymentBatch(target.toString(), chainId, bound)
-            : await session.readBatch(target.toString(), chainId, bound);
+        return route === "receipt"
+            ? await session.readReceiptBatch(target.toString(), chainId, bound, fallback.maxItemsPerRequest)
+            : route === "archive_deployment"
+                ? await session.readArchiveDeploymentBatch(target.toString(), chainId, bound)
+                : await session.readBatch(target.toString(), chainId, bound);
     };
     const sessionArchiveReceipt = async (session, method, params) => {
         const values = await sessionBatchCall(session)([
-            { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(chainId) },
-            { method, params, cachePolicy: "auto", decoder: (value) => value },
-        ], "archive");
+            { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcFallbackChainValue(chainId, receiptFallback?.role ?? "archive") },
+            { method, params, cachePolicy: "auto", decoder: rpcReceiptFallbackValue(params[0]) },
+        ], "receipt");
         return values[1];
     };
     const sessionCall = (session) => async (method, params) => {
@@ -178,11 +185,11 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
                 primary = await session.read(endpoint.toString(), chainId, method, params, primaryAttempt);
             }
             catch (error) {
-                if (distinctArchive === null || !isReceiptFallbackError(error))
+                if (receiptFallback === null || !isReceiptFallbackError(error))
                     throw error;
                 return await sessionArchiveReceipt(session, method, params);
             }
-            if (primary !== null || distinctArchive === null)
+            if (primary !== null || receiptFallback === null)
                 return primary;
             return await sessionArchiveReceipt(session, method, params);
         }
@@ -735,12 +742,38 @@ function isArchiveBatchItem(method, params) {
         return params.length === 2 && typeof params[0] === "string" && /^0x[0-9a-fA-F]{64}$/u.test(params[0]);
     return isArchiveRead(method, params);
 }
+function isReceiptBatchItem(method, params) {
+    return method === "eth_chainId" && params.length === 0 || method === "eth_getTransactionReceipt" && isArchiveRead(method, params);
+}
 function rpcArchiveChainValue(chainId) {
     return (value) => {
         const observed = evmRpcQuantity(value);
         if (observed !== BigInt(chainId))
             bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
         return observed;
+    };
+}
+function rpcFallbackChainValue(chainId, role) {
+    return (value) => {
+        const observed = evmRpcQuantity(value);
+        if (observed !== BigInt(chainId))
+            bridgeFailure("APN_RPC_CONFIG", role === "receipt" ? "bridge_receipt_RPC_chain" : "bridge_archive_RPC_chain");
+        return observed;
+    };
+}
+function rpcReceiptFallbackValue(expected) {
+    return (value) => {
+        if (value === null)
+            return null;
+        const receipt = evmRpcRecord(value), hash = evmRpcHex(expected, 32);
+        if (evmRpcHex(receipt.transactionHash, 32) !== hash)
+            bridgeFailure("APN_RPC_PROTOCOL", "receipt_transaction_hash");
+        const status = evmRpcQuantity(receipt.status);
+        if (status !== 0n && status !== 1n)
+            bridgeFailure("APN_RPC_PROTOCOL", "receipt_status");
+        evmRpcQuantity(receipt.blockNumber);
+        evmRpcHex(receipt.blockHash, 32);
+        return value;
     };
 }
 function assertMatchingHeader(raw, expected) {

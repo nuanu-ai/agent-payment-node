@@ -114,12 +114,16 @@ export class RpcReadSession {
     async readArchiveDeploymentBatch(origin, chainId, items) {
         return await this.readBatchBounded(origin, chainId, items, this.archiveDeploymentBatchMaxItems);
     }
-    async readBatchBounded(origin, chainId, items, maxItemsPerRequest) {
+    /** One atomic receipt identity read. Partial cache hits never remove chainId or receipt from the logical read. */
+    async readReceiptBatch(origin, chainId, items, maxItemsPerRequest) {
+        return await this.readBatchBounded(origin, chainId, items, maxItemsPerRequest, true);
+    }
+    async readBatchBounded(origin, chainId, items, maxItemsPerRequest, atomicCache = false) {
         if (!Array.isArray(items) || items.length === 0)
             return [];
         const batchKey = hashObject({ endpoint: rpcEndpointIdentity(origin), chainId, items: items.map((item) => ({
                 key: hashObject({ method: item.method, params: item.params }), cachePolicy: item.cachePolicy ?? "auto",
-            })), maxItemsPerRequest });
+            })), maxItemsPerRequest, atomicCache });
         const current = this.batchInflight.get(batchKey);
         if (current !== undefined) {
             this.assertBeforeQueue("batch");
@@ -127,13 +131,15 @@ export class RpcReadSession {
             const execution = await current;
             return this.decodeBatch(items, execution.raw);
         }
-        const operation = this.executeBatch(origin, chainId, items, maxItemsPerRequest).finally(() => this.batchInflight.delete(batchKey));
+        const operation = this.executeBatch(origin, chainId, items, maxItemsPerRequest, atomicCache).finally(() => this.batchInflight.delete(batchKey));
         this.batchInflight.set(batchKey, operation);
         return cloneRpcValue((await operation).decoded);
     }
-    async executeBatch(origin, chainId, items, maxItemsPerRequest) {
+    async executeBatch(origin, chainId, items, maxItemsPerRequest, atomicCache) {
         const rawResults = new Array(items.length), decodedResults = new Array(items.length);
         const unique = new Map();
+        const atomicCacheHit = atomicCache && items.every((item) => item.cachePolicy !== "none" &&
+            this.cache.has(this.key(origin, chainId, item.method, item.params)));
         for (let index = 0; index < items.length; index += 1) {
             const item = items[index];
             if (typeof item.method !== "string" || item.method.length === 0 || !Array.isArray(item.params) ||
@@ -141,7 +147,7 @@ export class RpcReadSession {
                 throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch item is malformed.");
             }
             const cacheKey = this.key(origin, chainId, item.method, item.params), policy = item.cachePolicy ?? "auto";
-            if (policy !== "none" && this.cache.has(cacheKey)) {
+            if (policy !== "none" && (!atomicCache || atomicCacheHit) && this.cache.has(cacheKey)) {
                 const raw = cloneRpcValue(this.cache.get(cacheKey));
                 rawResults[index] = raw;
                 decodedResults[index] = decodeRpcValue(item.decoder, raw);

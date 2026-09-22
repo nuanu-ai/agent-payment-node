@@ -259,6 +259,20 @@ across an approval or signing boundary. A session permits at most 96 logical
 items, 8 HTTP requests, 10 HTTP attempts and 180 seconds. It allows one request
 per RPC origin at least 750ms apart and two requests globally.
 
+Each admitted EVM chain also accepts optional
+`APN_<CHAIN>_ARCHIVE_RPC_URL` and `APN_<CHAIN>_RECEIPT_RPC_URL` readers. The
+primary `APN_<CHAIN>_RPC_URL` remains the frozen operation identity and receives
+the first exact transaction receipt read. A qualifying missing or unavailable
+historical receipt uses a distinct receipt reader when configured, otherwise a
+distinct archive reader. Receipt readers can receive only `eth_chainId` and the
+exact `eth_getTransactionReceipt`; state, code, configuration, moving tags,
+logs, estimates and effects stay off that endpoint. APN validates the reader's
+chain and the receipt transaction hash, status and block fields before caching
+the atomic result. The official Base `https://mainnet.base.org` reader is a
+known scalar-only endpoint, so APN sends chain ID and receipt as two sequential
+JSON-RPC objects with the same 750ms per-origin pacing. Archive deployment and
+historical state reads retain their three-item chunk limit.
+
 Operators must not run a separate synthetic RPC capability preflight before the
 real `bridge prepare`. The prepare command performs the exact chain, deployment,
 configuration and block identity checks that its materialized operation needs.
