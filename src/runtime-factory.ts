@@ -101,6 +101,7 @@ import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runtime.js";
 import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
 import { createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-factory.js";
+import { createTokenRpc } from "./swap/uniswap-v3/token-rpc.js";
 import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
@@ -275,7 +276,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       foreground: bound.request.command === "swap.uniswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
   const uniswapTokenRuntime = options.uniswapTokenRuntime ?? (bound.request.command.startsWith("swap.uniswap-token.")
-    ? createUniswapTokenRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), clock,
+    ? createUniswapTokenRuntime({ state, wrapping: wrappingSecret, call: createTokenRpc({ environment: process.env, state,
+      now: () => clock.now().getTime(), ...uniswapTokenRpcBudget(bound.request.command) }), clock,
       foreground: bound.request.command === "swap.uniswap-token.approve" ? "approve" :
         isUniswapTokenCleanup(bound.request.command) ? "cleanup" : "refuse" })
     : undefined);
@@ -371,6 +373,15 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
 }
 
 function isUniswapTokenCleanup(command: string): boolean { return command === "swap.uniswap-token.cleanup"; }
+function uniswapTokenRpcBudget(command: string): { readonly maxHttpRequests: number; readonly deadlineMs: number } {
+  if (command === "swap.uniswap-token.inventory") return { maxHttpRequests: 1, deadlineMs: 1_000 };
+  if (command === "swap.uniswap-token.quote") return { maxHttpRequests: 8, deadlineMs: 60_000 };
+  if (command === "swap.uniswap-token.prepare") return { maxHttpRequests: 9, deadlineMs: 60_000 };
+  if (command === "swap.uniswap-token.approve") return { maxHttpRequests: 14, deadlineMs: 90_000 };
+  if (command === "swap.uniswap-token.execute") return { maxHttpRequests: 24, deadlineMs: 150_000 };
+  if (command === "swap.uniswap-token.status") return { maxHttpRequests: 8, deadlineMs: 45_000 };
+  return { maxHttpRequests: 14, deadlineMs: 90_000 };
+}
 
 export async function executeBoundCommand(
   bound: BoundCommand,
