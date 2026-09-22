@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { domainHash } from "../../src/canonical.js";
-import { newUniswapTokenOperation, UniswapTokenJournal } from "../../src/swap/uniswap-v3/token-operation.js";
+import { newUniswapTokenOperation, tokenAttempt, transitionUniswapToken, UniswapTokenJournal } from "../../src/swap/uniswap-v3/token-operation.js";
 import { UniswapTokenExecution, type TokenEffectKind, type TokenEffectObservation } from "../../src/swap/uniswap-v3/token-execution.js";
 import { createUniswapTokenRoute } from "../../src/swap/uniswap-v3/token-route.js";
 import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
@@ -64,6 +64,20 @@ test("pre-sign refusal and signing failure release nonce while a sealed ambiguou
   op = await b.runtime.approve(b.operation.operationId); assert.equal(op.phase, "cleanup_required"); assert.deepEqual(b.released, ["approval:7"]); assert.deepEqual(b.committed, []);
   const ambiguous = await temporaryState(); t.after(ambiguous.cleanup); const c = await fixture(ambiguous.root); c.sendResult("ambiguous");
   op = await c.runtime.approve(c.operation.operationId); assert.equal(op.phase, "approval_unknown_finality"); assert.deepEqual(c.released, []); assert.deepEqual(c.committed, ["approval:7"]);
+});
+test("restart never signs an attempt whose reusable nonce was reassigned", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root), usage = { reservationId: "d".repeat(64), state: "reserved" as const };
+  const approved = await f.journal.save(transitionUniswapToken(f.operation, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, NOW));
+  let op = await f.journal.save(transitionUniswapToken(approved, "approval_submission_started", { approvalAttempt: tokenAttempt(approved, "approval", "7", NOW) }, NOW));
+  const released: string[] = [];
+  const restarted = new UniswapTokenExecution(new UniswapTokenJournal(temp.root), { now: () => NOW, foregroundApprove: async () => undefined,
+    foregroundCleanup: async () => undefined, withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(),
+    allocateNonce: async () => "8", releaseNonce: async (_op, kind, nonce) => { released.push(`${kind}:${nonce}`); }, commitNonce: async () => undefined,
+    currentAllowance: async () => "0", guard: async () => undefined, revalidate: async () => undefined, reserveUsage: async () => usage,
+    currentUsage: async () => usage, followUsage: async () => usage, seal: async () => { throw new Error("must not sign"); },
+    send: async () => { throw new Error("must not send"); }, observe: async () => null });
+  op = await restarted.execute(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "approval_nonce_reservation_lost");
+  assert.deepEqual(released, ["approval:8"]);
 });
 test("mismatched allowance refuses and reverted swap requires explicit cleanup", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup);
   await assert.rejects(fixture(temp.root, "2"), { code: "APN_STATE_CORRUPT" });

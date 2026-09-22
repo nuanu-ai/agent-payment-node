@@ -74,7 +74,14 @@ export class UniswapTokenExecution {
     async continueStart(op, kind) {
         if (attemptOf(op, kind).transactionHash !== null)
             return op;
-        return await this.ports.withAccountLock(op, async () => await this.finishStart(op, kind));
+        return await this.ports.withAccountLock(op, async () => {
+            const attempt = attemptOf(op, kind), nonce = await this.ports.allocateNonce(op, kind);
+            if (nonce !== attempt.nonce) {
+                await this.ports.releaseNonce(op, kind, nonce);
+                return await this.cleanupRequired(op, `${kind}_nonce_reservation_lost`);
+            }
+            return await this.finishStart(op, kind);
+        });
     }
     async finishStart(op, kind) {
         const attempt = attemptOf(op, kind);

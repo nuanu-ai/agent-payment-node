@@ -71,7 +71,9 @@ export class UniswapTokenExecution {
       return await this.finishStart(op, kind); });
   }
   private async continueStart(op: UniswapTokenOperation, kind: TokenEffectKind) { if (attemptOf(op, kind).transactionHash !== null) return op;
-    return await this.ports.withAccountLock(op, async () => await this.finishStart(op, kind)); }
+    return await this.ports.withAccountLock(op, async () => { const attempt = attemptOf(op, kind), nonce = await this.ports.allocateNonce(op, kind);
+      if (nonce !== attempt.nonce) { await this.ports.releaseNonce(op, kind, nonce); return await this.cleanupRequired(op, `${kind}_nonce_reservation_lost`); }
+      return await this.finishStart(op, kind); }); }
   private async finishStart(op: UniswapTokenOperation, kind: TokenEffectKind) {
     const attempt = attemptOf(op, kind); if (attempt.transactionHash !== null || op.phase !== started(kind)) return op;
     try { await this.ports.guard(op, kind, attempt.nonce); }
