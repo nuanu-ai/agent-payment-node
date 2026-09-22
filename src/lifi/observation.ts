@@ -86,11 +86,12 @@ export class BridgeObservation {
       let sourceProof = op.sourceProof;
       if (effect.role === "bridge" && transaction.status === "success") {
         try { sourceProof = bridgeSourceProof(op.intent.materialization, op.intent.decoded, receipt); }
-        catch {
+        catch (error) {
           reliable = false;
           op = await this.save(op, { state: "unknown_finality", observationTelemetry: appendObservationTelemetry(op, "source_observation",
             effect.role, "failure", beforeTelemetry, source.readTelemetry?.() ?? null),
-            failure: { reason: "source_protocol_evidence_unavailable", residualAllowance: null } });
+            failure: { reason: "source_protocol_evidence_unavailable", residualAllowance: null,
+              observationRpc: observationRpcFailure("source", effect.role, sourceProofDiagnostic(error), "APN_RPC_PROTOCOL") } });
           continue;
         }
       }
@@ -238,9 +239,15 @@ export class BridgeObservation {
     const current = await rpc.deployment(op.intent.materialization.tool, frozen.peerChainId,
       frozen.chainId === op.intent.materialization.request.fromChainId ? op.intent.materialization.request.fromToken : op.intent.materialization.request.toToken,
       proof.block, true);
-    if (current.contractHash !== frozen.contractHash || current.codeHash !== frozen.codeHash ||
-      current.configurationHash !== frozen.configurationHash || !bridgeSame(current.block, proof.block)) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_identity");
+    if (current.contractHash !== frozen.contractHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_contract_hash");
+    if (current.codeHash !== frozen.codeHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_code_hash");
+    if (current.configurationHash !== frozen.configurationHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_configuration_hash");
+    if (!bridgeSame(current.block, proof.block)) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_block");
   }
+}
+function sourceProofDiagnostic(error: unknown): ApnError {
+  const code = error instanceof ApnError ? error.code : "APN_RPC_PROTOCOL";
+  return new ApnError(code, "Bridge validation failed: source_proof.", { reason: "source_proof" });
 }
 function appendObservationTelemetry(op: BridgeOperationRecord, stage: "source_observation" | "destination_observation" | "residual_observation",
   effectRole: "approval" | "bridge", outcome: "success" | "missing" | "failure",
