@@ -46,7 +46,6 @@ export interface BridgeRpcPort {
     readonly transaction: BridgeDestinationTransactionProof;
     readonly receipt: BridgeProtocolReceipt;
   } | null>;
-  logs(input: { readonly fromBlockAtomic: string; readonly toBlockAtomic: string; readonly address: Address; readonly topics: readonly (Hex | null)[] }): Promise<readonly { readonly transactionHash: Hex; readonly blockNumberAtomic: string; readonly blockHash: Hex }[]>;
 }
 export type BridgeRpcFactory = (chainId: BridgeChainId, session?: RpcReadSession) => BridgeRpcPort;
 export interface BridgeSealedMaterial {
