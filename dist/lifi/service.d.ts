@@ -216,6 +216,7 @@ export declare class BridgeService {
         expires_at: string;
         next_actions: readonly string[];
         observation_rpc_failure?: {
+            endpoint_role?: "receipt" | "primary" | "archive";
             attempts?: number;
             http_status?: number;
             rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;
@@ -429,6 +430,7 @@ export declare class BridgeService {
         expires_at: string;
         next_actions: readonly string[];
         observation_rpc_failure?: {
+            endpoint_role?: "receipt" | "primary" | "archive";
             attempts?: number;
             http_status?: number;
             rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;

@@ -27,11 +27,13 @@ export function observationRpcFailure(chainRole: "source" | "destination", effec
   const rpcMethod = apn === null ? undefined : safeMethod(apn.details?.rpcMethod);
   const httpStatus = apn === null ? undefined : boundedInteger(apn.details?.httpStatus, 100, 599);
   const attempts = apn === null ? undefined : boundedInteger(apn.details?.attempts, 1, 10);
+  const endpointRole = apn === null ? undefined : safeEndpointRole(apn.details?.endpointRole);
   return {
     schemaVersion: "apn.bridge-observation-rpc-failure.v1", stage: stage(chainRole, reason, rpcMethod),
     effectRole, code: apn?.code ?? fallbackCode,
     ...(reason === undefined ? {} : { reason }), ...(rpcMethod === undefined ? {} : { rpcMethod }),
     ...(httpStatus === undefined ? {} : { httpStatus }), ...(attempts === undefined ? {} : { attempts }),
+    ...(endpointRole === undefined ? {} : { endpointRole }),
   };
 }
 
@@ -45,6 +47,9 @@ function safeReason(error: ApnError): BridgeObservationRpcReason | undefined {
 }
 function safeMethod(value: unknown): BridgeObservationRpcMethod | undefined {
   return typeof value === "string" && METHODS.has(value as BridgeObservationRpcMethod) ? value as BridgeObservationRpcMethod : undefined;
+}
+function safeEndpointRole(value: unknown): "primary" | "receipt" | "archive" | undefined {
+  return value === "primary" || value === "receipt" || value === "archive" ? value : undefined;
 }
 function boundedInteger(value: unknown, minimum: number, maximum: number): number | undefined {
   const number = typeof value === "number" ? value : typeof value === "string" && /^(?:0|[1-9][0-9]*)$/u.test(value) ? Number(value) : NaN;
