@@ -108,6 +108,7 @@ const observationRpcFailureSchema = z.strictObject({
     "eth_getLogs", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_call", "eth_estimateGas",
     "eth_maxPriorityFeePerGas", "debug_traceTransaction"]).optional(),
   httpStatus: z.number().int().min(100).max(599).optional(), attempts: z.number().int().min(1).max(10).optional(),
+  endpointRole: z.enum(["primary", "receipt", "archive"]).optional(),
 });
 export const failureSchema = z.strictObject({ reason: reasonSchema,
   residualAllowance: z.strictObject({ amountAtomic: uintSchema, block: blockSchema, rpcOrigin: originSchema }).nullable(),

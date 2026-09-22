@@ -68,6 +68,7 @@ export interface BridgeObservationRpcFailure {
   readonly rpcMethod?: BridgeObservationRpcMethod;
   readonly httpStatus?: number;
   readonly attempts?: number;
+  readonly endpointRole?: "primary" | "receipt" | "archive";
 }
 export type BridgeObservationRpcStage = "source_observation" | "source_transaction" | "source_receipt" |
   "source_included_block" | "source_safe_head" | "source_recheck" | "source_assert_chain" |
