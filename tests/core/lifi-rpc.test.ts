@@ -353,7 +353,7 @@ async function baseApprovalObservation(mode: BaseObservationMode,
 }
 
 async function productionBaseObservation(root: string, mode: BaseObservationMode, limits?: { maxHttpRequests: number; maxHttpAttempts: number },
-  effectRole: "approval" | "bridge" = "approval", historicalMismatch?: "contractHash" | "codeHash" | "configurationHash") {
+  effectRole: "approval" | "bridge" = "approval", historicalMismatch?: "contractHash" | "codeHash" | "configurationHash" | "block") {
   const fixture = await lifiFixture(root, "base-arb"), prepared = (await fixture.prepare("stargateV2")).operation;
   const run = await baseApprovalObservation(mode, limits), materialization = { ...prepared.intent.materialization,
     sender: run.expected.from, approvalAddress: run.expected.to };
@@ -363,7 +363,7 @@ async function productionBaseObservation(root: string, mode: BaseObservationMode
     contractHash: hashObject({ protocol: deployment, feeContract: BASE_FEE_CONTRACT }),
     codeHash: hashObject(code.map((row) => ({ address: row.address, codeHash: row.codeHash }))),
     configurationHash: hashObject([...deployment.reads, ...BASE_FEE_CONTRACT.reads].map((row) => ({ ...row, expected: row.expected }))) };
-  if (historicalMismatch !== undefined) sourceDeployment = { ...sourceDeployment, [historicalMismatch]: "0".repeat(64) };
+  if (historicalMismatch !== undefined && historicalMismatch !== "block") sourceDeployment = { ...sourceDeployment, [historicalMismatch]: "0".repeat(64) };
   const selected = prepared.effects.find((effect) => effect.role === effectRole)!, expected = { ...run.expected, role: effectRole } as BridgeEnvelope;
   let operation = { ...prepared, state: "unknown_finality", terminal: false, failure: null,
     intent: { ...prepared.intent, materialization, sourceDeployment }, effects: prepared.effects.map((effect) => effect.role === effectRole ? { ...selected, envelope: expected,
@@ -373,7 +373,13 @@ async function productionBaseObservation(root: string, mode: BaseObservationMode
     `0x${"0".repeat(24)}${materialization.approvalAddress.slice(2).toLowerCase()}`], data: word(BigInt(materialization.request.amountAtomic)),
     blockNumber: run.s.receipt.blockNumber, transactionHash: run.s.hash, transactionIndex: "0x0", blockHash: run.s.receipt.blockHash, logIndex: "0x0", removed: false }];
   if (mode === "approvalEvent" && run.s.receipt.logs[0] !== undefined) run.s.receipt.logs[0].data = word(0n);
-  const observer = new BridgeObservation(run.rpc, fixture.destination, fixture.provider, async (_previous, patch) => {
+  const source = historicalMismatch === "block" ? new Proxy(run.rpc, { get(target, property) {
+    if (property === "deployment") return async (...args: Parameters<typeof target.deployment>) => {
+      const current = await target.deployment(...args); return { ...current, block: { ...current.block, hash: word(999n) as Hex } };
+    };
+    const value = Reflect.get(target, property, target); return typeof value === "function" ? value.bind(target) : value;
+  } }) : run.rpc;
+  const observer = new BridgeObservation(source, fixture.destination, fixture.provider, async (_previous, patch) => {
     operation = { ...operation, ...patch } as BridgeOperationRecord; return operation;
   });
   return { fixture, run, template: prepared,
@@ -495,7 +501,7 @@ for (const [mode, reason, stage] of [
   assert.equal(prepared.run.calls.flatMap((call) => call.rows).some((row) => row.method === "eth_sendRawTransaction"), false);
 });
 
-for (const field of ["contractHash", "codeHash", "configurationHash"] as const) test(`LI.FI production observation identifies historical deployment ${field}`, async (t) => {
+for (const field of ["contractHash", "codeHash", "configurationHash", "block"] as const) test(`LI.FI production observation identifies historical deployment ${field}`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const prepared = await productionBaseObservation(temporary.root, "success", undefined, "approval", field), result = await prepared.execute();
   assert.equal(result.reliable, false);
