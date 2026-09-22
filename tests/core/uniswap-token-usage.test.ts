@@ -192,10 +192,10 @@ test("production token RPC phases stay within exact physical budgets through fin
   const temporary = await temporaryState(); t.after(temporary.cleanup); const at = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
     account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, at, account, key, "0");
   const pins = async (call: TokenRpcCall, tag: Hex) => { let cursor = 0;
-    await tokenBatch(call, "archive", [{ method: "eth_chainId", params: [], cachePolicy: "immutable" },
-      ...Array.from({ length: 2 }, () => ({ method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], cachePolicy: "immutable" as const }))]);
+    await tokenBatch(call, "archive", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: (value) => value },
+      ...Array.from({ length: 2 }, () => ({ method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], cachePolicy: "immutable" as const, decoder: (value: unknown) => value }))]);
     for (const size of [3, 3, 1]) await tokenBatch(call, "archive",
-      Array.from({ length: size }, () => ({ method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], cachePolicy: "immutable" }))); };
+      Array.from({ length: size }, () => ({ method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], cachePolicy: "immutable", decoder: (value: unknown) => value }))); };
   const runtime = (call: TokenRpcCall, foreground: "approve" | "cleanup" | "refuse") => createUniswapTokenRuntime({ state: p.state, wrapping: p.wrapping,
     clock: { now: () => at }, call, foreground, tty: p.tty, verifyPins: pins });
   const request = { ...quoteRequest(), account, recipient: account, deadline: Math.floor(at.getTime() / 1000) + 600 };
@@ -212,7 +212,7 @@ test("production token RPC phases stay within exact physical budgets through fin
   assert.equal(op.phase, "approval_submitted"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [2, 4]);
   p.setAllowance("1000000"); p.observe(op, "approval", 1);
   call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
-  assert.equal(op.phase, "approval_observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [6, 9]);
+  assert.equal(op.phase, "approval_observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [7, 10]);
 
   p.clearObservation(); call = p.sessionCall(24); op = await runtime(call, "refuse").execute(op.operationId); telemetry = call.telemetry!()!;
   assert.equal(op.phase, "submitted", op.cleanupReason ?? undefined); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [19, 32]);
@@ -220,8 +220,8 @@ test("production token RPC phases stay within exact physical budgets through fin
   assert.equal(op.phase, "submitted"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [2, 4]);
   p.setAllowance("0"); p.observe(op, "swap", 1);
   call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
-  assert.equal(op.phase, "observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [7, 13]);
-  assert.equal(8 + 9 + 14 + 6 + 19 + 7, 63); assert.equal(63 + 2 + 2, 67); assert.equal(op.receipt?.inputDebitAtomic, "1000000");
+  assert.equal(op.phase, "observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [8, 14]);
+  assert.equal(8 + 9 + 14 + 7 + 19 + 8, 65); assert.equal(65 + 2 + 2, 69); assert.equal(op.receipt?.inputDebitAtomic, "1000000");
 
   const journal = new UniswapTokenJournal(temporary.root), cleanupBase = await journal.save(operation(s.policy.policyDigest, "a", account)), usage = await s.usage.reserve(cleanupBase),
     cleanupOp = await journal.save(transitionUniswapToken(cleanupBase, "cleanup_required", { usageReservationId: usage.reservationId,

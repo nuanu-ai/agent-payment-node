@@ -1,9 +1,9 @@
-import { encodeFunctionData, parseAbi } from "viem";
+import { decodeFunctionResult, encodeFunctionData, parseAbi } from "viem";
 import { ApnError } from "../../errors.js";
 import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { envelopeOf } from "./token-custody.js";
-import { tokenBatch } from "./token-rpc.js";
-const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
+import { tokenBatch, tokenBlock, tokenChain } from "./token-rpc.js";
+const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)", "function balanceOf(address owner) view returns (uint256)"]);
 export class UniswapTokenObserver {
     call;
     constructor(call) {
@@ -12,10 +12,10 @@ export class UniswapTokenObserver {
     async observe(op, kind, transactionHash) {
         const rpc = this.call;
         const [primary, receiptRows] = await Promise.all([
-            tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], cachePolicy: "immutable" },
-                { method: "eth_getTransactionByHash", params: [transactionHash], cachePolicy: "none" }]),
-            tokenBatch(rpc, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable" },
-                { method: "eth_getTransactionReceipt", params: [transactionHash], cachePolicy: "none" }]),
+            tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+                { method: "eth_getTransactionByHash", params: [transactionHash], cachePolicy: "none", decoder: transactionDecoder }]),
+            tokenBatch(rpc, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+                { method: "eth_getTransactionReceipt", params: [transactionHash], cachePolicy: "none", decoder: receiptDecoder }]),
         ]);
         if (evmRpcQuantity(primary[0]) !== 1n || evmRpcQuantity(receiptRows[0]) !== 1n)
             throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token observer requires Ethereum chain 1.");
@@ -39,8 +39,8 @@ export class UniswapTokenObserver {
         if (evmRpcAddress(receipt.from) !== op.account || evmRpcAddress(receipt.to) !== envelope.to)
             blocked("Receipt sender or target conflicts.", "uniswap_token_receipt_conflict");
         const [rawBlock, rawSafe] = await tokenBatch(rpc, "primary", [
-            { method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false], cachePolicy: "none" },
-            { method: "eth_getBlockByNumber", params: ["safe", false], cachePolicy: "none" },
+            { method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false], cachePolicy: "none", decoder: tokenBlock },
+            { method: "eth_getBlockByNumber", params: ["safe", false], cachePolicy: "none", decoder: tokenBlock },
         ]), block = decodedBlock(rawBlock), safe = decodedBlock(rawSafe);
         if (block.hash !== blockHash)
             blocked("Receipt block is no longer canonical.", "uniswap_token_reorg_conflict");
@@ -76,11 +76,11 @@ export class UniswapTokenObserver {
 }
 function allowanceRequest(op, tag) {
     const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account, op.route.router] });
-    return { method: "eth_call", params: [{ to: op.route.inputToken, data }, tag], cachePolicy: "none" };
+    return { method: "eth_call", params: [{ to: op.route.inputToken, data }, tag], cachePolicy: "none", decoder: allowanceDecoder };
 }
 function balanceRequest(token, account, tag) {
     return { method: "eth_call",
-        params: [{ to: token, data: `0x70a08231${account.slice(2).toLowerCase().padStart(64, "0")}` }, tag], cachePolicy: "none" };
+        params: [{ to: token, data: `0x70a08231${account.slice(2).toLowerCase().padStart(64, "0")}` }, tag], cachePolicy: "none", decoder: balanceDecoder };
 }
 function decodedBlock(value) {
     const raw = evmRpcRecord(value), number = evmRpcQuantity(raw.number), hash = evmRpcHex(raw.hash, 32);
@@ -88,11 +88,40 @@ function decodedBlock(value) {
 }
 async function recheck(rpc, block, safe) {
     const [a, b] = await tokenBatch(rpc, "primary", [
-        { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none" },
-        { method: "eth_getBlockByNumber", params: [safe.tag, false], cachePolicy: "none" },
+        { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none", decoder: tokenBlock },
+        { method: "eth_getBlockByNumber", params: [safe.tag, false], cachePolicy: "none", decoder: tokenBlock },
     ]);
     if (decodedBlock(a).hash !== block.hash || decodedBlock(b).hash !== safe.hash)
         blocked("Receipt block changed during observation.", "uniswap_token_reorg_conflict");
+}
+function allowanceDecoder(value) { decodeFunctionResult({ abi: ERC20, functionName: "allowance", data: evmRpcHex(value, 32) }); return value; }
+function balanceDecoder(value) { decodeFunctionResult({ abi: ERC20, functionName: "balanceOf", data: evmRpcHex(value, 32) }); return value; }
+function transactionDecoder(value) {
+    if (value === null)
+        return value;
+    const row = evmRpcRecord(value);
+    evmRpcHex(row.hash, 32);
+    evmRpcQuantity(row.chainId);
+    evmRpcAddress(row.from);
+    evmRpcAddress(row.to);
+    evmRpcHex(row.input);
+    evmRpcQuantity(row.value);
+    evmRpcQuantity(row.nonce);
+    return value;
+}
+function receiptDecoder(value) {
+    if (value === null)
+        return value;
+    const row = evmRpcRecord(value);
+    evmRpcHex(row.transactionHash, 32);
+    evmRpcAddress(row.from);
+    evmRpcAddress(row.to);
+    evmRpcQuantity(row.blockNumber);
+    evmRpcHex(row.blockHash, 32);
+    evmRpcQuantity(row.status);
+    evmRpcQuantity(row.gasUsed);
+    evmRpcQuantity(row.effectiveGasPrice);
+    return value;
 }
 function assertEnvelope(tx, envelope) {
     if (evmRpcQuantity(tx.chainId) !== 1n || evmRpcAddress(tx.from) !== envelope.from || evmRpcAddress(tx.to) !== envelope.to ||

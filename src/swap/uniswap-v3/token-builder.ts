@@ -9,7 +9,7 @@ import { swapMechanismDigest } from "../pin.js";
 import { UNISWAP_V3_QUOTER_V2 } from "./pins.js";
 import { createUniswapTokenMaterial, type SavedUniswapTokenMaterialStore } from "./token-material.js";
 import { createUniswapTokenRoute, encodeUniswapTokenApproval, UNISWAP_TOKEN_MECHANISM_PIN, UNISWAP_V3_SWAP_ROUTER, verifyUniswapTokenRoutePins } from "./token-route.js";
-import { tokenBatch, type TokenRpcCall } from "./token-rpc.js";
+import { tokenBatch, tokenBlock, tokenChain, tokenHex, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
 const QUOTER = parseAbi(["function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)"]);
 export type UniswapTokenQuoteRequest = Extract<CommandRequest, {
@@ -28,8 +28,8 @@ export class UniswapTokenQuoteBuilder {
         if (request.deadline <= seconds || request.deadline - seconds > 1800)
             invalid("Uniswap token deadline must be in the next 30 minutes.");
         const rpc = this.call as TokenRpcCall, [chain, rawBlock] = await tokenBatch(rpc, "primary", [
-            { method: "eth_chainId", params: [], cachePolicy: "immutable" },
-            { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none" },
+            { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+            { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
         ]);
         if (evmRpcQuantity(chain) !== 1n)
             throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token route requires Ethereum chain 1.");
@@ -39,8 +39,8 @@ export class UniswapTokenQuoteBuilder {
         const quoteCall = encodeFunctionData({ abi: QUOTER, functionName: "quoteExactInputSingle", args: [{ tokenIn: request.inputToken,
                     tokenOut: request.outputToken, amountIn: request.amount, fee: 100, sqrtPriceLimitX96: 0n }] });
         const [rawAllowance, rawQuote] = await tokenBatch(rpc, "archive", [
-            { method: "eth_call", params: [{ to: request.inputToken, data: allowanceData }, block.tag], cachePolicy: "snapshot" },
-            { method: "eth_call", params: [{ to: UNISWAP_V3_QUOTER_V2, data: quoteCall }, block.tag], cachePolicy: "snapshot" },
+            { method: "eth_call", params: [{ to: request.inputToken, data: allowanceData }, block.tag], cachePolicy: "snapshot", decoder: allowanceDecoder },
+            { method: "eth_call", params: [{ to: UNISWAP_V3_QUOTER_V2, data: quoteCall }, block.tag], cachePolicy: "snapshot", decoder: quoteDecoder },
         ]);
         const allowance = decodeFunctionResult({ abi: ERC20, functionName: "allowance", data: evmRpcHex(rawAllowance, 32) });
         if (allowance !== 0n && allowance !== request.amount)
@@ -53,19 +53,19 @@ export class UniswapTokenQuoteBuilder {
         const approval = encodeUniswapTokenApproval(route.inputToken, route.amountIn), approvalTx = { from: request.account, to: approval.to, data: approval.data, value: "0x0" }, swapTx = { from: request.account, to: route.router, data: route.calldata, value: "0x0" };
         let rechecked: unknown, rawBalance: unknown;
         if (allowance === 0n) {
-            const [result] = await tokenBatch(rpc, "archive", [{ method: "eth_call", params: [approvalTx, block.tag], cachePolicy: "none" }]);
+            const [result] = await tokenBatch(rpc, "archive", [{ method: "eth_call", params: [approvalTx, block.tag], cachePolicy: "none", decoder: approvalDecoder }]);
             const approvalResult = evmRpcHex(result); if (approvalResult !== "0x" && approvalResult !== `0x${"0".repeat(63)}1`)
                 blocked("Token approval simulation returned an unsafe result.", "uniswap_approval_simulation");
             [rawBalance, rechecked] = await tokenBatch(rpc, "primary", [
-                { method: "eth_getBalance", params: [request.account, block.tag], cachePolicy: "snapshot" },
-                { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none" },
+                { method: "eth_getBalance", params: [request.account, block.tag], cachePolicy: "snapshot", decoder: tokenQuantity },
+                { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none", decoder: tokenBlock },
             ]);
         } else {
-            await tokenBatch(rpc, "archive", [{ method: "eth_call", params: [swapTx, block.tag], cachePolicy: "none" }]);
+            await tokenBatch(rpc, "archive", [{ method: "eth_call", params: [swapTx, block.tag], cachePolicy: "none", decoder: tokenHex() }]);
             const [estimate, balanceValue, blockAgain] = await tokenBatch(rpc, "primary", [
-                { method: "eth_estimateGas", params: [swapTx, block.tag], cachePolicy: "none" },
-                { method: "eth_getBalance", params: [request.account, block.tag], cachePolicy: "snapshot" },
-                { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none" },
+                { method: "eth_estimateGas", params: [swapTx, block.tag], cachePolicy: "none", decoder: tokenQuantity },
+                { method: "eth_getBalance", params: [request.account, block.tag], cachePolicy: "snapshot", decoder: tokenQuantity },
+                { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none", decoder: tokenBlock },
             ]);
             if (evmRpcQuantity(estimate) > request.maxSwapGas) blocked("Exact transaction gas estimate exceeds the owner cap.", "uniswap_gas_cap");
             rawBalance = balanceValue; rechecked = blockAgain;
@@ -89,6 +89,10 @@ export class UniswapTokenQuoteBuilder {
             policyDigest, mechanismDigest: material.mechanismDigest, signed: false, broadcast: false };
     }
 }
+function allowanceDecoder(value: unknown) { decodeFunctionResult({ abi: ERC20, functionName: "allowance", data: evmRpcHex(value, 32) }); return value; }
+function quoteDecoder(value: unknown) { decodeFunctionResult({ abi: QUOTER, functionName: "quoteExactInputSingle", data: evmRpcHex(value) }); return value; }
+function approvalDecoder(value: unknown) { const result = evmRpcHex(value); if (result !== "0x" && result !== `0x${"0".repeat(63)}1`)
+  throw new ApnError("APN_RPC_PROTOCOL", "Token approval simulation result is malformed."); return value; }
 function decodedBlock(value: unknown) { const raw = evmRpcRecord(value), number = evmRpcQuantity(raw.number), hash = evmRpcHex(raw.hash, 32);
     return { tag: `0x${number.toString(16)}` as Hex, number: number.toString(), hash, raw }; }
 function valid(input: UniswapTokenQuoteRequest) {

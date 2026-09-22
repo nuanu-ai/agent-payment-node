@@ -1,4 +1,4 @@
-import { encodeFunctionData, parseAbi, type Hex } from "viem";
+import { decodeFunctionResult, encodeFunctionData, parseAbi, type Hex } from "viem";
 import { EncryptedWalletStore } from "../../encrypted-wallet-store.js";
 import { ApnError } from "../../errors.js";
 import type { EvmRpcCall } from "../../evm-ports.js";
@@ -11,7 +11,7 @@ import type { UniswapTokenOperation } from "./token-operation.js";
 import { encodeUniswapTokenApproval, verifyUniswapTokenRoutePins } from "./token-route.js";
 import { UniswapTokenRevalidator } from "./token-revalidation.js";
 import type { UniswapTokenUsage } from "./token-usage.js";
-import { tokenBatch, type TokenRpcCall } from "./token-rpc.js";
+import { tokenBatch, tokenBlock, tokenChain, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
 
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)", "function balanceOf(address owner) view returns (uint256)"]);
 export class UniswapTokenSigningGuard {
@@ -60,9 +60,9 @@ export class UniswapTokenSigningGuard {
 
   private async common(account: string, token: string, router: string, deadline: number) {
     const [chain, rawBlock, rawPending] = await tokenBatch(this.call as TokenRpcCall, "primary", [
-      { method: "eth_chainId", params: [], cachePolicy: "immutable" },
-      { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none" },
-      { method: "eth_getTransactionCount", params: [account, "pending"], cachePolicy: "none" },
+      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+      { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
+      { method: "eth_getTransactionCount", params: [account, "pending"], cachePolicy: "none", decoder: tokenQuantity },
     ]);
     if (evmRpcQuantity(chain) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token signing requires Ethereum chain 1.");
     const block = decodedBlock(rawBlock), pending = evmRpcQuantity(rawPending); await this.verifyPins(this.call, block.tag);
@@ -75,7 +75,8 @@ export class UniswapTokenSigningGuard {
 }
 function request(kind: "allowance" | "balanceOf", owner: string, token: string, router: string, tag: Hex) { const data = encodeFunctionData({ abi: ERC20,
   functionName: kind, args: kind === "allowance" ? [owner as Hex, router as Hex] : [owner as Hex] });
-  return { method: "eth_call", params: [{ to: token, data }, tag], cachePolicy: "snapshot" as const }; }
+  return { method: "eth_call", params: [{ to: token, data }, tag], cachePolicy: "snapshot" as const,
+    decoder: (value: unknown) => { decodeFunctionResult({ abi: ERC20, functionName: kind, data: evmRpcHex(value, 32) }); return value; } }; }
 function word(value: unknown) { return BigInt(evmRpcHex(value, 32)); }
 function decodedBlock(value: unknown) { const raw = evmRpcRecord(value), number = evmRpcQuantity(raw.number), hash = evmRpcHex(raw.hash, 32);
   return { tag: `0x${number.toString(16)}` as Hex, number: number.toString(), hash, raw }; }
@@ -84,9 +85,9 @@ async function simulate(call: EvmRpcCall, tx: object, tag: Hex, limit: string, n
   if (evmRpcQuantity(await call("eth_estimateGas", [tx, tag])) > BigInt(limit)) blocked("Token transaction gas exceeds its cap.", "uniswap_token_gas_cap"); }
 async function finish(call: EvmRpcCall, block: ReturnType<typeof decodedBlock>, account: string, nativeCap: string, maxFee: string, maxPriority: string) {
   const [rawNative, rawPriority, rawBlock] = await tokenBatch(call as TokenRpcCall, "primary", [
-    { method: "eth_getBalance", params: [account, block.tag], cachePolicy: "snapshot" },
-    { method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none" },
-    { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none" },
+    { method: "eth_getBalance", params: [account, block.tag], cachePolicy: "snapshot", decoder: tokenQuantity },
+    { method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none", decoder: tokenQuantity },
+    { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none", decoder: tokenBlock },
   ]), base = evmRpcQuantity(block.raw.baseFeePerGas), priority = evmRpcQuantity(rawPriority);
   if (evmRpcQuantity(rawNative) < BigInt(nativeCap)) blocked("Native fee balance is below the approved bound.", "uniswap_token_native_balance");
   if (decodedBlock(rawBlock).hash !== block.hash) throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.");

@@ -39,6 +39,8 @@ export class InstalledUniswapTokenRuntime {
             blocked("Token quote binding changed.", "uniswap_token_quote_binding");
         if (this.ports.now().getTime() >= material.route.deadline * 1000)
             blocked("Token quote expired.", "uniswap_token_quote_expired");
+        const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
+            quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
         const reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, 9);
         try {
             await this.ports.confirm(material);
@@ -47,17 +49,18 @@ export class InstalledUniswapTokenRuntime {
             if (reservation !== undefined)
                 await this.rpcBudget.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
         }
-        const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
-            quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
+        await this.rpcBudget?.linkQuote(request.quoteHash, operationId);
         const prior = await this.journal.load(operationId);
-        if (prior !== null)
+        if (prior !== null) {
+            await this.rpcBudget?.reconcile(operationId);
             return prior;
+        }
         const saved = await this.journal.save(newUniswapTokenOperation({ operationId, profile: material.profile, account: material.account,
             route: material.route, approvalCapAtomic: material.approvalCapAtomic, allowanceAtPrepare: material.allowanceAtPrepare,
             approvalGas: material.approvalGas, swapGas: material.swapGas, cleanupGas: material.cleanupGas,
             maximumNativeDebitWei: material.maximumNativeDebitWei, policyDigest: material.policyDigest,
             mechanismDigest: material.mechanismDigest, now: this.ports.now() }));
-        await this.rpcBudget?.inherit(request.quoteHash, operationId);
+        await this.rpcBudget?.reconcile(operationId);
         return saved;
     }
     async approve(id) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, async () => await this.execution.approve(id)); }
@@ -70,6 +73,7 @@ export class InstalledUniswapTokenRuntime {
     async budgeted(id, command, cap, work) {
         if (this.rpcBudget === undefined)
             return await work();
+        await this.rpcBudget.reconcile(id);
         const reservation = await this.rpcBudget.reserve(id, command, cap);
         try {
             return await work();

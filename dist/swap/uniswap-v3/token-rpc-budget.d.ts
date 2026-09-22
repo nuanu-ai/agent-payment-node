@@ -14,13 +14,15 @@ export interface TokenRpcBudgetRow {
 interface BudgetRecord {
     readonly schemaVersion: "apn.uniswap-token-rpc-budget.v1";
     readonly binding: string;
+    readonly quoteBinding: string | null;
     readonly rows: readonly TokenRpcBudgetRow[];
 }
 export declare const TOKEN_OPERATION_RPC_CAP = 64;
 export declare class UniswapTokenRpcBudgetJournal extends SecureStateStore {
     reserve(binding: string, command: string, cap: number): Promise<string>;
     settle(binding: string, reservation: string, telemetry: RpcReadTelemetry | null, effects: number): Promise<void>;
-    inherit(from: string, to: string): Promise<void>;
+    linkQuote(from: string, to: string): Promise<void>;
+    reconcile(binding: string): Promise<void>;
     load(binding: string): Promise<BudgetRecord | null>;
     private path;
 }

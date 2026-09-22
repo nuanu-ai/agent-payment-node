@@ -17,7 +17,8 @@ export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
                 });
             const row = { reservation, command, cap, physicalRequests: null, attempts: null, logicalItems: null,
                 methodClasses: null, batchSizes: null, budgetRejects: null };
-            await this.writeJson(this.path(binding), { schemaVersion: "apn.uniswap-token-rpc-budget.v1", binding, rows: [...(current?.rows ?? []), row] });
+            await this.writeJson(this.path(binding), { schemaVersion: "apn.uniswap-token-rpc-budget.v1", binding,
+                quoteBinding: current?.quoteBinding ?? null, rows: [...(current?.rows ?? []), row] });
             return reservation;
         });
     }
@@ -38,19 +39,24 @@ export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
             await this.writeJson(this.path(binding), { ...current, rows });
         });
     }
-    async inherit(from, to) {
+    async linkQuote(from, to) {
         stateIdentifier(from, "Uniswap token quote");
         stateIdentifier(to, "Uniswap token operation");
-        const source = await this.load(from);
-        if (source === null)
-            return;
         await this.initialize();
         await this.ensureDirectory("uniswap-token-rpc-budgets");
-        await this.withLocks([`uniswap-token-rpc-budget:${to}`], async () => {
-            const target = await this.load(to);
-            if (target === null)
-                await this.writeJson(this.path(to), { ...source, binding: to }, true);
+        await this.withLocks([`uniswap-token-rpc-budget:${from}`, `uniswap-token-rpc-budget:${to}`], async () => {
+            const source = await this.load(from), target = await this.load(to);
+            if (target !== null && target.quoteBinding !== null && target.quoteBinding !== from)
+                corrupt();
+            const rows = mergeRows(target?.rows ?? [], source?.rows ?? []);
+            await this.writeJson(this.path(to), { schemaVersion: "apn.uniswap-token-rpc-budget.v1", binding: to, quoteBinding: from, rows });
         });
+    }
+    async reconcile(binding) {
+        stateIdentifier(binding, "Uniswap token operation");
+        const target = await this.load(binding);
+        if (target?.quoteBinding !== null && target?.quoteBinding !== undefined)
+            await this.linkQuote(target.quoteBinding, binding);
     }
     async load(binding) {
         stateIdentifier(binding, "Uniswap token RPC binding");
@@ -58,7 +64,8 @@ export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
         const value = await this.readJson(this.path(binding));
         if (value === null)
             return null;
-        if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "binding", "rows"]) || value.schemaVersion !== "apn.uniswap-token-rpc-budget.v1" || value.binding !== binding || !Array.isArray(value.rows))
+        if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "binding", "quoteBinding", "rows"]) || value.schemaVersion !== "apn.uniswap-token-rpc-budget.v1" || value.binding !== binding ||
+            value.quoteBinding !== null && (typeof value.quoteBinding !== "string" || !/^[a-f0-9]{64}$/u.test(value.quoteBinding)) || !Array.isArray(value.rows))
             corrupt();
         for (const row of value.rows)
             if (!validRow(row))
@@ -66,6 +73,15 @@ export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
         return value;
     }
     path(binding) { return `uniswap-token-rpc-budgets/${binding}.json`; }
+}
+function mergeRows(target, source) {
+    const rows = [...target], seen = new Set(rows.map((row) => row.reservation));
+    for (const row of source)
+        if (!seen.has(row.reservation)) {
+            rows.push(row);
+            seen.add(row.reservation);
+        }
+    return rows;
 }
 function usage(rows) { return rows.reduce((sum, row) => sum + (row.cap === 0 ? 0 : row.physicalRequests ?? row.cap), 0); }
 function validRow(value) {
