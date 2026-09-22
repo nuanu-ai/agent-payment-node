@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { keccak256, parseTransaction, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { canonicalJson, domainHash, hashObject } from "../../src/canonical.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { ApnError } from "../../src/errors.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
@@ -18,8 +21,9 @@ import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runti
 import { UniswapTokenUsage } from "../../src/swap/uniswap-v3/token-usage.js";
 import { ETHEREUM_USDT, UNISWAP_V3_QUOTER_V2 } from "../../src/swap/uniswap-v3/pins.js";
 import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
-import { createTokenRpc, tokenBatch, type TokenRpcCall } from "../../src/swap/uniswap-v3/token-rpc.js";
+import { createTokenRpc, tokenBatch, tokenChain, type TokenRpcCall } from "../../src/swap/uniswap-v3/token-rpc.js";
 import { UniswapTokenRpcBudgetJournal } from "../../src/swap/uniswap-v3/token-rpc-budget.js";
+import { tokenPrimaryCandidates } from "../../src/swap/uniswap-v3/token-rpc-pool.js";
 import { StateStore } from "../../src/state.js";
 import { activateDirectPolicy, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
@@ -53,9 +57,9 @@ function quoteRequest() { return { command: "swap.uniswap-token.quote" as const,
 
 class FailOnceEffectJournal extends UniswapTokenEffectJournal {
   failed = false;
-  override async seal(op: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: Hex, envelope: object, now: Date) {
+  override async seal(op: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: Hex, envelope: object, now: Date, providerId: string | null = null) {
     if (!this.failed) { this.failed = true; throw new Error("injected post-wallet-save failure"); }
-    return await super.seal(op, kind, transactionHash, envelope, now);
+    return await super.seal(op, kind, transactionHash, envelope, now, providerId);
   }
 }
 async function production(root: string, now: Date, account: string, key: Hex, allowanceInput: string) {
@@ -351,6 +355,64 @@ test("post-wallet-save journal failure commits nonce and restart repairs and bro
   let recovered = await restarted.execute(prepared.operationId); assert.equal(recovered.phase, "approval_submitted"); assert.equal(recovered.approvalAttempt?.nonce, "7");
   assert.match(recovered.approvalAttempt?.transactionHash ?? "", /^0x[a-f0-9]{64}$/u); assert.equal(p.sends.length, 1);
   recovered = await restarted.execute(prepared.operationId); assert.equal(recovered.phase, "approval_submitted"); assert.equal(p.sends.length, 1);
+});
+
+test("wallet-only crash binds signed raw to its opaque primary across reorder and rejects provider removal", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const state = new StateStore(temporary.root), wrapping = {
+    load: async () => Buffer.alloc(32, 91), create: async () => Buffer.alloc(32, 91) }, key = `0x${"0".repeat(63)}1` as Hex,
+    account = privateKeyToAccount(key).address, op = operation("a".repeat(64), "9", account), journal = new UniswapTokenJournal(temporary.root);
+  await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("token-swap", key, account);
+  const started = await journal.save(transitionUniswapToken(op, "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved",
+    approvalAttempt: tokenAttempt(op, "approval", "7", NOW) }, NOW));
+  const firstEnvironment = { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify(["https://one.example", "https://two.example"]),
+    APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" }, firstId = tokenPrimaryCandidates(firstEnvironment)[0]!.id;
+  const response = (body: string, send: boolean) => { const parsed = JSON.parse(body), rows = Array.isArray(parsed) ? parsed : [parsed];
+    const values = rows.map((row: any) => ({ jsonrpc: "2.0", id: row.id, result: send ? keccak256(row.params[0]) : "0x1" }));
+    return JSON.stringify(Array.isArray(parsed) ? values : values[0]); };
+  const firstRpc = createTokenRpc({ environment: firstEnvironment, state, now: Date.now, maxHttpRequests: 3, deadlineMs: 10_000,
+    wait: async () => {}, transport: { request: async (_url, _method, body) => ({ status: 200, body: response(body!, false) }) } });
+  await tokenBatch(firstRpc, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain }]);
+  const failedEffects = new FailOnceEffectJournal(temporary.root), crashed = new UniswapTokenCustody(state, wrapping, firstRpc, () => NOW, failedEffects);
+  await assert.rejects(crashed.seal(started, "approval", "7"), /injected post-wallet-save failure/u);
+  const wallet = await new EncryptedWalletStore(state, wrapping).describe("token-swap"); assert.ok(wallet);
+  assert.equal(Object.values(wallet.secret.directEffects)[0]?.primaryProviderId, firstId);
+  new EncryptedWalletStore(state, wrapping).clear(wallet.secret);
+
+  let sends = 0; const removedEnvironment = { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify(["https://two.example", "https://three.example"]),
+    APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" }, removedRpc = createTokenRpc({ environment: removedEnvironment, state,
+      now: Date.now, maxHttpRequests: 3, deadlineMs: 10_000, transport: { request: async () => { sends += 1; throw new Error("must not send"); } } });
+  await assert.rejects(new UniswapTokenCustody(state, wrapping, removedRpc, () => NOW).probeSealed(started, "approval", "7"),
+    { code: "APN_OPERATION_BLOCKED", details: { reason: "uniswap_token_provider_binding_unavailable" } });
+  assert.equal(sends, 0);
+
+  const origins: string[] = [], reorderedEnvironment = { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify(["https://two.example", "https://one.example"]),
+    APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" }, reorderedRpc = createTokenRpc({ environment: reorderedEnvironment, state,
+      now: Date.now, maxHttpRequests: 3, deadlineMs: 10_000, transport: { request: async (url, _method, body) => { origins.push(new URL(url).origin);
+        return { status: 200, body: response(body!, true) }; } } }), recovered = new UniswapTokenCustody(state, wrapping, reorderedRpc, () => NOW);
+  const boundFamily = tokenPrimaryCandidates(reorderedEnvironment).find((candidate) => candidate.id === firstId)!.familyHash;
+  await state.writeRpcProviderCooldown(boundFamily, Date.now() + 30_000);
+  await assert.rejects(recovered.probeSealed(started, "approval", "7"),
+    { code: "APN_PROVIDER_UNAVAILABLE", details: { reason: "uniswap_token_bound_provider_cooldown" } });
+  assert.equal(origins.length, 0); await state.writeRpcProviderCooldown(boundFamily, 0);
+  assert.ok(await recovered.probeSealed(started, "approval", "7"));
+  const effect = await new UniswapTokenEffectJournal(temporary.root).load(started, "approval");
+  assert.equal(effect?.schemaVersion, "apn.uniswap-token-effect.v2"); assert.equal(effect?.primaryProviderId, firstId);
+  assert.equal(await recovered.send(started, "approval"), "accepted"); assert.deepEqual(origins, ["https://one.example"]);
+  await assert.rejects(recovered.send(started, "approval"), { code: "APN_OPERATION_BLOCKED" }); assert.equal(origins.length, 1);
+});
+
+test("legacy token effect v1 remains readable and upgrades only with an explicit opaque provider binding", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const op = operation("a".repeat(64), "8"), started = transitionUniswapToken(op,
+    "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved", approvalAttempt: tokenAttempt(op, "approval", "7", NOW) }, NOW),
+    envelope = envelopeOf(started, "approval", "7"), body = { schemaVersion: "apn.uniswap-token-effect.v1" as const, operationId: started.operationId,
+      kind: "approval" as const, markerHash: started.approvalAttempt!.markerHash, envelopeHash: domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelope)),
+      transactionHash: `0x${"a".repeat(64)}` as Hex, phase: "sealed" as const, sendAttempts: 0 as const, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString() };
+  const directory = join(temporary.root, "uniswap-token-effects"); await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(directory, `${started.operationId}-approval.json`), canonicalJson({ ...body, integrityHash: hashObject(body) }), { mode: 0o600 });
+  const effects = new UniswapTokenEffectJournal(temporary.root); assert.equal((await effects.load(started, "approval"))?.schemaVersion, "apn.uniswap-token-effect.v1");
+  const providerId = "c".repeat(64); await effects.seal(started, "approval", body.transactionHash, envelope, NOW, providerId);
+  const upgraded = await effects.load(started, "approval"); assert.equal(upgraded?.schemaVersion, "apn.uniswap-token-effect.v2");
+  assert.equal(upgraded?.primaryProviderId, providerId);
 });
 
 test("wallet-only hard crash keeps nonce occupied, repairs the journal, and sends once after restart", async (t) => {

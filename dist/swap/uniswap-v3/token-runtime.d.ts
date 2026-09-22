@@ -40,5 +40,6 @@ export declare class InstalledUniswapTokenRuntime implements UniswapTokenCommand
     status(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     cleanup(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     private budgeted;
+    private poolCap;
 }
 export {};

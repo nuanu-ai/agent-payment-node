@@ -3,11 +3,13 @@ import test from "node:test";
 import { RpcReadSession } from "../../src/lifi/rpc.js";
 import { StateStore } from "../../src/state.js";
 import { UniswapTokenRpcBudgetJournal } from "../../src/swap/uniswap-v3/token-rpc-budget.js";
-import { createTokenRpc, tokenBatch, tokenChain, tokenHex, tokenQuantity, type TokenRpcCall } from "../../src/swap/uniswap-v3/token-rpc.js";
+import { createTokenRpc, tokenBatch, tokenBlock, tokenChain, tokenHex, tokenQuantity, type TokenRpcCall } from "../../src/swap/uniswap-v3/token-rpc.js";
 import { UniswapTokenQuoteBuilder } from "../../src/swap/uniswap-v3/token-builder.js";
 import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { ETHEREUM_USDT, UNISWAP_V3_QUOTER_V2 } from "../../src/swap/uniswap-v3/pins.js";
 import { temporaryState } from "./helpers.js";
+import { ApnError } from "../../src/errors.js";
+import { tokenPrimaryCandidates } from "../../src/swap/uniswap-v3/token-rpc-pool.js";
 
 const URLS = { APN_ETHEREUM_RPC_URL: "https://rpc.example", APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
 const H = `0x${"a".repeat(64)}`;
@@ -101,6 +103,198 @@ test("token raw send is one direct attempt outside the read retry and request bu
     transport: { request: async () => { attempts += 1; return { status: 503, body: "unavailable" }; } } });
   await assert.rejects(rpc("eth_sendRawTransaction", ["0x00"])); assert.equal(attempts, 1); assert.equal(rpc.effectAttempts!(), 1);
   assert.equal(rpc.telemetry!()?.httpAttempts, 0);
+});
+
+const POOL = { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify(["https://first.example", "https://second.example"]),
+  APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
+function batchResponse(body: string, result: (method: string, params: readonly unknown[]) => unknown) {
+  const value = JSON.parse(body) as any, rows = Array.isArray(value) ? value : [value];
+  const response = rows.map((row: any) => ({ jsonrpc: "2.0", id: row.id, result: result(row.method, row.params) }));
+  return JSON.stringify(Array.isArray(value) ? response : response[0]);
+}
+function poolValue(method: string, params: readonly unknown[]) { if (method === "eth_chainId") return "0x1";
+  if (method === "eth_getBlockByNumber") return { number: "0x10", hash: H, parentHash: `0x${"b".repeat(64)}` };
+  if (method === "eth_getBalance") return "0x2"; if (method === "eth_getCode") return "0x6000";
+  if (method === "eth_sendRawTransaction") return params[0]; return "0x1"; }
+
+test("ordered token primary pool charges one timeout then freezes the fully decoded second provider", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const origins: string[] = [];
+  const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 4, deadlineMs: 10_000,
+    transport: { request: async (url, _method, body) => { const origin = new URL(url).origin; origins.push(origin);
+      if (origin === "https://first.example") throw new ApnError("APN_RPC_AMBIGUOUS", "timeout", { transportReason: "request_deadline" });
+      return { status: 200, body: batchResponse(body!, poolValue) }; } } });
+  const items = [{ method: "eth_chainId", params: [], cachePolicy: "immutable" as const, decoder: tokenChain },
+    { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none" as const, decoder: identity }];
+  assert.equal((await tokenBatch(rpc, "primary", items))[0], "0x1");
+  assert.equal((await tokenBatch(rpc, "primary", [{ method: "eth_getBalance", params: [ACCOUNT, "latest"], decoder: tokenQuantity }]))[0], "0x2");
+  assert.deepEqual(origins, ["https://first.example", "https://second.example", "https://second.example"]);
+  assert.deepEqual(rpc.primaryPoolTelemetry!().attempts.map((row) => row.outcome), ["failed", "selected"]);
+  assert.equal(rpc.telemetry!()?.httpAttempts, 3); assert.equal(rpc.telemetry!()?.logicalItems, 5);
+});
+
+test("pool cooldown is durable across runtimes and skips the failed family without transport", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const calls: string[] = [], request = async (url: string, _method: string, body: string | null) => {
+    const origin = new URL(url).origin; calls.push(origin); if (origin === "https://first.example") return { status: 429, body: "rate", headers: { "retry-after": "30" } };
+    return { status: 200, body: batchResponse(body!, poolValue) }; };
+  const items = [{ method: "eth_chainId", params: [], decoder: tokenChain }];
+  for (let run = 0; run < 2; run += 1) { const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now,
+    maxHttpRequests: 3, deadlineMs: 10_000, transport: { request } }); await tokenBatch(rpc, "primary", items);
+    if (run === 1) assert.equal(rpc.primaryPoolTelemetry!().attempts[0]?.outcome, "cooldown_skipped"); }
+  assert.deepEqual(calls, ["https://first.example", "https://second.example", "https://second.example"]);
+});
+
+test("malformed candidate batch commits no cross-provider cache and archive must match the primary block", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const calls: string[] = [];
+  const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 6, deadlineMs: 10_000,
+    transport: { request: async (url, _method, body) => { const origin = new URL(url).origin; calls.push(origin); const parsed = JSON.parse(body!);
+      if (origin === "https://first.example") { const rows = parsed as any[]; return { status: 200, body: JSON.stringify(rows.map((row, index) =>
+        ({ jsonrpc: "2.0", id: row.id, result: index === 0 ? "0x1" : "bad" }))) }; }
+      return { status: 200, body: batchResponse(body!, poolValue) }; } } });
+  await tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+    { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock }]);
+  assert.equal((await tokenBatch(rpc, "archive", [{ method: "eth_getCode", params: [ACCOUNT, "0x10"], decoder: tokenHex() }]))[0], "0x6000");
+  assert.deepEqual(calls, ["https://first.example", "https://second.example", "https://archive.example", "https://archive.example"]);
+  assert.deepEqual(rpc.primaryPoolTelemetry!().attempts.map((row) => row.reason), ["malformed", null]);
+});
+
+test("pool config rejects duplicate provider aliases and an archive sharing a primary origin", () => {
+  assert.throws(() => tokenPrimaryCandidates({ APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify(["https://rpc.example", "https://rpc.example/"]) }),
+    { code: "APN_RPC_CONFIG", details: { reason: "duplicate_primary_provider" } });
+  assert.throws(() => tokenPrimaryCandidates({ APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify(["https://rpc.example/a"]),
+    APN_ETHEREUM_ARCHIVE_RPC_URL: "https://rpc.example/archive" }), { code: "APN_RPC_CONFIG", details: { reason: "archive_primary_not_distinct" } });
+});
+
+test("authentication is quarantined and raw submission never fails over from the frozen provider", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); let sends = 0; const origins: string[] = [];
+  const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 4, deadlineMs: 10_000,
+    transport: { request: async (url, _method, body) => { const origin = new URL(url).origin; origins.push(origin); const parsed = JSON.parse(body!);
+      if (origin === "https://first.example") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: "1",
+        error: { code: -32_000, message: "Unauthorized: API key required" } }) };
+      const rows = Array.isArray(parsed) ? parsed : [parsed]; if (rows[0]?.method === "eth_sendRawTransaction") { sends += 1;
+        throw new ApnError("APN_RPC_AMBIGUOUS", "timeout", { transportReason: "request_deadline" }); }
+      return { status: 200, body: batchResponse(body!, poolValue) }; } } });
+  await tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain }]);
+  await assert.rejects(rpc("eth_sendRawTransaction", ["0x00"]), { code: "APN_RPC_AMBIGUOUS" });
+  assert.equal(sends, 1); assert.equal(rpc.effectAttempts!(), 1);
+  assert.equal(origins.filter((origin) => origin === "https://first.example").length, 1);
+  assert.deepEqual(rpc.primaryPoolTelemetry!().attempts.map((row) => row.reason), ["authentication", null]);
+});
+
+test("all cooling candidates fail before transport and a failed candidate cannot exceed the request budget", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const state = new StateStore(temp.root), candidates = tokenPrimaryCandidates(POOL), now = Date.now();
+  await state.initialize(); for (const candidate of candidates) await state.writeRpcProviderCooldown(candidate.familyHash, now + 30_000);
+  let calls = 0; const cooling = createTokenRpc({ environment: POOL, state, now: Date.now, maxHttpRequests: 3, deadlineMs: 10_000,
+    transport: { request: async () => { calls += 1; throw Error("transport must not run"); } } });
+  await assert.rejects(tokenBatch(cooling, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain }]),
+    { code: "APN_PROVIDER_UNAVAILABLE", details: { reason: "token_primary_pool_exhausted", attemptedProviders: "2" } });
+  assert.equal(calls, 0); assert.deepEqual(cooling.primaryPoolTelemetry!().attempts.map((row) => row.outcome), ["cooldown_skipped", "cooldown_skipped"]);
+
+  const other = await temporaryState(); t.after(other.cleanup); calls = 0;
+  const capped = createTokenRpc({ environment: POOL, state: new StateStore(other.root), now: Date.now, maxHttpRequests: 1, deadlineMs: 10_000,
+    transport: { request: async () => { calls += 1; throw new ApnError("APN_RPC_AMBIGUOUS", "timeout", { transportReason: "request_deadline" }); } } });
+  await assert.rejects(tokenBatch(capped, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain }]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(calls, 1); assert.equal(capped.telemetry!()?.budgetRejectedBeforeTransport, 1);
+});
+
+test("archive block mismatch fails before historical state use", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); let archiveCalls = 0;
+  const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 4, deadlineMs: 10_000,
+    transport: { request: async (url, _method, body) => { const origin = new URL(url).origin;
+      if (origin === "https://archive.example") archiveCalls += 1;
+      return { status: 200, body: batchResponse(body!, (method, params) => method === "eth_getBlockByNumber" && origin === "https://archive.example"
+        ? { number: "0x10", hash: `0x${"c".repeat(64)}` } : poolValue(method, params)) }; } } });
+  await tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain },
+    { method: "eth_getBlockByNumber", params: ["latest", false], decoder: tokenBlock }]);
+  await assert.rejects(tokenBatch(rpc, "archive", [{ method: "eth_getCode", params: [ACCOUNT, "0x10"], decoder: tokenHex() }]),
+    { code: "APN_RPC_PROTOCOL", details: { reason: "token_archive_block_mismatch" } });
+  assert.equal(archiveCalls, 1);
+});
+
+test("pool quote counts exact anchor and each failed candidate without exceeding the reviewed cap", async (t) => {
+  for (const failures of [0, 1, 2]) {
+    const temp = await temporaryState(); t.after(temp.cleanup); let physical = 0;
+    const environment = { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify([
+      "https://one.example", "https://two.example", "https://three.example"]), APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
+    const rpc = createTokenRpc({ environment, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 11, deadlineMs: 10_000,
+      wait: async () => {}, pacingNow: () => physical * 1_000,
+      transport: { request: async (url, _method, body) => { physical += 1; const origin = new URL(url).origin;
+        if (origin !== "https://archive.example" && Number(origin.slice(8, 11) === "one" ? 0 : origin.slice(8, 11) === "two" ? 1 : 2) < failures)
+          throw new ApnError("APN_RPC_AMBIGUOUS", "timeout", { transportReason: "request_deadline" });
+        return { status: 200, body: batchResponse(body!, (method, params) => {
+          if (method === "eth_call") { const tx = params[0] as { to?: string; data?: string };
+            if (tx.to === UNISWAP_V3_QUOTER_V2) return `0x${word(1_000_000n)}${word(0n)}${word(0n)}${word(0n)}`;
+            if (tx.data?.startsWith("0xdd62ed3e")) return `0x${word(0n)}`; return "0x"; }
+          if (method === "eth_getBalance") return "0x1000000"; return poolValue(method, params); }) }; } } });
+    const pins = async (call: any, tag: any) => { let cursor = 0; for (const size of [3, 3, 3, 1]) await tokenBatch(call, "archive",
+      Array.from({ length: size }, () => ({ method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], decoder: tokenHex() }))); };
+    const builder = new UniswapTokenQuoteBuilder(rpc, { save: async (material: unknown) => material } as any,
+      async () => "d".repeat(64), () => new Date("2026-09-23T00:00:00.000Z"), pins);
+    await builder.quote({ command: "swap.uniswap-token.quote", profile: "p", account: ACCOUNT, recipient: RECIPIENT,
+      sourceToken: UNISWAP_USDC, outputToken: ETHEREUM_USDT, amountAtomic: "1000000", minimumOutputAtomic: "990000",
+      approvalCapAtomic: "1000000", deadline: Math.floor(Date.parse("2026-09-23T00:10:00.000Z") / 1000),
+      maxApprovalGasLimit: "100000", maxSwapGasLimit: "200000", maxCleanupGasLimit: "100000", maxFeePerGas: "2",
+      maxPriorityFeePerGas: "1", maxNativeDebitWei: "800000" });
+    assert.equal(physical, 9 + failures); assert.equal(rpc.telemetry!()?.httpAttempts, 9 + failures);
+    assert.equal(rpc.telemetry!()?.logicalItems, 19 + 2 * failures); assert.ok(physical <= 11);
+  }
+});
+
+test("cross-process probe lock persists every semantic quarantine before a peer can contact the candidate", async (t) => {
+  for (const reason of ["malformed", "authentication", "wrong_chain", "capability"] as const) {
+    const temp = await temporaryState(); t.after(temp.cleanup); let failedCalls = 0, healthyCalls = 0, tick = 0;
+    const request = async (url: string, _method: string, body: string | null) => { const origin = new URL(url).origin;
+      if (origin === "https://first.example") { failedCalls += 1; const parsed = JSON.parse(body!), row = Array.isArray(parsed) ? parsed[0] : parsed;
+        if (reason === "authentication") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: row.id,
+          error: { code: -32_000, message: "Unauthorized: API key required" } }) };
+        if (reason === "capability") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: row.id,
+          error: { code: -32_600, message: "Batch requests are not supported" } }) };
+        return { status: 200, body: batchResponse(body!, () => reason === "wrong_chain" ? "0x2" : "malformed") }; }
+      healthyCalls += 1; return { status: 200, body: batchResponse(body!, poolValue) }; };
+    const runtime = () => createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now, pacingNow: () => (tick += 1_000),
+      wait: async () => {}, maxHttpRequests: 3, deadlineMs: 10_000, transport: { request } });
+    const first = runtime(), second = runtime(), items = [{ method: "eth_chainId", params: [], decoder: tokenChain }];
+    await Promise.all([tokenBatch(first, "primary", items), tokenBatch(second, "primary", items)]);
+    assert.equal(failedCalls, 1, reason); assert.equal(healthyCalls, 2, reason);
+    assert.equal([first, second].filter((rpc) => rpc.primaryPoolTelemetry!().attempts.some((row) => row.outcome === "cooldown_skipped")).length, 1, reason);
+  }
+});
+
+test("wrong-chain and HTTP 5xx candidates are quarantined with finite redacted reasons", async (t) => {
+  for (const kind of ["wrong_chain", "http_5xx"] as const) {
+    const temp = await temporaryState(); t.after(temp.cleanup); const origins: string[] = [];
+    const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 3, deadlineMs: 10_000,
+      transport: { request: async (url, _method, body) => { const origin = new URL(url).origin; origins.push(origin);
+        if (origin === "https://first.example") return kind === "http_5xx" ? { status: 503, body: "unavailable" }
+          : { status: 200, body: batchResponse(body!, () => "0x2") };
+        return { status: 200, body: batchResponse(body!, poolValue) }; } } });
+    await tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain }]);
+    assert.deepEqual(origins, ["https://first.example", "https://second.example"]);
+    assert.equal(rpc.primaryPoolTelemetry!().attempts[0]?.reason, kind);
+    assert.doesNotMatch(JSON.stringify(rpc.primaryPoolTelemetry!()), /example|unavailable/u);
+  }
+});
+
+test("pool refuses submission before semantic selection and never fails over on a business error", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const origins: string[] = [];
+  const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 4, deadlineMs: 10_000,
+    transport: { request: async (url, _method, body) => { const origin = new URL(url).origin; origins.push(origin); const parsed = JSON.parse(body!);
+      const rows = Array.isArray(parsed) ? parsed : [parsed]; if (rows[0]?.method === "eth_call") return { status: 200,
+        body: JSON.stringify({ jsonrpc: "2.0", id: rows[0].id, error: { code: 3, message: "execution reverted" } }) };
+      return { status: 200, body: batchResponse(body!, poolValue) }; } } });
+  await assert.rejects(rpc("eth_sendRawTransaction", ["0x00"]), { code: "APN_RPC_CONFIG", details: { reason: "token_primary_not_selected" } });
+  assert.equal(rpc.effectAttempts!(), 0); assert.equal(origins.length, 0);
+  await tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain }]);
+  await assert.rejects(rpc("eth_call", [{ to: ACCOUNT, data: "0x" }, "latest"]));
+  assert.deepEqual(origins, ["https://first.example", "https://first.example"]);
+});
+
+test("maximum three-provider effect reservations fit the cumulative 64-request envelope", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const journal = new UniswapTokenRpcBudgetJournal(temp.root), binding = "e".repeat(64);
+  const caps = [["quote", 11, "quote"], ["prepare", 12, "prepare"], ["approve", 17, "approval_effect"], ["execute", 24, "swap_effect"]] as const;
+  for (const [command, cap, kind] of caps) { const reservation = await journal.reserve(binding, command, cap, cap, kind);
+    await journal.settle(binding, reservation, { ...new RpcReadSession().telemetry(), httpAttempts: cap, httpRequests: cap }, 0); }
+  assert.equal(caps.reduce((sum, row) => sum + row[1], 0), 64);
+  await assert.rejects(journal.reserve(binding, "extra-effect", 1), { code: "APN_RPC_BUDGET_EXCEEDED" });
 });
 
 test("durable operation budget caps only new effects and never blocks status or cleanup recovery", async (t) => {
