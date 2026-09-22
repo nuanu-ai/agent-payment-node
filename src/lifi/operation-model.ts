@@ -70,6 +70,20 @@ export interface BridgeObservationRpcFailure {
   readonly attempts?: number;
   readonly endpointRole?: "primary" | "receipt" | "archive";
 }
+export interface BridgeObservationTelemetry {
+  readonly schemaVersion: "apn.bridge-observation-telemetry.v1";
+  readonly stage: "source_observation" | "destination_observation";
+  readonly effectRole: "approval" | "bridge";
+  readonly outcome: "success" | "missing" | "failure";
+  readonly physicalRequests: number;
+  readonly httpAttempts: number;
+  readonly logicalRpcItems: number;
+  readonly batchCount: number;
+  readonly maxBatchSize: number;
+  readonly budgetRejectedBeforeTransport: number;
+  readonly attemptsByEndpointRole: Readonly<Record<"primary" | "receipt" | "archive", number>>;
+  readonly attemptsByMethodClass: Readonly<Record<string, number>>;
+}
 export type BridgeObservationRpcStage = "source_observation" | "source_transaction" | "source_receipt" |
   "source_included_block" | "source_safe_head" | "source_recheck" | "source_assert_chain" |
   "destination_observation" | "destination_transaction" | "destination_receipt" |
@@ -119,6 +133,8 @@ export interface BridgeMutable {
   readonly failure: BridgeFailure | null;
   /** Frozen reservation as first created; live lifecycle remains in the shared ledger. */
   readonly usageLease: AssetUsageReservation | null;
+  /** Append-only, redacted physical read accounting. Absent only on legacy records. */
+  readonly observationTelemetry?: readonly BridgeObservationTelemetry[];
 }
 export type BridgeEffectSnapshot = Omit<BridgeEffect, "envelope"> & { readonly envelopeHash: string };
 export interface BridgeTransition extends Omit<BridgeMutable, "effects"> {
@@ -164,7 +180,8 @@ export function bridgeSnapshot(value: BridgeMutable): Omit<BridgeTransition, "at
   return { state: value.state, approval: value.approval,
     effects: value.effects.map(({ envelope, ...effect }) => ({ ...effect, envelopeHash: envelope.envelopeHash })),
     sourceProof: value.sourceProof, destinationProof: value.destinationProof,
-    providerObservation: value.providerObservation, destinationScan: value.destinationScan, failure: value.failure, usageLease: value.usageLease };
+    providerObservation: value.providerObservation, destinationScan: value.destinationScan, failure: value.failure, usageLease: value.usageLease,
+    ...(value.observationTelemetry === undefined ? {} : { observationTelemetry: value.observationTelemetry }) };
 }
 export function sealBridgeOperation(value: Omit<BridgeOperationRecord, "integrityHash">): BridgeOperationRecord {
   return { ...value, integrityHash: hashObject(value) };

@@ -61,6 +61,10 @@ export interface RpcReadTelemetry {
   readonly remainingHttpAttempts: number;
   readonly deadline: number;
   readonly retryAfterMs?: number;
+  readonly attemptsByEndpointRole: Readonly<Record<"primary" | "receipt" | "archive", number>>;
+  readonly attemptsByMethodClass: Readonly<Record<string, number>>;
+  readonly maxBatchSize: number;
+  readonly budgetRejectedBeforeTransport: number;
   /** Backward-compatible telemetry aliases. */
   readonly uniqueCalls: number;
   readonly totalAttempts: number;
@@ -181,6 +185,10 @@ export class RpcReadSession {
   private retryAfterMs: number | undefined;
   private readonly methods = new Map<string, number>();
   private readonly endpoints = new Set<string>();
+  private readonly roleAttempts = { primary: 0, receipt: 0, archive: 0 };
+  private readonly methodClassAttempts = new Map<string, number>();
+  private maxBatchSize = 0;
+  private budgetRejectedBeforeTransport = 0;
 
   constructor(options: RpcReadSessionOptions = {}) {
     this.maxLogicalItems = positiveBound(options.maxLogicalItems ?? options.maxUniqueCalls ?? RPC_DEFAULT_LOGICAL_ITEMS, "maxLogicalItems");
@@ -208,12 +216,20 @@ export class RpcReadSession {
       remainingLogicalItems: Math.max(0, this.maxLogicalItems - this.logicalItems),
       remainingHttpRequests: Math.max(0, this.maxHttpRequests - this.httpRequests),
       remainingHttpAttempts: Math.max(0, this.maxHttpAttempts - this.httpAttempts), deadline: this.deadline,
+      attemptsByEndpointRole: { ...this.roleAttempts }, attemptsByMethodClass: Object.fromEntries(this.methodClassAttempts),
+      maxBatchSize: this.maxBatchSize, budgetRejectedBeforeTransport: this.budgetRejectedBeforeTransport,
       uniqueCalls: this.logicalItems, totalAttempts: this.httpAttempts, perMethod,
       remainingUniqueCalls: Math.max(0, this.maxLogicalItems - this.logicalItems),
       ...(this.retryAfterMs === undefined ? {} : { retryAfterMs: this.retryAfterMs }) };
   }
 
   currentTime(): number { return this.now(); }
+  recordPhysicalAttempt(endpointRole: "primary" | "receipt" | "archive", methods: readonly string[]): void {
+    this.roleAttempts[endpointRole] += 1; this.maxBatchSize = Math.max(this.maxBatchSize, methods.length);
+    for (const method of methods) {
+      const category = rpcMethodClass(method); this.methodClassAttempts.set(category, (this.methodClassAttempts.get(category) ?? 0) + 1);
+    }
+  }
 
   wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt: EvmRpcCall = call): EvmRpcCall {
     return async (method, params) => {
@@ -437,6 +453,7 @@ export class RpcReadSession {
   }
   private assertDeadline(method: string): void { if (this.now() >= this.deadline) this.budgetError(method, "deadline"); }
   private budgetError(method: string, reason: string): never {
+    this.budgetRejectedBeforeTransport += 1;
     throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC command budget exhausted.", telemetryDetails(this.telemetry(), method, reason));
   }
   private rateLimit(method: string, retryAfterMs?: number): ApnError {
@@ -502,7 +519,21 @@ export function telemetryDetails(telemetry: RpcReadTelemetry, method: string, re
     remainingHttpAttempts: telemetry.remainingHttpAttempts.toString(), deadline: telemetry.deadline.toString(),
     uniqueCalls: telemetry.uniqueCalls.toString(), totalAttempts: telemetry.totalAttempts.toString(), perMethod: canonicalJson(telemetry.perMethod),
     remainingUniqueCalls: telemetry.remainingUniqueCalls.toString(),
+    attemptsByEndpointRole: canonicalJson(telemetry.attemptsByEndpointRole),
+    attemptsByMethodClass: canonicalJson(telemetry.attemptsByMethodClass), maxBatchSize: telemetry.maxBatchSize.toString(),
+    budgetRejectedBeforeTransport: telemetry.budgetRejectedBeforeTransport.toString(),
     ...(telemetry.retryAfterMs === undefined ? {} : { retryAfterMs: telemetry.retryAfterMs.toString() }) };
+}
+function rpcMethodClass(method: string): string {
+  if (method === "eth_chainId") return "chain";
+  if (method === "eth_getTransactionByHash") return "transaction";
+  if (method === "eth_getTransactionReceipt") return "receipt";
+  if (method === "eth_getBlockByNumber") return "block";
+  if (method === "eth_getCode") return "code";
+  if (method === "eth_getStorageAt") return "storage";
+  if (method === "eth_call") return "call";
+  if (method === "eth_getLogs") return "logs";
+  return "other";
 }
 function positiveBound(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < 1) throw new ApnError("APN_RPC_CONFIG", `RPC ${name} bound is invalid.`); return value;

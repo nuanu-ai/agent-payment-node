@@ -12,6 +12,7 @@ import { approvalIncluded } from "./transaction.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
 import { ApnError, type ErrorCode } from "../errors.js";
 import { observationRpcFailure } from "./observation-diagnostics.js";
+import type { RpcReadTelemetry } from "./rpc.js";
 
 export type BridgeSave = (op: BridgeOperationRecord, patch: Partial<BridgeMutable>) => Promise<BridgeOperationRecord>;
 type LazyRpc = BridgeRpcPort | (() => BridgeRpcPort);
@@ -32,8 +33,8 @@ export class BridgeObservation {
       if (effect.phase === "safe_success" && effect.safeProof !== null &&
         (effect.role !== "bridge" || op.sourceProof !== null)) continue;
       let observation: Awaited<ReturnType<BridgeRpcPort["observe"]>>;
+      const source = this.source(), beforeTelemetry = source.readTelemetry?.() ?? null;
       try {
-        const source = this.source();
         observation = await source.observe(effect.transactionHash!, effect.envelope);
         if (observation !== null) {
           await this.historicalDeployment(op, source, observation.transaction, op.intent.sourceDeployment);
@@ -44,16 +45,19 @@ export class BridgeObservation {
         }
       } catch (error) {
         reliable = false;
-        op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? observationFailure(effect.role, error, "APN_INTERNAL") });
+        op = await this.save(op, { state: "unknown_finality", observationTelemetry: appendObservationTelemetry(op, effect.role, "failure", beforeTelemetry,
+          source.readTelemetry?.() ?? null), failure: retainedUnsentBridgeRpcFailure(op) ?? observationFailure(effect.role, error, "APN_INTERNAL") });
         continue;
       }
+      const observedTelemetry = appendObservationTelemetry(op, effect.role, observation === null ? "missing" : "success", beforeTelemetry,
+        source.readTelemetry?.() ?? null);
       if (observation === null) {
         reliable = false;
         if (effect.safeProof !== null) {
-          op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? {
+          op = await this.save(op, { state: "unknown_finality", observationTelemetry: observedTelemetry, failure: retainedUnsentBridgeRpcFailure(op) ?? {
             ...observationFailure(effect.role, null, "APN_RECEIPT_NOT_FOUND"), reason: "safe_source_observation_conflict" } });
         } else {
-          op = await this.save(op, { state: "unknown_finality", effects: replaceEffect(op, {
+          op = await this.save(op, { state: "unknown_finality", observationTelemetry: observedTelemetry, effects: replaceEffect(op, {
             ...effect, phase: "unknown_finality", includedProof: null, safeProof: null,
           }), ...(effect.role === "bridge" ? { sourceProof: null } : {}),
           failure: retainedUnsentBridgeRpcFailure(op) ?? observationFailure(effect.role, null, "APN_RECEIPT_NOT_FOUND") });
@@ -64,7 +68,8 @@ export class BridgeObservation {
       if (effect.safeProof !== null) {
         if (transaction.safeBlock === null || !bridgeSame(proofIdentity(effect.safeProof), proofIdentity(transaction))) {
           reliable = false;
-          op = await this.save(op, { state: "unknown_finality", failure: retainedUnsentBridgeRpcFailure(op) ?? { reason: "safe_source_observation_conflict", residualAllowance: null } });
+          op = await this.save(op, { state: "unknown_finality", observationTelemetry: observedTelemetry,
+            failure: retainedUnsentBridgeRpcFailure(op) ?? { reason: "safe_source_observation_conflict", residualAllowance: null } });
         }
         continue;
       }
@@ -85,7 +90,7 @@ export class BridgeObservation {
           continue;
         }
       }
-      op = await this.save(op, { state: reliable ? "source_pending" : "unknown_finality", sourceProof,
+      op = await this.save(op, { state: reliable ? "source_pending" : "unknown_finality", sourceProof, observationTelemetry: observedTelemetry,
         failure: reliable ? retainedUnsentBridgeRpcFailure(op) : op.failure, effects: replaceEffect(op, {
         ...current, phase, includedProof: transaction, safeProof: transaction.safeBlock === null ? null : transaction,
       }) });
@@ -195,10 +200,32 @@ export class BridgeObservation {
     proof: BridgeTransactionProof | BridgeDestinationTransactionProof, frozen: BridgeDeploymentIdentity): Promise<void> {
     if (rpc.origin !== frozen.rpcOrigin || proof.rpcOrigin !== frozen.rpcOrigin || proof.chainId !== frozen.chainId) bridgeFailure("APN_RPC_CONFIG", "observation_RPC_identity");
     const current = await rpc.deployment(op.intent.materialization.tool, frozen.peerChainId,
-      frozen.chainId === op.intent.materialization.request.fromChainId ? op.intent.materialization.request.fromToken : op.intent.materialization.request.toToken, proof.block);
+      frozen.chainId === op.intent.materialization.request.fromChainId ? op.intent.materialization.request.fromToken : op.intent.materialization.request.toToken,
+      proof.block, true);
     if (current.contractHash !== frozen.contractHash || current.codeHash !== frozen.codeHash ||
       current.configurationHash !== frozen.configurationHash || !bridgeSame(current.block, proof.block)) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_identity");
   }
+}
+function appendObservationTelemetry(op: BridgeOperationRecord, effectRole: "approval" | "bridge", outcome: "success" | "missing" | "failure",
+  before: RpcReadTelemetry | null, after: RpcReadTelemetry | null) {
+  const existing = op.observationTelemetry ?? [];
+  if (after === null) return existing;
+  const prior = before ?? zeroTelemetry(after.deadline), deltaRecord = (current: Readonly<Record<string, number>>, previous: Readonly<Record<string, number>>) =>
+    Object.fromEntries(Object.keys(current).sort().map((key) => [key, Math.max(0, (current[key] ?? 0) - (previous[key] ?? 0))]));
+  return [...existing, { schemaVersion: "apn.bridge-observation-telemetry.v1" as const, stage: "source_observation" as const, effectRole, outcome,
+    physicalRequests: Math.max(0, after.httpRequests - prior.httpRequests), httpAttempts: Math.max(0, after.httpAttempts - prior.httpAttempts),
+    logicalRpcItems: Math.max(0, after.logicalItems - prior.logicalItems), batchCount: Math.max(0, after.batchCount - prior.batchCount),
+    maxBatchSize: after.maxBatchSize, budgetRejectedBeforeTransport: Math.max(0, after.budgetRejectedBeforeTransport - prior.budgetRejectedBeforeTransport),
+    attemptsByEndpointRole: { primary: Math.max(0, after.attemptsByEndpointRole.primary - prior.attemptsByEndpointRole.primary),
+      receipt: Math.max(0, after.attemptsByEndpointRole.receipt - prior.attemptsByEndpointRole.receipt),
+      archive: Math.max(0, after.attemptsByEndpointRole.archive - prior.attemptsByEndpointRole.archive) },
+    attemptsByMethodClass: deltaRecord(after.attemptsByMethodClass, prior.attemptsByMethodClass) }];
+}
+function zeroTelemetry(deadline: number): RpcReadTelemetry {
+  return { logicalItems: 0, httpRequests: 0, httpAttempts: 0, batchCount: 0, batchItemsByMethod: {}, dedupHits: 0, cacheHits: 0,
+    singleflightHits: 0, endpointIdentities: [], remainingLogicalItems: 0, remainingHttpRequests: 0, remainingHttpAttempts: 0, deadline,
+    uniqueCalls: 0, totalAttempts: 0, perMethod: {}, remainingUniqueCalls: 0, attemptsByEndpointRole: { primary: 0, receipt: 0, archive: 0 },
+    attemptsByMethodClass: {}, maxBatchSize: 0, budgetRejectedBeforeTransport: 0 };
 }
 function observationFailure(effectRole: "approval" | "bridge", error: unknown, fallbackCode: ErrorCode | null = null) {
   return { reason: "source_observation_unavailable", residualAllowance: null,

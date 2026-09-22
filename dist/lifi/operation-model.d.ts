@@ -59,6 +59,20 @@ export interface BridgeObservationRpcFailure {
     readonly attempts?: number;
     readonly endpointRole?: "primary" | "receipt" | "archive";
 }
+export interface BridgeObservationTelemetry {
+    readonly schemaVersion: "apn.bridge-observation-telemetry.v1";
+    readonly stage: "source_observation" | "destination_observation";
+    readonly effectRole: "approval" | "bridge";
+    readonly outcome: "success" | "missing" | "failure";
+    readonly physicalRequests: number;
+    readonly httpAttempts: number;
+    readonly logicalRpcItems: number;
+    readonly batchCount: number;
+    readonly maxBatchSize: number;
+    readonly budgetRejectedBeforeTransport: number;
+    readonly attemptsByEndpointRole: Readonly<Record<"primary" | "receipt" | "archive", number>>;
+    readonly attemptsByMethodClass: Readonly<Record<string, number>>;
+}
 export type BridgeObservationRpcStage = "source_observation" | "source_transaction" | "source_receipt" | "source_included_block" | "source_safe_head" | "source_recheck" | "source_assert_chain" | "destination_observation" | "destination_transaction" | "destination_receipt" | "destination_included_block" | "destination_safe_head" | "destination_recheck" | "destination_assert_chain" | "destination_logs";
 export type BridgeObservationRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getLogs" | "eth_getBalance" | "eth_getCode" | "eth_getStorageAt" | "eth_call" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "debug_traceTransaction";
 export type BridgeObservationRpcReason = "bridge_RPC_HTTP_status" | "bridge_RPC_response" | "receipt_transaction_membership" | "canonical_transaction_membership" | "receipt_status" | "receipt_sender_target" | "receipt_log_membership" | "receipt_execution_fee_bounds" | "bridge_block_reorg" | "bridge_block_number" | "destination_log_range" | "destination_log_count" | "destination_log_identity" | "destination_log_hash" | "destination_scan_cursor_reorg" | "destination_scan_membership" | "destination_scan_reorg" | "destination_candidate_unresolved" | "duplicate_destination_delivery" | "destination_not_safe_success" | "destination_transaction_reverted" | "destination_trace_rebind" | "request_deadline" | "DNS_deadline" | "request_interrupted" | "response_aborted" | "response_interrupted";
@@ -91,6 +105,8 @@ export interface BridgeMutable {
     readonly failure: BridgeFailure | null;
     /** Frozen reservation as first created; live lifecycle remains in the shared ledger. */
     readonly usageLease: AssetUsageReservation | null;
+    /** Append-only, redacted physical read accounting. Absent only on legacy records. */
+    readonly observationTelemetry?: readonly BridgeObservationTelemetry[];
 }
 export type BridgeEffectSnapshot = Omit<BridgeEffect, "envelope"> & {
     readonly envelopeHash: string;
