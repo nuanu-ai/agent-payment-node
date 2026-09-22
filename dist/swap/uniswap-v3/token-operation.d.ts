@@ -45,6 +45,8 @@ export interface UniswapTokenFailureDiagnostic {
     readonly endpointRole: string | null;
     readonly phase: UniswapTokenPhase;
 }
+type FailureDiagnosticField = "code" | "reason" | "rpcMethod" | "endpointRole";
+export declare function sanitizeUniswapTokenFailureField(field: FailureDiagnosticField, value: unknown): string | null;
 export interface UniswapTokenOperation {
     readonly schemaVersion: typeof UNISWAP_TOKEN_OPERATION_SCHEMA | typeof UNISWAP_TOKEN_OPERATION_SCHEMA_V1;
     readonly operationId: string;
@@ -86,3 +88,4 @@ export declare class UniswapTokenJournal extends SecureStateStore {
 }
 export declare function transitionUniswapToken(opValue: UniswapTokenOperation, phase: UniswapTokenPhase, patch: Partial<UniswapTokenOperation>, now: Date): UniswapTokenOperation;
 export declare function tokenAttempt(op: UniswapTokenOperation, kind: "approval" | "swap" | "cleanup", nonce: string, now: Date): UniswapTokenAttempt;
+export {};

@@ -51,7 +51,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
     }
     async approve(id: string) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, 14, "approval_effect", async () => await this.execution.approve(id)); }
     async execute(id: string) { const phase = (await this.journal.load(id))?.phase;
-      const budget = phase === "approved" ? [14, 14, "approval_effect"] as const : phase === "approval_observed" ? [24, 24, "swap_effect"] as const : [0, 24, "recovery"] as const;
+      const budget = phase === "approved" || phase === "approval_observed" ? [24, 24, "swap_effect"] as const : [0, 24, "recovery"] as const;
       return await this.budgeted(id, "swap.uniswap-token.execute", budget[0], budget[1], budget[2], async () => await this.execution.execute(id)); }
     async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", 0, 8, "recovery", async () => await this.execution.status(id)); }
     async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", 0, 14, "recovery", async () => await this.execution.cleanup(id)); }

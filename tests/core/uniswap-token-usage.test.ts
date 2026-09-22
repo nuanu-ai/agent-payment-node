@@ -144,6 +144,36 @@ test("ledger-terminal live split brain reconciles the operation to no-effect cle
   const cleaned = await runtime.status(split.operationId); assert.equal(cleaned.phase, "cleaned"); assert.equal(cleaned.usageState, "failed_before_effect");
   assert.equal(cleaned.cleanupEvidence?.source, "legacy_usage_reconciliation"); assert.equal(cleaned.approvalAttempt?.transactionHash, null);
 });
+test("journal-only sealed or send-started evidence blocks no-effect cleanup and usage release", async (t) => {
+  for (const phase of ["sealed", "send_started"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
+      account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "0"),
+      journal = new UniswapTokenJournal(temporary.root), base = await journal.save(operation(s.policy.policyDigest, phase === "sealed" ? "b" : "c", account)), usage = await s.usage.reserve(base),
+      approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)),
+      started = await journal.save(transitionUniswapToken(approved, "approval_submission_started", { approvalAttempt: tokenAttempt(approved, "approval", "7", now) }, now)),
+      cleanup = await journal.save(transitionUniswapToken(started, "cleanup_required", { cleanupReason: "injected_crash" }, now)), effects = new UniswapTokenEffectJournal(temporary.root);
+    await effects.seal(cleanup, "approval", `0x${"a".repeat(64)}`, envelopeOf(cleanup, "approval", "7"), now);
+    if (phase === "send_started") await effects.markStarted(cleanup, "approval", now);
+    const runtime = createUniswapTokenRuntime({ ...p, clock: { now: () => now }, foreground: "cleanup", verifyPins: async () => undefined });
+    await assert.rejects(runtime.cleanup(cleanup.operationId), (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "uniswap_cleanup_effect_exists");
+    const persisted = await journal.load(cleanup.operationId); assert.equal(persisted?.phase, "cleanup_required", phase);
+    assert.equal(persisted?.cleanupEvidence, null, phase); assert.equal((await s.usage.current(cleanup)).state, "reserved", phase); assert.equal(p.sends.length, 0, phase);
+  }
+});
+test("wallet-only signed crash evidence blocks no-effect cleanup and usage release", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "0"),
+    journal = new UniswapTokenJournal(temporary.root), base = await journal.save(operation(s.policy.policyDigest, "d", account)), usage = await s.usage.reserve(base),
+    approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)),
+    started = await journal.save(transitionUniswapToken(approved, "approval_submission_started", { approvalAttempt: tokenAttempt(approved, "approval", "7", now) }, now)),
+    failingEffects = new FailOnceEffectJournal(temporary.root), custody = new UniswapTokenCustody(p.state, p.wrapping, p.call, () => now, failingEffects);
+  await assert.rejects(custody.seal(started, "approval", "7"), /injected post-wallet-save failure/u);
+  const cleanup = await journal.save(transitionUniswapToken(started, "cleanup_required", { cleanupReason: "injected_crash" }, now));
+  assert.equal(await new UniswapTokenEffectJournal(temporary.root).load(cleanup, "approval"), null);
+  const runtime = createUniswapTokenRuntime({ ...p, clock: { now: () => now }, foreground: "cleanup", verifyPins: async () => undefined });
+  await assert.rejects(runtime.cleanup(cleanup.operationId), (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "uniswap_cleanup_effect_exists");
+  assert.equal((await journal.load(cleanup.operationId))?.cleanupEvidence, null); assert.equal((await s.usage.current(cleanup)).state, "reserved"); assert.equal(p.sends.length, 0);
+});
 
 test("a refused token effect releases pending nonce 7 for the next valid operation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await setup(temporary.root, "3000000");
@@ -204,10 +234,21 @@ test("production execute durably routes non-exact live allowance drift into expl
   let op = await runtime.execute(approved.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "approval_allowance_drift");
   assert.equal(op.usageState, "reserved"); assert.equal(p.sends.length, 0);
   let budget = (await new UniswapTokenRpcBudgetJournal(temporary.root).load(op.operationId))!.rows.at(-1)!;
-  assert.deepEqual([budget.cap, budget.requestSessionCap, budget.budgetClass], [14, 14, "approval_effect"]);
+  assert.deepEqual([budget.cap, budget.requestSessionCap, budget.budgetClass], [24, 24, "swap_effect"]);
   op = await runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.equal(op.usageState, "reserved"); assert.equal(p.sends.length, 1);
   budget = (await new UniswapTokenRpcBudgetJournal(temporary.root).load(op.operationId))!.rows.at(-1)!;
   assert.deepEqual([budget.cap, budget.requestSessionCap, budget.budgetClass], [0, 14, "recovery"]);
+});
+test("execute from approved reserves the swap cap when exact allowance can skip approval", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "1000000"),
+    journal = new UniswapTokenJournal(temporary.root), base = await journal.save(operation(s.policy.policyDigest, "e", account)), usage = await s.usage.reserve(base),
+    approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)), call = p.sessionCall(24),
+    runtime = createUniswapTokenRuntime({ ...p, call, clock: { now: () => now }, foreground: "refuse", verifyPins: async () => undefined });
+  const op = await runtime.execute(approved.operationId), row = (await new UniswapTokenRpcBudgetJournal(temporary.root).load(op.operationId))!.rows.at(-1)!;
+  assert.equal(op.phase, "submitted"); assert.equal(op.approvalAttempt, null); assert.equal(op.swapAttempt?.transactionHash !== null, true); assert.equal(p.sends.length, 1);
+  assert.deepEqual([row.cap, row.requestSessionCap, row.budgetClass], [24, 24, "swap_effect"]);
+  assert.equal(row.physicalRequests, call.telemetry!()!.httpAttempts + call.effectAttempts!()); assert.ok(row.physicalRequests! <= row.cap);
 });
 
 test("production token RPC phases stay within exact physical budgets through finalized swap", async (t) => {

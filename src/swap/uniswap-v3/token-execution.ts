@@ -2,7 +2,7 @@ import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import type { UniswapTokenOperation, UniswapTokenPhase, UniswapTokenReceipt } from "./token-operation.js";
 import type { TokenUsageBinding } from "./token-usage.js";
-import { tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
+import { sanitizeUniswapTokenFailureField, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
 
 export type TokenEffectKind = "approval" | "swap" | "cleanup";
 export interface TokenSealedEffect { readonly transactionHash: string; readonly envelopeHash: string }
@@ -36,16 +36,13 @@ export class UniswapTokenExecution {
     let op = await this.required(id); if (op.phase !== "prepared") blocked("Token swap is not prepared.", "uniswap_token_phase");
     await this.ports.foregroundApprove(op); const usage = await this.ports.reserveUsage(op);
     op = await this.persist(transitionUniswapToken(op, "approved", usagePatch(usage), this.ports.now()));
-    return await this.execute(id);
+    op = await this.advanceApproval(op);
+    return approvalActive(op.phase) ? await this.observeApproval(await this.continueStart(op, "approval")) : op;
   }
   async execute(id: string): Promise<UniswapTokenOperation> {
     let op = await this.syncUsage(await this.required(id)); if (["observed", "cleaned", "cleanup_required"].includes(op.phase)) return op;
     if (this.ports.now().getTime() >= op.route.deadline * 1000 && !active(op.phase)) return await this.cleanupRequired(op, "deadline_expired");
-    if (op.phase === "approved") {
-      const allowance = await this.ports.currentAllowance(op);
-      if (allowance !== "0" && allowance !== op.route.amountIn) return await this.cleanupRequired(op, "approval_allowance_drift");
-      op = allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval");
-    }
+    if (op.phase === "approved") op = await this.advanceApproval(op);
     if (approvalActive(op.phase)) return await this.observeApproval(await this.continueStart(op, "approval"));
     if (op.phase === "approval_observed") { try { await this.ports.revalidate(op); }
       catch { return await this.cleanupRequired(op, "post_approval_revalidation_failed"); }
@@ -53,6 +50,9 @@ export class UniswapTokenExecution {
     if (swapActive(op.phase)) return await this.observeSwap(await this.continueStart(op, "swap"));
     return op;
   }
+  private async advanceApproval(op: UniswapTokenOperation) { const allowance = await this.ports.currentAllowance(op);
+    if (allowance !== "0" && allowance !== op.route.amountIn) return await this.cleanupRequired(op, "approval_allowance_drift");
+    return allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval"); }
   async status(id: string): Promise<UniswapTokenOperation> {
     const op = await this.syncUsage(await this.required(id));
     if (approvalActive(op.phase)) return await this.observeApproval(op);
@@ -159,7 +159,9 @@ function effectHash(op: UniswapTokenOperation) { return [op.approvalAttempt, op.
 function cleanupEvidence(source: "current_allowance" | "legacy_usage_reconciliation", now: Date) { return { schemaVersion: "apn.uniswap-token-cleanup-evidence.v1" as const,
   kind: "zero_allowance_no_effect" as const, source, observedAllowanceAtomic: "0" as const, observedAt: now.toISOString() }; }
 function diagnostic(error: unknown, phase: UniswapTokenPhase): import("./token-operation.js").UniswapTokenFailureDiagnostic { const e = error instanceof ApnError ? error : null;
-  return { code: safe(e?.code), reason: safe(e?.details?.reason), rpcMethod: safe(e?.details?.rpcMethod), endpointRole: safe(e?.details?.endpointRole), phase }; }
-function safe(value: unknown) { return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,80}$/u.test(value) ? value : null; }
+  return { code: sanitizeUniswapTokenFailureField("code", e?.code),
+    reason: sanitizeUniswapTokenFailureField("reason", e?.details?.reason ?? e?.details?.transportReason),
+    rpcMethod: sanitizeUniswapTokenFailureField("rpcMethod", e?.details?.rpcMethod),
+    endpointRole: sanitizeUniswapTokenFailureField("endpointRole", e?.details?.endpointRole), phase }; }
 function corrupt(message: string): never { throw new ApnError("APN_STATE_CORRUPT", message); }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
