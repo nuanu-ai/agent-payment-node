@@ -6,7 +6,7 @@ import { decodeFunctionData, encodeFunctionData } from "viem";
 import { canonicalJson } from "../../src/canonical.js";
 import { acrossBridgeAbi } from "../../src/lifi/abi.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
-import { bridgeRpcFactory } from "../../src/lifi/rpc.js";
+import { RpcReadSession, bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { addressWord } from "./lifi-event-fixtures.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_SENDER, LifiTestProvider, lifiFixture, lifiSteps } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -72,16 +72,21 @@ async function prepareSpy(now: Date) {
   };
   const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
     const host = new URL(endpoint).host, chainId = chainByHost[host]; assert.ok(chainId);
-    const items = JSON.parse(body!) as Request[]; assert.ok(Array.isArray(items), "prepare RPC must use JSON-RPC batches");
+    const parsed = JSON.parse(body!) as Request | Request[], items = Array.isArray(parsed) ? parsed : [parsed];
     calls.push({ host, items });
-    return { status: 200, body: JSON.stringify(items.map((item) => ({ jsonrpc: "2.0", id: item.id, result: resultFor(chainId, item) }))) };
+    const responses = items.map((item) => ({ jsonrpc: "2.0", id: item.id, result: resultFor(chainId, item) }));
+    return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? responses : responses[0]) };
   } };
   const rpcFor = bridgeRpcFactory({
     APN_ETHEREUM_RPC_URL: "https://eth-primary.example", APN_ETHEREUM_ARCHIVE_RPC_URL: "https://eth-archive.example",
     APN_BASE_RPC_URL: "https://base-primary.example", APN_BASE_ARCHIVE_RPC_URL: "https://base-archive.example",
     APN_ARBITRUM_RPC_URL: "https://arb-primary.example", APN_ARBITRUM_ARCHIVE_RPC_URL: "https://arb-archive.example",
   }, { transport, wait: async () => {} });
-  return { rpcFor, calls };
+  const sessions: RpcReadSession[] = [];
+  return { rpcFor: ((chainId, session) => {
+    if (session !== undefined) sessions.push(session);
+    return rpcFor(chainId, session);
+  }) satisfies typeof rpcFor, calls, sessions };
 }
 
 async function nativeEthBase(now: Date): Promise<LifiTestProvider> {
@@ -99,9 +104,13 @@ async function nativeEthBase(now: Date): Promise<LifiTestProvider> {
 }
 
 for (const flow of [
-  { pair: "eth-base" as const, tool: "across" as const, archiveSizes: [17, 25], native: true },
-  { pair: "base-arb" as const, tool: "stargateV2" as const, archiveSizes: [33, 25], native: false },
-]) test(`LI.FI ${flow.pair} ${flow.tool} complete prepare uses six RPC batches and one materialization`, async (t) => {
+  { pair: "eth-base" as const, tool: "across" as const, archiveSizes: {
+    "eth-archive.example": [3, 3, 3, 3, 3, 2], "base-archive.example": [3, 3, 3, 3, 3, 3, 3, 3, 1],
+  }, requests: 19, native: true },
+  { pair: "base-arb" as const, tool: "stargateV2" as const, archiveSizes: {
+    "base-archive.example": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], "arb-archive.example": [3, 3, 3, 3, 3, 3, 3, 3, 1],
+  }, requests: 24, native: false },
+]) test(`LI.FI ${flow.pair} ${flow.tool} complete prepare caps archive HTTP batches at three items`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
     const now = new Date(flow.native ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z");
     const spy = await prepareSpy(now); const provider = flow.native ? await nativeEthBase(now) : undefined;
@@ -111,10 +120,13 @@ for (const flow of [
     assert.ok(prepared.operation); assert.equal(f.provider.materializeCalls, 1);
     assert.match(prepared.operation.intent.sourceDeployment.codeHash, /^[0-9a-f]{64}$/u);
     assert.match(prepared.operation.intent.destinationDeployment.codeHash, /^[0-9a-f]{64}$/u);
-    assert.equal(spy.calls.length, 6);
+    assert.equal(spy.calls.length, flow.requests);
     const archive = spy.calls.filter((call) => call.host.includes("archive"));
-    assert.deepEqual(archive.map((call) => call.items.length), flow.archiveSizes);
-    assert.ok(archive.every((call) => call.items[0]!.method === "eth_chainId"));
+    for (const [host, sizes] of Object.entries(flow.archiveSizes)) {
+      assert.deepEqual(archive.filter((call) => call.host === host).map((call) => call.items.length), sizes);
+    }
+    assert.ok(archive.every((call) => call.items.length <= 3));
+    assert.equal(archive.filter((call) => call.items.some((item) => item.method === "eth_chainId")).length, 2);
     const primary = spy.calls.filter((call) => call.host.includes("primary"));
     assert.equal(primary.length, 4);
     assert.equal(primary.filter((call) => call.items.some((item) => item.method === "eth_getBalance")).length, 1);
@@ -129,5 +141,20 @@ for (const flow of [
         assert.equal(baseFeeCalls.length, 3); assert.notEqual(stateTag, undefined);
         assert.ok(baseFeeCalls.every((item) => item.params[1] === stateTag && item.params[1] !== "latest"));
       }
+    }
+    if (flow.pair === "base-arb") {
+      const beforeApproval = spy.calls.length; f.approval.accepted = false;
+      const rejected = await f.core.execute({ command: "bridge.approve", operationId: prepared.id });
+      assert.equal(rejected.ok, true, JSON.stringify(rejected.error));
+      assert.equal((rejected.operation as { state: string }).state, "failed_before_effect");
+      const execution = spy.calls.slice(beforeApproval), executionArchive = execution.filter((call) => call.host.includes("archive"));
+      assert.equal(execution.length, 24); assert.equal(execution.filter((call) => call.host.includes("primary")).length, 4);
+      assert.deepEqual(executionArchive.filter((call) => call.host === "base-archive.example").map((call) => call.items.length),
+        [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+      assert.deepEqual(executionArchive.filter((call) => call.host === "arb-archive.example").map((call) => call.items.length),
+        [3, 3, 3, 3, 3, 3, 3, 3, 1]);
+      assert.ok(executionArchive.every((call) => call.items.length <= 3));
+      assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 24);
+      assert.equal(spy.sessions.at(-1)!.telemetry().remainingHttpRequests, 4);
     }
 });

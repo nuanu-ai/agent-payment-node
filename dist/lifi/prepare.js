@@ -63,7 +63,10 @@ export class BridgePreparation {
                 .admit(profile, quote.owner.address, quote.request, selected.choice.tool);
             // One command-scoped session covers both sides of materialization. It is intentionally discarded before
             // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary.
-            const session = new RpcReadSession({ now: this.o.now });
+            // Two 33-item deployment proofs require at most 22 archive requests at the public-provider bound,
+            // plus the two safe-head and two source-account batches. Attempts retain two transient-retry slots.
+            const session = new RpcReadSession({ now: this.o.now, maxHttpRequests: 26, maxHttpAttempts: 28,
+                archiveDeploymentBatchMaxItems: 3 });
             const source = this.o.rpcFor(quote.request.fromChainId, session), destination = this.o.rpcFor(quote.request.toChainId, session);
             const [sourceSafeBlock, destinationSafeBlock, response] = await Promise.all([
                 source.block("safe"), destination.block("safe"), this.o.provider.materialize(selected.step),
