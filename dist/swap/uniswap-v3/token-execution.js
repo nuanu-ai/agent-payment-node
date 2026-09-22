@@ -96,6 +96,12 @@ export class UniswapTokenExecution {
         const attempt = attemptOf(op, kind);
         if (attempt.transactionHash !== null || op.phase !== started(kind))
             return op;
+        const recovered = await this.ports.probeSealed(op, kind, attempt.nonce);
+        if (recovered !== null) {
+            await this.ports.commitNonce(op, kind, attempt.nonce);
+            op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: recovered.transactionHash } }, this.ports.now()));
+            return await this.submit(op, kind);
+        }
         try {
             await this.ports.guard(op, kind, attempt.nonce);
         }
@@ -118,6 +124,9 @@ export class UniswapTokenExecution {
         }
         await this.ports.commitNonce(op, kind, attempt.nonce);
         op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: sealed.transactionHash } }, this.ports.now()));
+        return await this.submit(op, kind);
+    }
+    async submit(op, kind) {
         let result;
         try {
             result = await this.ports.send(op, kind);

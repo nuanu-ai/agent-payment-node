@@ -17,7 +17,7 @@ export type TokenPrimaryFailureReason = "cooldown" | "deadline" | "rate_limited"
 
 export interface TokenPrimaryAttemptTelemetry {
   readonly providerId: string;
-  readonly outcome: "selected" | "failed" | "cooldown_skipped";
+  readonly outcome: "selected" | "recovery_bound" | "failed" | "cooldown_skipped";
   readonly reason: TokenPrimaryFailureReason | null;
 }
 

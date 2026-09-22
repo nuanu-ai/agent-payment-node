@@ -8,7 +8,7 @@ export interface TokenPrimaryCandidate {
 export type TokenPrimaryFailureReason = "cooldown" | "deadline" | "rate_limited" | "http_5xx" | "authentication" | "malformed" | "wrong_chain" | "capability";
 export interface TokenPrimaryAttemptTelemetry {
     readonly providerId: string;
-    readonly outcome: "selected" | "failed" | "cooldown_skipped";
+    readonly outcome: "selected" | "recovery_bound" | "failed" | "cooldown_skipped";
     readonly reason: TokenPrimaryFailureReason | null;
 }
 export interface TokenPrimaryPoolTelemetry {

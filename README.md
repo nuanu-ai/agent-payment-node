@@ -543,7 +543,9 @@ shared cooldown. The selected primary is frozen for the command; a signed raw
 transaction is submitted to it once with no provider failover. If the array is
 absent, the existing `APN_ETHEREUM_RPC_URL` single-primary behavior and exact
 request counts are preserved. `APN_ETHEREUM_ARCHIVE_RPC_URL` must remain a
-distinct endpoint and must reproduce the selected primary's pinned block.
+distinct endpoint and must reproduce the selected primary's pinned block. The
+opaque selected provider ID is persisted with every signed pooled effect, so a
+restart cannot redirect cached raw bytes after candidate reorder or removal.
 
 `apn swap tron sunswap` swaps native TRX for TRON USDT through the pinned
 SunSwap V2 router the same way: `quote` reads the router and pair on chain,

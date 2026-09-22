@@ -7,7 +7,7 @@ import type { UniswapTokenOperation } from "./token-operation.js";
 
 export type TokenEffectPhase = "sealed" | "send_started" | "send_accepted" | "send_ambiguous";
 export interface TokenSignedEffect {
-  readonly schemaVersion: "apn.uniswap-token-effect.v1";
+  readonly schemaVersion: "apn.uniswap-token-effect.v1" | "apn.uniswap-token-effect.v2";
   readonly operationId: string;
   readonly kind: TokenEffectKind;
   readonly markerHash: string;
@@ -18,6 +18,7 @@ export interface TokenSignedEffect {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly integrityHash: string;
+  readonly primaryProviderId?: string | null;
 }
 
 export class UniswapTokenEffectJournal extends SecureStateStore {
@@ -26,17 +27,26 @@ export class UniswapTokenEffectJournal extends SecureStateStore {
     const value = await this.readJson(this.path(op.operationId, kind));
     return value === null ? null : validate(value, op, kind);
   }
-  async seal(op: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: Hex, envelope: object, now: Date) {
+  async seal(op: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: Hex, envelope: object, now: Date,
+    primaryProviderId: string | null = null) {
     const attempt = attemptOf(op, kind), at = instant(now), envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelope));
-    const body = { schemaVersion: "apn.uniswap-token-effect.v1" as const, operationId: op.operationId, kind,
+    provider(primaryProviderId); const body = { schemaVersion: "apn.uniswap-token-effect.v2" as const, operationId: op.operationId, kind,
       markerHash: attempt.markerHash, envelopeHash, transactionHash, phase: "sealed" as const, sendAttempts: 0 as const,
-      createdAt: at, updatedAt: at };
+      createdAt: at, updatedAt: at, primaryProviderId };
     const effect = validate({ ...body, integrityHash: hashObject(body) }, op, kind);
     await this.initialize(); await this.ensureDirectory("uniswap-token-effects");
     return await this.withLocks([`uniswap-token-effect:${op.operationId}:${kind}`], async () => {
       const prior = await this.load(op, kind);
       if (prior !== null) {
         if (prior.transactionHash !== transactionHash || prior.envelopeHash !== envelopeHash) corrupt("Uniswap token effect changed after sealing.");
+        if (prior.schemaVersion === "apn.uniswap-token-effect.v2") {
+          if (prior.primaryProviderId !== primaryProviderId) corrupt("Uniswap token effect provider binding changed.");
+          return prior;
+        }
+        if (primaryProviderId !== null) { const { integrityHash: _old, schemaVersion: _schema, ...legacy } = prior,
+          upgraded = { ...legacy, schemaVersion: "apn.uniswap-token-effect.v2" as const, primaryProviderId };
+          const next = validate({ ...upgraded, integrityHash: hashObject(upgraded) }, op, kind);
+          await this.writeJson(this.path(op.operationId, kind), next); return next; }
         return prior;
       }
       await this.writeJson(this.path(op.operationId, kind), effect, true); return effect;
@@ -63,16 +73,21 @@ export class UniswapTokenEffectJournal extends SecureStateStore {
 }
 
 function validate(value: unknown, op: UniswapTokenOperation, kind: TokenEffectKind): TokenSignedEffect {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "kind", "markerHash", "envelopeHash", "transactionHash",
-    "phase", "sendAttempts", "createdAt", "updatedAt", "integrityHash"]) || value.schemaVersion !== "apn.uniswap-token-effect.v1" ||
+  const keys = ["schemaVersion", "operationId", "kind", "markerHash", "envelopeHash", "transactionHash",
+    "phase", "sendAttempts", "createdAt", "updatedAt", "integrityHash"];
+  if (!isPlainRecord(value) || !["apn.uniswap-token-effect.v1", "apn.uniswap-token-effect.v2"].includes(value.schemaVersion as string) ||
+    !exactKeys(value, value.schemaVersion === "apn.uniswap-token-effect.v2" ? [...keys, "primaryProviderId"] : keys) ||
     value.operationId !== op.operationId || value.kind !== kind || !["sealed", "send_started", "send_accepted", "send_ambiguous"].includes(value.phase as string) ||
     !/^0x[a-f0-9]{64}$/u.test(value.transactionHash as string) || !/^[a-f0-9]{64}$/u.test(value.markerHash as string) ||
     !/^[a-f0-9]{64}$/u.test(value.envelopeHash as string) || !/^[a-f0-9]{64}$/u.test(value.integrityHash as string)) corrupt("Uniswap token effect is invalid.");
   const effect = value as unknown as TokenSignedEffect, attempt = attemptOf(op, kind), { integrityHash, ...body } = effect;
   if (effect.markerHash !== attempt.markerHash || effect.sendAttempts !== (effect.phase === "sealed" ? 0 : 1) || integrityHash !== hashObject(body) ||
-      !canonicalInstant(effect.createdAt) || !canonicalInstant(effect.updatedAt) || effect.updatedAt < effect.createdAt) corrupt("Uniswap token effect binding is invalid.");
+      !canonicalInstant(effect.createdAt) || !canonicalInstant(effect.updatedAt) || effect.updatedAt < effect.createdAt ||
+      effect.schemaVersion === "apn.uniswap-token-effect.v2" && !validProvider(effect.primaryProviderId)) corrupt("Uniswap token effect binding is invalid.");
   return effect;
 }
+function provider(value: string | null) { if (!validProvider(value)) corrupt("Uniswap token effect provider binding is invalid."); }
+function validProvider(value: unknown) { return value === null || typeof value === "string" && /^[a-f0-9]{64}$/u.test(value); }
 function attemptOf(op: UniswapTokenOperation, kind: TokenEffectKind) { const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
   if (attempt === null) corrupt("Uniswap token effect has no durable marker."); return attempt; }
 function instant(value: Date) { if (!(value instanceof Date) || !Number.isFinite(value.getTime())) corrupt("Uniswap token effect time is invalid."); return value.toISOString(); }

@@ -118,6 +118,14 @@ provider, and `eth_sendRawTransaction` has exactly one total attempt with no
 post-sign failover. Batches remain capped at three logical reads; there is no
 scalar fallback.
 
+When a pooled command signs, the selected opaque provider ID is stored with the
+encrypted raw effect and in token effect journal v2. Recovery resolves that
+exact ID even if the configured order changes. A removed, cooling, or mismatched
+provider blocks recovery before submission; an already signed effect never
+selects another candidate. Legacy journal v1 and wallet effects remain readable.
+Pooled legacy signed effects without a durable provider binding fail closed,
+while scalar recovery remains compatible.
+
 The distinct archive is independently chain-checked and must return the exact
 hash for the primary's numeric pinned block before historical state is used.
 Its anchor request is explicit in telemetry and budgets. With three primaries,

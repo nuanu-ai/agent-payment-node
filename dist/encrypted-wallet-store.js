@@ -259,12 +259,14 @@ function parseDirectEffects(value) {
         corrupt("Wallet effect map is invalid.");
     for (const [slot, item] of Object.entries(value)) {
         if (!HASH.test(slot) || !isPlainRecord(item) ||
-            !exactKeys(item, ["payloadHash", "transactionHash", "rawTransaction", "rawTransactionHash"]) ||
+            !exactKeys(item, item.primaryProviderId === undefined ? ["payloadHash", "transactionHash", "rawTransaction", "rawTransactionHash"] :
+                ["payloadHash", "transactionHash", "rawTransaction", "rawTransactionHash", "primaryProviderId"]) ||
             typeof item.payloadHash !== "string" || !HASH.test(item.payloadHash) ||
             typeof item.transactionHash !== "string" || !HEX32.test(item.transactionHash) ||
             typeof item.rawTransactionHash !== "string" || !HEX32.test(item.rawTransactionHash) ||
             typeof item.rawTransaction !== "string" || !RAW_TRANSACTION.test(item.rawTransaction) ||
-            item.rawTransaction.length > 16_386)
+            item.rawTransaction.length > 16_386 || item.primaryProviderId !== undefined && item.primaryProviderId !== null &&
+            (typeof item.primaryProviderId !== "string" || !HASH.test(item.primaryProviderId)))
             corrupt("Wallet direct-effect entry is invalid.");
         const computed = keccak256(item.rawTransaction);
         if (computed !== item.rawTransactionHash || computed !== item.transactionHash) {
