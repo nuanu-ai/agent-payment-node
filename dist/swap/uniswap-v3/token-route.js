@@ -1,9 +1,9 @@
-import { decodeFunctionData, encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
+import { decodeFunctionData, decodeFunctionResult, encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { evmRpcHex } from "../../evm-rpc-codec.js";
 import { parseAtomic } from "../../money.js";
-import { ETHEREUM_USDT, UNISWAP_V3_FACTORY } from "./pins.js";
+import { ETHEREUM_USDT, UNISWAP_V3_FACTORY, UNISWAP_V3_CODE_PINS, USDC_IMPLEMENTATION_PIN, USDC_IMPLEMENTATION_SLOT, verifyCodePins } from "./pins.js";
 import { UNISWAP_USDC } from "../uniswap-pin.js";
 import { SWAP_MECHANISM_PIN_SCHEMA, validateSwapMechanismPin } from "../pin.js";
 import { compileSwapProtocolRegistry } from "../protocol-registry.js";
@@ -14,6 +14,8 @@ export const UNISWAP_V3_USDC_USDT_100_CODE_HASH = "0x2ff673bacc60a73fc85c6788882
 export const UNISWAP_TOKEN_ROUTE_SCHEMA = "apn.uniswap-v3.swap-router.exact-input-single.v1";
 const ROUTER = parseAbi(["function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 deadline,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96) params) payable returns (uint256 amountOut)"]);
 const ERC20 = parseAbi(["function approve(address spender,uint256 amount) returns (bool)"]);
+const USDT_SAFETY = parseAbi(["function deprecated() view returns (bool)", "function basisPointsRate() view returns (uint256)",
+    "function maximumFee() view returns (uint256)"]);
 export const UNISWAP_TOKEN_MECHANISM_PIN = validateSwapMechanismPin({ schemaVersion: SWAP_MECHANISM_PIN_SCHEMA,
     protocolFamily: "uniswap_ethereum", networkFamily: "evm", chain: "eip155:1", protocolVersion: "v3-swap-router-1",
     constructorKind: "sdk", constructorIdentity: "apn.uniswap-v3.swap-router.exact-input-single", constructorVersion: "1.0.0",
@@ -70,8 +72,18 @@ export async function verifyUniswapTokenRoutePins(call, tag) {
         if (keccak256(evmRpcHex(await call("eth_getCode", [addressValue, tag]))) !== hash)
             blocked("Uniswap token route code pin changed.", "uniswap_code_pin_drift");
     }
+    await verifyCodePins(call, tag, UNISWAP_V3_CODE_PINS.filter((pin) => pin.address === UNISWAP_USDC || pin.address === ETHEREUM_USDT), { proxy: UNISWAP_USDC, slot: USDC_IMPLEMENTATION_SLOT, pin: USDC_IMPLEMENTATION_PIN });
+    await verifyUniswapTokenUsdtState(call, tag);
     if (UNISWAP_V3_FACTORY !== "0x1F98431c8aD98523631AE4a59f267346ea31F984")
         throw new ApnError("APN_STATE_CORRUPT", "Uniswap factory pin changed.");
+}
+export async function verifyUniswapTokenUsdtState(call, tag) {
+    for (const functionName of ["deprecated", "basisPointsRate", "maximumFee"]) {
+        const result = decodeFunctionResult({ abi: USDT_SAFETY, functionName,
+            data: evmRpcHex(await call("eth_call", [{ to: ETHEREUM_USDT, data: encodeFunctionData({ abi: USDT_SAFETY, functionName }) }, tag]), 32) });
+        if (result !== false && result !== 0n)
+            blocked("USDT safety state changed from zero/non-deprecated.", "uniswap_code_pin_drift");
+    }
 }
 function token(value) {
     const v = address(value);

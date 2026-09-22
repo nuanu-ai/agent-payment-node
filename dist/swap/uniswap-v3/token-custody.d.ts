@@ -22,8 +22,10 @@ export declare class UniswapTokenCustody {
     private readonly now;
     private readonly wallets;
     private readonly effects;
+    private readonly nonces;
     constructor(state: StateStore, wrapping: WrappingSecretPort, call: EvmRpcCall, now: () => Date);
-    currentNonce(account: string): Promise<string>;
+    withAccountLock<T>(account: string, work: () => Promise<T>): Promise<T>;
+    allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
     currentAllowance(op: UniswapTokenOperation): Promise<string>;
     seal(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect>;
     private sealUnlocked;

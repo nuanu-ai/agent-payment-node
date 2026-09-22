@@ -37,3 +37,4 @@ export declare function encodeUniswapTokenApproval(tokenAddress: string, amount:
     readonly amount: string;
 };
 export declare function verifyUniswapTokenRoutePins(call: EvmRpcCall, tag: Hex): Promise<void>;
+export declare function verifyUniswapTokenUsdtState(call: EvmRpcCall, tag: Hex): Promise<void>;
