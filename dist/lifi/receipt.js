@@ -175,6 +175,18 @@ export function previousCurrentBridgeReceipt(op) {
     return { ...previous, receipt_hash: hashObject(previous) };
 }
 export function currentBridgeReceiptCandidates(op) {
-    return [bridgeReceipt(op), previousCurrentBridgeReceipt(op)];
+    const current = bridgeReceipt(op), previous = previousCurrentBridgeReceipt(op);
+    // PR217 added an always-present projection of the optional journal telemetry. A transition written by an older
+    // writer has no journal field at all, so accept only its exact receipt forms with the empty projection omitted.
+    // Once a transition binds [] or any telemetry rows, omission is no longer a candidate.
+    return op.observationTelemetry === undefined
+        ? [current, previous, receiptWithoutObservationTelemetry(current), receiptWithoutObservationTelemetry(previous)]
+        : [current, previous];
+}
+function receiptWithoutObservationTelemetry(receipt) {
+    const body = structuredClone(receipt);
+    delete body.receipt_hash;
+    delete body.observation_rpc_telemetry;
+    return { ...body, receipt_hash: hashObject(body) };
 }
 //# sourceMappingURL=receipt.js.map
