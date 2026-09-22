@@ -422,6 +422,20 @@ test("archive deployment logical batches use sequential three-item chunks with g
   assert.deepEqual(fifteenBodies.map((body) => (JSON.parse(body) as Array<unknown>).length), [3, 3, 3, 3, 3]);
 });
 
+test("archive deployment HTTP 500 is terminal after one physical request", async () => {
+  let calls = 0;
+  const transport = { request: async () => { calls += 1; return { status: 500, body: "" }; } };
+  const descriptor = bridgeRpcCall(1, { APN_ETHEREUM_RPC_URL: "https://ethereum.example",
+    APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" }, { transport });
+  const session = new RpcReadSession({ maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
+  const batch = descriptor.sessionBatchCall(session), item = { method: "eth_getCode", params: ["0x0000000000000000000000000000000000000001", "0x10"],
+    cachePolicy: "immutable" as const, decoder: String };
+  await assert.rejects(batch([item, { ...item, params: ["0x0000000000000000000000000000000000000002", "0x10"] }], "archive_deployment"),
+    (error: unknown) => error instanceof ApnError && error.code === "APN_RPC_PROTOCOL" && error.details?.httpStatus === "500" &&
+      error.details?.attempts === "1");
+  assert.equal(calls, 1); assert.equal(session.telemetry().httpAttempts, 1);
+});
+
 test("archive deployment chunks retry only the failed chunk with its exact body and stop after a terminal failure", async () => {
   const bodies: string[] = []; let attemptNumber = 0;
   const attempt = async (body: string) => {
