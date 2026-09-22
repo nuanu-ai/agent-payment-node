@@ -122,7 +122,7 @@ const observationRpcFailureSchema = z.strictObject({
         "bridge_block_reorg", "bridge_block_number", "destination_log_range", "destination_log_count",
         "destination_log_identity", "destination_log_hash", "destination_scan_cursor_reorg", "destination_scan_membership",
         "destination_scan_reorg", "destination_candidate_unresolved", "duplicate_destination_delivery",
-        "destination_not_safe_success", "destination_trace_rebind", "request_deadline", "DNS_deadline",
+        "destination_not_safe_success", "destination_transaction_reverted", "destination_trace_rebind", "request_deadline", "DNS_deadline",
         "request_interrupted", "response_aborted", "response_interrupted"]).optional(),
     rpcMethod: z.enum(["eth_chainId", "eth_getBlockByNumber", "eth_getTransactionByHash", "eth_getTransactionReceipt",
         "eth_getLogs", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_call", "eth_estimateGas",

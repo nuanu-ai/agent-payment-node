@@ -112,6 +112,18 @@ test("LI.FI bridge destination observation excludes relayer fee evidence and Bas
   assert.equal(s.methods.includes("eth_getLogs"), false);
 });
 
+for (const missing of ["transaction", "receipt"] as const) test(`LI.FI missing destination ${missing} remains unavailable without a log scan`, async () => {
+  const s = await rpcObservation(), methods: string[] = [];
+  const rpc = new BridgeRpc(1, "https://ethereum.example", async (method) => {
+    methods.push(method);
+    if (method === "eth_chainId") return "0x1";
+    if (method === "eth_getTransactionByHash") return missing === "transaction" ? null : s.tx;
+    if (method === "eth_getTransactionReceipt") return missing === "receipt" ? null : s.receipt;
+    throw new Error(`unexpected method: ${method}`);
+  });
+  assert.equal(await rpc.observeDestination(s.hash), null); assert.equal(methods.includes("eth_getLogs"), false);
+});
+
 async function routedArchiveObservation(useArchive: boolean) {
   const s = await rpcObservation(), calls: Array<{ host: string; method: string; params: readonly unknown[] }> = [];
   const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {

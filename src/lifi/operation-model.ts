@@ -83,7 +83,7 @@ export type BridgeObservationRpcReason = "bridge_RPC_HTTP_status" | "bridge_RPC_
   "bridge_block_number" | "destination_log_range" | "destination_log_count" |
   "destination_log_identity" | "destination_log_hash" | "destination_scan_cursor_reorg" |
   "destination_scan_membership" | "destination_scan_reorg" | "destination_candidate_unresolved" |
-  "duplicate_destination_delivery" | "destination_not_safe_success" | "destination_trace_rebind" |
+  "duplicate_destination_delivery" | "destination_not_safe_success" | "destination_transaction_reverted" | "destination_trace_rebind" |
   "request_deadline" | "DNS_deadline" | "request_interrupted" | "response_aborted" |
   "response_interrupted";
 export type BridgePreSignRpcStage = "source_deployment_refresh" | "destination_deployment_refresh" |

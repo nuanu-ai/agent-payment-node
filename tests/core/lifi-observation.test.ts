@@ -26,6 +26,7 @@ for (const status of ["not_found", "pending", "completed_observed", "partial_obs
     assert.equal(record.terminal, false); assert.equal(record.destinationProof, null);
     assert.equal(record.state, ["not_found", "pending", "completed_observed"].includes(status) ? "destination_pending" : "unknown_finality");
     assert.ok(record.effects.every((e) => e.phase === "safe_success")); assert.equal(s.source.submissions.length, 2);
+    assert.equal(s.destination.calls.includes("logs"), false);
     s.destination.destinationAvailable = true;
     const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
     assert.equal((resumed.operation as { state: string }).state, "completed"); assert.equal(s.source.submissions.length, 2);
@@ -36,10 +37,38 @@ test("LI.FI destination inclusion without safe finality remains pending and comp
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.destination.destinationSafe = false;
   const { id } = await s.prepare(); assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
   assert.equal((await s.core.bridges.records.findOperation(id))!.destinationProof, null);
+  assert.equal((await s.core.bridges.records.findOperation(id))!.state, "destination_pending");
+  assert.equal(s.destination.calls.includes("logs"), false);
   s.destination.destinationSafe = true;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
   const record = (await s.core.bridges.records.findOperation(id))!; assert.equal(record.state, "completed");
   assert.equal(record.destinationProof!.transactionHash, LIFI_DESTINATION_HASH); assert.equal(s.source.submissions.length, 2);
+});
+
+test("LI.FI safe reverted provider destination remains nonterminal and accepts a later replacement transaction", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
+  s.destination.destinationStatus = "reverted";
+  const { id } = await s.prepare();
+  const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, true, first.error?.message);
+  const reverted = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(reverted.state, "unknown_finality"); assert.equal(reverted.terminal, false); assert.equal(reverted.destinationProof, null);
+  assert.ok(reverted.usageLease); assert.equal(reverted.failure?.reason, "destination_observation_unavailable");
+  assert.deepEqual(reverted.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
+    stage: "destination_receipt", effectRole: "bridge", code: "APN_RPC_PROTOCOL",
+    reason: "destination_transaction_reverted", rpcMethod: "eth_getTransactionReceipt" });
+  const statusCalls = s.provider.statusCalls;
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+  const conflicted = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(s.provider.statusCalls, statusCalls + 1); assert.equal(conflicted.state, "unknown_finality");
+  assert.equal(conflicted.failure?.observationRpc?.reason, "destination_transaction_reverted");
+  assert.equal(conflicted.destinationProof, null); assert.equal(conflicted.usageLease?.reservationId, reverted.usageLease?.reservationId);
+
+  const replacement = `0x${"78".repeat(32)}` as const;
+  s.provider.hint = replacement; s.destination.destinationHash = replacement; s.destination.destinationStatus = "success";
+  const recovered = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(recovered.ok, true, recovered.error?.message);
+  const completed = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(completed.state, "completed"); assert.equal(completed.destinationProof?.transactionHash, replacement);
+  assert.equal(s.destination.calls.includes("logs"), false);
 });
 
 test("LI.FI waits without a provider-named destination transaction and preserves the legacy scan cursor", async (t) => {

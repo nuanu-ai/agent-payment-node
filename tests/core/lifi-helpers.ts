@@ -125,6 +125,7 @@ export class LifiTestRpc implements BridgeRpcPort {
   allowance = "0"; nonce = 7n; pendingNonce: bigint | undefined;
   native = 1_000_000_000_000_000_000n; balance = 100_000_000n;
   safeApproval = true; safeBridge = true; destinationAvailable = true; destinationSafe = true;
+  destinationHash: Hex = LIFI_DESTINATION_HASH; destinationStatus: "success" | "reverted" = "success";
   destinationFillType: 0 | 1 | 2 = 0;
   destinationCompositeOutcome: "completed_native" | "recovered_weth" | "below_floor" | "protocol_mismatch" = "completed_native";
   missingHashes = new Set<Hex>(); reverted = new Set<"approval" | "bridge">();
@@ -175,7 +176,7 @@ export class LifiTestRpc implements BridgeRpcPort {
     if (this.missingHashes.has(hash) || this.op === undefined) return null;
     const op = this.op, d = op.intent.decoded;
     if (expected === undefined) {
-      if (!this.destinationAvailable || hash !== LIFI_DESTINATION_HASH) return null;
+      if (!this.destinationAvailable || hash !== this.destinationHash) return null;
       const sourceReceipt = makeSourceReceipt(d), source = bridgeSourceProof(op.intent.materialization, d, sourceReceipt),
         generated = makeDestinationReceipt(d, source, this.destinationFillType), destinationBlock = await this.block("2000");
       let shaped = generated;
@@ -197,8 +198,9 @@ export class LifiTestRpc implements BridgeRpcPort {
             ...shaped.nativeBalance!, beforeBlock: { ...shaped.nativeBalance!.beforeBlock, numberAtomic: "1999" }, afterBlock: destinationBlock,
           } }),
           ...(shaped.compositeTrace === undefined || shaped.compositeTrace === null ? {} : { compositeTrace: { ...shaped.compositeTrace, transactionHash: hash } }) };
-      const tx = await this.proof(hash, op.effects.at(-1)!.envelope, this.destinationSafe, receipt.logs, "success", true);
-      return { transaction: tx, receipt };
+      const logs = this.destinationStatus === "success" ? receipt.logs : [];
+      const tx = await this.proof(hash, op.effects.at(-1)!.envelope, this.destinationSafe, logs, this.destinationStatus, true);
+      return { transaction: tx, receipt: { ...receipt, logs } };
     }
     if (!this.submissions.some((raw) => keccak256(raw) === hash)) return null;
     const role = expected.role, reverted = this.reverted.has(role), safe = role === "approval" ? this.safeApproval : this.safeBridge;

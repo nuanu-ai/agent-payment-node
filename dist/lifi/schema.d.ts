@@ -485,6 +485,7 @@ export declare const failureSchema: z.ZodObject<{
             destination_candidate_unresolved: "destination_candidate_unresolved";
             duplicate_destination_delivery: "duplicate_destination_delivery";
             destination_not_safe_success: "destination_not_safe_success";
+            destination_transaction_reverted: "destination_transaction_reverted";
             destination_trace_rebind: "destination_trace_rebind";
             request_deadline: "request_deadline";
             DNS_deadline: "DNS_deadline";
@@ -1081,6 +1082,7 @@ export declare const transitionSchema: z.ZodObject<{
                 destination_candidate_unresolved: "destination_candidate_unresolved";
                 duplicate_destination_delivery: "duplicate_destination_delivery";
                 destination_not_safe_success: "destination_not_safe_success";
+                destination_transaction_reverted: "destination_transaction_reverted";
                 destination_trace_rebind: "destination_trace_rebind";
                 request_deadline: "request_deadline";
                 DNS_deadline: "DNS_deadline";
@@ -1787,6 +1789,7 @@ export declare const operationSchema: z.ZodObject<{
                     destination_candidate_unresolved: "destination_candidate_unresolved";
                     duplicate_destination_delivery: "duplicate_destination_delivery";
                     destination_not_safe_success: "destination_not_safe_success";
+                    destination_transaction_reverted: "destination_transaction_reverted";
                     destination_trace_rebind: "destination_trace_rebind";
                     request_deadline: "request_deadline";
                     DNS_deadline: "DNS_deadline";
@@ -2060,6 +2063,7 @@ export declare const operationSchema: z.ZodObject<{
                 destination_candidate_unresolved: "destination_candidate_unresolved";
                 duplicate_destination_delivery: "duplicate_destination_delivery";
                 destination_not_safe_success: "destination_not_safe_success";
+                destination_transaction_reverted: "destination_transaction_reverted";
                 destination_trace_rebind: "destination_trace_rebind";
                 request_deadline: "request_deadline";
                 DNS_deadline: "DNS_deadline";
