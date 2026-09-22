@@ -177,7 +177,11 @@ export class BridgeService {
       return () => rpc ??= d.rpcFor(chainId, new RpcReadSession({ ...options, providerScheduler: this.providerScheduler }));
     };
     const common = { now: () => this.context.clock.now().getTime(), archiveDeploymentBatchMaxItems: 3 };
-    const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 13, maxHttpAttempts: 13 });
+    // Base source observation with explicit scalar receipt and archive readers needs 19 clean requests:
+    // primary chain+transaction+included+safe (4), receipt chain+receipt (2), archive chain (1),
+    // Base fee deployment identity (8), operator fee reads (3), and the final archive safe-header recheck (1).
+    // Two additional attempts retain the command-wide bounded retry reserve without widening the request graph.
+    const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 19, maxHttpAttempts: 21 });
     const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: 16, maxHttpAttempts: 16 });
     const residualObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 2, maxHttpAttempts: 3 });
     return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session),
