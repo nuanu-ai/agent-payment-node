@@ -54,22 +54,46 @@ const PROVIDER_X402_RECEIPT_SCHEMA = "apn.provider-x402.receipt.v1";
 export class StateStore extends SecureStateStore {
   async loadRpcProviderPacing(familyHash: string): Promise<number | null> {
     stateIdentifier(familyHash, "RPC provider family hash");
-    const value = await this.readJson(join("rpc-provider-pacing", `${familyHash}.json`));
-    if (value === null) return null;
-    if (!isPlainRecord(value) || value.schemaVersion !== "apn.rpc-provider-pacing.v1" || value.familyHash !== familyHash ||
-      typeof value.lastStartMs !== "number" || !Number.isSafeInteger(value.lastStartMs) || value.lastStartMs < 0 ||
-      Object.keys(value).some((key) => !["schemaVersion", "familyHash", "lastStartMs"].includes(key))) {
-      stateCorrupt("RPC provider pacing record is invalid.");
-    }
-    return value.lastStartMs as number;
+    return (await this.rpcProviderPacingRecord(familyHash))?.lastStartMs ?? null;
   }
 
   async writeRpcProviderPacing(familyHash: string, lastStartMs: number): Promise<void> {
     stateIdentifier(familyHash, "RPC provider family hash");
     if (!Number.isSafeInteger(lastStartMs) || lastStartMs < 0) stateCorrupt("RPC provider pacing timestamp is invalid.");
+    const current = await this.rpcProviderPacingRecord(familyHash);
     await this.ensureDirectory("rpc-provider-pacing");
     await this.writeJson(join("rpc-provider-pacing", `${familyHash}.json`),
-      { schemaVersion: "apn.rpc-provider-pacing.v1", familyHash, lastStartMs });
+      { schemaVersion: "apn.rpc-provider-pacing.v2", familyHash, lastStartMs, cooldownUntilMs: current?.cooldownUntilMs ?? null });
+  }
+
+  async loadRpcProviderCooldown(familyHash: string): Promise<number | null> {
+    stateIdentifier(familyHash, "RPC provider family hash");
+    return (await this.rpcProviderPacingRecord(familyHash))?.cooldownUntilMs ?? null;
+  }
+
+  async writeRpcProviderCooldown(familyHash: string, cooldownUntilMs: number): Promise<void> {
+    stateIdentifier(familyHash, "RPC provider family hash");
+    if (!Number.isSafeInteger(cooldownUntilMs) || cooldownUntilMs < 0) stateCorrupt("RPC provider cooldown timestamp is invalid.");
+    const current = await this.rpcProviderPacingRecord(familyHash);
+    await this.ensureDirectory("rpc-provider-pacing");
+    await this.writeJson(join("rpc-provider-pacing", `${familyHash}.json`),
+      { schemaVersion: "apn.rpc-provider-pacing.v2", familyHash, lastStartMs: current?.lastStartMs ?? null, cooldownUntilMs });
+  }
+
+  private async rpcProviderPacingRecord(familyHash: string): Promise<{ readonly lastStartMs: number | null; readonly cooldownUntilMs: number | null } | null> {
+    const value = await this.readJson(join("rpc-provider-pacing", `${familyHash}.json`));
+    if (value === null) return null;
+    const v1 = isPlainRecord(value) && value.schemaVersion === "apn.rpc-provider-pacing.v1" && value.familyHash === familyHash &&
+      typeof value.lastStartMs === "number" && Number.isSafeInteger(value.lastStartMs) && value.lastStartMs >= 0 &&
+      !Object.keys(value).some((key) => !["schemaVersion", "familyHash", "lastStartMs"].includes(key));
+    if (v1) return { lastStartMs: value.lastStartMs as number, cooldownUntilMs: null };
+    const validTimestamp = (candidate: unknown) => candidate === null || typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate >= 0;
+    if (!isPlainRecord(value) || value.schemaVersion !== "apn.rpc-provider-pacing.v2" || value.familyHash !== familyHash ||
+      !validTimestamp(value.lastStartMs) || !validTimestamp(value.cooldownUntilMs) ||
+      Object.keys(value).some((key) => !["schemaVersion", "familyHash", "lastStartMs", "cooldownUntilMs"].includes(key))) {
+      stateCorrupt("RPC provider pacing record is invalid.");
+    }
+    return { lastStartMs: value.lastStartMs as number | null, cooldownUntilMs: value.cooldownUntilMs as number | null };
   }
 
   async loadWallet(profileHash: string): Promise<WalletRecord | null> {
