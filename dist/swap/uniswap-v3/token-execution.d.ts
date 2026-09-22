@@ -21,6 +21,8 @@ export interface UniswapTokenExecutionPorts {
     withAccountLock<T>(account: string, work: () => Promise<T>): Promise<T>;
     allocateNonce(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
     currentAllowance(operation: UniswapTokenOperation): Promise<string>;
+    releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+    commitNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     guard(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     revalidate(operation: UniswapTokenOperation): Promise<void>;
     reserveUsage(operation: UniswapTokenOperation): Promise<TokenUsageBinding>;

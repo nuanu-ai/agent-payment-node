@@ -84,9 +84,18 @@ export class UniswapTokenExecution {
             await this.ports.guard(op, kind, attempt.nonce);
         }
         catch {
+            await this.ports.releaseNonce(op, kind, attempt.nonce);
             return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`);
         }
-        const sealed = await this.ports.seal(op, kind, attempt.nonce);
+        let sealed;
+        try {
+            sealed = await this.ports.seal(op, kind, attempt.nonce);
+        }
+        catch {
+            await this.ports.releaseNonce(op, kind, attempt.nonce);
+            return await this.cleanupRequired(op, `${kind}_sign_failed`);
+        }
+        await this.ports.commitNonce(op, kind, attempt.nonce);
         op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: sealed.transactionHash } }, this.ports.now()));
         let result;
         try {

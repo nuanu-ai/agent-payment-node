@@ -12,21 +12,23 @@ import { UniswapTokenSigningGuard } from "./token-guard.js";
 import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
 export function createUniswapTokenRuntime(input) {
-    const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call), ledger = new AssetUsageLedger(state.root), usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now());
+    const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call), ledger = new AssetUsageLedger(state.root), usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
     const ports = {
         now: () => clock.now(), withAccountLock: async (account, work) => await custody.withAccountLock(account, work),
         allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),
+        releaseNonce: async (op, kind, nonce) => { await custody.releaseNonce(op, kind, nonce); },
+        commitNonce: async (op, kind, nonce) => { await custody.commitNonce(op, kind, nonce); },
         guard: async (op, kind, nonce) => await guard.inspect(op, kind, nonce), reserveUsage: async (op) => await usage.reserve(op),
         currentUsage: async (op) => await usage.current(op), followUsage: async (op, target) => await usage.follow(op, target),
         revalidate: async (op) => await revalidator.revalidate(op), seal: async (op, kind, nonce) => await custody.seal(op, kind, nonce),
         send: async (op, kind) => await custody.send(op, kind), observe: async (op, kind, hash) => await observer.observe(op, kind, hash),
-        foregroundApprove: async (op) => await foreground(input.foreground === "approve", op, false, clock.now()),
-        foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now()), confirm: async (material) => await guard.confirm(material),
+        foregroundApprove: async (op) => await foreground(input.foreground === "approve", op, false, clock.now(), input.tty),
+        foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty), confirm: async (material) => await guard.confirm(material),
     };
     const admit = async (request, now) => await usage.admitQuote(request, now);
     return new InstalledUniswapTokenRuntime(new UniswapTokenQuoteBuilder(call, materials, admit, () => clock.now()), materials, new UniswapTokenJournal(state.root), ports);
 }
-async function foreground(enabled, op, cleanup, now) {
+async function foreground(enabled, op, cleanup, now, tty = {}) {
     if (!enabled)
         throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Uniswap token approval must continue in the foreground CLI.", { reason: "swap_foreground_cli_required" });
     const lines = cleanup ? ["Agent Payment Node Uniswap token allowance cleanup", `Profile: ${op.profile}`, `Operation: ${op.operationId}`,
@@ -36,7 +38,7 @@ async function foreground(enabled, op, cleanup, now) {
             `Recipient: ${op.route.recipient}`, `Router: ${op.route.router}`, `Exact approval cap: ${op.approvalCapAtomic}`,
             `Aggregate native debit cap: ${op.maximumNativeDebitWei} wei`, `Deadline: ${new Date(op.route.deadline * 1000).toISOString()}`,
             "Approval, swap, and any explicit cleanup are independently signed and broadcast at most once."];
-    await exactChainConsent(lines, approvalCode("swap", op.integrityHash, cleanup ? "cleanup" : "execute"), cleanup ? new Date(now.getTime() + 300_000).toISOString() : new Date(op.route.deadline * 1000).toISOString(), {});
+    await exactChainConsent(lines, approvalCode("swap", op.integrityHash, cleanup ? "cleanup" : "execute"), cleanup ? new Date(now.getTime() + 300_000).toISOString() : new Date(op.route.deadline * 1000).toISOString(), tty);
 }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-runtime-factory.js.map

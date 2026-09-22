@@ -1,3 +1,4 @@
+import { type Hex } from "viem";
 import type { EvmRpcCall } from "../../evm-ports.js";
 import type { WrappingSecretPort } from "../../macos-keychain.js";
 import type { StateStore } from "../../state.js";
@@ -10,8 +11,9 @@ export declare class UniswapTokenSigningGuard {
     private readonly call;
     private readonly usage;
     private readonly now;
+    private readonly verifyPins;
     private readonly wallets;
-    constructor(state: StateStore, wrapping: WrappingSecretPort, call: EvmRpcCall, usage: UniswapTokenUsage, now: () => Date);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, call: EvmRpcCall, usage: UniswapTokenUsage, now: () => Date, verifyPins?: (call: EvmRpcCall, tag: Hex) => Promise<void>);
     confirm(material: UniswapTokenMaterial): Promise<void>;
     inspect(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     private common;

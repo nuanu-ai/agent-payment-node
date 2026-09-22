@@ -12,6 +12,8 @@ export interface UniswapTokenExecutionPorts {
   now(): Date; foregroundApprove(operation: UniswapTokenOperation): Promise<void>; foregroundCleanup(operation: UniswapTokenOperation): Promise<void>;
   withAccountLock<T>(account: string, work: () => Promise<T>): Promise<T>;
   allocateNonce(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>; currentAllowance(operation: UniswapTokenOperation): Promise<string>;
+  releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+  commitNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
   guard(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
   revalidate(operation: UniswapTokenOperation): Promise<void>;
   reserveUsage(operation: UniswapTokenOperation): Promise<TokenUsageBinding>;
@@ -73,8 +75,11 @@ export class UniswapTokenExecution {
   private async finishStart(op: UniswapTokenOperation, kind: TokenEffectKind) {
     const attempt = attemptOf(op, kind); if (attempt.transactionHash !== null || op.phase !== started(kind)) return op;
     try { await this.ports.guard(op, kind, attempt.nonce); }
-    catch { return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`); }
-    const sealed: TokenSealedEffect = await this.ports.seal(op, kind, attempt.nonce);
+    catch { await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`); }
+    let sealed: TokenSealedEffect;
+    try { sealed = await this.ports.seal(op, kind, attempt.nonce); }
+    catch { await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op, `${kind}_sign_failed`); }
+    await this.ports.commitNonce(op, kind, attempt.nonce);
     op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: sealed.transactionHash } }, this.ports.now()));
     let result: "accepted" | "ambiguous"; try { result = await this.ports.send(op, kind); } catch { result = "ambiguous"; }
     const usage = kind === "swap" ? await this.ports.followUsage(op, result === "accepted" ? "submitted" : "unknown_finality") : null;

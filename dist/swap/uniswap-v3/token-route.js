@@ -62,7 +62,7 @@ function createDecoded(data) {
     }
 }
 export function encodeUniswapTokenApproval(tokenAddress, amount) {
-    const to = token(tokenAddress), value = uint(amount).toString();
+    const to = token(tokenAddress), value = approvalAmount(amount).toString();
     return { to, spender: UNISWAP_V3_SWAP_ROUTER,
         data: encodeFunctionData({ abi: ERC20, functionName: "approve", args: [UNISWAP_V3_SWAP_ROUTER, BigInt(value)] }), amount: value };
 }
@@ -110,6 +110,12 @@ function uint(value) {
         return invalid("Uniswap amount is invalid.");
     }
 }
+function approvalAmount(value) { try {
+    return parseAtomic(value);
+}
+catch {
+    return invalid("Uniswap approval amount is invalid.");
+} }
 function invalid(message) { throw new ApnError("APN_INVALID_INPUT", message); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-route.js.map

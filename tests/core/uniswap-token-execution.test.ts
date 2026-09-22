@@ -17,19 +17,22 @@ async function fixture(root: string, allowance = "0") {
     approvalCapAtomic: "1000000", allowanceAtPrepare: allowance, approvalGas: gas, swapGas: gas, cleanupGas: gas,
     maximumNativeDebitWei: "600000", policyDigest: domainHash("p", "p"), mechanismDigest: domainHash("m", "m"), now: NOW }));
   const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance,
-    sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0, rejectRevalidation = false;
+    sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0, rejectRevalidation = false, rejectGuard = false, rejectSeal = false;
+  const released: string[] = [], committed: string[] = [];
   const ports = { now: () => NOW, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
     withAccountLock: async <T>(_account: string, work: () => Promise<T>) => await work(), allocateNonce: async () => String(7 + sends.length),
-    currentAllowance: async () => currentAllowance, guard: async () => undefined, revalidate: async () => { revalidations += 1; if (rejectRevalidation) throw new Error("drift"); },
+    releaseNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { released.push(`${kind}:${nonce}`); },
+    commitNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { committed.push(`${kind}:${nonce}`); },
+    currentAllowance: async () => currentAllowance, guard: async () => { if (rejectGuard) throw new Error("refused"); }, revalidate: async () => { revalidations += 1; if (rejectRevalidation) throw new Error("drift"); },
     reserveUsage: async () => ({ reservationId: "d".repeat(64), state: "reserved" as const }),
     currentUsage: async (op: { usageReservationId: string | null; usageState: any }) => ({ reservationId: op.usageReservationId!, state: op.usageState }),
     followUsage: async (_op: unknown, target: any) => ({ reservationId: "d".repeat(64), state: target }),
-    seal: async (_op: unknown, kind: TokenEffectKind) => ({ transactionHash: kind === "approval" ? H("1") : kind === "swap" ? H("2") : H("3"), envelopeHash: "e".repeat(64) }),
+    seal: async (_op: unknown, kind: TokenEffectKind) => { if (rejectSeal) throw new Error("sign failed"); return { transactionHash: kind === "approval" ? H("1") : kind === "swap" ? H("2") : H("3"), envelopeHash: "e".repeat(64) }; },
     send: async (_op: unknown, kind: TokenEffectKind) => { sends.push(kind); return sendResult; },
     observe: async (_op: unknown, _kind: TokenEffectKind, hash: string) => observations.get(hash) ?? null };
   return { runtime: new UniswapTokenExecution(journal, ports), journal, operation, sends, observations,
     allowance: (v: string) => { currentAllowance = v; }, sendResult: (v: "accepted" | "ambiguous") => { sendResult = v; },
-    rejectRevalidation: () => { rejectRevalidation = true; },
+    rejectRevalidation: () => { rejectRevalidation = true; }, rejectGuard: () => { rejectGuard = true; }, rejectSeal: () => { rejectSeal = true; }, released, committed,
     revalidations: () => revalidations };
 }
 test("exact approval then swap finalizes with zero allowance and bounded debit", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
@@ -46,12 +49,21 @@ test("ambiguous approval and swap are never resent after restart", async (t) => 
   const restarted = new UniswapTokenExecution(new UniswapTokenJournal(temp.root), { now: () => NOW, foregroundApprove: async () => undefined,
     foregroundCleanup: async () => undefined, withAccountLock: async <T>(_account: string, work: () => Promise<T>) => await work(),
     allocateNonce: async () => "99", currentAllowance: async () => "0", guard: async () => undefined, revalidate: async () => undefined,
+    releaseNonce: async () => undefined, commitNonce: async () => undefined,
     reserveUsage: async () => ({ reservationId: "d".repeat(64), state: "reserved" as const }),
     currentUsage: async (current) => ({ reservationId: current.usageReservationId!, state: current.usageState! }),
     followUsage: async (_current, target) => ({ reservationId: "d".repeat(64), state: target }),
     seal: async () => { throw new Error("must not sign"); }, send: async () => { throw new Error("must not resend"); }, observe: async () => null });
   op = await restarted.execute(op.operationId); assert.equal(op.phase, "approval_unknown_finality"); assert.deepEqual(f.sends, ["approval"]);
   assert.equal(f.revalidations(), 0);
+});
+test("pre-sign refusal and signing failure release nonce while a sealed ambiguous effect commits it", async (t) => {
+  const refused = await temporaryState(); t.after(refused.cleanup); const a = await fixture(refused.root); a.rejectGuard();
+  let op = await a.runtime.approve(a.operation.operationId); assert.equal(op.phase, "cleanup_required"); assert.deepEqual(a.released, ["approval:7"]); assert.deepEqual(a.committed, []);
+  const unsigned = await temporaryState(); t.after(unsigned.cleanup); const b = await fixture(unsigned.root); b.rejectSeal();
+  op = await b.runtime.approve(b.operation.operationId); assert.equal(op.phase, "cleanup_required"); assert.deepEqual(b.released, ["approval:7"]); assert.deepEqual(b.committed, []);
+  const ambiguous = await temporaryState(); t.after(ambiguous.cleanup); const c = await fixture(ambiguous.root); c.sendResult("ambiguous");
+  op = await c.runtime.approve(c.operation.operationId); assert.equal(op.phase, "approval_unknown_finality"); assert.deepEqual(c.released, []); assert.deepEqual(c.committed, ["approval:7"]);
 });
 test("mismatched allowance refuses and reverted swap requires explicit cleanup", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup);
   await assert.rejects(fixture(temp.root, "2"), { code: "APN_STATE_CORRUPT" });

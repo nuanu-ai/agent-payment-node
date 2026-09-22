@@ -9,7 +9,7 @@ import type { WrappingSecretPort } from "../../macos-keychain.js";
 import type { StateStore } from "../../state.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
 import type { TokenEffectKind, TokenSealedEffect } from "./token-execution.js";
-import type { TokenGasEnvelope, UniswapTokenOperation } from "./token-operation.js";
+import { UniswapTokenJournal, type TokenGasEnvelope, type UniswapTokenOperation } from "./token-operation.js";
 import { encodeUniswapTokenApproval } from "./token-route.js";
 import { UniswapTokenNonceStore } from "./token-nonce.js";
 
@@ -22,16 +22,26 @@ export class UniswapTokenCustody {
   private readonly wallets: EncryptedWalletStore;
   private readonly effects: UniswapTokenEffectJournal;
   private readonly nonces: UniswapTokenNonceStore;
+  private readonly operations: UniswapTokenJournal;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly call: EvmRpcCall,
     private readonly now: () => Date) { this.wallets = new EncryptedWalletStore(state, wrapping); this.effects = new UniswapTokenEffectJournal(state.root);
-    this.nonces = new UniswapTokenNonceStore(state.root); }
+    this.nonces = new UniswapTokenNonceStore(state.root); this.operations = new UniswapTokenJournal(state.root); }
 
   async withAccountLock<T>(account: string, work: () => Promise<T>): Promise<T> {
     return await this.state.withLocks([`uniswap-token-account:${domainHash("apn.uniswap-token-account-lock.v1", account)}`], work);
   }
   async allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind) {
     const pending = evmRpcQuantity(await this.call("eth_getTransactionCount", [op.account, "pending"]));
-    return await this.nonces.allocate(op, kind, pending);
+    return await this.nonces.allocate(op, kind, pending, async (operationId, effectKind) => await this.hasDurableEffect(operationId, effectKind));
+  }
+  async releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) {
+    await this.nonces.release(op, kind, nonce, async (operationId, effectKind) => await this.hasDurableEffect(operationId, effectKind));
+  }
+  async commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) { await this.nonces.commit(op, kind, nonce); }
+  private async hasDurableEffect(operationId: string, kind: TokenEffectKind) {
+    const op = await this.operations.load(operationId); if (op === null) return false;
+    const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
+    return attempt?.transactionHash !== null && attempt?.transactionHash !== undefined || await this.effects.load(op, kind) !== null;
   }
   async currentAllowance(op: UniswapTokenOperation) {
     const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account as Hex, op.route.router] });

@@ -54,11 +54,7 @@ export class UniswapTokenUsage {
             dailyUsageAtomic: (BigInt(current.amountAtomic) - BigInt(op.route.amountIn)).toString(), asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
     }
     async confirmCleanup(op) {
-        const active = await this.active(op.profile, op.account), now = this.clock.now();
-        if (active.digest !== op.policyDigest)
-            blocked("The active token swap policy changed.", "uniswap_token_policy_changed");
         await this.current(op);
-        await this.ledger.usage(identityOf(op), now);
     }
     async current(op) {
         const expected = assetUsageReservationId(identityOf(op), usageKey(op.operationId)), lease = await this.ledger.load(identityOf(op), expected);
