@@ -17,6 +17,10 @@ const HEX32 = /^0x[0-9a-f]{64}$/u;
 const SIGNATURE = /^0x[0-9a-f]{130}$/u;
 const RAW_TRANSACTION = /^0x(?:[0-9a-f]{2})+$/u;
 const DECIMAL = /^(?:0|[1-9][0-9]*)$/u;
+/** One kernel-backed critical section owns every encrypted local-wallet mutation for a profile. */
+export function walletCustodyLock(state, profileInput) {
+    return `custody:${state.profileHash(canonicalProfile(profileInput))}`;
+}
 export class EncryptedWalletStore {
     state;
     wrappingSecret;

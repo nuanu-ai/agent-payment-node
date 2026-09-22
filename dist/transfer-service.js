@@ -17,6 +17,7 @@ import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-
 import { ProviderDirectState } from "./provider-direct-state.js";
 import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
 import { evmAllowlistSubject, evmUsageTarget } from "./evm-direct-allowlist.js";
+import { walletCustodyLock } from "./encrypted-wallet-store.js";
 export class TransferService {
     context;
     operations;
@@ -161,13 +162,17 @@ export class TransferService {
                 await this.failBeforeEffect(operation, "approval_window_expired");
             }
             const rpc = this.context.requireRpc();
-            await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason));
+            const check = async () => await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
+            if (operation.evm === undefined)
+                await check();
+            else
+                await this.context.state.withLocks([walletCustodyLock(this.context.state, profile)], check);
             if (operation.evm !== undefined) {
                 // The native signer approves and signs in one call, so the reservation is durable in both stores before it.
                 const allowlistLease = await this.reserveUsage(operation);
                 operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect", { allowlistLease });
             }
-            const effect = parseEffect(await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", operation.evm === undefined ? {
+            const custodyPayload = operation.evm === undefined ? {
                 profile,
                 operationId: operation.operationId,
                 fingerprint: operation.fingerprint,
@@ -190,7 +195,23 @@ export class TransferService {
                     amountDecimal: operation.amountDecimal,
                     expiresAt: operation.expiresAt,
                 },
-            } : evmCustodyPayload(operation))));
+            } : evmCustodyPayload(operation);
+            let effectValue;
+            try {
+                effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload));
+            }
+            catch (error) {
+                if (operation.evm !== undefined && error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED") {
+                    const stored = await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
+                        profile, operationId, fingerprint: operation.fingerprint, expectedPayloadHash: hashObject(custodyPayload),
+                    }));
+                    if (isPlainRecord(stored) && exactKeys(stored, ["found"]) && stored.found === false) {
+                        await this.transition(operation, "failed_before_effect", true, "native_signer_reprepare_required", "durable_pre_effect_failure");
+                    }
+                }
+                throw error;
+            }
+            const effect = parseEffect(effectValue);
             await verifyEffect(effect, operation);
             operation = await this.transition(operation, "signed_not_submitted", false, "native_effect_material_bound", "native_transaction_hash", { transactionHash: effect.transactionHash, rawTransactionHash: effect.rawTransactionHash });
             operation = await this.submitAndInspect(operation, effect.rawTransaction);

@@ -188,7 +188,9 @@ export class ApnCore {
         if (request.command === "stargate.token.status") return operationOutcome(await service.status(request.operationId));
         return receiptOutcome(await service.receipt(request.operationId));
       }
-      case "swap.uniswap.inventory": case "swap.uniswap.quote": case "swap.uniswap.prepare": case "swap.uniswap.status": case "swap.uniswap.approve": case "swap.uniswap.execute": return await executeUniswapCommand(request, this.context);
+      case "swap.uniswap.inventory": case "swap.uniswap.quote": case "swap.uniswap.prepare": case "swap.uniswap.status": case "swap.uniswap.approve": case "swap.uniswap.execute":
+      case "swap.uniswap-token.inventory": case "swap.uniswap-token.quote": case "swap.uniswap-token.prepare": case "swap.uniswap-token.status":
+      case "swap.uniswap-token.approve": case "swap.uniswap-token.execute": case "swap.uniswap-token.cleanup": return await executeUniswapCommand(request, this.context);
       case "swap.sunswap.inventory": case "swap.sunswap.quote": case "swap.sunswap.prepare": case "swap.sunswap.status": case "swap.sunswap.approve": case "swap.sunswap.execute": return await executeSunSwapCommand(request, this.context);
       case "swap.jupiter.inventory": case "swap.jupiter.quote": case "swap.jupiter.prepare": case "swap.jupiter.status": case "swap.jupiter.approve": case "swap.jupiter.execute": return await executeJupiterCommand(request, this.context);
       case "swap.orca.inventory": case "swap.orca.quote": case "swap.orca.prepare": case "swap.orca.status": case "swap.orca.approve": case "swap.orca.execute": return await executeOrcaCommand(request, this.context);

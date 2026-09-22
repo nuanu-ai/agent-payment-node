@@ -15,6 +15,8 @@ import { appendTransition, sealOperation } from "./state-integrity.js";
 import { canonicalIdempotencyKey, publicOperation, validateEconomics } from "./transfer-policy.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
+import { walletCustodyLock } from "./encrypted-wallet-store.js";
+import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
 
 /** The shared networks keep their existing profile rule; a direct-only network is local-wallet only. */
 export async function assertDirectEvmProfile(context: RuntimeContext, profile: string, chainId: DirectEvmChainId | undefined): Promise<void> {
@@ -60,6 +62,7 @@ export async function prepareEvmTransfer(
   return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
     const existing = await operations.resolvePrepare({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash });
     if (existing !== null) return publicOperation(existing.record as OperationRecord);
+    return await state.withLocks([walletCustodyLock(state, profile)], async () => {
     const wallet = await state.loadWallet(profileHash);
     if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
     await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
@@ -77,8 +80,10 @@ export async function prepareEvmTransfer(
     // An amount above the balance is an economic refusal before any gas estimate, which would fail on the same shortfall.
     if (evmUint(balance.assetAtomic) < BigInt(amount.atomic)) throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
     const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
-    const [nonce, estimated] = await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]);
-    const economics = validateEconomics(nonce, priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
+    const [rpcNonce, estimated] = await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]);
+    let nonce = BigInt(rpcNonce); if (selection.chainId === 1) { const owned = new Set((await occupiedUniswapTokenNonces(state.root, wallet.address)).map(String));
+      while (owned.has(nonce.toString())) nonce += 1n; }
+    const economics = validateEconomics(nonce.toString(), priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
     const quote = await rpc.feeQuote(selection.chainId, economics);
     requireEvmFunding(balance, amount.atomic, quote, maximumFeeWei);
     const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000).toISOString();
@@ -99,6 +104,7 @@ export async function prepareEvmTransfer(
     });
     await persist(operation);
     return publicOperation(operation);
+    });
   });
 }
 

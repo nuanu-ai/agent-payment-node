@@ -4,6 +4,25 @@ import { UNISWAP_OFFICIAL_PIN_CATALOG, UNISWAP_USDC } from "./uniswap-pin.js";
 import { swapMechanismDigest } from "./pin.js";
 import { UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS, USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
 export async function executeUniswapCommand(request, context) {
+    if (request.command === "swap.uniswap-token.prepare" || request.command === "swap.uniswap-token.approve" ||
+        request.command === "swap.uniswap-token.execute" || request.command === "swap.uniswap-token.cleanup" || request.command === "swap.uniswap-token.status" || request.command === "swap.uniswap-token.inventory" || request.command === "swap.uniswap-token.quote") {
+        const runtime = context.uniswapTokenRuntime;
+        if (runtime === undefined)
+            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Uniswap token-input runtime is unavailable.", { reason: "uniswap_token_runtime_unavailable" });
+        if (request.command === "swap.uniswap-token.prepare")
+            return tokenOutcome(await runtime.prepare(request));
+        if (request.command === "swap.uniswap-token.approve")
+            return tokenOutcome(await runtime.approve(request.operationId));
+        if (request.command === "swap.uniswap-token.execute")
+            return tokenOutcome(await runtime.execute(request.operationId));
+        if (request.command === "swap.uniswap-token.cleanup")
+            return tokenOutcome(await runtime.cleanup(request.operationId));
+        if (request.command === "swap.uniswap-token.inventory")
+            return data(runtime.inventory(), "exact_token_route_inventory");
+        if (request.command === "swap.uniswap-token.quote")
+            return data(await runtime.quote(request), "unsigned_exact_simulated_swap_quote");
+        return tokenOutcome(await runtime.status(request.operationId));
+    }
     if (request.command === "swap.uniswap.inventory")
         return data({ catalog: UNISWAP_OFFICIAL_PIN_CATALOG, admitted: false,
             execution: context.uniswapRuntime === undefined ? "dormant" : "foreground_cli_after_owner_admission",
@@ -38,9 +57,12 @@ export async function executeUniswapCommand(request, context) {
         // Foreground CLI: the typed approval code and the single send are one command, like bridge approve.
         return operationOutcome(await context.uniswapRuntime.approveAndExecute(request.operationId, context.clock.now()));
     }
-    if (context.uniswapRuntime !== undefined)
+    if (request.command === "swap.uniswap.execute" && context.uniswapRuntime !== undefined)
         return operationOutcome(await context.uniswapRuntime.execute(request.operationId, context.clock.now()));
     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Uniswap signing and sending are dormant until a complete exact single-send adapter is installed.", { reason: "uniswap_execution_dormant" });
+}
+function tokenOutcome(value) {
+    return { proofClass: value.phase, data: null, operation: value, receipt: value.receipt, nextActions: [] };
 }
 function data(value, proofClass) {
     return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };

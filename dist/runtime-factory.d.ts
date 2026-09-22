@@ -31,6 +31,7 @@ import { type PortfolioDependencies } from "./portfolio/command.js";
 import { type AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runtime.js";
+import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
 import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
@@ -41,6 +42,7 @@ export interface RuntimeFactoryOptions {
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.uniswap.quote";
     }>>;
+    readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.sunswap.quote";
     }>>;
