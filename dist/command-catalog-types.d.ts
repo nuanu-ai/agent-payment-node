@@ -1,0 +1,51 @@
+export type ScalarType = "string" | "base64" | "profile" | "provider_id" | "provider_auth_method" | "positive_integer" | "https_url" | "address" | "decimal_usdc" | "atomic_usdc" | "wei" | "operation_id" | "transaction_hash" | "provider_request_id" | "idempotency_key" | "integer_seconds";
+export type EffectClass = "none" | "local_read" | "network_read" | "network_request" | "local_write" | "payment_prepare" | "payment_submit" | "recovery";
+export type ApprovalClass = "none" | "foreground_tty" | "prior_profile_policy" | "prior_operation_authorization";
+export interface CommandOption {
+    readonly name: `--${string}`;
+    readonly type: ScalarType;
+    readonly required: boolean;
+    readonly default: {
+        readonly kind: "none";
+    } | {
+        readonly kind: "literal";
+        readonly value: string;
+    };
+    readonly constraints: readonly string[];
+    readonly sensitivity: "public" | "operator_input" | "sensitive_input";
+}
+export interface CommandGroup {
+    readonly path: readonly string[];
+    readonly summary: string;
+    readonly kind: "group";
+}
+export interface CommandDefinition {
+    readonly path: readonly string[];
+    readonly synopsis: string;
+    readonly summary: string;
+    readonly options: readonly CommandOption[];
+    readonly effect: {
+        readonly class: EffectClass;
+        readonly summary: string;
+    };
+    readonly approval: {
+        readonly class: ApprovalClass;
+        readonly when: string;
+    };
+    readonly output: {
+        readonly contract: "text" | "apn.cli.v1";
+        readonly success_exit: 0;
+        readonly failure_exit: 1;
+        readonly success: string;
+        readonly failures: readonly string[];
+    };
+    readonly states: {
+        readonly terminal: readonly string[];
+        readonly non_terminal: readonly string[];
+    };
+    readonly recovery: readonly {
+        readonly command_path: readonly string[];
+        readonly when: string;
+    }[];
+    readonly examples: readonly string[];
+}
