@@ -204,6 +204,36 @@ for (const fallback of [false, true]) test(`LI.FI bounded observation uses scala
   assert.equal(archive.flatMap((call) => call.request as Json[]).some((row) => ["eth_sendRawTransaction", "eth_estimateGas", "eth_getLogs"].includes(row.method)), false);
 });
 
+test("LI.FI explicit receipt routing uses six requests while primary remains authoritative for transaction and finality", async () => {
+  const s = await rpcObservation(), safe = { ...s.block, number: "0x7d1", hash: `0x${"cd".repeat(32)}`, transactions: [] };
+  const calls: Array<{ host: string; request: Json | Json[] }> = [];
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    const request = JSON.parse(body!) as Json | Json[], rows = Array.isArray(request) ? request : [request], host = new URL(endpoint).host;
+    calls.push({ host, request });
+    const responses = rows.map((row) => {
+      let result: unknown;
+      if (row.method === "eth_chainId") result = "0x1";
+      else if (row.method === "eth_getTransactionByHash") result = s.tx;
+      else if (row.method === "eth_getTransactionReceipt") result = s.receipt;
+      else if (row.method === "eth_getBlockByNumber") result = row.params[0] === safe.number || row.params[0] === "safe" ? safe : s.block;
+      else throw new Error(`unexpected method: ${row.method}`);
+      return { jsonrpc: "2.0", id: row.id, result };
+    });
+    return { status: 200, body: JSON.stringify(Array.isArray(request) ? responses : responses[0]) };
+  } };
+  const session = new RpcReadSession({ wait: async () => {}, maxHttpRequests: 16, maxHttpAttempts: 16 });
+  const rpc = bridgeRpcFactory({ APN_ETHEREUM_RPC_URL: "https://primary.example", APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example",
+    APN_ETHEREUM_RECEIPT_RPC_URL: "https://receipt.example" }, { transport, wait: async () => {} })(1, session);
+  const observed = await rpc.observe(s.hash); assert.ok(observed); assert.equal(observed.transaction.rpcOrigin, "https://primary.example");
+  assert.equal(calls.length, 6); assert.equal(session.telemetry().httpRequests, 6);
+  const primary = calls.filter((call) => call.host === "primary.example");
+  assert.deepEqual(primary.map((call) => (call.request as Json).method), ["eth_chainId", "eth_getTransactionByHash",
+    "eth_getBlockByNumber", "eth_getBlockByNumber"]);
+  assert.equal(primary.some((call) => (call.request as Json).method === "eth_getTransactionReceipt"), false);
+  assert.deepEqual(calls.filter((call) => call.host === "receipt.example").map((call) =>
+    (call.request as Json[]).map((row) => row.method)), [["eth_chainId", "eth_getTransactionReceipt"]]);
+});
+
 test("LI.FI RPC requires signed transaction, canonical block membership, receipt and log identity before safe proof", async () => {
   const s = await rpcObservation(), observed = await s.rpcAdapter.observe(s.hash); assert.ok(observed);
   assert.equal(observed.transaction.safeBlock!.hash, s.block.hash); assert.equal(observed.transaction.actualTotalFeeWei, "21000000000000");

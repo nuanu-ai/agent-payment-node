@@ -509,6 +509,11 @@ export declare const failureSchema: z.ZodObject<{
         }>>;
         httpStatus: z.ZodOptional<z.ZodNumber>;
         attempts: z.ZodOptional<z.ZodNumber>;
+        endpointRole: z.ZodOptional<z.ZodEnum<{
+            receipt: "receipt";
+            primary: "primary";
+            archive: "archive";
+        }>>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const consentSchema: z.ZodObject<{
@@ -1106,6 +1111,11 @@ export declare const transitionSchema: z.ZodObject<{
             }>>;
             httpStatus: z.ZodOptional<z.ZodNumber>;
             attempts: z.ZodOptional<z.ZodNumber>;
+            endpointRole: z.ZodOptional<z.ZodEnum<{
+                receipt: "receipt";
+                primary: "primary";
+                archive: "archive";
+            }>>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     usageLease: z.ZodNullable<z.ZodUnknown>;
@@ -1813,6 +1823,11 @@ export declare const operationSchema: z.ZodObject<{
                 }>>;
                 httpStatus: z.ZodOptional<z.ZodNumber>;
                 attempts: z.ZodOptional<z.ZodNumber>;
+                endpointRole: z.ZodOptional<z.ZodEnum<{
+                    receipt: "receipt";
+                    primary: "primary";
+                    archive: "archive";
+                }>>;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
         usageLease: z.ZodNullable<z.ZodUnknown>;
@@ -2087,6 +2102,11 @@ export declare const operationSchema: z.ZodObject<{
             }>>;
             httpStatus: z.ZodOptional<z.ZodNumber>;
             attempts: z.ZodOptional<z.ZodNumber>;
+            endpointRole: z.ZodOptional<z.ZodEnum<{
+                receipt: "receipt";
+                primary: "primary";
+                archive: "archive";
+            }>>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     usageLease: z.ZodNullable<z.ZodUnknown>;

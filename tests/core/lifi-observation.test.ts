@@ -5,6 +5,19 @@ import { temporaryState } from "./helpers.js";
 import { LIFI_DESTINATION_HASH, lifiFixture } from "./lifi-helpers.js";
 import { ApnError } from "../../src/errors.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
+import { observationRpcFailure } from "../../src/lifi/observation-diagnostics.js";
+
+test("LI.FI observation diagnostics retain only the sanitized endpoint role", () => {
+  const error = new ApnError("APN_RPC_PROTOCOL", "Bridge validation failed: bridge_RPC_HTTP_status.", {
+    reason: "bridge_RPC_HTTP_status", rpcMethod: "eth_getTransactionReceipt", httpStatus: "403", attempts: "1",
+    endpointRole: "receipt", endpointUrl: "https://secret.example/token",
+  });
+  assert.deepEqual(observationRpcFailure("destination", "bridge", error), {
+    schemaVersion: "apn.bridge-observation-rpc-failure.v1", stage: "destination_receipt", effectRole: "bridge",
+    code: "APN_RPC_PROTOCOL", reason: "bridge_RPC_HTTP_status", rpcMethod: "eth_getTransactionReceipt",
+    httpStatus: 403, attempts: 1, endpointRole: "receipt",
+  });
+});
 
 test("LI.FI Across slow-fill delivery persists an empty repayment credit and reserve-funded exact output", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);

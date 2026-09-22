@@ -49,25 +49,27 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         if (method === "eth_sendRawTransaction")
             return await submitDirect(method, params, (m, p) => oneAttempt(endpoint, m, p));
         if (method === "eth_getTransactionReceipt" && isArchiveRead(method, params)) {
+            if (distinctReceipt !== null)
+                return await withEndpointRole(fallbackReceipt(method, params, { ...distinctReceipt, role: "receipt" }), "receipt");
             let primary;
             try {
-                primary = await retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait);
+                primary = await withEndpointRole(retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait), "primary");
             }
             catch (error) {
                 if (receiptFallback === null || !isReceiptFallbackError(error))
                     throw error;
-                return await fallbackReceipt(method, params, receiptFallback);
+                return await withEndpointRole(fallbackReceipt(method, params, receiptFallback), receiptFallback.role);
             }
             if (primary !== null || receiptFallback === null)
                 return primary;
-            return await fallbackReceipt(method, params, receiptFallback);
+            return await withEndpointRole(fallbackReceipt(method, params, receiptFallback), receiptFallback.role);
         }
         if (isHistoricalStateRead(method, params)) {
             if (distinctArchive === null)
                 return missingHistoricalArchive();
-            return await archiveRead(method, params, distinctArchive);
+            return await withEndpointRole(archiveRead(method, params, distinctArchive), "archive");
         }
-        return await retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait);
+        return await withEndpointRole(retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait), "primary");
     };
     const assertArchiveChain = async (target) => {
         if (archiveChain === undefined)
@@ -160,11 +162,12 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         const target = route === "receipt" ? fallback.url : route !== "primary" ? distinctArchive ?? missingHistoricalArchive() : endpoint;
         const attempt = async (body) => await batchAttempt(target, body, session.currentTime());
         const bound = items.map((item) => ({ ...item, batchAttempt: attempt }));
-        return route === "receipt"
-            ? await session.readReceiptBatch(target.toString(), chainId, bound, fallback.maxItemsPerRequest)
+        const role = route === "primary" ? "primary" : route === "receipt" ? fallback.role : "archive";
+        return await withEndpointRole(route === "receipt"
+            ? session.readReceiptBatch(target.toString(), chainId, bound, fallback.maxItemsPerRequest)
             : route === "archive_deployment"
-                ? await session.readArchiveDeploymentBatch(target.toString(), chainId, bound)
-                : await session.readBatch(target.toString(), chainId, bound);
+                ? session.readArchiveDeploymentBatch(target.toString(), chainId, bound)
+                : session.readBatch(target.toString(), chainId, bound), role);
     };
     const sessionArchiveReceipt = async (session, method, params) => {
         const values = await sessionBatchCall(session)([
@@ -180,29 +183,33 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         if (method === "eth_sendRawTransaction")
             return await submitDirect(method, params, primaryAttempt);
         if (method === "eth_getTransactionReceipt" && isArchiveRead(method, params)) {
+            if (distinctReceipt !== null)
+                return await withEndpointRole(sessionArchiveReceipt(session, method, params), "receipt");
             let primary;
             try {
-                primary = await session.read(endpoint.toString(), chainId, method, params, primaryAttempt);
+                primary = await withEndpointRole(session.read(endpoint.toString(), chainId, method, params, primaryAttempt), "primary");
             }
             catch (error) {
                 if (receiptFallback === null || !isReceiptFallbackError(error))
                     throw error;
-                return await sessionArchiveReceipt(session, method, params);
+                return await withEndpointRole(sessionArchiveReceipt(session, method, params), receiptFallback.role);
             }
             if (primary !== null || receiptFallback === null)
                 return primary;
-            return await sessionArchiveReceipt(session, method, params);
+            return await withEndpointRole(sessionArchiveReceipt(session, method, params), receiptFallback.role);
         }
         if (isHistoricalStateRead(method, params)) {
             if (distinctArchive === null)
                 return missingHistoricalArchive();
             const archiveAttempt = (m, p) => oneAttempt(distinctArchive, m, p, session.currentTime());
-            const chain = await session.read(distinctArchive.toString(), chainId, "eth_chainId", [], archiveAttempt);
-            if (evmRpcQuantity(chain) !== BigInt(chainId))
-                bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
-            return await session.read(distinctArchive.toString(), chainId, method, params, archiveAttempt);
+            return await withEndpointRole((async () => {
+                const chain = await session.read(distinctArchive.toString(), chainId, "eth_chainId", [], archiveAttempt);
+                if (evmRpcQuantity(chain) !== BigInt(chainId))
+                    bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
+                return await session.read(distinctArchive.toString(), chainId, method, params, archiveAttempt);
+            })(), "archive");
         }
-        return await session.read(endpoint.toString(), chainId, method, params, primaryAttempt);
+        return await withEndpointRole(session.read(endpoint.toString(), chainId, method, params, primaryAttempt), "primary");
     };
     return { origin: endpoint.origin, call, attempt: (method, params) => oneAttempt(endpoint, method, params), sessionCall, sessionBatchCall };
 }
@@ -644,6 +651,16 @@ function rpcHttpFailure(reason, method, status, attempts) {
     return new ApnError("APN_RPC_PROTOCOL", `Bridge validation failed: ${reason}.`, {
         rpcMethod: method, httpStatus: status.toString(), attempts: attempts.toString(),
     });
+}
+async function withEndpointRole(read, endpointRole) {
+    try {
+        return await read;
+    }
+    catch (error) {
+        if (!(error instanceof ApnError))
+            throw error;
+        throw new ApnError(error.code, error.message, { ...error.details, endpointRole });
+    }
 }
 function isReceiptFallbackError(error) {
     if (!(error instanceof ApnError))
