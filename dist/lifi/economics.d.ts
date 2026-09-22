@@ -18,9 +18,10 @@ export declare function bridgeApprovedPrices(fees: Pick<FeeEstimate, "maxFeePerG
  */
 export declare function bridgeApprovalRequired(request: BridgeMaterialization["request"], allowanceAtomic: string): boolean;
 export declare const BRIDGE_DEPLOYMENT_PROOF_VERIFIER: "apn.bridge.deployment-proof.base-stargate-ecotone.v1";
+export declare const BRIDGE_DEPLOYMENT_PROOF_POLICY_CUTOVER: "2026-09-22T05:47:00.000Z";
 export declare function legacyBridgeApprovalPolicyHash(materialization: Pick<BridgeMaterialization, "request">): string;
 export declare function bridgeApprovalPolicyHash(materialization: Pick<BridgeMaterialization, "tool" | "request">): string;
-export declare function bridgeApprovalPolicyBinding(materialization: Pick<BridgeMaterialization, "tool" | "request">, policyHash: string): "deployment-proof-v1" | "legacy-full-refresh" | null;
+export declare function bridgeApprovalPolicyBinding(materialization: Pick<BridgeMaterialization, "tool" | "request">, policyHash: string, preparedAt: string): "deployment-proof-v1" | "full-refresh" | null;
 /** The part of a native debit that is the principal itself: excluded from the fee cap, included in the funding check. */
 export declare function bridgeNativePrincipalWei(request: BridgeMaterialization["request"]): bigint;
 export declare function freezeBridgeEnvelopes(m: BridgeMaterialization, account: BridgeAccountSnapshot, rpc: BridgeRpcPort): Promise<readonly BridgeEnvelope[]>;
