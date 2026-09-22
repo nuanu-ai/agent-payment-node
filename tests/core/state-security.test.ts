@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { chmod, link, lstat, mkdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { sha256 } from "../../src/canonical.js";
+import { dirname, join } from "node:path";
+import { canonicalJson, sha256 } from "../../src/canonical.js";
 import type { AdvisoryLockPort } from "../../src/macos-advisory-lock.js";
 import { StateStore } from "../../src/state.js";
 import { RECIPIENT, TestNative, TestRpc, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
@@ -139,10 +139,17 @@ test("stable kernel lock files remain in place after release", async (t) => {
 test("RPC provider pacing survives restart and malformed records fail closed", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const familyHash = sha256("rpc-provider-family\0publicnode.com"), first = new StateStore(temporary.root);
-  await first.initialize(); await first.writeRpcProviderPacing(familyHash, 12_345);
-  assert.equal(await new StateStore(temporary.root).loadRpcProviderPacing(familyHash), 12_345);
+  await first.initialize();
   const path = join(temporary.root, "rpc-provider-pacing", `${familyHash}.json`);
-  await writeFile(path, JSON.stringify({ schemaVersion: "apn.rpc-provider-pacing.v1", familyHash, lastStartMs: "forged" }), { mode: 0o600 });
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${canonicalJson({ schemaVersion: "apn.rpc-provider-pacing.v1", familyHash, lastStartMs: 1_000 })}\n`, { mode: 0o600 });
+  assert.equal(await first.loadRpcProviderPacing(familyHash), 1_000); assert.equal(await first.loadRpcProviderCooldown(familyHash), null);
+  await first.writeRpcProviderPacing(familyHash, 12_345); await first.writeRpcProviderCooldown(familyHash, 17_345);
+  const restarted = new StateStore(temporary.root);
+  assert.equal(await restarted.loadRpcProviderPacing(familyHash), 12_345);
+  assert.equal(await restarted.loadRpcProviderCooldown(familyHash), 17_345);
+  await writeFile(path, `${canonicalJson({ schemaVersion: "apn.rpc-provider-pacing.v2", familyHash, lastStartMs: 12_345,
+    cooldownUntilMs: "forged" })}\n`, { mode: 0o600 });
   await assert.rejects(new StateStore(temporary.root).loadRpcProviderPacing(familyHash), { code: "APN_STATE_CORRUPT" });
 });
 

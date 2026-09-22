@@ -57,7 +57,7 @@ export declare class RpcHttpFailure extends Error {
     constructor(method: string, status: number, retryAfterMs?: number | undefined);
 }
 export interface RpcProviderPacingCoordinator {
-    coordinate<T>(family: string, work: (lastStart: number | null, saveStart: (value: number) => Promise<void>) => Promise<T>): Promise<T>;
+    coordinate<T>(family: string, work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null, saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>): Promise<T>;
 }
 /** Provider-family coordination. A coordinator can serialize starts and retain pacing across CLI processes. */
 export declare class RpcProviderScheduler {

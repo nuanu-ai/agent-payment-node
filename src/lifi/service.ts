@@ -45,13 +45,16 @@ export class BridgeService {
     this.records = new BridgeOperationRepository(context.state.root);
     this.operations = new OperationService(context.state, context.providerX402Repository, undefined, this.records);
     this.providerScheduler = new RpcProviderScheduler({
-      coordinate: async <T>(family: string, work: (lastStart: number | null, saveStart: (value: number) => Promise<void>) => Promise<T>) => {
+      coordinate: async <T>(family: string, work: (lastStart: number | null, saveStart: (value: number) => Promise<void>,
+        cooldownUntil: number | null, saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {
         const familyHash = sha256(`rpc-provider-family\0${family}`);
-        // The lock intentionally covers the HTTP attempt. A sibling process can therefore fail with APN_STATE_BUSY
-        // when one provider request occupies the family for longer than the state store's five-second lock wait.
+        // The lock intentionally covers a required cooldown/pacing wait and the HTTP attempt. A sibling process can
+        // therefore fail with APN_STATE_BUSY when family work exceeds the state store's five-second lock wait.
         return await context.state.withLocks([`rpc-provider-family:${familyHash}`], async () => await work(
           await context.state.loadRpcProviderPacing(familyHash),
-          async (value) => await context.state.writeRpcProviderPacing(familyHash, value)));
+          async (value) => await context.state.writeRpcProviderPacing(familyHash, value),
+          await context.state.loadRpcProviderCooldown(familyHash),
+          async (value) => await context.state.writeRpcProviderCooldown(familyHash, value)));
       },
     });
   }

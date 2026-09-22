@@ -49,7 +49,9 @@ export class RpcProviderScheduler {
             const index = this.queue.findIndex((entry) => !(this.families.get(entry.family)?.active ?? false));
             if (index < 0)
                 return;
-            const entry = this.queue.splice(index, 1)[0], state = this.families.get(entry.family) ?? { active: false, lastStart: Number.NEGATIVE_INFINITY };
+            const entry = this.queue.splice(index, 1)[0], state = this.families.get(entry.family) ?? {
+                active: false, lastStart: Number.NEGATIVE_INFINITY, cooldownUntil: Number.NEGATIVE_INFINITY,
+            };
             state.active = true;
             this.families.set(entry.family, state);
             this.active += 1;
@@ -58,14 +60,15 @@ export class RpcProviderScheduler {
     }
     async run(entry, state) {
         try {
-            const execute = async (persisted, saveStart) => {
+            const execute = async (persisted, saveStart, persistedCooldown, saveCooldownUntil) => {
                 const clock = this.coordinator === undefined ? entry.now : this.pacingNow ?? Date.now;
-                const lastStart = Math.max(state.lastStart, persisted ?? Number.NEGATIVE_INFINITY), before = clock();
+                const lastStart = Math.max(state.lastStart, persisted ?? Number.NEGATIVE_INFINITY);
+                const cooldownUntil = Math.max(state.cooldownUntil, persistedCooldown ?? Number.NEGATIVE_INFINITY), before = clock();
                 if (before < lastStart)
                     throw new ApnError("APN_RPC_CONFIG", "RPC scheduler clock moved backwards.", {
                         reason: "rpc_scheduler_clock_rollback", providerFamily: entry.family,
                     });
-                const nextAllowed = lastStart + RPC_ORIGIN_GAP_MS, delay = Math.max(0, nextAllowed - before);
+                const nextAllowed = Math.max(lastStart + RPC_ORIGIN_GAP_MS, cooldownUntil), delay = Math.max(0, nextAllowed - before);
                 entry.beforeWait(delay);
                 if (delay > 0)
                     await entry.wait(delay);
@@ -74,7 +77,7 @@ export class RpcProviderScheduler {
                     throw schedulerClockRollback(entry.family);
                 // Timers may wake a millisecond early. A persisted coordinator must still reach the exact wall-clock boundary;
                 // a clock that moves backwards or does not advance fails closed before transport.
-                if (persisted !== null && current < nextAllowed) {
+                if ((persisted !== null || persistedCooldown !== null) && current < nextAllowed) {
                     const remaining = nextAllowed - current;
                     entry.beforeWait(remaining);
                     await entry.wait(remaining);
@@ -85,9 +88,23 @@ export class RpcProviderScheduler {
                 }
                 state.lastStart = current;
                 await saveStart(state.lastStart);
-                return await entry.task();
+                try {
+                    return await entry.task();
+                }
+                catch (error) {
+                    if (error instanceof RpcHttpFailure && error.status === 429) {
+                        const observed = clock();
+                        if (observed < current)
+                            throw schedulerClockRollback(entry.family);
+                        const effectiveCooldown = Math.min(30_000, Math.max(RPC_RETRY_DELAY_MS, error.retryAfterMs ?? 0));
+                        state.cooldownUntil = Math.max(state.cooldownUntil, observed + effectiveCooldown);
+                        await saveCooldownUntil(state.cooldownUntil);
+                    }
+                    throw error;
+                }
             };
-            entry.resolve(this.coordinator === undefined ? await execute(null, async () => { }) : await this.coordinator.coordinate(entry.family, execute));
+            entry.resolve(this.coordinator === undefined ? await execute(null, async () => { }, null, async () => { }) :
+                await this.coordinator.coordinate(entry.family, execute));
         }
         catch (error) {
             entry.reject(error);
@@ -421,7 +438,10 @@ catch {
 export function rpcProviderFamily(origin) {
     try {
         const hostname = new URL(origin).hostname.toLowerCase();
-        return hostname === "publicnode.com" || hostname.endsWith(".publicnode.com") ? "publicnode.com" : hostname;
+        if (hostname === "publicnode.com" || hostname.endsWith(".publicnode.com"))
+            return "publicnode.com";
+        const drpcSuffix = ".drpc.org", drpcLabel = hostname.endsWith(drpcSuffix) ? hostname.slice(0, -drpcSuffix.length) : "";
+        return hostname === "drpc.org" || drpcLabel !== "" && !drpcLabel.includes(".") ? "drpc.org" : hostname;
     }
     catch {
         return "invalid-origin";
