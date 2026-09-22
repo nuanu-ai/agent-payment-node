@@ -99,7 +99,8 @@ test("installed CLI and MCP discovery enumerate the same finite gasless surface 
   try {
     const discovery = await connection.client.listTools();
     assert.deepEqual(discovery.tools.filter(tool => tool.name.startsWith("apn_gasless_")).map(tool => tool.name),
-      ["apn_gasless_capabilities", "apn_gasless_balance", "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve"]);
+      ["apn_gasless_usdt_status", "apn_gasless_usdt_resume", "apn_gasless_capabilities", "apn_gasless_balance",
+        "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve"]);
     const capabilities = await connection.call("apn_gasless_capabilities", { profile: s.profile });
     assert.deepEqual(capabilities.data, cli.data);
   } finally { await connection.close(); }
