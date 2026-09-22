@@ -55,6 +55,7 @@ import { portfolioPause } from "./portfolio/command.js";
 import { PortfolioHttps } from "./portfolio/https.js";
 import { TtyAllowlistPolicyApproval } from "./allowlist-policy-activation.js";
 import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
+import { createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-factory.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
@@ -136,6 +137,11 @@ export function createApnCore(bound, options = {}) {
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
             foreground: bound.request.command === "swap.uniswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
         : undefined);
+    const uniswapTokenRuntime = options.uniswapTokenRuntime ?? (bound.request.command.startsWith("swap.uniswap-token.")
+        ? createUniswapTokenRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), clock,
+            foreground: bound.request.command === "swap.uniswap-token.approve" ? "approve" :
+                isUniswapTokenCleanup(bound.request.command) ? "cleanup" : "refuse" })
+        : undefined);
     // Keyless SunSwap likewise, over APN_TRON_RPC_URL and the profile's encrypted local TRON wallet.
     const sunswapRuntime = options.sunswapRuntime ?? (bound.request.command.startsWith("swap.sunswap.") && options.sunswap === undefined
         ? createSunSwapKeylessRuntime({ state, rpc: tronRpc, accounts: chainAccounts, clock,
@@ -157,6 +163,7 @@ export function createApnCore(bound, options = {}) {
             portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
         } : {}),
         ...(uniswapRuntime === undefined ? {} : { uniswapRuntime }),
+        ...(uniswapTokenRuntime === undefined ? {} : { uniswapTokenRuntime }),
         ...(sunswapRuntime === undefined ? {} : { sunswapRuntime }),
         ...(orcaRuntime === undefined ? {} : { orcaRuntime }),
         ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
@@ -222,6 +229,7 @@ export function createApnCore(bound, options = {}) {
             : {}),
     });
 }
+function isUniswapTokenCleanup(command) { return command === "swap.uniswap-token.cleanup"; }
 export async function executeBoundCommand(bound, options = {}) {
     return await createApnCore(bound, options).execute(bound.request);
 }

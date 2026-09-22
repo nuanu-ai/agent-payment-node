@@ -1,6 +1,10 @@
 import type { UniswapTokenOperation } from "./token-operation.js";
 import { UniswapTokenJournal } from "./token-operation.js";
 export type TokenEffectKind = "approval" | "swap" | "cleanup";
+export interface TokenSealedEffect {
+    readonly transactionHash: string;
+    readonly envelopeHash: string;
+}
 export interface TokenEffectObservation {
     readonly status: "pending" | "success" | "reverted";
     readonly transactionHash: string;
@@ -12,9 +16,12 @@ export interface TokenEffectObservation {
 export interface UniswapTokenExecutionPorts {
     now(): Date;
     foregroundApprove(operation: UniswapTokenOperation): Promise<void>;
+    foregroundCleanup(operation: UniswapTokenOperation): Promise<void>;
     currentNonce(account: string): Promise<string>;
     currentAllowance(operation: UniswapTokenOperation): Promise<string>;
-    submit(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<string>;
+    revalidate(operation: UniswapTokenOperation): Promise<void>;
+    seal(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect>;
+    send(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<"accepted" | "ambiguous">;
     observe(operation: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: string): Promise<TokenEffectObservation | null>;
 }
 export interface UniswapTokenCommandRuntime {
@@ -39,6 +46,7 @@ export declare class UniswapTokenExecution {
     status(id: string): Promise<UniswapTokenOperation>;
     cleanup(id: string): Promise<UniswapTokenOperation>;
     private start;
+    private finishStart;
     private observeApproval;
     private observeSwap;
     private observeCleanup;
