@@ -4,22 +4,24 @@ import { parseAtomic } from "../../money.js";
 import { getAddress } from "viem";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
 import { validateUniswapTokenRoute } from "./token-route.js";
-export const UNISWAP_TOKEN_OPERATION_SCHEMA = "apn.uniswap-token-operation.v1";
+export const UNISWAP_TOKEN_OPERATION_SCHEMA_V1 = "apn.uniswap-token-operation.v1";
+export const UNISWAP_TOKEN_OPERATION_SCHEMA = "apn.uniswap-token-operation.v2";
 export const UNISWAP_TOKEN_RECEIPT_SCHEMA = "apn.uniswap-token-receipt.v1";
 export function newUniswapTokenOperation(input) {
     const at = instant(input.now), body = { schemaVersion: UNISWAP_TOKEN_OPERATION_SCHEMA, ...input, phase: "prepared",
         createdAt: at, updatedAt: at, accumulatedNativeDebitWei: "0", usageReservationId: null, usageState: null,
-        approvalAttempt: null, swapAttempt: null, cleanupAttempt: null, cleanupReason: null,
+        approvalAttempt: null, swapAttempt: null, cleanupAttempt: null, cleanupReason: null, cleanupEvidence: null, preSignFailure: null,
         receipt: null, previousIntegrityHash: null };
     delete body.now;
     return validateUniswapTokenOperation({ ...body, integrityHash: hashObject(body) });
 }
 export function validateUniswapTokenOperation(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "profile", "account", "phase", "route", "approvalCapAtomic",
+    const common = ["schemaVersion", "operationId", "profile", "account", "phase", "route", "approvalCapAtomic",
         "allowanceAtPrepare", "approvalGas", "swapGas", "cleanupGas", "maximumNativeDebitWei", "policyDigest", "mechanismDigest", "accumulatedNativeDebitWei",
         "usageReservationId", "usageState", "createdAt", "updatedAt",
-        "approvalAttempt", "swapAttempt", "cleanupAttempt", "cleanupReason", "receipt", "previousIntegrityHash", "integrityHash"]) ||
-        value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA)
+        "approvalAttempt", "swapAttempt", "cleanupAttempt", "cleanupReason", "receipt", "previousIntegrityHash", "integrityHash"];
+    if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
+        !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure"] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -36,9 +38,20 @@ export function validateUniswapTokenOperation(value) {
     attempt(op.approvalAttempt);
     attempt(op.swapAttempt);
     attempt(op.cleanupAttempt);
-    const approvalStarted = ["approval_submission_started", "approval_submitted", "approval_unknown_finality"].includes(op.phase) || op.approvalAttempt !== null, swapStarted = ["submission_started", "submitted", "unknown_finality", "observed"].includes(op.phase), cleanupStarted = ["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality", "cleaned"].includes(op.phase);
+    if (op.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA) {
+        validateCleanupEvidence(op.cleanupEvidence);
+        validateFailureDiagnostic(op.preSignFailure);
+    }
+    const evidence = op.cleanupEvidence ?? null, failure = op.preSignFailure ?? null;
+    const approvalStarted = ["approval_submission_started", "approval_submitted", "approval_unknown_finality"].includes(op.phase) || op.approvalAttempt !== null, swapStarted = ["submission_started", "submitted", "unknown_finality", "observed"].includes(op.phase), cleanupStarted = ["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase) || op.phase === "cleaned" && evidence === null;
     if (approvalStarted && op.allowanceAtPrepare === "0" && op.approvalAttempt === null || swapStarted && op.swapAttempt === null || cleanupStarted && op.cleanupAttempt === null)
         corrupt("Uniswap token attempt binding is invalid.");
+    const hashes = [op.approvalAttempt, op.swapAttempt, op.cleanupAttempt].some((row) => row?.transactionHash !== null && row?.transactionHash !== undefined);
+    if (evidence !== null && (op.phase !== "cleanup_required" && op.phase !== "cleaned" || op.cleanupReason !== "zero_allowance_no_effect" ||
+        op.accumulatedNativeDebitWei !== "0" || hashes || op.phase === "cleaned" && op.usageState !== "failed_before_effect"))
+        corrupt("Uniswap token no-effect cleanup evidence is invalid.");
+    if (failure !== null && op.phase !== "cleanup_required" && op.phase !== "cleaned")
+        corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
         corrupt("Uniswap token receipt phase is invalid.");
     if (op.receipt !== null)
@@ -68,7 +81,10 @@ export class UniswapTokenJournal extends SecureStateStore {
     path(id) { return `uniswap-token-operations/${id}.json`; }
 }
 export function transitionUniswapToken(opValue, phase, patch, now) {
-    const op = validateUniswapTokenOperation(opValue), { integrityHash, ...body } = op, nextBody = { ...body, ...patch, phase, updatedAt: instant(now), previousIntegrityHash: integrityHash };
+    const op = validateUniswapTokenOperation(opValue), { integrityHash, ...body } = op;
+    const upgraded = op.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA_V1
+        ? { ...body, schemaVersion: UNISWAP_TOKEN_OPERATION_SCHEMA, cleanupEvidence: null, preSignFailure: null } : body;
+    const nextBody = { ...upgraded, ...patch, phase, updatedAt: instant(now), previousIntegrityHash: integrityHash };
     return validateUniswapTokenOperation({ ...nextBody, integrityHash: hashObject(nextBody) });
 }
 export function tokenAttempt(op, kind, nonce, now) {
@@ -86,6 +102,22 @@ function attempt(v) {
     if (!isPlainRecord(v) || !exactKeys(v, ["markerHash", "markedAt", "nonce", "transactionHash", "attempts"]) || v.attempts !== 1 || !/^[a-f0-9]{64}$/u.test(v.markerHash) || !canonicalInstant(v.markedAt) || (v.transactionHash !== null && !/^0x[a-f0-9]{64}$/u.test(v.transactionHash)))
         corrupt("Uniswap token attempt is invalid.");
     uint(v.nonce);
+}
+function validateCleanupEvidence(v) {
+    if (v === null)
+        return;
+    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "source", "observedAllowanceAtomic", "observedAt"]) ||
+        v.schemaVersion !== "apn.uniswap-token-cleanup-evidence.v1" || v.kind !== "zero_allowance_no_effect" ||
+        !["current_allowance", "legacy_usage_reconciliation"].includes(v.source) || v.observedAllowanceAtomic !== "0" ||
+        !canonicalInstant(v.observedAt))
+        corrupt("Uniswap token cleanup evidence is invalid.");
+}
+function validateFailureDiagnostic(v) {
+    if (v === null)
+        return;
+    if (!isPlainRecord(v) || !exactKeys(v, ["code", "reason", "rpcMethod", "endpointRole", "phase"]) || !PHASES.includes(v.phase) ||
+        [v.code, v.reason, v.rpcMethod, v.endpointRole].some((field) => field !== null && (typeof field !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/u.test(field))))
+        corrupt("Uniswap token pre-sign diagnostic is invalid.");
 }
 function validateReceipt(v, op) {
     if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "operationId", "approvalGasWei", "swapGasWei", "cleanupGasWei", "nativeDebitWei", "inputDebitAtomic", "outputCreditAtomic", "residualAllowanceAtomic", "transactionHash", "observedAt", "receiptHash"]) || v.schemaVersion !== UNISWAP_TOKEN_RECEIPT_SCHEMA || v.operationId !== op.operationId || v.inputDebitAtomic !== op.route.amountIn || v.residualAllowanceAtomic !== "0" || v.nativeDebitWei !== op.accumulatedNativeDebitWei || !/^0x[a-f0-9]{64}$/u.test(v.transactionHash) || !canonicalInstant(v.observedAt))

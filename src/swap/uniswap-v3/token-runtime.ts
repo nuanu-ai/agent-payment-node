@@ -23,7 +23,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
     async quote(request: Extract<CommandRequest, {
         readonly command: "swap.uniswap-token.quote";
     }>) { const result = await this.builder.quote(request) as { readonly quoteHash: string };
-      if (this.rpcBudget !== undefined) { const reservation = await this.rpcBudget.reserve(result.quoteHash, request.command, 8);
+      if (this.rpcBudget !== undefined) { const reservation = await this.rpcBudget.reserve(result.quoteHash, request.command, 8, 8, "quote");
         await this.rpcBudget.settle(result.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); }
       return result; }
     async prepare(request: Prepare) {
@@ -36,7 +36,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
             blocked("Token quote expired.", "uniswap_token_quote_expired");
         const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
             quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
-        const reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, 9);
+        const reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, 9, 9, "prepare");
         try { await this.ports.confirm(material); }
         finally { if (reservation !== undefined) await this.rpcBudget!.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); }
         await this.rpcBudget?.linkQuote(request.quoteHash, operationId);
@@ -49,13 +49,15 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
             mechanismDigest: material.mechanismDigest, now: this.ports.now() }));
         await this.rpcBudget?.reconcile(operationId); return saved;
     }
-    async approve(id: string) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, async () => await this.execution.approve(id)); }
-    async execute(id: string) { const phase = (await this.journal.load(id))?.phase, beforeEffect = phase === "approved" || phase === "approval_observed";
-      return await this.budgeted(id, "swap.uniswap-token.execute", beforeEffect ? 24 : 0, async () => await this.execution.execute(id)); }
-    async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", 0, async () => await this.execution.status(id)); }
-    async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", 0, async () => await this.execution.cleanup(id)); }
-    private async budgeted<T>(id: string, command: string, cap: number, work: () => Promise<T>) { if (this.rpcBudget === undefined) return await work();
-      await this.rpcBudget.reconcile(id); const reservation = await this.rpcBudget.reserve(id, command, cap); try { return await work(); }
+    async approve(id: string) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, 14, "approval_effect", async () => await this.execution.approve(id)); }
+    async execute(id: string) { const phase = (await this.journal.load(id))?.phase;
+      const budget = phase === "approved" ? [14, 14, "approval_effect"] as const : phase === "approval_observed" ? [24, 24, "swap_effect"] as const : [0, 24, "recovery"] as const;
+      return await this.budgeted(id, "swap.uniswap-token.execute", budget[0], budget[1], budget[2], async () => await this.execution.execute(id)); }
+    async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", 0, 8, "recovery", async () => await this.execution.status(id)); }
+    async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", 0, 14, "recovery", async () => await this.execution.cleanup(id)); }
+    private async budgeted<T>(id: string, command: string, cap: number, requestSessionCap: number,
+      budgetClass: NonNullable<import("./token-rpc-budget.js").TokenRpcBudgetRow["budgetClass"]>, work: () => Promise<T>) { if (this.rpcBudget === undefined) return await work();
+      await this.rpcBudget.reconcile(id); const reservation = await this.rpcBudget.reserve(id, command, cap, requestSessionCap, budgetClass); try { return await work(); }
       finally { await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0); } }
 }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
