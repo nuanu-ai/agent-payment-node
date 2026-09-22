@@ -471,6 +471,7 @@ export declare const failureSchema: z.ZodObject<{
             canonical_transaction_membership: "canonical_transaction_membership";
             receipt_status: "receipt_status";
             receipt_sender_target: "receipt_sender_target";
+            receipt_log_membership: "receipt_log_membership";
             receipt_execution_fee_bounds: "receipt_execution_fee_bounds";
             bridge_block_reorg: "bridge_block_reorg";
             bridge_block_number: "bridge_block_number";
@@ -484,6 +485,7 @@ export declare const failureSchema: z.ZodObject<{
             destination_candidate_unresolved: "destination_candidate_unresolved";
             duplicate_destination_delivery: "duplicate_destination_delivery";
             destination_not_safe_success: "destination_not_safe_success";
+            destination_transaction_reverted: "destination_transaction_reverted";
             destination_trace_rebind: "destination_trace_rebind";
             request_deadline: "request_deadline";
             DNS_deadline: "DNS_deadline";
@@ -1066,6 +1068,7 @@ export declare const transitionSchema: z.ZodObject<{
                 canonical_transaction_membership: "canonical_transaction_membership";
                 receipt_status: "receipt_status";
                 receipt_sender_target: "receipt_sender_target";
+                receipt_log_membership: "receipt_log_membership";
                 receipt_execution_fee_bounds: "receipt_execution_fee_bounds";
                 bridge_block_reorg: "bridge_block_reorg";
                 bridge_block_number: "bridge_block_number";
@@ -1079,6 +1082,7 @@ export declare const transitionSchema: z.ZodObject<{
                 destination_candidate_unresolved: "destination_candidate_unresolved";
                 duplicate_destination_delivery: "duplicate_destination_delivery";
                 destination_not_safe_success: "destination_not_safe_success";
+                destination_transaction_reverted: "destination_transaction_reverted";
                 destination_trace_rebind: "destination_trace_rebind";
                 request_deadline: "request_deadline";
                 DNS_deadline: "DNS_deadline";
@@ -1771,6 +1775,7 @@ export declare const operationSchema: z.ZodObject<{
                     canonical_transaction_membership: "canonical_transaction_membership";
                     receipt_status: "receipt_status";
                     receipt_sender_target: "receipt_sender_target";
+                    receipt_log_membership: "receipt_log_membership";
                     receipt_execution_fee_bounds: "receipt_execution_fee_bounds";
                     bridge_block_reorg: "bridge_block_reorg";
                     bridge_block_number: "bridge_block_number";
@@ -1784,6 +1789,7 @@ export declare const operationSchema: z.ZodObject<{
                     destination_candidate_unresolved: "destination_candidate_unresolved";
                     duplicate_destination_delivery: "duplicate_destination_delivery";
                     destination_not_safe_success: "destination_not_safe_success";
+                    destination_transaction_reverted: "destination_transaction_reverted";
                     destination_trace_rebind: "destination_trace_rebind";
                     request_deadline: "request_deadline";
                     DNS_deadline: "DNS_deadline";
@@ -2043,6 +2049,7 @@ export declare const operationSchema: z.ZodObject<{
                 canonical_transaction_membership: "canonical_transaction_membership";
                 receipt_status: "receipt_status";
                 receipt_sender_target: "receipt_sender_target";
+                receipt_log_membership: "receipt_log_membership";
                 receipt_execution_fee_bounds: "receipt_execution_fee_bounds";
                 bridge_block_reorg: "bridge_block_reorg";
                 bridge_block_number: "bridge_block_number";
@@ -2056,6 +2063,7 @@ export declare const operationSchema: z.ZodObject<{
                 destination_candidate_unresolved: "destination_candidate_unresolved";
                 duplicate_destination_delivery: "duplicate_destination_delivery";
                 destination_not_safe_success: "destination_not_safe_success";
+                destination_transaction_reverted: "destination_transaction_reverted";
                 destination_trace_rebind: "destination_trace_rebind";
                 request_deadline: "request_deadline";
                 DNS_deadline: "DNS_deadline";

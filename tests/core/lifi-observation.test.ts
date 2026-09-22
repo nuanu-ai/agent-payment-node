@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Hex } from "../../src/model.js";
 import { bridgeReceipt } from "../../src/lifi/receipt.js";
 import { temporaryState } from "./helpers.js";
 import { LIFI_DESTINATION_HASH, lifiFixture } from "./lifi-helpers.js";
@@ -27,6 +26,7 @@ for (const status of ["not_found", "pending", "completed_observed", "partial_obs
     assert.equal(record.terminal, false); assert.equal(record.destinationProof, null);
     assert.equal(record.state, ["not_found", "pending", "completed_observed"].includes(status) ? "destination_pending" : "unknown_finality");
     assert.ok(record.effects.every((e) => e.phase === "safe_success")); assert.equal(s.source.submissions.length, 2);
+    assert.equal(s.destination.calls.includes("logs"), false);
     s.destination.destinationAvailable = true;
     const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
     assert.equal((resumed.operation as { state: string }).state, "completed"); assert.equal(s.source.submissions.length, 2);
@@ -37,48 +37,47 @@ test("LI.FI destination inclusion without safe finality remains pending and comp
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.destination.destinationSafe = false;
   const { id } = await s.prepare(); assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
   assert.equal((await s.core.bridges.records.findOperation(id))!.destinationProof, null);
+  assert.equal((await s.core.bridges.records.findOperation(id))!.state, "destination_pending");
+  assert.equal(s.destination.calls.includes("logs"), false);
   s.destination.destinationSafe = true;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
   const record = (await s.core.bridges.records.findOperation(id))!; assert.equal(record.state, "completed");
   assert.equal(record.destinationProof!.transactionHash, LIFI_DESTINATION_HASH); assert.equal(s.source.submissions.length, 2);
 });
 
-test("LI.FI Stargate cached delivery followed by a later retry scans all matching candidates", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.provider.hint = null;
-  const { id } = await s.prepare("stargateV2"); const cached = `0x${"cd".repeat(32)}` as Hex, block = await s.destination.block("2000");
-  s.destination.scanRows = [cached, LIFI_DESTINATION_HASH].map((transactionHash) => ({ transactionHash, blockNumberAtomic: "2000", blockHash: block.hash }));
-  const observe = s.destination.observe.bind(s.destination), candidates: Hex[] = [];
-  s.destination.observe = async (hash, envelope) => {
-    candidates.push(hash); const found = await observe(hash === cached ? LIFI_DESTINATION_HASH : hash, envelope);
-    return hash !== cached || found === null ? found : { ...found, receipt: { ...found.receipt, transactionHash: cached, logs: [] } };
-  };
-  const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  assert.equal((result.operation as { state: string }).state, "completed"); assert.deepEqual(candidates, [cached, LIFI_DESTINATION_HASH]);
-  assert.equal(s.destination.scanned.length, 1); assert.equal(s.destination.scanned[0]!.topics.length, 3);
-});
-
-test("LI.FI destination cursor advances by at most 1024 blocks and rejects a changed previous boundary", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.provider.hint = null;
-  const { id } = await s.prepare(); const block = s.destination.block.bind(s.destination);
-  s.destination.block = async (tag) => await block(tag === "safe" ? "6500" : tag);
-  assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  assert.equal((await s.core.bridges.records.findOperation(id))!.destinationScan.nextBlockAtomic, "3024");
+test("LI.FI safe reverted provider destination remains nonterminal and accepts a later replacement transaction", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
+  s.destination.destinationStatus = "reverted";
+  const { id } = await s.prepare();
+  const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, true, first.error?.message);
+  const reverted = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(reverted.state, "unknown_finality"); assert.equal(reverted.terminal, false); assert.equal(reverted.destinationProof, null);
+  assert.ok(reverted.usageLease); assert.equal(reverted.failure?.reason, "destination_observation_unavailable");
+  assert.deepEqual(reverted.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
+    stage: "destination_receipt", effectRole: "bridge", code: "APN_RPC_PROTOCOL",
+    reason: "destination_transaction_reverted", rpcMethod: "eth_getTransactionReceipt" });
+  const statusCalls = s.provider.statusCalls;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
-  const previous = (await s.core.bridges.records.findOperation(id))!; assert.equal(previous.destinationScan.nextBlockAtomic, "4048");
-  assert.deepEqual(s.destination.scanned.map((r) => [r.fromBlockAtomic, r.toBlockAtomic]), [["2000", "3023"], ["3024", "4047"]]);
-  s.destination.changedBlock = true;
-  const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "unknown_finality");
-  assert.deepEqual(current.destinationScan, previous.destinationScan); assert.equal(s.destination.scanned.length, 2);
+  const conflicted = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(s.provider.statusCalls, statusCalls + 1); assert.equal(conflicted.state, "unknown_finality");
+  assert.equal(conflicted.failure?.observationRpc?.reason, "destination_transaction_reverted");
+  assert.equal(conflicted.destinationProof, null); assert.equal(conflicted.usageLease?.reservationId, reverted.usageLease?.reservationId);
+
+  const replacement = `0x${"78".repeat(32)}` as const;
+  s.provider.hint = replacement; s.destination.destinationHash = replacement; s.destination.destinationStatus = "success";
+  const recovered = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(recovered.ok, true, recovered.error?.message);
+  const completed = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(completed.state, "completed"); assert.equal(completed.destinationProof?.transactionHash, replacement);
+  assert.equal(s.destination.calls.includes("logs"), false);
 });
 
-test("LI.FI unresolved destination candidates never advance the scan cursor", async (t) => {
+test("LI.FI waits without a provider-named destination transaction and preserves the legacy scan cursor", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.provider.hint = null;
-  const { id, operation } = await s.prepare(); s.destination.destinationAvailable = false;
-  s.destination.scanRows = [{ transactionHash: LIFI_DESTINATION_HASH, blockNumberAtomic: "2000", blockHash: (await s.destination.block("2000")).hash }];
+  const { id, operation } = await s.prepare("stargateV2");
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "unknown_finality");
+  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "destination_pending");
   assert.deepEqual(current.destinationScan, operation.destinationScan);
+  assert.equal(s.destination.calls.includes("logs"), false);
 });
 
 for (const role of ["approval", "bridge"] as const) test(`LI.FI included ${role} reorg preserves submitted identities and cannot complete`, async (t) => {
@@ -137,21 +136,22 @@ test("LI.FI source receipt protocol failures persist only allowlisted diagnostic
   for (const forbidden of [secret, endpoint, "password", "api_key", "provider body"]) assert.equal(persisted.includes(forbidden), false, forbidden);
 });
 
-test("LI.FI destination safe-head protocol failures persist bounded diagnostics", async (t) => {
+test("LI.FI exact destination receipt log failures persist bounded diagnostics without scanning", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   const { id } = await s.prepare(); s.destination.destinationAvailable = false;
   const initial = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(initial.ok, true, initial.error?.message);
-  s.provider.hint = null;
-  s.destination.block = async () => { throw new ApnError("APN_RPC_PROTOCOL", "unsafe raw response https://rpc.example/key", {
-    reason: "bridge_block_number", rpcMethod: "eth_getBlockByNumber", httpStatus: "999", attempts: "999",
+  s.destination.destinationAvailable = true;
+  s.destination.observe = async () => { throw new ApnError("APN_RPC_PROTOCOL", "unsafe raw response https://rpc.example/key", {
+    reason: "receipt_log_membership", rpcMethod: "eth_getTransactionReceipt", httpStatus: "999", attempts: "999",
     responseBody: "authorization: bearer secret",
   } as any); };
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
   const current = (await s.core.bridges.records.findOperation(id))!;
   assert.equal(current.failure?.reason, "destination_observation_unavailable");
   assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
-    stage: "destination_safe_head", effectRole: "bridge", code: "APN_RPC_PROTOCOL", reason: "bridge_block_number",
-    rpcMethod: "eth_getBlockByNumber" });
+    stage: "destination_receipt", effectRole: "bridge", code: "APN_RPC_PROTOCOL", reason: "receipt_log_membership",
+    rpcMethod: "eth_getTransactionReceipt" });
+  assert.equal(s.destination.calls.includes("logs"), false);
   const persisted = JSON.stringify(bridgeReceipt(current));
   for (const forbidden of ["rpc.example", "authorization", "bearer", "raw response"]) assert.equal(persisted.includes(forbidden), false, forbidden);
   assert.equal(persisted.includes("http_status"), false);

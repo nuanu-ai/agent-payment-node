@@ -11,12 +11,12 @@ const METHODS = new Set<BridgeObservationRpcMethod>([
 ]);
 const REASONS = new Set<BridgeObservationRpcReason>([
   "bridge_RPC_HTTP_status", "bridge_RPC_response", "receipt_transaction_membership",
-  "canonical_transaction_membership", "receipt_status", "receipt_sender_target",
+  "canonical_transaction_membership", "receipt_status", "receipt_sender_target", "receipt_log_membership",
   "receipt_execution_fee_bounds", "bridge_block_reorg", "bridge_block_number",
   "destination_log_range", "destination_log_count", "destination_log_identity",
   "destination_log_hash", "destination_scan_cursor_reorg", "destination_scan_membership",
   "destination_scan_reorg", "destination_candidate_unresolved", "duplicate_destination_delivery",
-  "destination_not_safe_success", "destination_trace_rebind", "request_deadline", "DNS_deadline",
+  "destination_not_safe_success", "destination_transaction_reverted", "destination_trace_rebind", "request_deadline", "DNS_deadline",
   "request_interrupted", "response_aborted", "response_interrupted",
 ]);
 

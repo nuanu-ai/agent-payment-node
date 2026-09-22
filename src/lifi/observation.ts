@@ -4,7 +4,7 @@ import { isEvmTransactionHash } from "../rail-status-binding.js";
 import type { BridgeDeploymentIdentity, BridgeDestinationTransactionProof, BridgeTransactionProof } from "./model.js";
 import { retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
-import { bridgeDestinationProof, bridgeSourceProof, destinationEventFilter, validateBnbFilledRelay } from "./protocol-evidence.js";
+import { bridgeDestinationProof, bridgeSourceProof, validateBnbFilledRelay } from "./protocol-evidence.js";
 import { bridgeProtocolEmitter } from "./deployments.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
 import { bridgeProviderBoundNativeDestination } from "./asset-registry.js";
@@ -119,17 +119,22 @@ export class BridgeObservation {
         if (outcome === "recovered_weth" || outcome === "below_floor" || outcome === "protocol_mismatch") return await this.finishDestinationFailure(op, outcome);
         return await this.save(op, { state: "unknown_finality", failure: { reason: "evidence_unavailable", residualAllowance: null } });
       } catch (error) {
+        if (error instanceof DestinationPending) return await this.waiting(op);
         if (error instanceof BnbProtocolMismatch) return await this.finishDestinationFailure(op, "protocol_mismatch");
         return await this.save(op, { state: "unknown_finality", failure: destinationObservationFailure("evidence_unavailable", error) });
       }
     }
-    // Only an EVM hash can address the EVM destination reader; a Solana hint falls through to the scan.
+    // Destination correlation is bound to the provider-named transaction and its canonical receipt logs.
     if (isEvmTransactionHash(hint)) {
       let proof: BridgeVerifiedDestinationProof | null = null;
-      try { proof = await this.destinationCandidate(op, hint); } catch { /* Scan the exact protocol correlation next. */ }
+      try { proof = await this.destinationCandidate(op, hint); }
+      catch (error) {
+        if (error instanceof DestinationPending) return await this.waiting(op);
+        return await this.save(op, { state: "unknown_finality", failure: destinationObservationFailure("destination_observation_unavailable", error) });
+      }
       if (proof !== null) return await this.finish(await this.save(op, { destinationProof: proof }));
     }
-    return await this.scan(op);
+    return await this.waiting(op);
   }
 
   async residual(op: BridgeOperationRecord) {
@@ -159,58 +164,26 @@ export class BridgeObservation {
         ? await destination.observe(transactionHash, undefined, nativeDelivery)
         : await destination.observeDestination(transactionHash, nativeDelivery);
     if (bnb) {
-      canonical = await observe(hash);
-      if (canonical === null || canonical.transaction.safeBlock === null || canonical.transaction.status !== "success") bridgeFailure("APN_RPC_PROTOCOL", "destination_not_safe_success");
+      canonical = requireSafeDestination(await observe(hash));
       await this.historicalDeployment(op, destination, canonical.transaction, op.intent.destinationDeployment);
       try { validateBnbFilledRelay(op.sourceProof!, op.intent.materialization, op.intent.decoded, canonical.receipt); }
       catch { throw new BnbProtocolMismatch(); }
     }
-    const found = await observe(hash, proveNativeDelta ? { recipient: request.recipient,
+    const found = requireSafeDestination(await observe(hash, proveNativeDelta ? { recipient: request.recipient,
       from: bnb ? BNB_COMPOSITE.executor : bridgeProtocolEmitter(request.toChainId, "across", request.toToken),
       ...(bnb ? { minimumAmountAtomic: op.intent.decoded.minimumOutputAtomic,
         composite: { message: op.intent.decoded.protocol.kind === "across" ? op.intent.decoded.protocol.message : "0x", call: op.intent.decoded.composite! } } : { amountAtomic: op.sourceProof!.correlation.kind === "across"
-        ? op.sourceProof!.correlation.outputAmountAtomic : op.intent.decoded.minimumOutputAtomic }) } : undefined);
-    if (found === null || found.transaction.safeBlock === null || found.transaction.status !== "success") bridgeFailure("APN_RPC_PROTOCOL", "destination_not_safe_success");
+        ? op.sourceProof!.correlation.outputAmountAtomic : op.intent.decoded.minimumOutputAtomic }) } : undefined));
     if (canonical !== null && (!bridgeSame(proofIdentity(canonical.transaction), proofIdentity(found.transaction)) ||
       !bridgeSame(canonical.receipt.logs, found.receipt.logs))) bridgeFailure("APN_RPC_PROTOCOL", "destination_trace_rebind");
     if (canonical === null) await this.historicalDeployment(op, destination, found.transaction, op.intent.destinationDeployment);
     let proof;
     try { proof = bridgeDestinationProof(op.sourceProof!, op.intent.materialization, op.intent.decoded, found.receipt); }
     catch (error) { if (bnb) throw new BnbProtocolMismatch(); throw error; }
-    return { ...proof, safeBlock: found.transaction.safeBlock, rpcOrigin: destination.origin,
+    const safeBlock = found.transaction.safeBlock;
+    if (safeBlock === null) throw new DestinationPending();
+    return { ...proof, safeBlock, rpcOrigin: destination.origin,
       transactionProofHash: hashObject(proofIdentity(found.transaction)) };
-  }
-  private async scan(op: BridgeOperationRecord): Promise<BridgeOperationRecord> {
-    let proof: BridgeVerifiedDestinationProof | null = null;
-    let destinationScan = op.destinationScan;
-    try {
-      const destination = this.destination();
-      const cursor = op.destinationScan;
-      if (cursor.previousEndBlock !== null && !bridgeSame(await destination.block(cursor.previousEndBlock.numberAtomic), cursor.previousEndBlock)) bridgeFailure("APN_RPC_PROTOCOL", "destination_scan_cursor_reorg");
-      const safe = await destination.block("safe"), start = BigInt(cursor.nextBlockAtomic);
-      if (BigInt(safe.numberAtomic) >= start) {
-      const end = BigInt(safe.numberAtomic) < start + 1023n ? BigInt(safe.numberAtomic) : start + 1023n;
-      const endBlock = await destination.block(end.toString()), filter = destinationEventFilter(op.sourceProof!, op.intent.materialization.request.toToken);
-      const logs = await destination.logs({ fromBlockAtomic: start.toString(), toBlockAtomic: end.toString(), ...filter });
-      const unique = [...new Map(logs.map((log) => [log.transactionHash, log])).values()];
-      let unresolvedCandidate = false;
-      for (const log of unique) {
-        let candidate: BridgeVerifiedDestinationProof;
-        try {
-          candidate = await this.destinationCandidate(op, log.transactionHash);
-          if (candidate.blockNumberAtomic !== log.blockNumberAtomic || candidate.blockHash !== log.blockHash) bridgeFailure("APN_RPC_PROTOCOL", "destination_scan_membership");
-        } catch { unresolvedCandidate = true; continue; }
-        if (proof !== null) bridgeFailure("APN_RPC_PROTOCOL", "duplicate_destination_delivery");
-        proof = candidate;
-      }
-      if (!bridgeSame(await destination.block(endBlock.numberAtomic), endBlock) ||
-        !bridgeSame(await destination.block(safe.numberAtomic), safe)) bridgeFailure("APN_RPC_PROTOCOL", "destination_scan_reorg");
-      if (proof === null && unresolvedCandidate) bridgeFailure("APN_RPC_PROTOCOL", "destination_candidate_unresolved");
-      destinationScan = { ...cursor, nextBlockAtomic: (end + 1n).toString(), previousEndBlock: endBlock };
-      }
-    } catch (error) { return await this.save(op, { state: "unknown_finality", failure: destinationObservationFailure("destination_observation_unavailable", error) }); }
-    if (proof !== null) return await this.finish(await this.save(op, { destinationProof: proof }));
-    return await this.waiting(await this.save(op, { destinationScan }));
   }
   private async waiting(op: BridgeOperationRecord): Promise<BridgeOperationRecord> {
     const provider = op.providerObservation?.status;
@@ -236,6 +209,7 @@ function destinationObservationFailure(reason: string, error: unknown) {
     ? { observationRpc: observationRpcFailure("destination", "bridge", error) } : {}) };
 }
 class BnbProtocolMismatch extends Error {}
+class DestinationPending extends Error {}
 export function replaceEffect(op: BridgeOperationRecord, effect: BridgeEffect): readonly BridgeEffect[] {
   return op.effects.map((e) => e.role === effect.role ? effect : e);
 }
@@ -246,5 +220,12 @@ function reusableProviderObservation(op: BridgeOperationRecord): boolean {
   if (op.sourceProof === null || bridge?.role !== "bridge" || bridge.phase !== "safe_success" ||
     bridge.transactionHash !== op.sourceProof.transactionHash || observation.responseHash === null ||
     !isEvmTransactionHash(observation.destinationTransactionHash)) bridgeFailure("APN_STATE_CORRUPT", "durable_bridge_provider_binding");
-  return true;
+  return op.failure?.observationRpc?.reason !== "destination_transaction_reverted";
+}
+function requireSafeDestination<T extends { readonly transaction: { readonly safeBlock: unknown | null; readonly status: "success" | "reverted" } }>(observation: T | null): T {
+  if (observation === null || observation.transaction.safeBlock === null) throw new DestinationPending();
+  if (observation.transaction.status === "reverted") bridgeFailure("APN_RPC_PROTOCOL", "destination_transaction_reverted", {
+    rpcMethod: "eth_getTransactionReceipt",
+  });
+  return observation;
 }

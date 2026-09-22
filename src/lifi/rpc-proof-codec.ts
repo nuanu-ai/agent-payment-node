@@ -28,7 +28,8 @@ export function parseReceiptLogs(value: unknown, hash: Hex, block: BridgeBlock, 
   return value.map((value) => {
     const l = evmRpcRecord(value), index = evmRpcQuantity(l.logIndex).toString();
     if (indices.has(index) || evmRpcHex(l.transactionHash, 32) !== hash || evmRpcHex(l.blockHash, 32) !== block.hash ||
-      evmRpcQuantity(l.blockNumber).toString() !== block.numberAtomic || evmRpcQuantity(l.transactionIndex) !== transactionIndex || l.removed !== false || !Array.isArray(l.topics) || l.topics.length > 4) bridgeFailure("APN_RPC_PROTOCOL", "receipt_log_membership");
+      evmRpcQuantity(l.blockNumber).toString() !== block.numberAtomic || evmRpcQuantity(l.transactionIndex) !== transactionIndex ||
+      l.removed !== undefined && l.removed !== false || !Array.isArray(l.topics) || l.topics.length > 4) bridgeFailure("APN_RPC_PROTOCOL", "receipt_log_membership");
     indices.add(index);
     return { address: evmRpcAddress(l.address), topics: l.topics.map((v) => evmRpcHex(v, 32)), data: bridgeHex(l.data, 64 * 1024, undefined, "APN_RPC_PROTOCOL") };
   });
