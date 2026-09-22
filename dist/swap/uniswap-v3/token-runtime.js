@@ -26,7 +26,7 @@ export class InstalledUniswapTokenRuntime {
     async quote(request) {
         const result = await this.builder.quote(request);
         if (this.rpcBudget !== undefined) {
-            const reservation = await this.rpcBudget.reserve(result.quoteHash, request.command, 8);
+            const reservation = await this.rpcBudget.reserve(result.quoteHash, request.command, 8, 8, "quote");
             await this.rpcBudget.settle(result.quoteHash, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
         }
         return result;
@@ -41,7 +41,7 @@ export class InstalledUniswapTokenRuntime {
             blocked("Token quote expired.", "uniswap_token_quote_expired");
         const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
             quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
-        const reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, 9);
+        const reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, 9, 9, "prepare");
         try {
             await this.ports.confirm(material);
         }
@@ -63,18 +63,19 @@ export class InstalledUniswapTokenRuntime {
         await this.rpcBudget?.reconcile(operationId);
         return saved;
     }
-    async approve(id) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, async () => await this.execution.approve(id)); }
+    async approve(id) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, 14, "approval_effect", async () => await this.execution.approve(id)); }
     async execute(id) {
-        const phase = (await this.journal.load(id))?.phase, beforeEffect = phase === "approved" || phase === "approval_observed";
-        return await this.budgeted(id, "swap.uniswap-token.execute", beforeEffect ? 24 : 0, async () => await this.execution.execute(id));
+        const phase = (await this.journal.load(id))?.phase;
+        const budget = phase === "approved" ? [14, 14, "approval_effect"] : phase === "approval_observed" ? [24, 24, "swap_effect"] : [0, 24, "recovery"];
+        return await this.budgeted(id, "swap.uniswap-token.execute", budget[0], budget[1], budget[2], async () => await this.execution.execute(id));
     }
-    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", 0, async () => await this.execution.status(id)); }
-    async cleanup(id) { return await this.budgeted(id, "swap.uniswap-token.cleanup", 0, async () => await this.execution.cleanup(id)); }
-    async budgeted(id, command, cap, work) {
+    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", 0, 8, "recovery", async () => await this.execution.status(id)); }
+    async cleanup(id) { return await this.budgeted(id, "swap.uniswap-token.cleanup", 0, 14, "recovery", async () => await this.execution.cleanup(id)); }
+    async budgeted(id, command, cap, requestSessionCap, budgetClass, work) {
         if (this.rpcBudget === undefined)
             return await work();
         await this.rpcBudget.reconcile(id);
-        const reservation = await this.rpcBudget.reserve(id, command, cap);
+        const reservation = await this.rpcBudget.reserve(id, command, cap, requestSessionCap, budgetClass);
         try {
             return await work();
         }

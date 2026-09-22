@@ -1,7 +1,8 @@
 import { SecureStateStore } from "../../secure-state-store.js";
 import type { AssetUsageState } from "../../asset-usage-ledger.js";
 import { type UniswapTokenRoute } from "./token-route.js";
-export declare const UNISWAP_TOKEN_OPERATION_SCHEMA: "apn.uniswap-token-operation.v1";
+export declare const UNISWAP_TOKEN_OPERATION_SCHEMA_V1: "apn.uniswap-token-operation.v1";
+export declare const UNISWAP_TOKEN_OPERATION_SCHEMA: "apn.uniswap-token-operation.v2";
 export declare const UNISWAP_TOKEN_RECEIPT_SCHEMA: "apn.uniswap-token-receipt.v1";
 export type UniswapTokenPhase = "prepared" | "approved" | "approval_submission_started" | "approval_submitted" | "approval_unknown_finality" | "approval_observed" | "submission_started" | "submitted" | "unknown_finality" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
 export interface TokenGasEnvelope {
@@ -30,8 +31,22 @@ export interface UniswapTokenReceipt {
     readonly observedAt: string;
     readonly receiptHash: string;
 }
+export interface UniswapTokenCleanupEvidence {
+    readonly schemaVersion: "apn.uniswap-token-cleanup-evidence.v1";
+    readonly kind: "zero_allowance_no_effect";
+    readonly source: "current_allowance" | "legacy_usage_reconciliation";
+    readonly observedAllowanceAtomic: "0";
+    readonly observedAt: string;
+}
+export interface UniswapTokenFailureDiagnostic {
+    readonly code: string | null;
+    readonly reason: string | null;
+    readonly rpcMethod: string | null;
+    readonly endpointRole: string | null;
+    readonly phase: UniswapTokenPhase;
+}
 export interface UniswapTokenOperation {
-    readonly schemaVersion: typeof UNISWAP_TOKEN_OPERATION_SCHEMA;
+    readonly schemaVersion: typeof UNISWAP_TOKEN_OPERATION_SCHEMA | typeof UNISWAP_TOKEN_OPERATION_SCHEMA_V1;
     readonly operationId: string;
     readonly profile: string;
     readonly account: string;
@@ -54,11 +69,13 @@ export interface UniswapTokenOperation {
     readonly swapAttempt: UniswapTokenAttempt | null;
     readonly cleanupAttempt: UniswapTokenAttempt | null;
     readonly cleanupReason: string | null;
+    readonly cleanupEvidence?: UniswapTokenCleanupEvidence | null;
+    readonly preSignFailure?: UniswapTokenFailureDiagnostic | null;
     readonly receipt: UniswapTokenReceipt | null;
     readonly previousIntegrityHash: string | null;
     readonly integrityHash: string;
 }
-export declare function newUniswapTokenOperation(input: Omit<UniswapTokenOperation, "schemaVersion" | "phase" | "createdAt" | "updatedAt" | "accumulatedNativeDebitWei" | "usageReservationId" | "usageState" | "approvalAttempt" | "swapAttempt" | "cleanupAttempt" | "cleanupReason" | "receipt" | "previousIntegrityHash" | "integrityHash"> & {
+export declare function newUniswapTokenOperation(input: Omit<UniswapTokenOperation, "schemaVersion" | "phase" | "createdAt" | "updatedAt" | "accumulatedNativeDebitWei" | "usageReservationId" | "usageState" | "approvalAttempt" | "swapAttempt" | "cleanupAttempt" | "cleanupReason" | "cleanupEvidence" | "preSignFailure" | "receipt" | "previousIntegrityHash" | "integrityHash"> & {
     readonly now: Date;
 }): UniswapTokenOperation;
 export declare function validateUniswapTokenOperation(value: unknown): UniswapTokenOperation;
