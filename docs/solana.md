@@ -1,6 +1,6 @@
 # Solana mainnet direct transfers
 
-This APN 0.5.24 package includes local SOL, canonical USDC and pinned USDT
+This APN 0.5.25 package includes local SOL, canonical USDC and pinned USDT
 transfers on Solana mainnet. Package availability, clean installation and live mainnet
 payment acceptance require separate evidence.
 
