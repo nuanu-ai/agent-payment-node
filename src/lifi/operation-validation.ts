@@ -1,6 +1,6 @@
 import { hashObject, sha256 } from "../canonical.js";
 import { decodeBridgeCall } from "./decode.js";
-import { bridgeApprovalPolicyHash, bridgeApprovalRequired, bridgeNativePrincipalWei } from "./economics.js";
+import { bridgeApprovalPolicyBinding, bridgeApprovalRequired, bridgeNativePrincipalWei } from "./economics.js";
 import { BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot, type BridgeEffect, type BridgeEffectPhase,
   type BridgeEffectSnapshot, type BridgeOperationRecord, type BridgeState, type BridgeTransition } from "./operation-model.js";
 import { legacyBridgeOperationSchema, operationSchema } from "./schema.js";
@@ -73,7 +73,7 @@ function validateIntent(op: BridgeOperationRecord, legacy: boolean): void {
     op.profileHash !== sha256(`profile\0${i.profile}`) || i.owner.address !== m.sender ||
     op.createdAt !== i.preparedAt || i.expiresAt <= i.preparedAt || Date.parse(i.expiresAt) - Date.parse(i.preparedAt) > 300_000 ||
     m.requestHash !== hashObject(r) || m.transactionDigest !== hashObject(m.transaction) ||
-    i.policyHash !== bridgeApprovalPolicyHash(m) ||
+    bridgeApprovalPolicyBinding(m, i.policyHash, i.preparedAt) === null ||
     op.requestHash !== hashObject({ profile: i.profile, quote: i.quoteHash, route: m.routeId })) bridgeCorrupt();
   if (!legacy) {
     const providerBoundNative = bridgeProviderBoundNativeDestination(r);

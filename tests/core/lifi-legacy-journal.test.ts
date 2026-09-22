@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
+import { BRIDGE_DEPLOYMENT_PROOF_POLICY_CUTOVER, bridgeApprovalPolicyBinding, legacyBridgeApprovalPolicyHash } from "../../src/lifi/economics.js";
 import { adaptLegacyBridgeOperation } from "../../src/lifi/legacy-operation.js";
-import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
-import { legacyBridgeReceipt } from "../../src/lifi/receipt.js";
+import { bridgeIntentBinding, type BridgeOperationRecord } from "../../src/lifi/operation-model.js";
+import { BridgeOperationRepository } from "../../src/lifi/operation-repository.js";
+import { bridgeReceipt, legacyBridgeReceipt } from "../../src/lifi/receipt.js";
+import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
 
@@ -47,6 +51,34 @@ async function installLegacyFixture(root: string, record: BridgeOperationRecord)
   await mkdir(dirname(operationPath), { recursive: true }); await mkdir(dirname(receiptPath), { recursive: true });
   await writeFile(operationPath, `${canonicalJson(raw)}\n`); await writeFile(receiptPath, `${canonicalJson(receipt)}\n`);
   return { raw, receipt, operationPath, receiptPath };
+}
+
+function preProofBindingFixture(record: BridgeOperationRecord, policyHash = legacyBridgeApprovalPolicyHash(record.intent.materialization)):
+  BridgeOperationRecord {
+  const raw = structuredClone(record) as BridgeOperationRecord;
+  (raw.intent as { policyHash: string }).policyHash = policyHash;
+  (raw as { fingerprint: string }).fingerprint = hashObject(bridgeIntentBinding(raw));
+  if (raw.approval !== null) (raw.approval as { fingerprint: string }).fingerprint = raw.fingerprint;
+  let previousHash = raw.fingerprint;
+  for (const transition of raw.transitions) {
+    if (transition.approval !== null) (transition.approval as { fingerprint: string }).fingerprint = raw.fingerprint;
+    (transition as { previousHash: string }).previousHash = previousHash;
+    const mutable = transition as BridgeOperationRecord["transitions"][number] & { transitionHash: string };
+    const { transitionHash: _old, ...body } = mutable;
+    mutable.transitionHash = hashObject(body); previousHash = mutable.transitionHash;
+  }
+  const mutable = raw as BridgeOperationRecord & { integrityHash: string };
+  const { integrityHash: _old, ...body } = mutable; mutable.integrityHash = hashObject(body);
+  return raw;
+}
+
+async function installPreProofBindingFixture(root: string, record: BridgeOperationRecord) {
+  const raw = preProofBindingFixture(record), validated = validateBridgeOperation(raw);
+  const operationPath = join(root, "bridge-operations", raw.profileHash, `${raw.operationId}.json`);
+  const receiptPath = join(root, "bridge-receipts", raw.profileHash, `${raw.operationId}.json`);
+  await mkdir(dirname(operationPath), { recursive: true }); await mkdir(dirname(receiptPath), { recursive: true });
+  await writeFile(operationPath, `${canonicalJson(raw)}\n`); await writeFile(receiptPath, `${canonicalJson(bridgeReceipt(validated))}\n`);
+  return { raw, operationPath, receiptPath };
 }
 
 test("legacy failed LI.FI journal stays readable and cannot be resumed, signed, sent, or hidden from new prepares", async (t) => {
@@ -121,4 +153,76 @@ test("legacy adapter rejects corrupt hashes and bindings, while upgraded records
   const stripped = downgradeFixture(upgradedPrepared.operation), path = join(upgradedRoot.root, "bridge-operations", stripped.profileHash, `${stripped.operationId}.json`);
   await writeFile(path, `${canonicalJson(stripped)}\n`);
   assert.equal((await upgraded.core.execute({ command: "operation.status", operationId: upgradedPrepared.id })).error?.code, "APN_STATE_CORRUPT");
+});
+
+test("pre-proof-binding operation loads across restart and can only use full fresh deployment validation", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "base-arb");
+  const prepared = await s.prepare("stargateV2", "pre-proof-binding-full-refresh");
+  await installPreProofBindingFixture(temporary.root, prepared.operation);
+  let retainedProofCalls = 0;
+  Object.assign(s.source, { refreshDeployment: async () => { retainedProofCalls += 1; throw new Error("retained proof forbidden"); } });
+  Object.assign(s.destination, { refreshDeployment: async () => { retainedProofCalls += 1; throw new Error("retained proof forbidden"); } });
+  s.approval.accepted = false;
+  const result = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+  assert.equal(result.ok, true, result.error?.message); assert.equal(retainedProofCalls, 0);
+  assert.equal((result.operation as { state: string }).state, "failed_before_effect"); assert.equal(s.source.submissions.length, 0);
+  const restarted = new BridgeOperationRepository(temporary.root), loaded = await restarted.findOperation(prepared.id);
+  assert.equal(loaded?.terminal, true); assert.equal(loaded?.state, "failed_before_effect");
+  assert.deepEqual(loaded?.effects.map((effect) => ({ attempts: effect.submissionAttempts, hash: effect.transactionHash })),
+    [{ attempts: 0, hash: null }, { attempts: 0, hash: null }]);
+});
+
+test("pre-proof-binding completed and unknown-finality records preserve effects and hashes on state roundtrip", async (t) => {
+  for (const state of ["completed", "unknown_finality"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await lifiFixture(temporary.root, "base-arb"); s.source.allowance = s.request.amountAtomic;
+    const prepared = await s.prepare("stargateV2", `pre-proof-binding-${state}`);
+    if (state === "unknown_finality") {
+      const send = s.source.send.bind(s.source);
+      s.source.send = async (raw) => { await send(raw); s.source.missingHashes.add(keccak256(raw)); throw new Error("synthetic timeout after acceptance"); };
+    }
+    await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+    const current = (await s.core.bridges.records.findOperation(prepared.id))!;
+    assert.equal(current.state, state);
+    await installPreProofBindingFixture(temporary.root, current);
+    const loaded = await new BridgeOperationRepository(temporary.root).findOperation(prepared.id);
+    assert.equal(loaded?.state, state); assert.equal(loaded?.terminal, state === "completed");
+    assert.deepEqual(loaded?.effects.map((effect) => ({ phase: effect.phase, attempts: effect.submissionAttempts, hash: effect.transactionHash })),
+      current.effects.map((effect) => ({ phase: effect.phase, attempts: effect.submissionAttempts, hash: effect.transactionHash })));
+  }
+});
+
+test("pre-proof-binding compatibility rejects an integrity-consistent unknown policy binding", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "base-arb"); const prepared = await s.prepare("stargateV2", "pre-proof-binding-tamper");
+  const raw = preProofBindingFixture(prepared.operation, "0".repeat(64));
+  const operationPath = join(temporary.root, "bridge-operations", raw.profileHash, `${raw.operationId}.json`);
+  await writeFile(operationPath, `${canonicalJson(raw)}\n`);
+  await assert.rejects(new BridgeOperationRepository(temporary.root).findOperation(prepared.id), { code: "APN_STATE_CORRUPT" });
+});
+
+test("pre-proof policy compatibility is strictly before the immutable merge cutover", async (t) => {
+  for (const [preparedAt, acceptsLegacy] of [
+    ["2026-09-22T05:46:59.999Z", true],
+    [BRIDGE_DEPLOYMENT_PROOF_POLICY_CUTOVER, false],
+    ["2026-09-22T05:47:00.001Z", false],
+  ] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await lifiFixture(temporary.root, "base-arb", { now: new Date(preparedAt) });
+    const prepared = await s.prepare("stargateV2", `proof-cutover-${preparedAt}`);
+    assert.equal(bridgeApprovalPolicyBinding(prepared.operation.intent.materialization, prepared.operation.intent.policyHash,
+      prepared.operation.intent.preparedAt), "deployment-proof-v1");
+    const raw = preProofBindingFixture(prepared.operation), operationPath = join(temporary.root, "bridge-operations",
+      raw.profileHash, `${raw.operationId}.json`);
+    await writeFile(operationPath, `${canonicalJson(raw)}\n`);
+    const before = await readFile(operationPath, "utf8"), calls = s.source.calls.length + s.destination.calls.length;
+    const submissions = s.source.submissions.length;
+    const status = await s.core.execute({ command: "operation.status", operationId: prepared.id });
+    assert.equal(status.ok, acceptsLegacy, preparedAt);
+    assert.equal(status.error?.code, acceptsLegacy ? undefined : "APN_STATE_CORRUPT", preparedAt);
+    assert.equal(s.source.calls.length + s.destination.calls.length, calls, `status must not issue RPC at ${preparedAt}`);
+    assert.equal(s.source.submissions.length, submissions, `status must not submit at ${preparedAt}`);
+    assert.equal(await readFile(operationPath, "utf8"), before, `status must not rewrite state at ${preparedAt}`);
+  }
 });
