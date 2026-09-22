@@ -57,6 +57,7 @@ export interface BridgeObservationRpcFailure {
     readonly rpcMethod?: BridgeObservationRpcMethod;
     readonly httpStatus?: number;
     readonly attempts?: number;
+    readonly endpointRole?: "primary" | "receipt" | "archive";
 }
 export type BridgeObservationRpcStage = "source_observation" | "source_transaction" | "source_receipt" | "source_included_block" | "source_safe_head" | "source_recheck" | "source_assert_chain" | "destination_observation" | "destination_transaction" | "destination_receipt" | "destination_included_block" | "destination_safe_head" | "destination_recheck" | "destination_assert_chain" | "destination_logs";
 export type BridgeObservationRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getLogs" | "eth_getBalance" | "eth_getCode" | "eth_getStorageAt" | "eth_call" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "debug_traceTransaction";
