@@ -3,10 +3,10 @@ import { ApnError } from "./errors.js";
 import { checkEvmTransferFunding } from "./evm-transfer-approval.js";
 import { parseAtomic } from "./money.js";
 import { requireFunding, validateBalance, validateEconomics } from "./transfer-policy.js";
-export async function checkTransferApproval(rpc, operation, failBeforeEffect) {
+export async function checkTransferApproval(rpc, operation, failBeforeEffect, stateRoot) {
     if (operation.evm !== undefined) {
         try {
-            await checkEvmTransferFunding(rpc, operation, true);
+            await checkEvmTransferFunding(rpc, operation, true, stateRoot);
         }
         catch (error) {
             if (error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED")

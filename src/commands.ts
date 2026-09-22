@@ -20,6 +20,15 @@ export type CommandRequest =
       readonly maxGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string }
   | { readonly command: "swap.uniswap.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
   | { readonly command: "swap.uniswap.status" | "swap.uniswap.approve" | "swap.uniswap.execute"; readonly operationId: string }
+  | { readonly command: "swap.uniswap-token.inventory" }
+  | { readonly command: "swap.uniswap-token.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
+      readonly sourceToken: string; readonly outputToken: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string;
+      readonly approvalCapAtomic: string; readonly deadline: number; readonly maxApprovalGasLimit: string; readonly maxSwapGasLimit: string;
+      readonly maxCleanupGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string;
+      readonly maxNativeDebitWei: string }
+  | { readonly command: "swap.uniswap-token.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
+  | { readonly command: "swap.uniswap-token.status" | "swap.uniswap-token.approve" | "swap.uniswap-token.execute" | "swap.uniswap-token.cleanup";
+      readonly operationId: string }
   | { readonly command: "swap.sunswap.inventory" }
   | { readonly command: "swap.sunswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
       readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly feeLimitSun: string; readonly deadline: number }

@@ -3,4 +3,4 @@ import type { RpcPort } from "./ports.js";
 export declare function checkTransferApproval(rpc: RpcPort, operation: OperationRecord & {
     readonly economics: Economics;
     readonly transactionData: Hex;
-}, failBeforeEffect: (reason: string) => Promise<never>): Promise<void>;
+}, failBeforeEffect: (reason: string) => Promise<never>, stateRoot?: string): Promise<void>;

@@ -4,6 +4,7 @@ import { directEvmNetwork } from "./evm-direct-networks.js";
 import type { Economics, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
 import { validateEconomics } from "./transfer-policy.js";
+import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
 
 function frozenEconomicsRemainExecutable(current: Economics, frozen: Economics): boolean {
   const freshMaximumFee = BigInt(current.maxFeePerGasAtomic);
@@ -16,7 +17,7 @@ function frozenEconomicsRemainExecutable(current: Economics, frozen: Economics):
     freshBaseFee <= BigInt(frozen.maxFeePerGasAtomic);
 }
 
-export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: OperationRecord, beforeSigning: boolean): Promise<void> {
+export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: OperationRecord, beforeSigning: boolean, stateRoot?: string): Promise<void> {
   const binding = operation.evm;
   if (binding === undefined || operation.economics === undefined) throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
   const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
@@ -33,7 +34,11 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
       rpc.nonce(operation.chainId, operation.walletAddress, "pending"),
       rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic)),
     ]);
-    const current = validateEconomics(nonce, fees);
+    let executableNonce = BigInt(nonce); if (operation.chainId === 1 && stateRoot !== undefined) {
+      const owned = new Set((await occupiedUniswapTokenNonces(stateRoot, operation.walletAddress)).map(String));
+      while (owned.has(executableNonce.toString())) executableNonce += 1n;
+    }
+    const current = validateEconomics(executableNonce.toString(), fees);
     if (!frozenEconomicsRemainExecutable(current, operation.economics)) {
       throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen nonce or transaction fee envelope is no longer executable before approval.");
     }
