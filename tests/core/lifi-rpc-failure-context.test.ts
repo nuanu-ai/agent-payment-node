@@ -18,7 +18,7 @@ test("LI.FI RPC transport ambiguity keeps only the JSON-RPC method", async () =>
   const rpc = bridgeRpcCall(1, { APN_ETHEREUM_RPC_URL: "https://rpc.example" }, { transport });
   await assert.rejects(rpc.call("eth_getCode", ["0x0000000000000000000000000000000000000000", "latest"]), (error: unknown) => {
     assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_RPC_AMBIGUOUS");
-    assert.deepEqual(error.details, { rpcMethod: "eth_getCode" });
+    assert.deepEqual(error.details, { rpcMethod: "eth_getCode", endpointRole: "primary" });
     assert.equal(JSON.stringify(error).includes(secret), false); assert.equal(error.message.includes(endpoint), false);
     return true;
   });

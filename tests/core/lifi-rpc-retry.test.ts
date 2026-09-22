@@ -31,7 +31,7 @@ test("repeated HTTP 408 preserves exact exhaustion evidence after two read retri
   await assert.rejects(rpc.call("eth_getTransactionReceipt", [`0x${"1".repeat(64)}`]), (error: unknown) => {
     assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_RPC_PROTOCOL");
     assert.match(error.message, /bridge_RPC_HTTP_status/u);
-    assert.deepEqual(error.details, { rpcMethod: "eth_getTransactionReceipt", httpStatus: "408", attempts: "2" });
+    assert.deepEqual(error.details, { rpcMethod: "eth_getTransactionReceipt", httpStatus: "408", attempts: "2", endpointRole: "primary" });
     return true;
   });
   assert.equal(f.calls, 2); assert.deepEqual(f.delays, [2_000]);
@@ -49,7 +49,7 @@ test("read-only HTTP 429 returns a typed cooldown without retry", async () => {
 test("permanent HTTP 4xx is not retried", async () => {
   const f = fixture([400, 200]);
   await assert.rejects(bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain(),
-    { code: "APN_RPC_PROTOCOL", details: { rpcMethod: "eth_chainId", httpStatus: "400", attempts: "1" } });
+    { code: "APN_RPC_PROTOCOL", details: { rpcMethod: "eth_chainId", httpStatus: "400", attempts: "1", endpointRole: "primary" } });
   assert.equal(f.calls, 1); assert.deepEqual(f.delays, []);
 });
 test("invalid JSON-RPC protocol evidence is not retried", async () => {
@@ -72,7 +72,7 @@ test("transient transport timeout retries reads and preserves exhaustion evidenc
     wait: async milliseconds => { delays.push(milliseconds); } });
   await assert.rejects(rpc.call("eth_getBlockByNumber", ["safe", false]), (error: unknown) => {
     assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_RPC_AMBIGUOUS");
-    assert.deepEqual(error.details, { rpcMethod: "eth_getBlockByNumber", attempts: "2", transportReason: "request_deadline" });
+    assert.deepEqual(error.details, { rpcMethod: "eth_getBlockByNumber", attempts: "2", transportReason: "request_deadline", endpointRole: "primary" });
     return true;
   });
   assert.equal(calls, 2); assert.deepEqual(delays, [2_000]);
