@@ -54,7 +54,7 @@ export declare class StargateTokenService {
         };
         approvalTransactionHash: `0x${string}` | null;
         residualAllowanceAtomic: string;
-        source: import("./token-execution.js").StargateTokenSourceReceipt;
+        source: import("./token-model.js").StargateTokenSourceReceipt;
         destination: StargateTokenDestinationEvidence;
         quoteLifecycle?: {
             ownerApprovedMinimumOutputAtomic: string;
@@ -98,7 +98,7 @@ export declare class StargateTokenService {
         options: `0x${string}`;
         executor: `0x${string}`;
         executorNativeCapAtomic: string;
-        policy: import("./token-execution.js").StargateTokenPolicyBinding;
+        policy: import("./token-model.js").StargateTokenPolicyBinding;
         finalityPolicy: import("./finality-policy.js").StargateV2RouteFinalityPolicy;
         quoteHash: string;
     }>>;
