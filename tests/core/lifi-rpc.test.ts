@@ -275,6 +275,76 @@ async function baseFeeFixture() {
   return { fixture, entries, block, receipt, observed, call };
 }
 
+async function baseApprovalObservation(mode: "success" | "missing" | "reverted" | "retry429" | "terminal429") {
+  const s = await rpcObservation(8453), fee = await baseFeeFixture();
+  Object.assign(s.receipt, { gasUsed: fee.receipt.gasUsed, effectiveGasPrice: fee.receipt.effectiveGasPrice,
+    l1Fee: fee.receipt.l1Fee, daFootprintGasScalar: fee.receipt.daFootprintGasScalar,
+    status: mode === "reverted" ? "0x0" : "0x1" });
+  const safe = { ...s.block, number: "0x7d1", hash: `0x${"cd".repeat(32)}`, transactions: [] };
+  let now = 0, limited = 0;
+  const calls: Array<{ readonly host: string; readonly rows: readonly Json[] }> = [];
+  const feeResult = (row: Json) => fee.entries.find((entry) => entry.request.method === row.method &&
+    canonicalJson(entry.request.params.slice(0, -1)).toLowerCase() === canonicalJson(row.params.slice(0, -1)).toLowerCase())?.result;
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    const request = JSON.parse(body!) as Json | Json[], rows = Array.isArray(request) ? request : [request], host = new URL(endpoint).host;
+    calls.push({ host, rows });
+    if (host === "base.drpc.org" && rows.some((row) => row.method === "eth_getCode") &&
+      (mode === "terminal429" || mode === "retry429" && limited === 0)) {
+      limited += 1; return { status: 429, body: "", headers: { "retry-after": "1" } };
+    }
+    const responses = rows.map((row) => {
+      let result: unknown;
+      if (row.method === "eth_chainId") result = "0x2105";
+      else if (row.method === "eth_getTransactionByHash") result = s.tx;
+      else if (row.method === "eth_getTransactionReceipt") result = mode === "missing" ? null : s.receipt;
+      else if (row.method === "eth_getBlockByNumber") result = row.params[0] === "safe" || row.params[0] === safe.number ? safe : s.block;
+      else result = feeResult(row);
+      assert.notEqual(result, undefined, `unexpected observation read ${row.method} ${canonicalJson(row.params)}`);
+      return { jsonrpc: "2.0", id: row.id, result };
+    });
+    return { status: 200, body: JSON.stringify(Array.isArray(request) ? responses : responses[0]) };
+  } };
+  const session = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 19, maxHttpAttempts: 21,
+    now: () => now, wait: async (milliseconds) => { now += milliseconds; } });
+  const rpc = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base-rpc.publicnode.com", APN_BASE_ARCHIVE_RPC_URL: "https://base.drpc.org",
+    APN_BASE_RECEIPT_RPC_URL: "https://mainnet.base.org" }, { transport, wait: async () => {} })(8453, session);
+  const expected = { role: "approval", chainId: 8453, from: s.rpc.from, to: s.rpc.to, data: s.rpc.input,
+    valueAtomic: BigInt(s.rpc.value).toString(), economics: { nonceAtomic: BigInt(s.rpc.nonce).toString(), gasLimitAtomic: BigInt(s.rpc.gas).toString(),
+      maxFeePerGasAtomic: BigInt(s.rpc.maxFeePerGas).toString(), maxPriorityFeePerGasAtomic: BigInt(s.rpc.maxPriorityFeePerGas).toString(),
+      maximumGasCostAtomic: (BigInt(s.rpc.gas) * BigInt(s.rpc.maxFeePerGas)).toString() } } as BridgeEnvelope;
+  return { s, calls, session, observe: async () => await rpc.observe(s.hash, expected) };
+}
+
+test("LI.FI Base approval observation completes safe with the exact 19-request graph and no resend", async () => {
+  const run = await baseApprovalObservation("success"), observed = await run.observe(); assert.ok(observed);
+  assert.equal(observed.transaction.status, "success"); assert.ok(observed.transaction.safeBlock);
+  assert.equal(run.session.telemetry().httpRequests, 19); assert.equal(run.session.telemetry().httpAttempts, 19);
+  assert.equal(run.calls.length, 19);
+  assert.deepEqual(Object.fromEntries(["base-rpc.publicnode.com", "mainnet.base.org", "base.drpc.org"].map((host) =>
+    [host, run.calls.filter((call) => call.host === host).length])),
+  { "base-rpc.publicnode.com": 4, "mainnet.base.org": 2, "base.drpc.org": 13 });
+  assert.deepEqual(run.calls.filter((call) => call.host === "mainnet.base.org").map((call) => call.rows.map((row) => row.method)),
+    [["eth_chainId"], ["eth_getTransactionReceipt"]]);
+  assert.ok(run.calls.filter((call) => call.host === "base.drpc.org").every((call) => call.rows.length <= 3));
+  assert.equal(run.calls.flatMap((call) => call.rows).some((row) => row.method === "eth_sendRawTransaction"), false);
+});
+
+test("LI.FI Base approval observation keeps missing, reverted and 429 outcomes bounded", async () => {
+  const missing = await baseApprovalObservation("missing"); assert.equal(await missing.observe(), null);
+  assert.equal(missing.session.telemetry().httpRequests, 4); assert.equal(missing.session.telemetry().httpAttempts, 4);
+  const reverted = await baseApprovalObservation("reverted"), revertedProof = await reverted.observe();
+  assert.equal(revertedProof?.transaction.status, "reverted"); assert.equal(reverted.session.telemetry().httpRequests, 19);
+  const retried = await baseApprovalObservation("retry429"), recovered = await retried.observe(); assert.ok(recovered);
+  assert.equal(retried.session.telemetry().httpRequests, 19); assert.equal(retried.session.telemetry().httpAttempts, 20);
+  const limited = await baseApprovalObservation("terminal429");
+  await assert.rejects(limited.observe(), (error: unknown) => error instanceof Error && (error as { code?: string }).code === "APN_RPC_RATE_LIMITED");
+  assert.equal(limited.session.telemetry().httpRequests, 8); assert.equal(limited.session.telemetry().httpAttempts, 9);
+  for (const run of [missing, reverted, retried, limited]) {
+    assert.equal(run.calls.flatMap((call) => call.rows).some((row) => row.method === "eth_sendRawTransaction"), false);
+    assert.ok(run.calls.filter((call) => call.host === "base.drpc.org").every((call) => call.rows.length <= 3));
+  }
+});
+
 test("LI.FI Base actual fee proves operator zero at receipt block and includes explicit L1 fee without counting DA footprint as a charge", async () => {
   const s = await baseFeeFixture(); assert.equal(s.receipt.operatorFeeScalar, undefined);
   const actual = await bridgeActualFees(8453, s.receipt, s.block, s.call);
