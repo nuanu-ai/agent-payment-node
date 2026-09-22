@@ -21,6 +21,7 @@ import { bindCircleCommand } from "./lifi/circle-command-catalog.js";
 import { bindGaslessCommand } from "./gasless/command-catalog.js";
 import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { bindUniswapCommand } from "./swap/uniswap-command-catalog.js";
+import { bindUniswapTokenCommand } from "./swap/uniswap-token-command-catalog.js";
 import { bindSunSwapCommand } from "./swap/sunswap-tron/command-catalog.js";
 import { bindJupiterCommand } from "./swap/jupiter-solana/command-catalog.js";
 import { bindOrcaCommand } from "./swap/orca-solana/command-catalog.js";
@@ -89,6 +90,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   }
   if (parsed.command.path[0] === "swap") {
     const path = parsed.command.path.join(" ");
+    if (path.startsWith("swap ethereum uniswap-token ")) return { request: bindUniswapTokenCommand(path, options) };
     if (path.startsWith("swap ethereum uniswap ")) return { request: bindUniswapCommand(path, options) };
     if (path.startsWith("swap tron sunswap ")) return { request: bindSunSwapCommand(path, options) };
     if (path.startsWith("swap solana jupiter ")) return { request: bindJupiterCommand(path, options) };
