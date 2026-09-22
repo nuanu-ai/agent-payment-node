@@ -125,6 +125,7 @@ test("LI.FI source observation errors replace stale projection with a bounded sa
   const receipt = bridgeReceipt(current) as ReturnType<typeof bridgeReceipt> & { observation_rpc_failure?: unknown };
   assert.deepEqual(receipt.observation_rpc_failure, { schema_version: "apn.bridge-observation-rpc-failure.v1",
     stage: "source_observation", effect_role: "approval", code: "APN_RPC_AMBIGUOUS" });
+  assert.equal(Object.hasOwn(receipt.observation_rpc_failure as object, "endpoint_role"), false);
   assert.doesNotThrow(() => validateBridgeOperation(current), "old v1 records without optional diagnostics still decode");
 });
 
@@ -134,19 +135,21 @@ test("LI.FI source receipt protocol failures persist only allowlisted diagnostic
   const secret = "sk-secret-do-not-persist", endpoint = "https://user:password@rpc.example/private?api_key=secret";
   s.source.observe = async () => { throw new ApnError("APN_RPC_PROTOCOL", `provider body ${secret} ${endpoint}`, {
     reason: "receipt_status", rpcMethod: "eth_getTransactionReceipt", httpStatus: "502", attempts: "2",
-    secret, endpoint,
+    endpointRole: "receipt", secret, endpoint, query: "api_key=secret", credentials: "user:password",
+    responseBody: `raw provider body ${secret}`,
   } as any); };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
   const current = (await s.core.bridges.records.findOperation(id))!;
   assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
     stage: "source_receipt", effectRole: "approval", code: "APN_RPC_PROTOCOL", reason: "receipt_status",
-    rpcMethod: "eth_getTransactionReceipt", httpStatus: 502, attempts: 2 });
+    rpcMethod: "eth_getTransactionReceipt", httpStatus: 502, attempts: 2, endpointRole: "receipt" });
   const projected = bridgeReceipt(current) as ReturnType<typeof bridgeReceipt> & { observation_rpc_failure?: unknown };
   assert.deepEqual(projected.observation_rpc_failure, { schema_version: "apn.bridge-observation-rpc-failure.v1",
     stage: "source_receipt", effect_role: "approval", code: "APN_RPC_PROTOCOL", reason: "receipt_status",
-    rpc_method: "eth_getTransactionReceipt", http_status: 502, attempts: 2 });
+    rpc_method: "eth_getTransactionReceipt", http_status: 502, attempts: 2, endpoint_role: "receipt" });
   const persisted = JSON.stringify({ operation: current, projected });
-  for (const forbidden of [secret, endpoint, "password", "api_key", "provider body"]) assert.equal(persisted.includes(forbidden), false, forbidden);
+  for (const forbidden of [secret, endpoint, "password", "api_key", "provider body", "raw provider body", "user:password"])
+    assert.equal(persisted.includes(forbidden), false, forbidden);
 });
 
 test("LI.FI exact destination receipt log failures persist bounded diagnostics without scanning", async (t) => {

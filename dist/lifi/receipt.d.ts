@@ -41,6 +41,7 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
     expires_at: string;
     next_actions: readonly string[];
     observation_rpc_failure?: {
+        endpoint_role?: "receipt" | "primary" | "archive";
         attempts?: number;
         http_status?: number;
         rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;
@@ -283,6 +284,7 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
     expires_at: string;
     next_actions: readonly string[];
     observation_rpc_failure?: {
+        endpoint_role?: "receipt" | "primary" | "archive";
         attempts?: number;
         http_status?: number;
         rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;
