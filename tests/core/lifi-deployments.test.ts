@@ -83,7 +83,7 @@ test("LI.FI Base and Arbitrum Stargate deployment proofs execute as one bounded 
   assert.equal(destination.session.telemetry().logicalItems, 26); // chain + safe header, then exact 24-item proof/recheck phase
 });
 
-test("LI.FI Base Stargate deployment sends the exact 33-item proof batch to the archive", async () => {
+test("LI.FI Base Stargate deployment sends sequential archive requests of at most three items", async () => {
   const capture = fixture.chains.find((chain) => chain.chainId === 8453)!;
   const values = new Map(capture.requests.map((entry) => [canonicalJson([entry.request.method, entry.request.params]), entry.response.result]));
   const requests: Array<{ host: string; items: Array<{ id: string; method: string; params: unknown[] }> }> = [];
@@ -95,14 +95,16 @@ test("LI.FI Base Stargate deployment sends the exact 33-item proof batch to the 
       return { jsonrpc: "2.0", id: item.id, result: structuredClone(values.get(key)) };
     })) };
   } };
-  const session = new RpcReadSession({ wait: async () => {} });
+  const session = new RpcReadSession({ maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
   const rpc = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base-primary.example", APN_BASE_ARCHIVE_RPC_URL: "https://base-archive.example" }, { transport, wait: async () => {} })(8453, session);
   await rpc.deployment("stargateV2", 42161, usdc(8453));
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 12);
   assert.equal(requests[0]!.host, "base-primary.example"); assert.equal(requests[0]!.items.length, 2);
-  assert.equal(requests[1]!.host, "base-archive.example"); assert.equal(requests[1]!.items.length, 33);
+  assert.ok(requests.slice(1).every((request) => request.host === "base-archive.example" && request.items.length <= 3));
+  assert.deepEqual(requests.slice(1).map((request) => request.items.length), [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
   assert.equal(requests[1]!.items[0]!.method, "eth_chainId");
-  assert.ok(requests[1]!.items.slice(1).every((item) => item.method === "eth_getCode" || item.method === "eth_getStorageAt" || item.method === "eth_call" || item.method === "eth_getBlockByNumber"));
+  assert.ok(requests.slice(1).flatMap((request) => request.items).slice(1)
+    .every((item) => item.method === "eth_getCode" || item.method === "eth_getStorageAt" || item.method === "eth_call" || item.method === "eth_getBlockByNumber"));
 });
 
 for (const chain of fixture.chains) {

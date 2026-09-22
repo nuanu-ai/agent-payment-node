@@ -63,7 +63,11 @@ export class BridgeService {
     async repairDeployment(operationId) {
         return await this.deploymentMigrationLocked(operationId, async (op) => {
             const raw = isLegacyBridgeOperation(op) ? op.raw : op;
-            const session = new RpcReadSession({ now: () => this.context.clock.now().getTime() });
+            // The recognized Base migration needs 29 clean HTTP requests: two seven-request observations,
+            // five Ethereum and eight Base deployment chunks, and two finality reads. Keep two request
+            // retries plus two additional attempt-only retries bounded inside the one repair command.
+            const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 31, maxHttpAttempts: 33,
+                archiveDeploymentBatchMaxItems: 3 });
             if (raw.operationId === BASE_DEPLOYMENT_MIGRATION_CANDIDATE.operationId) {
                 if (!isLegacyBridgeOperation(op)) {
                     const eligible = migrateBaseDeploymentOperation(raw);
@@ -139,7 +143,9 @@ export class BridgeService {
     }
     execution(op) {
         const d = this.dependencies(), m = op.intent.materialization;
-        const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 13, maxHttpAttempts: 13,
+        // The first token guard spends 24 requests: two safe heads, 11+9 Base/Arbitrum archive chunks and two account batches.
+        // Four later guards reuse immutable evidence and spend one mutable account/simulation batch each.
+        const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 28, maxHttpAttempts: 30,
             archiveDeploymentBatchMaxItems: 3 });
         const lazy = (chainId, options) => {
             let rpc;
