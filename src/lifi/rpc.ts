@@ -231,6 +231,7 @@ export function bridgeRpcFactory(environment: Readonly<Record<string, string | u
 export class BridgeRpc implements BridgeRpcPort {
   private readonly evm: EvmRpc;
   private readonly call: EvmRpcCall;
+  private readonly submit: EvmRpcCall;
   private readonly batchCall: ((items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>) | undefined;
   private commandLatestBlock?: BridgeBlock;
   private commandPrices?: Readonly<{ maxFeePerGasAtomic: string; maxPriorityFeePerGasAtomic: string }>;
@@ -240,6 +241,8 @@ export class BridgeRpc implements BridgeRpcPort {
     sessionCall?: (session: RpcReadSession) => EvmRpcCall,
     sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>) {
     bridgeChain(chainId); this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call);
+    this.submit = session === undefined || oneAttempt === undefined ? call :
+      async (method, params) => await submitDirect(method, params, (m, p) => oneAttempt(m, p));
     this.batchCall = session === undefined ? undefined : sessionBatchCall?.(session);
     this.evm = new EvmRpc(this.call, origin, 16 * 1024);
   }
@@ -575,7 +578,7 @@ export class BridgeRpc implements BridgeRpcPort {
   }
   async send(raw: Hex): Promise<Hex> {
     bridgeHex(raw, 16 * 1024, undefined, "APN_PROVIDER_EFFECT_UNAVAILABLE");
-    const hash = evmRpcHex(await this.call("eth_sendRawTransaction", [raw]), 32);
+    const hash = evmRpcHex(await this.submit("eth_sendRawTransaction", [raw]), 32);
     if (hash !== keccak256(raw)) bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
     return hash;
   }

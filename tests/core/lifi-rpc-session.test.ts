@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ApnError } from "../../src/errors.js";
 import { BridgeRpc, RpcProviderScheduler, RpcReadSession, bridgeRpcCall } from "../../src/lifi/rpc.js";
+import { RPC_READ_METHODS } from "../../src/lifi/rpc-session.js";
 import { rpcBlockValue, rpcFeeBlockValue } from "../../src/lifi/rpc-batch-codec.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 
@@ -145,13 +146,26 @@ test("provider-family pacing survives scheduler restart through its coordinator"
     work: (lastStart: number | null, saveStart: (value: number) => Promise<void>) => Promise<T>) =>
     await work(persisted, async (value) => { persisted = value; }) };
   const run = async (origin: string) => {
-    const session = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator), now: () => now,
+    const session = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
       wait: async (milliseconds) => { waits.push(milliseconds); now += milliseconds; } });
     await session.wrap(origin, 8453, async () => { calls += 1; return "0x1"; })("eth_chainId", []);
   };
   await run("https://base-rpc.publicnode.com");
   await run("https://arbitrum-one-rpc.publicnode.com");
   assert.equal(calls, 2); assert.deepEqual(waits, [750]); assert.equal(persisted, 10_750);
+});
+
+test("provider-family scheduler rejects a persisted wall-clock rollback before transport", async () => {
+  let calls = 0;
+  const coordinator = { coordinate: async <T>(_family: string,
+    work: (lastStart: number | null, saveStart: (value: number) => Promise<void>) => Promise<T>) =>
+    await work(10_000, async () => {}) };
+  const session = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => 9_999), now: () => 9_999, wait: async () => {} });
+  await assert.rejects(session.read("https://base-rpc.publicnode.com", 8453, "eth_chainId", [], async () => {
+    calls += 1; return "0x2105";
+  }), (error: unknown) => error instanceof ApnError && error.code === "APN_RPC_CONFIG" &&
+    error.details?.reason === "rpc_scheduler_clock_rollback");
+  assert.equal(calls, 0);
 });
 
 test("RPC session fails closed at unique call, attempt and deadline budgets", async () => {
@@ -238,6 +252,40 @@ test("raw transaction submission makes one attempt and bypasses session schedule
   const rpc = new BridgeRpc(8453, descriptor.origin, descriptor.call, new RpcReadSession(), descriptor.attempt);
   await assert.rejects(rpc.send("0x02"), { code: "APN_RPC_PROTOCOL" });
   assert.equal(calls, 1); assert.equal(new RpcReadSession().telemetry().totalAttempts, 0);
+});
+
+test("RPC read boundary rejects send, unknown, personal, admin, filter and subscription methods without transport", async () => {
+  let calls = 0;
+  const attempt = async () => { calls += 1; return "0x1"; };
+  const session = new RpcReadSession({ wait: async () => {} });
+  for (const method of ["eth_sendRawTransaction", "eth_unknownRead", "personal_sign", "admin_nodeInfo", "eth_newFilter", "eth_subscribe"]) {
+    await assert.rejects(session.read("https://rpc.example", 1, method, [], attempt),
+      (error: unknown) => error instanceof ApnError && error.code === "APN_RPC_PROTOCOL" && error.details?.reason === "bridge_RPC_read_method");
+  }
+  await assert.rejects(session.wrap("https://rpc.example", 1, attempt)("eth_sendRawTransaction", ["0x02"]),
+    (error: unknown) => error instanceof ApnError && error.details?.reason === "bridge_RPC_read_method");
+  assert.equal(calls, 0);
+});
+
+test("RPC mixed batch validates every read method before transport", async () => {
+  let calls = 0;
+  const attempt = async () => { calls += 1; return []; };
+  await assert.rejects(new RpcReadSession().readBatch("https://rpc.example", 1, [
+    { method: "eth_chainId", params: [], decoder: passthrough, batchAttempt: attempt },
+    { method: "eth_sendRawTransaction", params: ["0x02"], decoder: passthrough, batchAttempt: attempt },
+  ]), (error: unknown) => error instanceof ApnError && error.details?.reason === "bridge_RPC_read_method");
+  assert.equal(calls, 0);
+});
+
+test("RPC read allowlist admits every APN bridge observation, simulation, fee and state method", async () => {
+  const seen: string[] = [];
+  for (const method of RPC_READ_METHODS) {
+    const session = new RpcReadSession();
+    await session.read(`https://${method.toLowerCase()}.example`, 1, method, [], async (observed) => {
+      seen.push(observed); return "0x1";
+    });
+  }
+  assert.deepEqual(seen, [...RPC_READ_METHODS]);
 });
 
 const passthrough = (value: unknown) => value;

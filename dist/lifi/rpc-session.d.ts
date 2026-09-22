@@ -4,6 +4,8 @@ export declare const MAX_READ_ATTEMPTS = 2;
 export declare const RPC_RETRY_DELAY_MS = 2000;
 export declare const RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS = 3;
 export declare const RPC_BATCH_MAX_ITEMS = 33;
+export declare const RPC_READ_METHODS: readonly ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction"];
+export type RpcReadMethod = typeof RPC_READ_METHODS[number];
 export type RpcBatchAttempt = (canonicalBody: string) => Promise<unknown>;
 export interface RpcBatchReadItem<T = unknown> {
     readonly method: string;
@@ -60,10 +62,11 @@ export interface RpcProviderPacingCoordinator {
 /** Provider-family coordination. A coordinator can serialize starts and retain pacing across CLI processes. */
 export declare class RpcProviderScheduler {
     private readonly coordinator?;
+    private readonly pacingNow?;
     private readonly families;
     private readonly queue;
     private active;
-    constructor(coordinator?: RpcProviderPacingCoordinator | undefined);
+    constructor(coordinator?: RpcProviderPacingCoordinator | undefined, pacingNow?: (() => number) | undefined);
     schedule(origin: string, now: () => number, wait: (milliseconds: number) => Promise<void>, beforeWait: (milliseconds: number) => void, task: () => Promise<unknown>): Promise<unknown>;
     private pump;
     private run;

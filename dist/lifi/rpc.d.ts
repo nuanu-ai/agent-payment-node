@@ -35,6 +35,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
     readonly origin: string;
     private readonly evm;
     private readonly call;
+    private readonly submit;
     private readonly batchCall;
     private commandLatestBlock?;
     private commandPrices?;
