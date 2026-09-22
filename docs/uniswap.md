@@ -98,3 +98,39 @@ zero residual allowance. A reverted or drifted post-approval operation enters
 zero allowance cleanup. `status` observes and never signs or broadcasts.
 USDT's no-return approval behavior is accepted only when the call returns empty
 data; final allowance and finalized receipt evidence remain mandatory.
+
+### Token-lane public primary pool
+
+`APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS` may contain an ordered JSON array of one to
+three credential-free HTTPS Ethereum endpoints. Duplicate endpoint aliases,
+shared provider families, query credentials, and an archive that shares a
+primary origin are rejected. The setting affects only the guarded token-input
+lane. When it is absent, `APN_ETHEREUM_RPC_URL` keeps the previous single-primary
+behavior and request counts.
+
+Before signing, the lane sends the command's first full semantic batch to each
+candidate at most once. Transport deadlines, HTTP 429/5xx/authentication,
+malformed responses, wrong-chain responses, and missing capability put that
+opaque provider identity into a finite shared cooldown or quarantine. Partial
+responses never populate another provider's cache. The first fully decoded
+candidate is frozen for the command. Business reverts are terminal on that
+provider, and `eth_sendRawTransaction` has exactly one total attempt with no
+post-sign failover. Batches remain capped at three logical reads; there is no
+scalar fallback.
+
+When a pooled command signs, the selected opaque provider ID is stored with the
+encrypted raw effect and in token effect journal v2. Recovery resolves that
+exact ID even if the configured order changes. A removed, cooling, or mismatched
+provider blocks recovery before submission; an already signed effect never
+selects another candidate. Legacy journal v1 and wallet effects remain readable.
+Pooled legacy signed effects without a durable provider binding fail closed,
+while scalar recovery remains compatible.
+
+The distinct archive is independently chain-checked and must return the exact
+hash for the primary's numeric pinned block before historical state is used.
+Its anchor request is explicit in telemetry and budgets. With three primaries,
+the effect-bearing reservations are quote 11, prepare 12, approval 17, and swap
+24 physical attempts, totaling the durable operation ceiling of 64. Status and
+cleanup reserve no new cumulative effect budget but enforce request-session
+caps of 11 and 17. Durable telemetry stores only opaque provider IDs, finite
+outcome/reason enums, and counters.

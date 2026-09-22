@@ -4,7 +4,7 @@ import type { TokenEffectKind } from "./token-execution.js";
 import type { UniswapTokenOperation } from "./token-operation.js";
 export type TokenEffectPhase = "sealed" | "send_started" | "send_accepted" | "send_ambiguous";
 export interface TokenSignedEffect {
-    readonly schemaVersion: "apn.uniswap-token-effect.v1";
+    readonly schemaVersion: "apn.uniswap-token-effect.v1" | "apn.uniswap-token-effect.v2";
     readonly operationId: string;
     readonly kind: TokenEffectKind;
     readonly markerHash: string;
@@ -15,10 +15,11 @@ export interface TokenSignedEffect {
     readonly createdAt: string;
     readonly updatedAt: string;
     readonly integrityHash: string;
+    readonly primaryProviderId?: string | null;
 }
 export declare class UniswapTokenEffectJournal extends SecureStateStore {
     load(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<TokenSignedEffect | null>;
-    seal(op: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: Hex, envelope: object, now: Date): Promise<TokenSignedEffect>;
+    seal(op: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: Hex, envelope: object, now: Date, primaryProviderId?: string | null): Promise<TokenSignedEffect>;
     markStarted(op: UniswapTokenOperation, kind: TokenEffectKind, now: Date): Promise<TokenSignedEffect>;
     markOutcome(op: UniswapTokenOperation, kind: TokenEffectKind, phase: "send_accepted" | "send_ambiguous", now: Date): Promise<TokenSignedEffect>;
     private move;

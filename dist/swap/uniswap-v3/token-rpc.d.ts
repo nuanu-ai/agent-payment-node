@@ -2,6 +2,7 @@ import type { EvmRpcCall } from "../../evm-ports.js";
 import { BridgeHttps } from "../../lifi/https.js";
 import { type RpcReadTelemetry } from "../../lifi/rpc.js";
 import type { StateStore } from "../../state.js";
+import { type TokenPrimaryPoolTelemetry } from "./token-rpc-pool.js";
 export type TokenRpcRoute = "primary" | "archive" | "receipt";
 export interface TokenRpcItem {
     readonly method: string;
@@ -13,6 +14,11 @@ export type TokenRpcCall = EvmRpcCall & {
     readonly batch?: (route: TokenRpcRoute, items: readonly TokenRpcItem[]) => Promise<readonly unknown[]>;
     readonly telemetry?: () => RpcReadTelemetry | null;
     readonly effectAttempts?: () => number;
+    readonly primaryPoolTelemetry?: () => TokenPrimaryPoolTelemetry;
+    readonly primaryPoolEnabled?: () => boolean;
+    readonly primaryPoolSize?: () => number;
+    readonly selectedPrimaryProviderId?: () => string | null;
+    readonly bindPrimaryProvider?: (providerId: string | null) => Promise<void>;
 };
 export declare function tokenBatch(call: TokenRpcCall, route: TokenRpcRoute, items: readonly TokenRpcItem[]): Promise<readonly unknown[]>;
 export declare function tokenChain(value: unknown): unknown;
@@ -26,6 +32,7 @@ export declare function createTokenRpc(input: {
     readonly now: () => number;
     readonly maxHttpRequests: number;
     readonly deadlineMs: number;
+    readonly maxLogicalItems?: number;
     readonly transport?: Pick<BridgeHttps, "request">;
     readonly wait?: (milliseconds: number) => Promise<void>;
     readonly pacingNow?: () => number;
