@@ -3,6 +3,7 @@ import type { StateStore } from "../state.js";
 import type { BridgeRouteRequest } from "./model.js";
 import { BridgeOperationRepository } from "./operation-repository.js";
 import type { BridgeRpcFactory, LifiProviderPort } from "./ports.js";
+import { RpcProviderScheduler } from "./rpc.js";
 import { BridgeQuoteRepository } from "./quote-repository.js";
 import type { StoredBridgeOperationRecord } from "./legacy-operation.js";
 export interface BridgePreparationOptions {
@@ -13,6 +14,7 @@ export interface BridgePreparationOptions {
     readonly provider: LifiProviderPort;
     readonly rpcFor: BridgeRpcFactory;
     readonly now: () => number;
+    readonly providerScheduler?: RpcProviderScheduler;
 }
 export declare class BridgePreparation {
     private readonly o;

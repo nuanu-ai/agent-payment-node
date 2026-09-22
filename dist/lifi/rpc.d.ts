@@ -2,10 +2,10 @@ import type { BridgeChainId } from "./chains.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import { BridgeHttps } from "./https.js";
-import type { BridgeBlock, BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
+import type { BridgeBlock, BridgeDeploymentIdentity, BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 import type { BridgeRpcFactory, BridgeRpcPort } from "./ports.js";
 import { RpcReadSession, type RpcBatchReadItem } from "./rpc-session.js";
-export { RpcReadSession } from "./rpc-session.js";
+export { RpcProviderScheduler, RpcReadSession } from "./rpc-session.js";
 export type { RpcBatchReadItem, RpcReadSessionOptions, RpcReadTelemetry } from "./rpc-session.js";
 export declare function deploymentMulticallEligible(data: Hex): boolean;
 export declare const BRIDGE_RPC_ENV: {
@@ -44,6 +44,16 @@ export declare class BridgeRpc implements BridgeRpcPort {
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
     deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<{
+        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        peerChainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        tool: BridgeTool;
+        block: BridgeBlock;
+        rpcOrigin: string;
+        contractHash: string;
+        codeHash: string;
+        configurationHash: string;
+    }>;
+    refreshDeployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, frozen: BridgeDeploymentIdentity): Promise<{
         chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
         peerChainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
         tool: BridgeTool;

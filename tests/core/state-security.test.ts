@@ -136,6 +136,16 @@ test("stable kernel lock files remain in place after release", async (t) => {
   assert.equal((await readFile(lockPath(temporary.root, "stable-key"))).length, 0);
 });
 
+test("RPC provider pacing survives restart and malformed records fail closed", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const familyHash = sha256("rpc-provider-family\0publicnode.com"), first = new StateStore(temporary.root);
+  await first.initialize(); await first.writeRpcProviderPacing(familyHash, 12_345);
+  assert.equal(await new StateStore(temporary.root).loadRpcProviderPacing(familyHash), 12_345);
+  const path = join(temporary.root, "rpc-provider-pacing", `${familyHash}.json`);
+  await writeFile(path, JSON.stringify({ schemaVersion: "apn.rpc-provider-pacing.v1", familyHash, lastStartMs: "forged" }), { mode: 0o600 });
+  await assert.rejects(new StateStore(temporary.root).loadRpcProviderPacing(familyHash), { code: "APN_STATE_CORRUPT" });
+});
+
 test("a held kernel lock refuses a contender until the file handle closes", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);

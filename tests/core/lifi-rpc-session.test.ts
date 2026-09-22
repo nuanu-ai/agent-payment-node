@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ApnError } from "../../src/errors.js";
-import { BridgeRpc, RpcReadSession, bridgeRpcCall } from "../../src/lifi/rpc.js";
+import { BridgeRpc, RpcProviderScheduler, RpcReadSession, bridgeRpcCall } from "../../src/lifi/rpc.js";
 import { rpcBlockValue, rpcFeeBlockValue } from "../../src/lifi/rpc-batch-codec.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 
@@ -124,6 +124,36 @@ test("RPC session enforces per-origin pacing and two-origin global concurrency",
   assert.ok(waits.includes(750));
 });
 
+test("shared scheduler serializes sibling provider subdomains across sessions", async () => {
+  let now = 0, active = 0, maximum = 0;
+  const waits: number[] = [], scheduler = new RpcProviderScheduler();
+  const options = { providerScheduler: scheduler, now: () => now, wait: async (milliseconds: number) => { waits.push(milliseconds); now += milliseconds; } };
+  const base = new RpcReadSession(options).wrap("https://base-rpc.publicnode.com", 8453, async () => {
+    active += 1; maximum = Math.max(maximum, active); await Promise.resolve(); active -= 1; return "0x1";
+  });
+  const arbitrum = new RpcReadSession(options).wrap("https://arbitrum-one-rpc.publicnode.com", 42161, async () => {
+    active += 1; maximum = Math.max(maximum, active); await Promise.resolve(); active -= 1; return "0x1";
+  });
+  await Promise.all([base("eth_chainId", []), arbitrum("eth_chainId", [])]);
+  assert.equal(maximum, 1); assert.deepEqual(waits, [750]);
+});
+
+test("provider-family pacing survives scheduler restart through its coordinator", async () => {
+  let now = 10_000, persisted: number | null = null, calls = 0;
+  const waits: number[] = [];
+  const coordinator = { coordinate: async <T>(_family: string,
+    work: (lastStart: number | null, saveStart: (value: number) => Promise<void>) => Promise<T>) =>
+    await work(persisted, async (value) => { persisted = value; }) };
+  const run = async (origin: string) => {
+    const session = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator), now: () => now,
+      wait: async (milliseconds) => { waits.push(milliseconds); now += milliseconds; } });
+    await session.wrap(origin, 8453, async () => { calls += 1; return "0x1"; })("eth_chainId", []);
+  };
+  await run("https://base-rpc.publicnode.com");
+  await run("https://arbitrum-one-rpc.publicnode.com");
+  assert.equal(calls, 2); assert.deepEqual(waits, [750]); assert.equal(persisted, 10_750);
+});
+
 test("RPC session fails closed at unique call, attempt and deadline budgets", async () => {
   const one = new RpcReadSession({ maxUniqueCalls: 1 });
   const first = one.wrap("https://a.example", 1, async () => "0x1");
@@ -152,7 +182,7 @@ test("RPC session rejects the 65th representative unique read before HTTP", asyn
   assert.equal(calls, 64);
 });
 
-test("RPC session applies typed 429 cooldown and one retry for 408", async () => {
+test("RPC session honors Retry-After once for idempotent 429 and retains one retry for 408", async () => {
   let calls = 0; const waits: number[] = [];
   const transport = { request: async (_endpoint: string, _method: string, body: string) => {
     const request = JSON.parse(body) as { id: string };
@@ -163,8 +193,17 @@ test("RPC session applies typed 429 cooldown and one retry for 408", async () =>
   const descriptor = bridgeRpcCall(8453, { APN_BASE_RPC_URL: "https://base.example" }, { transport });
   const cooldown = new RpcReadSession({ wait: async (milliseconds) => { waits.push(milliseconds); } });
   const rpc = new BridgeRpc(8453, descriptor.origin, descriptor.call, cooldown, descriptor.attempt);
-  await assert.rejects(rpc.assertChain(), (error: unknown) => error instanceof ApnError && error.code === "APN_RPC_RATE_LIMITED" && error.details?.retryAfterMs === "5000");
-  assert.equal(calls, 1); assert.deepEqual(waits, []);
+  await rpc.assertChain();
+  assert.equal(calls, 2); assert.equal(waits[0], 5_000); assert.ok(waits[1]! >= 749 && waits[1]! <= 750);
+
+  calls = 0; const boundedWaits: number[] = [];
+  const alwaysLimited = { request: async () => { calls += 1; return { status: 429, body: "", headers: { "retry-after": "1" } }; } };
+  const limitedDescriptor = bridgeRpcCall(8453, { APN_BASE_RPC_URL: "https://limited.example" }, { transport: alwaysLimited });
+  const limited = new BridgeRpc(8453, limitedDescriptor.origin, limitedDescriptor.call,
+    new RpcReadSession({ wait: async (milliseconds) => { boundedWaits.push(milliseconds); } }), limitedDescriptor.attempt);
+  await assert.rejects(limited.assertChain(), (error: unknown) => error instanceof ApnError && error.code === "APN_RPC_RATE_LIMITED" &&
+    error.details?.retryAfterMs === "1000" && error.details?.httpAttempts === "2");
+  assert.equal(calls, 2); assert.equal(boundedWaits[0], 2_000); assert.ok(boundedWaits[1]! >= 749 && boundedWaits[1]! <= 750);
 
   calls = 0; const retryWaits: number[] = [];
   const retryTransport = { request: async (_endpoint: string, _method: string, body: string) => {
@@ -374,7 +413,7 @@ test("RPC batch enforces 33/96/8/10/deadline bounds and removes cached immutable
   assert.deepEqual(observedSizes, [1, 1]); assert.equal(cached.telemetry().cacheHits, 1);
 });
 
-test("whole RPC batch uses stable retry ids/body, treats 429 as one attempt and retries transient once", async () => {
+test("whole RPC batch uses stable retry ids/body and retries 429/503 once", async () => {
   for (const status of [400, 429, 503]) {
     let calls = 0; const bodies: string[] = [];
     const transport = { request: async (_endpoint: string, _method: string, body: string) => {
@@ -387,11 +426,10 @@ test("whole RPC batch uses stable retry ids/body, treats 429 as one attempt and 
     const item = { method: "eth_chainId", params: [], cachePolicy: "immutable" as const, decoder: canonicalQuantity };
     if (status === 400) await assert.rejects(batch([item]), (error: unknown) => error instanceof ApnError &&
       error.code === "APN_RPC_PROTOCOL" && error.details?.rpcMethod === "eth_chainId");
-    else if (status === 429) await assert.rejects(batch([item]), { code: "APN_RPC_RATE_LIMITED" });
     else assert.deepEqual(await batch([item]), [1n]);
-    assert.equal(calls, status === 503 ? 2 : 1); assert.equal(session.telemetry().httpRequests, 1);
-    assert.equal(session.telemetry().httpAttempts, status === 503 ? 2 : 1);
-    if (status === 503) assert.equal(bodies[0], bodies[1]);
+    assert.equal(calls, status === 400 ? 1 : 2); assert.equal(session.telemetry().httpRequests, 1);
+    assert.equal(session.telemetry().httpAttempts, status === 400 ? 1 : 2);
+    if (status !== 400) assert.equal(bodies[0], bodies[1]);
   }
 });
 

@@ -25,6 +25,7 @@ export declare class BridgeService {
     private readonly context;
     readonly records: BridgeOperationRepository;
     readonly operations: OperationService;
+    private readonly providerScheduler;
     constructor(context: RuntimeContext);
     inventory(): Promise<{
         schema_version: string;

@@ -23,6 +23,56 @@ export class RpcHttpFailure extends Error {
         this.retryAfterMs = retryAfterMs;
     }
 }
+/** Provider-family coordination. A coordinator can serialize starts and retain pacing across CLI processes. */
+export class RpcProviderScheduler {
+    coordinator;
+    families = new Map();
+    queue = [];
+    active = 0;
+    constructor(coordinator) {
+        this.coordinator = coordinator;
+    }
+    schedule(origin, now, wait, beforeWait, task) {
+        const family = rpcProviderFamily(origin);
+        return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, resolve, reject }); this.pump(); });
+    }
+    pump() {
+        while (this.active < 2) {
+            const index = this.queue.findIndex((entry) => !(this.families.get(entry.family)?.active ?? false));
+            if (index < 0)
+                return;
+            const entry = this.queue.splice(index, 1)[0], state = this.families.get(entry.family) ?? { active: false, lastStart: Number.NEGATIVE_INFINITY };
+            state.active = true;
+            this.families.set(entry.family, state);
+            this.active += 1;
+            void this.run(entry, state);
+        }
+    }
+    async run(entry, state) {
+        try {
+            const execute = async (persisted, saveStart) => {
+                const lastStart = Math.max(state.lastStart, persisted ?? Number.NEGATIVE_INFINITY), before = entry.now();
+                const delay = Math.max(0, lastStart + RPC_ORIGIN_GAP_MS - before);
+                entry.beforeWait(delay);
+                if (delay > 0)
+                    await entry.wait(delay);
+                const current = entry.now();
+                state.lastStart = current > before ? current : before;
+                await saveStart(state.lastStart);
+                return await entry.task();
+            };
+            entry.resolve(this.coordinator === undefined ? await execute(null, async () => { }) : await this.coordinator.coordinate(entry.family, execute));
+        }
+        catch (error) {
+            entry.reject(error);
+        }
+        finally {
+            state.active = false;
+            this.active -= 1;
+            this.pump();
+        }
+    }
+}
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export class RpcReadSession {
     maxLogicalItems;
@@ -32,12 +82,10 @@ export class RpcReadSession {
     now;
     wait;
     deadline;
+    providerScheduler;
     cache = new Map();
     inflight = new Map();
     batchInflight = new Map();
-    origins = new Map();
-    queue = [];
-    active = 0;
     logicalItems = 0;
     httpRequests = 0;
     httpAttempts = 0;
@@ -59,6 +107,7 @@ export class RpcReadSession {
         const deadlineMs = positiveBound(options.deadlineMs ?? RPC_DEFAULT_DEADLINE_MS, "deadlineMs");
         this.now = options.now ?? (() => Date.now());
         this.wait = options.wait ?? (async (milliseconds) => await new Promise((resolve) => setTimeout(resolve, milliseconds)));
+        this.providerScheduler = options.providerScheduler ?? new RpcProviderScheduler();
         const started = this.now();
         if (!Number.isFinite(started))
             throw new ApnError("APN_RPC_CONFIG", "RPC command clock is invalid.");
@@ -276,7 +325,7 @@ export class RpcReadSession {
                 const http = error instanceof RpcHttpFailure ? error : undefined, transport = approvedTransportReason(error);
                 // Archive deployment HTTP 500 commonly represents deterministic provider rejection (including an oversized batch).
                 // Replaying the identical chunk cannot change that shape; other bounded reads retain their existing retry contract.
-                const retryable = http !== undefined ? http.status === 408 || http.status >= 500 && http.status <= 599 &&
+                const retryable = http !== undefined ? http.status === 408 || http.status === 429 || http.status >= 500 && http.status <= 599 &&
                     (http.status !== 500 || retryHttp500) : transport !== undefined;
                 if (!retryable || attempt + 1 >= MAX_READ_ATTEMPTS) {
                     if (http !== undefined) {
@@ -300,41 +349,11 @@ export class RpcReadSession {
         }
     }
     schedule(originInput, task) {
-        const origin = rpcOriginIdentity(originInput);
         this.assertBeforeQueue("rpc");
-        return new Promise((resolve, reject) => { this.queue.push({ origin, task, resolve, reject }); this.pump(); });
-    }
-    pump() {
-        while (this.active < 2) {
-            const index = this.queue.findIndex((entry) => !(this.origins.get(entry.origin)?.active ?? false));
-            if (index < 0)
-                return;
-            const entry = this.queue.splice(index, 1)[0], state = this.origins.get(entry.origin) ?? { active: false, lastStart: Number.NEGATIVE_INFINITY };
-            state.active = true;
-            this.origins.set(entry.origin, state);
-            this.active += 1;
-            void this.runScheduled(entry, state);
-        }
-    }
-    async runScheduled(entry, state) {
-        try {
-            const before = this.now(), delay = Math.max(0, state.lastStart + RPC_ORIGIN_GAP_MS - before);
-            this.assertBeforeWait("rpc", delay);
-            if (delay > 0)
-                await this.wait(delay);
-            const now = this.now();
+        return this.providerScheduler.schedule(originInput, this.now, this.wait, (delay) => this.assertBeforeWait("rpc", delay), async () => {
             this.assertDeadline("rpc");
-            state.lastStart = Math.max(now, state.lastStart + RPC_ORIGIN_GAP_MS);
-            entry.resolve(await entry.task());
-        }
-        catch (error) {
-            entry.reject(error);
-        }
-        finally {
-            state.active = false;
-            this.active -= 1;
-            this.pump();
-        }
+            return await task();
+        });
     }
     assertBeforeAttempt(method) {
         this.assertDeadline(method);
@@ -369,6 +388,15 @@ export function rpcOriginIdentity(origin) { try {
 catch {
     return "invalid-origin";
 } }
+export function rpcProviderFamily(origin) {
+    try {
+        const hostname = new URL(origin).hostname.toLowerCase();
+        return hostname === "publicnode.com" || hostname.endsWith(".publicnode.com") ? "publicnode.com" : hostname;
+    }
+    catch {
+        return "invalid-origin";
+    }
+}
 export function rpcEndpointIdentity(endpoint) {
     try {
         const parsed = new URL(endpoint);

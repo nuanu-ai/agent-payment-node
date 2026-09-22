@@ -36,6 +36,8 @@ export interface RpcReadSessionOptions {
   readonly maxUniqueCalls?: number;
   readonly now?: () => number;
   readonly wait?: (milliseconds: number) => Promise<void>;
+  /** Shared by related commands so one provider family cannot be burst through separate sessions. */
+  readonly providerScheduler?: RpcProviderScheduler;
 }
 export interface RpcReadTelemetry {
   readonly logicalItems: number;
@@ -62,6 +64,57 @@ export class RpcHttpFailure extends Error {
   constructor(readonly method: string, readonly status: number, readonly retryAfterMs?: number) { super(`RPC HTTP ${status}`); }
 }
 
+interface ScheduledRpcRead {
+  readonly family: string;
+  readonly now: () => number;
+  readonly wait: (milliseconds: number) => Promise<void>;
+  readonly beforeWait: (milliseconds: number) => void;
+  readonly task: () => Promise<unknown>;
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: unknown) => void;
+}
+export interface RpcProviderPacingCoordinator {
+  coordinate<T>(family: string, work: (lastStart: number | null, saveStart: (value: number) => Promise<void>) => Promise<T>): Promise<T>;
+}
+
+/** Provider-family coordination. A coordinator can serialize starts and retain pacing across CLI processes. */
+export class RpcProviderScheduler {
+  private readonly families = new Map<string, { active: boolean; lastStart: number }>();
+  private readonly queue: ScheduledRpcRead[] = [];
+  private active = 0;
+  constructor(private readonly coordinator?: RpcProviderPacingCoordinator) {}
+
+  schedule(origin: string, now: () => number, wait: (milliseconds: number) => Promise<void>, beforeWait: (milliseconds: number) => void,
+    task: () => Promise<unknown>): Promise<unknown> {
+    const family = rpcProviderFamily(origin);
+    return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, resolve, reject }); this.pump(); });
+  }
+
+  private pump(): void {
+    while (this.active < 2) {
+      const index = this.queue.findIndex((entry) => !(this.families.get(entry.family)?.active ?? false));
+      if (index < 0) return;
+      const entry = this.queue.splice(index, 1)[0]!, state = this.families.get(entry.family) ?? { active: false, lastStart: Number.NEGATIVE_INFINITY };
+      state.active = true; this.families.set(entry.family, state); this.active += 1; void this.run(entry, state);
+    }
+  }
+
+  private async run(entry: ScheduledRpcRead, state: { active: boolean; lastStart: number }): Promise<void> {
+    try {
+      const execute = async (persisted: number | null, saveStart: (value: number) => Promise<void>) => {
+        const lastStart = Math.max(state.lastStart, persisted ?? Number.NEGATIVE_INFINITY), before = entry.now();
+        const delay = Math.max(0, lastStart + RPC_ORIGIN_GAP_MS - before);
+        entry.beforeWait(delay); if (delay > 0) await entry.wait(delay);
+        const current = entry.now(); state.lastStart = current > before ? current : before;
+        await saveStart(state.lastStart);
+        return await entry.task();
+      };
+      entry.resolve(this.coordinator === undefined ? await execute(null, async () => {}) : await this.coordinator.coordinate(entry.family, execute));
+    } catch (error) { entry.reject(error); }
+    finally { state.active = false; this.active -= 1; this.pump(); }
+  }
+}
+
 type RpcDecoder<T = unknown> = (value: unknown) => T;
 interface BatchExecution {
   readonly raw: readonly unknown[];
@@ -77,12 +130,10 @@ export class RpcReadSession {
   private readonly now: () => number;
   private readonly wait: (milliseconds: number) => Promise<void>;
   private readonly deadline: number;
+  private readonly providerScheduler: RpcProviderScheduler;
   private readonly cache = new Map<string, unknown>();
   private readonly inflight = new Map<string, Promise<unknown>>();
   private readonly batchInflight = new Map<string, Promise<BatchExecution>>();
-  private readonly origins = new Map<string, { active: boolean; lastStart: number }>();
-  private readonly queue: Array<{ origin: string; task: () => Promise<unknown>; resolve: (value: unknown) => void; reject: (error: unknown) => void }> = [];
-  private active = 0;
   private logicalItems = 0;
   private httpRequests = 0;
   private httpAttempts = 0;
@@ -106,6 +157,7 @@ export class RpcReadSession {
     const deadlineMs = positiveBound(options.deadlineMs ?? RPC_DEFAULT_DEADLINE_MS, "deadlineMs");
     this.now = options.now ?? (() => Date.now());
     this.wait = options.wait ?? (async (milliseconds) => await new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+    this.providerScheduler = options.providerScheduler ?? new RpcProviderScheduler();
     const started = this.now();
     if (!Number.isFinite(started)) throw new ApnError("APN_RPC_CONFIG", "RPC command clock is invalid.");
     this.deadline = started + deadlineMs;
@@ -309,7 +361,7 @@ export class RpcReadSession {
         const http = error instanceof RpcHttpFailure ? error : undefined, transport = approvedTransportReason(error);
         // Archive deployment HTTP 500 commonly represents deterministic provider rejection (including an oversized batch).
         // Replaying the identical chunk cannot change that shape; other bounded reads retain their existing retry contract.
-        const retryable = http !== undefined ? http.status === 408 || http.status >= 500 && http.status <= 599 &&
+        const retryable = http !== undefined ? http.status === 408 || http.status === 429 || http.status >= 500 && http.status <= 599 &&
           (http.status !== 500 || retryHttp500) : transport !== undefined;
         if (!retryable || attempt + 1 >= MAX_READ_ATTEMPTS) {
           if (http !== undefined) {
@@ -330,26 +382,10 @@ export class RpcReadSession {
     }
   }
   private schedule(originInput: string, task: () => Promise<unknown>): Promise<unknown> {
-    const origin = rpcOriginIdentity(originInput); this.assertBeforeQueue("rpc");
-    return new Promise((resolve, reject) => { this.queue.push({ origin, task, resolve, reject }); this.pump(); });
-  }
-  private pump(): void {
-    while (this.active < 2) {
-      const index = this.queue.findIndex((entry) => !(this.origins.get(entry.origin)?.active ?? false));
-      if (index < 0) return;
-      const entry = this.queue.splice(index, 1)[0]!, state = this.origins.get(entry.origin) ?? { active: false, lastStart: Number.NEGATIVE_INFINITY };
-      state.active = true; this.origins.set(entry.origin, state); this.active += 1; void this.runScheduled(entry, state);
-    }
-  }
-  private async runScheduled(entry: { origin: string; task: () => Promise<unknown>; resolve: (value: unknown) => void; reject: (error: unknown) => void },
-    state: { active: boolean; lastStart: number }): Promise<void> {
-    try {
-      const before = this.now(), delay = Math.max(0, state.lastStart + RPC_ORIGIN_GAP_MS - before);
-      this.assertBeforeWait("rpc", delay); if (delay > 0) await this.wait(delay);
-      const now = this.now(); this.assertDeadline("rpc"); state.lastStart = Math.max(now, state.lastStart + RPC_ORIGIN_GAP_MS);
-      entry.resolve(await entry.task());
-    } catch (error) { entry.reject(error); }
-    finally { state.active = false; this.active -= 1; this.pump(); }
+    this.assertBeforeQueue("rpc");
+    return this.providerScheduler.schedule(originInput, this.now, this.wait, (delay) => this.assertBeforeWait("rpc", delay), async () => {
+      this.assertDeadline("rpc"); return await task();
+    });
   }
   private assertBeforeAttempt(method: string): void {
     this.assertDeadline(method); if (this.httpAttempts >= this.maxHttpAttempts) this.budgetError(method, "maxHttpAttempts");
@@ -377,6 +413,12 @@ export class RpcReadSession {
 }
 
 export function rpcOriginIdentity(origin: string): string { try { return new URL(origin).origin; } catch { return "invalid-origin"; } }
+export function rpcProviderFamily(origin: string): string {
+  try {
+    const hostname = new URL(origin).hostname.toLowerCase();
+    return hostname === "publicnode.com" || hostname.endsWith(".publicnode.com") ? "publicnode.com" : hostname;
+  } catch { return "invalid-origin"; }
+}
 export function rpcEndpointIdentity(endpoint: string): string {
   try { const parsed = new URL(endpoint); return hashObject({ protocol: parsed.protocol, hostname: parsed.hostname.toLowerCase(), port: parsed.port, pathname: parsed.pathname }); }
   catch { return "invalid-endpoint"; }
