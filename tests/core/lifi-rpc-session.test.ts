@@ -227,6 +227,36 @@ test("dRPC Retry-After blocks concurrent sibling processes until shared cooldown
   await run(5_000, 5_000, "https://arbitrum.drpc.org/archive", 42161);
 });
 
+test("terminal second 429 extends shared dRPC cooldown without a third local attempt", async () => {
+  let now = 0, attempts = 0, siblingCalls = 0, persisted: number | null = null, cooldown: number | null = null;
+  const families: string[] = [], coordinator = { coordinate: async <T>(family: string,
+    work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
+      saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {
+    families.push(family); return await work(persisted, async (value) => { persisted = value; }, cooldown,
+      async (value) => { cooldown = value; });
+  } };
+  const base = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
+    wait: async (milliseconds) => { now += milliseconds; } });
+  await assert.rejects(base.read("https://base.drpc.org", 8453, "eth_chainId", [], async () => {
+    attempts += 1; throw new RpcHttpFailure("eth_chainId", 429, attempts === 1 ? undefined : 5_000);
+  }), (error: unknown) => error instanceof ApnError && error.code === "APN_RPC_RATE_LIMITED" &&
+    error.details?.httpAttempts === "2");
+  assert.equal(attempts, 2); assert.equal(now, 2_000); assert.equal(cooldown, 7_000);
+
+  let releaseSibling!: () => void;
+  const siblingGate = new Promise<void>((resolve) => { releaseSibling = resolve; }), siblingWaits: number[] = [];
+  const sibling = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
+    wait: async (milliseconds) => { siblingWaits.push(milliseconds); await siblingGate; } });
+  const siblingRead = sibling.read("https://ethereum.drpc.org", 1, "eth_chainId", [], async () => {
+    siblingCalls += 1; return "0x1";
+  });
+  while (siblingWaits.length === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(siblingCalls, 0); assert.deepEqual(siblingWaits, [5_000]);
+  now = 7_000; releaseSibling(); await siblingRead;
+  assert.equal(siblingCalls, 1); assert.equal(attempts, 2);
+  assert.deepEqual(families, ["drpc.org", "drpc.org", "drpc.org"]);
+});
+
 test("provider-family pacing survives scheduler restart through its coordinator", async () => {
   let now = 10_000, persisted: number | null = null, calls = 0;
   const waits: number[] = [];
