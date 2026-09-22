@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "apn.uniswap-token-live-recovery-fixture.v1",
+  "description": "Sanitized shape matching the 2026-09-23 zero-effect cleanup split brain.",
+  "operation": {
+    "schemaVersion": "apn.uniswap-token-operation.v1",
+    "operationId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "profile": "evm-live-buyer",
+    "account": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+    "route": {
+      "schemaVersion": "apn.uniswap-v3.swap-router.exact-input-single.v1",
+      "inputToken": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "outputToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "recipient": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+      "amountIn": "100000",
+      "amountOutMinimum": "99000",
+      "deadline": 1790110099,
+      "router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+      "pool": "0x3416cF6C708Da44DB2624D63ea0AAef7113527C6",
+      "fee": 100,
+      "calldata": "0x414bf389000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000064000000000000000000000000823a3a5bab1186141b32fc65f8e25ca24c679ce7000000000000000000000000000000000000000000000000000000006ab2e99300000000000000000000000000000000000000000000000000000000000186a000000000000000000000000000000000000000000000000000000000000182b80000000000000000000000000000000000000000000000000000000000000000",
+      "routeHash": "57b8c0d954731fb31381cebc33e3123e93e136302e0721a68be7a301f58cf949"
+    },
+    "approvalCapAtomic": "100000",
+    "allowanceAtPrepare": "0",
+    "approvalGas": {
+      "gasLimit": "80000",
+      "maxFeePerGas": "4000000000",
+      "maxPriorityFeePerGas": "1000000000"
+    },
+    "swapGas": {
+      "gasLimit": "250000",
+      "maxFeePerGas": "4000000000",
+      "maxPriorityFeePerGas": "1000000000"
+    },
+    "cleanupGas": {
+      "gasLimit": "80000",
+      "maxFeePerGas": "4000000000",
+      "maxPriorityFeePerGas": "1000000000"
+    },
+    "maximumNativeDebitWei": "1640000000000000",
+    "policyDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "mechanismDigest": "8888888888888888888888888888888888888888888888888888888888888888",
+    "phase": "cleanup_required",
+    "createdAt": "2026-09-22T20:25:52.223Z",
+    "updatedAt": "2026-09-22T20:25:52.223Z",
+    "accumulatedNativeDebitWei": "0",
+    "usageReservationId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "usageState": "reserved",
+    "approvalAttempt": {
+      "markerHash": "29abaf2320eaa4f243736d0a9550dec77f961d3a539a326df983d4ca6e793368",
+      "markedAt": "2026-09-22T20:25:52.223Z",
+      "nonce": "39",
+      "transactionHash": null,
+      "attempts": 1
+    },
+    "swapAttempt": null,
+    "cleanupAttempt": null,
+    "cleanupReason": "approval_pre_sign_failed",
+    "receipt": null,
+    "previousIntegrityHash": "4f45e8803cf56c5e02559a926f84326f2723f5f6d592c548d70dfcdc596d4d3d",
+    "integrityHash": "dfcca77aa5129d88a8d5a32cdac0577631d24d75dff2d7b00bd9f601bc3961a5"
+  },
+  "authoritativeUsage": {
+    "reservationId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "state": "failed_before_effect"
+  }
+}

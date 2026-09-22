@@ -109,7 +109,13 @@ export class UniswapTokenCustody {
         }
     }
     async probeSealed(op, kind, nonce) {
-        const envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelopeOf(op, kind, nonce))), wallet = await this.wallets.describe(op.profile);
+        const envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelopeOf(op, kind, nonce))), journaled = await this.effects.load(op, kind);
+        if (journaled !== null) {
+            if (journaled.envelopeHash !== envelopeHash)
+                corrupt("Uniswap token effect envelope changed.");
+            return { transactionHash: journaled.transactionHash, envelopeHash };
+        }
+        const wallet = await this.wallets.describe(op.profile);
         if (wallet === null)
             return null;
         try {

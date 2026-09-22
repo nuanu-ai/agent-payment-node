@@ -52,6 +52,7 @@ export declare class UniswapTokenExecution {
     constructor(journal: UniswapTokenJournal, ports: UniswapTokenExecutionPorts);
     approve(id: string): Promise<UniswapTokenOperation>;
     execute(id: string): Promise<UniswapTokenOperation>;
+    private advanceApproval;
     status(id: string): Promise<UniswapTokenOperation>;
     cleanup(id: string): Promise<UniswapTokenOperation>;
     private start;
@@ -63,6 +64,7 @@ export declare class UniswapTokenExecution {
     private cleaned;
     private cleanupRequired;
     private syncUsage;
+    private assertNoEffect;
     private required;
     private persist;
 }
