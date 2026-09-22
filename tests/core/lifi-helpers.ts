@@ -231,6 +231,7 @@ export class LifiTestRpc implements BridgeRpcPort {
 export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad" | "eth-bnb" = "eth-base", options: {
   now?: Date; wrapping?: LifiWrapping; provider?: LifiTestProvider; source?: LifiTestRpc; destination?: LifiTestRpc; initializeWallet?: boolean;
   rpcFor?: BridgeRpcFactory;
+  clockNow?: () => Date;
   maxNativeDebitWei?: string;
   policy?: false | { readonly maximumPerTransferAtomic?: string; readonly dailyLimitAtomic?: string;
     readonly provider?: string; readonly reference?: string };
@@ -275,7 +276,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
     return chain === source.chainId ? source : destination;
   };
   const dependencies = { provider, rpcFor: options.rpcFor ?? fakeRpcFor, custody, approval };
-  const core = new ApnCore({ state, bridge: dependencies, clock: { now: () => new Date(now) } });
+  const core = new ApnCore({ state, bridge: dependencies, clock: { now: options.clockNow ?? (() => new Date(now)) } });
   const native = a.fromToken.address === BRIDGE_ZERO_ADDRESS;
   const request: BridgeRouteRequest = { fromChainId: a.fromChainId, toChainId: a.toChainId, fromToken: a.fromToken.address, toToken: a.toToken.address,
     recipient: pair === "eth-linea" || pair === "eth-monad" || pair === "eth-bnb" ? LIFI_SYNTHETIC_SENDER : LIFI_RECIPIENT, amountAtomic: a.fromAmount, minOutputAtomic: native ? provider.steps[0]!.estimate.toAmountMin : "9000000",

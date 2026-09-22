@@ -5,8 +5,11 @@ import test from "node:test";
 import { ApnError } from "../../src/errors.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE as candidate, assertBaseDeploymentMigrationProof,
   migrateBaseDeploymentOperation, type BaseMigrationObservation } from "../../src/lifi/base-deployment-migration.js";
+import type { BridgeChainId } from "../../src/lifi/chains.js";
 import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
-import type { BridgeDeploymentIdentity } from "../../src/lifi/model.js";
+import type { BridgeDeploymentIdentity, BridgeTool } from "../../src/lifi/model.js";
+import type { BridgeRpcPort } from "../../src/lifi/ports.js";
+import { BridgeRpc, type RpcBatchReadItem, type RpcReadSession } from "../../src/lifi/rpc.js";
 import { validateBridgeOperation, validateLegacyBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { temporaryState } from "./helpers.js";
 import { lifiFixture } from "./lifi-helpers.js";
@@ -153,4 +156,61 @@ test("repair-deployment migrates the copied journal audit-first and is restart-i
   await writeFile(auditPath, `${JSON.stringify(forgedAudit)}\n`, { mode: 0o600 });
   const rejected = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
   assert.equal(rejected.ok, false); assert.equal(rejected.error?.code, "APN_STATE_CORRUPT");
+});
+
+test("repair-deployment fits its production 29-request BridgeRpc session shape with archive chunks capped at three", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const requests: Array<{ origin: string; route: "primary" | "archive"; items: Array<{ id: string; method: string; params: unknown[] }> }> = [];
+  let repairSession: RpcReadSession | undefined;
+  const shapeRpc = (chainId: BridgeChainId, session: RpcReadSession): BridgeRpcPort => {
+    const origin = chainId === 1 ? candidate.verifiedSourceDeployment.rpcOrigin : candidate.newDestinationDeployment.rpcOrigin;
+    const archiveOrigin = `${origin}/archive`;
+    const attempt = (route: "primary" | "archive") => async (body: string) => {
+      const parsed = JSON.parse(body) as { id: string; method: string; params: unknown[] } | Array<{ id: string; method: string; params: unknown[] }>;
+      const items = Array.isArray(parsed) ? parsed : [parsed]; requests.push({ origin: route === "archive" ? archiveOrigin : origin, route, items });
+      const response = items.map((item) => ({ jsonrpc: "2.0", id: item.id, result: "0x1" }));
+      return Array.isArray(parsed) ? response : response[0];
+    };
+    const read = async (route: "primary" | "archive", methods: readonly string[], archiveDeployment = false) => {
+      const transport = attempt(route), items = methods.map((method, index) => ({ method, params: [`0x${chainId.toString(16)}`, index, requests.length],
+        cachePolicy: "none" as const, decoder: (value: unknown) => value, batchAttempt: transport })) satisfies RpcBatchReadItem[];
+      return archiveDeployment ? await session.readArchiveDeploymentBatch(archiveOrigin, chainId, items) :
+        await session.readBatch(route === "archive" ? archiveOrigin : origin, chainId, items);
+    };
+    const rpc = new BridgeRpc(chainId, origin, async () => "0x1");
+    rpc.observe = async () => {
+      for (const methods of [["eth_chainId"], ["eth_getTransactionByHash"], ["eth_getTransactionReceipt"],
+        ["eth_getBlockByNumber"], ["eth_getBlockByNumber"], ["eth_call"]]) await read("primary", methods);
+      await read("archive", ["eth_chainId", "eth_getBlockByNumber", "eth_getBlockByNumber"]);
+      return await observation(chainId === 1 ? "source" : "destination");
+    };
+    rpc.deployment = async (_tool: BridgeTool) => {
+      await read("archive", Array.from({ length: chainId === 1 ? 15 : 23 }, (_, index) =>
+        index % 3 === 0 ? "eth_getCode" : index % 3 === 1 ? "eth_getStorageAt" : "eth_call"), true);
+      return chainId === 1 ? sourceDeployment : destinationDeployment;
+    };
+    rpc.block = async () => {
+      await read("primary", ["eth_getBlockByNumber"]);
+      return chainId === 1 ? sourceFinality : destinationFinality;
+    };
+    return rpc;
+  };
+  const rpcFor = (chainId: BridgeChainId, session?: RpcReadSession) => {
+    assert.ok(session); repairSession ??= session; assert.equal(session, repairSession); return shapeRpc(chainId, session);
+  };
+  const clockStart = Date.parse("2026-09-22T00:00:00.000Z"); let clockReads = 0;
+  const s = await lifiFixture(temporary.root, "eth-base", { initializeWallet: false, policy: false, rpcFor,
+    clockNow: () => new Date(clockStart + Math.floor(clockReads++ / 5) * 750) });
+  const old = await fixture(), id = old.operationId, profile = old.profileHash;
+  await mkdir(resolve(temporary.root, "bridge-operations", profile), { recursive: true, mode: 0o700 });
+  await mkdir(resolve(temporary.root, "bridge-receipts", profile), { recursive: true, mode: 0o700 });
+  await writeFile(resolve(temporary.root, "bridge-operations", profile, `${id}.json`), `${JSON.stringify(old)}\n`, { mode: 0o600 });
+  await writeFile(resolve(temporary.root, "bridge-receipts", profile, `${id}.json`), await readFile(fixturePath("deployment-receipt")), { mode: 0o600 });
+  const result = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
+  assert.equal(result.ok, true, JSON.stringify(result.error)); assert.equal((result.data as any).status, "migrated");
+  assert.ok(repairSession); assert.equal(repairSession.telemetry().httpRequests, 29);
+  assert.equal(repairSession.telemetry().httpAttempts, 29); assert.equal(repairSession.telemetry().remainingHttpRequests, 2);
+  const archive = requests.filter((request) => request.route === "archive");
+  assert.equal(requests.length, 29); assert.ok(archive.every((request) => request.items.length <= 3));
+  assert.deepEqual(archive.slice(2).map((request) => request.items.length), [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2]);
 });
