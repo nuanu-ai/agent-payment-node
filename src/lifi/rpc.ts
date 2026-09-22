@@ -49,9 +49,17 @@ export function deploymentMulticallEligible(data: Hex): boolean {
 const LINEA_TRACE_PROBE_TRANSACTION = "0x4352433956109d31ab50db9547f16bcb90f3545f793ed40f75716ccd9a360efd" as Hex;
 const MONAD_TRACE_PROBE_TRANSACTION = "0x9ff1560ef67d7253df2663b897452abe6644f6d6cb746743253822c264d13440" as Hex;
 export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 56: "APN_BNB_RPC_URL", 8453: "APN_BASE_RPC_URL", 143: "APN_MONAD_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" } as const;
+export interface BridgeRpcRequestTrace {
+  readonly origin: string;
+  readonly endpointRole: "primary" | "receipt" | "archive";
+  readonly methods: readonly string[];
+  readonly batchSize: number;
+}
 export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Record<string, string | undefined>>, options: {
   readonly transport?: Pick<BridgeHttps, "request">;
   readonly wait?: (milliseconds: number) => Promise<void>;
+  /** Optional read-only observation hook; called from the selected production route before each physical HTTP attempt. */
+  readonly onRequest?: (trace: BridgeRpcRequestTrace) => void;
 } = {}): { readonly origin: string; readonly call: EvmRpcCall; readonly attempt: EvmRpcCall; readonly sessionCall: (session: RpcReadSession) => EvmRpcCall;
   readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]> } {
   bridgeChain(chainId, "APN_RPC_CONFIG");
@@ -90,7 +98,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   };
   const assertArchiveChain = async (target: URL): Promise<void> => {
     if (archiveChain === undefined) archiveChain = (async () => {
-      if (evmRpcQuantity(await retryDirect("eth_chainId", [], () => oneAttempt(target, "eth_chainId", []), wait)) !== BigInt(chainId)) {
+      if (evmRpcQuantity(await retryDirect("eth_chainId", [], () => oneAttempt(target, "eth_chainId", [], undefined, "archive"), wait)) !== BigInt(chainId)) {
         bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
       }
     })();
@@ -98,7 +106,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   };
   const archiveRead = async (method: string, params: readonly unknown[], target: URL): Promise<unknown> => {
     await assertArchiveChain(target);
-    return await retryDirect(method, params, () => oneAttempt(target, method, params), wait);
+    return await retryDirect(method, params, () => oneAttempt(target, method, params, undefined, "archive"), wait);
   };
   const fallbackReceipt = async (method: string, params: readonly unknown[], target: BridgeReceiptEndpoint & {
     readonly role: "receipt" | "archive" }): Promise<unknown> => {
@@ -109,22 +117,26 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     return await retryDirect(method, params, async () => {
       let values: readonly unknown[];
       if (target.maxItemsPerRequest === 1) {
-        const chain = await oneAttempt(target.url, requests[0].method, requests[0].params);
+        const chain = await oneAttempt(target.url, requests[0].method, requests[0].params, undefined, target.role);
         await wait(750);
-        const result = await oneAttempt(target.url, requests[1].method, requests[1].params);
+        const result = await oneAttempt(target.url, requests[1].method, requests[1].params, undefined, target.role);
         values = [chain, result];
       } else {
-        values = decodeAtomicBatchResponse(await batchAttempt(target.url, canonicalJson(requests)), requests);
+        values = decodeAtomicBatchResponse(await batchAttempt(target.url, canonicalJson(requests), undefined, target.role), requests);
       }
       rpcFallbackChainValue(chainId, target.role)(values[0]);
       return rpcReceiptFallbackValue(params[0])(values[1]);
     }, wait);
   };
-  const oneAttempt = async (target: URL, method: string, params: readonly unknown[], now = Date.now()): Promise<unknown> => {
+  const oneAttempt = async (target: URL, method: string, params: readonly unknown[], now = Date.now(),
+    endpointRole: "primary" | "receipt" | "archive" = "primary"): Promise<unknown> => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
     const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
     let response: LifiResponse;
-    try { response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG"); }
+    try {
+      options.onRequest?.({ origin: target.origin, endpointRole, methods: [method], batchSize: 1 });
+      response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");
+    }
     catch (error) {
       if (error instanceof ApnError && error.code === "APN_RPC_AMBIGUOUS") throw error;
       throw error;
@@ -148,10 +160,16 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     if (!Object.hasOwn(r, "result")) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response", { rpcMethod: method });
     return r.result;
   };
-  const batchAttempt = async (target: URL, body: string, now = Date.now()): Promise<unknown> => {
+  const batchAttempt = async (target: URL, body: string, now = Date.now(),
+    endpointRole: "primary" | "receipt" | "archive" = "primary"): Promise<unknown> => {
     const rpcMethod = rpcBodyMethod(body);
     let response: LifiResponse;
-    try { response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG"); }
+    try {
+      const parsed = JSON.parse(body) as { method: string } | Array<{ method: string }>;
+      const rows = Array.isArray(parsed) ? parsed : [parsed];
+      options.onRequest?.({ origin: target.origin, endpointRole, methods: rows.map((row) => row.method), batchSize: rows.length });
+      response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");
+    }
     catch (error) { throw error; }
     if (response.status !== 200) throw new RpcHttpFailure(rpcMethod, response.status, parseRetryAfter(response.headers, now));
     return bridgeJson(response.body, 1024 * 1024);
@@ -166,9 +184,9 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     const fallback = route === "receipt" ? receiptFallback : null;
     if (route === "receipt" && fallback === null) missingHistoricalArchive();
     const target = route === "receipt" ? fallback!.url : route !== "primary" ? distinctArchive ?? missingHistoricalArchive() : endpoint;
-    const attempt: RpcBatchAttempt = async (body) => await batchAttempt(target, body, session.currentTime());
-    const bound = items.map((item) => ({ ...item, batchAttempt: attempt }));
     const role = route === "primary" ? "primary" : route === "receipt" ? fallback!.role : "archive";
+    const attempt: RpcBatchAttempt = async (body) => await batchAttempt(target, body, session.currentTime(), role);
+    const bound = items.map((item) => ({ ...item, batchAttempt: attempt }));
     return await withEndpointRole(route === "receipt"
       ? session.readReceiptBatch(target.toString(), chainId, bound, fallback!.maxItemsPerRequest)
       : route === "archive_deployment"
@@ -199,7 +217,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     }
     if (isHistoricalStateRead(method, params)) {
       if (distinctArchive === null) return missingHistoricalArchive();
-      const archiveAttempt = (m: string, p: readonly unknown[]) => oneAttempt(distinctArchive, m, p, session.currentTime());
+      const archiveAttempt = (m: string, p: readonly unknown[]) => oneAttempt(distinctArchive, m, p, session.currentTime(), "archive");
       return await withEndpointRole((async () => {
         const chain = await session.read(distinctArchive.toString(), chainId, "eth_chainId", [], archiveAttempt);
         if (evmRpcQuantity(chain) !== BigInt(chainId)) bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
@@ -213,6 +231,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
 export function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options: {
   readonly transport?: Pick<BridgeHttps, "request">;
   readonly wait?: (milliseconds: number) => Promise<void>;
+  readonly onRequest?: (trace: BridgeRpcRequestTrace) => void;
 } = {}): BridgeRpcFactory {
   const cache = new Map<BridgeChainId, { origin: string; call: EvmRpcCall; attempt: EvmRpcCall; sessionCall: (session: RpcReadSession) => EvmRpcCall; sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>; base?: BridgeRpcPort }>(), transport = options.transport ?? new BridgeHttps();
   return (chainId, session) => {
