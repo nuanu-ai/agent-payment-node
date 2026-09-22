@@ -16,25 +16,33 @@ async function fixture(root: string, allowance = "0") {
   const operation = await journal.save(newUniswapTokenOperation({ operationId: "a".repeat(64), profile: "token-swap", account: ACCOUNT, route,
     approvalCapAtomic: "1000000", allowanceAtPrepare: allowance, approvalGas: gas, swapGas: gas, cleanupGas: gas,
     maximumNativeDebitWei: "600000", policyDigest: domainHash("p", "p"), mechanismDigest: domainHash("m", "m"), now: NOW }));
-  const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance;
-  const ports = { now: () => NOW, foregroundApprove: async () => undefined, currentNonce: async () => String(7 + sends.length),
-    currentAllowance: async () => currentAllowance, submit: async (_op: unknown, kind: TokenEffectKind) => { sends.push(kind); return kind === "approval" ? H("1") : kind === "swap" ? H("2") : H("3"); },
+  const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance,
+    sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0;
+  const ports = { now: () => NOW, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
+    currentNonce: async () => String(7 + sends.length), currentAllowance: async () => currentAllowance, revalidate: async () => { revalidations += 1; },
+    seal: async (_op: unknown, kind: TokenEffectKind) => ({ transactionHash: kind === "approval" ? H("1") : kind === "swap" ? H("2") : H("3"), envelopeHash: "e".repeat(64) }),
+    send: async (_op: unknown, kind: TokenEffectKind) => { sends.push(kind); return sendResult; },
     observe: async (_op: unknown, _kind: TokenEffectKind, hash: string) => observations.get(hash) ?? null };
-  return { runtime: new UniswapTokenExecution(journal, ports), journal, operation, sends, observations, allowance: (v: string) => { currentAllowance = v; } };
+  return { runtime: new UniswapTokenExecution(journal, ports), journal, operation, sends, observations,
+    allowance: (v: string) => { currentAllowance = v; }, sendResult: (v: "accepted" | "ambiguous") => { sendResult = v; },
+    revalidations: () => revalidations };
 }
 test("exact approval then swap finalizes with zero allowance and bounded debit", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "approval_submitted"); assert.deepEqual(f.sends, ["approval"]);
   f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" }); f.allowance("1000000");
   op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "approval_observed"); op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "submitted");
   f.observations.set(H("2"), { status: "success", transactionHash: H("2"), gasDebitWei: "100", allowanceAtomic: "0", inputDebitAtomic: "1000000", outputCreditAtomic: "990000" }); f.allowance("0");
-  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "observed"); assert.equal(op.receipt?.residualAllowanceAtomic, "0"); assert.deepEqual(f.sends, ["approval", "swap"]);
+  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "observed"); assert.equal(op.receipt?.residualAllowanceAtomic, "0");
+  assert.equal(op.receipt?.nativeDebitWei, "200"); assert.deepEqual(f.sends, ["approval", "swap"]); assert.equal(f.revalidations(), 1);
   assert.equal((await new UniswapTokenJournal(temp.root).load(op.operationId))?.integrityHash, op.integrityHash);
 });
 test("ambiguous approval and swap are never resent after restart", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
-  let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "approval_submitted");
+  f.sendResult("ambiguous"); let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "approval_unknown_finality");
   const restarted = new UniswapTokenExecution(new UniswapTokenJournal(temp.root), { now: () => NOW, foregroundApprove: async () => undefined,
-    currentNonce: async () => "99", currentAllowance: async () => "0", submit: async () => { throw new Error("must not resend"); }, observe: async () => null });
-  op = await restarted.execute(op.operationId); assert.equal(op.phase, "approval_submitted"); assert.deepEqual(f.sends, ["approval"]);
+    foregroundCleanup: async () => undefined, currentNonce: async () => "99", currentAllowance: async () => "0", revalidate: async () => undefined,
+    seal: async () => { throw new Error("must not sign"); }, send: async () => { throw new Error("must not resend"); }, observe: async () => null });
+  op = await restarted.execute(op.operationId); assert.equal(op.phase, "approval_unknown_finality"); assert.deepEqual(f.sends, ["approval"]);
+  assert.equal(f.revalidations(), 0);
 });
 test("mismatched allowance refuses and reverted swap requires explicit cleanup", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup);
   await assert.rejects(fixture(temp.root, "2"), { code: "APN_STATE_CORRUPT" });
