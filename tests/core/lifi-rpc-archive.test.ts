@@ -23,6 +23,8 @@ function fixture(chainIds: Readonly<Record<string, string>> = {}, receipts: Read
 const primary = { APN_ETHEREUM_RPC_URL: "https://primary.example" };
 const withArchive = { ...primary, APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
 const DIAMOND = "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE";
+const TRANSACTION_HASH = `0x${"b".repeat(64)}`;
+const RECEIPT = { transactionHash: TRANSACTION_HASH, status: "0x1", blockNumber: "0x10", blockHash: `0x${"c".repeat(64)}` };
 
 test("block-pinned state uses archive while a successful exact-hash receipt read stays on primary", async () => {
   const f = fixture();
@@ -44,8 +46,8 @@ test("block-pinned state uses archive while a successful exact-hash receipt read
 });
 
 test("a null primary receipt falls back once through a chain-checked archive", async () => {
-  const f = fixture({}, { "primary.example": null, "archive.example": "archive-receipt" });
-  assert.equal(await bridgeRpcCall(1, withArchive, { transport: f.transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]), "archive-receipt");
+  const f = fixture({}, { "primary.example": null, "archive.example": RECEIPT });
+  assert.deepEqual(await bridgeRpcCall(1, withArchive, { transport: f.transport }).call("eth_getTransactionReceipt", [TRANSACTION_HASH]), RECEIPT);
   assert.deepEqual(f.calls, [
     { host: "primary.example", method: "eth_getTransactionReceipt" },
     { host: "archive.example", method: "eth_chainId" },
@@ -63,16 +65,107 @@ test("the exact Base PublicNode historical receipt capability response falls bac
       return { status: 403, body: "  Archive requests require a personal token  " };
     }
     const responses = requests.map((request) => ({ jsonrpc: "2.0", id: request.id,
-      result: request.method === "eth_chainId" ? "0x2105" : "archive-receipt" }));
+      result: request.method === "eth_chainId" ? "0x2105" : RECEIPT }));
     return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? responses : responses[0]) };
   } };
   const environment = { APN_BASE_RPC_URL: "https://base-rpc.publicnode.com:443/", APN_BASE_ARCHIVE_RPC_URL: "https://archive.example" };
-  assert.equal(await bridgeRpcCall(8453, environment, { transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]), "archive-receipt");
+  assert.deepEqual(await bridgeRpcCall(8453, environment, { transport }).call("eth_getTransactionReceipt", [TRANSACTION_HASH]), RECEIPT);
   assert.deepEqual(calls, [
     { host: "base-rpc.publicnode.com", method: "eth_getTransactionReceipt" },
     { host: "archive.example", method: "eth_chainId" },
     { host: "archive.example", method: "eth_getTransactionReceipt" },
   ]);
+});
+
+test("an explicit official Base receipt endpoint rejects arrays but completes the atomic receipt read as two paced scalars", async () => {
+  const bodies: unknown[] = [], waits: number[] = [];
+  const environment = { APN_BASE_RPC_URL: "https://base-rpc.publicnode.com",
+    APN_BASE_ARCHIVE_RPC_URL: "https://base-archive.example", APN_BASE_RECEIPT_RPC_URL: "https://mainnet.base.org" };
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    const parsed = JSON.parse(body!) as { id: string; method: string } | unknown[];
+    if (new URL(endpoint).host === "base-rpc.publicnode.com") return { status: 403, body: "archive requests require a personal token" };
+    bodies.push(parsed); assert.equal(Array.isArray(parsed), false, "official Base receipt endpoint rejects JSON-RPC arrays");
+    const request = parsed as { id: string; method: string };
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "eth_chainId" ? "0x2105" : RECEIPT }) };
+  } };
+  const descriptor = bridgeRpcCall(8453, environment, { transport });
+  const result = await descriptor.sessionCall(new RpcReadSession({ wait: async (milliseconds) => { waits.push(milliseconds); } }))
+    ("eth_getTransactionReceipt", [TRANSACTION_HASH]);
+  assert.deepEqual(result, RECEIPT);
+  assert.deepEqual(bodies.map((body) => (body as { method: string }).method), ["eth_chainId", "eth_getTransactionReceipt"]);
+  assert.deepEqual(waits, [750]);
+});
+
+test("receipt fallback cache is atomic when the second scalar decoder fails", async () => {
+  let receiptAttempts = 0; const receiptMethods: string[] = [];
+  const environment = { APN_BASE_RPC_URL: "https://primary.example", APN_BASE_ARCHIVE_RPC_URL: "https://archive.example",
+    APN_BASE_RECEIPT_RPC_URL: "https://mainnet.base.org" };
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    const request = JSON.parse(body!) as { id: string; method: string };
+    const host = new URL(endpoint).host;
+    if (host === "primary.example") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: null }) };
+    assert.equal(host, "mainnet.base.org"); receiptMethods.push(request.method);
+    if (request.method === "eth_getTransactionReceipt") receiptAttempts += 1;
+    const result = request.method === "eth_chainId" ? "0x2105" : receiptAttempts === 1 ? { ...RECEIPT, blockHash: "0xdeadbeef" } : RECEIPT;
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
+  } };
+  const descriptor = bridgeRpcCall(8453, environment, { transport });
+  const call = descriptor.sessionCall(new RpcReadSession({ wait: async () => {} }));
+  await assert.rejects(call("eth_getTransactionReceipt", [TRANSACTION_HASH]), { code: "APN_RPC_PROTOCOL" });
+  assert.deepEqual(await call("eth_getTransactionReceipt", [TRANSACTION_HASH]), RECEIPT);
+  assert.deepEqual(receiptMethods, ["eth_chainId", "eth_getTransactionReceipt", "eth_chainId", "eth_getTransactionReceipt"]);
+});
+
+test("wrong explicit receipt chain fails and state remains isolated on the archive endpoint", async () => {
+  const calls: Array<{ host: string; method: string }> = [];
+  const environment = { APN_ETHEREUM_RPC_URL: "https://primary.example", APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example",
+    APN_ETHEREUM_RECEIPT_RPC_URL: "https://receipt.example" };
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    const parsed = JSON.parse(body!) as { id: string; method: string } | Array<{ id: string; method: string }>;
+    const requests = Array.isArray(parsed) ? parsed : [parsed], host = new URL(endpoint).host;
+    for (const request of requests) calls.push({ host, method: request.method });
+    const responses = requests.map((request) => ({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "eth_chainId" ? host === "receipt.example" ? "0x2105" : "0x1"
+        : request.method === "eth_getTransactionReceipt" ? host === "primary.example" ? null : RECEIPT : "0x60" }));
+    return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? responses : responses[0]) };
+  } };
+  const descriptor = bridgeRpcCall(1, environment, { transport });
+  await descriptor.call("eth_getCode", [DIAMOND, "0x10"]);
+  await assert.rejects(descriptor.call("eth_getTransactionReceipt", [TRANSACTION_HASH]), { code: "APN_RPC_CONFIG", message: /bridge_receipt_RPC_chain/u });
+  assert.deepEqual(calls, [
+    { host: "archive.example", method: "eth_chainId" }, { host: "archive.example", method: "eth_getCode" },
+    { host: "primary.example", method: "eth_getTransactionReceipt" },
+    { host: "receipt.example", method: "eth_chainId" }, { host: "receipt.example", method: "eth_getTransactionReceipt" },
+  ]);
+});
+
+test("receipt route accepts only the exact ordered chain identity and canonical receipt pair before transport", async () => {
+  let receiptCalls = 0;
+  const environment = { ...withArchive, APN_ETHEREUM_RECEIPT_RPC_URL: "https://receipt.example" };
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    assert.equal(new URL(endpoint).host, "receipt.example"); receiptCalls += 1;
+    const requests = JSON.parse(body!) as Array<{ id: string; method: string }>;
+    assert.deepEqual(requests.map((item) => item.method), ["eth_chainId", "eth_getTransactionReceipt"]);
+    return { status: 200, body: JSON.stringify(requests.map((request) => ({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "eth_chainId" ? "0x1" : RECEIPT }))) };
+  } };
+  const batch = bridgeRpcCall(1, environment, { transport }).sessionBatchCall(new RpcReadSession({ wait: async () => {} }));
+  const item = (method: string, params: readonly unknown[]) => ({ method, params, cachePolicy: "none" as const, decoder: (value: unknown) => value });
+  const chain = item("eth_chainId", []), receipt = item("eth_getTransactionReceipt", [TRANSACTION_HASH]);
+  const rejected = [
+    [], [chain], [receipt], [receipt, chain], [chain, chain], [receipt, receipt], [chain, receipt, receipt],
+    [chain, item("eth_getLogs", [{}])], [chain, item("eth_getCode", [DIAMOND, "0x10"])],
+    [chain, item("eth_getBlockByNumber", ["latest", false])], [chain, item("eth_sendRawTransaction", ["0x02"])],
+    [item("eth_chainId", ["extra"]), receipt], [chain, item("eth_getTransactionReceipt", [TRANSACTION_HASH, "extra"])],
+    [chain, item("eth_getTransactionReceipt", ["0xdeadbeef"])],
+    [chain, item("eth_getTransactionReceipt", [`0x${"B".repeat(64)}`])],
+  ];
+  for (const shape of rejected) await assert.rejects(batch(shape, "receipt"),
+    { code: "APN_RPC_CONFIG", message: /bridge_receipt_RPC_method/u });
+  assert.equal(receiptCalls, 0);
+  assert.deepEqual(await batch([chain, receipt], "receipt"), ["0x1", RECEIPT]);
+  assert.equal(receiptCalls, 1);
 });
 
 test("the exact Ethereum PublicNode historical receipt capability response falls back only from its root origin", async () => {
@@ -83,11 +176,11 @@ test("the exact Ethereum PublicNode historical receipt capability response falls
     calls.push({ host, methods: requests.map((request) => request.method) });
     if (host === "ethereum-rpc.publicnode.com") return { status: 403, body: "archive requests require a personal token" };
     const responses = requests.map((request) => ({ jsonrpc: "2.0", id: request.id,
-      result: request.method === "eth_chainId" ? "0x1" : "archive-receipt" }));
+      result: request.method === "eth_chainId" ? "0x1" : RECEIPT }));
     return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? responses : responses[0]) };
   } };
   const environment = { APN_ETHEREUM_RPC_URL: "https://ethereum-rpc.publicnode.com/", APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
-  assert.equal(await bridgeRpcCall(1, environment, { transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]), "archive-receipt");
+  assert.deepEqual(await bridgeRpcCall(1, environment, { transport }).call("eth_getTransactionReceipt", [TRANSACTION_HASH]), RECEIPT);
   assert.deepEqual(calls, [
     { host: "ethereum-rpc.publicnode.com", methods: ["eth_getTransactionReceipt"] },
     { host: "archive.example", methods: ["eth_chainId", "eth_getTransactionReceipt"] },
@@ -154,10 +247,10 @@ test("an explicit pruned-history JSON-RPC error falls back without accepting arb
     if (host === "primary.example") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: requests[0]!.id,
       error: { code: -32000, message: "historical receipt unavailable: pruned data" } }) };
     const responses = requests.map((request) => ({ jsonrpc: "2.0", id: request.id,
-      result: request.method === "eth_chainId" ? "0x1" : "archive-receipt" }));
+      result: request.method === "eth_chainId" ? "0x1" : RECEIPT }));
     return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? responses : responses[0]) };
   } };
-  assert.equal(await bridgeRpcCall(1, withArchive, { transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]), "archive-receipt");
+  assert.deepEqual(await bridgeRpcCall(1, withArchive, { transport }).call("eth_getTransactionReceipt", [TRANSACTION_HASH]), RECEIPT);
   assert.deepEqual(calls, [
     { host: "primary.example", method: "eth_getTransactionReceipt" },
     { host: "archive.example", method: "eth_chainId" },
@@ -340,6 +433,8 @@ test("archive endpoints follow the bound RPC rules: public HTTPS and no query", 
     { code: "APN_RPC_CONFIG", message: /bridge_archive_RPC_query_forbidden/u });
   assert.throws(() => bridgeRpcCall(1, { ...primary, APN_ETHEREUM_ARCHIVE_RPC_URL: "http://archive.example" }), { code: "APN_RPC_CONFIG" });
   assert.throws(() => bridgeArchiveEndpoint(10 as never, { APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" }), { code: "APN_RPC_CONFIG" });
+  assert.throws(() => bridgeRpcCall(8453, { APN_BASE_RPC_URL: "https://primary.example",
+    APN_BASE_RECEIPT_RPC_URL: "https://mainnet.base.org/?key=secret" }), { code: "APN_RPC_CONFIG", message: /bridge_receipt_RPC_query_forbidden/u });
 });
 
 test("archive HTTP failures remain generic and do not leak the response body", async () => {
