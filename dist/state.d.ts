@@ -52,7 +52,5 @@ export declare class StateStore extends SecureStateStore {
     listX402Receipts(profileHash: string): Promise<readonly X402ReceiptRecord[]>;
     loadReceipt(profileHash: string, operationId: string): Promise<ReceiptRecord | null>;
     writeReceipt(profileHash: string, receipt: ReceiptRecord): Promise<void>;
-    private validateX402TerminalGraph;
-    private validateX402RecoveryReceiptAuthority;
     private operationProfiles;
 }
