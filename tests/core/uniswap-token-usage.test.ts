@@ -142,6 +142,40 @@ test("token and native custody share nonce ownership and preserve both encrypted
   new EncryptedWalletStore(new StateStore(temporary.root), native.wrapping).clear(restarted.secret);
 });
 
+test("native prepare skips a sealed token nonce after restart and both effects survive", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const native = evmCore(temporary.root), wallet = await ensureDirectWallet(native);
+  native.rpc.chainId = 1; native.rpc.sender = wallet.address; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; native.rpc.nonceAtomic = "7";
+  const token = operation("a".repeat(64), "6", wallet.address, "default"), journal = new UniswapTokenJournal(temporary.root);
+  await journal.save(token); const call = async (method: string) => { if (method === "eth_getTransactionCount") return "0x7"; throw new Error(method); };
+  const custody = new UniswapTokenCustody(native.state, native.wrapping, call, () => NOW), nonce = await custody.withAccountLock(token,
+    async () => await custody.allocateNonce(token, "approval")); assert.equal(nonce, "7");
+  const started = await journal.save(transitionUniswapToken(token, "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved",
+    approvalAttempt: tokenAttempt(token, "approval", nonce, NOW) }, NOW));
+  await custody.withAccountLock(started, async () => { await custody.seal(started, "approval", nonce); await custody.commitNonce(started, "approval", nonce); });
+  const restarted = evmCore(temporary.root, native.rpc, native.wrapping, native.approval), prepared = await restarted.core.transfer.prepare({ ...EVM_REQUEST,
+    asset: { chainId: 1, token: "native" }, amount: "0.000000000001", idempotencyKey: "token-owned-native-next-001" }) as { operation_id: string };
+  const record = await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id); assert.equal(record?.economics?.nonceAtomic, "8");
+  await restarted.core.transfer.approve(prepared.operation_id); const loaded = await new EncryptedWalletStore(restarted.state, native.wrapping).describe("default"); assert.ok(loaded);
+  assert.deepEqual(Object.values(loaded.secret.directEffects).map((effect) => Number(parseTransaction(effect.rawTransaction).nonce)).sort(), [7, 8]);
+  new EncryptedWalletStore(restarted.state, native.wrapping).clear(loaded.secret);
+});
+
+test("native pre-sign refuses when its frozen nonce becomes token-owned", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const native = evmCore(temporary.root), wallet = await ensureDirectWallet(native);
+  native.rpc.chainId = 1; native.rpc.sender = wallet.address; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; native.rpc.nonceAtomic = "7";
+  const prepared = await native.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" }, amount: "0.000000000001",
+    idempotencyKey: "native-token-conflict-001" }) as { operation_id: string };
+  const token = operation("a".repeat(64), "5", wallet.address, "default"), journal = new UniswapTokenJournal(temporary.root); await journal.save(token);
+  const store = new UniswapTokenNonceStore(temporary.root), noEffect = async () => false; assert.equal(await store.allocate(token, "approval", 7n, noEffect), "7");
+  const started = await journal.save(transitionUniswapToken(token, "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved",
+    approvalAttempt: tokenAttempt(token, "approval", "7", NOW) }, NOW));
+  const call = async (method: string) => { if (method === "eth_getTransactionCount") return "0x7"; throw new Error(method); };
+  const custody = new UniswapTokenCustody(native.state, native.wrapping, call, () => NOW);
+  await custody.withAccountLock(started, async () => { await custody.seal(started, "approval", "7"); await custody.commitNonce(started, "approval", "7"); });
+  await assert.rejects(native.core.transfer.approve(prepared.operation_id), { code: "APN_REPREPARE_REQUIRED" });
+  assert.equal(native.rpc.submissions.length, 0);
+});
+
 test("token USDT behavior pins reject deprecated and fee-bearing state", async () => {
   const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
   const verify = async (values: readonly bigint[]) => { let index = 0;
