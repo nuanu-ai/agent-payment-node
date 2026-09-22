@@ -31,13 +31,18 @@ export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
   async settle(binding: string, reservation: string, telemetry: RpcReadTelemetry | null, effects: number): Promise<void> {
     stateIdentifier(binding, "Uniswap token RPC binding");
     await this.withLocks([`uniswap-token-rpc-budget:${binding}`], async () => { const current = await this.load(binding);
-      if (current === null) corrupt(); let found = false;
-      const rows = current.rows.map((row) => row.reservation !== reservation ? row : (found = true, {
-        ...row, physicalRequests: (telemetry?.httpAttempts ?? 0) + effects, attempts: telemetry?.httpAttempts ?? 0,
+      if (current === null || !Number.isSafeInteger(effects) || effects < 0) corrupt();
+      const reserved = current.rows.find((row) => row.reservation === reservation); if (reserved === undefined) corrupt();
+      const physical = (telemetry?.httpAttempts ?? 0) + effects, sessionCap = reserved.requestSessionCap ?? reserved.cap;
+      if (physical > sessionCap)
+        throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Uniswap token request exceeded its reserved effect budget.", {
+          reason: "request_session_overrun", physicalRequests: physical.toString(), reservedPhysicalRequests: sessionCap.toString(), effectAttempts: effects.toString(),
+        });
+      const rows = current.rows.map((row) => row.reservation !== reservation ? row : ({
+        ...row, physicalRequests: physical, attempts: telemetry?.httpAttempts ?? 0,
         logicalItems: telemetry?.logicalItems ?? 0, methodClasses: telemetry?.attemptsByMethodClass ?? {},
         batchSizes: telemetry?.attemptsByBatchSize ?? {}, budgetRejects: telemetry?.budgetRejectedBeforeTransport ?? 0,
       }));
-      if (!found) corrupt();
       await this.writeJson(this.path(binding), { ...current, rows });
     });
   }

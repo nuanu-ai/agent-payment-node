@@ -136,3 +136,13 @@ test("budget merging deduplicates row identity but retains two real prepare sess
   assert.deepEqual(rows.map((row) => row.physicalRequests), [8, 9, 9]);
   await assert.rejects(journal.reserve(operation, "approve", 39), { code: "APN_RPC_BUDGET_EXCEEDED" });
 });
+test("settlement fails closed without recording a request-session overrun", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const journal = new UniswapTokenRpcBudgetJournal(temp.root), binding = "c".repeat(64);
+  const recovery = await journal.reserve(binding, "recovery-overrun", 0, 8, "recovery"), telemetry = new RpcReadSession().telemetry();
+  await assert.rejects(journal.settle(binding, recovery, { ...telemetry, httpAttempts: 8, httpRequests: 8 }, 1),
+    (error: any) => error.code === "APN_RPC_BUDGET_EXCEEDED" && error.details?.reason === "request_session_overrun");
+  assert.equal((await journal.load(binding))!.rows[0]?.physicalRequests, null);
+  const approval = await journal.reserve(binding, "approval-overrun", 14, 14, "approval_effect");
+  await assert.rejects(journal.settle(binding, approval, { ...telemetry, httpAttempts: 14, httpRequests: 14 }, 1), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal((await journal.load(binding))!.rows[1]?.physicalRequests, null);
+});

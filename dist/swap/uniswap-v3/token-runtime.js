@@ -63,25 +63,29 @@ export class InstalledUniswapTokenRuntime {
         await this.rpcBudget?.reconcile(operationId);
         return saved;
     }
-    async approve(id) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, 14, "approval_effect", async () => await this.execution.approve(id)); }
+    async approve(id) { return await this.budgeted(id, "swap.uniswap-token.approve", async () => [14, 14, "approval_effect"], async () => await this.execution.approve(id)); }
     async execute(id) {
-        const phase = (await this.journal.load(id))?.phase;
-        const budget = phase === "approved" || phase === "approval_observed" ? [24, 24, "swap_effect"] : [0, 24, "recovery"];
-        return await this.budgeted(id, "swap.uniswap-token.execute", budget[0], budget[1], budget[2], async () => await this.execution.execute(id));
+        return await this.budgeted(id, "swap.uniswap-token.execute", async () => {
+            const phase = (await this.journal.load(id))?.phase;
+            return phase === "approved" || phase === "approval_observed" ? [24, 24, "swap_effect"] : [0, 24, "recovery"];
+        }, async () => await this.execution.execute(id));
     }
-    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", 0, 8, "recovery", async () => await this.execution.status(id)); }
-    async cleanup(id) { return await this.budgeted(id, "swap.uniswap-token.cleanup", 0, 14, "recovery", async () => await this.execution.cleanup(id)); }
-    async budgeted(id, command, cap, requestSessionCap, budgetClass, work) {
-        if (this.rpcBudget === undefined)
-            return await work();
-        await this.rpcBudget.reconcile(id);
-        const reservation = await this.rpcBudget.reserve(id, command, cap, requestSessionCap, budgetClass);
-        try {
-            return await work();
-        }
-        finally {
-            await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
-        }
+    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, 8, "recovery"], async () => await this.execution.status(id)); }
+    async cleanup(id) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, 14, "recovery"], async () => await this.execution.cleanup(id)); }
+    async budgeted(id, command, budget, work) {
+        return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => {
+            const [cap, requestSessionCap, budgetClass] = await budget();
+            if (this.rpcBudget === undefined)
+                return await work();
+            await this.rpcBudget.reconcile(id);
+            const reservation = await this.rpcBudget.reserve(id, command, cap, requestSessionCap, budgetClass);
+            try {
+                return await work();
+            }
+            finally {
+                await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0);
+            }
+        });
     }
 }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
