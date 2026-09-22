@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
-import { legacyBridgeApprovalPolicyHash } from "../../src/lifi/economics.js";
+import { BRIDGE_DEPLOYMENT_PROOF_POLICY_CUTOVER, bridgeApprovalPolicyBinding, legacyBridgeApprovalPolicyHash } from "../../src/lifi/economics.js";
 import { adaptLegacyBridgeOperation } from "../../src/lifi/legacy-operation.js";
 import { bridgeIntentBinding, type BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import { BridgeOperationRepository } from "../../src/lifi/operation-repository.js";
@@ -200,4 +200,29 @@ test("pre-proof-binding compatibility rejects an integrity-consistent unknown po
   const operationPath = join(temporary.root, "bridge-operations", raw.profileHash, `${raw.operationId}.json`);
   await writeFile(operationPath, `${canonicalJson(raw)}\n`);
   await assert.rejects(new BridgeOperationRepository(temporary.root).findOperation(prepared.id), { code: "APN_STATE_CORRUPT" });
+});
+
+test("pre-proof policy compatibility is strictly before the immutable merge cutover", async (t) => {
+  for (const [preparedAt, acceptsLegacy] of [
+    ["2026-09-22T05:46:59.999Z", true],
+    [BRIDGE_DEPLOYMENT_PROOF_POLICY_CUTOVER, false],
+    ["2026-09-22T05:47:00.001Z", false],
+  ] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await lifiFixture(temporary.root, "base-arb", { now: new Date(preparedAt) });
+    const prepared = await s.prepare("stargateV2", `proof-cutover-${preparedAt}`);
+    assert.equal(bridgeApprovalPolicyBinding(prepared.operation.intent.materialization, prepared.operation.intent.policyHash,
+      prepared.operation.intent.preparedAt), "deployment-proof-v1");
+    const raw = preProofBindingFixture(prepared.operation), operationPath = join(temporary.root, "bridge-operations",
+      raw.profileHash, `${raw.operationId}.json`);
+    await writeFile(operationPath, `${canonicalJson(raw)}\n`);
+    const before = await readFile(operationPath, "utf8"), calls = s.source.calls.length + s.destination.calls.length;
+    const submissions = s.source.submissions.length;
+    const status = await s.core.execute({ command: "operation.status", operationId: prepared.id });
+    assert.equal(status.ok, acceptsLegacy, preparedAt);
+    assert.equal(status.error?.code, acceptsLegacy ? undefined : "APN_STATE_CORRUPT", preparedAt);
+    assert.equal(s.source.calls.length + s.destination.calls.length, calls, `status must not issue RPC at ${preparedAt}`);
+    assert.equal(s.source.submissions.length, submissions, `status must not submit at ${preparedAt}`);
+    assert.equal(await readFile(operationPath, "utf8"), before, `status must not rewrite state at ${preparedAt}`);
+  }
 });

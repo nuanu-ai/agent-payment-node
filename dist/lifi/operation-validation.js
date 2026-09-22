@@ -78,7 +78,7 @@ function validateIntent(op, legacy) {
         op.profileHash !== sha256(`profile\0${i.profile}`) || i.owner.address !== m.sender ||
         op.createdAt !== i.preparedAt || i.expiresAt <= i.preparedAt || Date.parse(i.expiresAt) - Date.parse(i.preparedAt) > 300_000 ||
         m.requestHash !== hashObject(r) || m.transactionDigest !== hashObject(m.transaction) ||
-        bridgeApprovalPolicyBinding(m, i.policyHash) === null ||
+        bridgeApprovalPolicyBinding(m, i.policyHash, i.preparedAt) === null ||
         op.requestHash !== hashObject({ profile: i.profile, quote: i.quoteHash, route: m.routeId }))
         bridgeCorrupt();
     if (!legacy) {

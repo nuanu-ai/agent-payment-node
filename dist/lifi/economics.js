@@ -29,6 +29,7 @@ export function bridgeApprovalRequired(request, allowanceAtomic) {
     return allowanceAtomic === "0";
 }
 export const BRIDGE_DEPLOYMENT_PROOF_VERIFIER = "apn.bridge.deployment-proof.base-stargate-ecotone.v1";
+export const BRIDGE_DEPLOYMENT_PROOF_POLICY_CUTOVER = "2026-09-22T05:47:00.000Z";
 export function legacyBridgeApprovalPolicyHash(materialization) {
     return hashObject({ identity: "apn.bridge.foreground-approval.v1", request: materialization.request });
 }
@@ -38,13 +39,15 @@ export function bridgeApprovalPolicyHash(materialization) {
     return hashObject({ identity: "apn.bridge.foreground-approval.v1", request,
         ...(retainedProof ? { deploymentProofVerifier: BRIDGE_DEPLOYMENT_PROOF_VERIFIER } : {}) });
 }
-export function bridgeApprovalPolicyBinding(materialization, policyHash) {
+export function bridgeApprovalPolicyBinding(materialization, policyHash, preparedAt) {
     const current = bridgeApprovalPolicyHash(materialization), legacy = legacyBridgeApprovalPolicyHash(materialization);
     // Reuse authority exists only when the verifier made the current hash distinct from the historical policy hash.
     if (current !== legacy && policyHash === current)
         return "deployment-proof-v1";
-    if (policyHash === legacy)
-        return "legacy-full-refresh";
+    if (current === legacy && policyHash === current)
+        return "full-refresh";
+    if (policyHash === legacy && Date.parse(preparedAt) < Date.parse(BRIDGE_DEPLOYMENT_PROOF_POLICY_CUTOVER))
+        return "full-refresh";
     return null;
 }
 /** The part of a native debit that is the principal itself: excluded from the fee cap, included in the funding check. */
@@ -187,7 +190,7 @@ function rpcBoundary(role, stage, chainRole, chainId, category) {
 export async function guardBridgeEffect(op, role, source, destination, now) {
     assertBridgeRemaining(op, now());
     const i = op.intent, m = i.materialization, effect = op.effects.find((e) => e.role === role);
-    const proofBinding = bridgeApprovalPolicyBinding(m, i.policyHash);
+    const proofBinding = bridgeApprovalPolicyBinding(m, i.policyHash, i.preparedAt);
     if (proofBinding === null)
         bridgeFailure("APN_STATE_CORRUPT", "bridge_deployment_proof_verifier_changed");
     if (op.terminal || effect === undefined || effect.submissionAttempts !== 0)
