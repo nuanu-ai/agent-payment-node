@@ -147,7 +147,9 @@ export class BridgeService {
   }
   private execution(op: BridgeOperationRecord) {
     const d = this.dependencies(), m = op.intent.materialization;
-    const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 13, maxHttpAttempts: 13,
+    // The first token guard spends 24 requests: two safe heads, 11+9 Base/Arbitrum archive chunks and two account batches.
+    // Four later guards reuse immutable evidence and spend one mutable account/simulation batch each.
+    const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 28, maxHttpAttempts: 30,
       archiveDeploymentBatchMaxItems: 3 });
     const lazy = (chainId: typeof m.request.fromChainId, options: ConstructorParameters<typeof RpcReadSession>[0]) => {
       let rpc: ReturnType<typeof d.rpcFor> | undefined;

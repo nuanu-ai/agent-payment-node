@@ -6,7 +6,7 @@ import { decodeFunctionData, encodeFunctionData } from "viem";
 import { canonicalJson } from "../../src/canonical.js";
 import { acrossBridgeAbi } from "../../src/lifi/abi.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
-import { bridgeRpcFactory } from "../../src/lifi/rpc.js";
+import { RpcReadSession, bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { addressWord } from "./lifi-event-fixtures.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_SENDER, LifiTestProvider, lifiFixture, lifiSteps } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -82,7 +82,11 @@ async function prepareSpy(now: Date) {
     APN_BASE_RPC_URL: "https://base-primary.example", APN_BASE_ARCHIVE_RPC_URL: "https://base-archive.example",
     APN_ARBITRUM_RPC_URL: "https://arb-primary.example", APN_ARBITRUM_ARCHIVE_RPC_URL: "https://arb-archive.example",
   }, { transport, wait: async () => {} });
-  return { rpcFor, calls };
+  const sessions: RpcReadSession[] = [];
+  return { rpcFor: ((chainId, session) => {
+    if (session !== undefined) sessions.push(session);
+    return rpcFor(chainId, session);
+  }) satisfies typeof rpcFor, calls, sessions };
 }
 
 async function nativeEthBase(now: Date): Promise<LifiTestProvider> {
@@ -137,5 +141,20 @@ for (const flow of [
         assert.equal(baseFeeCalls.length, 3); assert.notEqual(stateTag, undefined);
         assert.ok(baseFeeCalls.every((item) => item.params[1] === stateTag && item.params[1] !== "latest"));
       }
+    }
+    if (flow.pair === "base-arb") {
+      const beforeApproval = spy.calls.length; f.approval.accepted = false;
+      const rejected = await f.core.execute({ command: "bridge.approve", operationId: prepared.id });
+      assert.equal(rejected.ok, true, JSON.stringify(rejected.error));
+      assert.equal((rejected.operation as { state: string }).state, "failed_before_effect");
+      const execution = spy.calls.slice(beforeApproval), executionArchive = execution.filter((call) => call.host.includes("archive"));
+      assert.equal(execution.length, 24); assert.equal(execution.filter((call) => call.host.includes("primary")).length, 4);
+      assert.deepEqual(executionArchive.filter((call) => call.host === "base-archive.example").map((call) => call.items.length),
+        [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+      assert.deepEqual(executionArchive.filter((call) => call.host === "arb-archive.example").map((call) => call.items.length),
+        [3, 3, 3, 3, 3, 3, 3, 3, 1]);
+      assert.ok(executionArchive.every((call) => call.items.length <= 3));
+      assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 24);
+      assert.equal(spy.sessions.at(-1)!.telemetry().remainingHttpRequests, 4);
     }
 });
