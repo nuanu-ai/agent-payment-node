@@ -85,7 +85,7 @@ export class SecureStateStore {
             stateSecurity("State root resolves through an alias or symbolic link.");
         for (const name of [
             "profiles", "wallets", "policies", "provider-authorizations", "operations", "receipts",
-            "x402-operations", "x402-results", "x402-receipts", "locks",
+            "x402-operations", "x402-results", "x402-receipts", "rpc-provider-pacing", "locks",
         ]) {
             await this.ensureDirectory(name);
         }

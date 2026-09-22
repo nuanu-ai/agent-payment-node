@@ -24,6 +24,8 @@ export interface RpcReadSessionOptions {
     readonly maxUniqueCalls?: number;
     readonly now?: () => number;
     readonly wait?: (milliseconds: number) => Promise<void>;
+    /** Shared by related commands so one provider family cannot be burst through separate sessions. */
+    readonly providerScheduler?: RpcProviderScheduler;
 }
 export interface RpcReadTelemetry {
     readonly logicalItems: number;
@@ -52,6 +54,20 @@ export declare class RpcHttpFailure extends Error {
     readonly retryAfterMs?: number | undefined;
     constructor(method: string, status: number, retryAfterMs?: number | undefined);
 }
+export interface RpcProviderPacingCoordinator {
+    coordinate<T>(family: string, work: (lastStart: number | null, saveStart: (value: number) => Promise<void>) => Promise<T>): Promise<T>;
+}
+/** Provider-family coordination. A coordinator can serialize starts and retain pacing across CLI processes. */
+export declare class RpcProviderScheduler {
+    private readonly coordinator?;
+    private readonly families;
+    private readonly queue;
+    private active;
+    constructor(coordinator?: RpcProviderPacingCoordinator | undefined);
+    schedule(origin: string, now: () => number, wait: (milliseconds: number) => Promise<void>, beforeWait: (milliseconds: number) => void, task: () => Promise<unknown>): Promise<unknown>;
+    private pump;
+    private run;
+}
 type RpcDecoder<T = unknown> = (value: unknown) => T;
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export declare class RpcReadSession {
@@ -62,12 +78,10 @@ export declare class RpcReadSession {
     private readonly now;
     private readonly wait;
     private readonly deadline;
+    private readonly providerScheduler;
     private readonly cache;
     private readonly inflight;
     private readonly batchInflight;
-    private readonly origins;
-    private readonly queue;
-    private active;
     private logicalItems;
     private httpRequests;
     private httpAttempts;
@@ -103,8 +117,6 @@ export declare class RpcReadSession {
     private reserveRequest;
     private retry;
     private schedule;
-    private pump;
-    private runScheduled;
     private assertBeforeAttempt;
     private assertBeforeQueue;
     private assertBeforeWait;
@@ -115,6 +127,7 @@ export declare class RpcReadSession {
     private transportError;
 }
 export declare function rpcOriginIdentity(origin: string): string;
+export declare function rpcProviderFamily(origin: string): string;
 export declare function rpcEndpointIdentity(endpoint: string): string;
 export declare function approvedTransportReason(error: unknown): string | undefined;
 export declare function parseRetryAfter(headers: Readonly<Record<string, string | readonly string[] | undefined>> | undefined, now: number): number | undefined;

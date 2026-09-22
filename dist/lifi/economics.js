@@ -28,6 +28,13 @@ export function bridgeApprovalRequired(request, allowanceAtomic) {
     }
     return allowanceAtomic === "0";
 }
+export const BRIDGE_DEPLOYMENT_PROOF_VERIFIER = "apn.bridge.deployment-proof.base-stargate-ecotone.v1";
+export function bridgeApprovalPolicyHash(materialization) {
+    const request = materialization.request, retainedProof = materialization.tool === "stargateV2" &&
+        [8453, 42161].includes(request.fromChainId) && [8453, 42161].includes(request.toChainId);
+    return hashObject({ identity: "apn.bridge.foreground-approval.v1", request,
+        ...(retainedProof ? { deploymentProofVerifier: BRIDGE_DEPLOYMENT_PROOF_VERIFIER } : {}) });
+}
 /** The part of a native debit that is the principal itself: excluded from the fee cap, included in the funding check. */
 export function bridgeNativePrincipalWei(request) {
     return bridgeNativePrincipal(request) ? BigInt(request.amountAtomic) : 0n;
@@ -168,14 +175,18 @@ function rpcBoundary(role, stage, chainRole, chainId, category) {
 export async function guardBridgeEffect(op, role, source, destination, now) {
     assertBridgeRemaining(op, now());
     const i = op.intent, m = i.materialization, effect = op.effects.find((e) => e.role === role);
+    if (i.policyHash !== bridgeApprovalPolicyHash(m))
+        bridgeFailure("APN_STATE_CORRUPT", "bridge_deployment_proof_verifier_changed");
     if (op.terminal || effect === undefined || effect.submissionAttempts !== 0)
         bridgeFailure("APN_OPERATION_BLOCKED", "bridge_first_send_only");
     if (source.origin !== i.sourceRpcOrigin || destination.origin !== i.destinationRpcOrigin || source.chainId !== m.request.fromChainId ||
         destination.chainId !== m.request.toChainId)
         bridgeFailure("APN_RPC_CONFIG", "bridge_frozen_RPC_origin");
     const [sourceDeployment, destinationDeployment] = await Promise.all([
-        preSignRpc(rpcBoundary(role, "source_deployment_refresh", "source", source.chainId, "deployment_refresh"), async () => await source.deployment(m.tool, m.request.toChainId, m.request.fromToken)),
-        preSignRpc(rpcBoundary(role, "destination_deployment_refresh", "destination", destination.chainId, "deployment_refresh"), async () => await destination.deployment(m.tool, m.request.fromChainId, m.request.toToken)),
+        preSignRpc(rpcBoundary(role, "source_deployment_refresh", "source", source.chainId, "deployment_refresh"), async () => await (source.refreshDeployment?.(m.tool, m.request.toChainId, m.request.fromToken, i.sourceDeployment) ??
+            source.deployment(m.tool, m.request.toChainId, m.request.fromToken))),
+        preSignRpc(rpcBoundary(role, "destination_deployment_refresh", "destination", destination.chainId, "deployment_refresh"), async () => await (destination.refreshDeployment?.(m.tool, m.request.fromChainId, m.request.toToken, i.destinationDeployment) ??
+            destination.deployment(m.tool, m.request.fromChainId, m.request.toToken))),
     ]);
     for (const [frozen, current] of [[i.sourceDeployment, sourceDeployment], [i.destinationDeployment, destinationDeployment]]) {
         if (current.contractHash !== frozen.contractHash || current.codeHash !== frozen.codeHash || current.configurationHash !== frozen.configurationHash)

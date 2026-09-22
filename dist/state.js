@@ -16,6 +16,25 @@ export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./stat
 const PROVIDER_X402_OPERATION_SCHEMAS = new Set(["apn.provider-x402.state.v1", "apn.provider-x402.state.v2"]);
 const PROVIDER_X402_RECEIPT_SCHEMA = "apn.provider-x402.receipt.v1";
 export class StateStore extends SecureStateStore {
+    async loadRpcProviderPacing(familyHash) {
+        stateIdentifier(familyHash, "RPC provider family hash");
+        const value = await this.readJson(join("rpc-provider-pacing", `${familyHash}.json`));
+        if (value === null)
+            return null;
+        if (!isPlainRecord(value) || value.schemaVersion !== "apn.rpc-provider-pacing.v1" || value.familyHash !== familyHash ||
+            typeof value.lastStartMs !== "number" || !Number.isSafeInteger(value.lastStartMs) || value.lastStartMs < 0 ||
+            Object.keys(value).some((key) => !["schemaVersion", "familyHash", "lastStartMs"].includes(key))) {
+            stateCorrupt("RPC provider pacing record is invalid.");
+        }
+        return value.lastStartMs;
+    }
+    async writeRpcProviderPacing(familyHash, lastStartMs) {
+        stateIdentifier(familyHash, "RPC provider family hash");
+        if (!Number.isSafeInteger(lastStartMs) || lastStartMs < 0)
+            stateCorrupt("RPC provider pacing timestamp is invalid.");
+        await this.ensureDirectory("rpc-provider-pacing");
+        await this.writeJson(join("rpc-provider-pacing", `${familyHash}.json`), { schemaVersion: "apn.rpc-provider-pacing.v1", familyHash, lastStartMs });
+    }
     async loadWallet(profileHash) {
         const value = await this.readJson(join("wallets", profileHash, "wallet.json"));
         return value === null ? null : validateWallet(value);

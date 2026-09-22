@@ -29,6 +29,9 @@ export interface BridgeRpcPort {
   assertChain(): Promise<void>;
   block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
   deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<BridgeDeploymentIdentity>;
+  /** Reuses this operation's frozen code proof while refreshing every mutable deployment binding at a fresh safe block. */
+  refreshDeployment?(tool: BridgeTool, peerChainId: BridgeChainId, token: Address,
+    frozen: BridgeDeploymentIdentity): Promise<BridgeDeploymentIdentity>;
   account(owner: Address, spender: Address, token: Address, planned?: readonly BridgeTransaction[]): Promise<BridgeAccountSnapshot>;
   prices(): Promise<Pick<FeeEstimate, "maxFeePerGasAtomic" | "maxPriorityFeePerGasAtomic">>;
   estimate(transaction: BridgeTransaction): Promise<FeeEstimate>;
