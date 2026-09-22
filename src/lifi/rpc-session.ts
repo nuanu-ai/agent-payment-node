@@ -73,6 +73,7 @@ export class RpcHttpFailure extends Error {
 
 interface ScheduledRpcRead {
   readonly family: string;
+  readonly persistRateLimitCooldown: boolean;
   readonly now: () => number;
   readonly wait: (milliseconds: number) => Promise<void>;
   readonly beforeWait: (milliseconds: number) => void;
@@ -93,9 +94,11 @@ export class RpcProviderScheduler {
   constructor(private readonly coordinator?: RpcProviderPacingCoordinator, private readonly pacingNow?: () => number) {}
 
   schedule(origin: string, now: () => number, wait: (milliseconds: number) => Promise<void>, beforeWait: (milliseconds: number) => void,
-    task: () => Promise<unknown>): Promise<unknown> {
+    task: () => Promise<unknown>, persistRateLimitCooldown = true): Promise<unknown> {
     const family = rpcProviderFamily(origin);
-    return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, resolve, reject }); this.pump(); });
+    return new Promise((resolve, reject) => {
+      this.queue.push({ family, persistRateLimitCooldown, now, wait, beforeWait, task, resolve, reject }); this.pump();
+    });
   }
 
   private pump(): void {
@@ -135,10 +138,11 @@ export class RpcProviderScheduler {
         await saveStart(state.lastStart);
         try { return await entry.task(); }
         catch (error) {
-          if (error instanceof RpcHttpFailure && error.status === 429 && error.retryAfterMs !== undefined) {
+          if (entry.persistRateLimitCooldown && error instanceof RpcHttpFailure && error.status === 429) {
             const observed = clock();
             if (observed < current) throw schedulerClockRollback(entry.family);
-            state.cooldownUntil = Math.max(state.cooldownUntil, observed + Math.max(0, Math.min(30_000, error.retryAfterMs)));
+            const effectiveCooldown = Math.min(30_000, Math.max(RPC_RETRY_DELAY_MS, error.retryAfterMs ?? 0));
+            state.cooldownUntil = Math.max(state.cooldownUntil, observed + effectiveCooldown);
             await saveCooldownUntil(state.cooldownUntil);
           }
           throw error;
@@ -396,7 +400,7 @@ export class RpcReadSession {
       try {
         return await this.schedule(origin, () => {
           this.assertBeforeAttempt(method); this.httpAttempts += 1; return oneAttempt();
-        });
+        }, attempt + 1 < MAX_READ_ATTEMPTS);
       } catch (error) {
         const http = error instanceof RpcHttpFailure ? error : undefined, transport = approvedTransportReason(error);
         // Archive deployment HTTP 500 commonly represents deterministic provider rejection (including an oversized batch).
@@ -421,11 +425,11 @@ export class RpcReadSession {
       }
     }
   }
-  private schedule(originInput: string, task: () => Promise<unknown>): Promise<unknown> {
+  private schedule(originInput: string, task: () => Promise<unknown>, persistRateLimitCooldown: boolean): Promise<unknown> {
     this.assertBeforeQueue("rpc");
     return this.providerScheduler.schedule(originInput, this.now, this.wait, (delay) => this.assertBeforeWait("rpc", delay), async () => {
       this.assertDeadline("rpc"); return await task();
-    });
+    }, persistRateLimitCooldown);
   }
   private assertBeforeAttempt(method: string): void {
     this.assertDeadline(method); if (this.httpAttempts >= this.maxHttpAttempts) this.budgetError(method, "maxHttpAttempts");
