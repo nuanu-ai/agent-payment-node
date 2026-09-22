@@ -131,7 +131,8 @@ export class BridgeOperationRepository extends SecureStateStore {
     const savedAudit = await this.readJson(`bridge-migrations/${op.profileHash}/${op.operationId}.json`);
     if (!bridgeSame(savedAudit, audit)) bridgeCorrupt();
     const receiptPath = this.path("bridge-receipts", op.profileHash, op.operationId), savedReceipt = await this.readJson(receiptPath);
-    if (savedReceipt !== null && !bridgeSame(savedReceipt, bridgeReceipt(previous)) && !bridgeSame(savedReceipt, bridgeReceipt(op))) bridgeCorrupt();
+    if (savedReceipt !== null && !currentBridgeReceiptCandidates(previous).some((candidate) => bridgeSame(savedReceipt, candidate)) &&
+      !bridgeSame(savedReceipt, bridgeReceipt(op))) bridgeCorrupt();
     await this.ensureDirectory(`bridge-receipts/${op.profileHash}`);
     if (!bridgeSame(savedReceipt, bridgeReceipt(op))) await this.writeJson(receiptPath, bridgeReceipt(op));
   }
