@@ -26,7 +26,7 @@ export class UniswapTokenExecution {
         if (op.phase === "approved") {
             const allowance = await this.ports.currentAllowance(op);
             if (allowance !== "0" && allowance !== op.route.amountIn)
-                blocked("Allowance must be zero or the exact input amount.", "uniswap_allowance_mismatch");
+                return await this.cleanupRequired(op, "approval_allowance_drift");
             op = allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval");
         }
         if (approvalActive(op.phase))
@@ -98,7 +98,12 @@ export class UniswapTokenExecution {
         try {
             sealed = await this.ports.seal(op, kind, attempt.nonce);
         }
-        catch {
+        catch (error) {
+            const durable = await this.ports.probeSealed(op, kind, attempt.nonce);
+            if (durable !== null) {
+                await this.ports.commitNonce(op, kind, attempt.nonce);
+                throw error;
+            }
             await this.ports.releaseNonce(op, kind, attempt.nonce);
             return await this.cleanupRequired(op, `${kind}_sign_failed`);
         }
