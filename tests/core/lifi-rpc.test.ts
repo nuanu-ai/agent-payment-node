@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
-import { keccak256, parseTransaction, type TransactionSerializable } from "viem";
+import { decodeFunctionData, encodeFunctionResult, keccak256, parseTransaction, type TransactionSerializable } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, sha256 } from "../../src/canonical.js";
 import { EvmRpc } from "../../src/evm-rpc.js";
@@ -14,6 +14,9 @@ import { evmTransactionSignatureScalar, verifyRpcTransaction } from "../../src/l
 import { verifyBridgeSigned } from "../../src/lifi/transaction.js";
 import { BRIDGE_DIAMOND } from "../../src/lifi/validation.js";
 import type { BridgeEnvelope } from "../../src/lifi/model.js";
+import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
+import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
+import { MULTICALL3_ADDRESS } from "../../src/portfolio/registry.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_KEY, LIFI_SYNTHETIC_SENDER } from "./lifi-helpers.js";
 
 type Json = Record<string, any>;
@@ -277,17 +280,35 @@ async function baseFeeFixture() {
 
 async function baseApprovalObservation(mode: "success" | "missing" | "reverted" | "retry429" | "terminal429") {
   const s = await rpcObservation(8453), fee = await baseFeeFixture();
+  const deploymentFixture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/deployment-rpc-20260908.json"), "utf8")) as Json;
+  const deploymentCapture = (deploymentFixture.chains as Json[]).find((chain) => chain.chainId === 8453)!;
+  const multicallCode = (await readFile(resolve("tests/core/fixtures/multicall3-runtime-code.hex"), "utf8")).trim();
   Object.assign(s.receipt, { gasUsed: fee.receipt.gasUsed, effectiveGasPrice: fee.receipt.effectiveGasPrice,
     l1Fee: fee.receipt.l1Fee, daFootprintGasScalar: fee.receipt.daFootprintGasScalar,
     status: mode === "reverted" ? "0x0" : "0x1" });
   const safe = { ...s.block, number: "0x7d1", hash: `0x${"cd".repeat(32)}`, transactions: [] };
   let now = 0, limited = 0;
-  const calls: Array<{ readonly host: string; readonly rows: readonly Json[] }> = [];
+  const calls: Array<{ readonly origin: string; readonly endpointRole: "primary" | "archive" | "receipt"; readonly rows: readonly Json[] }> = [];
   const feeResult = (row: Json) => fee.entries.find((entry) => entry.request.method === row.method &&
     canonicalJson(entry.request.params.slice(0, -1)).toLowerCase() === canonicalJson(row.params.slice(0, -1)).toLowerCase())?.result;
+  const deploymentResult = (row: Json): unknown => {
+    if (row.method === "eth_getBlockByNumber") return s.block;
+    if (row.method === "eth_getCode" && String(row.params[0]).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) return multicallCode;
+    if (row.method === "eth_call" && String(row.params[0]?.to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) {
+      const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data: row.params[0].data as Hex });
+      assert.equal(decoded.functionName, "aggregate3");
+      return encodeFunctionResult({ abi: MULTICALL3_ABI, functionName: "aggregate3", result: decoded.args[0].map((inner) => ({
+        success: true, returnData: deploymentResult({ method: "eth_call", params: [{ to: inner.target, data: inner.callData }, row.params[1]] }) as Hex,
+      })) });
+    }
+    const comparable = (params: unknown[]) => params.slice(0, -1);
+    return (deploymentCapture.requests as Json[]).find((entry) => entry.request.method === row.method &&
+      canonicalJson(comparable(entry.request.params)).toLowerCase() === canonicalJson(comparable(row.params)).toLowerCase())?.response.result;
+  };
   const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
     const request = JSON.parse(body!) as Json | Json[], rows = Array.isArray(request) ? request : [request], host = new URL(endpoint).host;
-    calls.push({ host, rows });
+    const endpointRole = host === "base.drpc.org" ? "archive" : host === "mainnet.base.org" ? "receipt" : "primary";
+    calls.push({ origin: `https://${host}`, endpointRole, rows });
     if (host === "base.drpc.org" && rows.some((row) => row.method === "eth_getCode") &&
       (mode === "terminal429" || mode === "retry429" && limited === 0)) {
       limited += 1; return { status: 429, body: "", headers: { "retry-after": "1" } };
@@ -298,13 +319,13 @@ async function baseApprovalObservation(mode: "success" | "missing" | "reverted" 
       else if (row.method === "eth_getTransactionByHash") result = s.tx;
       else if (row.method === "eth_getTransactionReceipt") result = mode === "missing" ? null : s.receipt;
       else if (row.method === "eth_getBlockByNumber") result = row.params[0] === "safe" || row.params[0] === safe.number ? safe : s.block;
-      else result = feeResult(row);
+      else result = typeof row.params.at(-1) === "object" ? feeResult(row) : deploymentResult(row);
       assert.notEqual(result, undefined, `unexpected observation read ${row.method} ${canonicalJson(row.params)}`);
       return { jsonrpc: "2.0", id: row.id, result };
     });
     return { status: 200, body: JSON.stringify(Array.isArray(request) ? responses : responses[0]) };
   } };
-  const session = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 19, maxHttpAttempts: 21,
+  const session = new RpcReadSession({ archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 25, maxHttpAttempts: 27,
     now: () => now, wait: async (milliseconds) => { now += milliseconds; } });
   const rpc = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base-rpc.publicnode.com", APN_BASE_ARCHIVE_RPC_URL: "https://base.drpc.org",
     APN_BASE_RECEIPT_RPC_URL: "https://mainnet.base.org" }, { transport, wait: async () => {} })(8453, session);
@@ -312,21 +333,44 @@ async function baseApprovalObservation(mode: "success" | "missing" | "reverted" 
     valueAtomic: BigInt(s.rpc.value).toString(), economics: { nonceAtomic: BigInt(s.rpc.nonce).toString(), gasLimitAtomic: BigInt(s.rpc.gas).toString(),
       maxFeePerGasAtomic: BigInt(s.rpc.maxFeePerGas).toString(), maxPriorityFeePerGasAtomic: BigInt(s.rpc.maxPriorityFeePerGas).toString(),
       maximumGasCostAtomic: (BigInt(s.rpc.gas) * BigInt(s.rpc.maxFeePerGas)).toString() } } as BridgeEnvelope;
-  return { s, calls, session, observe: async () => await rpc.observe(s.hash, expected) };
+  return { s, calls, session, observe: async () => await rpc.observe(s.hash, expected), historicalDeployment: async () => {
+    const observed = await rpc.observe(s.hash, expected); assert.ok(observed);
+    const token = BRIDGE_ASSET_REGISTRY[8453].tokens.find((row) => row.symbol === "USDC")!.address;
+    return await rpc.deployment("stargateV2", 42161, token, observed.transaction.block);
+  } };
 }
 
-test("LI.FI Base approval observation completes safe with the exact 19-request graph and no resend", async () => {
-  const run = await baseApprovalObservation("success"), observed = await run.observe(); assert.ok(observed);
-  assert.equal(observed.transaction.status, "success"); assert.ok(observed.transaction.safeBlock);
-  assert.equal(run.session.telemetry().httpRequests, 19); assert.equal(run.session.telemetry().httpAttempts, 19);
-  assert.equal(run.calls.length, 19);
+test("LI.FI Base approval observation and historical deployment use the complete ordered physical trace with no resend", async () => {
+  const run = await baseApprovalObservation("success"), deployment = await run.historicalDeployment(); assert.ok(deployment);
+  assert.equal(run.session.telemetry().httpRequests, 25); assert.equal(run.session.telemetry().httpAttempts, 25);
+  assert.equal(run.calls.length, 25);
   assert.deepEqual(Object.fromEntries(["base-rpc.publicnode.com", "mainnet.base.org", "base.drpc.org"].map((host) =>
-    [host, run.calls.filter((call) => call.host === host).length])),
-  { "base-rpc.publicnode.com": 4, "mainnet.base.org": 2, "base.drpc.org": 13 });
-  assert.deepEqual(run.calls.filter((call) => call.host === "mainnet.base.org").map((call) => call.rows.map((row) => row.method)),
+    [host, run.calls.filter((call) => new URL(call.origin).host === host).length])),
+  { "base-rpc.publicnode.com": 4, "mainnet.base.org": 2, "base.drpc.org": 19 });
+  assert.deepEqual(run.calls.filter((call) => call.endpointRole === "receipt").map((call) => call.rows.map((row) => row.method)),
     [["eth_chainId"], ["eth_getTransactionReceipt"]]);
-  assert.ok(run.calls.filter((call) => call.host === "base.drpc.org").every((call) => call.rows.length <= 3));
+  assert.ok(run.calls.filter((call) => call.endpointRole === "archive").every((call) => call.rows.length <= 3));
   assert.equal(run.calls.flatMap((call) => call.rows).some((row) => row.method === "eth_sendRawTransaction"), false);
+  const trace = (origin: string, endpointRole: "primary" | "archive" | "receipt", methods: string[]) =>
+    ({ origin, endpointRole, methods, batchSize: methods.length });
+  const primary = "https://base-rpc.publicnode.com", receipt = "https://mainnet.base.org", archive = "https://base.drpc.org";
+  assert.deepEqual(run.calls.map((call) => ({ origin: call.origin, endpointRole: call.endpointRole,
+    methods: call.rows.map((row) => row.method), batchSize: call.rows.length })), [
+    trace(primary, "primary", ["eth_chainId"]), trace(receipt, "receipt", ["eth_chainId"]),
+    trace(primary, "primary", ["eth_getTransactionByHash"]), trace(receipt, "receipt", ["eth_getTransactionReceipt"]),
+    trace(primary, "primary", ["eth_getBlockByNumber"]), trace(primary, "primary", ["eth_getBlockByNumber"]),
+    trace(archive, "archive", ["eth_chainId"]), trace(archive, "archive", ["eth_getCode"]),
+    trace(archive, "archive", ["eth_getCode"]), trace(archive, "archive", ["eth_getStorageAt"]),
+    trace(archive, "archive", ["eth_getStorageAt"]),
+    ...Array.from({ length: 7 }, () => trace(archive, "archive", ["eth_call"])),
+    trace(archive, "archive", ["eth_getBlockByNumber", "eth_getBlockByNumber"]),
+    trace(archive, "archive", ["eth_getCode", "eth_getCode", "eth_getCode"]),
+    trace(archive, "archive", ["eth_getCode", "eth_getCode", "eth_getCode"]),
+    trace(archive, "archive", ["eth_getCode", "eth_getCode", "eth_getCode"]),
+    trace(archive, "archive", ["eth_getCode", "eth_getCode", "eth_getStorageAt"]),
+    trace(archive, "archive", ["eth_getStorageAt", "eth_call", "eth_getStorageAt"]),
+    trace(archive, "archive", ["eth_getStorageAt", "eth_call"]),
+  ]);
 });
 
 test("LI.FI Base approval observation keeps missing, reverted and 429 outcomes bounded", async () => {
@@ -341,7 +385,7 @@ test("LI.FI Base approval observation keeps missing, reverted and 429 outcomes b
   assert.equal(limited.session.telemetry().httpRequests, 8); assert.equal(limited.session.telemetry().httpAttempts, 9);
   for (const run of [missing, reverted, retried, limited]) {
     assert.equal(run.calls.flatMap((call) => call.rows).some((row) => row.method === "eth_sendRawTransaction"), false);
-    assert.ok(run.calls.filter((call) => call.host === "base.drpc.org").every((call) => call.rows.length <= 3));
+    assert.ok(run.calls.filter((call) => call.endpointRole === "archive").every((call) => call.rows.length <= 3));
   }
 });
 

@@ -78,14 +78,14 @@ test("LI.FI observation phases use independent lazy bounded RPC sessions", async
   assert.equal(first.ok, true, first.error?.message); assert.ok(s.rpcSessions.length >= 3);
   const approvalSession = s.rpcSessions[0]; assert.ok(approvalSession); assert.equal(s.rpcSessions[1], approvalSession);
   const approvalUnique = [...new Set(s.rpcSessions)]; assert.equal(approvalUnique.length, 2);
-  assert.deepEqual(approvalUnique.map((session) => session.telemetry().remainingHttpRequests), [13, 13]);
+  assert.deepEqual(approvalUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 25]);
   s.source.safeApproval = true; s.rpcSessions.length = 0;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal(resumed.ok, true, resumed.error?.message); assert.ok(s.rpcSessions.length >= 5);
   const resumeSession = s.rpcSessions[0]; assert.ok(resumeSession); assert.equal(s.rpcSessions[1], resumeSession);
   const resumeUnique = [...new Set(s.rpcSessions)]; assert.equal(resumeUnique.length, 4);
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [13, 13, 16, 2]);
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [13, 13, 16, 3]);
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 25, 16, 2]);
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [30, 27, 16, 3]);
   assert.notEqual(resumeSession, approvalSession);
 });
 
@@ -99,6 +99,8 @@ test("LI.FI expiry after paid approval preserves its fee and residual allowance,
   s.source.safeApproval = true;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
   const record = (await s.core.bridges.records.findOperation(id))!; assert.equal(record.state, "failed_after_approval");
+  assert.deepEqual(record.effects.map((effect) => [effect.role, effect.phase, effect.submissionAttempts]),
+    [["approval", "safe_success", 1], ["bridge", "unsealed", 0]]);
   assert.ok(BigInt(record.effects[0]!.safeProof!.actualTotalFeeWei) > 0n); assert.equal(record.failure!.residualAllowance!.amountAtomic, s.request.amountAtomic);
   assert.equal(s.source.submissions.length, 1);
 });
