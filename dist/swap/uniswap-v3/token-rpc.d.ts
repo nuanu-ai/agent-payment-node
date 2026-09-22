@@ -17,6 +17,8 @@ export type TokenRpcCall = EvmRpcCall & {
     readonly primaryPoolTelemetry?: () => TokenPrimaryPoolTelemetry;
     readonly primaryPoolEnabled?: () => boolean;
     readonly primaryPoolSize?: () => number;
+    readonly selectedPrimaryProviderId?: () => string | null;
+    readonly bindPrimaryProvider?: (providerId: string | null) => Promise<void>;
 };
 export declare function tokenBatch(call: TokenRpcCall, route: TokenRpcRoute, items: readonly TokenRpcItem[]): Promise<readonly unknown[]>;
 export declare function tokenChain(value: unknown): unknown;

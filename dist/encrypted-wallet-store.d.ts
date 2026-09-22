@@ -15,6 +15,7 @@ export interface DirectEffectMaterial {
     readonly transactionHash: Hex;
     readonly rawTransaction: Hex;
     readonly rawTransactionHash: Hex;
+    readonly primaryProviderId?: string | null;
 }
 export interface X402EffectMaterial {
     readonly createPayloadHash: string;

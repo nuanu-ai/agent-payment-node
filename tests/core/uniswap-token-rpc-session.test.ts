@@ -239,17 +239,24 @@ test("pool quote counts exact anchor and each failed candidate without exceeding
   }
 });
 
-test("cross-process candidate quarantine serializes selection and prevents duplicate malformed probes", async (t) => {
-  const temp = await temporaryState(); t.after(temp.cleanup); let failedCalls = 0, healthyCalls = 0, tick = 0;
-  const request = async (url: string, _method: string, body: string | null) => { const origin = new URL(url).origin;
-    if (origin === "https://first.example") { failedCalls += 1; return { status: 200, body: batchResponse(body!, () => "malformed") }; }
-    healthyCalls += 1; return { status: 200, body: batchResponse(body!, poolValue) }; };
-  const runtime = () => createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now, pacingNow: () => (tick += 1_000),
-    wait: async () => {}, maxHttpRequests: 3, deadlineMs: 10_000, transport: { request } });
-  const first = runtime(), second = runtime(), items = [{ method: "eth_chainId", params: [], decoder: tokenChain }];
-  await Promise.all([tokenBatch(first, "primary", items), tokenBatch(second, "primary", items)]);
-  assert.equal(failedCalls, 1); assert.equal(healthyCalls, 2);
-  assert.equal([first, second].filter((rpc) => rpc.primaryPoolTelemetry!().attempts.some((row) => row.outcome === "cooldown_skipped")).length, 1);
+test("cross-process probe lock persists every semantic quarantine before a peer can contact the candidate", async (t) => {
+  for (const reason of ["malformed", "authentication", "wrong_chain", "capability"] as const) {
+    const temp = await temporaryState(); t.after(temp.cleanup); let failedCalls = 0, healthyCalls = 0, tick = 0;
+    const request = async (url: string, _method: string, body: string | null) => { const origin = new URL(url).origin;
+      if (origin === "https://first.example") { failedCalls += 1; const parsed = JSON.parse(body!), row = Array.isArray(parsed) ? parsed[0] : parsed;
+        if (reason === "authentication") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: row.id,
+          error: { code: -32_000, message: "Unauthorized: API key required" } }) };
+        if (reason === "capability") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: row.id,
+          error: { code: -32_600, message: "Batch requests are not supported" } }) };
+        return { status: 200, body: batchResponse(body!, () => reason === "wrong_chain" ? "0x2" : "malformed") }; }
+      healthyCalls += 1; return { status: 200, body: batchResponse(body!, poolValue) }; };
+    const runtime = () => createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now, pacingNow: () => (tick += 1_000),
+      wait: async () => {}, maxHttpRequests: 3, deadlineMs: 10_000, transport: { request } });
+    const first = runtime(), second = runtime(), items = [{ method: "eth_chainId", params: [], decoder: tokenChain }];
+    await Promise.all([tokenBatch(first, "primary", items), tokenBatch(second, "primary", items)]);
+    assert.equal(failedCalls, 1, reason); assert.equal(healthyCalls, 2, reason);
+    assert.equal([first, second].filter((rpc) => rpc.primaryPoolTelemetry!().attempts.some((row) => row.outcome === "cooldown_skipped")).length, 1, reason);
+  }
 });
 
 test("wrong-chain and HTTP 5xx candidates are quarantined with finite redacted reasons", async (t) => {

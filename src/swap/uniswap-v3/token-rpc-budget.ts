@@ -90,7 +90,7 @@ function validPool(value: unknown): value is TokenPrimaryPoolTelemetry { if (!is
   !Array.isArray(value.attempts) || value.attempts.length > 3) return false;
   return value.attempts.every((row) => isPlainRecord(row) && exactKeys(row, ["providerId", "outcome", "reason"]) &&
     typeof row.providerId === "string" && /^[a-f0-9]{64}$/u.test(row.providerId) &&
-    ["selected", "failed", "cooldown_skipped"].includes(row.outcome as string) &&
+    ["selected", "recovery_bound", "failed", "cooldown_skipped"].includes(row.outcome as string) &&
     (row.reason === null || ["cooldown", "deadline", "rate_limited", "http_5xx", "authentication", "malformed", "wrong_chain", "capability"].includes(row.reason as string)));
 }
 function corrupt(): never { throw new ApnError("APN_STATE_CORRUPT", "Uniswap token RPC budget record is invalid."); }

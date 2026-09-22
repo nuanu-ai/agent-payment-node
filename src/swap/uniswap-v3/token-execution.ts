@@ -80,6 +80,10 @@ export class UniswapTokenExecution {
       return await this.finishStart(op, kind); }); }
   private async finishStart(op: UniswapTokenOperation, kind: TokenEffectKind) {
     const attempt = attemptOf(op, kind); if (attempt.transactionHash !== null || op.phase !== started(kind)) return op;
+    const recovered = await this.ports.probeSealed(op, kind, attempt.nonce);
+    if (recovered !== null) { await this.ports.commitNonce(op, kind, attempt.nonce);
+      op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: recovered.transactionHash } }, this.ports.now()));
+      return await this.submit(op, kind); }
     try { await this.ports.guard(op, kind, attempt.nonce); }
     catch (error) { await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op,
       kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase)); }
@@ -90,6 +94,9 @@ export class UniswapTokenExecution {
       await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op, `${kind}_sign_failed`); }
     await this.ports.commitNonce(op, kind, attempt.nonce);
     op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: sealed.transactionHash } }, this.ports.now()));
+    return await this.submit(op, kind);
+  }
+  private async submit(op: UniswapTokenOperation, kind: TokenEffectKind) {
     let result: "accepted" | "ambiguous"; try { result = await this.ports.send(op, kind); } catch { result = "ambiguous"; }
     const usage = kind === "swap" ? await this.ports.followUsage(op, result === "accepted" ? "submitted" : "unknown_finality") : null;
     return await this.persist(transitionUniswapToken(op, result === "accepted" ? submitted(kind) : unknown(kind), usage === null ? {} : usagePatch(usage), this.ports.now()));

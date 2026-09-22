@@ -41,8 +41,9 @@ export function createTokenRpc(input) {
             deadlineMs: input.deadlineMs, now: input.now, ...(input.wait === undefined ? {} : { wait: input.wait }), providerScheduler: scheduler });
         const baseTransport = input.transport ?? new BridgeHttps(undefined, undefined, 2_500), transport = { request: async (...args) => {
                 const response = await baseTransport.request(...args);
-                return response.status === 200 && credentialResponse(response.body)
-                    ? { ...response, status: 403, body: "" } : response;
+                if (response.status === 200 && capabilityResponse(response.body))
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Uniswap token primary does not support bounded JSON-RPC batches.", { reason: "token_primary_batch_unsupported" });
+                return response.status === 200 && credentialResponse(response.body) ? { ...response, status: 403, body: "" } : response;
             } }, descriptors = candidates().map((candidate) => bridgeRpcCall(1, { ...input.environment, APN_ETHEREUM_RPC_URL: candidate.url.toString() }, { transport }));
         return { session, descriptors };
     })();
@@ -74,6 +75,8 @@ export function createTokenRpc(input) {
                 configuredCandidates: candidates().length, selectedProviderId: selected === null ? null : candidates()[selected].id, attempts: [...attempts] }) },
         primaryPoolEnabled: { value: () => true },
         primaryPoolSize: { value: () => candidates().length },
+        selectedPrimaryProviderId: { value: () => selected === null ? null : candidates()[selected].id },
+        bindPrimaryProvider: { value: async (providerId) => { await bindProvider(providerId); } },
     });
     return call;
     async function primary(items) {
@@ -84,24 +87,28 @@ export function createTokenRpc(input) {
             if (tried.has(index))
                 continue;
             tried.add(index);
-            try {
-                return await input.state.withLocks([`uniswap-token-primary-probe:${candidates()[index].familyHash}`], async () => {
+            // Pool code always acquires probe before the scheduler's provider-family lock. No path acquires them in reverse.
+            const result = await input.state.withLocks([probeLock(index)], async () => {
+                try {
                     const values = await resolve().descriptors[index].sessionBatchCall(resolve().session)(items, "primary");
                     rememberBlocks(items, values);
                     selected = index;
                     attempts.push({ providerId: candidates()[index].id, outcome: "selected", reason: null });
-                    return values;
-                });
-            }
-            catch (error) {
-                const reason = failureReason(error);
-                if (reason === null)
-                    throw error;
-                attempts.push({ providerId: candidates()[index].id,
-                    outcome: reason === "cooldown" ? "cooldown_skipped" : "failed", reason });
-                if (reason !== "cooldown")
-                    await quarantine(index, reason);
-            }
+                    return { ok: true, values };
+                }
+                catch (error) {
+                    const reason = failureReason(error);
+                    if (reason === null)
+                        throw error;
+                    attempts.push({ providerId: candidates()[index].id,
+                        outcome: reason === "cooldown" ? "cooldown_skipped" : "failed", reason });
+                    if (reason !== "cooldown")
+                        await quarantine(index, reason);
+                    return { ok: false };
+                }
+            });
+            if (result.ok)
+                return result.values;
         }
         throw new ApnError("APN_PROVIDER_UNAVAILABLE", "No configured Uniswap token primary provider passed semantic validation.", { reason: "token_primary_pool_exhausted", attemptedProviders: attempts.length.toString() });
     }
@@ -147,6 +154,29 @@ export function createTokenRpc(input) {
             await input.state.writeRpcProviderCooldown(candidate.familyHash, Math.max(current ?? 0, now + duration));
         });
     }
+    async function bindProvider(providerId) {
+        if (providerId === null || !/^[a-f0-9]{64}$/u.test(providerId))
+            throw new ApnError("APN_OPERATION_BLOCKED", "Signed Uniswap token effect has no valid primary provider binding.", { reason: "uniswap_token_provider_binding_missing" });
+        const index = candidates().findIndex((candidate) => candidate.id === providerId);
+        if (index < 0)
+            throw new ApnError("APN_OPERATION_BLOCKED", "Signed Uniswap token effect provider is unavailable.", { reason: "uniswap_token_provider_binding_unavailable" });
+        if (selected !== null && selected !== index)
+            throw new ApnError("APN_OPERATION_BLOCKED", "Signed Uniswap token effect provider changed.", { reason: "uniswap_token_provider_binding_changed" });
+        await input.state.initialize();
+        await input.state.withLocks([probeLock(index)], async () => {
+            await input.state.withLocks([`rpc-provider-family:${candidates()[index].familyHash}`], async () => {
+                const cooldown = await input.state.loadRpcProviderCooldown(candidates()[index].familyHash), now = input.pacingNow?.() ?? Date.now();
+                if (cooldown !== null && cooldown > now)
+                    throw new ApnError("APN_PROVIDER_UNAVAILABLE", "Signed Uniswap token effect provider is cooling down.", { reason: "uniswap_token_bound_provider_cooldown" });
+                if (selected === null) {
+                    selected = index;
+                    tried.add(index);
+                    attempts.push({ providerId, outcome: "recovery_bound", reason: null });
+                }
+            });
+        });
+    }
+    function probeLock(index) { return `uniswap-token-primary-probe:${candidates()[index].familyHash}`; }
 }
 function createLegacyTokenRpc(input) {
     const scheduler = new RpcProviderScheduler({ coordinate: async (family, work) => {
@@ -184,7 +214,11 @@ function createLegacyTokenRpc(input) {
                 }
                 return await resolve().batch(items, route);
             } }, telemetry: { value: () => initialized?.session.telemetry() ?? null },
-        effectAttempts: { value: () => effects }, primaryPoolEnabled: { value: () => false }, primaryPoolSize: { value: () => 1 } });
+        effectAttempts: { value: () => effects }, primaryPoolEnabled: { value: () => false }, primaryPoolSize: { value: () => 1 },
+        selectedPrimaryProviderId: { value: () => null }, bindPrimaryProvider: { value: async (providerId) => {
+                if (providerId !== null)
+                    throw new ApnError("APN_OPERATION_BLOCKED", "Scalar Uniswap token RPC cannot restore a pooled provider binding.", { reason: "uniswap_token_provider_binding_changed" });
+            } } });
     return call;
 }
 function archiveTag(item) {
@@ -231,6 +265,26 @@ function credentialResponse(body) {
             const message = error.message;
             return typeof message === "string" && ["api key", "apikey", "unauthorized", "authentication", "access denied"]
                 .some((part) => message.toLowerCase().includes(part));
+        });
+    }
+    catch {
+        return false;
+    }
+}
+function capabilityResponse(body) {
+    if (body.length < 2 || body.length > 1_048_576)
+        return false;
+    try {
+        const value = JSON.parse(body), rows = Array.isArray(value) ? value : [value];
+        return rows.some((row) => {
+            if (typeof row !== "object" || row === null || Array.isArray(row))
+                return false;
+            const error = row.error;
+            if (typeof error !== "object" || error === null || Array.isArray(error))
+                return false;
+            const message = error.message;
+            return typeof message === "string" && ["batch requests are not supported", "batch requests not supported", "batch unsupported"]
+                .includes(message.trim().toLowerCase());
         });
     }
     catch {
