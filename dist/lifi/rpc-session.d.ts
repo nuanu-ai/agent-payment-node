@@ -2,6 +2,7 @@ import type { EvmRpcCall } from "../evm-ports.js";
 import type { BridgeChainId } from "./chains.js";
 export declare const MAX_READ_ATTEMPTS = 2;
 export declare const RPC_RETRY_DELAY_MS = 2000;
+export declare const RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS = 3;
 export declare const RPC_BATCH_MAX_ITEMS = 33;
 export type RpcBatchAttempt = (canonicalBody: string) => Promise<unknown>;
 export interface RpcBatchReadItem<T = unknown> {

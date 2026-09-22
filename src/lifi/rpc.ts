@@ -277,7 +277,7 @@ export class BridgeRpc implements BridgeRpcPort {
       { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
     ];
     const values = this.batchCall === undefined ? await Promise.all(items.map(async (item) => item.decoder(await this.call(item.method, item.params))))
-      : await this.batchCall(items, block === undefined ? "archive" : "archive_deployment");
+      : await this.batchCall(items, "archive_deployment");
     let offset = 0;
     if (values[offset++] !== BigInt(this.chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
     for (const row of codeRows) {
