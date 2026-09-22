@@ -161,7 +161,7 @@ export class TransferService {
                 await this.failBeforeEffect(operation, "approval_window_expired");
             }
             const rpc = this.context.requireRpc();
-            await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason));
+            await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
             if (operation.evm !== undefined) {
                 // The native signer approves and signs in one call, so the reservation is durable in both stores before it.
                 const allowlistLease = await this.reserveUsage(operation);

@@ -2,6 +2,7 @@ import { ApnError } from "./errors.js";
 import { requireEvmFunding, requireEvmRpc, evmTransaction } from "./evm-direct.js";
 import { directEvmNetwork } from "./evm-direct-networks.js";
 import { validateEconomics } from "./transfer-policy.js";
+import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
 function frozenEconomicsRemainExecutable(current, frozen) {
     const freshMaximumFee = BigInt(current.maxFeePerGasAtomic);
     const freshPriorityFee = BigInt(current.maxPriorityFeePerGasAtomic);
@@ -13,7 +14,7 @@ function frozenEconomicsRemainExecutable(current, frozen) {
         BigInt(current.gasLimitAtomic) <= BigInt(frozen.gasLimitAtomic) &&
         freshBaseFee <= BigInt(frozen.maxFeePerGasAtomic);
 }
-export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning) {
+export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning, stateRoot) {
     const binding = operation.evm;
     if (binding === undefined || operation.economics === undefined)
         throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
@@ -31,7 +32,13 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning)
             rpc.nonce(operation.chainId, operation.walletAddress, "pending"),
             rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic)),
         ]);
-        const current = validateEconomics(nonce, fees);
+        let executableNonce = BigInt(nonce);
+        if (operation.chainId === 1 && stateRoot !== undefined) {
+            const owned = new Set((await occupiedUniswapTokenNonces(stateRoot, operation.walletAddress)).map(String));
+            while (owned.has(executableNonce.toString()))
+                executableNonce += 1n;
+        }
+        const current = validateEconomics(executableNonce.toString(), fees);
         if (!frozenEconomicsRemainExecutable(current, operation.economics)) {
             throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen nonce or transaction fee envelope is no longer executable before approval.");
         }

@@ -26,6 +26,8 @@ import { transferData } from "./transfer-policy.js";
 import { TtyTransferApproval, type TransferApprovalIntent, type TransferApprovalPort } from "./tty-approval.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { x402AuthorizationIntentHash } from "./x402-state-integrity.js";
+import { publicDirectEffect, publicWalletIdentity as publicIdentity, publicX402Effect } from "./local-wallet-native-public.js";
+import { uniswapTokenNonceOwned } from "./swap/uniswap-v3/token-nonce-ownership.js";
 
 const HASH = /^[a-f0-9]{64}$/u;
 const HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
@@ -143,6 +145,9 @@ export class LocalWalletNative implements NativePort {
       if (existing !== undefined) {
         if (existing.payloadHash !== payloadHash) throw rejected("APN_EFFECT_MISMATCH", "Stored direct-transfer effect differs from the frozen request.");
         return publicDirectEffect(existing);
+      }
+      if ((intent.evm?.asset.chainId ?? CHAIN_ID) === 1 && await uniswapTokenNonceOwned(this.state.root, identity.address, intent.nonceAtomic)) {
+        throw rejected("APN_NONCE_CONFLICT", "A guarded token effect already owns the approved Ethereum nonce; prepare a fresh transfer.");
       }
       const account = privateKeyToAccount(secret.privateKey);
       const rawTransaction = await account.signTransaction({
@@ -432,20 +437,6 @@ function publicAuthorization(value: X402Binding["authorization"]): X402Binding["
     from: value.from, to: value.to, value: value.value, validAfter: value.validAfter,
     validBefore: value.validBefore, nonce: value.nonce,
   };
-}
-
-function publicIdentity(identity: WalletIdentity): {
-  readonly profile: string; readonly address: Address; readonly createdAt: string; readonly bindingHash: string;
-} {
-  return { profile: identity.profile, address: identity.address, createdAt: identity.createdAt, bindingHash: identity.bindingHash };
-}
-
-function publicDirectEffect(effect: DirectEffectMaterial): unknown {
-  return { transactionHash: effect.transactionHash, rawTransaction: effect.rawTransaction, rawTransactionHash: effect.rawTransactionHash };
-}
-
-function publicX402Effect(effect: X402EffectMaterial): unknown {
-  return { authorization: effect.authorization, signature: effect.signature, signatureHash: effect.signatureHash };
 }
 
 function assertWallet(identity: WalletIdentity, expected: Address): void {

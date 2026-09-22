@@ -10,9 +10,10 @@ export async function checkTransferApproval(
   rpc: RpcPort,
   operation: OperationRecord & { readonly economics: Economics; readonly transactionData: Hex },
   failBeforeEffect: (reason: string) => Promise<never>,
+  stateRoot?: string,
 ): Promise<void> {
   if (operation.evm !== undefined) {
-    try { await checkEvmTransferFunding(rpc, operation, true); }
+    try { await checkEvmTransferFunding(rpc, operation, true, stateRoot); }
     catch (error) {
       if (error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED") await failBeforeEffect("fee_or_nonce_changed");
       throw error;
