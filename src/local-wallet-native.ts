@@ -8,6 +8,7 @@ import { domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./cano
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID } from "./constants.js";
 import {
   EncryptedWalletStore,
+  walletCustodyLock,
   type DirectEffectMaterial,
   type WalletIdentity,
   type WalletSecretState,
@@ -46,8 +47,7 @@ export class LocalWalletNative implements NativePort {
     if (request.version !== "apn.native.v1") throw protocol("Unsupported custody request version.");
     await this.state.initialize();
     const profile = requestProfile(request.payload);
-    const profileHash = this.state.profileHash(profile);
-    return await this.state.withLocks([`custody:${profileHash}`], async () => {
+    return await this.state.withLocks([walletCustodyLock(this.state, profile)], async () => {
       switch (request.operation) {
         case "wallet.ensure": return await this.ensureWallet(profile);
         case "wallet.import": return await this.importWallet(profile, request.payload);

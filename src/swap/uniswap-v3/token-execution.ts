@@ -10,7 +10,7 @@ export interface TokenEffectObservation { readonly status: "pending" | "success"
   readonly gasDebitWei: string; readonly allowanceAtomic: string; readonly inputDebitAtomic?: string; readonly outputCreditAtomic?: string }
 export interface UniswapTokenExecutionPorts {
   now(): Date; foregroundApprove(operation: UniswapTokenOperation): Promise<void>; foregroundCleanup(operation: UniswapTokenOperation): Promise<void>;
-  withAccountLock<T>(account: string, work: () => Promise<T>): Promise<T>;
+  withAccountLock<T>(operation: UniswapTokenOperation, work: () => Promise<T>): Promise<T>;
   allocateNonce(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>; currentAllowance(operation: UniswapTokenOperation): Promise<string>;
   releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
   commitNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
@@ -66,12 +66,12 @@ export class UniswapTokenExecution {
     op = await this.start(op, "cleanup"); return await this.observeCleanup(await this.continueStart(op, "cleanup"));
   }
   private async start(op: UniswapTokenOperation, kind: TokenEffectKind) {
-    return await this.ports.withAccountLock(op.account, async () => { const nonce = await this.ports.allocateNonce(op, kind), attempt = tokenAttempt(op, kind, nonce, this.ports.now());
+    return await this.ports.withAccountLock(op, async () => { const nonce = await this.ports.allocateNonce(op, kind), attempt = tokenAttempt(op, kind, nonce, this.ports.now());
       op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: attempt }, this.ports.now()));
       return await this.finishStart(op, kind); });
   }
   private async continueStart(op: UniswapTokenOperation, kind: TokenEffectKind) { if (attemptOf(op, kind).transactionHash !== null) return op;
-    return await this.ports.withAccountLock(op.account, async () => await this.finishStart(op, kind)); }
+    return await this.ports.withAccountLock(op, async () => await this.finishStart(op, kind)); }
   private async finishStart(op: UniswapTokenOperation, kind: TokenEffectKind) {
     const attempt = attemptOf(op, kind); if (attempt.transactionHash !== null || op.phase !== started(kind)) return op;
     try { await this.ports.guard(op, kind, attempt.nonce); }

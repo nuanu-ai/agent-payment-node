@@ -13,7 +13,7 @@ type Durable = (operationId: string, kind: TokenEffectKind) => Promise<boolean>;
 
 /** Called while the shared account custody lock is held. Only reservations without a durable signed-effect marker may be reclaimed. */
 export class UniswapTokenNonceStore extends SecureStateStore {
-  async allocate(op: UniswapTokenOperation, kind: TokenEffectKind, pending: bigint, durable: Durable): Promise<string> {
+  async allocate(op: UniswapTokenOperation, kind: TokenEffectKind, pending: bigint, durable: Durable, occupied: readonly bigint[] = []): Promise<string> {
     await this.initialize(); await this.ensureDirectory("uniswap-token-nonces"); const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path),
       current = raw === null ? empty(account) : validate(raw, account), slot = nonceSlot(op.operationId, kind), prior = current.reservations[slot];
     if (prior !== undefined) return prior.nonce;
@@ -23,8 +23,8 @@ export class UniswapTokenNonceStore extends SecureStateStore {
       if (await durable(reservation.operationId, reservation.kind)) reservations[key] = { ...reservation, state: "committed" };
       else delete reservations[key];
     }
-    const occupied = new Set(Object.values(reservations).map((reservation) => reservation.nonce)); let nonce = pending;
-    while (occupied.has(nonce.toString())) nonce += 1n;
+    const unavailable = new Set([...Object.values(reservations).map((reservation) => reservation.nonce), ...occupied.map(String)]); let nonce = pending;
+    while (unavailable.has(nonce.toString())) nonce += 1n;
     reservations[slot] = { operationId: op.operationId, kind, nonce: nonce.toString(), state: "reserved" };
     await this.writeJson(path, { schemaVersion: "apn.uniswap-token-nonces.v2", account, reservations } satisfies NonceRecord, raw === null);
     return nonce.toString();

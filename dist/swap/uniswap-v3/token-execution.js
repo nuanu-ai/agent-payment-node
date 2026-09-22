@@ -65,7 +65,7 @@ export class UniswapTokenExecution {
         return await this.observeCleanup(await this.continueStart(op, "cleanup"));
     }
     async start(op, kind) {
-        return await this.ports.withAccountLock(op.account, async () => {
+        return await this.ports.withAccountLock(op, async () => {
             const nonce = await this.ports.allocateNonce(op, kind), attempt = tokenAttempt(op, kind, nonce, this.ports.now());
             op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: attempt }, this.ports.now()));
             return await this.finishStart(op, kind);
@@ -74,7 +74,7 @@ export class UniswapTokenExecution {
     async continueStart(op, kind) {
         if (attemptOf(op, kind).transactionHash !== null)
             return op;
-        return await this.ports.withAccountLock(op.account, async () => await this.finishStart(op, kind));
+        return await this.ports.withAccountLock(op, async () => await this.finishStart(op, kind));
     }
     async finishStart(op, kind) {
         const attempt = attemptOf(op, kind);

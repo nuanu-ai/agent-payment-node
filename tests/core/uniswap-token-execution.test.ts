@@ -20,7 +20,7 @@ async function fixture(root: string, allowance = "0") {
     sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0, rejectRevalidation = false, rejectGuard = false, rejectSeal = false;
   const released: string[] = [], committed: string[] = [];
   const ports = { now: () => NOW, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
-    withAccountLock: async <T>(_account: string, work: () => Promise<T>) => await work(), allocateNonce: async () => String(7 + sends.length),
+    withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(), allocateNonce: async () => String(7 + sends.length),
     releaseNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { released.push(`${kind}:${nonce}`); },
     commitNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { committed.push(`${kind}:${nonce}`); },
     currentAllowance: async () => currentAllowance, guard: async () => { if (rejectGuard) throw new Error("refused"); }, revalidate: async () => { revalidations += 1; if (rejectRevalidation) throw new Error("drift"); },
@@ -47,7 +47,7 @@ test("exact approval then swap finalizes with zero allowance and bounded debit",
 test("ambiguous approval and swap are never resent after restart", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   f.sendResult("ambiguous"); let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "approval_unknown_finality");
   const restarted = new UniswapTokenExecution(new UniswapTokenJournal(temp.root), { now: () => NOW, foregroundApprove: async () => undefined,
-    foregroundCleanup: async () => undefined, withAccountLock: async <T>(_account: string, work: () => Promise<T>) => await work(),
+    foregroundCleanup: async () => undefined, withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(),
     allocateNonce: async () => "99", currentAllowance: async () => "0", guard: async () => undefined, revalidate: async () => undefined,
     releaseNonce: async () => undefined, commitNonce: async () => undefined,
     reserveUsage: async () => ({ reservationId: "d".repeat(64), state: "reserved" as const }),

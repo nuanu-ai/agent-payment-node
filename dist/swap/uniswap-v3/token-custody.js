@@ -1,7 +1,7 @@
 import { encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, domainHash } from "../../canonical.js";
-import { EncryptedWalletStore } from "../../encrypted-wallet-store.js";
+import { EncryptedWalletStore, walletCustodyLock } from "../../encrypted-wallet-store.js";
 import { ApnError } from "../../errors.js";
 import { evmRpcHex, evmRpcQuantity } from "../../evm-rpc-codec.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
@@ -27,12 +27,15 @@ export class UniswapTokenCustody {
         this.nonces = new UniswapTokenNonceStore(state.root);
         this.operations = new UniswapTokenJournal(state.root);
     }
-    async withAccountLock(account, work) {
-        return await this.state.withLocks([`uniswap-token-account:${domainHash("apn.uniswap-token-account-lock.v1", account)}`], work);
+    async withAccountLock(op, work) {
+        return await this.state.withLocks([walletCustodyLock(this.state, op.profile)], work);
     }
     async allocateNonce(op, kind) {
         const pending = evmRpcQuantity(await this.call("eth_getTransactionCount", [op.account, "pending"]));
-        return await this.nonces.allocate(op, kind, pending, async (operationId, effectKind) => await this.hasDurableEffect(operationId, effectKind));
+        const occupied = (await this.state.listOperations(this.state.profileHash(op.profile)))
+            .filter((operation) => !operation.terminal && operation.walletAddress === op.account && operation.evm?.asset.chainId === 1 && operation.economics !== undefined)
+            .map((operation) => BigInt(operation.economics.nonceAtomic));
+        return await this.nonces.allocate(op, kind, pending, async (operationId, effectKind) => await this.hasDurableEffect(operationId, effectKind), occupied);
     }
     async releaseNonce(op, kind, nonce) {
         await this.nonces.release(op, kind, nonce, async (operationId, effectKind) => await this.hasDurableEffect(operationId, effectKind));
