@@ -185,41 +185,46 @@ test("dRPC family pacing persists across Ethereum, Base and Arbitrum process rec
 });
 
 test("dRPC Retry-After blocks concurrent sibling processes until shared cooldown and pacing expire", async () => {
-  let now = 0, attempts = 0, siblingCalls = 0, persisted: number | null = null, cooldown: number | null = null;
-  let tail = Promise.resolve(), releaseBaseRetry!: () => void, releaseSiblingCooldown!: () => void, releaseBasePacing!: () => void;
-  const baseRetry = new Promise<void>((resolve) => { releaseBaseRetry = resolve; });
-  const siblingCooldown = new Promise<void>((resolve) => { releaseSiblingCooldown = resolve; });
-  const basePacing = new Promise<void>((resolve) => { releaseBasePacing = resolve; });
-  const families: string[] = [], coordinator = { coordinate: async <T>(family: string,
-    work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
-      saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {
-    let unlock!: () => void; const previous = tail; tail = new Promise<void>((resolve) => { unlock = resolve; }); await previous;
-    families.push(family);
-    try { return await work(persisted, async (value) => { persisted = value; }, cooldown, async (value) => { cooldown = value; }); }
-    finally { unlock(); }
-  } };
-  const baseWaits: number[] = [], siblingWaits: number[] = [];
-  const base = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
-    wait: async (milliseconds) => { baseWaits.push(milliseconds); await (milliseconds === 5_000 ? baseRetry : basePacing); } });
-  const baseRead = base.read("https://base.drpc.org/archive", 8453, "eth_chainId", [], async () => {
-    attempts += 1; if (attempts === 1) throw new RpcHttpFailure("eth_chainId", 429, 5_000); return "0x2105";
-  });
-  while (baseWaits.length === 0) await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(cooldown, 5_000);
-  const sibling = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
-    wait: async (milliseconds) => { siblingWaits.push(milliseconds); await siblingCooldown; } });
-  const siblingRead = sibling.read("https://arbitrum.drpc.org/archive", 42161, "eth_chainId", [], async () => {
-    siblingCalls += 1; return "0xa4b1";
-  });
-  while (siblingWaits.length === 0) await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(siblingCalls, 0); assert.deepEqual(siblingWaits, [5_000]);
-  now = 5_000; releaseSiblingCooldown(); await siblingRead;
-  assert.equal(siblingCalls, 1); assert.equal(persisted, 5_000);
-  releaseBaseRetry();
-  while (baseWaits.length < 2) await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(attempts, 1); assert.deepEqual(baseWaits, [5_000, 750]);
-  now = 5_750; releaseBasePacing(); await baseRead;
-  assert.equal(attempts, 2); assert.deepEqual(families, ["drpc.org", "drpc.org", "drpc.org"]);
+  const run = async (retryAfterMs: number | undefined, effectiveCooldown: number, siblingOrigin: string, siblingChain: 1 | 42161) => {
+    let now = 0, attempts = 0, siblingCalls = 0, persisted: number | null = null, cooldown: number | null = null;
+    let tail = Promise.resolve(), releaseBaseRetry!: () => void, releaseSiblingCooldown!: () => void, releaseBasePacing!: () => void;
+    const baseRetry = new Promise<void>((resolve) => { releaseBaseRetry = resolve; });
+    const siblingCooldown = new Promise<void>((resolve) => { releaseSiblingCooldown = resolve; });
+    const basePacing = new Promise<void>((resolve) => { releaseBasePacing = resolve; });
+    const families: string[] = [], coordinator = { coordinate: async <T>(family: string,
+      work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
+        saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {
+      let unlock!: () => void; const previous = tail; tail = new Promise<void>((resolve) => { unlock = resolve; }); await previous;
+      families.push(family);
+      try { return await work(persisted, async (value) => { persisted = value; }, cooldown, async (value) => { cooldown = value; }); }
+      finally { unlock(); }
+    } };
+    const baseWaits: number[] = [], siblingWaits: number[] = [];
+    const base = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
+      wait: async (milliseconds) => { baseWaits.push(milliseconds); await (milliseconds === effectiveCooldown ? baseRetry : basePacing); } });
+    const baseRead = base.read("https://base.drpc.org/archive", 8453, "eth_chainId", [], async () => {
+      attempts += 1; if (attempts === 1) throw new RpcHttpFailure("eth_chainId", 429, retryAfterMs); return "0x2105";
+    });
+    while (baseWaits.length === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(cooldown, effectiveCooldown);
+    const sibling = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
+      wait: async (milliseconds) => { siblingWaits.push(milliseconds); await siblingCooldown; } });
+    const siblingRead = sibling.read(siblingOrigin, siblingChain, "eth_chainId", [], async () => {
+      siblingCalls += 1; return siblingChain === 1 ? "0x1" : "0xa4b1";
+    });
+    while (siblingWaits.length === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(siblingCalls, 0); assert.deepEqual(siblingWaits, [effectiveCooldown]);
+    now = effectiveCooldown; releaseSiblingCooldown(); await siblingRead;
+    assert.equal(siblingCalls, 1); assert.equal(persisted, effectiveCooldown);
+    releaseBaseRetry();
+    while (baseWaits.length < 2) await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(attempts, 1); assert.deepEqual(baseWaits, [effectiveCooldown, 750]);
+    now = effectiveCooldown + 750; releaseBasePacing(); await baseRead;
+    assert.equal(attempts, 2); assert.deepEqual(families, ["drpc.org", "drpc.org", "drpc.org"]);
+  };
+  await run(undefined, 2_000, "https://arbitrum.drpc.org/archive", 42161);
+  await run(1_000, 2_000, "https://ethereum.drpc.org/archive", 1);
+  await run(5_000, 5_000, "https://arbitrum.drpc.org/archive", 42161);
 });
 
 test("provider-family pacing survives scheduler restart through its coordinator", async () => {

@@ -40,9 +40,12 @@ export class RpcProviderScheduler {
         this.coordinator = coordinator;
         this.pacingNow = pacingNow;
     }
-    schedule(origin, now, wait, beforeWait, task) {
+    schedule(origin, now, wait, beforeWait, task, persistRateLimitCooldown = true) {
         const family = rpcProviderFamily(origin);
-        return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, resolve, reject }); this.pump(); });
+        return new Promise((resolve, reject) => {
+            this.queue.push({ family, persistRateLimitCooldown, now, wait, beforeWait, task, resolve, reject });
+            this.pump();
+        });
     }
     pump() {
         while (this.active < 2) {
@@ -92,11 +95,12 @@ export class RpcProviderScheduler {
                     return await entry.task();
                 }
                 catch (error) {
-                    if (error instanceof RpcHttpFailure && error.status === 429 && error.retryAfterMs !== undefined) {
+                    if (entry.persistRateLimitCooldown && error instanceof RpcHttpFailure && error.status === 429) {
                         const observed = clock();
                         if (observed < current)
                             throw schedulerClockRollback(entry.family);
-                        state.cooldownUntil = Math.max(state.cooldownUntil, observed + Math.max(0, Math.min(30_000, error.retryAfterMs)));
+                        const effectiveCooldown = Math.min(30_000, Math.max(RPC_RETRY_DELAY_MS, error.retryAfterMs ?? 0));
+                        state.cooldownUntil = Math.max(state.cooldownUntil, observed + effectiveCooldown);
                         await saveCooldownUntil(state.cooldownUntil);
                     }
                     throw error;
@@ -365,7 +369,7 @@ export class RpcReadSession {
                     this.assertBeforeAttempt(method);
                     this.httpAttempts += 1;
                     return oneAttempt();
-                });
+                }, attempt + 1 < MAX_READ_ATTEMPTS);
             }
             catch (error) {
                 const http = error instanceof RpcHttpFailure ? error : undefined, transport = approvedTransportReason(error);
@@ -394,12 +398,12 @@ export class RpcReadSession {
             }
         }
     }
-    schedule(originInput, task) {
+    schedule(originInput, task, persistRateLimitCooldown) {
         this.assertBeforeQueue("rpc");
         return this.providerScheduler.schedule(originInput, this.now, this.wait, (delay) => this.assertBeforeWait("rpc", delay), async () => {
             this.assertDeadline("rpc");
             return await task();
-        });
+        }, persistRateLimitCooldown);
     }
     assertBeforeAttempt(method) {
         this.assertDeadline(method);
