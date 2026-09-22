@@ -284,8 +284,10 @@ async function baseFeeFixture() {
   return { fixture, entries, block, receipt, observed, call };
 }
 
-async function baseApprovalObservation(mode: "success" | "missing" | "reverted" | "retry429" | "terminal429" |
-  "multicallMalformed" | "multicallRevert" | "multicallOrder" | "multicallCode",
+type BaseObservationMode = "success" | "missing" | "reverted" | "retry429" | "terminal429" |
+  "multicallMalformed" | "multicallRevert" | "multicallOrder" | "multicallCode" | "deploymentCode" |
+  "deploymentConfiguration" | "approvalEvent";
+async function baseApprovalObservation(mode: BaseObservationMode,
   limits: { maxHttpRequests: number; maxHttpAttempts: number } = { maxHttpRequests: 14, maxHttpAttempts: 16 }) {
   const s = await rpcObservation(8453), fee = await baseFeeFixture();
   const deploymentFixture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/deployment-rpc-20260908.json"), "utf8")) as Json;
@@ -302,12 +304,15 @@ async function baseApprovalObservation(mode: "success" | "missing" | "reverted" 
   const deploymentResult = (row: Json): unknown => {
     if (row.method === "eth_getBlockByNumber") return s.block;
     if (row.method === "eth_getCode" && String(row.params[0]).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) return mode === "multicallCode" ? "0x6000" : multicallCode;
+    if (mode === "deploymentCode" && row.method === "eth_getCode" &&
+      !BASE_FEE_CONTRACT.code.some((entry) => entry.address.toLowerCase() === String(row.params[0]).toLowerCase())) return "0x6000";
     if (row.method === "eth_call" && String(row.params[0]?.to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) {
       const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data: row.params[0].data as Hex });
       assert.equal(decoded.functionName, "aggregate3");
       if (mode === "multicallMalformed") return "0x1234";
-      const results = decoded.args[0].map((inner) => ({
-        success: true, returnData: deploymentResult({ method: "eth_call", params: [{ to: inner.target, data: inner.callData }, row.params[1]] }) as Hex,
+      const results = decoded.args[0].map((inner, index) => ({
+        success: true, returnData: mode === "deploymentConfiguration" && decoded.args[0].length !== 4 && index === 0 ? word(123n) :
+          deploymentResult({ method: "eth_call", params: [{ to: inner.target, data: inner.callData }, row.params[1]] }) as Hex,
       }));
       if (mode === "multicallRevert" && results[0] !== undefined) results[0] = { success: false, returnData: "0x" };
       if (mode === "multicallOrder") results.reverse();
@@ -347,17 +352,18 @@ async function baseApprovalObservation(mode: "success" | "missing" | "reverted" 
   return { s, calls, traces, session, rpc, expected, observe: async () => await rpc.observe(s.hash, expected) };
 }
 
-async function productionBaseObservation(root: string, mode: "success" | "terminal429", limits?: { maxHttpRequests: number; maxHttpAttempts: number },
-  effectRole: "approval" | "bridge" = "approval") {
+async function productionBaseObservation(root: string, mode: BaseObservationMode, limits?: { maxHttpRequests: number; maxHttpAttempts: number },
+  effectRole: "approval" | "bridge" = "approval", historicalMismatch?: "contractHash" | "codeHash" | "configurationHash" | "block") {
   const fixture = await lifiFixture(root, "base-arb"), prepared = (await fixture.prepare("stargateV2")).operation;
   const run = await baseApprovalObservation(mode, limits), materialization = { ...prepared.intent.materialization,
     sender: run.expected.from, approvalAddress: run.expected.to };
   const token = BRIDGE_ASSET_REGISTRY[8453].tokens.find((row) => row.symbol === "USDC")!.address;
   const deployment = bridgeDeployment(8453, 42161, "stargateV2", token), code = [...deployment.code, ...BASE_FEE_CONTRACT.code];
-  const sourceDeployment = { ...prepared.intent.sourceDeployment, rpcOrigin: "https://base-rpc.publicnode.com",
+  let sourceDeployment = { ...prepared.intent.sourceDeployment, rpcOrigin: "https://base-rpc.publicnode.com",
     contractHash: hashObject({ protocol: deployment, feeContract: BASE_FEE_CONTRACT }),
     codeHash: hashObject(code.map((row) => ({ address: row.address, codeHash: row.codeHash }))),
     configurationHash: hashObject([...deployment.reads, ...BASE_FEE_CONTRACT.reads].map((row) => ({ ...row, expected: row.expected }))) };
+  if (historicalMismatch !== undefined && historicalMismatch !== "block") sourceDeployment = { ...sourceDeployment, [historicalMismatch]: "0".repeat(64) };
   const selected = prepared.effects.find((effect) => effect.role === effectRole)!, expected = { ...run.expected, role: effectRole } as BridgeEnvelope;
   let operation = { ...prepared, state: "unknown_finality", terminal: false, failure: null,
     intent: { ...prepared.intent, materialization, sourceDeployment }, effects: prepared.effects.map((effect) => effect.role === effectRole ? { ...selected, envelope: expected,
@@ -366,7 +372,14 @@ async function productionBaseObservation(root: string, mode: "success" | "termin
     `0x${"0".repeat(24)}${materialization.sender.slice(2).toLowerCase()}`,
     `0x${"0".repeat(24)}${materialization.approvalAddress.slice(2).toLowerCase()}`], data: word(BigInt(materialization.request.amountAtomic)),
     blockNumber: run.s.receipt.blockNumber, transactionHash: run.s.hash, transactionIndex: "0x0", blockHash: run.s.receipt.blockHash, logIndex: "0x0", removed: false }];
-  const observer = new BridgeObservation(run.rpc, fixture.destination, fixture.provider, async (_previous, patch) => {
+  if (mode === "approvalEvent" && run.s.receipt.logs[0] !== undefined) run.s.receipt.logs[0].data = word(0n);
+  const source = historicalMismatch === "block" ? new Proxy(run.rpc, { get(target, property) {
+    if (property === "deployment") return async (...args: Parameters<typeof target.deployment>) => {
+      const current = await target.deployment(...args); return { ...current, block: { ...current.block, hash: word(999n) as Hex } };
+    };
+    const value = Reflect.get(target, property, target); return typeof value === "function" ? value.bind(target) : value;
+  } }) : run.rpc;
+  const observer = new BridgeObservation(source, fixture.destination, fixture.provider, async (_previous, patch) => {
     operation = { ...operation, ...patch } as BridgeOperationRecord; return operation;
   });
   return { fixture, run, template: prepared,
@@ -454,6 +467,8 @@ test("LI.FI source protocol evidence failures persist the consumed production tr
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const prepared = await productionBaseObservation(temporary.root, "success", undefined, "bridge"), result = await prepared.execute();
   assert.equal(result.reliable, false); assert.equal(result.operation.failure?.reason, "source_protocol_evidence_unavailable");
+  assert.deepEqual(result.operation.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
+    stage: "source_protocol_evidence", effectRole: "bridge", code: "APN_RPC_PROTOCOL", reason: "source_proof" });
   assert.equal(result.operation.observationTelemetry?.length, 1);
   assert.deepEqual(result.operation.observationTelemetry?.[0], {
     schemaVersion: "apn.bridge-observation-telemetry.v1", stage: "source_observation", effectRole: "bridge", outcome: "failure",
@@ -468,6 +483,31 @@ test("LI.FI source protocol evidence failures persist the consumed production tr
   const serialized = JSON.stringify(projected);
   for (const forbidden of ["base.drpc.org", "publicnode.com", "mainnet.base.org", "authorization", "api_key"])
     assert.equal(serialized.includes(forbidden), false, forbidden);
+});
+
+for (const [mode, reason, stage] of [
+  ["multicallMalformed", "bridge_multicall_response", "source_fee_evidence"],
+  ["multicallCode", "Base_fee_code_identity", "source_fee_evidence"],
+  ["deploymentCode", "bridge_deployment_code_changed", "source_deployment"],
+  ["deploymentConfiguration", "bridge_deployment_configuration_changed", "source_deployment"],
+  ["approvalEvent", "approval_event_identity", "source_receipt"],
+] as const) test(`LI.FI production observation persists bounded ${reason} diagnostics`, async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const prepared = await productionBaseObservation(temporary.root, mode), result = await prepared.execute();
+  assert.equal(result.reliable, false);
+  assert.equal(result.operation.failure?.observationRpc?.reason, reason);
+  assert.equal(result.operation.failure?.observationRpc?.stage, stage);
+  assert.equal(result.operation.observationTelemetry?.length, 1);
+  assert.equal(prepared.run.calls.flatMap((call) => call.rows).some((row) => row.method === "eth_sendRawTransaction"), false);
+});
+
+for (const field of ["contractHash", "codeHash", "configurationHash", "block"] as const) test(`LI.FI production observation identifies historical deployment ${field}`, async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const prepared = await productionBaseObservation(temporary.root, "success", undefined, "approval", field), result = await prepared.execute();
+  assert.equal(result.reliable, false);
+  assert.equal(result.operation.failure?.observationRpc?.reason, `historical_deployment_${field.replace("Hash", "_hash")}`);
+  assert.equal(result.operation.failure?.observationRpc?.stage, "source_deployment");
+  assert.equal(result.operation.observationTelemetry?.at(-1)?.physicalRequests, 14);
 });
 
 test("LI.FI Base approval observation keeps missing, reverted and 429 outcomes bounded", async () => {
