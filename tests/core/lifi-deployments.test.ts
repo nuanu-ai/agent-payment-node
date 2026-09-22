@@ -91,8 +91,8 @@ test("LI.FI Base and Arbitrum Stargate deployment proofs execute as one bounded 
   await destination.rpc.deployment("stargateV2", 8453, usdc(42161));
   assert.equal(source.session.telemetry().httpRequests, 2); assert.equal(destination.session.telemetry().httpRequests, 2);
   assert.equal(source.session.telemetry().batchCount, 2); assert.equal(destination.session.telemetry().batchCount, 2);
-  assert.equal(source.session.telemetry().logicalItems, 19); // safe head plus compact 18-item deployment proof
-  assert.equal(destination.session.telemetry().logicalItems, 15); // safe head plus compact 14-item deployment proof
+  assert.equal(source.session.telemetry().logicalItems, 20); // safe head plus compact 19-item deployment proof
+  assert.equal(destination.session.telemetry().logicalItems, 16); // safe head plus compact 15-item deployment proof
 });
 
 test("LI.FI Base Stargate deployment sends sequential archive requests of at most three items", async () => {
@@ -112,19 +112,21 @@ test("LI.FI Base Stargate deployment sends sequential archive requests of at mos
   };
   const requests: Array<{ host: string; items: Array<{ id: string; method: string; params: unknown[] }> }> = [];
   const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
-    const items = JSON.parse(body!) as Array<{ id: string; method: string; params: unknown[] }>;
+    const parsed = JSON.parse(body!) as { id: string; method: string; params: unknown[] } | Array<{ id: string; method: string; params: unknown[] }>;
+    const items = Array.isArray(parsed) ? parsed : [parsed];
     requests.push({ host: new URL(endpoint).host, items });
-    return { status: 200, body: JSON.stringify(items.map((item) => {
+    const responses = items.map((item) => {
       return { jsonrpc: "2.0", id: item.id, result: resultFor(item) };
-    })) };
+    });
+    return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? responses : responses[0]) };
   } };
   const session = new RpcReadSession({ maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
   const rpc = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base-primary.example", APN_BASE_ARCHIVE_RPC_URL: "https://base-archive.example" }, { transport, wait: async () => {} })(8453, session);
   await rpc.deployment("stargateV2", 42161, usdc(8453));
-  assert.equal(requests.length, 7);
+  assert.equal(requests.length, 8);
   assert.equal(requests[0]!.host, "base-primary.example"); assert.equal(requests[0]!.items.length, 2);
   assert.ok(requests.slice(1).every((request) => request.host === "base-archive.example" && request.items.length <= 3));
-  assert.deepEqual(requests.slice(1).map((request) => request.items.length), [3, 3, 3, 3, 3, 3]);
+  assert.deepEqual(requests.slice(1).map((request) => request.items.length), [3, 3, 3, 3, 3, 3, 1]);
   assert.equal(requests[1]!.items[0]!.method, "eth_chainId");
   assert.ok(requests.slice(1).flatMap((request) => request.items).slice(1)
     .every((item) => item.method === "eth_getCode" || item.method === "eth_getStorageAt" || item.method === "eth_call" || item.method === "eth_getBlockByNumber"));

@@ -125,8 +125,8 @@ for (const flow of [
     "eth-archive.example": [3, 3, 3, 3, 3, 2], "base-archive.example": [3, 3, 3, 3, 3, 3, 3, 3, 1],
   }, requests: 19, native: true },
   { pair: "base-arb" as const, tool: "stargateV2" as const, archiveSizes: {
-    "base-archive.example": [3, 3, 3, 3, 3, 3], "arb-archive.example": [3, 3, 3, 3, 2],
-  }, requests: 15, native: false },
+    "base-archive.example": [3, 3, 3, 3, 3, 3, 1], "arb-archive.example": [3, 3, 3, 3, 3],
+  }, requests: 16, native: false },
 ]) test(`LI.FI ${flow.pair} ${flow.tool} complete prepare caps archive HTTP batches at three items`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
     const now = new Date(flow.native ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z");
@@ -165,14 +165,14 @@ for (const flow of [
       assert.equal(rejected.ok, true, JSON.stringify(rejected.error));
       assert.equal((rejected.operation as { state: string }).state, "failed_before_effect");
       const execution = spy.calls.slice(beforeApproval), executionArchive = execution.filter((call) => call.host.includes("archive"));
-      assert.equal(execution.length, 15); assert.equal(execution.filter((call) => call.host.includes("primary")).length, 4);
+      assert.equal(execution.length, 16); assert.equal(execution.filter((call) => call.host.includes("primary")).length, 4);
       assert.deepEqual(executionArchive.filter((call) => call.host === "base-archive.example").map((call) => call.items.length),
-        [3, 3, 3, 3, 3, 3]);
+        [3, 3, 3, 3, 3, 3, 1]);
       assert.deepEqual(executionArchive.filter((call) => call.host === "arb-archive.example").map((call) => call.items.length),
-        [3, 3, 3, 3, 2]);
+        [3, 3, 3, 3, 3]);
       assert.ok(executionArchive.every((call) => call.items.length <= 3));
-      assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 15);
-      assert.equal(spy.sessions.at(-1)!.telemetry().remainingHttpRequests, 13);
+      assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 16);
+      assert.equal(spy.sessions.at(-1)!.telemetry().remainingHttpRequests, 12);
     }
 });
 
@@ -186,8 +186,27 @@ test("deployment Multicall keeps direct-proof identity and rejects unknown selec
   assert.equal(intent.sourceDeployment.configurationHash, hashObject([...base.reads, ...BASE_FEE_CONTRACT.reads].map((row) => ({ ...row, expected: row.expected }))));
   assert.equal(intent.destinationDeployment.configurationHash, hashObject(arb.reads.map((row) => ({ ...row, expected: row.expected }))));
   assert.equal(deploymentMulticallEligible("0x313ce567"), true);
+  assert.equal(deploymentMulticallEligible("0xcdffacc6"), false);
+  assert.equal(deploymentMulticallEligible("0x5c60da1b"), false);
   assert.equal(deploymentMulticallEligible("0x70a082310000000000000000000000000000000000000000000000000000000000000000"), false);
   assert.equal(spy.calls.flatMap((call) => call.items).some((item) => item.method === "eth_getStorageAt"), true);
+  const archiveItems = spy.calls.filter((call) => call.host.includes("archive"))
+    .flatMap((call) => call.items.map((item) => ({ host: call.host, item })));
+  const identitySelectors = new Set(["0xcdffacc6", "0x5c60da1b"]);
+  const directIdentity = archiveItems.filter(({ item }) => item.method === "eth_call" &&
+    String((item.params[0] as { to?: unknown }).to).toLowerCase() !== MULTICALL3_ADDRESS.toLowerCase() &&
+    identitySelectors.has(String((item.params[0] as { data?: unknown }).data).slice(0, 10)));
+  assert.deepEqual(directIdentity.map(({ item }) => String((item.params[0] as { data?: unknown }).data).slice(0, 10)).sort(),
+    ["0xcdffacc6", "0xcdffacc6"]);
+  const aggregateItems = archiveItems.filter(({ item }) => item.method === "eth_call" &&
+    String((item.params[0] as { to?: unknown }).to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase());
+  assert.equal(aggregateItems.length, 2);
+  for (const { host, item } of aggregateItems) {
+    const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data: (item.params[0] as { data: Hex }).data });
+    assert.equal(decoded.functionName, "aggregate3");
+    assert.ok(decoded.args[0].every((inner) => !identitySelectors.has(inner.callData.slice(0, 10))));
+    assert.ok(directIdentity.filter((direct) => direct.host === host).every((direct) => direct.item.params[1] === item.params[1]));
+  }
 });
 
 for (const [mode, code] of [["failed", "APN_RPC_PROTOCOL"], ["malformed", "APN_RPC_PROTOCOL"],
