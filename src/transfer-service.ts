@@ -184,7 +184,7 @@ export class TransferService {
         const allowlistLease = await this.reserveUsage(operation);
         operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect", { allowlistLease });
       }
-      const effect = parseEffect(await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", operation.evm === undefined ? {
+      const custodyPayload = operation.evm === undefined ? {
         profile,
         operationId: operation.operationId,
         fingerprint: operation.fingerprint,
@@ -207,7 +207,21 @@ export class TransferService {
           amountDecimal: operation.amountDecimal,
           expiresAt: operation.expiresAt,
         },
-      } : evmCustodyPayload(operation))));
+      } : evmCustodyPayload(operation);
+      let effectValue: unknown;
+      try { effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload)); }
+      catch (error) {
+        if (operation.evm !== undefined && error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED") {
+          const stored = await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
+            profile, operationId, fingerprint: operation.fingerprint, expectedPayloadHash: hashObject(custodyPayload),
+          }));
+          if (isPlainRecord(stored) && exactKeys(stored, ["found"]) && stored.found === false) {
+            await this.transition(operation, "failed_before_effect", true, "native_signer_reprepare_required", "durable_pre_effect_failure");
+          }
+        }
+        throw error;
+      }
+      const effect = parseEffect(effectValue);
       await verifyEffect(effect, operation);
       operation = await this.transition(
         operation,
