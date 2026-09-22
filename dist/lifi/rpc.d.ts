@@ -7,6 +7,7 @@ import type { BridgeRpcFactory, BridgeRpcPort } from "./ports.js";
 import { RpcReadSession, type RpcBatchReadItem } from "./rpc-session.js";
 export { RpcReadSession } from "./rpc-session.js";
 export type { RpcBatchReadItem, RpcReadSessionOptions, RpcReadTelemetry } from "./rpc-session.js";
+export declare function deploymentMulticallEligible(data: Hex): boolean;
 export declare const BRIDGE_RPC_ENV: {
     readonly 1: "APN_ETHEREUM_RPC_URL";
     readonly 56: "APN_BNB_RPC_URL";
