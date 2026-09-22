@@ -8,6 +8,7 @@ export class RuntimeContext {
     stargateToken;
     portfolio;
     uniswapRuntime;
+    uniswapTokenRuntime;
     sunswapRuntime;
     orcaRuntime;
     uniswap;
@@ -59,6 +60,8 @@ export class RuntimeContext {
             this.portfolio = dependencies.portfolio;
         if (dependencies.uniswapRuntime !== undefined)
             this.uniswapRuntime = dependencies.uniswapRuntime;
+        if (dependencies.uniswapTokenRuntime !== undefined)
+            this.uniswapTokenRuntime = dependencies.uniswapTokenRuntime;
         if (dependencies.sunswapRuntime !== undefined)
             this.sunswapRuntime = dependencies.sunswapRuntime;
         if (dependencies.orcaRuntime !== undefined)

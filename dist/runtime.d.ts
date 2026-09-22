@@ -20,6 +20,7 @@ import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/se
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
+import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
 import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
 import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
@@ -36,6 +37,7 @@ export interface CoreDependencies {
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.uniswap.quote";
     }>>;
+    readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.sunswap.quote";
     }>>;
@@ -86,6 +88,7 @@ export declare class RuntimeContext {
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.uniswap.quote";
     }>>;
+    readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.sunswap.quote";
     }>>;

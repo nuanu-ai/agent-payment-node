@@ -20,6 +20,8 @@ All addresses and runtime code hashes were read on Ethereum mainnet with
 | USDC/WETH 0.05% pool | `0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640` |
 | USDT | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |
 | WETH/USDT 0.3% pool | `0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36` |
+| Original V3 SwapRouter (token input) | `0xE592427A0AEce92De3Edee1F18E0157C05861564` |
+| USDC/USDT 0.01% pool | `0x3416cF6C708Da44DB2624D63ea0AAef7113527C6` |
 
 The USDC pool's token0 is USDC, token1 is WETH and its fee is 500. The USDT
 pool is the deepest WETH/USDT V3 pool by in-range liquidity: token0 WETH,
@@ -77,3 +79,22 @@ handoff.
 
 Any refusal before the submission marker releases the reservation as
 `failed_before_effect`. After the marker, APN never sends again.
+
+## Canonical token input lane
+
+The separate `swap ethereum uniswap-token` family supports only canonical
+Ethereum USDC to USDT and USDT to USDC through the fee-100 pool. Its transaction
+is original SwapRouter `exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))`
+with selector `0x414bf389`, tuple deadline, `sqrtPriceLimitX96 = 0`, and value
+zero. The approval spender is exactly the original SwapRouter. Universal Router
+and native-input materials remain byte compatible.
+
+`quote` requires an explicit approval cap equal to the input amount and budgets
+the worst-case approval, swap, and cleanup gas. Allowance must start at zero or
+the exact input amount. The foreground `approve` path may approve only that
+amount. Successful execution proves the exact input debit, minimum output, and
+zero residual allowance. A reverted or drifted post-approval operation enters
+`cleanup_required`; only an explicit foreground `execute` continuation can send
+the zero allowance cleanup. `status` observes and never signs or broadcasts.
+USDT's no-return approval behavior is accepted only when the call returns empty
+data; final allowance and finalized receipt evidence remain mandatory.

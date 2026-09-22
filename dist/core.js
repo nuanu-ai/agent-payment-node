@@ -146,7 +146,13 @@ export class ApnCore {
             case "swap.uniswap.prepare":
             case "swap.uniswap.status":
             case "swap.uniswap.approve":
-            case "swap.uniswap.execute": return await executeUniswapCommand(request, this.context);
+            case "swap.uniswap.execute":
+            case "swap.uniswap-token.inventory":
+            case "swap.uniswap-token.quote":
+            case "swap.uniswap-token.prepare":
+            case "swap.uniswap-token.status":
+            case "swap.uniswap-token.approve":
+            case "swap.uniswap-token.execute": return await executeUniswapCommand(request, this.context);
             case "swap.sunswap.inventory":
             case "swap.sunswap.quote":
             case "swap.sunswap.prepare":
