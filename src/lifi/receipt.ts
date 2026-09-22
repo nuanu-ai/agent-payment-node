@@ -167,7 +167,11 @@ export function legacyBridgeReceiptCandidates(op: LegacyBridgeOperationRecord): 
   delete olderBody.asset.from.approval;
   delete olderBody.asset.to.approval;
   const older = { ...olderBody, receipt_hash: hashObject(olderBody) };
-  return [latest, older];
+  // PR217 added an always-present projection of optional journal telemetry. Preserve the exact
+  // historical receipt forms emitted before that projection only when the journal itself omitted it.
+  return op.raw.observationTelemetry === undefined
+    ? [latest, older, receiptWithoutObservationTelemetry(latest), receiptWithoutObservationTelemetry(older)]
+    : [latest, older];
 }
 function assetProjection(chainId: BridgeOperationRecord["intent"]["materialization"]["request"]["fromChainId"], token: `0x${string}`) {
   const row = BRIDGE_ASSET_REGISTRY[chainId], asset = bridgeAssetRow(chainId, token, "APN_STATE_CORRUPT");
