@@ -4,6 +4,7 @@ import { keccak256, parseTransaction, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
+import { ApnError } from "../../src/errors.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { UniswapTokenCustody } from "../../src/swap/uniswap-v3/token-custody.js";
 import { UniswapTokenEffectJournal } from "../../src/swap/uniswap-v3/token-effects.js";
@@ -293,6 +294,53 @@ test("native pre-sign refuses when its frozen nonce becomes token-owned", async 
   const loaded = await new EncryptedWalletStore(native.state, native.wrapping).describe("default"); assert.ok(loaded);
   assert.equal(Object.values(loaded.secret.directEffects).length, 1); assert.equal(parseTransaction(Object.values(loaded.secret.directEffects)[0]!.rawTransaction).nonce, 7);
   new EncryptedWalletStore(native.state, native.wrapping).clear(loaded.secret); assert.equal(native.rpc.submissions.length, 0);
+});
+
+test("signer-time token nonce race releases native usage only after proving no signed effect", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); let inject: (() => Promise<void>) | null = null, signerCalls = 0;
+  const native = evmCore(temporary.root, undefined, undefined, undefined, (port) => ({ request: async (request) => {
+    if (request.operation === "directTransfer.approveAndSign") { signerCalls += 1; const race = inject; inject = null; await race?.(); }
+    return await port.request(request);
+  } }));
+  native.rpc.chainId = 1; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; const wallet = await ensureDirectWallet(native); native.rpc.sender = wallet.address;
+  const prepared = await native.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" }, amount: "0.000000000001",
+    idempotencyKey: "native-signer-token-race-001" }) as { operation_id: string };
+  const frozen = await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id); assert.ok(frozen?.economics);
+  const token = operation("a".repeat(64), "2", wallet.address, "default"), store = new UniswapTokenNonceStore(temporary.root);
+  inject = async () => { assert.equal(await store.allocate(token, "approval", BigInt(frozen.economics!.nonceAtomic)), frozen.economics!.nonceAtomic); };
+  await assert.rejects(native.core.transfer.approve(prepared.operation_id), { code: "APN_REPREPARE_REQUIRED" });
+  const failed = await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id); assert.ok(failed?.allowlistLease);
+  assert.equal(failed.state, "failed_before_effect"); assert.equal(failed.terminal, true); assert.equal(failed.reason, "native_signer_reprepare_required");
+  assert.equal(failed.transactionHash, undefined); assert.equal(failed.rawTransactionHash, undefined); assert.equal(signerCalls, 1); assert.equal(native.rpc.submissions.length, 0);
+  const secret = await new EncryptedWalletStore(native.state, native.wrapping).describe("default"); assert.ok(secret); assert.equal(Object.keys(secret.secret.directEffects).length, 0);
+  new EncryptedWalletStore(native.state, native.wrapping).clear(secret.secret); const reservation = failed.allowlistLease.reservation;
+  const ledger = await new AssetUsageLedger(temporary.root).load({ account: reservation.account, chain: reservation.chain, asset: reservation.asset }, reservation.reservationId);
+  assert.equal(ledger?.state, "failed_before_effect");
+  assert.equal((await native.core.transfer.approve(prepared.operation_id) as { state: string }).state, "failed_before_effect"); assert.equal(signerCalls, 1);
+  const restarted = evmCore(temporary.root, native.rpc, native.wrapping);
+  assert.equal((await restarted.core.transfer.approve(prepared.operation_id) as { state: string }).state, "failed_before_effect");
+  assert.equal((await new AssetUsageLedger(temporary.root).load({ account: reservation.account, chain: reservation.chain, asset: reservation.asset }, reservation.reservationId))?.state, "failed_before_effect");
+  assert.equal(native.rpc.submissions.length, 0);
+});
+
+test("reprepare classification after native effect persistence remains recoverable and reserved", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const native = evmCore(temporary.root, undefined, undefined, undefined, (port) => ({ request: async (request) => {
+    const result = await port.request(request);
+    if (request.operation === "directTransfer.approveAndSign") throw new ApnError("APN_REPREPARE_REQUIRED", "injected after effect persistence");
+    return result;
+  } }));
+  native.rpc.chainId = 1; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; const wallet = await ensureDirectWallet(native); native.rpc.sender = wallet.address;
+  const prepared = await native.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" }, amount: "0.000000000001",
+    idempotencyKey: "native-post-marker-reprepare-001" }) as { operation_id: string };
+  await assert.rejects(native.core.transfer.approve(prepared.operation_id), { code: "APN_REPREPARE_REQUIRED" });
+  const started = await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id); assert.equal(started?.state, "started");
+  const reservation = started?.allowlistLease?.reservation; assert.ok(reservation);
+  assert.equal((await new AssetUsageLedger(temporary.root).load({ account: reservation.account, chain: reservation.chain, asset: reservation.asset }, reservation.reservationId))?.state, "reserved");
+  const secret = await new EncryptedWalletStore(native.state, native.wrapping).describe("default"); assert.ok(secret); assert.equal(Object.keys(secret.secret.directEffects).length, 1);
+  new EncryptedWalletStore(native.state, native.wrapping).clear(secret.secret);
+  const restarted = evmCore(temporary.root, native.rpc, native.wrapping); assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
+  assert.equal(native.rpc.submissions.length, 1);
 });
 
 test("token USDT behavior pins reject deprecated and fee-bearing state", async () => {
