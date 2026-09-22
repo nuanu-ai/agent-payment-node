@@ -57,6 +57,7 @@ import { TtyAllowlistPolicyApproval } from "./allowlist-policy-activation.js";
 import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
 import { createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-factory.js";
 import { createTokenRpc } from "./swap/uniswap-v3/token-rpc.js";
+import { tokenPrimaryCandidates } from "./swap/uniswap-v3/token-rpc-pool.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
@@ -235,17 +236,19 @@ function isUniswapTokenCleanup(command) { return command === "swap.uniswap-token
 function uniswapTokenRpcBudget(command) {
     if (command === "swap.uniswap-token.inventory")
         return { maxHttpRequests: 1, deadlineMs: 1_000 };
+    const overhead = process.env.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === undefined || process.env.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === ""
+        ? 0 : tokenPrimaryCandidates(process.env).length;
     if (command === "swap.uniswap-token.quote")
-        return { maxHttpRequests: 8, deadlineMs: 60_000 };
+        return { maxHttpRequests: 8 + overhead, deadlineMs: 60_000 };
     if (command === "swap.uniswap-token.prepare")
-        return { maxHttpRequests: 9, deadlineMs: 60_000 };
+        return { maxHttpRequests: 9 + overhead, deadlineMs: 60_000 };
     if (command === "swap.uniswap-token.approve")
-        return { maxHttpRequests: 14, deadlineMs: 90_000 };
+        return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
     if (command === "swap.uniswap-token.execute")
         return { maxHttpRequests: 24, deadlineMs: 150_000 };
     if (command === "swap.uniswap-token.status")
-        return { maxHttpRequests: 8, deadlineMs: 45_000 };
-    return { maxHttpRequests: 14, deadlineMs: 90_000 };
+        return { maxHttpRequests: 8 + overhead, deadlineMs: 45_000 };
+    return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
 }
 export async function executeBoundCommand(bound, options = {}) {
     return await createApnCore(bound, options).execute(bound.request);

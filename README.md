@@ -536,6 +536,15 @@ swap, and explicit cleanup gas. Native-input command shapes remain unchanged.
 MCP exposes all seven commands; `approve`, `execute`, and `cleanup` hand off to the
 foreground CLI.
 
+This token lane can use up to three ordered credential-free Ethereum primaries
+from `APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS` (a JSON array of HTTPS URLs). Each
+candidate gets one semantic preflight attempt and failed candidates enter a
+shared cooldown. The selected primary is frozen for the command; a signed raw
+transaction is submitted to it once with no provider failover. If the array is
+absent, the existing `APN_ETHEREUM_RPC_URL` single-primary behavior and exact
+request counts are preserved. `APN_ETHEREUM_ARCHIVE_RPC_URL` must remain a
+distinct endpoint and must reproduce the selected primary's pinned block.
+
 `apn swap tron sunswap` swaps native TRX for TRON USDT through the pinned
 SunSwap V2 router the same way: `quote` reads the router and pair on chain,
 encodes `swapExactETHForTokens` locally and simulates it from the owner

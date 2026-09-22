@@ -22,7 +22,7 @@ export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
             return reservation;
         });
     }
-    async settle(binding, reservation, telemetry, effects) {
+    async settle(binding, reservation, telemetry, effects, primaryPool) {
         stateIdentifier(binding, "Uniswap token RPC binding");
         await this.withLocks([`uniswap-token-rpc-budget:${binding}`], async () => {
             const current = await this.load(binding);
@@ -40,6 +40,7 @@ export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
                 ...row, physicalRequests: physical, attempts: telemetry?.httpAttempts ?? 0,
                 logicalItems: telemetry?.logicalItems ?? 0, methodClasses: telemetry?.attemptsByMethodClass ?? {},
                 batchSizes: telemetry?.attemptsByBatchSize ?? {}, budgetRejects: telemetry?.budgetRejectedBeforeTransport ?? 0,
+                ...(primaryPool === undefined ? {} : { primaryPool }),
             }));
             await this.writeJson(this.path(binding), { ...current, rows });
         });
@@ -93,13 +94,28 @@ function validRow(value) {
     if (!isPlainRecord(value))
         return false;
     const legacy = ["reservation", "command", "cap", "physicalRequests", "attempts", "logicalItems", "methodClasses", "batchSizes", "budgetRejects"], extended = [...legacy, "requestSessionCap", "budgetClass"];
-    if (!exactKeys(value, value.requestSessionCap === undefined ? legacy : extended))
+    const keys = value.requestSessionCap === undefined ? legacy : extended;
+    if (!exactKeys(value, value.primaryPool === undefined ? keys : [...keys, "primaryPool"]))
         return false;
     const number = (v) => v === null || typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
     return /^[a-f0-9]{32}$/u.test(value.reservation) && typeof value.command === "string" && number(value.cap) && number(value.physicalRequests) && number(value.attempts) && number(value.logicalItems) && number(value.budgetRejects) &&
         (value.requestSessionCap === undefined || typeof value.requestSessionCap === "number" && Number.isSafeInteger(value.requestSessionCap) && value.requestSessionCap >= 0 &&
             ["quote", "prepare", "approval_effect", "swap_effect", "recovery"].includes(value.budgetClass)) &&
-        (value.methodClasses === null || isPlainRecord(value.methodClasses)) && (value.batchSizes === null || isPlainRecord(value.batchSizes));
+        (value.methodClasses === null || isPlainRecord(value.methodClasses)) && (value.batchSizes === null || isPlainRecord(value.batchSizes)) &&
+        (value.primaryPool === undefined || validPool(value.primaryPool));
+}
+function validPool(value) {
+    if (!isPlainRecord(value) ||
+        !exactKeys(value, ["schemaVersion", "configuredCandidates", "selectedProviderId", "attempts"]) ||
+        value.schemaVersion !== "apn.uniswap-token-primary-pool-telemetry.v1" || !Number.isSafeInteger(value.configuredCandidates) ||
+        Number(value.configuredCandidates) < 1 || Number(value.configuredCandidates) > 3 ||
+        value.selectedProviderId !== null && (typeof value.selectedProviderId !== "string" || !/^[a-f0-9]{64}$/u.test(value.selectedProviderId)) ||
+        !Array.isArray(value.attempts) || value.attempts.length > 3)
+        return false;
+    return value.attempts.every((row) => isPlainRecord(row) && exactKeys(row, ["providerId", "outcome", "reason"]) &&
+        typeof row.providerId === "string" && /^[a-f0-9]{64}$/u.test(row.providerId) &&
+        ["selected", "failed", "cooldown_skipped"].includes(row.outcome) &&
+        (row.reason === null || ["cooldown", "deadline", "rate_limited", "http_5xx", "authentication", "malformed", "wrong_chain", "capability"].includes(row.reason)));
 }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "Uniswap token RPC budget record is invalid."); }
 //# sourceMappingURL=token-rpc-budget.js.map

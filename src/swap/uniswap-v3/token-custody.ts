@@ -12,6 +12,7 @@ import type { TokenEffectKind, TokenSealedEffect } from "./token-execution.js";
 import { UniswapTokenJournal, type TokenGasEnvelope, type UniswapTokenOperation } from "./token-operation.js";
 import { encodeUniswapTokenApproval } from "./token-route.js";
 import { UniswapTokenNonceStore, type TokenNonceEvidence } from "./token-nonce.js";
+import { tokenBatch, tokenBlock, tokenChain, tokenHex, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
 
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
 export interface TokenTransactionEnvelope { readonly chainId: 1; readonly from: string; readonly to: string; readonly data: Hex;
@@ -31,7 +32,12 @@ export class UniswapTokenCustody {
   }
   async allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind) {
     await this.reconcileNonceReservations(op.account);
-    const pending = evmRpcQuantity(await this.call("eth_getTransactionCount", [op.account, "pending"]));
+    const rpc = this.call as TokenRpcCall;
+    const pending = rpc.primaryPoolEnabled?.() === true ? evmRpcQuantity((await tokenBatch(rpc, "primary", [
+      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+      { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
+      { method: "eth_getTransactionCount", params: [op.account, "pending"], cachePolicy: "none", decoder: tokenQuantity },
+    ]))[2]) : evmRpcQuantity(await this.call("eth_getTransactionCount", [op.account, "pending"]));
     const occupied = (await this.state.listOperations(this.state.profileHash(op.profile)))
       .filter((operation) => !operation.terminal && operation.walletAddress === op.account && operation.evm?.asset.chainId === 1 && operation.economics !== undefined)
       .map((operation) => BigInt(operation.economics!.nonceAtomic));
@@ -57,7 +63,14 @@ export class UniswapTokenCustody {
   }
   async currentAllowance(op: UniswapTokenOperation) {
     const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account as Hex, op.route.router] });
-    return BigInt(evmRpcHex(await this.call("eth_call", [{ to: op.route.inputToken, data }, "latest"]), 32)).toString();
+    const rpc = this.call as TokenRpcCall;
+    if (rpc.primaryPoolEnabled?.() !== true) return BigInt(evmRpcHex(await this.call("eth_call", [{ to: op.route.inputToken, data }, "latest"]), 32)).toString();
+    const values = await tokenBatch(rpc, "primary", [
+      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+      { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
+      { method: "eth_call", params: [{ to: op.route.inputToken, data }, "latest"], cachePolicy: "none", decoder: tokenHex(32) },
+    ]);
+    return BigInt(evmRpcHex(values[2], 32)).toString();
   }
   async seal(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect> {
     return await this.state.withLocks([`uniswap-token-custody:${op.operationId}:${kind}`], async () => await this.sealUnlocked(op, kind, nonce));
