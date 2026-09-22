@@ -39,7 +39,12 @@ export function bridgeAtTransition(op, index) {
     if (s === undefined)
         bridgeFailure("APN_STATE_CORRUPT", "bridge_history_index");
     const { at, previousHash: _p, transitionHash: _t, ...mutable } = s;
-    const { integrityHash: _old, ...body } = op;
-    return sealBridgeOperation({ ...body, ...mutable, effects: mutable.effects.map(({ envelopeHash: _h, ...e }, i) => ({ ...e, envelope: op.effects[i].envelope })), updatedAt: at, terminal: BRIDGE_TERMINAL.includes(mutable.state), transitions: op.transitions.slice(0, index + 1) });
+    const { integrityHash: _old, ...body } = op, reconstructed = { ...body, ...mutable };
+    // Optional mutable fields absent from an older snapshot must remain absent when reconstructing its exact integrity
+    // binding; spreading the current operation first would otherwise leak a later telemetry value backwards in time.
+    if (!Object.hasOwn(mutable, "observationTelemetry"))
+        delete reconstructed.observationTelemetry;
+    return sealBridgeOperation({ ...reconstructed, effects: mutable.effects.map(({ envelopeHash: _h, ...e }, i) => ({ ...e, envelope: op.effects[i].envelope })), updatedAt: at, terminal: BRIDGE_TERMINAL.includes(mutable.state),
+        transitions: op.transitions.slice(0, index + 1) });
 }
 //# sourceMappingURL=transitions.js.map
