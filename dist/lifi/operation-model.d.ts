@@ -61,7 +61,7 @@ export interface BridgeObservationRpcFailure {
 }
 export interface BridgeObservationTelemetry {
     readonly schemaVersion: "apn.bridge-observation-telemetry.v1";
-    readonly stage: "source_observation" | "destination_observation";
+    readonly stage: "source_observation" | "destination_observation" | "residual_observation";
     readonly effectRole: "approval" | "bridge";
     readonly outcome: "success" | "missing" | "failure";
     readonly physicalRequests: number;

@@ -141,6 +141,7 @@ export class RpcReadSession {
     endpoints = new Set();
     roleAttempts = { primary: 0, receipt: 0, archive: 0 };
     methodClassAttempts = new Map();
+    batchSizeAttempts = new Map();
     maxBatchSize = 0;
     budgetRejectedBeforeTransport = 0;
     constructor(options = {}) {
@@ -169,6 +170,7 @@ export class RpcReadSession {
             remainingHttpRequests: Math.max(0, this.maxHttpRequests - this.httpRequests),
             remainingHttpAttempts: Math.max(0, this.maxHttpAttempts - this.httpAttempts), deadline: this.deadline,
             attemptsByEndpointRole: { ...this.roleAttempts }, attemptsByMethodClass: Object.fromEntries(this.methodClassAttempts),
+            attemptsByBatchSize: Object.fromEntries(this.batchSizeAttempts),
             maxBatchSize: this.maxBatchSize, budgetRejectedBeforeTransport: this.budgetRejectedBeforeTransport,
             uniqueCalls: this.logicalItems, totalAttempts: this.httpAttempts, perMethod,
             remainingUniqueCalls: Math.max(0, this.maxLogicalItems - this.logicalItems),
@@ -177,7 +179,6 @@ export class RpcReadSession {
     currentTime() { return this.now(); }
     recordPhysicalAttempt(endpointRole, methods) {
         this.roleAttempts[endpointRole] += 1;
-        this.maxBatchSize = Math.max(this.maxBatchSize, methods.length);
         for (const method of methods) {
             const category = rpcMethodClass(method);
             this.methodClassAttempts.set(category, (this.methodClassAttempts.get(category) ?? 0) + 1);
@@ -205,7 +206,7 @@ export class RpcReadSession {
         }
         this.reserveLogical(method);
         this.reserveRequest(method);
-        const operation = this.retry(origin, method, () => oneAttempt(method, params))
+        const operation = this.retry(origin, method, () => oneAttempt(method, params), true, [method])
             .then((raw) => { if (isSessionCacheable(method, params, raw))
             this.cache.set(key, cloneRpcValue(raw)); return raw; })
             .finally(() => this.inflight.delete(key));
@@ -291,9 +292,8 @@ export class RpcReadSession {
         for (let start = 0; start < requests.length; start += maxItemsPerRequest) {
             const chunk = requests.slice(start, start + maxItemsPerRequest), chunkMethod = chunk.length === 1 ? chunk[0].method : rpcMethod;
             this.reserveRequest(chunkMethod);
-            this.batchCount += chunk.length === 1 ? 0 : 1;
             const body = canonicalJson(chunk.length === 1 ? chunk[0] : chunk);
-            const response = await this.retry(origin, chunkMethod, async () => await attempt(body), retryHttp500);
+            const response = await this.retry(origin, chunkMethod, async () => await attempt(body), retryHttp500, chunk.map((row) => row.method));
             const responses = chunk.length === 1 ? [response] : response;
             if (!Array.isArray(responses))
                 throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod: chunkMethod });
@@ -373,12 +373,13 @@ export class RpcReadSession {
             this.budgetError(method, "maxHttpRequests");
         this.httpRequests += 1;
     }
-    async retry(origin, method, oneAttempt, retryHttp500 = true) {
+    async retry(origin, method, oneAttempt, retryHttp500 = true, methodsForAttempt = [method]) {
         for (let attempt = 0;; attempt += 1) {
             try {
                 return await this.schedule(origin, () => {
                     this.assertBeforeAttempt(method);
                     this.httpAttempts += 1;
+                    this.recordAttemptShape(methodsForAttempt);
                     return oneAttempt();
                 });
             }
@@ -415,6 +416,12 @@ export class RpcReadSession {
             this.assertDeadline("rpc");
             return await task();
         });
+    }
+    recordAttemptShape(methods) {
+        this.maxBatchSize = Math.max(this.maxBatchSize, methods.length);
+        this.batchSizeAttempts.set(methods.length, (this.batchSizeAttempts.get(methods.length) ?? 0) + 1);
+        if (methods.length > 1)
+            this.batchCount += 1;
     }
     assertBeforeAttempt(method) {
         this.assertDeadline(method);
@@ -516,6 +523,7 @@ export function telemetryDetails(telemetry, method, reason) {
         remainingUniqueCalls: telemetry.remainingUniqueCalls.toString(),
         attemptsByEndpointRole: canonicalJson(telemetry.attemptsByEndpointRole),
         attemptsByMethodClass: canonicalJson(telemetry.attemptsByMethodClass), maxBatchSize: telemetry.maxBatchSize.toString(),
+        attemptsByBatchSize: canonicalJson(telemetry.attemptsByBatchSize),
         budgetRejectedBeforeTransport: telemetry.budgetRejectedBeforeTransport.toString(),
         ...(telemetry.retryAfterMs === undefined ? {} : { retryAfterMs: telemetry.retryAfterMs.toString() }) };
 }

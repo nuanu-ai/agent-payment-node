@@ -131,13 +131,16 @@ const observationRpcFailureSchema = z.strictObject({
     endpointRole: z.enum(["primary", "receipt", "archive"]).optional(),
 });
 const observationTelemetrySchema = z.strictObject({
-    schemaVersion: z.literal("apn.bridge-observation-telemetry.v1"), stage: z.enum(["source_observation", "destination_observation"]),
+    schemaVersion: z.literal("apn.bridge-observation-telemetry.v1"), stage: z.enum(["source_observation", "destination_observation", "residual_observation"]),
     effectRole: z.enum(["approval", "bridge"]), outcome: z.enum(["success", "missing", "failure"]),
     physicalRequests: z.number().int().min(0).max(10_000), httpAttempts: z.number().int().min(0).max(10_000),
     logicalRpcItems: z.number().int().min(0).max(100_000), batchCount: z.number().int().min(0).max(10_000),
     maxBatchSize: z.number().int().min(0).max(33), budgetRejectedBeforeTransport: z.number().int().min(0).max(10_000),
     attemptsByEndpointRole: z.strictObject({ primary: z.number().int().min(0), receipt: z.number().int().min(0), archive: z.number().int().min(0) }),
-    attemptsByMethodClass: z.record(z.enum(["chain", "transaction", "receipt", "block", "code", "storage", "call", "logs", "other"]), z.number().int().min(0)),
+    attemptsByMethodClass: z.strictObject({ chain: z.number().int().min(0).optional(), transaction: z.number().int().min(0).optional(),
+        receipt: z.number().int().min(0).optional(), block: z.number().int().min(0).optional(), code: z.number().int().min(0).optional(),
+        storage: z.number().int().min(0).optional(), call: z.number().int().min(0).optional(), logs: z.number().int().min(0).optional(),
+        other: z.number().int().min(0).optional() }),
 });
 export const failureSchema = z.strictObject({ reason: reasonSchema,
     residualAllowance: z.strictObject({ amountAtomic: uintSchema, block: blockSchema, rpcOrigin: originSchema }).nullable(),

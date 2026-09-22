@@ -181,7 +181,7 @@ export declare class BridgeService {
     approve(operationId: string): Promise<{
         observation_rpc_telemetry: {
             schema_version: "apn.bridge-observation-telemetry.v1";
-            stage: "source_observation" | "destination_observation";
+            stage: "source_observation" | "destination_observation" | "residual_observation";
             effect_role: "bridge" | "approval";
             outcome: "success" | "missing" | "failure";
             physical_requests: number;
@@ -409,7 +409,7 @@ export declare class BridgeService {
     resume(operationId: string): Promise<{
         observation_rpc_telemetry: {
             schema_version: "apn.bridge-observation-telemetry.v1";
-            stage: "source_observation" | "destination_observation";
+            stage: "source_observation" | "destination_observation" | "residual_observation";
             effect_role: "bridge" | "approval";
             outcome: "success" | "missing" | "failure";
             physical_requests: number;

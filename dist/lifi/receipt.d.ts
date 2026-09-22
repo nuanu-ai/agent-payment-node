@@ -5,7 +5,7 @@ export declare function bridgeProofClass(op: BridgeOperationRecord): string;
 export declare function publicBridgeOperation(op: BridgeOperationRecord): {
     observation_rpc_telemetry: {
         schema_version: "apn.bridge-observation-telemetry.v1";
-        stage: "source_observation" | "destination_observation";
+        stage: "source_observation" | "destination_observation" | "residual_observation";
         effect_role: "bridge" | "approval";
         outcome: "success" | "missing" | "failure";
         physical_requests: number;
@@ -262,7 +262,7 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
     operation_binding_hash: string;
     observation_rpc_telemetry: {
         schema_version: "apn.bridge-observation-telemetry.v1";
-        stage: "source_observation" | "destination_observation";
+        stage: "source_observation" | "destination_observation" | "residual_observation";
         effect_role: "bridge" | "approval";
         outcome: "success" | "missing" | "failure";
         physical_requests: number;

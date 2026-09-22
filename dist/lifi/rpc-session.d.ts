@@ -46,6 +46,7 @@ export interface RpcReadTelemetry {
     readonly retryAfterMs?: number;
     readonly attemptsByEndpointRole: Readonly<Record<"primary" | "receipt" | "archive", number>>;
     readonly attemptsByMethodClass: Readonly<Record<string, number>>;
+    readonly attemptsByBatchSize: Readonly<Record<string, number>>;
     readonly maxBatchSize: number;
     readonly budgetRejectedBeforeTransport: number;
     /** Backward-compatible telemetry aliases. */
@@ -101,6 +102,7 @@ export declare class RpcReadSession {
     private readonly endpoints;
     private readonly roleAttempts;
     private readonly methodClassAttempts;
+    private readonly batchSizeAttempts;
     private maxBatchSize;
     private budgetRejectedBeforeTransport;
     constructor(options?: RpcReadSessionOptions);
@@ -129,6 +131,7 @@ export declare class RpcReadSession {
     private reserveRequest;
     private retry;
     private schedule;
+    private recordAttemptShape;
     private assertBeforeAttempt;
     private assertBeforeQueue;
     private assertBeforeWait;
