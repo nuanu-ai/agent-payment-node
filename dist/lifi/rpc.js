@@ -1,4 +1,4 @@
-import { encodeFunctionData, keccak256 } from "viem";
+import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { EvmRpc } from "../evm-rpc.js";
@@ -15,6 +15,8 @@ import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbCompositeTrace, verifyBnbPoolC
 import { approvedTransportReason, MAX_READ_ATTEMPTS, parseRetryAfter, RpcHttpFailure, RpcReadSession, RPC_RETRY_DELAY_MS } from "./rpc-session.js";
 import { bridgeFeeQuote, rpcBlockValue, rpcExpectedChainValue, rpcFeeBlockValue, rpcHexValue, rpcQuantityValue, rpcRecordValue, rpcTransactionInput, rpcWordValue } from "./rpc-batch-codec.js";
 import { exactNativeTransfer, parseReceiptLogs } from "./rpc-proof-codec.js";
+import { MULTICALL3_ADDRESS, PORTFOLIO_NETWORK_RPC } from "../portfolio/registry.js";
+import { MULTICALL3_ABI } from "../portfolio/evm-reader.js";
 export { RpcReadSession } from "./rpc-session.js";
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }];
@@ -23,6 +25,15 @@ const L1_BLOCK = "0x4200000000000000000000000000000000000015";
 const GAS_ORACLE_ABI = [{ type: "function", name: "getL1FeeUpperBound", stateMutability: "view", inputs: [{ name: "size", type: "uint256" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "getOperatorFee", stateMutability: "view", inputs: [{ name: "gas", type: "uint256" }], outputs: [{ type: "uint256" }] }];
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "debug_traceTransaction", "eth_sendRawTransaction"]);
+// Exact selectors of reviewed, caller-independent configuration getters. Unknown calls stay as direct RPC reads.
+const DEPLOYMENT_MULTICALL_SELECTORS = new Set([
+    "0x079bd2c7", "0x105d0b81", "0x2bc5114c", "0x313ce567", "0x54fd4d50", "0x57f6dcb8",
+    "0x5e280f11", "0x5f6d9ae4", "0x72607537", "0x857749b0", "0x8da5cb5b", "0x9baf00f9", "0xb54501bc",
+    "0xbb0b6a53", "0xd8e8dbc7", "0xd999984d", "0xf6503992", "0xfb214c2f", "0xfc0c546a",
+]);
+export function deploymentMulticallEligible(data) {
+    return DEPLOYMENT_MULTICALL_SELECTORS.has(data.slice(0, 10));
+}
 const LINEA_TRACE_PROBE_TRANSACTION = "0x4352433956109d31ab50db9547f16bcb90f3545f793ed40f75716ccd9a360efd";
 const MONAD_TRACE_PROBE_TRANSACTION = "0x9ff1560ef67d7253df2663b897452abe6644f6d6cb746743253822c264d13440";
 export const BRIDGE_RPC_ENV = { 1: "APN_ETHEREUM_RPC_URL", 56: "APN_BNB_RPC_URL", 8453: "APN_BASE_RPC_URL", 143: "APN_MONAD_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" };
@@ -277,7 +288,13 @@ export class BridgeRpc {
         const at = block ?? await this.block("safe"), contract = bridgeDeployment(this.chainId, peerChainId, tool, token), tag = quantity(BigInt(at.numberAtomic));
         const code = [], configuration = [];
         const feeContract = this.chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
-        const codeRows = [...contract.code, ...feeContract.code], readRows = [...contract.reads, ...feeContract.reads];
+        const compactDeployment = tool === "stargateV2" && (this.chainId === 8453 || this.chainId === 42161);
+        const multicallHash = compactDeployment
+            ? PORTFOLIO_NETWORK_RPC.find((row) => row.evmChainId === this.chainId)?.multicall3CodeHash : null;
+        if (compactDeployment && (multicallHash === undefined || multicallHash === null))
+            bridgeFailure("APN_RPC_CONFIG", "bridge_multicall_unreviewed");
+        const codeRows = [...contract.code, ...feeContract.code], verificationCodeRows = compactDeployment
+            ? [...codeRows, { address: getAddress(MULTICALL3_ADDRESS), codeHash: multicallHash }] : codeRows, readRows = [...contract.reads, ...feeContract.reads], aggregateRows = compactDeployment ? readRows.filter((row) => row.kind === "call" && deploymentMulticallEligible(row.data)) : [], directRows = readRows.filter((row) => !aggregateRows.includes(row));
         const extraItems = [];
         if (this.chainId === 56 && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
             extraItems.push({ method: "eth_call", params: [{ to: BNB_COMPOSITE.vault, data: bnbPoolReadData.registration }, tag], cachePolicy: "immutable", decoder: rpcHexValue(256) }, { method: "eth_call", params: [{ to: BNB_COMPOSITE.vault, data: bnbPoolReadData.tokens }, tag], cachePolicy: "immutable", decoder: rpcHexValue(2048) });
@@ -288,12 +305,30 @@ export class BridgeRpc {
                 : { transaction: LINEA_TRACE_PROBE_TRANSACTION, from: "0x9629fe86f04e735923e8542ddd9f265f576e7421", to: "0xbcc016e2a79d509d2b776827ed986568d9b56d59", value: 243939205000000000n };
             extraItems.push({ method: "debug_traceTransaction", params: [traceProbe.transaction, { tracer: "callTracer", tracerConfig: { onlyTopCall: true, withLog: false } }], cachePolicy: "immutable", decoder: rpcRecordValue });
         }
+        const aggregateData = encodeFunctionData({ abi: MULTICALL3_ABI, functionName: "aggregate3", args: [aggregateRows.map((row) => ({
+                    target: row.address, allowFailure: false, callData: row.data,
+                }))] });
+        const aggregateDecoder = (value) => {
+            const raw = rpcHexValue(512 * 1024)(value);
+            let decoded;
+            try {
+                decoded = decodeFunctionResult({ abi: MULTICALL3_ABI, functionName: "aggregate3", data: raw });
+            }
+            catch {
+                return bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
+            }
+            if (decoded.length !== aggregateRows.length || decoded.some((row) => !row.success))
+                bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
+            return decoded.map((row) => rpcHexValue(64 * 1024)(row.returnData));
+        };
         const items = [
             { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-            ...codeRows.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable", decoder: rpcHexValue(128 * 1024) })),
-            ...readRows.map((row) => ({ method: row.kind === "storage" ? "eth_getStorageAt" : "eth_call",
+            ...verificationCodeRows.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable", decoder: rpcHexValue(128 * 1024) })),
+            ...directRows.map((row) => ({ method: row.kind === "storage" ? "eth_getStorageAt" : "eth_call",
                 params: row.kind === "storage" ? [row.address, row.data, tag] : [{ to: row.address, data: row.data }, tag], cachePolicy: "immutable",
                 decoder: rpcHexValue(64 * 1024) })),
+            ...(aggregateRows.length === 0 ? [] : [{ method: "eth_call", params: [{ to: MULTICALL3_ADDRESS, data: aggregateData }, tag],
+                    cachePolicy: "immutable", decoder: aggregateDecoder }]),
             ...extraItems,
             { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
         ];
@@ -302,14 +337,25 @@ export class BridgeRpc {
         let offset = 0;
         if (values[offset++] !== BigInt(this.chainId))
             throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-        for (const row of codeRows) {
+        for (const row of verificationCodeRows) {
             const bytes = values[offset++];
             if (bytes === "0x" || keccak256(bytes) !== row.codeHash)
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_code_changed");
-            code.push({ address: row.address, codeHash: keccak256(bytes) });
+            if (row.address !== getAddress(MULTICALL3_ADDRESS))
+                code.push({ address: row.address, codeHash: keccak256(bytes) });
+        }
+        const observedByRead = new Map();
+        for (const row of directRows)
+            observedByRead.set(hashObject(row), values[offset++]);
+        if (aggregateRows.length > 0) {
+            const aggregate = values[offset++];
+            for (let index = 0; index < aggregateRows.length; index += 1)
+                observedByRead.set(hashObject(aggregateRows[index]), aggregate[index]);
         }
         for (const row of readRows) {
-            const observed = values[offset++];
+            const observed = observedByRead.get(hashObject(row));
+            if (observed === undefined)
+                bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
             if (observed !== row.expected)
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_configuration_changed");
             configuration.push({ ...row, expected: observed });
