@@ -168,7 +168,8 @@ export class BridgeService {
         // Base source observation with explicit scalar receipt and archive readers needs 25 clean requests:
         // primary chain+transaction+included+safe (4), receipt chain+receipt (2), archive chain (1),
         // Base fee deployment identity (8), operator fee reads (3), the final archive safe-header recheck (1),
-        // and six three-item-or-smaller archive batches for the operation-bound historical deployment proof.
+        // The historical deployment proof contributes 18 logical items; its archive chainId is already cached,
+        // leaving 17 transported items in six archive batches sized 3/3/3/3/3/2.
         // Two additional attempts retain the command-wide bounded retry reserve without widening the request graph.
         const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 25, maxHttpAttempts: 27 });
         const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: 16, maxHttpAttempts: 16 });
