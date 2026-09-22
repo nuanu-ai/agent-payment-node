@@ -21,6 +21,21 @@ function previousCurrentReceipt(op: BridgeOperationRecord): Record<string, any> 
     (BigInt(op.intent.materialization.request.amountAtomic) - BigInt(op.intent.materialization.minimumOutputAtomic)).toString();
   return { ...previous, receipt_hash: hashObject(previous) };
 }
+function beforeObservationTelemetryWriter(op: BridgeOperationRecord): BridgeOperationRecord {
+  const previous = structuredClone(op) as any; delete previous.observationTelemetry;
+  let prior = previous.fingerprint;
+  previous.transitions = previous.transitions.map((entry: Record<string, any>) => {
+    const body = structuredClone(entry); delete body.observationTelemetry; delete body.transitionHash; body.previousHash = prior;
+    const next = { ...body, transitionHash: hashObject(body) }; prior = next.transitionHash; return next;
+  });
+  delete previous.integrityHash; previous.integrityHash = hashObject(previous);
+  return validateBridgeOperation(previous);
+}
+function receiptBeforeObservationTelemetry(op: BridgeOperationRecord): Record<string, any> {
+  const previous = structuredClone(bridgeReceipt(op)) as Record<string, any>;
+  delete previous.receipt_hash; delete previous.observation_rpc_telemetry;
+  return { ...previous, receipt_hash: hashObject(previous) };
+}
 
 for (const pair of ["eth-base", "base-arb", "arb-eth"] as const) for (const tool of ["across", "stargateV2"] as const) {
   test(`LI.FI ${tool} ${pair} selected route completes with independently correlated dual-chain proof`, async (t) => {
@@ -221,4 +236,43 @@ test("LI.FI pre-asset-bounds current-v1 receipt upgrades atomically without cust
   assert.deepEqual([custodyAccesses, s.wrapping.loads, s.source.calls.length, s.source.submissions.length, s.provider.materializeCalls],
     [0, wraps, calls, submissions, materializations]);
   assert.deepEqual(repaired, bridgeReceipt(operation));
+});
+
+test("LI.FI pre-telemetry receipt integrity upgrades only the exact omitted-empty projection", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "base-arb"); s.source.sendTimeout = true; s.source.failObserve = true;
+  const { id } = await s.prepare("stargateV2", "pre-observation-telemetry-receipt");
+  const submitted = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(submitted.ok, true, submitted.error?.message);
+  const current = (await s.core.bridges.records.findOperation(id))!;
+  assert.deepEqual(current.effects.map((effect) => [effect.role, effect.submissionAttempts]), [["approval", 1], ["bridge", 0]]);
+  const historical = beforeObservationTelemetryWriter(current), operationPath = join(temporary.root, "bridge-operations", historical.profileHash, `${id}.json`),
+    receiptPath = join(temporary.root, "bridge-receipts", historical.profileHash, `${id}.json`), historicalReceipt = receiptBeforeObservationTelemetry(historical);
+  await writeFile(operationPath, `${canonicalJson(historical)}\n`, { mode: 0o600 });
+  await writeFile(receiptPath, `${canonicalJson(historicalReceipt)}\n`, { mode: 0o600 });
+  const journalBefore = await readFile(operationPath); await s.core.bridges.records.repairReceipt(historical);
+  assert.deepEqual(await readFile(operationPath), journalBefore, "receipt recovery must not rewrite the operation journal");
+  const repaired = await s.core.bridges.records.loadReceipt(historical.profileHash, id) as any;
+  assert.deepEqual(repaired.observation_rpc_telemetry, []);
+  const loaded = (await s.core.bridges.records.findOperation(id))!;
+  assert.deepEqual(loaded.effects.map((effect) => [effect.role, effect.submissionAttempts, effect.transactionHash]),
+    historical.effects.map((effect) => [effect.role, effect.submissionAttempts, effect.transactionHash]));
+
+  const telemetry = { schemaVersion: "apn.bridge-observation-telemetry.v1" as const, stage: "source_observation" as const,
+    effectRole: "approval" as const, outcome: "failure" as const, physicalRequests: 1, httpAttempts: 1, logicalRpcItems: 1,
+    batchCount: 0, maxBatchSize: 1, budgetRejectedBeforeTransport: 0,
+    attemptsByEndpointRole: { primary: 1, receipt: 0, archive: 0 }, attemptsByMethodClass: { transaction: 1 } };
+  const observed = transitionBridge(historical, { observationTelemetry: [telemetry] }, new Date(Date.parse(historical.updatedAt) + 1).toISOString());
+  await s.core.bridges.records.writeOperation(observed); await s.core.bridges.records.repairReceipt(observed);
+  const exact = bridgeReceipt(observed) as any; assert.deepEqual((await s.core.bridges.records.loadReceipt(observed.profileHash, id) as any).observation_rpc_telemetry,
+    exact.observation_rpc_telemetry);
+  const reject = async (mutate: (receipt: any) => void) => {
+    const forged = structuredClone(exact); mutate(forged); delete forged.receipt_hash; forged.receipt_hash = hashObject(forged);
+    await writeFile(receiptPath, `${canonicalJson(forged)}\n`, { mode: 0o600 });
+    await assert.rejects(s.core.bridges.records.repairReceipt(observed), { code: "APN_STATE_CORRUPT" });
+    await writeFile(receiptPath, `${canonicalJson(exact)}\n`, { mode: 0o600 });
+  };
+  await reject((receipt) => { delete receipt.observation_rpc_telemetry; });
+  await reject((receipt) => { receipt.observation_rpc_telemetry[0].physical_requests = 2; });
+  await reject((receipt) => { receipt.transfer.amountAtomic = (BigInt(receipt.transfer.amountAtomic) + 1n).toString(); });
+  assert.equal(s.source.submissions.length, 1); assert.equal(observed.effects[1]!.submissionAttempts, 0);
 });
