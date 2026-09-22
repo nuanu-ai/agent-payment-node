@@ -20,6 +20,7 @@ export interface UniswapTokenExecutionPorts {
   currentUsage(operation: UniswapTokenOperation): Promise<TokenUsageBinding>;
   followUsage(operation: UniswapTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert"): Promise<TokenUsageBinding>;
   seal(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect>;
+  probeSealed(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null>;
   send(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<"accepted" | "ambiguous">;
   observe(operation: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: string): Promise<TokenEffectObservation | null>;
 }
@@ -42,7 +43,7 @@ export class UniswapTokenExecution {
     if (this.ports.now().getTime() >= op.route.deadline * 1000 && !active(op.phase)) return await this.cleanupRequired(op, "deadline_expired");
     if (op.phase === "approved") {
       const allowance = await this.ports.currentAllowance(op);
-      if (allowance !== "0" && allowance !== op.route.amountIn) blocked("Allowance must be zero or the exact input amount.", "uniswap_allowance_mismatch");
+      if (allowance !== "0" && allowance !== op.route.amountIn) return await this.cleanupRequired(op, "approval_allowance_drift");
       op = allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval");
     }
     if (approvalActive(op.phase)) return await this.observeApproval(await this.continueStart(op, "approval"));
@@ -80,7 +81,9 @@ export class UniswapTokenExecution {
     catch { await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`); }
     let sealed: TokenSealedEffect;
     try { sealed = await this.ports.seal(op, kind, attempt.nonce); }
-    catch { await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op, `${kind}_sign_failed`); }
+    catch (error) { const durable = await this.ports.probeSealed(op, kind, attempt.nonce);
+      if (durable !== null) { await this.ports.commitNonce(op, kind, attempt.nonce); throw error; }
+      await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op, `${kind}_sign_failed`); }
     await this.ports.commitNonce(op, kind, attempt.nonce);
     op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: sealed.transactionHash } }, this.ports.now()));
     let result: "accepted" | "ambiguous"; try { result = await this.ports.send(op, kind); } catch { result = "ambiguous"; }

@@ -20,11 +20,10 @@ export interface TokenTransactionEnvelope { readonly chainId: 1; readonly from: 
 /** Local encrypted-wallet custody plus the durable one-way broadcast boundary. */
 export class UniswapTokenCustody {
   private readonly wallets: EncryptedWalletStore;
-  private readonly effects: UniswapTokenEffectJournal;
   private readonly nonces: UniswapTokenNonceStore;
   private readonly operations: UniswapTokenJournal;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly call: EvmRpcCall,
-    private readonly now: () => Date) { this.wallets = new EncryptedWalletStore(state, wrapping); this.effects = new UniswapTokenEffectJournal(state.root);
+    private readonly now: () => Date, private readonly effects = new UniswapTokenEffectJournal(state.root)) { this.wallets = new EncryptedWalletStore(state, wrapping);
     this.nonces = new UniswapTokenNonceStore(state.root); this.operations = new UniswapTokenJournal(state.root); }
 
   async withAccountLock<T>(op: UniswapTokenOperation, work: () => Promise<T>): Promise<T> {
@@ -44,7 +43,8 @@ export class UniswapTokenCustody {
   private async hasDurableEffect(operationId: string, kind: TokenEffectKind) {
     const op = await this.operations.load(operationId); if (op === null) return false;
     const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
-    return attempt?.transactionHash !== null && attempt?.transactionHash !== undefined || await this.effects.load(op, kind) !== null;
+    return attempt?.transactionHash !== null && attempt?.transactionHash !== undefined || await this.effects.load(op, kind) !== null ||
+      attempt !== null && await this.probeSealed(op, kind, attempt.nonce) !== null;
   }
   async currentAllowance(op: UniswapTokenOperation) {
     const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account as Hex, op.route.router] });
@@ -54,7 +54,8 @@ export class UniswapTokenCustody {
     return await this.state.withLocks([`uniswap-token-custody:${op.operationId}:${kind}`], async () => await this.sealUnlocked(op, kind, nonce));
   }
   private async sealUnlocked(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect> {
-    const envelope = envelopeOf(op, kind, nonce), key = effectKey(op, kind), existing = await this.effects.load(op, kind);
+    const envelope = envelopeOf(op, kind, nonce), envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelope)),
+      key = effectKey(op, kind), existing = await this.effects.load(op, kind);
     const wallet = await this.wallets.describe(op.profile);
     if (wallet === null) blocked("The encrypted EVM wallet is unavailable.", "uniswap_token_wallet_missing");
     try {
@@ -64,16 +65,29 @@ export class UniswapTokenCustody {
         if (cached === undefined || cached.transactionHash !== existing.transactionHash || cached.payloadHash !== existing.envelopeHash) corrupt("Uniswap token signed effect is missing or changed.");
         return { transactionHash: existing.transactionHash, envelopeHash: existing.envelopeHash };
       }
+      if (cached !== undefined) {
+        if (cached.payloadHash !== envelopeHash || cached.transactionHash !== cached.rawTransactionHash || keccak256(cached.rawTransaction) !== cached.transactionHash) corrupt("Uniswap token cached effect changed.");
+        await this.effects.seal(op, kind, cached.transactionHash, envelope, this.now());
+        return { transactionHash: cached.transactionHash, envelopeHash };
+      }
       const account = privateKeyToAccount(wallet.secret.privateKey), n = BigInt(nonce);
       if (n > BigInt(Number.MAX_SAFE_INTEGER)) blocked("Uniswap token nonce exceeds signer bounds.", "uniswap_token_nonce_bound");
       const raw = await account.signTransaction({ type: "eip1559", chainId: 1, to: envelope.to as Hex, data: envelope.data,
         value: 0n, nonce: Number(n), gas: BigInt(envelope.gasLimit), maxFeePerGas: BigInt(envelope.maxFeePerGas),
         maxPriorityFeePerGas: BigInt(envelope.maxPriorityFeePerGas), accessList: [] });
-      const transactionHash = keccak256(raw), envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelope));
+      const transactionHash = keccak256(raw);
       wallet.secret.directEffects[key] = { payloadHash: envelopeHash, transactionHash, rawTransaction: raw, rawTransactionHash: transactionHash };
       await this.wallets.save(wallet.identity, wallet.secret);
       await this.effects.seal(op, kind, transactionHash, envelope, this.now());
       return { transactionHash, envelopeHash };
+    } finally { this.wallets.clear(wallet.secret); }
+  }
+  async probeSealed(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null> {
+    const envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelopeOf(op, kind, nonce))), wallet = await this.wallets.describe(op.profile);
+    if (wallet === null) return null;
+    try { const cached = wallet.secret.directEffects[effectKey(op, kind)]; if (cached === undefined) return null;
+      if (cached.payloadHash !== envelopeHash || cached.transactionHash !== cached.rawTransactionHash || keccak256(cached.rawTransaction) !== cached.transactionHash) corrupt("Uniswap token cached effect changed.");
+      return { transactionHash: cached.transactionHash, envelopeHash };
     } finally { this.wallets.clear(wallet.secret); }
   }
   async send(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<"accepted" | "ambiguous"> {
