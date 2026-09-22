@@ -63,7 +63,10 @@ export class BridgeService {
     async repairDeployment(operationId) {
         return await this.deploymentMigrationLocked(operationId, async (op) => {
             const raw = isLegacyBridgeOperation(op) ? op.raw : op;
-            const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 26, maxHttpAttempts: 28,
+            // The recognized Base migration needs 29 clean HTTP requests: two seven-request observations,
+            // five Ethereum and eight Base deployment chunks, and two finality reads. Keep two request
+            // retries plus two additional attempt-only retries bounded inside the one repair command.
+            const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 31, maxHttpAttempts: 33,
                 archiveDeploymentBatchMaxItems: 3 });
             if (raw.operationId === BASE_DEPLOYMENT_MIGRATION_CANDIDATE.operationId) {
                 if (!isLegacyBridgeOperation(op)) {
