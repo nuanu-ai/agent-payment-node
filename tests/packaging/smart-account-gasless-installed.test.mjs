@@ -250,14 +250,14 @@ async function gate(s, manifest = installed.manifest, manifestPath = installed.m
     "--manifest-sha256", manifestSha256, "--package-root", manifest.packageRoot]);
 }
 
-test("installed CLI and 48-tool MCP discover Base Smart Account gasless without state or external effects", async () => {
+test("installed CLI and 85-tool MCP discover Base Smart Account gasless without state or external effects", async () => {
   const s = await scenario(); await chmod(s.state.root, 0o777);
   const capabilities = await s.cli(["gasless", "capabilities", "--profile", s.profile]); assert.equal(capabilities.ok, true);
   const row = capabilities.data.profiles.find(p => p.provider === "metamask-smart-account");
   assert.equal(row.adapter, "implemented"); assert.equal(row.mainnet_acceptance, "open");
   assert.equal(capabilities.data.provider_networks["metamask-smart-account"][0].executable_adapter, true);
   const connection = await mcp(s);
-  try { const tools = await connection.client.listTools(); assert.equal(tools.tools.length, 48);
+  try { const tools = await connection.client.listTools(); assert.equal(tools.tools.length, 85);
     assert.deepEqual((await connection.call("apn_gasless_capabilities", { profile: s.profile })).data, capabilities.data);
   } finally { await connection.close(); }
   assert.deepEqual(await s.trace(), []); assert.equal((await stat(s.state.root)).mode & 0o777, 0o777);
