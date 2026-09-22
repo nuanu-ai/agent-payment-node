@@ -40,12 +40,9 @@ export class RpcProviderScheduler {
         this.coordinator = coordinator;
         this.pacingNow = pacingNow;
     }
-    schedule(origin, now, wait, beforeWait, task, persistRateLimitCooldown = true) {
+    schedule(origin, now, wait, beforeWait, task) {
         const family = rpcProviderFamily(origin);
-        return new Promise((resolve, reject) => {
-            this.queue.push({ family, persistRateLimitCooldown, now, wait, beforeWait, task, resolve, reject });
-            this.pump();
-        });
+        return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, resolve, reject }); this.pump(); });
     }
     pump() {
         while (this.active < 2) {
@@ -95,7 +92,7 @@ export class RpcProviderScheduler {
                     return await entry.task();
                 }
                 catch (error) {
-                    if (entry.persistRateLimitCooldown && error instanceof RpcHttpFailure && error.status === 429) {
+                    if (error instanceof RpcHttpFailure && error.status === 429) {
                         const observed = clock();
                         if (observed < current)
                             throw schedulerClockRollback(entry.family);
@@ -369,7 +366,7 @@ export class RpcReadSession {
                     this.assertBeforeAttempt(method);
                     this.httpAttempts += 1;
                     return oneAttempt();
-                }, attempt + 1 < MAX_READ_ATTEMPTS);
+                });
             }
             catch (error) {
                 const http = error instanceof RpcHttpFailure ? error : undefined, transport = approvedTransportReason(error);
@@ -398,12 +395,12 @@ export class RpcReadSession {
             }
         }
     }
-    schedule(originInput, task, persistRateLimitCooldown) {
+    schedule(originInput, task) {
         this.assertBeforeQueue("rpc");
         return this.providerScheduler.schedule(originInput, this.now, this.wait, (delay) => this.assertBeforeWait("rpc", delay), async () => {
             this.assertDeadline("rpc");
             return await task();
-        }, persistRateLimitCooldown);
+        });
     }
     assertBeforeAttempt(method) {
         this.assertDeadline(method);
