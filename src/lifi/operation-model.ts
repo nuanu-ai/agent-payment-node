@@ -86,9 +86,11 @@ export interface BridgeObservationTelemetry {
 }
 export type BridgeObservationRpcStage = "source_observation" | "source_transaction" | "source_receipt" |
   "source_included_block" | "source_safe_head" | "source_recheck" | "source_assert_chain" |
+  "source_fee_evidence" | "source_deployment" | "source_protocol_evidence" |
   "destination_observation" | "destination_transaction" | "destination_receipt" |
   "destination_included_block" | "destination_safe_head" | "destination_recheck" |
-  "destination_assert_chain" | "destination_logs";
+  "destination_assert_chain" | "destination_logs" | "destination_fee_evidence" | "destination_deployment" |
+  "destination_protocol_evidence";
 export type BridgeObservationRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getTransactionByHash" |
   "eth_getTransactionReceipt" | "eth_getLogs" | "eth_getBalance" | "eth_getCode" | "eth_getStorageAt" |
   "eth_call" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "debug_traceTransaction";
@@ -99,6 +101,15 @@ export type BridgeObservationRpcReason = "bridge_RPC_HTTP_status" | "bridge_RPC_
   "destination_log_identity" | "destination_log_hash" | "destination_scan_cursor_reorg" |
   "destination_scan_membership" | "destination_scan_reorg" | "destination_candidate_unresolved" |
   "duplicate_destination_delivery" | "destination_not_safe_success" | "destination_transaction_reverted" | "destination_trace_rebind" |
+  "bridge_deployment_code_changed" | "bridge_deployment_configuration_changed" |
+  "historical_deployment_contract_hash" | "historical_deployment_code_hash" |
+  "historical_deployment_configuration_hash" | "historical_deployment_block" |
+  "bridge_multicall_response" | "Base_fee_code_identity" | "Base_fee_configuration_identity" |
+  "bridge_archive_block_mismatch" | "bridge_prepared_block_reorg" |
+  "transaction_chain_or_hash" | "transaction_signature" | "transaction_parity" |
+  "transaction_signature_reconstruction" | "approval_event_identity" | "source_proof" |
+  "receipt_fee_shape" | "unsupported_Base_blob_transaction" | "operator_fee_formula" |
+  "operator_receipt_parameters" |
   "request_deadline" | "DNS_deadline" | "request_interrupted" | "response_aborted" |
   "response_interrupted";
 export type BridgePreSignRpcStage = "source_deployment_refresh" | "destination_deployment_refresh" |

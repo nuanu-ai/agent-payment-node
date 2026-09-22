@@ -19,6 +19,32 @@ test("LI.FI observation diagnostics retain only the sanitized endpoint role", ()
   });
 });
 
+test("LI.FI observation diagnostics classify finite post-read proof failures without provider data", () => {
+  const cases = [
+    ["bridge_deployment_code_changed", "source_deployment"],
+    ["bridge_deployment_configuration_changed", "source_deployment"],
+    ["historical_deployment_contract_hash", "source_deployment"],
+    ["historical_deployment_code_hash", "source_deployment"],
+    ["historical_deployment_configuration_hash", "source_deployment"],
+    ["historical_deployment_block", "source_deployment"],
+    ["bridge_multicall_response", "source_fee_evidence"],
+    ["Base_fee_code_identity", "source_fee_evidence"],
+    ["Base_fee_configuration_identity", "source_fee_evidence"],
+    ["bridge_archive_block_mismatch", "source_fee_evidence"],
+    ["transaction_signature_reconstruction", "source_transaction"],
+    ["source_proof", "source_protocol_evidence"],
+  ] as const;
+  for (const [reason, stage] of cases) {
+    const error = new ApnError("APN_PROVIDER_PROTOCOL", `Bridge validation failed: ${reason}.`, {
+      reason, endpointRole: "archive", endpointUrl: "https://secret.example/token", responseBody: "secret",
+    });
+    assert.deepEqual(observationRpcFailure("source", "approval", error), {
+      schemaVersion: "apn.bridge-observation-rpc-failure.v1", stage, effectRole: "approval",
+      code: "APN_PROVIDER_PROTOCOL", reason, endpointRole: "archive",
+    });
+  }
+});
+
 test("LI.FI Across slow-fill delivery persists an empty repayment credit and reserve-funded exact output", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   s.destination.destinationFillType = 2; const { id } = await s.prepare("across");
