@@ -127,7 +127,7 @@ for (const flow of [
     "eth-archive.example": [3, 3, 3, 3, 3, 2], "base-archive.example": [3, 3, 3, 3, 3, 3, 3, 3, 1],
   }, requests: 19, native: true },
   { pair: "base-arb" as const, tool: "stargateV2" as const, archiveSizes: {
-    "base-archive.example": [3, 3, 3, 3, 3, 3, 1], "arb-archive.example": [3, 3, 3, 3, 3],
+    "base-archive.example": [3, 3, 3, 3, 3, 3, 2], "arb-archive.example": [3, 3, 3, 3, 3],
   }, requests: 16, native: false },
 ]) test(`LI.FI ${flow.pair} ${flow.tool} complete prepare caps archive HTTP batches at three items`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
@@ -202,7 +202,7 @@ test("deployment Multicall keeps direct-proof identity and rejects unknown selec
     ["0xcdffacc6", "0xcdffacc6"]);
   const aggregateItems = archiveItems.filter(({ item }) => item.method === "eth_call" &&
     String((item.params[0] as { to?: unknown }).to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase());
-  assert.equal(aggregateItems.length, 2);
+  assert.equal(aggregateItems.length, 3);
   for (const { host, item } of aggregateItems) {
     const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data: (item.params[0] as { data: Hex }).data });
     assert.equal(decoded.functionName, "aggregate3");

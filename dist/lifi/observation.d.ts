@@ -22,6 +22,22 @@ export declare class BridgeObservation {
         block: import("./model.js").BridgeBlock;
         rpcOrigin: string;
     }>;
+    residualObservation(op: BridgeOperationRecord): Promise<{
+        ok: true;
+        value: {
+            amountAtomic: string;
+            block: import("./model.js").BridgeBlock;
+            rpcOrigin: string;
+        };
+        observationTelemetry: readonly import("./operation-model.js").BridgeObservationTelemetry[];
+        error?: never;
+    } | {
+        ok: false;
+        error: unknown;
+        observationTelemetry: readonly import("./operation-model.js").BridgeObservationTelemetry[];
+        value?: never;
+    }>;
+    private residualFrom;
     private finish;
     private finishDestinationFailure;
     private destinationCandidate;

@@ -139,6 +139,11 @@ export class RpcReadSession {
     retryAfterMs;
     methods = new Map();
     endpoints = new Set();
+    roleAttempts = { primary: 0, receipt: 0, archive: 0 };
+    methodClassAttempts = new Map();
+    batchSizeAttempts = new Map();
+    maxBatchSize = 0;
+    budgetRejectedBeforeTransport = 0;
     constructor(options = {}) {
         this.maxLogicalItems = positiveBound(options.maxLogicalItems ?? options.maxUniqueCalls ?? RPC_DEFAULT_LOGICAL_ITEMS, "maxLogicalItems");
         this.maxHttpRequests = positiveBound(options.maxHttpRequests ?? RPC_DEFAULT_HTTP_REQUESTS, "maxHttpRequests");
@@ -164,11 +169,21 @@ export class RpcReadSession {
             remainingLogicalItems: Math.max(0, this.maxLogicalItems - this.logicalItems),
             remainingHttpRequests: Math.max(0, this.maxHttpRequests - this.httpRequests),
             remainingHttpAttempts: Math.max(0, this.maxHttpAttempts - this.httpAttempts), deadline: this.deadline,
+            attemptsByEndpointRole: { ...this.roleAttempts }, attemptsByMethodClass: Object.fromEntries(this.methodClassAttempts),
+            attemptsByBatchSize: Object.fromEntries(this.batchSizeAttempts),
+            maxBatchSize: this.maxBatchSize, budgetRejectedBeforeTransport: this.budgetRejectedBeforeTransport,
             uniqueCalls: this.logicalItems, totalAttempts: this.httpAttempts, perMethod,
             remainingUniqueCalls: Math.max(0, this.maxLogicalItems - this.logicalItems),
             ...(this.retryAfterMs === undefined ? {} : { retryAfterMs: this.retryAfterMs }) };
     }
     currentTime() { return this.now(); }
+    recordPhysicalAttempt(endpointRole, methods) {
+        this.roleAttempts[endpointRole] += 1;
+        for (const method of methods) {
+            const category = rpcMethodClass(method);
+            this.methodClassAttempts.set(category, (this.methodClassAttempts.get(category) ?? 0) + 1);
+        }
+    }
     wrap(origin, chainId, call, oneAttempt = call) {
         return async (method, params) => {
             return await this.read(origin, chainId, method, params, oneAttempt);
@@ -191,7 +206,7 @@ export class RpcReadSession {
         }
         this.reserveLogical(method);
         this.reserveRequest(method);
-        const operation = this.retry(origin, method, () => oneAttempt(method, params))
+        const operation = this.retry(origin, method, () => oneAttempt(method, params), true, [method])
             .then((raw) => { if (isSessionCacheable(method, params, raw))
             this.cache.set(key, cloneRpcValue(raw)); return raw; })
             .finally(() => this.inflight.delete(key));
@@ -277,9 +292,8 @@ export class RpcReadSession {
         for (let start = 0; start < requests.length; start += maxItemsPerRequest) {
             const chunk = requests.slice(start, start + maxItemsPerRequest), chunkMethod = chunk.length === 1 ? chunk[0].method : rpcMethod;
             this.reserveRequest(chunkMethod);
-            this.batchCount += chunk.length === 1 ? 0 : 1;
             const body = canonicalJson(chunk.length === 1 ? chunk[0] : chunk);
-            const response = await this.retry(origin, chunkMethod, async () => await attempt(body), retryHttp500);
+            const response = await this.retry(origin, chunkMethod, async () => await attempt(body), retryHttp500, chunk.map((row) => row.method));
             const responses = chunk.length === 1 ? [response] : response;
             if (!Array.isArray(responses))
                 throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod: chunkMethod });
@@ -359,12 +373,13 @@ export class RpcReadSession {
             this.budgetError(method, "maxHttpRequests");
         this.httpRequests += 1;
     }
-    async retry(origin, method, oneAttempt, retryHttp500 = true) {
+    async retry(origin, method, oneAttempt, retryHttp500 = true, methodsForAttempt = [method]) {
         for (let attempt = 0;; attempt += 1) {
             try {
                 return await this.schedule(origin, () => {
                     this.assertBeforeAttempt(method);
                     this.httpAttempts += 1;
+                    this.recordAttemptShape(methodsForAttempt);
                     return oneAttempt();
                 });
             }
@@ -402,6 +417,12 @@ export class RpcReadSession {
             return await task();
         });
     }
+    recordAttemptShape(methods) {
+        this.maxBatchSize = Math.max(this.maxBatchSize, methods.length);
+        this.batchSizeAttempts.set(methods.length, (this.batchSizeAttempts.get(methods.length) ?? 0) + 1);
+        if (methods.length > 1)
+            this.batchCount += 1;
+    }
     assertBeforeAttempt(method) {
         this.assertDeadline(method);
         if (this.httpAttempts >= this.maxHttpAttempts)
@@ -416,6 +437,7 @@ export class RpcReadSession {
     assertDeadline(method) { if (this.now() >= this.deadline)
         this.budgetError(method, "deadline"); }
     budgetError(method, reason) {
+        this.budgetRejectedBeforeTransport += 1;
         throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC command budget exhausted.", telemetryDetails(this.telemetry(), method, reason));
     }
     rateLimit(method, retryAfterMs) {
@@ -499,7 +521,30 @@ export function telemetryDetails(telemetry, method, reason) {
         remainingHttpAttempts: telemetry.remainingHttpAttempts.toString(), deadline: telemetry.deadline.toString(),
         uniqueCalls: telemetry.uniqueCalls.toString(), totalAttempts: telemetry.totalAttempts.toString(), perMethod: canonicalJson(telemetry.perMethod),
         remainingUniqueCalls: telemetry.remainingUniqueCalls.toString(),
+        attemptsByEndpointRole: canonicalJson(telemetry.attemptsByEndpointRole),
+        attemptsByMethodClass: canonicalJson(telemetry.attemptsByMethodClass), maxBatchSize: telemetry.maxBatchSize.toString(),
+        attemptsByBatchSize: canonicalJson(telemetry.attemptsByBatchSize),
+        budgetRejectedBeforeTransport: telemetry.budgetRejectedBeforeTransport.toString(),
         ...(telemetry.retryAfterMs === undefined ? {} : { retryAfterMs: telemetry.retryAfterMs.toString() }) };
+}
+function rpcMethodClass(method) {
+    if (method === "eth_chainId")
+        return "chain";
+    if (method === "eth_getTransactionByHash")
+        return "transaction";
+    if (method === "eth_getTransactionReceipt")
+        return "receipt";
+    if (method === "eth_getBlockByNumber")
+        return "block";
+    if (method === "eth_getCode")
+        return "code";
+    if (method === "eth_getStorageAt")
+        return "storage";
+    if (method === "eth_call")
+        return "call";
+    if (method === "eth_getLogs")
+        return "logs";
+    return "other";
 }
 function positiveBound(value, name) {
     if (!Number.isSafeInteger(value) || value < 1)

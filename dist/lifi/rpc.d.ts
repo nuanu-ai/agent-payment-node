@@ -50,10 +50,12 @@ export declare class BridgeRpc implements BridgeRpcPort {
     private commandPrices?;
     private commandFeeInputs?;
     private readonly preparedEstimates;
+    private readonly readSession;
     constructor(chainId: BridgeChainId, origin: string, call: EvmRpcCall, session?: RpcReadSession, oneAttempt?: EvmRpcCall, sessionCall?: (session: RpcReadSession) => EvmRpcCall, sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>);
+    readTelemetry(): import("./rpc-session.js").RpcReadTelemetry | null;
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
-    deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<{
+    deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock, exactHashPin?: boolean): Promise<{
         chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
         peerChainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
         tool: BridgeTool;
@@ -165,6 +167,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
     })[]>;
     send(raw: Hex): Promise<Hex>;
+    private basePinnedFeeValues;
     observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Parameters<BridgeRpcPort["observe"]>[2]): Promise<{
         transaction: BridgeTransactionProof;
         receipt: BridgeProtocolReceipt;

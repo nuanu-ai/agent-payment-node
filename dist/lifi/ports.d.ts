@@ -1,5 +1,5 @@
 import type { BridgeChainId } from "./chains.js";
-import type { RpcReadSession } from "./rpc.js";
+import type { RpcReadSession, RpcReadTelemetry } from "./rpc.js";
 import type { EvmFeeQuote } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import type { FeeEstimate } from "../ports.js";
@@ -26,9 +26,10 @@ export interface LifiProviderPort {
 export interface BridgeRpcPort {
     readonly chainId: BridgeChainId;
     readonly origin: string;
+    readTelemetry?(): RpcReadTelemetry | null;
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
-    deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock): Promise<BridgeDeploymentIdentity>;
+    deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock, exactHashPin?: boolean): Promise<BridgeDeploymentIdentity>;
     /** Reuses this operation's frozen code proof while refreshing every mutable deployment binding at a fresh safe block. */
     refreshDeployment?(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, frozen: BridgeDeploymentIdentity): Promise<BridgeDeploymentIdentity>;
     account(owner: Address, spender: Address, token: Address, planned?: readonly BridgeTransaction[]): Promise<BridgeAccountSnapshot>;
