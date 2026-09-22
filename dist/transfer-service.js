@@ -17,6 +17,7 @@ import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-
 import { ProviderDirectState } from "./provider-direct-state.js";
 import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
 import { evmAllowlistSubject, evmUsageTarget } from "./evm-direct-allowlist.js";
+import { walletCustodyLock } from "./encrypted-wallet-store.js";
 export class TransferService {
     context;
     operations;
@@ -161,7 +162,11 @@ export class TransferService {
                 await this.failBeforeEffect(operation, "approval_window_expired");
             }
             const rpc = this.context.requireRpc();
-            await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
+            const check = async () => await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
+            if (operation.evm === undefined)
+                await check();
+            else
+                await this.context.state.withLocks([walletCustodyLock(this.context.state, profile)], check);
             if (operation.evm !== undefined) {
                 // The native signer approves and signs in one call, so the reservation is durable in both stores before it.
                 const allowlistLease = await this.reserveUsage(operation);

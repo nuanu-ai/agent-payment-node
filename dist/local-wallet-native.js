@@ -138,7 +138,7 @@ export class LocalWalletNative {
                 return publicDirectEffect(existing);
             }
             if ((intent.evm?.asset.chainId ?? CHAIN_ID) === 1 && await uniswapTokenNonceOwned(this.state.root, identity.address, intent.nonceAtomic)) {
-                throw rejected("APN_NONCE_CONFLICT", "A guarded token effect already owns the approved Ethereum nonce; prepare a fresh transfer.");
+                throw new ApnError("APN_REPREPARE_REQUIRED", "A guarded token effect already owns the approved Ethereum nonce; prepare a fresh transfer.");
             }
             const account = privateKeyToAccount(secret.privateKey);
             const rawTransaction = await account.signTransaction({

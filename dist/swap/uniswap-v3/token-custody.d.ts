@@ -30,7 +30,7 @@ export declare class UniswapTokenCustody {
     allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
     releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
-    private hasDurableEffect;
+    private reconcileNonceReservations;
     currentAllowance(op: UniswapTokenOperation): Promise<string>;
     seal(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect>;
     private sealUnlocked;

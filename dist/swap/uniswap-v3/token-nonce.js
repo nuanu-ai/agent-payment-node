@@ -4,42 +4,46 @@ import { ApnError } from "../../errors.js";
 import { SecureStateStore } from "../../secure-state-store.js";
 /** Called while the shared account custody lock is held. Only reservations without a durable signed-effect marker may be reclaimed. */
 export class UniswapTokenNonceStore extends SecureStateStore {
-    async occupied(accountValue, durable) {
+    async occupied(accountValue) {
         await this.initialize();
         await this.ensureDirectory("uniswap-token-nonces");
         const account = canonical(accountValue), path = this.path(account), raw = await this.readJson(path);
         if (raw === null)
             return [];
+        const current = validate(raw, account);
+        return Object.values(current.reservations).map((reservation) => BigInt(reservation.nonce));
+    }
+    async reconcile(accountValue, evidence) {
+        await this.initialize();
+        await this.ensureDirectory("uniswap-token-nonces");
+        const account = canonical(accountValue), path = this.path(account), raw = await this.readJson(path);
+        if (raw === null)
+            return;
         const current = validate(raw, account), reservations = { ...current.reservations };
         let changed = false;
         for (const [key, reservation] of Object.entries(reservations)) {
             if (reservation.state !== "reserved")
                 continue;
-            changed = true;
-            if (await durable(reservation.operationId, reservation.kind))
-                reservations[key] = { ...reservation, state: "committed" };
-            else
+            const state = await evidence(reservation.operationId, reservation.kind, reservation.nonce);
+            if (state === "committed") {
+                reservations[key] = { ...reservation, state };
+                changed = true;
+            }
+            else if (state === null) {
                 delete reservations[key];
+                changed = true;
+            }
         }
         if (changed)
             await this.writeJson(path, { ...current, reservations });
-        return Object.values(reservations).filter((reservation) => reservation.state === "committed").map((reservation) => BigInt(reservation.nonce));
     }
-    async allocate(op, kind, pending, durable, occupied = []) {
+    async allocate(op, kind, pending, occupied = []) {
         await this.initialize();
         await this.ensureDirectory("uniswap-token-nonces");
         const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path), current = raw === null ? empty(account) : validate(raw, account), slot = nonceSlot(op.operationId, kind), prior = current.reservations[slot];
         if (prior !== undefined)
             return prior.nonce;
         const reservations = { ...current.reservations };
-        for (const [key, reservation] of Object.entries(reservations)) {
-            if (reservation.state !== "reserved")
-                continue;
-            if (await durable(reservation.operationId, reservation.kind))
-                reservations[key] = { ...reservation, state: "committed" };
-            else
-                delete reservations[key];
-        }
         const unavailable = new Set([...Object.values(reservations).map((reservation) => reservation.nonce), ...occupied.map(String)]);
         let nonce = pending;
         while (unavailable.has(nonce.toString()))
@@ -48,7 +52,7 @@ export class UniswapTokenNonceStore extends SecureStateStore {
         await this.writeJson(path, { schemaVersion: "apn.uniswap-token-nonces.v2", account, reservations }, raw === null);
         return nonce.toString();
     }
-    async release(op, kind, nonce, durable) {
+    async release(op, kind, nonce) {
         const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path);
         if (raw === null)
             corrupt("Uniswap token nonce record is missing.");
@@ -56,11 +60,8 @@ export class UniswapTokenNonceStore extends SecureStateStore {
         if (reservation === undefined)
             return false;
         exact(reservation, op, kind, nonce);
-        if (reservation.state === "committed" || await durable(op.operationId, kind)) {
-            if (reservation.state === "reserved")
-                await this.writeJson(path, { ...current, reservations: { ...current.reservations, [slot]: { ...reservation, state: "committed" } } });
+        if (reservation.state === "committed")
             return false;
-        }
         const reservations = { ...current.reservations };
         delete reservations[slot];
         await this.writeJson(path, { ...current, reservations });

@@ -9,44 +9,42 @@ interface Reservation { readonly operationId: string; readonly kind: TokenEffect
 interface LegacyReservation { readonly nonce: string; readonly state: "committed" }
 interface NonceRecord { readonly schemaVersion: "apn.uniswap-token-nonces.v2"; readonly account: string;
   readonly reservations: Readonly<Record<string, Reservation | LegacyReservation>> }
-type Durable = (operationId: string, kind: TokenEffectKind) => Promise<boolean>;
+export type TokenNonceEvidence = "reserved" | "committed" | null;
+type Evidence = (operationId: string, kind: TokenEffectKind, nonce: string) => Promise<TokenNonceEvidence>;
 
 /** Called while the shared account custody lock is held. Only reservations without a durable signed-effect marker may be reclaimed. */
 export class UniswapTokenNonceStore extends SecureStateStore {
-  async occupied(accountValue: string, durable: Durable): Promise<readonly bigint[]> {
+  async occupied(accountValue: string): Promise<readonly bigint[]> {
     await this.initialize(); await this.ensureDirectory("uniswap-token-nonces"); const account = canonical(accountValue), path = this.path(account), raw = await this.readJson(path);
-    if (raw === null) return []; const current = validate(raw, account), reservations: Record<string, Reservation | LegacyReservation> = { ...current.reservations };
+    if (raw === null) return []; const current = validate(raw, account);
+    return Object.values(current.reservations).map((reservation) => BigInt(reservation.nonce));
+  }
+  async reconcile(accountValue: string, evidence: Evidence): Promise<void> {
+    await this.initialize(); await this.ensureDirectory("uniswap-token-nonces"); const account = canonical(accountValue), path = this.path(account), raw = await this.readJson(path);
+    if (raw === null) return; const current = validate(raw, account), reservations: Record<string, Reservation | LegacyReservation> = { ...current.reservations };
     let changed = false; for (const [key, reservation] of Object.entries(reservations)) {
-      if (reservation.state !== "reserved") continue; changed = true;
-      if (await durable(reservation.operationId, reservation.kind)) reservations[key] = { ...reservation, state: "committed" }; else delete reservations[key];
+      if (reservation.state !== "reserved") continue; const state = await evidence(reservation.operationId, reservation.kind, reservation.nonce);
+      if (state === "committed") { reservations[key] = { ...reservation, state }; changed = true; }
+      else if (state === null) { delete reservations[key]; changed = true; }
     }
     if (changed) await this.writeJson(path, { ...current, reservations });
-    return Object.values(reservations).filter((reservation) => reservation.state === "committed").map((reservation) => BigInt(reservation.nonce));
   }
-  async allocate(op: UniswapTokenOperation, kind: TokenEffectKind, pending: bigint, durable: Durable, occupied: readonly bigint[] = []): Promise<string> {
+  async allocate(op: UniswapTokenOperation, kind: TokenEffectKind, pending: bigint, occupied: readonly bigint[] = []): Promise<string> {
     await this.initialize(); await this.ensureDirectory("uniswap-token-nonces"); const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path),
       current = raw === null ? empty(account) : validate(raw, account), slot = nonceSlot(op.operationId, kind), prior = current.reservations[slot];
     if (prior !== undefined) return prior.nonce;
     const reservations: Record<string, Reservation | LegacyReservation> = { ...current.reservations };
-    for (const [key, reservation] of Object.entries(reservations)) {
-      if (reservation.state !== "reserved") continue;
-      if (await durable(reservation.operationId, reservation.kind)) reservations[key] = { ...reservation, state: "committed" };
-      else delete reservations[key];
-    }
     const unavailable = new Set([...Object.values(reservations).map((reservation) => reservation.nonce), ...occupied.map(String)]); let nonce = pending;
     while (unavailable.has(nonce.toString())) nonce += 1n;
     reservations[slot] = { operationId: op.operationId, kind, nonce: nonce.toString(), state: "reserved" };
     await this.writeJson(path, { schemaVersion: "apn.uniswap-token-nonces.v2", account, reservations } satisfies NonceRecord, raw === null);
     return nonce.toString();
   }
-  async release(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string, durable: Durable): Promise<boolean> {
+  async release(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean> {
     const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path); if (raw === null) corrupt("Uniswap token nonce record is missing.");
     const current = validate(raw, account), slot = nonceSlot(op.operationId, kind), reservation = current.reservations[slot];
     if (reservation === undefined) return false;
-    exact(reservation, op, kind, nonce); if (reservation.state === "committed" || await durable(op.operationId, kind)) {
-      if (reservation.state === "reserved") await this.writeJson(path, { ...current, reservations: { ...current.reservations, [slot]: { ...reservation, state: "committed" } } });
-      return false;
-    }
+    exact(reservation, op, kind, nonce); if (reservation.state === "committed") return false;
     const reservations = { ...current.reservations }; delete reservations[slot]; await this.writeJson(path, { ...current, reservations }); return true;
   }
   async commit(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void> {

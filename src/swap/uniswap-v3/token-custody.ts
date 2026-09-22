@@ -11,7 +11,7 @@ import { UniswapTokenEffectJournal } from "./token-effects.js";
 import type { TokenEffectKind, TokenSealedEffect } from "./token-execution.js";
 import { UniswapTokenJournal, type TokenGasEnvelope, type UniswapTokenOperation } from "./token-operation.js";
 import { encodeUniswapTokenApproval } from "./token-route.js";
-import { UniswapTokenNonceStore } from "./token-nonce.js";
+import { UniswapTokenNonceStore, type TokenNonceEvidence } from "./token-nonce.js";
 
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
 export interface TokenTransactionEnvelope { readonly chainId: 1; readonly from: string; readonly to: string; readonly data: Hex;
@@ -27,24 +27,33 @@ export class UniswapTokenCustody {
     this.nonces = new UniswapTokenNonceStore(state.root); this.operations = new UniswapTokenJournal(state.root); }
 
   async withAccountLock<T>(op: UniswapTokenOperation, work: () => Promise<T>): Promise<T> {
-    return await this.state.withLocks([walletCustodyLock(this.state, op.profile)], work);
+    return await this.state.withLocks([`profile:${this.state.profileHash(op.profile)}`, walletCustodyLock(this.state, op.profile)], work);
   }
   async allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind) {
+    await this.reconcileNonceReservations(op.account);
     const pending = evmRpcQuantity(await this.call("eth_getTransactionCount", [op.account, "pending"]));
     const occupied = (await this.state.listOperations(this.state.profileHash(op.profile)))
       .filter((operation) => !operation.terminal && operation.walletAddress === op.account && operation.evm?.asset.chainId === 1 && operation.economics !== undefined)
       .map((operation) => BigInt(operation.economics!.nonceAtomic));
-    return await this.nonces.allocate(op, kind, pending, async (operationId, effectKind) => await this.hasDurableEffect(operationId, effectKind), occupied);
+    return await this.nonces.allocate(op, kind, pending, occupied);
   }
   async releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) {
-    await this.nonces.release(op, kind, nonce, async (operationId, effectKind) => await this.hasDurableEffect(operationId, effectKind));
+    if (await this.probeSealed(op, kind, nonce) !== null || await this.effects.load(op, kind) !== null) {
+      await this.nonces.commit(op, kind, nonce); return;
+    }
+    await this.nonces.release(op, kind, nonce);
   }
   async commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) { await this.nonces.commit(op, kind, nonce); }
-  private async hasDurableEffect(operationId: string, kind: TokenEffectKind) {
-    const op = await this.operations.load(operationId); if (op === null) return false;
-    const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
-    return attempt?.transactionHash !== null && attempt?.transactionHash !== undefined || await this.effects.load(op, kind) !== null ||
-      attempt !== null && await this.probeSealed(op, kind, attempt.nonce) !== null;
+  private async reconcileNonceReservations(account: string) {
+    await this.nonces.reconcile(account, async (operationId, kind, nonce): Promise<TokenNonceEvidence> => {
+      const op = await this.operations.load(operationId); if (op === null) return null;
+      const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
+      if (attempt === null) return null;
+      if (op.account !== account || attempt.nonce !== nonce) corrupt("Uniswap token nonce reservation conflicts with its operation marker.");
+      if (attempt.transactionHash !== null || await this.effects.load(op, kind) !== null) return "committed";
+      if (await this.probeSealed(op, kind, nonce) !== null) { await this.seal(op, kind, nonce); return "committed"; }
+      return "reserved";
+    });
   }
   async currentAllowance(op: UniswapTokenOperation) {
     const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account as Hex, op.route.router] });

@@ -9,6 +9,7 @@ import { UniswapTokenCustody } from "../../src/swap/uniswap-v3/token-custody.js"
 import { UniswapTokenEffectJournal } from "../../src/swap/uniswap-v3/token-effects.js";
 import { UniswapTokenExecution, type TokenEffectKind } from "../../src/swap/uniswap-v3/token-execution.js";
 import { UniswapTokenNonceStore } from "../../src/swap/uniswap-v3/token-nonce.js";
+import { occupiedUniswapTokenNonces } from "../../src/swap/uniswap-v3/token-nonce-ownership.js";
 import { newUniswapTokenOperation, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
 import { createUniswapTokenRoute, UNISWAP_TOKEN_MECHANISM_PIN, verifyUniswapTokenUsdtState } from "../../src/swap/uniswap-v3/token-route.js";
 import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
@@ -103,18 +104,19 @@ test("token usage finalizes consumed principal and releases only proven no-debit
 
 test("a refused token effect releases pending nonce 7 for the next valid operation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await setup(temporary.root, "3000000");
-  const store = new UniswapTokenNonceStore(temporary.root), refused = operation(s.policy.policyDigest, "1"), valid = operation(s.policy.policyDigest, "2"), noEffect = async () => false;
-  assert.equal(await store.allocate(refused, "approval", 7n, noEffect), "7"); assert.equal(await store.release(refused, "approval", "7", noEffect), true);
-  assert.equal(await store.allocate(valid, "approval", 7n, noEffect), "7");
+  const store = new UniswapTokenNonceStore(temporary.root), refused = operation(s.policy.policyDigest, "1"), valid = operation(s.policy.policyDigest, "2");
+  assert.equal(await store.allocate(refused, "approval", 7n), "7"); assert.equal(await store.release(refused, "approval", "7"), true);
+  assert.equal(await store.allocate(valid, "approval", 7n), "7");
 });
 
 test("restart reclaims pre-marker nonce but never reuses a committed ambiguous nonce", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await setup(temporary.root, "3000000"), noEffect = async () => false;
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await setup(temporary.root, "3000000");
   const first = operation(s.policy.policyDigest, "1"), replacement = operation(s.policy.policyDigest, "2"), afterAmbiguous = operation(s.policy.policyDigest, "3");
-  assert.equal(await new UniswapTokenNonceStore(temporary.root).allocate(first, "approval", 7n, noEffect), "7");
-  const restarted = new UniswapTokenNonceStore(temporary.root); assert.equal(await restarted.allocate(replacement, "approval", 7n, noEffect), "7");
+  assert.equal(await new UniswapTokenNonceStore(temporary.root).allocate(first, "approval", 7n), "7");
+  const restarted = new UniswapTokenNonceStore(temporary.root); await restarted.reconcile(first.account, async () => null);
+  assert.equal(await restarted.allocate(replacement, "approval", 7n), "7");
   await restarted.commit(replacement, "approval", "7");
-  assert.equal(await new UniswapTokenNonceStore(temporary.root).allocate(afterAmbiguous, "approval", 7n, noEffect), "8");
+  assert.equal(await new UniswapTokenNonceStore(temporary.root).allocate(afterAmbiguous, "approval", 7n), "8");
 });
 
 test("production token runtime allows explicit cleanup after owner policy revocation while new approval stays blocked", async (t) => {
@@ -190,6 +192,51 @@ test("post-wallet-save journal failure commits nonce and restart repairs and bro
   recovered = await restarted.execute(prepared.operationId); assert.equal(recovered.phase, "approval_submitted"); assert.equal(p.sends.length, 1);
 });
 
+test("wallet-only hard crash keeps nonce occupied, repairs the journal, and sends once after restart", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const native = evmCore(temporary.root), wallet = await ensureDirectWallet(native);
+  native.rpc.chainId = 1; native.rpc.sender = wallet.address; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; native.rpc.nonceAtomic = "7";
+  const s = await setup(temporary.root, "3000000", wallet.address), token = operation(s.policy.policyDigest, "4", wallet.address, "default"),
+    journal = new UniswapTokenJournal(temporary.root), effects = new FailOnceEffectJournal(temporary.root), sends: Hex[] = [];
+  await journal.save(token); const call = async (method: string, params: readonly unknown[]) => {
+    if (method === "eth_getTransactionCount") return "0x7";
+    if (method === "eth_sendRawTransaction") { const raw = params[0] as Hex; sends.push(raw); return keccak256(raw); }
+    throw new Error(method);
+  };
+  const crashed = new UniswapTokenCustody(native.state, native.wrapping, call, () => NOW, effects);
+  const nonce = await crashed.withAccountLock(token, async () => await crashed.allocateNonce(token, "approval")); assert.equal(nonce, "7");
+  const started = await journal.save(transitionUniswapToken(token, "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved",
+    approvalAttempt: tokenAttempt(token, "approval", nonce, NOW) }, NOW));
+  await assert.rejects(crashed.withAccountLock(started, async () => await crashed.seal(started, "approval", nonce)), /injected post-wallet-save failure/u);
+  assert.equal(await new UniswapTokenEffectJournal(temporary.root).load(started, "approval"), null);
+  assert.deepEqual(await occupiedUniswapTokenNonces(temporary.root, wallet.address), [7n]);
+  const restartedNative = evmCore(temporary.root, native.rpc, native.wrapping, native.approval), prepared = await restartedNative.core.transfer.prepare({ ...EVM_REQUEST,
+    asset: { chainId: 1, token: "native" }, amount: "0.000000000001", idempotencyKey: "wallet-only-crash-native-001" }) as { operation_id: string };
+  assert.equal((await restartedNative.state.loadOperation(restartedNative.state.profileHash("default"), prepared.operation_id))?.economics?.nonceAtomic, "8");
+  const recovered = new UniswapTokenCustody(restartedNative.state, native.wrapping, call, () => NOW);
+  await recovered.withAccountLock(started, async () => { assert.equal(await recovered.allocateNonce(started, "approval"), "7");
+    assert.ok(await new UniswapTokenEffectJournal(temporary.root).load(started, "approval")); await recovered.commitNonce(started, "approval", "7"); });
+  assert.equal(await recovered.send(started, "approval"), "accepted"); assert.equal(sends.length, 1);
+  await assert.rejects(recovered.send(started, "approval"), { code: "APN_OPERATION_BLOCKED" }); assert.equal(sends.length, 1);
+});
+
+test("token allocation and attempt persistence exclude a concurrent native prepare without deleting ownership", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const native = evmCore(temporary.root), wallet = await ensureDirectWallet(native);
+  native.rpc.chainId = 1; native.rpc.sender = wallet.address; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; native.rpc.nonceAtomic = "7";
+  const s = await setup(temporary.root, "3000000", wallet.address), token = operation(s.policy.policyDigest, "3", wallet.address, "default"), journal = new UniswapTokenJournal(temporary.root);
+  await journal.save(token); const call = async (method: string) => { if (method === "eth_getTransactionCount") return "0x7"; throw new Error(method); };
+  const custody = new UniswapTokenCustody(native.state, native.wrapping, call, () => NOW); let allocated!: () => void, persist!: () => void;
+  const allocatedReady = new Promise<void>((resolve) => { allocated = resolve; }), mayPersist = new Promise<void>((resolve) => { persist = resolve; });
+  const tokenWork = custody.withAccountLock(token, async () => { const nonce = await custody.allocateNonce(token, "approval"); allocated(); await mayPersist;
+    await journal.save(transitionUniswapToken(token, "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved",
+      approvalAttempt: tokenAttempt(token, "approval", nonce, NOW) }, NOW)); return nonce; });
+  await allocatedReady; assert.deepEqual(await occupiedUniswapTokenNonces(temporary.root, wallet.address), [7n]);
+  const nativeWork = native.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" }, amount: "0.000000000001",
+    idempotencyKey: "token-native-race-001" }) as Promise<{ operation_id: string }>;
+  persist(); assert.equal(await tokenWork, "7"); const prepared = await nativeWork;
+  assert.deepEqual(await occupiedUniswapTokenNonces(temporary.root, wallet.address), [7n]);
+  assert.equal((await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id))?.economics?.nonceAtomic, "8");
+});
+
 test("token and native custody share nonce ownership and preserve both encrypted effects across restart", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const native = evmCore(temporary.root), wallet = await ensureDirectWallet(native);
   native.rpc.chainId = 1; native.rpc.sender = wallet.address; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; native.rpc.nonceAtomic = "7";
@@ -234,14 +281,18 @@ test("native pre-sign refuses when its frozen nonce becomes token-owned", async 
   const prepared = await native.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" }, amount: "0.000000000001",
     idempotencyKey: "native-token-conflict-001" }) as { operation_id: string };
   const token = operation("a".repeat(64), "5", wallet.address, "default"), journal = new UniswapTokenJournal(temporary.root); await journal.save(token);
-  const store = new UniswapTokenNonceStore(temporary.root), noEffect = async () => false; assert.equal(await store.allocate(token, "approval", 7n, noEffect), "7");
-  const started = await journal.save(transitionUniswapToken(token, "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved",
-    approvalAttempt: tokenAttempt(token, "approval", "7", NOW) }, NOW));
   const call = async (method: string) => { if (method === "eth_getTransactionCount") return "0x7"; throw new Error(method); };
-  const custody = new UniswapTokenCustody(native.state, native.wrapping, call, () => NOW);
-  await custody.withAccountLock(started, async () => { await custody.seal(started, "approval", "7"); await custody.commitNonce(started, "approval", "7"); });
+  const custody = new UniswapTokenCustody(native.state, native.wrapping, call, () => NOW), store = new UniswapTokenNonceStore(temporary.root); let started!: UniswapTokenOperation;
+  await custody.withAccountLock(token, async () => { assert.equal(await store.allocate(token, "approval", 7n), "7");
+    started = await journal.save(transitionUniswapToken(token, "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved",
+      approvalAttempt: tokenAttempt(token, "approval", "7", NOW) }, NOW));
+    await custody.seal(started, "approval", "7"); await custody.commitNonce(started, "approval", "7"); });
   await assert.rejects(native.core.transfer.approve(prepared.operation_id), { code: "APN_REPREPARE_REQUIRED" });
-  assert.equal(native.rpc.submissions.length, 0);
+  const refused = await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id);
+  assert.equal(refused?.state, "failed_before_effect"); assert.equal(refused?.transitions.some((transition) => transition.state === "started"), false);
+  const loaded = await new EncryptedWalletStore(native.state, native.wrapping).describe("default"); assert.ok(loaded);
+  assert.equal(Object.values(loaded.secret.directEffects).length, 1); assert.equal(parseTransaction(Object.values(loaded.secret.directEffects)[0]!.rawTransaction).nonce, 7);
+  new EncryptedWalletStore(native.state, native.wrapping).clear(loaded.secret); assert.equal(native.rpc.submissions.length, 0);
 });
 
 test("token USDT behavior pins reject deprecated and fee-bearing state", async () => {
