@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
-import { decodeFunctionData, encodeFunctionData } from "viem";
-import { canonicalJson } from "../../src/canonical.js";
+import { decodeFunctionData, encodeFunctionData, encodeFunctionResult, type Hex } from "viem";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
+import { ApnError } from "../../src/errors.js";
 import { acrossBridgeAbi } from "../../src/lifi/abi.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
-import { RpcReadSession, bridgeRpcFactory } from "../../src/lifi/rpc.js";
+import { RpcReadSession, bridgeRpcFactory, deploymentMulticallEligible } from "../../src/lifi/rpc.js";
+import { BASE_FEE_CONTRACT } from "../../src/lifi/rpc-fees.js";
+import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
+import { MULTICALL3_ADDRESS } from "../../src/portfolio/registry.js";
 import { addressWord } from "./lifi-event-fixtures.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_SENDER, LifiTestProvider, lifiFixture, lifiSteps } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -14,12 +18,13 @@ import { temporaryState } from "./helpers.js";
 type Request = { id: string; method: string; params: unknown[] };
 type Capture = { chainId: 1 | 8453 | 42161; requests: Array<{ request: { method: string; params: unknown[] }; response: { result: unknown } }> };
 
-async function prepareSpy(now: Date) {
+async function prepareSpy(now: Date, aggregateMode: "valid" | "failed" | "malformed" | "reversed" = "valid") {
   const fixture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/deployment-rpc-20260908.json"), "utf8")) as { chains: Capture[] };
   const runtimes = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/wrapped-native-runtime-blockscout-20260922.json"), "utf8")) as {
     contracts: Array<{ chainId: number; address: string; deployedBytecode: string }>;
   };
   const runtime = new Map(runtimes.contracts.map((row) => [`${row.chainId}:${row.address.toLowerCase()}`, row.deployedBytecode]));
+  const multicallCode = (await readFile(resolve("tests/core/fixtures/multicall3-runtime-code.hex"), "utf8")).trim();
   const nativeReads = new Map<string, string>();
   for (const [chainId, peerChainId] of [[1, 8453], [8453, 1]] as const) {
     for (const row of bridgeDeployment(chainId, peerChainId, "across", "0x0000000000000000000000000000000000000000").reads) {
@@ -54,11 +59,23 @@ async function prepareSpy(now: Date) {
     if (item.method === "eth_getTransactionCount") return "0x7";
     if (item.method === "eth_estimateGas") return "0x186a0";
     if (item.method === "eth_getCode") {
+      if (String(item.params[0]).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) return multicallCode;
       const code = runtime.get(`${chainId}:${String(item.params[0]).toLowerCase()}`);
       if (code !== undefined) return code;
     }
     if (item.method === "eth_call") {
       const call = item.params[0] as { to?: unknown; data?: unknown }, data = String(call.data ?? "");
+      if (String(call.to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) {
+        if (aggregateMode === "malformed") return "0x1234";
+        const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data: data as Hex });
+        assert.equal(decoded.functionName, "aggregate3");
+        const results = decoded.args[0].map((entry, index) => ({
+          success: true, returnData: resultFor(chainId, { id: String(index), method: "eth_call", params: [{ to: entry.target, data: entry.callData }, item.params[1]] }) as Hex,
+        }));
+        if (aggregateMode === "failed" && results[0] !== undefined) results[0] = { success: false, returnData: "0x" };
+        if (aggregateMode === "reversed") results.reverse();
+        return encodeFunctionResult({ abi: MULTICALL3_ABI, functionName: "aggregate3", result: results });
+      }
       const expected = nativeReads.get(canonicalJson([chainId, "call", String(call.to).toLowerCase(), data]));
       if (expected !== undefined) return expected;
       if (data.startsWith("0x70a08231")) return `0x${(100_000_000n).toString(16).padStart(64, "0")}`;
@@ -108,8 +125,8 @@ for (const flow of [
     "eth-archive.example": [3, 3, 3, 3, 3, 2], "base-archive.example": [3, 3, 3, 3, 3, 3, 3, 3, 1],
   }, requests: 19, native: true },
   { pair: "base-arb" as const, tool: "stargateV2" as const, archiveSizes: {
-    "base-archive.example": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], "arb-archive.example": [3, 3, 3, 3, 3, 3, 3, 3, 1],
-  }, requests: 24, native: false },
+    "base-archive.example": [3, 3, 3, 3, 3, 3], "arb-archive.example": [3, 3, 3, 3, 2],
+  }, requests: 15, native: false },
 ]) test(`LI.FI ${flow.pair} ${flow.tool} complete prepare caps archive HTTP batches at three items`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
     const now = new Date(flow.native ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z");
@@ -148,13 +165,36 @@ for (const flow of [
       assert.equal(rejected.ok, true, JSON.stringify(rejected.error));
       assert.equal((rejected.operation as { state: string }).state, "failed_before_effect");
       const execution = spy.calls.slice(beforeApproval), executionArchive = execution.filter((call) => call.host.includes("archive"));
-      assert.equal(execution.length, 24); assert.equal(execution.filter((call) => call.host.includes("primary")).length, 4);
+      assert.equal(execution.length, 15); assert.equal(execution.filter((call) => call.host.includes("primary")).length, 4);
       assert.deepEqual(executionArchive.filter((call) => call.host === "base-archive.example").map((call) => call.items.length),
-        [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+        [3, 3, 3, 3, 3, 3]);
       assert.deepEqual(executionArchive.filter((call) => call.host === "arb-archive.example").map((call) => call.items.length),
-        [3, 3, 3, 3, 3, 3, 3, 3, 1]);
+        [3, 3, 3, 3, 2]);
       assert.ok(executionArchive.every((call) => call.items.length <= 3));
-      assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 24);
-      assert.equal(spy.sessions.at(-1)!.telemetry().remainingHttpRequests, 4);
+      assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 15);
+      assert.equal(spy.sessions.at(-1)!.telemetry().remainingHttpRequests, 13);
     }
 });
+
+test("deployment Multicall keeps direct-proof identity and rejects unknown selectors", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const now = new Date("2026-09-08T12:00:00.000Z"), spy = await prepareSpy(now);
+  const f = await lifiFixture(temporary.root, "base-arb", { rpcFor: spy.rpcFor, now });
+  const prepared = await f.prepare("stargateV2"), intent = prepared.operation.intent;
+  const base = bridgeDeployment(8453, 42161, "stargateV2", intent.materialization.request.fromToken);
+  const arb = bridgeDeployment(42161, 8453, "stargateV2", intent.materialization.request.toToken);
+  assert.equal(intent.sourceDeployment.configurationHash, hashObject([...base.reads, ...BASE_FEE_CONTRACT.reads].map((row) => ({ ...row, expected: row.expected }))));
+  assert.equal(intent.destinationDeployment.configurationHash, hashObject(arb.reads.map((row) => ({ ...row, expected: row.expected }))));
+  assert.equal(deploymentMulticallEligible("0x313ce567"), true);
+  assert.equal(deploymentMulticallEligible("0x70a082310000000000000000000000000000000000000000000000000000000000000000"), false);
+  assert.equal(spy.calls.flatMap((call) => call.items).some((item) => item.method === "eth_getStorageAt"), true);
+});
+
+for (const [mode, code] of [["failed", "APN_RPC_PROTOCOL"], ["malformed", "APN_RPC_PROTOCOL"],
+  ["reversed", "APN_PROVIDER_PROTOCOL"]] as const) test(`deployment Multicall fails closed on ${mode} subresults`, async (t) => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const now = new Date("2026-09-08T12:00:00.000Z"), spy = await prepareSpy(now, mode);
+    const rpc = spy.rpcFor(8453, new RpcReadSession({ maxHttpRequests: 16, maxHttpAttempts: 16, wait: async () => {} }));
+    await assert.rejects(rpc.deployment("stargateV2", 42161, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+      (error: unknown) => error instanceof ApnError && error.code === code);
+  });

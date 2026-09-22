@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
+import { decodeFunctionData, encodeFunctionResult, type Hex } from "viem";
 import { canonicalJson, sha256 } from "../../src/canonical.js";
 import type { EvmChainId } from "../../src/evm-asset.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
@@ -11,12 +12,15 @@ import { BridgeRpc, RpcReadSession, bridgeRpcFactory, type RpcBatchReadItem } fr
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import { BASE_FEE_CONTRACT } from "../../src/lifi/rpc-fees.js";
 import type { BridgeTool } from "../../src/lifi/model.js";
+import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
+import { MULTICALL3_ADDRESS } from "../../src/portfolio/registry.js";
 
 type Entry = { request: { method: string; params: unknown[] }; response: { result: unknown } };
 type Capture = { chainId: EvmChainId; rpcOrigin: string; requests: Entry[];
   safeBlock: { number: string; hash: string; timestamp: string }; verification: { chainMatches: boolean; blockMatches: boolean };
   invocations: Array<{ peerChainId: EvmChainId; tool: BridgeTool }> };
 const raw = await readFile(resolve("tests/core/lifi-fixtures/deployment-rpc-20260908.json"), "utf8");
+const multicallCode = (await readFile(resolve("tests/core/fixtures/multicall3-runtime-code.hex"), "utf8")).toString().trim();
 assert.equal(sha256(raw), "a07fc84d38e22270965e4a43c4e42fec426256afdebe4de5a8f7898b160cbe6e");
 const fixture = JSON.parse(raw) as { chains: Capture[]; verification: { fixtureRequestCount: number; allChainsPassed: boolean } };
 /** The capture was recorded for canonical USDC, which is the registry row every replay pins. */
@@ -45,6 +49,14 @@ function replay(capture: Capture, changed?: Entry) {
   if (changed) values.set(canonicalJson([changed.request.method, changed.request.params]), changed.response.result);
   const call: EvmRpcCall = async (method, params) => {
     calls.push({ method, params }); const key = canonicalJson([method, params]);
+    if (method === "eth_getCode" && String(params[0]).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) return multicallCode;
+    if (method === "eth_call" && String((params[0] as { to?: unknown }).to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) {
+      const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data: (params[0] as { data: Hex }).data });
+      assert.equal(decoded.functionName, "aggregate3");
+      return encodeFunctionResult({ abi: MULTICALL3_ABI, functionName: "aggregate3", result: await Promise.all(decoded.args[0].map(async (entry) => ({
+        success: true, returnData: await call("eth_call", [{ to: entry.target, data: entry.callData }, params[1]]) as Hex,
+      }))) });
+    }
     assert.ok(values.has(key), `Uncaptured RPC request ${key}`); return structuredClone(values.get(key));
   };
   return { rpc: new BridgeRpc(capture.chainId, capture.rpcOrigin, call), calls, call };
@@ -79,29 +91,40 @@ test("LI.FI Base and Arbitrum Stargate deployment proofs execute as one bounded 
   await destination.rpc.deployment("stargateV2", 8453, usdc(42161));
   assert.equal(source.session.telemetry().httpRequests, 2); assert.equal(destination.session.telemetry().httpRequests, 2);
   assert.equal(source.session.telemetry().batchCount, 2); assert.equal(destination.session.telemetry().batchCount, 2);
-  assert.equal(source.session.telemetry().logicalItems, 34); // chain + safe header, then exact 32-item proof/recheck phase
-  assert.equal(destination.session.telemetry().logicalItems, 26); // chain + safe header, then exact 24-item proof/recheck phase
+  assert.equal(source.session.telemetry().logicalItems, 19); // safe head plus compact 18-item deployment proof
+  assert.equal(destination.session.telemetry().logicalItems, 15); // safe head plus compact 14-item deployment proof
 });
 
 test("LI.FI Base Stargate deployment sends sequential archive requests of at most three items", async () => {
   const capture = fixture.chains.find((chain) => chain.chainId === 8453)!;
   const values = new Map(capture.requests.map((entry) => [canonicalJson([entry.request.method, entry.request.params]), entry.response.result]));
+  const resultFor = (item: { method: string; params: unknown[] }): unknown => {
+    if (item.method === "eth_getCode" && String(item.params[0]).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) return multicallCode;
+    if (item.method === "eth_call" && String((item.params[0] as { to?: unknown }).to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) {
+      const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data: (item.params[0] as { data: Hex }).data });
+      assert.equal(decoded.functionName, "aggregate3");
+      return encodeFunctionResult({ abi: MULTICALL3_ABI, functionName: "aggregate3", result: decoded.args[0].map((entry) => ({
+        success: true, returnData: resultFor({ method: "eth_call", params: [{ to: entry.target, data: entry.callData }, item.params[1]] }) as Hex,
+      })) });
+    }
+    const key = canonicalJson([item.method, item.params]); assert.ok(values.has(key), `Uncaptured RPC request ${key}`);
+    return structuredClone(values.get(key));
+  };
   const requests: Array<{ host: string; items: Array<{ id: string; method: string; params: unknown[] }> }> = [];
   const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
     const items = JSON.parse(body!) as Array<{ id: string; method: string; params: unknown[] }>;
     requests.push({ host: new URL(endpoint).host, items });
     return { status: 200, body: JSON.stringify(items.map((item) => {
-      const key = canonicalJson([item.method, item.params]); assert.ok(values.has(key), `Uncaptured RPC request ${key}`);
-      return { jsonrpc: "2.0", id: item.id, result: structuredClone(values.get(key)) };
+      return { jsonrpc: "2.0", id: item.id, result: resultFor(item) };
     })) };
   } };
   const session = new RpcReadSession({ maxHttpRequests: 13, maxHttpAttempts: 13, wait: async () => {} });
   const rpc = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base-primary.example", APN_BASE_ARCHIVE_RPC_URL: "https://base-archive.example" }, { transport, wait: async () => {} })(8453, session);
   await rpc.deployment("stargateV2", 42161, usdc(8453));
-  assert.equal(requests.length, 12);
+  assert.equal(requests.length, 7);
   assert.equal(requests[0]!.host, "base-primary.example"); assert.equal(requests[0]!.items.length, 2);
   assert.ok(requests.slice(1).every((request) => request.host === "base-archive.example" && request.items.length <= 3));
-  assert.deepEqual(requests.slice(1).map((request) => request.items.length), [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+  assert.deepEqual(requests.slice(1).map((request) => request.items.length), [3, 3, 3, 3, 3, 3]);
   assert.equal(requests[1]!.items[0]!.method, "eth_chainId");
   assert.ok(requests.slice(1).flatMap((request) => request.items).slice(1)
     .every((item) => item.method === "eth_getCode" || item.method === "eth_getStorageAt" || item.method === "eth_call" || item.method === "eth_getBlockByNumber"));
@@ -113,7 +136,8 @@ for (const chain of fixture.chains) {
       const { rpc, calls } = replay(chain); const proof = await rpc.deployment(invocation.tool, invocation.peerChainId, usdc(chain.chainId));
       assert.equal(proof.block.hash, chain.safeBlock.hash); assert.equal(proof.rpcOrigin, chain.rpcOrigin);
       assert.equal(proof.chainId, chain.chainId); assert.equal(proof.peerChainId, invocation.peerChainId);
-      assert.equal(calls.filter((c) => c.method === "eth_getCode").length, invocation.tool === "across" ? (chain.chainId === 8453 ? 9 : 7) : (chain.chainId === 8453 ? 10 : 8));
+      assert.equal(calls.filter((c) => c.method === "eth_getCode").length, invocation.tool === "across" ? (chain.chainId === 8453 ? 9 : 7) :
+        (chain.chainId === 8453 || chain.chainId === 42161 ? (chain.chainId === 8453 ? 11 : 9) : 8));
       assert.ok(calls.filter((c) => ["eth_getCode", "eth_getStorageAt", "eth_call"].includes(c.method)).every((c) => c.params.at(-1) === chain.safeBlock.number));
       const historical = await rpc.deployment(invocation.tool, invocation.peerChainId, usdc(chain.chainId), proof.block); assert.deepEqual(historical, proof);
     });

@@ -4,7 +4,7 @@ import type { PortfolioHttpPort } from "./https.js";
 import { MULTICALL3_ADDRESS, PORTFOLIO_NETWORK_RPC, type PortfolioNetworkRpc } from "./registry.js";
 import { CountingPortfolioHttp, jsonRpcBatchBody, jsonRpcBatchResults, PortfolioReadFailure, unavailableAttempt, type JsonRpcItem } from "./rpc-batch.js";
 
-const MULTICALL3_ABI = [
+export const MULTICALL3_ABI = [
   { type: "function", name: "aggregate3", stateMutability: "payable",
     inputs: [{ name: "calls", type: "tuple[]", components: [{ name: "target", type: "address" },
       { name: "allowFailure", type: "bool" }, { name: "callData", type: "bytes" }] }],
