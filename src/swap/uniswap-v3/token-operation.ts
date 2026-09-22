@@ -40,6 +40,20 @@ export interface UniswapTokenCleanupEvidence { readonly schemaVersion: "apn.unis
     readonly observedAllowanceAtomic: "0"; readonly observedAt: string; }
 export interface UniswapTokenFailureDiagnostic { readonly code: string | null; readonly reason: string | null;
     readonly rpcMethod: string | null; readonly endpointRole: string | null; readonly phase: UniswapTokenPhase; }
+type FailureDiagnosticField = "code" | "reason" | "rpcMethod" | "endpointRole";
+const FAILURE_DIAGNOSTIC_VALUES: Readonly<Record<FailureDiagnosticField, ReadonlySet<string>>> = {
+    code: new Set(["APN_OPERATION_BLOCKED", "APN_RPC_PROTOCOL", "APN_RPC_AMBIGUOUS", "APN_RPC_BUDGET_EXCEEDED", "APN_RPC_RATE_LIMITED",
+        "APN_PROVIDER_CAPABILITY_UNAVAILABLE", "APN_PROVIDER_UNAVAILABLE", "APN_CHAIN_MISMATCH", "APN_STATE_CORRUPT", "APN_WALLET_MISMATCH", "APN_RPC_CONFIG", "APN_REPREPARE_REQUIRED"]),
+    reason: new Set(["http_status", "request_deadline", "DNS_deadline", "request_interrupted", "response_aborted", "response_interrupted", "deadline", "maxHttpAttempts", "http_429", "batch_unsupported",
+        "swap_owner_admission_required", "uniswap_code_pin_drift", "uniswap_token_quote_expired", "uniswap_token_allowance_drift", "uniswap_token_source_balance", "uniswap_token_deadline", "uniswap_token_nonce_drift",
+        "uniswap_token_wallet_drift", "uniswap_token_approval_simulation", "uniswap_token_gas_cap", "uniswap_token_native_balance", "uniswap_token_fee_cap", "uniswap_token_output_floor",
+        "bridge_RPC_response", "bridge_RPC_method", "bridge_RPC_read_method", "bridge_archive_RPC_method", "distinct_archive_RPC_required"]),
+    rpcMethod: new Set(["batch", "rpc", "eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt"]),
+    endpointRole: new Set(["primary", "archive", "receipt"]),
+};
+export function sanitizeUniswapTokenFailureField(field: FailureDiagnosticField, value: unknown): string | null {
+    return typeof value === "string" && FAILURE_DIAGNOSTIC_VALUES[field].has(value) ? value : null;
+}
 export interface UniswapTokenOperation {
     readonly schemaVersion: typeof UNISWAP_TOKEN_OPERATION_SCHEMA | typeof UNISWAP_TOKEN_OPERATION_SCHEMA_V1;
     readonly operationId: string;
@@ -165,7 +179,7 @@ function validateCleanupEvidence(v: UniswapTokenCleanupEvidence | null | undefin
         !canonicalInstant(v.observedAt as string)) corrupt("Uniswap token cleanup evidence is invalid."); }
 function validateFailureDiagnostic(v: UniswapTokenFailureDiagnostic | null | undefined) { if (v === null) return;
     if (!isPlainRecord(v) || !exactKeys(v, ["code", "reason", "rpcMethod", "endpointRole", "phase"]) || !PHASES.includes(v.phase as UniswapTokenPhase) ||
-        [v.code, v.reason, v.rpcMethod, v.endpointRole].some((field) => field !== null && (typeof field !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/u.test(field))))
+        (["code", "reason", "rpcMethod", "endpointRole"] as const).some((field) => v[field] !== null && sanitizeUniswapTokenFailureField(field, v[field]) !== v[field]))
         corrupt("Uniswap token pre-sign diagnostic is invalid."); }
 function validateReceipt(v: UniswapTokenReceipt, op: UniswapTokenOperation) { if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "operationId", "approvalGasWei", "swapGasWei", "cleanupGasWei", "nativeDebitWei", "inputDebitAtomic", "outputCreditAtomic", "residualAllowanceAtomic", "transactionHash", "observedAt", "receiptHash"]) || v.schemaVersion !== UNISWAP_TOKEN_RECEIPT_SCHEMA || v.operationId !== op.operationId || v.inputDebitAtomic !== op.route.amountIn || v.residualAllowanceAtomic !== "0" || v.nativeDebitWei !== op.accumulatedNativeDebitWei || !/^0x[a-f0-9]{64}$/u.test(v.transactionHash) || !canonicalInstant(v.observedAt))
     corrupt("Uniswap token receipt is invalid."); const { receiptHash, ...body } = v; if (receiptHash !== domainHash(UNISWAP_TOKEN_RECEIPT_SCHEMA, canonicalJson(body)))

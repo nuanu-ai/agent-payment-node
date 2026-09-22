@@ -89,7 +89,8 @@ test("restart never signs an attempt whose reusable nonce was reassigned", async
 test("mismatched allowance refuses and reverted swap requires explicit cleanup", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup);
   await assert.rejects(fixture(temp.root, "2"), { code: "APN_STATE_CORRUPT" });
   const other = await temporaryState(); t.after(other.cleanup); const g = await fixture(other.root, "1000000"); let op = await g.runtime.approve(g.operation.operationId);
-  assert.equal(op.phase, "submitted"); g.observations.set(H("2"), { status: "reverted", transactionHash: H("2"), gasDebitWei: "100", allowanceAtomic: "1000000" });
+  assert.equal(op.phase, "approval_observed"); assert.deepEqual(g.sends, []); op = await g.runtime.execute(op.operationId); assert.equal(op.phase, "submitted");
+  g.observations.set(H("2"), { status: "reverted", transactionHash: H("2"), gasDebitWei: "100", allowanceAtomic: "1000000" });
   op = await g.runtime.status(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.deepEqual(g.sends, ["swap"]);
   op = await g.runtime.execute(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.deepEqual(g.sends, ["swap"]);
   op = await g.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.deepEqual(g.sends, ["swap", "cleanup"]);
@@ -119,7 +120,8 @@ test("zero allowance cannot claim no-effect cleanup after an approval hash exist
   op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "approval_observed"); f.rejectRevalidation();
   op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "cleanup_required"); f.allowance("0");
   await assert.rejects(f.runtime.cleanup(op.operationId), (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "uniswap_cleanup_effect_exists");
-  assert.equal((await f.journal.load(op.operationId))?.cleanupEvidence, null); assert.deepEqual(f.sends, ["approval"]);
+  const persisted = await f.journal.load(op.operationId); assert.equal(persisted?.cleanupEvidence, null); assert.equal(persisted?.usageState, "reserved");
+  assert.deepEqual(f.sends, ["approval"]);
 });
 test("status repairs the live ledger-terminal split brain without allowance reads, signing, or sending", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); f.rejectGuard();
@@ -131,15 +133,26 @@ test("status repairs the live ledger-terminal split brain without allowance read
 test("pre-sign diagnostics retain only classified fields for provider and guard failures", async (t) => {
   const rows = [
     new ApnError("APN_RPC_PROTOCOL", "http", { reason: "http_status", rpcMethod: "eth_call", endpointRole: "primary", url: "https://secret.example/key" }),
-    new ApnError("APN_RPC_AMBIGUOUS", "timeout", { reason: "request_deadline", rpcMethod: "batch", endpointRole: "archive", params: "secret" }),
+    new ApnError("APN_RPC_AMBIGUOUS", "timeout", { transportReason: "request_deadline", rpcMethod: "batch", endpointRole: "archive", params: "secret" }),
     new ApnError("APN_OPERATION_BLOCKED", "policy", { reason: "swap_owner_admission_required" }),
     new ApnError("APN_OPERATION_BLOCKED", "pin", { reason: "uniswap_code_pin_drift" }),
   ];
   for (const [index, error] of rows.entries()) { const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); f.rejectGuard(error);
     const op = await f.runtime.approve(f.operation.operationId); assert.equal(op.cleanupReason, "approval_pre_sign_failed");
-    assert.deepEqual(op.preSignFailure, { code: error.code, reason: error.details?.reason ?? null, rpcMethod: error.details?.rpcMethod ?? null,
+    assert.deepEqual(op.preSignFailure, { code: error.code, reason: error.details?.reason ?? error.details?.transportReason ?? null, rpcMethod: error.details?.rpcMethod ?? null,
       endpointRole: error.details?.endpointRole ?? null, phase: "approval_submission_started" }, String(index));
     assert.doesNotMatch(JSON.stringify(op.preSignFailure), /secret|https:|params|address/u); }
+});
+test("pre-sign diagnostics reject address, hash, key-shaped, and arbitrary strings field by field", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  f.rejectGuard(new ApnError("APN_OPERATION_BLOCKED", "hostile", { reason: ACCOUNT, rpcMethod: H("a"), endpointRole: "private_key", secret: "key" }));
+  const op = await f.runtime.approve(f.operation.operationId); assert.deepEqual(op.preSignFailure, {
+    code: "APN_OPERATION_BLOCKED", reason: null, rpcMethod: null, endpointRole: null, phase: "approval_submission_started",
+  });
+  for (const [field, value] of [["code", "SECRET_KEY"], ["reason", ACCOUNT], ["rpcMethod", H("b")], ["endpointRole", "arbitrary"]] as const) {
+    const preSignFailure = { ...op.preSignFailure!, [field]: value };
+    assert.throws(() => validateUniswapTokenOperation({ ...op, preSignFailure }), { code: "APN_STATE_CORRUPT" }, field);
+  }
 });
 test("legacy v1 operations remain readable and upgrade on the next transition", async () => {
   const current = newUniswapTokenOperation({ operationId: "b".repeat(64), profile: "legacy", account: ACCOUNT,

@@ -66,7 +66,7 @@ export class InstalledUniswapTokenRuntime {
     async approve(id) { return await this.budgeted(id, "swap.uniswap-token.approve", 14, 14, "approval_effect", async () => await this.execution.approve(id)); }
     async execute(id) {
         const phase = (await this.journal.load(id))?.phase;
-        const budget = phase === "approved" ? [14, 14, "approval_effect"] : phase === "approval_observed" ? [24, 24, "swap_effect"] : [0, 24, "recovery"];
+        const budget = phase === "approved" || phase === "approval_observed" ? [24, 24, "swap_effect"] : [0, 24, "recovery"];
         return await this.budgeted(id, "swap.uniswap-token.execute", budget[0], budget[1], budget[2], async () => await this.execution.execute(id));
     }
     async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", 0, 8, "recovery", async () => await this.execution.status(id)); }

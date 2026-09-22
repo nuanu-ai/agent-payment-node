@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
-import { tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
+import { sanitizeUniswapTokenFailureField, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
 export class UniswapTokenExecution {
     journal;
     ports;
@@ -15,7 +15,8 @@ export class UniswapTokenExecution {
         await this.ports.foregroundApprove(op);
         const usage = await this.ports.reserveUsage(op);
         op = await this.persist(transitionUniswapToken(op, "approved", usagePatch(usage), this.ports.now()));
-        return await this.execute(id);
+        op = await this.advanceApproval(op);
+        return approvalActive(op.phase) ? await this.observeApproval(await this.continueStart(op, "approval")) : op;
     }
     async execute(id) {
         let op = await this.syncUsage(await this.required(id));
@@ -23,12 +24,8 @@ export class UniswapTokenExecution {
             return op;
         if (this.ports.now().getTime() >= op.route.deadline * 1000 && !active(op.phase))
             return await this.cleanupRequired(op, "deadline_expired");
-        if (op.phase === "approved") {
-            const allowance = await this.ports.currentAllowance(op);
-            if (allowance !== "0" && allowance !== op.route.amountIn)
-                return await this.cleanupRequired(op, "approval_allowance_drift");
-            op = allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval");
-        }
+        if (op.phase === "approved")
+            op = await this.advanceApproval(op);
         if (approvalActive(op.phase))
             return await this.observeApproval(await this.continueStart(op, "approval"));
         if (op.phase === "approval_observed") {
@@ -43,6 +40,12 @@ export class UniswapTokenExecution {
         if (swapActive(op.phase))
             return await this.observeSwap(await this.continueStart(op, "swap"));
         return op;
+    }
+    async advanceApproval(op) {
+        const allowance = await this.ports.currentAllowance(op);
+        if (allowance !== "0" && allowance !== op.route.amountIn)
+            return await this.cleanupRequired(op, "approval_allowance_drift");
+        return allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval");
     }
     async status(id) {
         const op = await this.syncUsage(await this.required(id));
@@ -225,9 +228,11 @@ function cleanupEvidence(source, now) {
 }
 function diagnostic(error, phase) {
     const e = error instanceof ApnError ? error : null;
-    return { code: safe(e?.code), reason: safe(e?.details?.reason), rpcMethod: safe(e?.details?.rpcMethod), endpointRole: safe(e?.details?.endpointRole), phase };
+    return { code: sanitizeUniswapTokenFailureField("code", e?.code),
+        reason: sanitizeUniswapTokenFailureField("reason", e?.details?.reason ?? e?.details?.transportReason),
+        rpcMethod: sanitizeUniswapTokenFailureField("rpcMethod", e?.details?.rpcMethod),
+        endpointRole: sanitizeUniswapTokenFailureField("endpointRole", e?.details?.endpointRole), phase };
 }
-function safe(value) { return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,80}$/u.test(value) ? value : null; }
 function corrupt(message) { throw new ApnError("APN_STATE_CORRUPT", message); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-execution.js.map
