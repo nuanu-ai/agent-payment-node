@@ -10,12 +10,13 @@ import { UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYL
 type Request = Extract<CommandRequest, { readonly command: `swap.uniswap.${string}` | `swap.uniswap-token.${string}` }>;
 export async function executeUniswapCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome> {
   if (request.command === "swap.uniswap-token.prepare" || request.command === "swap.uniswap-token.approve" ||
-      request.command === "swap.uniswap-token.execute" || request.command === "swap.uniswap-token.status" || request.command === "swap.uniswap-token.inventory" || request.command === "swap.uniswap-token.quote") {
+      request.command === "swap.uniswap-token.execute" || request.command === "swap.uniswap-token.cleanup" || request.command === "swap.uniswap-token.status" || request.command === "swap.uniswap-token.inventory" || request.command === "swap.uniswap-token.quote") {
     const runtime = context.uniswapTokenRuntime;
     if (runtime === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Uniswap token-input runtime is unavailable.", { reason: "uniswap_token_runtime_unavailable" });
     if (request.command === "swap.uniswap-token.prepare") return tokenOutcome(await runtime.prepare(request));
     if (request.command === "swap.uniswap-token.approve") return tokenOutcome(await runtime.approve(request.operationId));
     if (request.command === "swap.uniswap-token.execute") return tokenOutcome(await runtime.execute(request.operationId));
+    if (request.command === "swap.uniswap-token.cleanup") return tokenOutcome(await runtime.cleanup(request.operationId));
     if (request.command === "swap.uniswap-token.inventory") return data(runtime.inventory(), "exact_token_route_inventory");
     if (request.command === "swap.uniswap-token.quote") return data(await runtime.quote(request), "unsigned_exact_simulated_swap_quote");
     return tokenOutcome(await runtime.status(request.operationId));

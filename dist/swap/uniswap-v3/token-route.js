@@ -73,23 +73,31 @@ export async function verifyUniswapTokenRoutePins(call, tag) {
     if (UNISWAP_V3_FACTORY !== "0x1F98431c8aD98523631AE4a59f267346ea31F984")
         throw new ApnError("APN_STATE_CORRUPT", "Uniswap factory pin changed.");
 }
-function token(value) { const v = address(value); if (v !== UNISWAP_USDC && v !== ETHEREUM_USDT)
-    invalid("Only canonical Ethereum USDC and USDT are admitted."); return v; }
-function address(value) { try {
-    const v = getAddress(value);
-    if (v !== value || /^0x0{40}$/u.test(v))
-        throw new Error();
+function token(value) {
+    const v = address(value);
+    if (v !== UNISWAP_USDC && v !== ETHEREUM_USDT)
+        invalid("Only canonical Ethereum USDC and USDT are admitted.");
     return v;
 }
-catch {
-    return invalid("Uniswap address is invalid.");
-} }
-function uint(value) { try {
-    return parseAtomic(value, { positive: true });
+function address(value) {
+    try {
+        const v = getAddress(value);
+        if (v !== value || /^0x0{40}$/u.test(v))
+            throw new Error();
+        return v;
+    }
+    catch {
+        return invalid("Uniswap address is invalid.");
+    }
 }
-catch {
-    return invalid("Uniswap amount is invalid.");
-} }
+function uint(value) {
+    try {
+        return parseAtomic(value, { positive: true });
+    }
+    catch {
+        return invalid("Uniswap amount is invalid.");
+    }
+}
 function invalid(message) { throw new ApnError("APN_INVALID_INPUT", message); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-route.js.map

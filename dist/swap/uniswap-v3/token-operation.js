@@ -69,31 +69,48 @@ export function tokenAttempt(op, kind, nonce, now) {
     const markedAt = instant(now), markerHash = domainHash("apn.uniswap-token-attempt.v1", canonicalJson({ operationId: op.operationId, integrityHash: op.integrityHash, kind, nonce, markedAt }));
     return { markerHash, markedAt, nonce: uint(nonce).toString(), transactionHash: null, attempts: 1 };
 }
-function validateGas(v) { if (!isPlainRecord(v) || !exactKeys(v, ["gasLimit", "maxFeePerGas", "maxPriorityFeePerGas"]) || uint(v.gasLimit) === 0n || uint(v.maxFeePerGas) === 0n || uint(v.maxPriorityFeePerGas) > uint(v.maxFeePerGas))
-    corrupt("Uniswap token gas envelope is invalid."); }
+function validateGas(v) {
+    if (!isPlainRecord(v) || !exactKeys(v, ["gasLimit", "maxFeePerGas", "maxPriorityFeePerGas"]) || uint(v.gasLimit) === 0n || uint(v.maxFeePerGas) === 0n || uint(v.maxPriorityFeePerGas) > uint(v.maxFeePerGas))
+        corrupt("Uniswap token gas envelope is invalid.");
+}
 function maxGas(v) { validateGas(v); return BigInt(v.gasLimit) * BigInt(v.maxFeePerGas); }
-function attempt(v) { if (v === null)
-    return; if (!isPlainRecord(v) || !exactKeys(v, ["markerHash", "markedAt", "nonce", "transactionHash", "attempts"]) || v.attempts !== 1 || !/^[a-f0-9]{64}$/u.test(v.markerHash) || !canonicalInstant(v.markedAt) || (v.transactionHash !== null && !/^0x[a-f0-9]{64}$/u.test(v.transactionHash)))
-    corrupt("Uniswap token attempt is invalid."); uint(v.nonce); }
-function validateReceipt(v, op) { if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "operationId", "approvalGasWei", "swapGasWei", "cleanupGasWei", "nativeDebitWei", "inputDebitAtomic", "outputCreditAtomic", "residualAllowanceAtomic", "transactionHash", "observedAt", "receiptHash"]) || v.schemaVersion !== UNISWAP_TOKEN_RECEIPT_SCHEMA || v.operationId !== op.operationId || v.inputDebitAtomic !== op.route.amountIn || v.residualAllowanceAtomic !== "0" || v.nativeDebitWei !== op.accumulatedNativeDebitWei || !/^0x[a-f0-9]{64}$/u.test(v.transactionHash) || !canonicalInstant(v.observedAt))
-    corrupt("Uniswap token receipt is invalid."); const { receiptHash, ...body } = v; if (receiptHash !== domainHash(UNISWAP_TOKEN_RECEIPT_SCHEMA, canonicalJson(body)))
-    corrupt("Uniswap token receipt hash is invalid."); }
-function canonicalAddress(v) { try {
-    return getAddress(v);
+function attempt(v) {
+    if (v === null)
+        return;
+    if (!isPlainRecord(v) || !exactKeys(v, ["markerHash", "markedAt", "nonce", "transactionHash", "attempts"]) || v.attempts !== 1 || !/^[a-f0-9]{64}$/u.test(v.markerHash) || !canonicalInstant(v.markedAt) || (v.transactionHash !== null && !/^0x[a-f0-9]{64}$/u.test(v.transactionHash)))
+        corrupt("Uniswap token attempt is invalid.");
+    uint(v.nonce);
 }
-catch {
-    return "";
-} }
-function uint(v) { try {
-    if (typeof v !== "string")
-        throw new Error();
-    return parseAtomic(v);
+function validateReceipt(v, op) {
+    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "operationId", "approvalGasWei", "swapGasWei", "cleanupGasWei", "nativeDebitWei", "inputDebitAtomic", "outputCreditAtomic", "residualAllowanceAtomic", "transactionHash", "observedAt", "receiptHash"]) || v.schemaVersion !== UNISWAP_TOKEN_RECEIPT_SCHEMA || v.operationId !== op.operationId || v.inputDebitAtomic !== op.route.amountIn || v.residualAllowanceAtomic !== "0" || v.nativeDebitWei !== op.accumulatedNativeDebitWei || !/^0x[a-f0-9]{64}$/u.test(v.transactionHash) || !canonicalInstant(v.observedAt))
+        corrupt("Uniswap token receipt is invalid.");
+    const { receiptHash, ...body } = v;
+    if (receiptHash !== domainHash(UNISWAP_TOKEN_RECEIPT_SCHEMA, canonicalJson(body)))
+        corrupt("Uniswap token receipt hash is invalid.");
 }
-catch {
-    return corrupt("Uniswap token integer is invalid.");
-} }
-function instant(v) { if (!(v instanceof Date) || !Number.isFinite(v.getTime()))
-    corrupt("Uniswap token time is invalid."); return v.toISOString(); }
+function canonicalAddress(v) {
+    try {
+        return getAddress(v);
+    }
+    catch {
+        return "";
+    }
+}
+function uint(v) {
+    try {
+        if (typeof v !== "string")
+            throw new Error();
+        return parseAtomic(v);
+    }
+    catch {
+        return corrupt("Uniswap token integer is invalid.");
+    }
+}
+function instant(v) {
+    if (!(v instanceof Date) || !Number.isFinite(v.getTime()))
+        corrupt("Uniswap token time is invalid.");
+    return v.toISOString();
+}
 function canonicalInstant(v) { return Number.isFinite(Date.parse(v)) && new Date(v).toISOString() === v; }
 function corrupt(message) { throw new ApnError("APN_STATE_CORRUPT", message); }
 //# sourceMappingURL=token-operation.js.map
