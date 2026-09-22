@@ -18,7 +18,7 @@ import { temporaryState } from "./helpers.js";
 type Request = { id: string; method: string; params: unknown[] };
 type Capture = { chainId: 1 | 8453 | 42161; requests: Array<{ request: { method: string; params: unknown[] }; response: { result: unknown } }> };
 
-async function prepareSpy(now: Date, aggregateMode: "valid" | "failed" | "malformed" | "reversed" = "valid") {
+async function prepareSpy(now: Date, aggregateMode: "valid" | "failed" | "malformed" | "reversed" | "delegation" = "valid") {
   const fixture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/deployment-rpc-20260908.json"), "utf8")) as { chains: Capture[] };
   const runtimes = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/wrapped-native-runtime-blockscout-20260922.json"), "utf8")) as {
     contracts: Array<{ chainId: number; address: string; deployedBytecode: string }>;
@@ -47,6 +47,8 @@ async function prepareSpy(now: Date, aggregateMode: "valid" | "failed" | "malfor
   }
   const calls: Array<{ host: string; items: Request[] }> = [];
   const resultFor = (chainId: number, item: Request): unknown => {
+    if (aggregateMode === "delegation" && item.method === "eth_getCode" &&
+      String(item.params[0]).toLowerCase() !== MULTICALL3_ADDRESS.toLowerCase()) return `0xef0100${"1".repeat(40)}`;
     const captured = values.get(chainId)!.get(canonicalJson([item.method, item.params]));
     if (captured !== undefined) return structuredClone(captured);
     if (item.method === "eth_chainId") return `0x${chainId.toString(16)}`;
@@ -165,14 +167,14 @@ for (const flow of [
       assert.equal(rejected.ok, true, JSON.stringify(rejected.error));
       assert.equal((rejected.operation as { state: string }).state, "failed_before_effect");
       const execution = spy.calls.slice(beforeApproval), executionArchive = execution.filter((call) => call.host.includes("archive"));
-      assert.equal(execution.length, 16); assert.equal(execution.filter((call) => call.host.includes("primary")).length, 4);
+      assert.equal(execution.length, 13); assert.equal(execution.filter((call) => call.host.includes("primary")).length, 4);
       assert.deepEqual(executionArchive.filter((call) => call.host === "base-archive.example").map((call) => call.items.length),
-        [3, 3, 3, 3, 3, 3, 1]);
+        [3, 3, 3, 1]);
       assert.deepEqual(executionArchive.filter((call) => call.host === "arb-archive.example").map((call) => call.items.length),
         [3, 3, 3, 3, 3]);
       assert.ok(executionArchive.every((call) => call.items.length <= 3));
-      assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 16);
-      assert.equal(spy.sessions.at(-1)!.telemetry().remainingHttpRequests, 12);
+      assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 13);
+      assert.equal(spy.sessions.at(-1)!.telemetry().remainingHttpRequests, 15);
     }
 });
 
@@ -207,10 +209,14 @@ test("deployment Multicall keeps direct-proof identity and rejects unknown selec
     assert.ok(decoded.args[0].every((inner) => !identitySelectors.has(inner.callData.slice(0, 10))));
     assert.ok(directIdentity.filter((direct) => direct.host === host).every((direct) => direct.item.params[1] === item.params[1]));
   }
+  const refresh = spy.rpcFor(8453, new RpcReadSession({ maxHttpRequests: 10, maxHttpAttempts: 12, wait: async () => {} }));
+  assert.ok(refresh.refreshDeployment);
+  await assert.rejects(refresh.refreshDeployment!("stargateV2", 42161, intent.materialization.request.fromToken,
+    { ...intent.sourceDeployment, contractHash: "0".repeat(64) }), { code: "APN_OPERATION_BLOCKED" });
 });
 
 for (const [mode, code] of [["failed", "APN_RPC_PROTOCOL"], ["malformed", "APN_RPC_PROTOCOL"],
-  ["reversed", "APN_PROVIDER_PROTOCOL"]] as const) test(`deployment Multicall fails closed on ${mode} subresults`, async (t) => {
+  ["reversed", "APN_PROVIDER_PROTOCOL"], ["delegation", "APN_PROVIDER_PROTOCOL"]] as const) test(`deployment proof fails closed on ${mode} code/subresults`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const now = new Date("2026-09-08T12:00:00.000Z"), spy = await prepareSpy(now, mode);
     const rpc = spy.rpcFor(8453, new RpcReadSession({ maxHttpRequests: 16, maxHttpAttempts: 16, wait: async () => {} }));

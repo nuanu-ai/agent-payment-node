@@ -9,7 +9,7 @@ import type { Address, Hex } from "../model.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { bridgeDeployment } from "./deployments.js";
 import { BridgeHttps } from "./https.js";
-import type { BridgeBlock, BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
+import type { BridgeBlock, BridgeDeploymentIdentity, BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 import type { BridgeRpcFactory, BridgeRpcPort, LifiResponse } from "./ports.js";
 import { bridgeArchiveEndpoint, bridgeReceiptEndpoint, isArchiveRead, isHistoricalStateRead,
   type BridgeReceiptEndpoint } from "./rpc-archive.js";
@@ -25,7 +25,7 @@ import { bridgeFeeQuote, rpcBlockValue, rpcExpectedChainValue, rpcFeeBlockValue,
 import { exactNativeTransfer, parseReceiptLogs } from "./rpc-proof-codec.js";
 import { MULTICALL3_ADDRESS, PORTFOLIO_NETWORK_RPC } from "../portfolio/registry.js";
 import { MULTICALL3_ABI } from "../portfolio/evm-reader.js";
-export { RpcReadSession } from "./rpc-session.js";
+export { RpcProviderScheduler, RpcReadSession } from "./rpc-session.js";
 export type { RpcBatchReadItem, RpcReadSessionOptions, RpcReadTelemetry } from "./rpc-session.js";
 const ERC20_READ = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }] as const;
@@ -34,6 +34,9 @@ const L1_BLOCK = "0x4200000000000000000000000000000000000015" as Address;
 const GAS_ORACLE_ABI = [{ type: "function", name: "getL1FeeUpperBound", stateMutability: "view", inputs: [{ name: "size", type: "uint256" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "getOperatorFee", stateMutability: "view", inputs: [{ name: "gas", type: "uint256" }], outputs: [{ type: "uint256" }] }] as const;
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "debug_traceTransaction", "eth_sendRawTransaction"]);
+// Base activated EIP-6780 in Ecotone at this exact timestamp. Arbitrum has no exact activation point in this verifier,
+// so its code remains fully fresh. System/predeploy and EIP-7702 delegation-marker code are never retained.
+const BASE_ECOTONE_EIP6780_TIMESTAMP = 1_710_374_401n; // 2024-03-14T00:00:01Z
 // Exact selectors of reviewed, caller-independent configuration getters. Unknown calls stay as direct RPC reads.
 const DEPLOYMENT_MULTICALL_SELECTORS = new Set([
   "0x079bd2c7", "0x105d0b81", "0x2bc5114c", "0x313ce567", "0x54fd4d50", "0x57f6dcb8",
@@ -228,6 +231,7 @@ export function bridgeRpcFactory(environment: Readonly<Record<string, string | u
 export class BridgeRpc implements BridgeRpcPort {
   private readonly evm: EvmRpc;
   private readonly call: EvmRpcCall;
+  private readonly submit: EvmRpcCall;
   private readonly batchCall: ((items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>) | undefined;
   private commandLatestBlock?: BridgeBlock;
   private commandPrices?: Readonly<{ maxFeePerGasAtomic: string; maxPriorityFeePerGasAtomic: string }>;
@@ -237,6 +241,8 @@ export class BridgeRpc implements BridgeRpcPort {
     sessionCall?: (session: RpcReadSession) => EvmRpcCall,
     sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>) {
     bridgeChain(chainId); this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call);
+    this.submit = session === undefined || oneAttempt === undefined ? call :
+      async (method, params) => await submitDirect(method, params, (m, p) => oneAttempt(m, p));
     this.batchCall = session === undefined ? undefined : sessionBatchCall?.(session);
     this.evm = new EvmRpc(this.call, origin, 16 * 1024);
   }
@@ -315,7 +321,7 @@ export class BridgeRpc implements BridgeRpcPort {
     if (values[offset++] !== BigInt(this.chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
     for (const row of verificationCodeRows) {
       const bytes = values[offset++] as Hex;
-      if (bytes === "0x" || keccak256(bytes) !== row.codeHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_code_changed");
+      if (bytes === "0x" || eip7702Delegation(bytes) || keccak256(bytes) !== row.codeHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_code_changed");
       if (row.address !== getAddress(MULTICALL3_ADDRESS)) code.push({ address: row.address, codeHash: keccak256(bytes) });
     }
     const observedByRead = new Map<string, Hex>();
@@ -349,6 +355,77 @@ export class BridgeRpc implements BridgeRpcPort {
     if (this.batchCall === undefined) await this.assertChain();
     return { chainId: this.chainId, peerChainId, tool, block: at, rpcOrigin: this.origin,
       contractHash: hashObject({ protocol: contract, feeContract }), codeHash: hashObject(code), configurationHash: hashObject(configuration) };
+  }
+  async refreshDeployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, frozen: BridgeDeploymentIdentity) {
+    const contract = bridgeDeployment(this.chainId, peerChainId, tool, token), feeContract = this.chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
+    const contractHash = hashObject({ protocol: contract, feeContract });
+    if (frozen.chainId !== this.chainId || frozen.peerChainId !== peerChainId || frozen.tool !== tool || frozen.rpcOrigin !== this.origin ||
+      frozen.contractHash !== contractHash || !/^[a-f0-9]{64}$/u.test(frozen.codeHash)) {
+      bridgeFailure("APN_OPERATION_BLOCKED", "bridge_prepared_deployment_binding_changed");
+    }
+    // Only this compact lane is admitted to retained code proof reuse. All proxy/admin/facet/storage/config reads remain fresh.
+    if (this.batchCall === undefined || tool !== "stargateV2" || this.chainId !== 8453) {
+      return await this.deployment(tool, peerChainId, token);
+    }
+    if (BigInt(frozen.block.timestampAtomic) < BASE_ECOTONE_EIP6780_TIMESTAMP) {
+      return await this.deployment(tool, peerChainId, token);
+    }
+    const at = await this.block("safe"), tag = quantity(BigInt(at.numberAtomic)), readRows = [...contract.reads, ...feeContract.reads];
+    if (BigInt(at.timestampAtomic) < BASE_ECOTONE_EIP6780_TIMESTAMP || BigInt(at.numberAtomic) < BigInt(frozen.block.numberAtomic)) {
+      bridgeFailure("APN_OPERATION_BLOCKED", "bridge_retained_deployment_proof_not_final");
+    }
+    const aggregateRows = readRows.filter((row) => row.kind === "call" && deploymentMulticallEligible(row.data));
+    const directRows = readRows.filter((row) => !aggregateRows.includes(row));
+    const aggregateData = encodeFunctionData({ abi: MULTICALL3_ABI, functionName: "aggregate3", args: [aggregateRows.map((row) => ({
+      target: row.address, allowFailure: false, callData: row.data,
+    }))] });
+    const aggregateDecoder = (value: unknown): readonly Hex[] => {
+      const raw = rpcHexValue(512 * 1024)(value);
+      let decoded: readonly { success: boolean; returnData: Hex }[];
+      try { decoded = decodeFunctionResult({ abi: MULTICALL3_ABI, functionName: "aggregate3", data: raw }); }
+      catch { return bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response"); }
+      if (decoded.length !== aggregateRows.length || decoded.some((row) => !row.success)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
+      return decoded.map((row) => rpcHexValue(64 * 1024)(row.returnData));
+    };
+    const items: Array<Omit<RpcBatchReadItem, "batchAttempt">> = [
+      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
+      // Base fee machinery is system/predeploy code and is never covered by retained ordinary-code proof.
+      ...feeContract.code.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable" as const,
+        decoder: rpcHexValue(128 * 1024) })),
+      ...directRows.map((row) => ({ method: row.kind === "storage" ? "eth_getStorageAt" : "eth_call",
+        params: row.kind === "storage" ? [row.address, row.data, tag] : [{ to: row.address, data: row.data }, tag],
+        cachePolicy: "immutable" as const, decoder: rpcHexValue(64 * 1024) })),
+      ...(aggregateRows.length === 0 ? [] : [{ method: "eth_call", params: [{ to: MULTICALL3_ADDRESS, data: aggregateData }, tag],
+        cachePolicy: "immutable" as const, decoder: aggregateDecoder }]),
+      { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
+      { method: "eth_getBlockByNumber", params: [quantity(BigInt(frozen.block.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
+    ];
+    const values = await this.batchCall(items, "archive_deployment");
+    let offset = 0;
+    if (values[offset++] !== BigInt(this.chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+    for (const row of feeContract.code) {
+      const bytes = values[offset++] as Hex;
+      if (bytes === "0x" || eip7702Delegation(bytes) || keccak256(bytes) !== row.codeHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_code_changed");
+    }
+    const observedByRead = new Map<string, Hex>();
+    for (const row of directRows) observedByRead.set(hashObject(row), values[offset++] as Hex);
+    if (aggregateRows.length > 0) {
+      const aggregate = values[offset++] as readonly Hex[];
+      for (let index = 0; index < aggregateRows.length; index += 1) observedByRead.set(hashObject(aggregateRows[index]!), aggregate[index]!);
+    }
+    const configuration = readRows.map((row) => {
+      const observed = observedByRead.get(hashObject(row));
+      if (observed === undefined) return bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
+      if (observed !== row.expected) return bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_configuration_changed");
+      return { ...row, expected: observed };
+    });
+    const recheck = values[offset++] as Record<string, unknown>, preparedRecheck = values[offset] as Record<string, unknown>;
+    if (evmRpcQuantity(recheck.number).toString() !== at.numberAtomic || evmRpcHex(recheck.hash, 32) !== at.hash) bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
+    if (evmRpcQuantity(preparedRecheck.number).toString() !== frozen.block.numberAtomic || evmRpcHex(preparedRecheck.hash, 32) !== frozen.block.hash) {
+      bridgeFailure("APN_RPC_PROTOCOL", "bridge_prepared_block_reorg");
+    }
+    return { chainId: this.chainId, peerChainId, tool, block: at, rpcOrigin: this.origin,
+      contractHash, codeHash: frozen.codeHash, configurationHash: hashObject(configuration) };
   }
   /** A native principal's balance is the native balance itself and its allowance is the constant zero: nothing is approved. */
   async account(owner: Address, spender: Address, token: Address, planned: readonly BridgeTransaction[] = []) {
@@ -501,7 +578,7 @@ export class BridgeRpc implements BridgeRpcPort {
   }
   async send(raw: Hex): Promise<Hex> {
     bridgeHex(raw, 16 * 1024, undefined, "APN_PROVIDER_EFFECT_UNAVAILABLE");
-    const hash = evmRpcHex(await this.call("eth_sendRawTransaction", [raw]), 32);
+    const hash = evmRpcHex(await this.submit("eth_sendRawTransaction", [raw]), 32);
     if (hash !== keccak256(raw)) bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
     return hash;
   }
@@ -750,3 +827,4 @@ function assertMatchingHeader(raw: Record<string, unknown>, expected: BridgeBloc
   }
 }
 function quantity(n: bigint): Hex { return `0x${n.toString(16)}`; }
+function eip7702Delegation(code: Hex): boolean { return /^0xef0100[0-9a-f]{40}$/iu.test(code); }

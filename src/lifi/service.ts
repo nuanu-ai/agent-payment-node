@@ -20,7 +20,8 @@ import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
 import { bridgeProtocolEmitter } from "./deployments.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation,
   type BaseDeploymentMigrationAudit } from "./base-deployment-migration.js";
-import { RpcReadSession } from "./rpc.js";
+import { RpcProviderScheduler, RpcReadSession } from "./rpc.js";
+import { sha256 } from "../canonical.js";
 
 export interface BridgeDependencies {
   readonly provider: LifiProviderPort;
@@ -39,9 +40,20 @@ export interface BridgeDeploymentMigrationResult {
 export class BridgeService {
   readonly records: BridgeOperationRepository;
   readonly operations: OperationService;
+  private readonly providerScheduler: RpcProviderScheduler;
   constructor(private readonly context: RuntimeContext) {
     this.records = new BridgeOperationRepository(context.state.root);
     this.operations = new OperationService(context.state, context.providerX402Repository, undefined, this.records);
+    this.providerScheduler = new RpcProviderScheduler({
+      coordinate: async <T>(family: string, work: (lastStart: number | null, saveStart: (value: number) => Promise<void>) => Promise<T>) => {
+        const familyHash = sha256(`rpc-provider-family\0${family}`);
+        // The lock intentionally covers the HTTP attempt. A sibling process can therefore fail with APN_STATE_BUSY
+        // when one provider request occupies the family for longer than the state store's five-second lock wait.
+        return await context.state.withLocks([`rpc-provider-family:${familyHash}`], async () => await work(
+          await context.state.loadRpcProviderPacing(familyHash),
+          async (value) => await context.state.writeRpcProviderPacing(familyHash, value)));
+      },
+    });
   }
   async inventory() { return bridgeInventory(await this.dependencies().provider.inventory()); }
   async routes(profile: string, request: BridgeIntent["materialization"]["request"]) {
@@ -146,18 +158,20 @@ export class BridgeService {
   private preparation() {
     const d = this.dependencies();
     return new BridgePreparation({ state: this.context.state, records: this.records, quotes: new BridgeQuoteRepository(this.context.state.root),
-      operations: this.operations, provider: d.provider, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime() });
+      operations: this.operations, provider: d.provider, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime(), providerScheduler: this.providerScheduler });
   }
   private execution(op: BridgeOperationRecord) {
     const d = this.dependencies(), m = op.intent.materialization;
     // The modeled worst-case first token guard spends 19 requests: two safe heads, 6+9 Ethereum/Base archive chunks and two account batches.
-    // Base/Arbitrum Stargate spends 16: two safe heads, 7+5 archive chunks and two account batches.
+    // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof. Arbitrum code remains fully fresh
+    // because this verifier lacks an exact fork activation point: two safe heads, four Base plus five Arbitrum chunks,
+    // and two source account/simulation batches total 13 physical reads.
     // Four later guards reuse immutable evidence and spend one mutable account/simulation batch each.
     const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 28, maxHttpAttempts: 30,
-      archiveDeploymentBatchMaxItems: 3 });
+      archiveDeploymentBatchMaxItems: 3, providerScheduler: this.providerScheduler });
     const lazy = (chainId: typeof m.request.fromChainId, options: ConstructorParameters<typeof RpcReadSession>[0]) => {
       let rpc: ReturnType<typeof d.rpcFor> | undefined;
-      return () => rpc ??= d.rpcFor(chainId, new RpcReadSession(options));
+      return () => rpc ??= d.rpcFor(chainId, new RpcReadSession({ ...options, providerScheduler: this.providerScheduler }));
     };
     const common = { now: () => this.context.clock.now().getTime(), archiveDeploymentBatchMaxItems: 3 };
     const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 13, maxHttpAttempts: 13 });
