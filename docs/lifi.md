@@ -1,11 +1,11 @@
 # LI.FI EVM cross-chain assets
 
-This APN 0.5.24 package includes local-wallet route selection and execution for
+This APN 0.5.25 package includes local-wallet route selection and execution for
 the admitted assets between Ethereum, Base, Arbitrum One and the finite native
 destinations below. It implements
 Across V4 and Stargate V2 Taxi through the LI.FI API. Package availability,
 source tests and installed-package tests are separate from real mainnet
-acceptance, which remains **0/3**, and named human acceptance remains open.
+acceptance, which is now **1/3**, and named human acceptance remains open.
 
 | Profile | Custody and execution | Bridge availability |
 | --- | --- | --- |
@@ -660,21 +660,38 @@ exercise both protocols in the three required directions, a WBTC route on a
 second chain, the fee-headroom boundary on both sides, and recovery without
 real payment submission.
 
+On 2026-09-22, repository commit
+`8a2e0a56edf144690e6c7779246b0b9470acafeb` completed the Base canonical USDC
+to Arbitrum canonical USDC live row. Operation
+`15c26d9966e6b2e1c93656d0b6dfb75f9d85fa6541d7f4a970154edccdea9497`
+recorded one source submission attempt in transaction
+`0x2aee1da1c335d6b555f6a873205b871af3c73ed724568479006487349d3ee448`
+and safe destination delivery in transaction
+`0x2e81c54e5d99f876f3f0bbfdd4c1fdc1dc465a48dfc6dfebb91e744ea477253c`.
+The durable receipt correlated 149,610 atomic USDC delivered from a 150,000
+atomic source debit, 390 atomic total token loss, a 3,153,012,738,511 wei
+source network fee, zero residual allowance and finalized usage. Its terminal
+proof is `rpc_safe_correlated` / `delivery_correlated`.
+
 | Required real mainnet acceptance | Status |
 | --- | --- |
 | Ethereum to Base canonical USDC | OPEN |
-| Base to Arbitrum canonical USDC | OPEN |
+| Base to Arbitrum canonical USDC | ACCEPTED (2026-09-22) |
 | Arbitrum to Ethereum canonical USDC | OPEN |
 | Arbitrum to Ethereum WBTC | OPEN |
 | Named human receiving acceptance | OPEN |
 
-The three live rows need fresh action-time quotes, at least two selectable
-executable alternatives in the EVM family, explicit account/amount/fee and
-recovery authority, independently verified transactions on both chains and a
-durable APN receipt. Wallet/provider setup, funding, real transactions and public
-release are separate actions. Existing direct-transfer and x402 state formats
-remain unchanged; this implementation uses separate bridge stores without a
-migration.
+This acceptance closes only the Base-to-Arbitrum canonical-USDC row. The two
+remaining canonical-USDC rows need fresh action-time quotes, at least two
+selectable executable alternatives in the EVM family, explicit
+account/amount/fee and recovery authority, independently verified transactions
+on both chains and a durable APN receipt. The latest Arbitrum-to-Ethereum
+canonical-USDC route was blocked by the provider deadline before an APN
+operation or effect, so it remains open; Arbitrum-to-Ethereum WBTC and named
+receiving-human acceptance also remain open. Wallet/provider setup, funding,
+real transactions and public release are separate actions. Existing
+direct-transfer and x402 state formats remain unchanged; this implementation
+uses separate bridge stores without a migration.
 
 ## Base to Solana USDC observation kernel (source only)
 

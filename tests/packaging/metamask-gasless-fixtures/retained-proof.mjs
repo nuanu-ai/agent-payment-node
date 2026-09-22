@@ -105,7 +105,7 @@ export async function runInstalledRetainedProof(installed) {
 async function installedModules(packageRoot) {
   const [core, state, canonical, constants, profiles, policy, profileRepository, providerRegistry, awal,
     providerX402Stage, providerX402State, providerX402Repository, chainAccount, chainPolicy, railModel, railRepository,
-    bridgeTransitions, bridgeRepository, gaslessRegistry] = await Promise.all([
+    bridgeTransitions, bridgeRepository, bridgeEconomics, gaslessRegistry] = await Promise.all([
     loadModule(packageRoot, "core.js"), loadModule(packageRoot, "state.js"), loadModule(packageRoot, "canonical.js"),
     loadModule(packageRoot, "constants.js"), loadModule(packageRoot, "provider-profile.js"),
     loadModule(packageRoot, "profile-policy.js"), loadModule(packageRoot, "profile-repository.js"),
@@ -115,11 +115,13 @@ async function installedModules(packageRoot) {
     loadModule(packageRoot, "chain-account-store.js"), loadModule(packageRoot, "chain-policy.js"),
     loadModule(packageRoot, "rail-operation-model.js"), loadModule(packageRoot, "rail-operation-repository.js"),
     loadModule(packageRoot, "lifi/transitions.js"), loadModule(packageRoot, "lifi/operation-repository.js"),
+    loadModule(packageRoot, "lifi/economics.js"),
     loadModule(packageRoot, "gasless/registry.js"),
   ]);
   return { ...core, ...state, ...canonical, ...constants, ...profiles, ...policy, ...profileRepository,
     ...providerRegistry, ...awal, ...providerX402Stage, ...providerX402State, ...providerX402Repository, ...chainAccount,
-    ...chainPolicy, ...railModel, ...railRepository, ...bridgeTransitions, ...bridgeRepository, ...gaslessRegistry };
+    ...chainPolicy, ...railModel, ...railRepository, ...bridgeTransitions, ...bridgeRepository, ...bridgeEconomics,
+    ...gaslessRegistry };
 }
 
 async function buildLocalDirect(s, m) {
@@ -195,8 +197,9 @@ async function buildBridge(s, m) {
   const template = JSON.parse(templateBytes.toString("utf8"));
   const profileHash = state.profileHash(s.profile), idempotencyKey = "retained-lifi-bridge-0001";
   const operationId = state.operationId(s.profile, idempotencyKey);
-  const intent = { ...template.intent, profile: s.profile,
+  const rebound = { ...template.intent, profile: s.profile, allowlist: null,
     owner: { ...template.intent.owner, profile: s.profile, profileHash } };
+  const intent = { ...rebound, policyHash: m.bridgeApprovalPolicyHash(rebound.materialization) };
   const requestHash = m.hashObject({ profile: s.profile, quote: intent.quoteHash, route: intent.materialization.routeId });
   const record = m.newBridgeOperation({ profileHash, operationId, idempotencyHash: state.idempotencyHash(idempotencyKey),
     requestHash, intent, effects: template.effects });

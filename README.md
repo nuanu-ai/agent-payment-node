@@ -5,10 +5,15 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.24 is the ordinary release build for Apple Silicon macOS. It combines
-the admitted sprint commands with APN 0.5.10 EVM fee-envelope corrections.
+APN 0.5.25 is the ordinary release build for Apple Silicon macOS. It carries
+the merged bridge hardening from PRs #200-#219: decoder-safe RPC caching;
+fail-closed, read-only public-RPC routing with bounded archive batches and
+provider-family pacing; restart-safe observation; and redacted observation
+telemetry and proof diagnostics. Base USDC to Arbitrum USDC now has live
+acceptance. Ethereum to Base and Arbitrum to Ethereum canonical USDC,
+Arbitrum to Ethereum WBTC, and named receiving-human acceptance remain open.
 GitHub publication and the Homebrew Formula remain separate release gates; use
-only an exact verified 0.5.24 archive or installation for the new commands.
+only an exact verified 0.5.25 archive or installation for the new behavior.
 
 The current platform boundary and the required work for future Linux or
 Windows support are recorded in the [platform support matrix](docs/platform-support.md).
@@ -39,8 +44,10 @@ for commands, total TRX caps and the two open mainnet acceptance rows.
 LI.FI route selection and local-wallet execution now cover canonical USDC
 between Ethereum, Base and Arbitrum through Across V4 and Stargate V2 Taxi.
 The bridge flow freezes both source effects, requires foreground approval and
-correlates safe delivery across both chains. See [LI.FI bridges](docs/lifi.md)
-for fee controls, recovery and the three open mainnet acceptance rows.
+correlates safe delivery across both chains. Public RPC reads are method
+allowlisted, bounded, provider-paced and split across explicit primary,
+receipt and archive roles. See [LI.FI bridges](docs/lifi.md) for fee controls,
+recovery, the accepted Base-to-Arbitrum row and the remaining open rows.
 
 The local wallet also has a USDC fee-transfer path on Ethereum, Base, Arbitrum,
 Optimism, Polygon PoS and Unichain. Avalanche C-Chain remains required but its
@@ -49,7 +56,7 @@ the total USDC budget, so the sender can have zero native gas balance. The
 recipient amount and maximum USDC fee are frozen before foreground approval;
 unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
 for commands, persistent account permissions and recovery. This remains
-an APN 0.5.24 capability with separate per-network mainnet acceptance.
+an APN 0.5.25 capability with separate per-network mainnet acceptance.
 
 The same gasless commands also support an existing MetaMask Agent server wallet
 on Ethereum, Optimism, Polygon PoS, Monad, Sei, Base, Arbitrum and Linea. The
@@ -70,7 +77,7 @@ and the [verified archive recovery preflight](docs/gasless.md#existing-state-and
 ## Install
 
 Homebrew installation is a separate publication gate. Verify that `apn version`
-reports `0.5.24` before using the commands described for this release.
+reports `0.5.25` before using the commands described for this release.
 
 ```sh
 brew install nuanu-ai/tap/apn

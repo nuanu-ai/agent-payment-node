@@ -16,7 +16,7 @@ const moduleAt = (root, path) => import(pathToFileURL(join(root, "dist", path)).
 const LEGACY_SHA = "1883f117a84552e720319d2770ea9439fad30d8eb6f1bd3212f344854b0ce267";
 const LEGACY_COMMIT = "cf415148c905f8f993a0c53217fc92e40f9fc4f9";
 let installed;
-before(async () => { installed = await install(); }, { timeout: 600000 });
+before(async () => { installed = await install(); }, { timeout: 960000 });
 
 async function unpackArchive(archive, destination, archiveSha256) {
   const bytes = await readFile(archive); assert.equal(digest(bytes), archiveSha256);
@@ -62,8 +62,9 @@ async function install() {
   const suppliedArchive = Boolean(archive);
   if (!archive) {
     // Honor the package's real prepack gates. A previously verified archive may be supplied explicitly.
+    // The complete prepack suite has grown beyond the former nine-minute bound; retain the real command and proof assertions.
     const packEnv = { ...process.env }; delete packEnv.NODE_TEST_CONTEXT;
-    const result = await run("npm", ["pack", "--json", "--pack-destination", root], { cwd: source, env: packEnv, timeoutMs: 540000 });
+    const result = await run("npm", ["pack", "--json", "--pack-destination", root], { cwd: source, env: packEnv, timeoutMs: 900000 });
     const output = result.stdout + result.stderr;
     await writeFile(join(root, "pack.log"), output); assert.equal(result.code, 0);
     assert.doesNotMatch(output, /skipping running files|called recursively/u);
@@ -249,14 +250,14 @@ async function gate(s, manifest = installed.manifest, manifestPath = installed.m
     "--manifest-sha256", manifestSha256, "--package-root", manifest.packageRoot]);
 }
 
-test("installed CLI and 48-tool MCP discover Base Smart Account gasless without state or external effects", async () => {
+test("installed CLI and 85-tool MCP discover Base Smart Account gasless without state or external effects", async () => {
   const s = await scenario(); await chmod(s.state.root, 0o777);
   const capabilities = await s.cli(["gasless", "capabilities", "--profile", s.profile]); assert.equal(capabilities.ok, true);
   const row = capabilities.data.profiles.find(p => p.provider === "metamask-smart-account");
   assert.equal(row.adapter, "implemented"); assert.equal(row.mainnet_acceptance, "open");
   assert.equal(capabilities.data.provider_networks["metamask-smart-account"][0].executable_adapter, true);
   const connection = await mcp(s);
-  try { const tools = await connection.client.listTools(); assert.equal(tools.tools.length, 48);
+  try { const tools = await connection.client.listTools(); assert.equal(tools.tools.length, 85);
     assert.deepEqual((await connection.call("apn_gasless_capabilities", { profile: s.profile })).data, capabilities.data);
   } finally { await connection.close(); }
   assert.deepEqual(await s.trace(), []); assert.equal((await stat(s.state.root)).mode & 0o777, 0o777);
