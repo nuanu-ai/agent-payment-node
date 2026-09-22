@@ -7,6 +7,9 @@ export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./stat
 export declare class StateStore extends SecureStateStore {
     loadRpcProviderPacing(familyHash: string): Promise<number | null>;
     writeRpcProviderPacing(familyHash: string, lastStartMs: number): Promise<void>;
+    loadRpcProviderCooldown(familyHash: string): Promise<number | null>;
+    writeRpcProviderCooldown(familyHash: string, cooldownUntilMs: number): Promise<void>;
+    private rpcProviderPacingRecord;
     loadWallet(profileHash: string): Promise<WalletRecord | null>;
     loadWalletArtifacts(profile: string, profileHash: string): Promise<{
         readonly stored: WalletRecord | null;
