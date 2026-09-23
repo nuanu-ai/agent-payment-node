@@ -3,7 +3,7 @@ import test from "node:test";
 import { getAddress, keccak256, pad, type Hex } from "viem";
 import type { GaslessTransport } from "../../src/gasless/https.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
-import { usdtChainPort, usdtSponsorPort } from "../../src/gasless-usdt/rpc.js";
+import { usdtChainPort, usdtSafeSnapshot, usdtSponsorPort } from "../../src/gasless-usdt/rpc.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RPC_URL = "https://ethereum.example-rpc.test/";
@@ -66,6 +66,22 @@ test("pins are code hashes read from the owner's RPC; drift, a wrong chain or a 
   assert.equal(delegated.delegation, "expected");
   await assert.rejects(usdtChainPort(transport(replies({ [`code:${OWNER}`]: `0xef0100${"12".repeat(20)}` }), []), RPC_URL).account(OWNER),
     /gasless_usdt_foreign_delegation/u);
+});
+
+test("safe snapshot anchors contract reads to the canonical safe block hash", async () => {
+  const blockHash = `0x${"ab".repeat(32)}`;
+  const params: unknown[][] = [];
+  const peer: GaslessTransport = { request: async (_endpoint, _method, body) => {
+    const request = JSON.parse(body!) as { id: string; method: string; params: unknown[] };
+    params.push(request.params);
+    const result = request.method === "eth_chainId" ? "0x1" : request.method === "eth_getBlockByNumber"
+      ? { number: "0x100", hash: blockHash } : "0x01";
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
+  } };
+  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), /gasless_usdt_code_drift/u);
+  assert.deepEqual(params[1], ["safe", false]);
+  assert.deepEqual(params[2], [USDT_GASLESS.token, { blockHash, requireCanonical: true }]);
+  assert.equal(params.length, 3);
 });
 
 test("a receipt counts only at or below the safe head and on the canonical block", async () => {

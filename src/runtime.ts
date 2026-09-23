@@ -24,6 +24,7 @@ import type { OneClickSourceService } from "./lifi/near-oneclick-source-service.
 import type { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
+import type { GaslessUsdtCommandPrepare } from "./gasless-usdt/command-prepare.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
@@ -56,6 +57,7 @@ export interface CoreDependencies {
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
   readonly gasless?: GaslessDependencies;
   readonly gaslessUsdt?: GaslessUsdtOperationService;
+  readonly gaslessUsdtPrepare?: GaslessUsdtCommandPrepare;
   readonly bridge?: BridgeDependencies;
   readonly circleApproval?: CircleV2ApprovalExecutor;
   readonly circleSource?: CircleV2SourceService;
@@ -104,6 +106,7 @@ export class RuntimeContext {
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
   readonly gasless?: GaslessDependencies;
   readonly gaslessUsdt?: GaslessUsdtOperationService;
+  readonly gaslessUsdtPrepare?: GaslessUsdtCommandPrepare;
   readonly bridge?: BridgeDependencies;
   readonly circleApproval?: CircleV2ApprovalExecutor;
   readonly circleSource?: CircleV2SourceService;
@@ -153,6 +156,7 @@ export class RuntimeContext {
     if (dependencies.metaMaskGasless !== undefined) this.metaMaskGasless = dependencies.metaMaskGasless;
     if (dependencies.gasless !== undefined) this.gasless = dependencies.gasless;
     if (dependencies.gaslessUsdt !== undefined) this.gaslessUsdt = dependencies.gaslessUsdt;
+    if (dependencies.gaslessUsdtPrepare !== undefined) this.gaslessUsdtPrepare = dependencies.gaslessUsdtPrepare;
     if (dependencies.bridge !== undefined) this.bridge = dependencies.bridge;
     if (dependencies.circleApproval !== undefined) this.circleApproval = dependencies.circleApproval;
     if (dependencies.circleSource !== undefined) this.circleSource = dependencies.circleSource;
