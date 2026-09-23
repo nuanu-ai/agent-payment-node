@@ -55,6 +55,64 @@ function challenge(value: unknown = X402_PAYMENT_REQUIRED): TestHttp {
   return new TestHttp(challengeObservation({ header: canonicalPaymentRequiredHeader(value) }));
 }
 
+const SPONSOR_DECLARATION = {
+  info: { description: "EIP-2612 gas sponsorship", version: "1" },
+  schema: { $schema: "https://json-schema.org/draft/2020-12/schema", type: "object",
+    properties: Object.fromEntries(["from", "asset", "spender", "amount", "nonce", "deadline", "signature", "version"]
+      .map((field) => [field, { type: "string", pattern: ".+" }])),
+    required: ["from", "asset", "spender", "amount", "nonce", "deadline", "signature", "version"] },
+};
+
+test("service prepare treats payment identifier independently of EIP-2612 sponsorship", async (t) => {
+  const identifier = paymentIdentifierDeclaration(false);
+  for (const [name, extensions, hasIdentifier] of [
+    ["no extension", undefined, false],
+    ["sponsor only", { eip2612GasSponsoring: SPONSOR_DECLARATION }, false],
+    ["identifier only", { "payment-identifier": identifier }, true],
+    ["sponsor and identifier", { eip2612GasSponsoring: SPONSOR_DECLARATION, "payment-identifier": identifier }, true],
+  ] as const) {
+    await t.test(name, async (nested) => {
+      const temporary = await temporaryState();
+      nested.after(temporary.cleanup);
+      const native = new TestNative();
+      await ensureWallet(makeCore({ root: temporary.root, native }));
+      const wire = { ...X402_PAYMENT_REQUIRED, ...(extensions === undefined ? {} : { extensions }) };
+      const http = challenge(wire);
+      const rpc = new TestRpc();
+      const result = await makeCore({ root: temporary.root, native, http, rpc }).execute({
+        ...PREPARE_REQUEST, idempotencyKey: `x402-extensions-${name.replaceAll(" ", "-")}`,
+      });
+      assert.equal(result.ok, true, `${name}: ${JSON.stringify(result.error)}`);
+      const operation = operationRecord(result);
+      const state = await readOperation(temporary.root, "default", String(operation.operationId));
+      assert.equal(state.paymentIdentifier?.value, hasIdentifier ? `apn_${operation.operationId}` : undefined);
+      assert.equal(http.calls.length, 1);
+      assert.equal(rpc.x402PrepareCalls, 1);
+    });
+  }
+
+  for (const [name, extensions] of [
+    ["malformed sponsor", { eip2612GasSponsoring: true }],
+    ["unsupported sponsor version", { eip2612GasSponsoring: { ...SPONSOR_DECLARATION,
+      info: { ...SPONSOR_DECLARATION.info, version: "2" } } }],
+    ["malformed identifier", { "payment-identifier": { ...identifier, info: { required: "yes" } } }],
+  ] as const) {
+    await t.test(name, async (nested) => {
+      const temporary = await temporaryState();
+      nested.after(temporary.cleanup);
+      const native = new TestNative();
+      await ensureWallet(makeCore({ root: temporary.root, native }));
+      const rpc = new TestRpc();
+      const result = await makeCore({ root: temporary.root, native, http: challenge({
+        ...X402_PAYMENT_REQUIRED, extensions,
+      }), rpc }).execute({ ...PREPARE_REQUEST, idempotencyKey: `x402-extensions-${name.replaceAll(" ", "-")}` });
+      assert.equal(result.ok, false);
+      assert.equal(result.error?.code, "APN_HTTP_PROTOCOL");
+      assert.equal(rpc.x402PrepareCalls, 0);
+    });
+  }
+});
+
 function sealed<T extends Record<string, unknown>>(domain: string, value: T): T & { readonly integrityHash: string } {
   return { ...value, integrityHash: domainHash(domain, canonicalJson(value)) };
 }
