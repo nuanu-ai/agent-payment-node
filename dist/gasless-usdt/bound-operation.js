@@ -4,7 +4,7 @@ import { getAddress } from "viem";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { ApnError } from "../errors.js";
-import { USDT_GASLESS } from "./model.js";
+import { USDT_EXCHANGE_RATE_MAX, USDT_GASLESS, USDT_POST_OP_GAS_MAX } from "./model.js";
 import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "./paymaster-data.js";
 import { usdtApprovalTransferBatch } from "./policy-prepare.js";
 import { planUsdtTransfer } from "./quote.js";
@@ -77,7 +77,11 @@ export function validateUsdtBoundOperation(value) {
     try {
         if (getAddress(request.sender) !== request.sender || getAddress(request.recipient) !== request.recipient ||
             request.recipient === USDT_GASLESS.token || request.recipient === USDT_GASLESS.paymaster ||
-            quote.paymaster !== USDT_GASLESS.paymaster || quote.token !== USDT_GASLESS.token)
+            quote.paymaster !== USDT_GASLESS.paymaster || quote.token !== USDT_GASLESS.token ||
+            quote.postOpGas === 0n || quote.postOpGas > USDT_POST_OP_GAS_MAX || quote.exchangeRate === 0n ||
+            quote.exchangeRate > USDT_EXCHANGE_RATE_MAX || quote.exchangeRateNativeToUsd === 0n ||
+            quote.exchangeRateNativeToUsd > USDT_EXCHANGE_RATE_MAX || price.maxFeePerGas === 0n ||
+            price.maxPriorityFeePerGas > price.maxFeePerGas)
             fail("binding_route");
     }
     catch {
