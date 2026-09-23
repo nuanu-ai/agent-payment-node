@@ -161,7 +161,7 @@ function validateChallenge(challenge: X402PaymentRequired): boolean {
 /** Adapter port for serial integration; implementations must return authenticated, fresh reads. */
 export interface Permit2PrepareReadPort {
   read(input: { readonly payer: Address; readonly chainId: 43114; readonly token: Address;
-    readonly challengeHash: string; readonly offerHash: string; readonly amountAtomic: string;
+    readonly challengeHash: string; readonly offerHash: string; readonly amountAtomic: string; readonly nowSeconds: number;
     readonly nonceBitmapWordIndex: string }): Promise<{ readonly owner: Permit2OwnerAdmission; readonly evidence: Permit2PrepareEvidence }>;
 }
 
@@ -177,7 +177,7 @@ export async function preparePermit2WithPort(
   }
   const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
   const read = await port.read({ payer: input.payer, chainId: 43114, token: asset.token, challengeHash,
-    offerHash: selection.offerHash, amountAtomic: selection.amountAtomic,
+    offerHash: selection.offerHash, amountAtomic: selection.amountAtomic, nowSeconds: input.nowSeconds,
     nonceBitmapWordIndex: (nonce >> 8n).toString() });
   return preparePermit2Payment({ ...input, owner: read.owner, evidence: read.evidence, nonce });
 }

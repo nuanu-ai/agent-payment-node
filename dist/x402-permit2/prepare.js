@@ -100,7 +100,7 @@ export async function preparePermit2WithPort(port, input) {
     }
     const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
     const read = await port.read({ payer: input.payer, chainId: 43114, token: asset.token, challengeHash,
-        offerHash: selection.offerHash, amountAtomic: selection.amountAtomic,
+        offerHash: selection.offerHash, amountAtomic: selection.amountAtomic, nowSeconds: input.nowSeconds,
         nonceBitmapWordIndex: (nonce >> 8n).toString() });
     return preparePermit2Payment({ ...input, owner: read.owner, evidence: read.evidence, nonce });
 }
