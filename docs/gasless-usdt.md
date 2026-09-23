@@ -18,3 +18,9 @@ APN_ETHEREUM_RPC_URL=https://example.invalid node scripts/gasless-usdt-rehearsal
 ```
 
 This stops before any signature and does not read APN state.
+
+## Policy bound local prepare core
+
+`preparePolicyBoundUsdt` is a domain-only, unsigned preparation API. Its adapter must supply the authenticated active owner policy, combined daily USDT usage, a trusted clock, and account state at one canonical Ethereum safe block. The sponsor is the fixed keyless Pimlico endpoint. The API refuses a missing, revoked, expired, mismatched or unadmitted policy; the owner account, Ethereum USDT identity, gasless mechanism pin and positive per-transfer and daily caps must match exactly. It checks the quote and signed paymaster payload against the fee budget, repeats the quote and policy reads after sponsor data, and returns a binding hash covering the policy revision, safe block, account nonce, fee plan, paymaster data and unsigned operation.
+
+The frozen account batch calls USDT `approve(paymaster, 0)`, then `approve(paymaster, F)`, then `transfer(recipient, N)`, in that order. The paymaster request sees this exact calldata. No signer, dispatch, journal write or usage reservation is exposed by this core API. A future runtime adapter must authenticate the safe block and policy, persist the complete prepared binding, reserve shared usage atomically with its operation lifecycle, and recheck the active policy and chain state before any signature or effect. The existing dormant operation journal does not yet store the complete binding. This package has no CLI or MCP execution path and no fresh mainnet transfer acceptance.
