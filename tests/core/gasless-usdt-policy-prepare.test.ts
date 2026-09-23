@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { lstat, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { decodeFunctionData, getAddress, parseAbi } from "viem";
@@ -13,7 +13,7 @@ import type { UsdtUserOperation } from "../../src/gasless-usdt/userop.js";
 import type { Hex } from "../../src/model.js";
 import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
 import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
-import { USDT_BOUND_OPERATION_SCHEMA, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
+import { USDT_BOUND_OPERATION_SCHEMA, UsdtBoundOperationRepository, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
 import { temporaryState } from "./helpers.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
@@ -243,4 +243,35 @@ test("independent services serialize competing same-key bindings through one ato
   assert.equal((await readdir(profile)).filter(name => name.endsWith(".json")).length, 1);
   await assert.rejects(() => new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root))
     .forProfile("b".repeat(64)).prepareBound(firstBinding, "race-001", NOW), { code: "APN_IDEMPOTENCY_CONFLICT" });
+});
+
+test("first-use directory entries are parent-synced and unsupported fsync refuses before publication", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), binding = await preparePolicyBoundUsdt(f.ports, request());
+  class TrackingRepository extends UsdtBoundOperationRepository {
+    readonly synced: string[] = [];
+    failAt: string | undefined;
+    protected override async fsyncDirectory(path: string): Promise<void> {
+      this.synced.push(path);
+      if (path === this.failAt) throw Object.assign(new Error("directory fsync unsupported"), { code: "EINVAL" });
+      await super.fsyncDirectory(path);
+    }
+  }
+  const root = join(temporary.base, "fresh-root"), repository = new TrackingRepository(root);
+  await repository.create("a".repeat(64), binding, "first-use-001", NOW);
+  const rail = join(root, "gasless-usdt-bound-operations");
+  assert.deepEqual(repository.synced.slice(0, 4), [temporary.base, root, rail, rail]);
+  for (const directory of [root, rail, join(rail, "a".repeat(64)), join(rail, "claims")]) {
+    assert.equal((await lstat(directory)).mode & 0o777, 0o700);
+  }
+  const refusedRoot = join(temporary.base, "sync-refused"), refused = new TrackingRepository(refusedRoot);
+  refused.failAt = temporary.base;
+  await assert.rejects(() => refused.create("a".repeat(64), binding, "sync-refused-001", NOW),
+    { code: "APN_STATE_SECURITY" });
+  await assert.rejects(() => lstat(join(refusedRoot, "gasless-usdt-bound-operations")), { code: "ENOENT" });
+  refused.failAt = undefined;
+  await refused.create("a".repeat(64), binding, "sync-refused-001", NOW);
+  assert.equal(refused.synced.filter(path => path === temporary.base).length, 2);
+  await assert.rejects(() => new UsdtBoundOperationRepository(join(temporary.base, "missing-parent", "state"))
+    .create("a".repeat(64), binding, "missing-parent-001", NOW), { code: "APN_STATE_SECURITY" });
 });

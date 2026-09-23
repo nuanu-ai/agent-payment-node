@@ -1,6 +1,6 @@
 import { link, lstat, mkdir, open, readFile, readdir, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { isAbsolute, join, normalize, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { getAddress } from "viem";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
@@ -150,16 +150,30 @@ export class UsdtBoundOperationRepository {
     return join(this.claimsPath(), `${hashObject({ schemaVersion: USDT_BOUND_OPERATION_SCHEMA, idempotencyKey })}.json`);
   }
   private async dir(path: string, create: boolean): Promise<boolean> {
-    if (create) await mkdir(path, { recursive: true, mode: DIR_MODE });
+    if (create) {
+      // The state root's parent must already exist. Create one child at a time so each
+      // new directory entry can be durably synced in its parent before publication.
+      try { await mkdir(path, { mode: DIR_MODE }); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") fail("bound_directory_parent_missing", "APN_STATE_SECURITY");
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
     let stat;
     try { stat = await lstat(path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     }
     if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o777) !== DIR_MODE) fail("bound_directory", "APN_STATE_SECURITY");
+    // Repeat on retries: a previous process may have stopped after mkdir but before fsync.
+    if (create) await this.syncDirectory(dirname(path));
     return true;
   }
   private async syncDirectory(path: string): Promise<void> {
+    try { await this.fsyncDirectory(path); }
+    catch { fail("bound_directory_sync_unavailable", "APN_STATE_SECURITY"); }
+  }
+  protected async fsyncDirectory(path: string): Promise<void> {
     const handle = await open(path, "r");
     try { await handle.sync(); } finally { await handle.close(); }
   }
