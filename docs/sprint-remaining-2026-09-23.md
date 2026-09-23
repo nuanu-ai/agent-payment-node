@@ -8,7 +8,7 @@ Baseline: `origin/main` `59a6c1c4ef38e5c9039d125bc53543f5302d461d`, APN `v0.5.26
 
 | ID | Sprint 2 row; state | Remaining objective and acceptance evidence, or closure evidence | Dependency / blocker |
 | --- | --- | --- | --- |
-| C1-01 | Local gasless Polygon; **done** | Historical 0.2 USDC paid and recipient/fee proof on 18 Sep; preserve [gasless contract](gasless.md). A new-version run is a separate regression scope. | None for historical closure. |
+| C1-01 | Local gasless Polygon; **done** | Historical 0.2 USDC paid and recipient/fee proof on 16 Sep; preserve [gasless contract](gasless.md). A new-version run is a separate regression scope. | None for historical closure. |
 | C1-02 | Local gasless Ethereum; **todo** | One bounded zero-native-gas Ethereum transfer; frozen debit/fee, recipient settlement, receipt and observation-only recovery. Historical no-money passed. | Current owner cap, funded USDC, working admitted sponsor/RPC; [gasless](gasless.md). |
 | C1-03 | Avalanche PayAI alternative; **done** | Historical 0.2 USDC PayAI paid acceptance on 15 Sep; retain exact facilitator and chain evidence. | None for historical closure; EIP-7702 Circle refusal is a different route. |
 | C1-04 | MetaMask Agent; **blocked** | Establish CLI session, run no-money prepare/approval refusal and recovery, then eight separate accepted USDC receipts with sender debit, recipient delivery and no resend (Ethereum, Optimism, Polygon, Monad, Sei, Base, Arbitrum, Linea). | Owner provider login and account permissions; [gasless](gasless.md#metamask-agent-server-wallet). Current live count 0/8. |
