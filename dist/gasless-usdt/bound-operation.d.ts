@@ -36,6 +36,7 @@ export declare class UsdtBoundOperationRepository {
     private claimPath;
     private dir;
     private syncDirectory;
+    protected fsyncDirectory(path: string): Promise<void>;
     private readRecord;
     private readClaim;
     private writeCompleteTemp;
