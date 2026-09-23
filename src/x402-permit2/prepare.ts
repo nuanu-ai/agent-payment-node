@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { canonicalJson, domainHash } from "../canonical.js";
+import { canonicalJson, domainHash, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import type { Address, Hex } from "../model.js";
+import type { X402PaymentRequired } from "../x402-codec.js";
 import { planPermit2Authorization, type Permit2SigningPlan } from "./authorization.js";
+import { isEip2612GasSponsoringDeclaration } from "./extension.js";
 import { selectPermit2Offer, type Permit2Requirement } from "./offer.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "./registry.js";
 
@@ -53,12 +55,7 @@ export interface Permit2PrepareEvidence {
 export interface Permit2PrepareInput {
   readonly payer: Address;
   readonly localWallet: true;
-  readonly challenge: {
-    readonly x402Version: 2;
-    readonly resource: unknown;
-    readonly accepts: readonly unknown[];
-    readonly eip2612GasSponsoring: boolean;
-  };
+  readonly challenge: X402PaymentRequired;
   /** Terms the caller displayed/accepted; a changed merchant 402 cannot be silently substituted. */
   readonly expected: { readonly index: number; readonly requirement: Permit2Requirement; readonly challengeHash: string };
   readonly owner: Permit2OwnerAdmission;
@@ -85,8 +82,7 @@ export interface Permit2PreparedMaterial {
 /** Pure prepare domain. The caller supplies trusted policy/RPC/facilitator reads; no effect port is accepted. */
 export function preparePermit2Payment(input: Permit2PrepareInput): Permit2PreparedMaterial {
   if (input.localWallet !== true) blocked("A local EVM wallet is required.", "x402_permit2_local_wallet_required");
-  if (input.challenge?.x402Version !== 2 || !Array.isArray(input.challenge.accepts) ||
-      typeof input.challenge.eip2612GasSponsoring !== "boolean") invalid("The merchant challenge is invalid.");
+  const sellerSponsorsEip2612 = validateChallenge(input.challenge);
   const challengeHash = hashChallenge(input.challenge);
   const selection = selectPermit2Offer(input.challenge.accepts, input.payer);
   if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
@@ -130,14 +126,14 @@ export function preparePermit2Payment(input: Permit2PrepareInput): Permit2Prepar
   if (((BigInt(evidence.nonceBitmapWord) >> (input.nonce & 0xffn)) & 1n) !== 0n) {
     blocked("The Permit2 nonce is already consumed.", "x402_permit2_nonce_consumed");
   }
-  if (allowance < amount && (!input.challenge.eip2612GasSponsoring || !facilitator.eip2612GasSponsoring)) {
+  if (allowance < amount && (!sellerSponsorsEip2612 || !facilitator.eip2612GasSponsoring)) {
     blocked("Allowance is insufficient and exact EIP-2612 sponsorship is unavailable.", "x402_permit2_allowance_required");
   }
   const eip2612Nonce = evidence.eip2612Nonce === null ? null : quantity(evidence.eip2612Nonce);
   if (allowance < amount && eip2612Nonce === null) blocked("The token permit nonce is missing.", "x402_permit2_eip2612_unavailable");
   const plan = planPermit2Authorization(selection, { payer: input.payer, nowSeconds: input.nowSeconds,
     nonce: input.nonce, permit2AllowanceAtomic: allowance.toString(), eip2612Nonce,
-    sellerSponsorsEip2612: input.challenge.eip2612GasSponsoring && facilitator.eip2612GasSponsoring });
+    sellerSponsorsEip2612: sellerSponsorsEip2612 && facilitator.eip2612GasSponsoring });
   const body = { challengeHash, offerHash: selection.offerHash, policyDigest: owner.policyDigest, payer: input.payer,
     chain: "eip155:43114" as const, token: asset.token, payTo: selection.payTo, amountAtomic: selection.amountAtomic,
     expiresAtUnix: plan.authorization.deadline, planHash: plan.planHash };
@@ -145,7 +141,21 @@ export function preparePermit2Payment(input: Permit2PrepareInput): Permit2Prepar
 }
 
 export function hashChallenge(challenge: Permit2PrepareInput["challenge"]): string {
+  validateChallenge(challenge);
   return domainHash("apn.x402-permit2.challenge.v1", canonicalJson(challenge));
+}
+
+function validateChallenge(challenge: X402PaymentRequired): boolean {
+  if (!isPlainRecord(challenge) || challenge.x402Version !== 2 || !isPlainRecord(challenge.resource) ||
+      typeof challenge.resource.url !== "string" || !Array.isArray(challenge.accepts) || challenge.accepts.length === 0 ||
+      Object.hasOwn(challenge, "eip2612GasSponsoring")) invalid("The merchant challenge is invalid.");
+  if (challenge.extensions === undefined) return false;
+  if (!isPlainRecord(challenge.extensions)) invalid("The merchant challenge extensions are invalid.");
+  if (!Object.hasOwn(challenge.extensions, "eip2612GasSponsoring")) return false;
+  if (!isEip2612GasSponsoringDeclaration(challenge.extensions.eip2612GasSponsoring)) {
+    invalid("The merchant EIP-2612 sponsorship declaration is invalid or unsupported.");
+  }
+  return true;
 }
 
 /** Adapter port for serial integration; implementations must return authenticated, fresh reads. */
@@ -162,7 +172,7 @@ export async function preparePermit2WithPort(
   const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
   const read = await port.read({ payer: input.payer, chainId: 43114, token: asset.token, challengeHash,
     nonceBitmapWordIndex: (nonce >> 8n).toString() });
-  return preparePermit2Payment({ ...input, ...read, nonce });
+  return preparePermit2Payment({ ...input, owner: read.owner, evidence: read.evidence, nonce });
 }
 
 function quantity(value: unknown): bigint {

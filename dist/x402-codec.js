@@ -5,6 +5,7 @@ import { CHAIN_CAIP2 } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { canonicalErc7710Facilitators, isStrictErc7710Payload } from "./x402-erc7710-codec.js";
 import { MAX_DECODED_X402_BYTES, decodeCanonicalBase64, parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
+import { isEip2612GasSponsoringDeclaration } from "./x402-permit2/extension.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const LOWER_ADDRESS = /^0x[0-9a-f]{40}$/u;
 const BYTES32 = /^0x[0-9a-f]{64}$/u;
@@ -317,6 +318,13 @@ function validatePaymentRequiredExtensions(value) {
     if (Object.hasOwn(extensions, "payment-identifier")) {
         validatePaymentIdentifierDeclaration(extensions["payment-identifier"], false);
     }
+    if (Object.hasOwn(extensions, "eip2612GasSponsoring")) {
+        validateEip2612GasSponsoringDeclaration(extensions.eip2612GasSponsoring);
+    }
+}
+function validateEip2612GasSponsoringDeclaration(value) {
+    if (!isEip2612GasSponsoringDeclaration(value))
+        throw protocol("eip2612GasSponsoring declaration is invalid or unsupported.");
 }
 function validatePaymentPayloadExtensions(value) {
     const extensions = record(value, "extensions");
@@ -337,12 +345,11 @@ function validatePaymentIdentifierDeclaration(value, paymentPayload) {
 }
 function paymentRequiredWithSupportedExtensions(value) {
     const extensions = value.extensions;
-    if (extensions === undefined || Object.keys(extensions).every((key) => key === "payment-identifier"))
+    if (extensions === undefined || Object.keys(extensions).every((key) => key === "payment-identifier" || key === "eip2612GasSponsoring"))
         return value;
     const { extensions: _ignored, ...paymentRequired } = value;
-    if (!Object.hasOwn(extensions, "payment-identifier"))
-        return paymentRequired;
-    return { ...paymentRequired, extensions: { "payment-identifier": extensions["payment-identifier"] } };
+    const supported = Object.fromEntries(Object.entries(extensions).filter(([key]) => key === "payment-identifier" || key === "eip2612GasSponsoring"));
+    return Object.keys(supported).length === 0 ? paymentRequired : { ...paymentRequired, extensions: supported };
 }
 function paymentRequiredCoreFields(value) {
     const wire = record(value, "PAYMENT-REQUIRED");
