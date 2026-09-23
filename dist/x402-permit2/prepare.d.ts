@@ -82,6 +82,9 @@ export interface Permit2PrepareReadPort {
         readonly chainId: 43114;
         readonly token: Address;
         readonly challengeHash: string;
+        readonly offerHash: string;
+        readonly amountAtomic: string;
+        readonly nowSeconds: number;
         readonly nonceBitmapWordIndex: string;
     }): Promise<{
         readonly owner: Permit2OwnerAdmission;
