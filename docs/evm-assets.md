@@ -2,7 +2,7 @@
 
 Owner acceptance runbook: [direct EVM live proofs](evm-direct-live-acceptance-2026-09-19.md).
 
-The APN 0.5.25 package supports the local encrypted disposable wallet on the
+The APN 0.5.26 package supports the local encrypted disposable wallet on the
 11 direct EVM networks in the frozen allowlist. `wallet balance-asset` reads
 native coins or any explicitly selected contract on each of those networks;
 direct transfers (`pay transfer prepare-asset`) use the same network registry

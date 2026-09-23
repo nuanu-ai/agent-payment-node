@@ -321,7 +321,9 @@ test("production token RPC phases stay within exact physical budgets through fin
   assert.equal(op.phase, "observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [8, 14]);
   assert.equal(8 + 9 + 14 + 7 + 19 + 8, 65); assert.equal(65 + 2 + 2, 69); assert.equal(op.receipt?.inputDebitAtomic, "1000000");
 
-  const journal = new UniswapTokenJournal(temporary.root), cleanupBase = await journal.save(operation(s.policy.policyDigest, "a", account)), usage = await s.usage.reserve(cleanupBase),
+  const journal = new UniswapTokenJournal(temporary.root), cleanupBase = await journal.save(operation(s.policy.policyDigest, "a", account)),
+    cleanupUsage = new UniswapTokenUsage(new StateStore(temporary.root), { now: () => at }, new AssetUsageLedger(temporary.root)),
+    usage = await cleanupUsage.reserve(cleanupBase),
     cleanupOp = await journal.save(transitionUniswapToken(cleanupBase, "cleanup_required", { usageReservationId: usage.reservationId,
       usageState: usage.state, cleanupReason: "measured_cleanup" }, at));
   p.setAllowance("1000000"); p.clearObservation(); call = p.sessionCall(14); const cleanup = await runtime(call, "cleanup").cleanup(cleanupOp.operationId); telemetry = call.telemetry!()!;

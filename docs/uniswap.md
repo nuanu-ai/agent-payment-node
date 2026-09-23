@@ -134,3 +134,11 @@ the effect-bearing reservations are quote 11, prepare 12, approval 17, and swap
 cleanup reserve no new cumulative effect budget but enforce request-session
 caps of 11 and 17. Durable telemetry stores only opaque provider IDs, finite
 outcome/reason enums, and counters.
+
+## 0.5.26 evidence boundary
+
+The 0.5.26 release carries source and CI proof for this token-input lane and
+retained no-effect live quote/recovery evidence. It does not record live paid
+or effect acceptance. The latest live preflight did not reach `prepare` because
+the available public providers could not satisfy the guarded read requirements;
+no approval, swap or cleanup transaction was submitted.
