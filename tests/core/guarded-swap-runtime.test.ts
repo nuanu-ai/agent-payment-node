@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { lstat } from "node:fs/promises";
 import test from "node:test";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { compileAllowlistPolicyOverlay, type AllowlistPolicyOverlayInput } from "../../src/allowlist-policy-overlay.js";
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
 import { StateStore } from "../../src/state.js";
+import { createMcpServer } from "../../src/mcp-server.js";
 import { createSwapQuote, type SwapQuoteInput } from "../../src/swap/quote.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { compileSwapProtocolRegistry } from "../../src/swap/protocol-registry.js";
@@ -28,11 +31,11 @@ const quoteInput: SwapQuoteInput = { profile: "runtime-swap", account: ACCOUNT, 
   routeHash: H("b"), unsignedTransactionPayloadHash: H("c"), simulation: { requestHash: H("d"), resultHash: H("e"), success: true,
     blockNumber: "100", blockHash: `0x${H("1")}`, headBlockNumber: "101", maxHeadDrift: 2, gasEstimate: "100000" } };
 
-async function fixture(root: string, options: { readonly admitted?: boolean; readonly typingMs?: number } = {}) {
+async function fixture(root: string, options: { readonly admitted?: boolean; readonly typingMs?: number; readonly sourceCap?: string } = {}) {
   const inventory = loadAllowlistInventory(), overlay: AllowlistPolicyOverlayInput = { overlayVersion: "runtime-swap.1", profile: "runtime-swap",
     account: ACCOUNT, datasetVersion: inventory.dataset.version, datasetSha256: inventory.dataset.sha256, inventorySha256: inventory.inventorySha256,
     effectiveAt: "2026-09-18T00:00:00.000Z", expiresAt: "2026-09-18T00:05:00.000Z", admissions: [
-      { chain: "eip155:1", kind: "native", rail: "swap", maximumPerTransferAtomic: "100", dailyLimitAtomic: "100", mechanism: pin },
+      { chain: "eip155:1", kind: "native", rail: "swap", maximumPerTransferAtomic: options.sourceCap ?? "100", dailyLimitAtomic: "100", mechanism: pin },
       { chain: "eip155:1", kind: "token", identifier: USDC, rail: "swap", maximumPerTransferAtomic: "100", dailyLimitAtomic: "100", mechanism: pin },
     ] };
   const policy = compileAllowlistPolicyOverlay(overlay).registry;
@@ -47,7 +50,9 @@ async function fixture(root: string, options: { readonly admitted?: boolean; rea
       return await runtime.service.recordPossibleSend(op, "unknown_finality", input.now); },
     async observe(input) { observes++; return input.operation; },
   };
-  runtime = new GuardedSwapRuntime({ chain: "eip155:1", builder: { async quote() { return material; }, async load(hash) { return hash === quote.quoteHash ? material : null; } },
+  runtime = new GuardedSwapRuntime({ chain: "eip155:1", builder: { async quote() {
+    return { quoteHash: quote.quoteHash, quote, signed: false, broadcast: false };
+  }, async load(hash) { return hash === quote.quoteHash ? material : null; } },
     policy: async (profile) => options.admitted === false || profile !== "runtime-swap" ? null : policy, clock,
     protocolRegistry: protocols, usage, operations, approvals,
     ownerAdmission: { async assert() { admissionCalls++; } },
@@ -106,6 +111,68 @@ test("no active owner admission refuses preparation with a stable classification
   await assert.rejects(f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "runtime-swap-0004" }, NOW),
     (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "swap_owner_admission_required");
   assert.equal(f.counters().sends, 0);
+});
+
+test("an amount one unit above the owner's source cap refuses before consent, reservation, or send", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await fixture(temporary.root, { sourceCap: "99" });
+  await assert.rejects(
+    f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "runtime-cap-0001" }, NOW),
+    { code: "APN_OPERATION_BLOCKED", message: "The transfer exceeds the asset policy per-transfer cap." },
+  );
+  assert.deepEqual(f.counters(), { sends: 0, observes: 0, admissionCalls: 0 });
+  await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
+  const matchingState = await temporaryState(); t.after(matchingState.cleanup);
+  const matching = await fixture(matchingState.root, { sourceCap: "100" });
+  const allowed = await matching.runtime.prepare({ profile: "runtime-swap", quoteHash: matching.quote.quoteHash,
+    idempotencyKey: "runtime-cap-0002" }, NOW);
+  assert.equal(allowed.state, "awaiting_approval");
+  assert.deepEqual(matching.counters(), { sends: 0, observes: 0, admissionCalls: 0 });
+});
+
+test("MCP transports a guarded quote, prepare, and status with no effect, and hands execution to the CLI", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await fixture(temporary.root);
+  const server = createMcpServer({ stateRoot: temporary.root, clock: { now: () => NOW }, uniswapRuntime: f.runtime });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "apn-swap-acceptance", version: "1.0.0" });
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const names = (await client.listTools()).tools.map((tool) => tool.name);
+  for (const action of ["quote", "prepare", "status"]) assert.ok(names.includes(`apn_swap_ethereum_uniswap_${action}`));
+  for (const action of ["quote", "prepare", "status"]) assert.ok(names.includes(`apn_swap_ethereum_uniswap_token_${action}`));
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const result = await client.callTool({ name, arguments: args });
+    const content = result.content[0];
+    assert.equal(content?.type, "text");
+    const envelope = JSON.parse((content as { text: string }).text) as {
+      ok: boolean; data?: { quoteHash?: string; quote?: { quoteHash: string }; signed?: boolean; broadcast?: boolean };
+      operation?: { operationId: string; state: string };
+      error?: { code: string; details?: { cli_handoff?: string } };
+    };
+    return { envelope, isError: result.isError };
+  };
+  const quoted = await call("apn_swap_ethereum_uniswap_quote", { profile: "runtime-swap", account: ACCOUNT,
+    to: RECIPIENT, output_token: USDC, amount: "100", slippage_bps: "100", owner_slippage_cap_bps: "100",
+    deadline: "1790000300", max_gas_limit: "100000", max_fee_per_gas: "2", max_priority_fee_per_gas: "1" });
+  assert.equal(quoted.envelope.ok, true); assert.equal(quoted.isError, false);
+  assert.equal(quoted.envelope.data?.quoteHash, f.quote.quoteHash);
+  assert.equal(quoted.envelope.data?.quote?.quoteHash, f.quote.quoteHash);
+  assert.equal(quoted.envelope.data?.signed, false); assert.equal(quoted.envelope.data?.broadcast, false);
+  const prepared = await call("apn_swap_ethereum_uniswap_prepare", { profile: "runtime-swap", quote: f.quote.quoteHash,
+    idempotency_key: "runtime-mcp-0001" });
+  assert.equal(prepared.envelope.ok, true); assert.equal(prepared.isError, false);
+  assert.equal(prepared.envelope.operation?.state, "awaiting_approval");
+  const operationId = prepared.envelope.operation!.operationId;
+  const status = await call("apn_swap_ethereum_uniswap_status", { operation: operationId });
+  assert.equal(status.envelope.ok, true); assert.equal(status.isError, false);
+  assert.equal(status.envelope.operation?.operationId, operationId);
+  const execution = await call("apn_swap_ethereum_uniswap_execute", { operation: operationId });
+  assert.equal(execution.envelope.ok, false); assert.equal(execution.isError, true);
+  assert.equal(execution.envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
+  assert.equal(execution.envelope.error?.details?.cli_handoff, `apn swap ethereum uniswap execute --operation ${operationId}`);
+  assert.deepEqual(f.counters(), { sends: 0, observes: 0, admissionCalls: 0 });
 });
 
 test("an approved reservation that outlives its deadline or loses its consent is released unsigned", async (t) => {
