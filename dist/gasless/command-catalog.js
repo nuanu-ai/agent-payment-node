@@ -30,7 +30,7 @@ export const GASLESS_COMMANDS = [
             option("--amount", "string", ["positive_USDT_at_most_six_decimal_places"]),
             option("--max-fee", "string", ["nonnegative_USDT_at_most_six_decimal_places"]),
             option("--min-received", "string", ["positive_USDT_at_most_six_decimal_places"]),
-            option("--idempotency-key", "idempotency_key", ["global_across_all_money_families"])],
+            option("--idempotency-key", "idempotency_key", ["gasless_usdt_bound_journal_only_across_profiles"])],
         effect: { class: "payment_prepare", summary: "Reads the active owner policy, safe Ethereum account and fixed public sponsor, then saves only unsigned material." },
         approval: readApproval, output, states: { terminal: [], non_terminal: ["prepared"] }, recovery: [],
         examples: ["apn gasless usdt prepare --profile default --to <recipient> --amount 1 --max-fee 0.5 --min-received 0.5 --idempotency-key <key>"] },

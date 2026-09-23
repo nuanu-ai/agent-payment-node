@@ -127,7 +127,7 @@ export function validateUsdtBoundOperation(value: unknown): UsdtBoundOperation {
   return freeze(value as unknown as UsdtBoundOperation);
 }
 
-/** Separate v2 journal keeps old dormant v1 records readable while requiring the complete new binding. */
+/** Separate bound journal: one key claims across its profiles, independently of every other payment family's claims. */
 export class UsdtBoundOperationRepository {
   readonly directory: string;
   constructor(readonly root: string) {

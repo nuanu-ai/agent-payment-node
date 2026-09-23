@@ -14,13 +14,15 @@ import type { Hex } from "../../src/model.js";
 import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
 import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
 import { USDT_BOUND_OPERATION_SCHEMA, UsdtBoundOperationRepository, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
-import { temporaryState } from "./helpers.js";
+import { TestNative, TestRpc, ensureWallet, makeCore, temporaryState } from "./helpers.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { runCli } from "../../src/cli.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { createApnCore } from "../../src/runtime-factory.js";
+import { COMMANDS } from "../../src/command-catalog.js";
+import { MCP_TOOLS } from "../../src/mcp-projection.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RECIPIENT = getAddress("0x000000000000000000000000000000000000dEaD");
@@ -110,6 +112,43 @@ test("command refuses inactive or changed policy before RPC or journal publicati
     assert.equal(outcome.ok, false);
     assert.equal(f.offered.length, 0);
   }
+});
+
+test("bound USDT key replays exact material and conflicts on a changed intent within its journal", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), options = { stateRoot: temporary.root, clock: { now: () => NOW },
+    gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } };
+  const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "family-local-001"];
+  const first = await runCli(argv, {}, options), replay = await runCli(argv, {}, options);
+  assert.equal(first.ok, true); assert.deepEqual(replay.operation, first.operation);
+  const changed = [...argv]; changed[changed.indexOf("--to") + 1] = getAddress("0x0000000000000000000000000000000000001111");
+  const conflict = await runCli(changed, {}, options);
+  assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  const definition = COMMANDS.find(command => command.path.join(" ") === "gasless usdt prepare")!;
+  assert.deepEqual(definition.options.find(option => option.name === "--idempotency-key")?.constraints,
+    ["gasless_usdt_bound_journal_only_across_profiles"]);
+  const mcpKey = MCP_TOOLS.find(tool => tool.name === "apn_gasless_usdt_prepare")!.inputSchema.properties.idempotency_key;
+  assert.match(JSON.stringify(mcpKey), /gasless_usdt_bound_journal_only_across_profiles/u);
+});
+
+test("the same key can independently prepare an older direct rail and the bound USDT journal", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const key = "cross-family-local-001";
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  const directRpc = new TestRpc();
+  const direct = await makeCore({ root: temporary.root, rpc: directRpc }).execute({ command: "transfer.prepare",
+    profile: "default", recipient: RECIPIENT, amount: "1", idempotencyKey: key });
+  assert.equal(direct.ok, true, JSON.stringify(direct.error));
+  const f = fixture(), usdt = await runCli(["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", key], {},
+  { stateRoot: temporary.root, clock: { now: () => NOW },
+    gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } });
+  assert.equal(usdt.ok, true, JSON.stringify(usdt.error));
+  assert.notEqual((direct.operation as { operationId: string }).operationId,
+    (usdt.operation as { operationId: string }).operationId);
+  assert.equal(directRpc.submissions.length, 0);
+  assert.equal(f.offered.length, 1);
 });
 
 test("policy prepare freezes owner, safe block, exact approval sequence and sponsored unsigned operation", async () => {

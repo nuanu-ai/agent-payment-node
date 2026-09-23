@@ -25,7 +25,7 @@ export type UsdtBoundRecovery = {
 };
 /** Validate both hashes and the relationships that a rehashed but inconsistent record could violate. */
 export declare function validateUsdtBoundOperation(value: unknown): UsdtBoundOperation;
-/** Separate v2 journal keeps old dormant v1 records readable while requiring the complete new binding. */
+/** Separate bound journal: one key claims across its profiles, independently of every other payment family's claims. */
 export declare class UsdtBoundOperationRepository {
     readonly root: string;
     readonly directory: string;
