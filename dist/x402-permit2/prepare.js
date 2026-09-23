@@ -93,8 +93,14 @@ function validateChallenge(challenge) {
 }
 export async function preparePermit2WithPort(port, input) {
     const challengeHash = hashChallenge(input.challenge);
+    const selection = selectPermit2Offer(input.challenge.accepts, input.payer);
+    if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
+        canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement)) {
+        blocked("The merchant challenge or selected terms changed.", "x402_permit2_merchant_terms_mismatch");
+    }
     const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
     const read = await port.read({ payer: input.payer, chainId: 43114, token: asset.token, challengeHash,
+        offerHash: selection.offerHash, amountAtomic: selection.amountAtomic, nowSeconds: input.nowSeconds,
         nonceBitmapWordIndex: (nonce >> 8n).toString() });
     return preparePermit2Payment({ ...input, owner: read.owner, evidence: read.evidence, nonce });
 }

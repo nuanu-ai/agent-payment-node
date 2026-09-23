@@ -161,7 +161,8 @@ function validateChallenge(challenge: X402PaymentRequired): boolean {
 /** Adapter port for serial integration; implementations must return authenticated, fresh reads. */
 export interface Permit2PrepareReadPort {
   read(input: { readonly payer: Address; readonly chainId: 43114; readonly token: Address;
-    readonly challengeHash: string; readonly nonceBitmapWordIndex: string }): Promise<{ readonly owner: Permit2OwnerAdmission; readonly evidence: Permit2PrepareEvidence }>;
+    readonly challengeHash: string; readonly offerHash: string; readonly amountAtomic: string; readonly nowSeconds: number;
+    readonly nonceBitmapWordIndex: string }): Promise<{ readonly owner: Permit2OwnerAdmission; readonly evidence: Permit2PrepareEvidence }>;
 }
 
 export async function preparePermit2WithPort(
@@ -169,8 +170,14 @@ export async function preparePermit2WithPort(
   input: Omit<Permit2PrepareInput, "owner" | "evidence" | "nonce">,
 ): Promise<Permit2PreparedMaterial> {
   const challengeHash = hashChallenge(input.challenge);
+  const selection = selectPermit2Offer(input.challenge.accepts, input.payer);
+  if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
+      canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement)) {
+    blocked("The merchant challenge or selected terms changed.", "x402_permit2_merchant_terms_mismatch");
+  }
   const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
   const read = await port.read({ payer: input.payer, chainId: 43114, token: asset.token, challengeHash,
+    offerHash: selection.offerHash, amountAtomic: selection.amountAtomic, nowSeconds: input.nowSeconds,
     nonceBitmapWordIndex: (nonce >> 8n).toString() });
   return preparePermit2Payment({ ...input, owner: read.owner, evidence: read.evidence, nonce });
 }
