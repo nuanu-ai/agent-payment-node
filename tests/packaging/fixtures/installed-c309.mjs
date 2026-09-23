@@ -26,6 +26,7 @@ const root = await mkdtemp('/private/tmp/apn-c309-synthetic-');
 const installed = new URL('./node_modules/@nuanu-ai/apn/', import.meta.url);
 const binary = new URL('bin/apn.js', installed).pathname;
 const expected = [
+  'apn_swap_ethereum_uniswap_token_inventory',
   'apn_swap_ethereum_uniswap_token_quote',
   'apn_swap_ethereum_uniswap_token_prepare',
   'apn_swap_ethereum_uniswap_token_status',
@@ -117,7 +118,8 @@ try {
   let stdioStderr = ''; stdio.stderr?.on('data', chunk => { stdioStderr += String(chunk); });
   await direct.connect(stdio);
   const tools = (await direct.listTools()).tools.map(x => x.name);
-  assert.ok(expected.every(x => tools.includes(x)));
+  assert.equal(expected.length, 7);
+  assert.deepEqual(tools.filter(x => x.startsWith('apn_swap_ethereum_uniswap_token_')).toSorted(), expected.toSorted());
   const arbitraryOperation = 'a'.repeat(64), binaryHandoffs = {};
   for (const action of ['approve','execute','cleanup']) {
     const result = decode(await direct.callTool({ name: `apn_swap_ethereum_uniswap_token_${action}`,

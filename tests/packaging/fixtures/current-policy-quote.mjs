@@ -9,12 +9,23 @@ import {createUniswapTokenRuntime} from '@nuanu-ai/apn/dist/swap/uniswap-v3/toke
 import {ETHEREUM_USDT,UNISWAP_V3_QUOTER_V2} from '@nuanu-ai/apn/dist/swap/uniswap-v3/pins.js';
 import {UNISWAP_USDC} from '@nuanu-ai/apn/dist/swap/uniswap-pin.js';
 const root=await mkdtemp('/private/tmp/apn-c309-current-policy-');
+const EXPECTED_POLICY_DIGEST='dcdd15c939ae013dbb33d68746eb5c258f66691018c54f1e4eefb5312bb17a64';
 try{
   const ownerRoot=process.env.APN_OWNER_STATE_ROOT;
   if(!ownerRoot) throw new Error('APN_OWNER_STATE_ROOT is required');
   for(const name of ['allowlist-policies','allowlist-activations']) await cp(join(ownerRoot,name),join(root,name),{recursive:true});
   const now=new Date(); const active=await loadActiveAssetPolicyRegistry(root,'evm-live-buyer',now);
   if(active===null) throw new Error('no active current policy');
+  assert.equal(active.revision,8,'current owner policy revision changed; refresh the evidence');
+  assert.equal(active.digest,EXPECTED_POLICY_DIGEST,'current owner policy digest changed; refresh the evidence');
+  const chain=active.registry.chains.find(x=>x.chain==='eip155:1');
+  assert.ok(chain,'Ethereum is absent from the active owner policy');
+  const admitted=chain.assets.filter(x=>x.rails.swap).map(x=>({identifier:x.identifier,
+    cap:x.railCaps.swap.maximumPerTransferAtomic,pin:x.mechanismPins.swap.protocolVersion})).sort((a,b)=>a.identifier.localeCompare(b.identifier));
+  assert.deepEqual(admitted,[
+    {identifier:UNISWAP_USDC,cap:'3000000',pin:'v3-swap-router-1'},
+    {identifier:ETHEREUM_USDT,cap:'3000000',pin:'v3-swap-router-1'},
+  ].sort((a,b)=>a.identifier.localeCompare(b.identifier)),'exact USDT and USDC swap admissions changed');
   let physical=0,logical=0,effects=0;const methods=[];
   const word=n=>`0x${n.toString(16).padStart(64,'0')}`;
   const value=(m,p)=>{methods.push(m);if(m==='eth_sendRawTransaction') effects++;
@@ -38,11 +49,14 @@ try{
   const result=await client.callTool({name:'apn_swap_ethereum_uniswap_token_quote',arguments:args});
   const envelope=JSON.parse(result.content[0].text);
   await client.close();await server.close();
+  assert.equal(envelope.ok,true,`current-owner MCP quote failed: ${JSON.stringify(envelope.error)}`);
+  assert.equal(envelope.data?.expectedOutputAtomic,'1000000');
+  assert.equal(physical,4,'current-owner quote physical RPC budget changed');
+  assert.equal(logical,7,'current-owner quote logical RPC budget changed');
   assert.equal(effects,0);assert.equal(methods.includes('eth_sendRawTransaction'),false);
-  const chain=active.registry.chains.find(x=>x.chain==='eip155:1');
   console.log(JSON.stringify({at:now.toISOString(),revision:active.revision,digest:active.digest,
-    expiresAt:active.registry.expiresAt,swapAssets:chain?.assets.filter(x=>x.rails.swap).map(x=>({identifier:x.identifier,
-      cap:x.railCaps.swap.maximumPerTransferAtomic,pin:x.mechanismPins.swap.protocolVersion})) ?? [],
-    quote:{ok:envelope.ok,code:envelope.error?.code ?? null,reason:envelope.error?.details?.reason ?? null},
+    expiresAt:active.registry.expiresAt,swapAssets:admitted,
+    quote:{ok:envelope.ok,expectedOutputAtomic:envelope.data.expectedOutputAtomic,
+      code:envelope.error?.code ?? null,reason:envelope.error?.details?.reason ?? null},
     rpc:{physical,logical,effects,methods}},null,2));
 }finally{await rm(root,{recursive:true,force:true});}
