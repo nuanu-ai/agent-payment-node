@@ -1,6 +1,6 @@
 # LI.FI EVM cross-chain assets
 
-This APN 0.5.25 package includes local-wallet route selection and execution for
+This APN 0.5.26 package includes local-wallet route selection and execution for
 the admitted assets between Ethereum, Base, Arbitrum One and the finite native
 destinations below. It implements
 Across V4 and Stargate V2 Taxi through the LI.FI API. Package availability,
