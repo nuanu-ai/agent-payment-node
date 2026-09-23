@@ -143,7 +143,7 @@ export function paymentIdentifierState(
   operationId: string,
 ): X402OperationRecord["paymentIdentifier"] | undefined {
   const extensions = paymentRequired.extensions;
-  if (extensions === undefined || Object.keys(extensions).length === 0) return undefined;
+  if (extensions === undefined || !Object.hasOwn(extensions, "payment-identifier")) return undefined;
   const declaration = extensions["payment-identifier"];
   if (!isPlainRecord(declaration)) throw new ApnError("APN_HTTP_PROTOCOL", "Supported payment-identifier declaration is missing.");
   const declarationCanonicalJson = canonicalJson(declaration);
