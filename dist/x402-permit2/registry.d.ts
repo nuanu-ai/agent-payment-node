@@ -5,6 +5,8 @@ import type { Address, Hex } from "../model.js";
  * nothing is discovered from a seller offer.
  */
 export declare const PERMIT2_ADDRESS: Address;
+/** Canonical Permit2 runtime hash observed on Avalanche in the frozen chain probe. */
+export declare const PERMIT2_CODE_HASH: Hex;
 /** x402 Foundation exact Permit2 proxy; CREATE2, the same address and runtime code on every admitted chain. */
 export declare const X402_EXACT_PERMIT2_PROXY: Address;
 /** The owner's x402 admission must carry exactly this mechanism pin; any other pin refuses. */
