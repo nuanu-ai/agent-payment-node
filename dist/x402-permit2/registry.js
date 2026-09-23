@@ -5,6 +5,8 @@ import { keccak256, toHex } from "viem";
  * nothing is discovered from a seller offer.
  */
 export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+/** Canonical Permit2 runtime hash observed on Avalanche in the frozen chain probe. */
+export const PERMIT2_CODE_HASH = "0x081beff14e75c5a5c1e60740445f58d54ba0fef228148a11d3e4287dc3551cbb";
 /** x402 Foundation exact Permit2 proxy; CREATE2, the same address and runtime code on every admitted chain. */
 export const X402_EXACT_PERMIT2_PROXY = "0x402085c248EeA27D92E8b30b2C58ed07f9E20001";
 /** The owner's x402 admission must carry exactly this mechanism pin; any other pin refuses. */
