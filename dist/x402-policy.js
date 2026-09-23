@@ -101,7 +101,7 @@ export function tokenDomainSeparator(name, version, chainId = 8453) {
 }
 export function paymentIdentifierState(paymentRequired, operationId) {
     const extensions = paymentRequired.extensions;
-    if (extensions === undefined || Object.keys(extensions).length === 0)
+    if (extensions === undefined || !Object.hasOwn(extensions, "payment-identifier"))
         return undefined;
     const declaration = extensions["payment-identifier"];
     if (!isPlainRecord(declaration))
