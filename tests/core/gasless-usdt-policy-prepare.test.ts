@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeFunctionData, getAddress, parseAbi } from "viem";
+import { hashObject } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import type { ActiveAssetPolicy } from "../../src/allowlist-active-policy.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
 import { preparePolicyBoundUsdt, type UsdtPolicyPrepareRequest, type UsdtPreparePort } from "../../src/gasless-usdt/policy-prepare.js";
 import type { UsdtSponsorPort } from "../../src/gasless-usdt/engine.js";
 import type { UsdtUserOperation } from "../../src/gasless-usdt/userop.js";
+import type { Hex } from "../../src/model.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RECIPIENT = getAddress("0x000000000000000000000000000000000000dEaD");
@@ -16,14 +18,15 @@ const QUOTE = { quotes: [{ paymaster: USDT_GASLESS.paymaster, token: USDT_GASLES
 const PRICE = { slow: { maxFeePerGas: "0x10ef719d", maxPriorityFeePerGas: "0xbb0de7a" },
   standard: { maxFeePerGas: "0x11c8374b", maxPriorityFeePerGas: "0xc468333" },
   fast: { maxFeePerGas: "0x12a0fcf9", maxPriorityFeePerGas: "0xcdc27ec" } };
-const SIGNED = { paymaster: USDT_GASLESS.paymaster, paymasterData: "0x020000006aacecdb000000000000dac17f958d2ee523a2206206994597c13d831ec700000000000000000000000000004c2c00000000000000000000000000000000000000000000000000000000a380509a000000000000000000000000000138804337ff05c84b9a80ea0a78dbe7b8e102f66d4c08972391719016554aea7ecb13e50f38e455f67da2908c40238d37d162d3f3dc686067c76c198b6239400746330724b6191afa40a35538022086b0288210f55e1c1c" };
+const SIGNED_RAW = { paymaster: USDT_GASLESS.paymaster, paymasterData: "0x020000006aacecdb000000000000dac17f958d2ee523a2206206994597c13d831ec700000000000000000000000000004c2c00000000000000000000000000000000000000000000000000000000a380509a000000000000000000000000000138804337ff05c84b9a80ea0a78dbe7b8e102f66d4c08972391719016554aea7ecb13e50f38e455f67da2908c40238d37d162d3f3dc686067c76c198b6239400746330724b6191afa40a35538022086b0288210f55e1c1c" };
+const SIGNED = { ...SIGNED_RAW, paymasterData: SIGNED_RAW.paymasterData.replace("a380509a", "a38ca6e3") };
 const request = (): UsdtPolicyPrepareRequest => ({ profile: "owner", chain: "eip155:1", token: USDT_GASLESS.token,
   sponsorUrl: USDT_GASLESS.bundlerUrl, sender: OWNER, recipient: RECIPIENT, grossAtomic: 1_000_000n,
   maxFeeAtomic: 500_000n, minReceivedAtomic: 500_000n });
-function active(options: { per?: string; daily?: string; mechanism?: { provider: string; reference: string }; owner?: typeof OWNER } = {}): ActiveAssetPolicy {
+function active(options: { per?: string; daily?: string; mechanism?: { provider: string; reference: string }; owner?: typeof OWNER; expiresAt?: string } = {}): ActiveAssetPolicy {
   const unsigned: UnsignedAssetPolicyRegistry = { schemaVersion: "apn.asset-policy-registry.v2", registryVersion: "owner.1",
     publishedAt: "2026-09-18T00:00:00.000Z", effectiveDate: "2026-09-18", effectiveAt: "2026-09-18T00:00:00.000Z",
-    chains: [{ chain: "eip155:1", family: "evm", name: "Ethereum", assets: [{ kind: "token", identifier: USDT_GASLESS.token,
+    ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }), chains: [{ chain: "eip155:1", family: "evm", name: "Ethereum", assets: [{ kind: "token", identifier: USDT_GASLESS.token,
       symbol: "USDT", decimals: 6, rails: { direct: false, gasless: true, x402: false, bridge: false, swap: false },
       railCaps: { gasless: { maximumPerTransferAtomic: options.per ?? "1000000", dailyLimitAtomic: options.daily ?? "2000000" } },
       mechanismPins: { gasless: options.mechanism ?? USDT_GASLESS.mechanism } }] }] };
@@ -89,4 +92,53 @@ test("policy prepare rejects wrong route and quote drift, and rechecks revoked p
   const revoked = fixture();
   revoked.ports.sponsor.paymasterData = async op => { revoked.offered.push(op); revoked.setPolicy(null); return SIGNED; };
   await assert.rejects(() => preparePolicyBoundUsdt(revoked.ports, request()), { code: "APN_ALLOWLIST_REFUSED" });
+});
+
+test("policy prepare captures the safe account before sponsor callbacks and returns an immutable binding", async () => {
+  const f = fixture();
+  const account = { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" as const };
+  const snapshot = { chainId: 1n, blockNumber: 26_002_950n, blockHash: `0x${"12".repeat(32)}` as Hex, account };
+  f.ports.prepare.safeSnapshot = async () => snapshot;
+  f.ports.sponsor.paymasterData = async op => {
+    assert.equal(op.nonce, "0x7");
+    account.entryPointNonce = 99n;
+    account.eoaNonce = 100n;
+    account.usdtBalanceAtomic = 0n;
+    snapshot.blockNumber = 99n;
+    snapshot.blockHash = `0x${"34".repeat(32)}`;
+    return SIGNED;
+  };
+  const prepared = await preparePolicyBoundUsdt(f.ports, request());
+  assert.equal(prepared.account.entryPointNonce, 7n);
+  assert.equal(prepared.account.eoaNonce, 31n);
+  assert.equal(prepared.account.usdtBalanceAtomic, 1_000_000n);
+  assert.equal(prepared.safeBlockNumber, "26002950");
+  assert.equal(prepared.safeBlockHash, `0x${"12".repeat(32)}`);
+  assert.equal(prepared.unsignedOperation.nonce, "0x7");
+  assert.equal(prepared.unsignedOperation.eip7702Auth?.nonce, "0x1f");
+  account.entryPointNonce = 123n;
+  assert.equal(prepared.account.entryPointNonce, 7n);
+  assert.throws(() => { (prepared.account as { entryPointNonce: bigint }).entryPointNonce = 555n; }, TypeError);
+  assert.throws(() => { (prepared.plan.request as { grossAtomic: bigint }).grossAtomic = 2n; }, TypeError);
+  assert.equal(prepared.account.entryPointNonce, 7n);
+  assert.equal(prepared.plan.request.grossAtomic, 1_000_000n);
+  const { bindingHash, ...body } = prepared;
+  assert.equal(bindingHash, hashObject(JSON.parse(JSON.stringify(body, (_key, value: unknown) =>
+    typeof value === "bigint" ? value.toString() : value))));
+});
+
+test("policy prepare refuses a signed rate that differs from the quote, expired policy, and wrong safe chain", async () => {
+  const mismatchedRate = fixture();
+  mismatchedRate.ports.sponsor.paymasterData = async () => SIGNED_RAW;
+  await assert.rejects(() => preparePolicyBoundUsdt(mismatchedRate.ports, request()), /signed_quote_rate_mismatch/u);
+  const expired = fixture();
+  expired.setPolicy(active({ expiresAt: new Date(NOW.getTime() - 1).toISOString() }));
+  await assert.rejects(() => preparePolicyBoundUsdt(expired.ports, request()));
+  assert.equal(expired.offered.length, 0);
+  const wrongChain = fixture();
+  wrongChain.ports.prepare.safeSnapshot = async () => ({ chainId: 2n, blockNumber: 26_002_950n,
+    blockHash: `0x${"12".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n,
+      eoaNonce: 31n, delegation: "empty" } });
+  await assert.rejects(() => preparePolicyBoundUsdt(wrongChain.ports, request()), /gasless_usdt_safe_block/u);
+  assert.equal(wrongChain.offered.length, 0);
 });
