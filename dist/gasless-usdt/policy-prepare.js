@@ -13,6 +13,18 @@ const STUB_WORD = `0x${"11".repeat(32)}`;
 const HASH = /^0x[0-9a-f]{64}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 const serializable = (value) => JSON.parse(JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString() : entry));
+function frozenCopy(value) {
+    const copy = structuredClone(value);
+    const freeze = (entry) => {
+        if (entry !== null && typeof entry === "object") {
+            for (const nested of Object.values(entry))
+                freeze(nested);
+            Object.freeze(entry);
+        }
+    };
+    freeze(copy);
+    return copy;
+}
 function canonicalAddress(value) {
     if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(value))
         usdtFailure("APN_INVALID_INPUT", "gasless_usdt_address");
@@ -58,6 +70,7 @@ export async function preparePolicyBoundUsdt(ports, request) {
     const now = ports.prepare.now();
     if (!(now instanceof Date) || !Number.isFinite(now.getTime()))
         usdtFailure("APN_INVALID_INPUT", "gasless_usdt_clock");
+    const startMilliseconds = now.getTime();
     const sender = canonicalAddress(request.sender), recipient = canonicalAddress(request.recipient);
     if ([sender, USDT_GASLESS.token, USDT_GASLESS.paymaster, USDT_GASLESS.entryPoint, USDT_GASLESS.delegate,
         USDT_GASLESS.treasury].includes(recipient))
@@ -65,28 +78,40 @@ export async function preparePolicyBoundUsdt(ports, request) {
     if (typeof request.grossAtomic !== "bigint" || typeof request.maxFeeAtomic !== "bigint" ||
         typeof request.minReceivedAtomic !== "bigint")
         usdtFailure("APN_INVALID_INPUT", "gasless_usdt_amount_type");
-    const usage = await ports.prepare.dailyUsage(sender, now);
-    const active = requirePolicy(await ports.prepare.activePolicy(request.profile), request, usage, now);
+    const profile = request.profile;
+    const transferRequest = { sender, recipient, grossAtomic: request.grossAtomic,
+        maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic };
+    const policyRequest = { ...transferRequest, profile, chain: USDT_GASLESS.chain,
+        token: USDT_GASLESS.token, sponsorUrl: USDT_GASLESS.bundlerUrl };
+    const usage = await ports.prepare.dailyUsage(sender, new Date(startMilliseconds));
+    const active = requirePolicy(await ports.prepare.activePolicy(profile), policyRequest, usage, new Date(startMilliseconds));
+    const policyDigest = active.digest, policyRevision = active.revision, activationDigest = active.activationDigest;
     const snapshot = await ports.prepare.safeSnapshot(sender);
-    if (snapshot.chainId !== 1n || snapshot.blockNumber < 1n || !HASH.test(snapshot.blockHash) ||
-        snapshot.account.entryPointNonce < 0n || snapshot.account.eoaNonce < 0n ||
-        !["empty", "expected"].includes(snapshot.account.delegation)) {
+    const { chainId, blockNumber, blockHash } = snapshot;
+    const { usdtBalanceAtomic, entryPointNonce, eoaNonce, delegation } = snapshot.account;
+    if (chainId !== 1n || typeof blockNumber !== "bigint" || blockNumber < 1n ||
+        typeof blockHash !== "string" || !HASH.test(blockHash) || typeof usdtBalanceAtomic !== "bigint" ||
+        usdtBalanceAtomic < 0n || typeof entryPointNonce !== "bigint" || entryPointNonce < 0n ||
+        typeof eoaNonce !== "bigint" || eoaNonce < 0n || !["empty", "expected"].includes(delegation)) {
         usdtFailure("APN_CHAIN_MISMATCH", "gasless_usdt_safe_block");
     }
+    const account = Object.freeze({ usdtBalanceAtomic, entryPointNonce, eoaNonce, delegation });
     const quote = validateUsdtTokenQuote(await ports.sponsor.tokenQuote());
     const price = validateUsdtGasPrice(await ports.sponsor.gasPrice()).fast;
-    const plan = planUsdtTransfer({ sender, recipient, grossAtomic: request.grossAtomic,
-        maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic }, quote, price);
-    assertUsdtFunding(plan, snapshot.account);
+    const plan = planUsdtTransfer(transferRequest, quote, price);
+    assertUsdtFunding(plan, account);
     const callData = usdtApprovalTransferBatch(plan);
-    const authorization = snapshot.account.delegation === "empty" ? {
-        chainId: "0x1", address: USDT_GASLESS.delegate, nonce: `0x${snapshot.account.eoaNonce.toString(16)}`,
+    const authorization = account.delegation === "empty" ? Object.freeze({
+        chainId: "0x1", address: USDT_GASLESS.delegate, nonce: `0x${account.eoaNonce.toString(16)}`,
         yParity: "0x0", r: STUB_WORD, s: STUB_WORD,
-    } : null;
-    const draft = usdtUserOperation(plan, { entryPointNonce: snapshot.account.entryPointNonce, callData,
-        paymasterData: "0x", signature: ESTIMATE_SIGNATURE, authorization });
+    }) : null;
+    const draft = frozenCopy(usdtUserOperation(plan, { entryPointNonce: account.entryPointNonce, callData,
+        paymasterData: "0x", signature: ESTIMATE_SIGNATURE, authorization }));
     const result = await ports.sponsor.paymasterData(draft);
-    const paymaster = validateUsdtPaymasterData(result, plan, BigInt(Math.floor(now.getTime() / 1000)));
+    const paymaster = validateUsdtPaymasterData(result, plan, BigInt(Math.floor(startMilliseconds / 1000)));
+    if (paymaster.exchangeRate !== plan.quote.exchangeRate) {
+        usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_signed_quote_rate_mismatch");
+    }
     const paymasterData = result.paymasterData.toLowerCase();
     const freshQuote = validateUsdtTokenQuote(await ports.sponsor.tokenQuote());
     const freshPrice = validateUsdtGasPrice(await ports.sponsor.gasPrice()).fast;
@@ -95,21 +120,21 @@ export async function preparePolicyBoundUsdt(ports, request) {
         usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_quote_drift");
     }
     const finalNow = ports.prepare.now();
-    if (!(finalNow instanceof Date) || !Number.isFinite(finalNow.getTime()) || finalNow.getTime() < now.getTime()) {
+    if (!(finalNow instanceof Date) || !Number.isFinite(finalNow.getTime()) || finalNow.getTime() < startMilliseconds) {
         usdtFailure("APN_INVALID_INPUT", "gasless_usdt_clock");
     }
     validateUsdtPaymasterData(result, plan, BigInt(Math.floor(finalNow.getTime() / 1000)));
     const freshUsage = await ports.prepare.dailyUsage(sender, finalNow);
-    const current = requirePolicy(await ports.prepare.activePolicy(request.profile), request, freshUsage, finalNow);
-    if (current.digest !== active.digest || current.revision !== active.revision || current.activationDigest !== active.activationDigest ||
+    const current = requirePolicy(await ports.prepare.activePolicy(profile), policyRequest, freshUsage, finalNow);
+    if (current.digest !== policyDigest || current.revision !== policyRevision || current.activationDigest !== activationDigest ||
         freshUsage !== usage)
         usdtFailure("APN_ALLOWLIST_REFUSED", "gasless_usdt_policy_changed");
-    const unsignedOperation = usdtUserOperation(plan, { entryPointNonce: snapshot.account.entryPointNonce, callData,
+    const unsignedOperation = usdtUserOperation(plan, { entryPointNonce: account.entryPointNonce, callData,
         paymasterData, signature: ESTIMATE_SIGNATURE, authorization });
-    const body = { schemaVersion: "apn.gasless-usdt-policy-prepare.v1", profile: request.profile, policyDigest: active.digest,
-        policyRevision: active.revision, activationDigest: active.activationDigest, chain: USDT_GASLESS.chain, token: USDT_GASLESS.token,
-        mechanism: USDT_GASLESS.mechanism, sponsorUrl: USDT_GASLESS.bundlerUrl, safeBlockNumber: snapshot.blockNumber.toString(),
-        safeBlockHash: snapshot.blockHash, account: snapshot.account, plan, callData, paymaster, paymasterData, unsignedOperation };
-    return { ...body, bindingHash: hashObject(serializable(body)) };
+    const body = frozenCopy({ schemaVersion: "apn.gasless-usdt-policy-prepare.v1", profile, policyDigest,
+        policyRevision, activationDigest, chain: USDT_GASLESS.chain, token: USDT_GASLESS.token,
+        mechanism: USDT_GASLESS.mechanism, sponsorUrl: USDT_GASLESS.bundlerUrl, safeBlockNumber: blockNumber.toString(),
+        safeBlockHash: blockHash, account, plan, callData, paymaster, paymasterData, unsignedOperation });
+    return Object.freeze({ ...body, bindingHash: hashObject(serializable(body)) });
 }
 //# sourceMappingURL=policy-prepare.js.map
