@@ -1,4 +1,5 @@
-import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, readdir, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { isAbsolute, join, normalize, resolve } from "node:path";
 import { getAddress } from "viem";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
@@ -37,6 +38,7 @@ const DECIMAL = /^(0|[1-9][0-9]*)$/u;
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 const MAX_BYTES = 1024 * 1024;
+const ORPHAN_AGE_MS = 5 * 60 * 1000;
 const ESTIMATE_SIGNATURE = `0x${"fffffffffffffffffffffffffffffff0"}${"0".repeat(32)}7${"a".repeat(63)}1c`;
 const STUB_WORD = `0x${"11".repeat(32)}`;
 const serializable = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, item: unknown) =>
@@ -128,14 +130,24 @@ export function validateUsdtBoundOperation(value: unknown): UsdtBoundOperation {
 /** Separate v2 journal keeps old dormant v1 records readable while requiring the complete new binding. */
 export class UsdtBoundOperationRepository {
   readonly directory: string;
-  private tail: Promise<void> = Promise.resolve();
   constructor(readonly root: string) {
     if (!isAbsolute(root) || normalize(root) !== root || resolve(root) !== root) fail("state_root", "APN_STATE_SECURITY");
     this.directory = join(root, "gasless-usdt-bound-operations");
   }
+  private profilePath(profileHash: string): string {
+    if (!HASH.test(profileHash)) fail("bound_path", "APN_STATE_SECURITY");
+    return join(this.directory, profileHash);
+  }
   private path(profileHash: string, operationId: string): string {
     if (!HASH.test(profileHash) || !HASH.test(operationId)) fail("bound_path", "APN_STATE_SECURITY");
-    return join(this.directory, profileHash, `${operationId}.json`);
+    return join(this.profilePath(profileHash), `${operationId}.json`);
+  }
+  private claimsPath(): string {
+    return join(this.directory, "claims");
+  }
+  private claimPath(idempotencyKey: string): string {
+    if (!KEY.test(idempotencyKey)) fail("bound_key", "APN_INVALID_INPUT");
+    return join(this.claimsPath(), `${hashObject({ schemaVersion: USDT_BOUND_OPERATION_SCHEMA, idempotencyKey })}.json`);
   }
   private async dir(path: string, create: boolean): Promise<boolean> {
     if (create) await mkdir(path, { recursive: true, mode: DIR_MODE });
@@ -147,47 +159,118 @@ export class UsdtBoundOperationRepository {
     if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o777) !== DIR_MODE) fail("bound_directory", "APN_STATE_SECURITY");
     return true;
   }
-  async load(profileHash: string, operationId: string): Promise<UsdtBoundOperation | null> {
-    const path = this.path(profileHash, operationId);
-    if (!await this.dir(this.root, false) || !await this.dir(this.directory, false) || !await this.dir(join(this.directory, profileHash), false)) return null;
+  private async syncDirectory(path: string): Promise<void> {
+    const handle = await open(path, "r");
+    try { await handle.sync(); } finally { await handle.close(); }
+  }
+  private async readRecord(path: string): Promise<UsdtBoundOperation | null> {
     let stat;
     try { stat = await lstat(path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
     }
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o777) !== FILE_MODE || stat.size > MAX_BYTES) fail("bound_file", "APN_STATE_SECURITY");
+    // A crash after atomic link but before unlinking the complete temp may leave exactly two links.
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink < 1 || stat.nlink > 2 ||
+      (stat.mode & 0o777) !== FILE_MODE || stat.size > MAX_BYTES) fail("bound_file", "APN_STATE_SECURITY");
     let parsed: unknown;
     try { parsed = JSON.parse(await readFile(path, "utf8")); } catch { fail("bound_json"); }
-    const record = validateUsdtBoundOperation(parsed);
-    if (record.profileHash !== profileHash || record.operationId !== operationId) fail("bound_path_binding");
+    return validateUsdtBoundOperation(parsed);
+  }
+  private async readClaim(idempotencyKey: string): Promise<UsdtBoundOperation | null> {
+    if (!await this.dir(this.claimsPath(), false)) return null;
+    const record = await this.readRecord(this.claimPath(idempotencyKey));
+    if (record !== null && record.idempotencyKey !== idempotencyKey) fail("bound_claim_binding");
     return record;
+  }
+  private async writeCompleteTemp(directory: string, record: UsdtBoundOperation): Promise<string> {
+    const path = join(directory, `.pending-${randomUUID()}`);
+    const content = `${canonicalJson(record)}\n`;
+    if (Buffer.byteLength(content, "utf8") > MAX_BYTES) fail("bound_capacity");
+    const handle = await open(path, "wx", FILE_MODE);
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.sync();
+    } catch (error) {
+      await handle.close();
+      await unlink(path);
+      throw error;
+    }
+    await handle.close();
+    return path;
+  }
+  /** Publish a fully written file with link(2), which fails rather than replacing an existing record. */
+  private async publish(directory: string, path: string, record: UsdtBoundOperation, acceptExisting = false): Promise<void> {
+    const temp = await this.writeCompleteTemp(directory, record);
+    try {
+      try { await link(temp, path); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+      await this.syncDirectory(directory);
+      const found = await this.readRecord(path);
+      if (found === null || (!acceptExisting && canonicalJson(found) !== canonicalJson(record))) fail("bound_publish_conflict", "APN_IDEMPOTENCY_CONFLICT");
+    } finally {
+      await unlink(temp);
+      await this.syncDirectory(directory);
+    }
+  }
+  private async cleanupOldTemps(directory: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (!/^\.pending-[0-9a-f-]{36}$/u.test(entry.name)) continue;
+      if (!entry.isFile() || entry.isSymbolicLink()) fail("bound_pending_file", "APN_STATE_SECURITY");
+      const path = join(directory, entry.name);
+      let stat;
+      try { stat = await lstat(path); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      if ((stat.mode & 0o777) !== FILE_MODE || stat.nlink < 1 || stat.nlink > 2) fail("bound_pending_file", "APN_STATE_SECURITY");
+      if (Date.now() - stat.mtimeMs > ORPHAN_AGE_MS) {
+        try { await unlink(path); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+    }
+  }
+  async load(profileHash: string, operationId: string): Promise<UsdtBoundOperation | null> {
+    const path = this.path(profileHash, operationId);
+    if (!await this.dir(this.root, false) || !await this.dir(this.directory, false) || !await this.dir(this.profilePath(profileHash), false)) return null;
+    const record = await this.readRecord(path);
+    if (record !== null) {
+      if (record.profileHash !== profileHash || record.operationId !== operationId) fail("bound_path_binding");
+      return record;
+    }
+    // A process may have crashed after claiming the key and before publishing the final copy.
+    if (!await this.dir(this.claimsPath(), false)) return null;
+    for (const entry of await readdir(this.claimsPath(), { withFileTypes: true })) {
+      if (/^\.pending-/u.test(entry.name)) continue;
+      if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) fail("bound_claim_inventory");
+      const claimed = await this.readRecord(join(this.claimsPath(), entry.name));
+      if (claimed === null || entry.name !== `${hashObject({ schemaVersion: USDT_BOUND_OPERATION_SCHEMA,
+        idempotencyKey: claimed.idempotencyKey })}.json`) fail("bound_claim_binding");
+      if (claimed.profileHash === profileHash && claimed.operationId === operationId) return claimed;
+    }
+    return null;
   }
   async create(profileHash: string, binding: UsdtPolicyPrepared, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation> {
     if (!HASH.test(profileHash) || !KEY.test(idempotencyKey) || !Number.isFinite(now.getTime())) fail("bound_input", "APN_INVALID_INPUT");
     const saved = serializable(binding) as Persisted<UsdtPolicyPrepared>;
-    const operationId = hashObject({ schemaVersion: USDT_BOUND_OPERATION_SCHEMA, profileHash, idempotencyKey, bindingHash: saved.bindingHash });
-    const draft = { schemaVersion: USDT_BOUND_OPERATION_SCHEMA, operationId, profileHash, idempotencyKey, binding: saved,
-      createdAt: now.toISOString(), signerBoundary: "unavailable" as const, dispatch: "disabled" as const, usageReservation: "disabled" as const };
-    const record = validateUsdtBoundOperation({ ...draft, integrityHash: hashObject(draft) });
-    const previous = this.tail;
-    let release!: () => void;
-    this.tail = new Promise<void>(done => { release = done; });
-    await previous;
-    try {
-      await this.dir(this.root, true); await this.dir(this.directory, true); await this.dir(join(this.directory, profileHash), true);
-      for (const entry of await readdir(join(this.directory, profileHash), { withFileTypes: true })) {
-        if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) fail("bound_inventory");
-        const existing = await this.load(profileHash, entry.name.slice(0, -5));
-        if (existing?.idempotencyKey === idempotencyKey && existing.operationId !== operationId) fail("bound_idempotency", "APN_IDEMPOTENCY_CONFLICT");
-      }
-      const path = this.path(profileHash, operationId);
-      try { await writeFile(path, `${canonicalJson(record)}\n`, { flag: "wx", mode: FILE_MODE }); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-      const found = await this.load(profileHash, operationId);
-      if (found === null) fail("bound_missing");
-      if (canonicalJson(found) !== canonicalJson(record)) fail("bound_conflict", "APN_IDEMPOTENCY_CONFLICT");
-      return found;
-    } finally { release(); }
+    await this.dir(this.root, true); await this.dir(this.directory, true); await this.dir(this.profilePath(profileHash), true);
+    await this.dir(this.claimsPath(), true);
+    await this.cleanupOldTemps(this.profilePath(profileHash));
+    await this.cleanupOldTemps(this.claimsPath());
+    const claimPath = this.claimPath(idempotencyKey);
+    let record = await this.readClaim(idempotencyKey);
+    if (record === null) {
+      const operationId = hashObject({ schemaVersion: USDT_BOUND_OPERATION_SCHEMA, profileHash, idempotencyKey, bindingHash: saved.bindingHash });
+      const draft = { schemaVersion: USDT_BOUND_OPERATION_SCHEMA, operationId, profileHash, idempotencyKey, binding: saved,
+        createdAt: now.toISOString(), signerBoundary: "unavailable" as const, dispatch: "disabled" as const, usageReservation: "disabled" as const };
+      const candidate = validateUsdtBoundOperation({ ...draft, integrityHash: hashObject(draft) });
+      await this.publish(this.claimsPath(), claimPath, candidate, true);
+      record = await this.readClaim(idempotencyKey);
+      if (record === null) fail("bound_claim_missing");
+    }
+    if (record.profileHash !== profileHash || canonicalJson(record.binding) !== canonicalJson(saved)) fail("bound_idempotency", "APN_IDEMPOTENCY_CONFLICT");
+    await this.publish(this.profilePath(profileHash), this.path(profileHash, record.operationId), record);
+    return record;
   }
 }
 

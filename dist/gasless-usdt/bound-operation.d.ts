@@ -29,10 +29,19 @@ export declare function validateUsdtBoundOperation(value: unknown): UsdtBoundOpe
 export declare class UsdtBoundOperationRepository {
     readonly root: string;
     readonly directory: string;
-    private tail;
     constructor(root: string);
+    private profilePath;
     private path;
+    private claimsPath;
+    private claimPath;
     private dir;
+    private syncDirectory;
+    private readRecord;
+    private readClaim;
+    private writeCompleteTemp;
+    /** Publish a fully written file with link(2), which fails rather than replacing an existing record. */
+    private publish;
+    private cleanupOldTemps;
     load(profileHash: string, operationId: string): Promise<UsdtBoundOperation | null>;
     create(profileHash: string, binding: UsdtPolicyPrepared, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation>;
 }

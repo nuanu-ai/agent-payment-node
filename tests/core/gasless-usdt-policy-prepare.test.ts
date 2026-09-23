@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { decodeFunctionData, getAddress, parseAbi } from "viem";
@@ -194,4 +194,53 @@ test("bound journal persists the complete preparation and classifies revocation 
   forgedBinding.safeBlockHash = `0x${"99".repeat(32)}`;
   await writeFile(path, JSON.stringify(forged));
   await assert.rejects(() => service.statusBound(saved.operationId), { code: "APN_STATE_CORRUPT" });
+});
+
+test("bound journal replays the first complete record after time advances and repairs claim-only publication", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), binding = await preparePolicyBoundUsdt(f.ports, request());
+  const service = new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root)).forProfile("a".repeat(64));
+  const first = await service.prepareBound(binding, "replay-001", NOW);
+  const profile = join(temporary.root, "gasless-usdt-bound-operations", "a".repeat(64));
+  const path = join(profile, `${first.operationId}.json`);
+  await rm(path); // Simulate interruption after the atomic key claim but before final publication.
+  assert.deepEqual(await service.statusBound(first.operationId), first);
+  assert.equal((await readdir(profile)).includes(`${first.operationId}.json`), false);
+  const claims = join(temporary.root, "gasless-usdt-bound-operations", "claims");
+  const orphan = join(claims, ".pending-00000000-0000-4000-8000-000000000001");
+  await writeFile(orphan, "{ partial", { mode: 0o600 });
+  const old = new Date(Date.now() - 10 * 60_000);
+  await utimes(orphan, old, old);
+  const replay = await service.prepareBound(binding, "replay-001", new Date(NOW.getTime() + 86_400_000));
+  assert.deepEqual(replay, first);
+  assert.deepEqual(await service.statusBound(first.operationId), first);
+  assert.equal((await readdir(profile)).includes(`${first.operationId}.json`), true);
+  assert.equal((await readdir(claims)).includes(".pending-00000000-0000-4000-8000-000000000001"), false);
+  assert.equal(f.offered.length, 1);
+});
+
+test("independent services serialize competing same-key bindings through one atomic claim", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const firstFixture = fixture(), secondFixture = fixture();
+  secondFixture.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n,
+    blockHash: `0x${"14".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n,
+      eoaNonce: 31n, delegation: "empty" } });
+  const [firstBinding, secondBinding] = await Promise.all([
+    preparePolicyBoundUsdt(firstFixture.ports, request()), preparePolicyBoundUsdt(secondFixture.ports, request()),
+  ]);
+  const services = Array.from({ length: 12 }, () => new GaslessUsdtOperationService(
+    new UsdtOperationRepository(temporary.root)).forProfile("a".repeat(64)));
+  const outcomes = await Promise.allSettled(services.map((service, index) => service.prepareBound(
+    index % 2 === 0 ? firstBinding : secondBinding, "race-001", NOW)));
+  const winners = outcomes.filter(result => result.status === "fulfilled").map(result => result.value);
+  const losers = outcomes.filter(result => result.status === "rejected").map(result => result.reason as { code?: string });
+  assert.ok(winners.length > 0);
+  assert.ok(losers.length > 0);
+  assert.equal(new Set(winners.map(record => record.operationId)).size, 1);
+  assert.ok(losers.every(error => error.code === "APN_IDEMPOTENCY_CONFLICT"));
+  const profile = join(temporary.root, "gasless-usdt-bound-operations", "a".repeat(64));
+  assert.equal((await readdir(join(temporary.root, "gasless-usdt-bound-operations", "claims"))).filter(name => name.endsWith(".json")).length, 1);
+  assert.equal((await readdir(profile)).filter(name => name.endsWith(".json")).length, 1);
+  await assert.rejects(() => new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root))
+    .forProfile("b".repeat(64)).prepareBound(firstBinding, "race-001", NOW), { code: "APN_IDEMPOTENCY_CONFLICT" });
 });
