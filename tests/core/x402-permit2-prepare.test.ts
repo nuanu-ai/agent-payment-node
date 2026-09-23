@@ -62,6 +62,8 @@ test("read port receives the exact nonce word before it supplies authenticated o
   const result = await preparePermit2WithPort({ read: async (request) => {
     called = true;
     assert.equal(request.challengeHash, base.expected.challengeHash);
+    assert.equal(request.offerHash, selection.offerHash);
+    assert.equal(request.amountAtomic, selection.amountAtomic);
     assert.equal(request.chainId, 43114);
     assert.equal(request.token, asset.token);
     return { owner: base.owner, evidence: { ...base.evidence, nonceBitmapWordIndex: request.nonceBitmapWordIndex } };
