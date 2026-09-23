@@ -64,6 +64,7 @@ test("read port receives the exact nonce word before it supplies authenticated o
     assert.equal(request.challengeHash, base.expected.challengeHash);
     assert.equal(request.offerHash, selection.offerHash);
     assert.equal(request.amountAtomic, selection.amountAtomic);
+    assert.equal(request.nowSeconds, base.nowSeconds);
     assert.equal(request.chainId, 43114);
     assert.equal(request.token, asset.token);
     return { owner: base.owner, evidence: { ...base.evidence, nonceBitmapWordIndex: request.nonceBitmapWordIndex } };
