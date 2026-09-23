@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { lstat, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { decodeFunctionData, getAddress, parseAbi } from "viem";
 import { hashObject } from "../../src/canonical.js";
@@ -9,6 +11,10 @@ import { preparePolicyBoundUsdt, type UsdtPolicyPrepareRequest, type UsdtPrepare
 import type { UsdtSponsorPort } from "../../src/gasless-usdt/engine.js";
 import type { UsdtUserOperation } from "../../src/gasless-usdt/userop.js";
 import type { Hex } from "../../src/model.js";
+import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
+import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
+import { USDT_BOUND_OPERATION_SCHEMA, UsdtBoundOperationRepository, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
+import { temporaryState } from "./helpers.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RECIPIENT = getAddress("0x000000000000000000000000000000000000dEaD");
@@ -141,4 +147,131 @@ test("policy prepare refuses a signed rate that differs from the quote, expired 
       eoaNonce: 31n, delegation: "empty" } });
   await assert.rejects(() => preparePolicyBoundUsdt(wrongChain.ports, request()), /gasless_usdt_safe_block/u);
   assert.equal(wrongChain.offered.length, 0);
+});
+
+test("bound journal persists the complete preparation and classifies revocation and nonce drift without effects", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture();
+  const binding = await preparePolicyBoundUsdt(f.ports, request());
+  const service = new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root)).forProfile("a".repeat(64));
+  const saved = await service.prepareBound(binding, "bound-001", NOW);
+  const path = join(temporary.root, "gasless-usdt-bound-operations", "a".repeat(64), `${saved.operationId}.json`);
+  const bytes = await readFile(path, "utf8");
+  assert.equal(saved.binding.bindingHash, binding.bindingHash);
+  assert.equal(saved.binding.paymasterData, binding.paymasterData);
+  assert.equal(saved.binding.unsignedOperation.callData, binding.callData);
+  assert.equal(saved.binding.account.entryPointNonce, "7");
+  assert.equal((await service.statusBound(saved.operationId)).integrityHash, saved.integrityHash);
+  assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare), { state: "prepared", operation: saved });
+  const alternate = fixture();
+  alternate.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n,
+    blockHash: `0x${"14".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n,
+      eoaNonce: 31n, delegation: "empty" } });
+  const alternateBinding = await preparePolicyBoundUsdt(alternate.ports, request());
+  await assert.rejects(() => service.prepareBound(alternateBinding, "bound-001", NOW),
+    { code: "APN_IDEMPOTENCY_CONFLICT" });
+  f.setPolicy(null);
+  assert.equal((await service.resumeBound(saved.operationId, f.ports.prepare)).state, "capability_unavailable");
+  f.setPolicy(active());
+  f.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_951n,
+    blockHash: `0x${"13".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 8n,
+      eoaNonce: 31n, delegation: "empty" } });
+  assert.equal((await service.resumeBound(saved.operationId, f.ports.prepare)).state, "capability_unavailable");
+  assert.equal(await readFile(path, "utf8"), bytes);
+  assert.equal(f.offered.length, 1);
+  const resealed = JSON.parse(bytes) as Record<string, unknown>;
+  const resealedBinding = resealed.binding as Record<string, unknown>;
+  (resealedBinding.account as Record<string, unknown>).entryPointNonce = "8";
+  const { bindingHash: _oldBindingHash, ...bindingBody } = resealedBinding;
+  resealedBinding.bindingHash = hashObject(bindingBody);
+  resealed.operationId = hashObject({ schemaVersion: USDT_BOUND_OPERATION_SCHEMA, profileHash: resealed.profileHash,
+    idempotencyKey: resealed.idempotencyKey, bindingHash: resealedBinding.bindingHash });
+  const { integrityHash: _oldIntegrityHash, ...resealedBody } = resealed;
+  resealed.integrityHash = hashObject(resealedBody);
+  assert.throws(() => validateUsdtBoundOperation(resealed), { code: "APN_STATE_CORRUPT" });
+  const forged = JSON.parse(bytes) as Record<string, unknown>;
+  const forgedBinding = forged.binding as Record<string, unknown>;
+  forgedBinding.safeBlockHash = `0x${"99".repeat(32)}`;
+  await writeFile(path, JSON.stringify(forged));
+  await assert.rejects(() => service.statusBound(saved.operationId), { code: "APN_STATE_CORRUPT" });
+});
+
+test("bound journal replays the first complete record after time advances and repairs claim-only publication", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), binding = await preparePolicyBoundUsdt(f.ports, request());
+  const service = new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root)).forProfile("a".repeat(64));
+  const first = await service.prepareBound(binding, "replay-001", NOW);
+  const profile = join(temporary.root, "gasless-usdt-bound-operations", "a".repeat(64));
+  const path = join(profile, `${first.operationId}.json`);
+  await rm(path); // Simulate interruption after the atomic key claim but before final publication.
+  assert.deepEqual(await service.statusBound(first.operationId), first);
+  assert.equal((await readdir(profile)).includes(`${first.operationId}.json`), false);
+  const claims = join(temporary.root, "gasless-usdt-bound-operations", "claims");
+  const orphan = join(claims, ".pending-00000000-0000-4000-8000-000000000001");
+  await writeFile(orphan, "{ partial", { mode: 0o600 });
+  const old = new Date(Date.now() - 10 * 60_000);
+  await utimes(orphan, old, old);
+  const replay = await service.prepareBound(binding, "replay-001", new Date(NOW.getTime() + 86_400_000));
+  assert.deepEqual(replay, first);
+  assert.deepEqual(await service.statusBound(first.operationId), first);
+  assert.equal((await readdir(profile)).includes(`${first.operationId}.json`), true);
+  assert.equal((await readdir(claims)).includes(".pending-00000000-0000-4000-8000-000000000001"), false);
+  assert.equal(f.offered.length, 1);
+});
+
+test("independent services serialize competing same-key bindings through one atomic claim", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const firstFixture = fixture(), secondFixture = fixture();
+  secondFixture.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n,
+    blockHash: `0x${"14".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n,
+      eoaNonce: 31n, delegation: "empty" } });
+  const [firstBinding, secondBinding] = await Promise.all([
+    preparePolicyBoundUsdt(firstFixture.ports, request()), preparePolicyBoundUsdt(secondFixture.ports, request()),
+  ]);
+  const services = Array.from({ length: 12 }, () => new GaslessUsdtOperationService(
+    new UsdtOperationRepository(temporary.root)).forProfile("a".repeat(64)));
+  const outcomes = await Promise.allSettled(services.map((service, index) => service.prepareBound(
+    index % 2 === 0 ? firstBinding : secondBinding, "race-001", NOW)));
+  const winners = outcomes.filter(result => result.status === "fulfilled").map(result => result.value);
+  const losers = outcomes.filter(result => result.status === "rejected").map(result => result.reason as { code?: string });
+  assert.ok(winners.length > 0);
+  assert.ok(losers.length > 0);
+  assert.equal(new Set(winners.map(record => record.operationId)).size, 1);
+  assert.ok(losers.every(error => error.code === "APN_IDEMPOTENCY_CONFLICT"));
+  const profile = join(temporary.root, "gasless-usdt-bound-operations", "a".repeat(64));
+  assert.equal((await readdir(join(temporary.root, "gasless-usdt-bound-operations", "claims"))).filter(name => name.endsWith(".json")).length, 1);
+  assert.equal((await readdir(profile)).filter(name => name.endsWith(".json")).length, 1);
+  await assert.rejects(() => new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root))
+    .forProfile("b".repeat(64)).prepareBound(firstBinding, "race-001", NOW), { code: "APN_IDEMPOTENCY_CONFLICT" });
+});
+
+test("first-use directory entries are parent-synced and unsupported fsync refuses before publication", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), binding = await preparePolicyBoundUsdt(f.ports, request());
+  class TrackingRepository extends UsdtBoundOperationRepository {
+    readonly synced: string[] = [];
+    failAt: string | undefined;
+    protected override async fsyncDirectory(path: string): Promise<void> {
+      this.synced.push(path);
+      if (path === this.failAt) throw Object.assign(new Error("directory fsync unsupported"), { code: "EINVAL" });
+      await super.fsyncDirectory(path);
+    }
+  }
+  const root = join(temporary.base, "fresh-root"), repository = new TrackingRepository(root);
+  await repository.create("a".repeat(64), binding, "first-use-001", NOW);
+  const rail = join(root, "gasless-usdt-bound-operations");
+  assert.deepEqual(repository.synced.slice(0, 4), [temporary.base, root, rail, rail]);
+  for (const directory of [root, rail, join(rail, "a".repeat(64)), join(rail, "claims")]) {
+    assert.equal((await lstat(directory)).mode & 0o777, 0o700);
+  }
+  const refusedRoot = join(temporary.base, "sync-refused"), refused = new TrackingRepository(refusedRoot);
+  refused.failAt = temporary.base;
+  await assert.rejects(() => refused.create("a".repeat(64), binding, "sync-refused-001", NOW),
+    { code: "APN_STATE_SECURITY" });
+  await assert.rejects(() => lstat(join(refusedRoot, "gasless-usdt-bound-operations")), { code: "ENOENT" });
+  refused.failAt = undefined;
+  await refused.create("a".repeat(64), binding, "sync-refused-001", NOW);
+  assert.equal(refused.synced.filter(path => path === temporary.base).length, 2);
+  await assert.rejects(() => new UsdtBoundOperationRepository(join(temporary.base, "missing-parent", "state"))
+    .create("a".repeat(64), binding, "missing-parent-001", NOW), { code: "APN_STATE_SECURITY" });
 });
