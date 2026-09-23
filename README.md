@@ -5,15 +5,17 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-APN 0.5.25 is the ordinary release build for Apple Silicon macOS. It carries
-the merged bridge hardening from PRs #200-#219: decoder-safe RPC caching;
-fail-closed, read-only public-RPC routing with bounded archive batches and
-provider-family pacing; restart-safe observation; and redacted observation
-telemetry and proof diagnostics. Base USDC to Arbitrum USDC now has live
-acceptance. Ethereum to Base and Arbitrum to Ethereum canonical USDC,
-Arbitrum to Ethereum WBTC, and named receiving-human acceptance remain open.
+APN 0.5.26 is the ordinary release build for Apple Silicon macOS. It adds a
+guarded Ethereum Uniswap token-input lane for exact canonical USDC/USDT swaps,
+with durable exact approvals, explicit allowance cleanup, one-send recovery,
+cross-process operation locking, and command-scoped RPC budgets, caching and
+count telemetry. The token lane also supports a bounded public primary pool
+with cooldown, quarantine and durable provider binding. This release has source
+and CI proof plus no-effect live quote/recovery evidence. It does not claim live
+paid or effect acceptance; the latest live prepare preflight remained blocked
+by public provider availability.
 GitHub publication and the Homebrew Formula remain separate release gates; use
-only an exact verified 0.5.25 archive or installation for the new behavior.
+only an exact verified 0.5.26 archive or installation for the new behavior.
 
 The current platform boundary and the required work for future Linux or
 Windows support are recorded in the [platform support matrix](docs/platform-support.md).
@@ -56,7 +58,7 @@ the total USDC budget, so the sender can have zero native gas balance. The
 recipient amount and maximum USDC fee are frozen before foreground approval;
 unused fee budget remains with the sender. See [USDC gas fees](docs/gasless.md)
 for commands, persistent account permissions and recovery. This remains
-an APN 0.5.25 capability with separate per-network mainnet acceptance.
+an APN 0.5.26 capability with separate per-network mainnet acceptance.
 
 The same gasless commands also support an existing MetaMask Agent server wallet
 on Ethereum, Optimism, Polygon PoS, Monad, Sei, Base, Arbitrum and Linea. The
@@ -77,7 +79,7 @@ and the [verified archive recovery preflight](docs/gasless.md#existing-state-and
 ## Install
 
 Homebrew installation is a separate publication gate. Verify that `apn version`
-reports `0.5.25` before using the commands described for this release.
+reports `0.5.26` before using the commands described for this release.
 
 ```sh
 brew install nuanu-ai/tap/apn
