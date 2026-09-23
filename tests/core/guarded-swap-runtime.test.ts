@@ -50,7 +50,9 @@ async function fixture(root: string, options: { readonly admitted?: boolean; rea
       return await runtime.service.recordPossibleSend(op, "unknown_finality", input.now); },
     async observe(input) { observes++; return input.operation; },
   };
-  runtime = new GuardedSwapRuntime({ chain: "eip155:1", builder: { async quote() { return quote; }, async load(hash) { return hash === quote.quoteHash ? material : null; } },
+  runtime = new GuardedSwapRuntime({ chain: "eip155:1", builder: { async quote() {
+    return { quoteHash: quote.quoteHash, quote, signed: false, broadcast: false };
+  }, async load(hash) { return hash === quote.quoteHash ? material : null; } },
     policy: async (profile) => options.admitted === false || profile !== "runtime-swap" ? null : policy, clock,
     protocolRegistry: protocols, usage, operations, approvals,
     ownerAdmission: { async assert() { admissionCalls++; } },
@@ -144,23 +146,32 @@ test("MCP transports a guarded quote, prepare, and status with no effect, and ha
     const result = await client.callTool({ name, arguments: args });
     const content = result.content[0];
     assert.equal(content?.type, "text");
-    return JSON.parse((content as { text: string }).text) as {
-      ok: boolean; data?: { quoteHash?: string }; operation?: { operationId: string; state: string };
+    const envelope = JSON.parse((content as { text: string }).text) as {
+      ok: boolean; data?: { quoteHash?: string; quote?: { quoteHash: string }; signed?: boolean; broadcast?: boolean };
+      operation?: { operationId: string; state: string };
       error?: { code: string; details?: { cli_handoff?: string } };
     };
+    return { envelope, isError: result.isError };
   };
   const quoted = await call("apn_swap_ethereum_uniswap_quote", { profile: "runtime-swap", account: ACCOUNT,
     to: RECIPIENT, output_token: USDC, amount: "100", slippage_bps: "100", owner_slippage_cap_bps: "100",
     deadline: "1790000300", max_gas_limit: "100000", max_fee_per_gas: "2", max_priority_fee_per_gas: "1" });
-  assert.equal(quoted.ok, true); assert.equal(quoted.data?.quoteHash, f.quote.quoteHash);
+  assert.equal(quoted.envelope.ok, true); assert.equal(quoted.isError, false);
+  assert.equal(quoted.envelope.data?.quoteHash, f.quote.quoteHash);
+  assert.equal(quoted.envelope.data?.quote?.quoteHash, f.quote.quoteHash);
+  assert.equal(quoted.envelope.data?.signed, false); assert.equal(quoted.envelope.data?.broadcast, false);
   const prepared = await call("apn_swap_ethereum_uniswap_prepare", { profile: "runtime-swap", quote: f.quote.quoteHash,
     idempotency_key: "runtime-mcp-0001" });
-  assert.equal(prepared.ok, true); assert.equal(prepared.operation?.state, "awaiting_approval");
-  const status = await call("apn_swap_ethereum_uniswap_status", { operation: prepared.operation!.operationId });
-  assert.equal(status.ok, true); assert.equal(status.operation?.operationId, prepared.operation?.operationId);
-  const execution = await call("apn_swap_ethereum_uniswap_execute", { operation: prepared.operation!.operationId });
-  assert.equal(execution.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
-  assert.equal(execution.error?.details?.cli_handoff, `apn swap ethereum uniswap execute --operation ${prepared.operation!.operationId}`);
+  assert.equal(prepared.envelope.ok, true); assert.equal(prepared.isError, false);
+  assert.equal(prepared.envelope.operation?.state, "awaiting_approval");
+  const operationId = prepared.envelope.operation!.operationId;
+  const status = await call("apn_swap_ethereum_uniswap_status", { operation: operationId });
+  assert.equal(status.envelope.ok, true); assert.equal(status.isError, false);
+  assert.equal(status.envelope.operation?.operationId, operationId);
+  const execution = await call("apn_swap_ethereum_uniswap_execute", { operation: operationId });
+  assert.equal(execution.envelope.ok, false); assert.equal(execution.isError, true);
+  assert.equal(execution.envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
+  assert.equal(execution.envelope.error?.details?.cli_handoff, `apn swap ethereum uniswap execute --operation ${operationId}`);
   assert.deepEqual(f.counters(), { sends: 0, observes: 0, admissionCalls: 0 });
 });
 
