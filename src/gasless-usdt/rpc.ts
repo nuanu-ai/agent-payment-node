@@ -32,7 +32,10 @@ export class UsdtJsonRpc {
     try {
       response = await this.transport.request(this.endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }),
         MAX_RESPONSE, "APN_RPC_CONFIG");
-    } catch { throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless USDT RPC transport is unavailable.", { reason: "gasless_usdt_rpc_unavailable" }); }
+    } catch (error) {
+      if (error instanceof ApnError) throw error;
+      throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless USDT RPC transport is unavailable.", { reason: "gasless_usdt_rpc_unavailable" });
+    }
     if (response.status !== 200) usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_rpc_http_status");
     const record = rpcRecord(rpcJson(response.body, MAX_RESPONSE));
     const result = Object.hasOwn(record, "result"), error = Object.hasOwn(record, "error");
@@ -43,6 +46,45 @@ export class UsdtJsonRpc {
     if (error) throw providerRefusal(method, record.error);
     return record.result;
   }
+}
+
+/** Read one authenticated safe-block account view. Every contract and account read uses the same safe tag. */
+export async function usdtSafeSnapshot(transport: GaslessTransport, rpcUrl: string, sender: Address): Promise<{
+  readonly chainId: bigint; readonly blockNumber: bigint; readonly blockHash: Hex; readonly account: UsdtAccountState;
+}> {
+  const rpc = new UsdtJsonRpc(transport, rpcUrl, CHAIN_METHODS);
+  const chainId = rpcQuantity(await rpc.call("eth_chainId", []));
+  if (chainId !== 1n) usdtFailure("APN_CHAIN_MISMATCH", "gasless_usdt_chain");
+  const block = rpcRecord(await rpc.call("eth_getBlockByNumber", ["safe", false]));
+  const blockNumber = rpcQuantity(block.number), blockHash = rpcHex(block.hash, 32, 32);
+  if (blockNumber < 1n) usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_safe_block");
+  const tag = { blockHash, requireCanonical: true };
+  const read = async (to: Address, data: Hex): Promise<Hex> => rpcHex(await rpc.call("eth_call", [{ to, data }, tag]));
+  for (const [address, expected] of [[USDT_GASLESS.token, USDT_GASLESS.tokenCodeHash], [USDT_GASLESS.entryPoint, USDT_GASLESS.entryPointCodeHash],
+    [USDT_GASLESS.delegate, USDT_GASLESS.delegateCodeHash], [USDT_GASLESS.paymaster, USDT_GASLESS.paymasterCodeHash]] as const) {
+    if (keccak256(rpcHex(await rpc.call("eth_getCode", [address, tag]))) !== expected) {
+      usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_code_drift");
+    }
+  }
+  const call = (functionName: "basisPointsRate" | "maximumFee" | "paused" | "entryPoint") =>
+    encodeFunctionData({ abi: READS, functionName });
+  if (rpcWord(await read(USDT_GASLESS.token, call("basisPointsRate"))) !== 0n ||
+    rpcWord(await read(USDT_GASLESS.token, call("maximumFee"))) !== 0n) {
+    usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_token_transfer_fee");
+  }
+  if (rpcWord(await read(USDT_GASLESS.token, call("paused"))) !== 0n) usdtFailure("APN_OPERATION_BLOCKED", "gasless_usdt_token_paused");
+  if (rpcAddress(`0x${(await read(USDT_GASLESS.paymaster, call("entryPoint"))).slice(26)}`) !== USDT_GASLESS.entryPoint) {
+    usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_paymaster_entry_point");
+  }
+  const code = rpcHex(await rpc.call("eth_getCode", [sender, tag]));
+  if (code !== "0x" && code !== DELEGATION) usdtFailure("APN_OPERATION_BLOCKED", "gasless_usdt_foreign_delegation");
+  const usdtBalanceAtomic = rpcWord(await read(USDT_GASLESS.token,
+    encodeFunctionData({ abi: READS, functionName: "balanceOf", args: [sender] })));
+  const entryPointNonce = rpcWord(await read(USDT_GASLESS.entryPoint,
+    encodeFunctionData({ abi: READS, functionName: "getNonce", args: [sender, 0n] })));
+  const eoaNonce = rpcQuantity(await rpc.call("eth_getTransactionCount", [sender, tag]));
+  return { chainId, blockNumber, blockHash,
+    account: { usdtBalanceAtomic, entryPointNonce, eoaNonce, delegation: code === "0x" ? "empty" : "expected" } };
 }
 
 /**

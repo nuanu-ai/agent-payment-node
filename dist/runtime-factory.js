@@ -37,6 +37,7 @@ import { OneClickSourceService } from "./lifi/near-oneclick-source-service.js";
 import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
 import { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
+import { GaslessUsdtCommandPrepare } from "./gasless-usdt/command-prepare.js";
 import { UsdtOperationRepository } from "./gasless-usdt/operation.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
@@ -199,6 +200,9 @@ export function createApnCore(bound, options = {}) {
             ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyGaslessApproval() } : {}) },
         ...(bound.request.command.startsWith("gasless.usdt.") || options.gaslessUsdt !== undefined ? {
             gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)),
+        } : {}),
+        ...(bound.request.command === "gasless.usdt.prepare" || options.gaslessUsdtPrepare !== undefined ? {
+            gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock, options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)), options.gaslessUsdtPrepareOptions),
         } : {}),
         bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
             custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),

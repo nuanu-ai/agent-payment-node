@@ -231,6 +231,14 @@ export type CommandRequest = {
     readonly profileHash: string;
     readonly operationId: string;
 } | {
+    readonly command: "gasless.usdt.prepare";
+    readonly profile: string;
+    readonly recipient: Address;
+    readonly grossAtomic: string;
+    readonly maxFeeAtomic: string;
+    readonly minReceivedAtomic: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "bridge.capabilities";
     readonly profile?: string;
 } | {

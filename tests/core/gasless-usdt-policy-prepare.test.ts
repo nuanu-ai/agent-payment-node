@@ -7,7 +7,7 @@ import { hashObject } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import type { ActiveAssetPolicy } from "../../src/allowlist-active-policy.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
-import { preparePolicyBoundUsdt, type UsdtPolicyPrepareRequest, type UsdtPreparePort } from "../../src/gasless-usdt/policy-prepare.js";
+import { preparePolicyBoundUsdt, type UsdtPolicyPrepared, type UsdtPolicyPrepareRequest, type UsdtPreparePort } from "../../src/gasless-usdt/policy-prepare.js";
 import type { UsdtSponsorPort } from "../../src/gasless-usdt/engine.js";
 import type { UsdtUserOperation } from "../../src/gasless-usdt/userop.js";
 import type { Hex } from "../../src/model.js";
@@ -15,6 +15,12 @@ import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
 import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
 import { USDT_BOUND_OPERATION_SCHEMA, UsdtBoundOperationRepository, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
 import { temporaryState } from "./helpers.js";
+import { bindArgv } from "../../src/command-binder.js";
+import { runCli } from "../../src/cli.js";
+import { createMcpServer } from "../../src/mcp-server.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
+import { createApnCore } from "../../src/runtime-factory.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RECIPIENT = getAddress("0x000000000000000000000000000000000000dEaD");
@@ -52,6 +58,59 @@ function fixture() {
     setUsage: (value: string) => { usage = value; }, setQuote: (value: typeof QUOTE) => { quote = value; },
     setPrice: (value: typeof PRICE) => { price = value; } };
 }
+
+test("installed CLI and MCP prepare save the same unsigned bound operation; status reads it", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), options = { stateRoot: temporary.root, clock: { now: () => NOW },
+    gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor },
+    ids: { next: () => "12345678-1234-4234-8234-123456789abc" } };
+  const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "installed-001"];
+  const bound = bindArgv(argv);
+  assert.equal(bound.request.command, "gasless.usdt.prepare");
+  const cli = await runCli(argv, {}, options);
+  assert.equal(cli.ok, true, JSON.stringify(cli.error));
+  const server = createMcpServer(options), [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "gasless-usdt-prepare-test", version: "1.0.0" });
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const result = await client.callTool({ name: "apn_gasless_usdt_prepare", arguments: { profile: "owner", to: RECIPIENT,
+    amount: "1", max_fee: "0.5", min_received: "0.5", idempotency_key: "installed-001" } });
+  assert.equal(result.content[0]?.type, "text");
+  if (result.content[0]?.type !== "text") throw new Error("MCP text result missing");
+  assert.equal(result.content[0].text, JSON.stringify(cli));
+  const record = cli.operation as { operationId: string; profileHash: string; signerBoundary: string; dispatch: string;
+    usageReservation: string; binding: UsdtPolicyPrepared };
+  assert.equal(record.profileHash, allowlistProfileHash("owner"));
+  assert.equal(record.signerBoundary, "unavailable");
+  assert.equal(record.dispatch, "disabled");
+  assert.equal(record.usageReservation, "disabled");
+  assert.equal(record.binding.account.entryPointNonce, "7");
+  assert.equal(record.binding.plan.feeCapAtomic, "500000");
+  const status = await createApnCore(bindArgv(["gasless", "usdt", "status", "--profile-hash", record.profileHash,
+    "--operation", record.operationId]), options).execute({ command: "gasless.usdt.status", profileHash: record.profileHash,
+    operationId: record.operationId });
+  assert.equal(status.ok, true);
+  assert.deepEqual(status.operation, cli.operation);
+  assert.equal(f.offered.length, 2);
+  assert.equal(f.offered.every(op => op.signature !== "0x"), true); // estimate placeholder only; no signer is reachable
+});
+
+test("command refuses inactive or changed policy before RPC or journal publication", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  for (const mutate of [(f: ReturnType<typeof fixture>) => f.setPolicy(null),
+    (f: ReturnType<typeof fixture>) => f.setPolicy(active({ owner: RECIPIENT })),
+    (f: ReturnType<typeof fixture>) => f.setPolicy(active({ per: "999999" }))]) {
+    const f = fixture(); mutate(f);
+    const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+      "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "refuse-001"];
+    const outcome = await runCli(argv, {}, { stateRoot: temporary.root, clock: { now: () => NOW },
+      gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } });
+    assert.equal(outcome.ok, false);
+    assert.equal(f.offered.length, 0);
+  }
+});
 
 test("policy prepare freezes owner, safe block, exact approval sequence and sponsored unsigned operation", async () => {
   const f = fixture();

@@ -232,10 +232,25 @@ export class ApnCore {
                                 : await this.gasless.balance(request.profile, gaslessChain(request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")), "chain_verified_public_read");
             }
             case "gasless.transfer.prepare": return operationOutcome(await this.prepareGasless(request));
+            case "gasless.usdt.prepare": {
+                const service = this.context.gaslessUsdtPrepare;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Gasless USDT prepare runtime is unavailable.", { reason: "gasless_usdt_prepare_runtime_unavailable" });
+                return operationOutcome(await service.prepare(request));
+            }
             case "gasless.usdt.status":
             case "gasless.usdt.resume":
                 if (this.context.gaslessUsdt === undefined)
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Gasless USDT operation command runtime is unavailable.", { reason: "gasless_usdt_command_runtime_unavailable" });
+                if (request.command === "gasless.usdt.status") {
+                    try {
+                        return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash).statusBound(request.operationId));
+                    }
+                    catch (error) {
+                        if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_NOT_FOUND")
+                            throw error;
+                    }
+                }
                 return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash)[request.command.endsWith("status") ? "status" : "resume"](request.operationId));
             case "gasless.transfer.approve": {
                 const stored = await this.operations.required(request.operationId), { kind } = stored;

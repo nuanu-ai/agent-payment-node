@@ -23,6 +23,17 @@ const states = { terminal: [...new Set([...GASLESS_TERMINAL, ...SA_TERMINAL, ...
 const readApproval = { class: "none", when: "Never signs or submits." };
 const done = { terminal: ["completed", "classified_failure"], non_terminal: [] };
 export const GASLESS_COMMANDS = [
+    { path: ["gasless", "usdt", "prepare"],
+        synopsis: "apn gasless usdt prepare --profile <profile> --to <address> --amount <gross-USDT> --max-fee <USDT> --min-received <USDT> --idempotency-key <key>",
+        summary: "Save an unsigned Ethereum USDT gasless preparation under the active owner asset policy.",
+        options: [profile, option("--to", "address", ["nonzero_distinct_recipient"]),
+            option("--amount", "string", ["positive_USDT_at_most_six_decimal_places"]),
+            option("--max-fee", "string", ["nonnegative_USDT_at_most_six_decimal_places"]),
+            option("--min-received", "string", ["positive_USDT_at_most_six_decimal_places"]),
+            option("--idempotency-key", "idempotency_key", ["global_across_all_money_families"])],
+        effect: { class: "payment_prepare", summary: "Reads the active owner policy, safe Ethereum account and fixed public sponsor, then saves only unsigned material." },
+        approval: readApproval, output, states: { terminal: [], non_terminal: ["prepared"] }, recovery: [],
+        examples: ["apn gasless usdt prepare --profile default --to <recipient> --amount 1 --max-fee 0.5 --min-received 0.5 --idempotency-key <key>"] },
     { path: ["gasless", "usdt", "status"], synopsis: "apn gasless usdt status --profile-hash <hash> --operation <operation-id>",
         summary: "Read a saved gasless USDT operation without creating or changing state.", options: [profileHash, operation],
         effect: { class: "local_read", summary: "Reads the explicitly bound gasless USDT journal; never signs or submits." }, approval: readApproval, output,
@@ -82,6 +93,10 @@ function commandDecimals(chainId) {
 export function bindGaslessCommand(path, o) {
     if (path === "gasless capabilities")
         return { command: "gasless.capabilities", ...(o["--profile"] === undefined ? {} : { profile: o["--profile"] }) };
+    if (path === "gasless usdt prepare")
+        return { command: "gasless.usdt.prepare", profile: o["--profile"], idempotencyKey: o["--idempotency-key"],
+            recipient: gaslessAddress(o["--to"], "APN_INVALID_INPUT"), grossAtomic: gaslessDecimal(o["--amount"], 6, true),
+            maxFeeAtomic: gaslessDecimal(o["--max-fee"], 6), minReceivedAtomic: gaslessDecimal(o["--min-received"], 6, true) };
     if (path === "gasless usdt status" || path === "gasless usdt resume") {
         const profileHash = o["--profile-hash"];
         if (!/^[a-f0-9]{64}$/u.test(profileHash))

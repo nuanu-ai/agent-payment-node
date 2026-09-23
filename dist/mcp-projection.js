@@ -61,7 +61,7 @@ const SELECTED_PATHS = [
     "x402 inspect-network",
     "x402 fetch prepare-network",
     "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
-    "gasless usdt status", "gasless usdt resume",
+    "gasless usdt prepare", "gasless usdt status", "gasless usdt resume",
     "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
     "oneclick source submit", "oneclick source status",
 ];

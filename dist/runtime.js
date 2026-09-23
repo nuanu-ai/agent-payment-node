@@ -19,6 +19,7 @@ export class RuntimeContext {
     metaMaskGasless;
     gasless;
     gaslessUsdt;
+    gaslessUsdtPrepare;
     bridge;
     circleApproval;
     circleSource;
@@ -82,6 +83,8 @@ export class RuntimeContext {
             this.gasless = dependencies.gasless;
         if (dependencies.gaslessUsdt !== undefined)
             this.gaslessUsdt = dependencies.gaslessUsdt;
+        if (dependencies.gaslessUsdtPrepare !== undefined)
+            this.gaslessUsdtPrepare = dependencies.gaslessUsdtPrepare;
         if (dependencies.bridge !== undefined)
             this.bridge = dependencies.bridge;
         if (dependencies.circleApproval !== undefined)
