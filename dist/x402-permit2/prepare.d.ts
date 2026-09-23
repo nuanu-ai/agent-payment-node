@@ -1,4 +1,5 @@
 import type { Address, Hex } from "../model.js";
+import type { X402PaymentRequired } from "../x402-codec.js";
 import { type Permit2SigningPlan } from "./authorization.js";
 import { type Permit2Requirement } from "./offer.js";
 /** Values must come from the current, authenticated owner policy and local wallet binding. */
@@ -45,12 +46,7 @@ export interface Permit2PrepareEvidence {
 export interface Permit2PrepareInput {
     readonly payer: Address;
     readonly localWallet: true;
-    readonly challenge: {
-        readonly x402Version: 2;
-        readonly resource: unknown;
-        readonly accepts: readonly unknown[];
-        readonly eip2612GasSponsoring: boolean;
-    };
+    readonly challenge: X402PaymentRequired;
     /** Terms the caller displayed/accepted; a changed merchant 402 cannot be silently substituted. */
     readonly expected: {
         readonly index: number;

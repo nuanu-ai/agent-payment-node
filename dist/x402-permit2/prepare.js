@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { canonicalJson, domainHash } from "../canonical.js";
+import { canonicalJson, domainHash, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { planPermit2Authorization } from "./authorization.js";
+import { isEip2612GasSponsoringDeclaration } from "./extension.js";
 import { selectPermit2Offer } from "./offer.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "./registry.js";
 const PREPARE_DOMAIN = "apn.x402-permit2.prepare.v1";
@@ -11,9 +12,7 @@ const asset = X402_PERMIT2_ASSETS[0];
 export function preparePermit2Payment(input) {
     if (input.localWallet !== true)
         blocked("A local EVM wallet is required.", "x402_permit2_local_wallet_required");
-    if (input.challenge?.x402Version !== 2 || !Array.isArray(input.challenge.accepts) ||
-        typeof input.challenge.eip2612GasSponsoring !== "boolean")
-        invalid("The merchant challenge is invalid.");
+    const sellerSponsorsEip2612 = validateChallenge(input.challenge);
     const challengeHash = hashChallenge(input.challenge);
     const selection = selectPermit2Offer(input.challenge.accepts, input.payer);
     if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
@@ -58,7 +57,7 @@ export function preparePermit2Payment(input) {
     if (((BigInt(evidence.nonceBitmapWord) >> (input.nonce & 0xffn)) & 1n) !== 0n) {
         blocked("The Permit2 nonce is already consumed.", "x402_permit2_nonce_consumed");
     }
-    if (allowance < amount && (!input.challenge.eip2612GasSponsoring || !facilitator.eip2612GasSponsoring)) {
+    if (allowance < amount && (!sellerSponsorsEip2612 || !facilitator.eip2612GasSponsoring)) {
         blocked("Allowance is insufficient and exact EIP-2612 sponsorship is unavailable.", "x402_permit2_allowance_required");
     }
     const eip2612Nonce = evidence.eip2612Nonce === null ? null : quantity(evidence.eip2612Nonce);
@@ -66,21 +65,38 @@ export function preparePermit2Payment(input) {
         blocked("The token permit nonce is missing.", "x402_permit2_eip2612_unavailable");
     const plan = planPermit2Authorization(selection, { payer: input.payer, nowSeconds: input.nowSeconds,
         nonce: input.nonce, permit2AllowanceAtomic: allowance.toString(), eip2612Nonce,
-        sellerSponsorsEip2612: input.challenge.eip2612GasSponsoring && facilitator.eip2612GasSponsoring });
+        sellerSponsorsEip2612: sellerSponsorsEip2612 && facilitator.eip2612GasSponsoring });
     const body = { challengeHash, offerHash: selection.offerHash, policyDigest: owner.policyDigest, payer: input.payer,
         chain: "eip155:43114", token: asset.token, payTo: selection.payTo, amountAtomic: selection.amountAtomic,
         expiresAtUnix: plan.authorization.deadline, planHash: plan.planHash };
     return deepFreeze({ ...body, plan, prepareHash: domainHash(PREPARE_DOMAIN, canonicalJson(body)) });
 }
 export function hashChallenge(challenge) {
+    validateChallenge(challenge);
     return domainHash("apn.x402-permit2.challenge.v1", canonicalJson(challenge));
+}
+function validateChallenge(challenge) {
+    if (!isPlainRecord(challenge) || challenge.x402Version !== 2 || !isPlainRecord(challenge.resource) ||
+        typeof challenge.resource.url !== "string" || !Array.isArray(challenge.accepts) || challenge.accepts.length === 0 ||
+        Object.hasOwn(challenge, "eip2612GasSponsoring"))
+        invalid("The merchant challenge is invalid.");
+    if (challenge.extensions === undefined)
+        return false;
+    if (!isPlainRecord(challenge.extensions))
+        invalid("The merchant challenge extensions are invalid.");
+    if (!Object.hasOwn(challenge.extensions, "eip2612GasSponsoring"))
+        return false;
+    if (!isEip2612GasSponsoringDeclaration(challenge.extensions.eip2612GasSponsoring)) {
+        invalid("The merchant EIP-2612 sponsorship declaration is invalid or unsupported.");
+    }
+    return true;
 }
 export async function preparePermit2WithPort(port, input) {
     const challengeHash = hashChallenge(input.challenge);
     const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
     const read = await port.read({ payer: input.payer, chainId: 43114, token: asset.token, challengeHash,
         nonceBitmapWordIndex: (nonce >> 8n).toString() });
-    return preparePermit2Payment({ ...input, ...read, nonce });
+    return preparePermit2Payment({ ...input, owner: read.owner, evidence: read.evidence, nonce });
 }
 function quantity(value) {
     if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,77})$/u.test(value) || BigInt(value) > UINT256) {
