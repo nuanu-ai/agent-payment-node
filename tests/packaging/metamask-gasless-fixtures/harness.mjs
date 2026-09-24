@@ -38,6 +38,7 @@ export async function installedPackage() {
   await writeFile(join(root, "install.log"), install.stdout + install.stderr);
   assert.equal(install.code, 0, install.stderr);
   await stat(join(packageRoot, "dist/metamask-gasless/client/helper-entry.js"));
+  await stat(join(packageRoot, "dist/metamask-gasless/client/helper-bootstrap.js"));
   const identities = {};
   for (const [name, version] of Object.entries({ "@metamask/agent-sdk": "6.1.4", "@metamask/fox-sdk": "2.7.0",
     "@toruslabs/ethereum-controllers": "9.12.0" })) {
