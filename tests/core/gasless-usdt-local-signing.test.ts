@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getAddress, hashTypedData } from "viem";
+import { encodeAbiParameters, getAddress, hashTypedData, numberToHex, padHex, toEventSelector } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../../src/canonical.js";
 import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { UsdtBoundOperationRepository } from "../../src/gasless-usdt/bound-operation.js";
-import { UsdtExecutionJournal } from "../../src/gasless-usdt/execution-journal.js";
+import { UsdtExecutionJournal, usdtExecutionIntent } from "../../src/gasless-usdt/execution-journal.js";
+import { UsdtRecoveryService, type UsdtRecoveryPort } from "../../src/gasless-usdt/recovery.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { LocalUsdtSigningService, verifySignedUsdtOperation } from "../../src/gasless-usdt/local-signing.js";
 import { GuardedUsdtSendService } from "../../src/gasless-usdt/send.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
+import type { UsdtChainReceipt } from "../../src/gasless-usdt/receipt.js";
 import { preparePolicyBoundUsdt } from "../../src/gasless-usdt/policy-prepare.js";
 import { usdtUserOperationHash, usdtUserOperationTypedData } from "../../src/gasless-usdt/userop.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
@@ -190,5 +193,80 @@ test("guarded send blocks changed policy or nonce before any dispatch", async t 
       { async send() { calls++; return `0x${"aa".repeat(32)}`; } }, port);
     await assert.rejects(() => send.send(f.bound, f.expected), { code: "APN_OPERATION_BLOCKED" });
     assert.equal(calls, 0);
+  }
+});
+
+const USER_OPERATION_EVENT = toEventSelector("UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)");
+const TRANSFER_EVENT = toEventSelector("Transfer(address indexed from, address indexed to, uint256 value)");
+const TX = `0x${"cc".repeat(32)}` as const;
+function observedReceipt(hash: `0x${string}`, success: boolean, sender: `0x${string}`): UsdtChainReceipt {
+  const logs = [{ address: USDT_GASLESS.entryPoint,
+    topics: [USER_OPERATION_EVENT, hash, padHex(sender, { size: 32 }), padHex(USDT_GASLESS.paymaster, { size: 32 })],
+    data: encodeAbiParameters([{ type: "uint256" }, { type: "bool" }, { type: "uint256" }, { type: "uint256" }],
+      [7n, success, 10n, 20n]) }];
+  if (success) for (const [to, amount] of [[RECIPIENT, 500_000n], [USDT_GASLESS.treasury, 100_000n]] as const) {
+    logs.push({ address: USDT_GASLESS.token, topics: [TRANSFER_EVENT, padHex(sender, { size: 32 }), padHex(to, { size: 32 })],
+      data: padHex(numberToHex(amount), { size: 32 }) });
+  }
+  return { transactionHash: TX, blockNumber: 26_002_951n, status: "success", logs };
+}
+
+test("recovery finalizes an observed pending UserOperation once and replays without RPC", async t => {
+  const f = await setup(); t.after(f.temporary.cleanup);
+  const journal = new UsdtExecutionJournal(f.temporary.root), signed = await f.signer.sign(f.bound, f.expected);
+  await journal.reserve(f.bound, usdtExecutionIntent(f.bound), f.port);
+  await journal.markSubmitting(f.bound, f.port, signed.userOperationHash);
+  await journal.markSubmitted(f.bound, signed.userOperationHash, NOW);
+  let lookups = 0;
+  const port: UsdtRecoveryPort = { userOperationReceipt: async () => { lookups++; return { userOpHash: signed.userOperationHash,
+    sender: OWNER, entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
+    success: true, transactionHash: TX }; }, canonicalFinalizedReceipt: async () => observedReceipt(signed.userOperationHash, true, OWNER) };
+  const recovery = new UsdtRecoveryService(journal, port, () => NOW);
+  const result = await recovery.observe(f.bound);
+  assert.equal(result.state, "finalized");
+  assert.equal(result.settlement?.recipientCreditAtomic, "500000");
+  assert.equal(result.settlement?.feeAtomic, "100000");
+  assert.equal((await new AssetUsageLedger(f.temporary.root).load({ account: OWNER, chain: USDT_GASLESS.chain,
+    asset: { kind: "token", identifier: USDT_GASLESS.token } }, result.reservationId))?.state, "finalized");
+  assert.deepEqual(await recovery.observe(f.bound), result);
+  assert.equal(lookups, 1);
+});
+
+test("recovery releases usage only for canonical failed UserOperationEvent", async t => {
+  const f = await setup(); t.after(f.temporary.cleanup);
+  const journal = new UsdtExecutionJournal(f.temporary.root), signed = await f.signer.sign(f.bound, f.expected);
+  await journal.reserve(f.bound, usdtExecutionIntent(f.bound), f.port);
+  await journal.markSubmitting(f.bound, f.port, signed.userOperationHash);
+  const recovery = new UsdtRecoveryService(journal, { userOperationReceipt: async () => ({ userOpHash: signed.userOperationHash,
+    sender: OWNER, entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
+    success: false, transactionHash: TX }), canonicalFinalizedReceipt: async () => observedReceipt(signed.userOperationHash, false, OWNER) }, () => NOW);
+  const result = await recovery.observe(f.bound);
+  assert.equal(result.state, "failed_confirmed_revert");
+  assert.equal(result.settlement, null);
+  assert.equal((await new AssetUsageLedger(f.temporary.root).load({ account: OWNER, chain: USDT_GASLESS.chain,
+    asset: { kind: "token", identifier: USDT_GASLESS.token } }, result.reservationId))?.state, "failed_confirmed_revert");
+  assert.deepEqual(await recovery.observe(f.bound), result);
+});
+
+test("pre-send crash, pending, malformed, mismatched and unavailable observations retain unknown finality", async t => {
+  for (const caseName of ["missing", "wrong_hash", "wrong_chain_event", "malformed", "provider_failure"] as const) {
+    const f = await setup(); t.after(f.temporary.cleanup);
+    const journal = new UsdtExecutionJournal(f.temporary.root), signed = await f.signer.sign(f.bound, f.expected);
+    await journal.reserve(f.bound, usdtExecutionIntent(f.bound), f.port);
+    await journal.markSubmitting(f.bound, f.port, signed.userOperationHash);
+    const port: UsdtRecoveryPort = { userOperationReceipt: async () => {
+      if (caseName === "provider_failure") throw new Error("provider unavailable");
+      if (caseName === "missing") return null;
+      return { userOpHash: caseName === "wrong_hash" ? `0x${"aa".repeat(32)}` : signed.userOperationHash,
+        sender: OWNER, entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
+        success: true, transactionHash: TX };
+    }, canonicalFinalizedReceipt: async () => caseName === "malformed" ? null :
+      observedReceipt(caseName === "wrong_chain_event" ? `0x${"bb".repeat(32)}` : signed.userOperationHash, true, OWNER) };
+    const recovery = new UsdtRecoveryService(journal, port, () => NOW);
+    assert.equal((await recovery.observe(f.bound)).state, "unknown_finality", caseName);
+    assert.equal((await recovery.observe(f.bound)).state, "unknown_finality", caseName);
+    assert.equal((await new AssetUsageLedger(f.temporary.root).load({ account: OWNER, chain: USDT_GASLESS.chain,
+      asset: { kind: "token", identifier: USDT_GASLESS.token } }, (await journal.load(f.bound.operationId))!.reservationId))?.state,
+    "unknown_finality", caseName);
   }
 });

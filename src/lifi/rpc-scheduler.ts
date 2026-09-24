@@ -1,6 +1,7 @@
 import { ApnError } from "../errors.js";
 
 const RPC_ORIGIN_GAP_MS = 750;
+const PIMLICO_PUBLIC_GAP_MS = 3_000;
 export const RPC_RETRY_DELAY_MS = 2_000;
 
 export class RpcHttpFailure extends Error {
@@ -60,7 +61,8 @@ export class RpcProviderScheduler {
         if (this.cooldownMode === "reject" && cooldownUntil > before) {
           throw new ApnError("APN_PROVIDER_UNAVAILABLE", "RPC provider is cooling down.", { reason: "rpc_provider_cooldown" });
         }
-        const nextAllowed = Math.max(lastStart + RPC_ORIGIN_GAP_MS, cooldownUntil), delay = Math.max(0, nextAllowed - before);
+        const gap = entry.family === "public.pimlico.io" ? PIMLICO_PUBLIC_GAP_MS : RPC_ORIGIN_GAP_MS;
+        const nextAllowed = Math.max(lastStart + gap, cooldownUntil), delay = Math.max(0, nextAllowed - before);
         entry.beforeWait(delay); if (delay > 0) await entry.wait(delay);
         let current = clock();
         if (current < before) throw schedulerClockRollback(entry.family);

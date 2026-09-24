@@ -3,7 +3,7 @@ import test from "node:test";
 import { getAddress, keccak256, pad, type Hex } from "viem";
 import type { GaslessTransport } from "../../src/gasless/https.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
-import { UsdtJsonRpc, usdtChainPort, usdtSafeSnapshot, usdtSponsorPort } from "../../src/gasless-usdt/rpc.js";
+import { UsdtJsonRpc, usdtChainPort, usdtRecoveryPort, usdtSafeSnapshot, usdtSponsorPort } from "../../src/gasless-usdt/rpc.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RPC_URL = "https://ethereum.example-rpc.test/";
@@ -170,4 +170,33 @@ test("a receipt counts only at or below the safe head and on the canonical block
   const proven = await chain("0x64", blockHash).receiptAt(tx);
   assert.deepEqual(proven, { transactionHash: tx, blockNumber: 100n, status: "success", logs: [] });
   assert.equal(await usdtChainPort(transport({ eth_getTransactionReceipt: null }, []), RPC_URL).receiptAt(tx), null);
+});
+
+test("recovery adapter requires the finalized head and rejects malformed or noncanonical chain evidence", async () => {
+  const hash = `0x${"ab".repeat(32)}` as Hex, tx = `0x${"cd".repeat(32)}` as Hex;
+  const blockHash = `0x${"ee".repeat(32)}` as Hex, seen: string[] = [];
+  const locator = { userOpHash: hash, sender: OWNER, entryPoint: USDT_GASLESS.entryPoint,
+    paymaster: USDT_GASLESS.paymaster, success: true, receipt: { transactionHash: tx } };
+  const receipt = { transactionHash: tx, blockNumber: "0x64", blockHash, status: "0x1", logs: [] };
+  const peer = transport({ eth_getUserOperationReceipt: locator, eth_chainId: "0x1", eth_getTransactionReceipt: receipt,
+    eth_getBlockByNumber: (params: readonly unknown[]) => params[0] === "finalized" ? { number: "0x64" } : { hash: blockHash } }, seen);
+  const port = usdtRecoveryPort(peer, RPC_URL);
+  assert.deepEqual(await port.userOperationReceipt(hash), { userOpHash: hash, sender: OWNER,
+    entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster, success: true, transactionHash: tx });
+  assert.equal((await port.canonicalFinalizedReceipt(tx))?.transactionHash, tx);
+  assert.deepEqual(seen, [`${USDT_GASLESS.bundlerUrl} eth_getUserOperationReceipt`, `${RPC_URL} eth_chainId`,
+    `${RPC_URL} eth_getTransactionReceipt`, `${RPC_URL} eth_getBlockByNumber`, `${RPC_URL} eth_getBlockByNumber`]);
+  const headTags: unknown[] = [];
+  const notFinal = usdtRecoveryPort(transport({ eth_chainId: "0x1", eth_getTransactionReceipt: receipt,
+    eth_getBlockByNumber: (params: readonly unknown[]) => { headTags.push(params[0]); return params[0] === "finalized"
+      ? { number: "0x63" } : { number: "0x65", hash: blockHash }; } }, []), RPC_URL);
+  assert.equal(await notFinal.canonicalFinalizedReceipt(tx), null);
+  assert.deepEqual(headTags, ["finalized"]);
+  await assert.rejects(usdtRecoveryPort(transport({ eth_getUserOperationReceipt: { ...locator, success: "yes" } }, []), RPC_URL)
+    .userOperationReceipt(hash), /gasless_usdt_userop_receipt_success/u);
+  await assert.rejects(usdtRecoveryPort(transport({ eth_chainId: "0x89" }, []), RPC_URL).canonicalFinalizedReceipt(tx),
+    /gasless_usdt_chain/u);
+  await assert.rejects(usdtRecoveryPort(transport({ eth_chainId: "0x1", eth_getTransactionReceipt: { ...receipt,
+    status: "0x2" }, eth_getBlockByNumber: (params: readonly unknown[]) => params[0] === "finalized" ? { number: "0x64" } : { hash: blockHash } }, []),
+  RPC_URL).canonicalFinalizedReceipt(tx), /gasless_usdt_receipt_status/u);
 });

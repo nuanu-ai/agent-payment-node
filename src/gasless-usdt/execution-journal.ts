@@ -8,9 +8,10 @@ import { validateUsdtBoundOperation, type UsdtBoundOperation } from "./bound-ope
 import { USDT_GASLESS } from "./model.js";
 import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "./paymaster-data.js";
 import type { UsdtPreparePort } from "./policy-prepare.js";
+import type { UsdtSettlement } from "./receipt.js";
 
 export const USDT_EXECUTION_SCHEMA = "apn.gasless-usdt-execution.v1" as const;
-export type UsdtExecutionState = "planned" | "reserved" | "submitting" | "submitted_pending" | "unknown_finality";
+export type UsdtExecutionState = "planned" | "reserved" | "submitting" | "submitted_pending" | "unknown_finality" | "finalized" | "failed_confirmed_revert";
 export interface UsdtExecutionIntent {
   readonly operationId: string;
   readonly profileHash: string;
@@ -37,10 +38,12 @@ export interface UsdtExecutionRecord extends UsdtExecutionIntent {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly integrityHash: string;
+  readonly outcomeDigest?: string;
+  readonly settlement?: UsdtSettlement | null;
 }
 const HASH = /^[a-f0-9]{64}$/u;
 const DECIMAL = /^(0|[1-9][0-9]*)$/u;
-const STATES: readonly UsdtExecutionState[] = ["planned", "reserved", "submitting", "submitted_pending", "unknown_finality"];
+const STATES: readonly UsdtExecutionState[] = ["planned", "reserved", "submitting", "submitted_pending", "unknown_finality", "finalized", "failed_confirmed_revert"];
 function fail(reason: string, code: "APN_OPERATION_BLOCKED" | "APN_STATE_CORRUPT" | "APN_IDEMPOTENCY_CONFLICT" = "APN_OPERATION_BLOCKED"): never {
   throw new ApnError(code, `Gasless USDT execution refused: ${reason}.`, { rail: "gasless_usdt", reason });
 }
@@ -72,7 +75,7 @@ function expected(bound: UsdtBoundOperation): UsdtExecutionIntent {
 }
 function exactIntent(record: UsdtExecutionRecord): UsdtExecutionIntent {
   const { schemaVersion: _schema, reservationId: _reservation, state: _state, userOperationHash: _userOperationHash, createdAt: _created,
-    updatedAt: _updated, integrityHash: _integrity, ...intent } = record;
+    updatedAt: _updated, integrityHash: _integrity, outcomeDigest: _outcome, settlement: _settlement, ...intent } = record;
   return intent;
 }
 export function validateUsdtExecutionRecord(value: unknown): UsdtExecutionRecord {
@@ -80,14 +83,18 @@ export function validateUsdtExecutionRecord(value: unknown): UsdtExecutionRecord
     "operationId", "profileHash", "bindingHash", "policyDigest", "policyRevision", "activationDigest", "sender",
     "smartAccount", "recipient", "entryPointNonce", "eoaNonce", "safeBlockNumber", "safeBlockHash", "quoteHash",
     "paymasterValidUntil", "maxFeeAtomic"];
-  if (!isPlainRecord(value) || !exactKeys(value, keys) || value.schemaVersion !== USDT_EXECUTION_SCHEMA ||
+  const terminal = isPlainRecord(value) && (value.state === "finalized" || value.state === "failed_confirmed_revert");
+  if (!isPlainRecord(value) || !exactKeys(value, terminal ? [...keys, "outcomeDigest", "settlement"] : keys) || value.schemaVersion !== USDT_EXECUTION_SCHEMA ||
     !STATES.includes(value.state as UsdtExecutionState) ||
     [value.operationId, value.profileHash, value.bindingHash, value.policyDigest, value.activationDigest,
       value.quoteHash, value.integrityHash].some(v => typeof v !== "string" || !HASH.test(v)) ||
     typeof value.reservationId !== "string" || !HASH.test(value.reservationId) ||
     (value.userOperationHash !== null && (typeof value.userOperationHash !== "string" || !/^0x[0-9a-f]{64}$/u.test(value.userOperationHash))) ||
     ((value.state === "planned" || value.state === "reserved") && value.userOperationHash !== null) ||
-    ((value.state === "submitting" || value.state === "submitted_pending") && value.userOperationHash === null) ||
+    ((value.state === "submitting" || value.state === "submitted_pending" || value.state === "finalized" ||
+      value.state === "failed_confirmed_revert") && value.userOperationHash === null) ||
+    (terminal && (typeof value.outcomeDigest !== "string" || !HASH.test(value.outcomeDigest) ||
+      (value.state === "finalized" ? !isPlainRecord(value.settlement) : value.settlement !== null))) ||
     !Number.isSafeInteger(value.policyRevision) || (value.policyRevision as number) < 1 ||
     [value.entryPointNonce, value.eoaNonce, value.safeBlockNumber, value.paymasterValidUntil, value.maxFeeAtomic]
       .some(v => typeof v !== "string" || !DECIMAL.test(v)) ||
@@ -268,10 +275,44 @@ export class UsdtExecutionJournal extends SecureStateStore {
     const bound = validateUsdtBoundOperation(boundValue); await this.ready();
     return this.withLocks([this.lock(bound.operationId)], async () => {
       const current = await this.load(bound.operationId);
-      if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)) || current.state !== "submitting") fail("unknown_finality_source");
+      if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)) ||
+        !["submitting", "submitted_pending", "unknown_finality"].includes(current.state)) fail("unknown_finality_source");
       await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
         policyDigest: current.policyDigest, state: "unknown_finality", expectedCurrentStates: ["reserved", "unknown_finality"], now });
       const next = seal({ ...recordBody(current), state: "unknown_finality", updatedAt: instant(now) });
+      await this.write(next); return next;
+    });
+  }
+
+  /** Replaying the same observation repairs a crash between the ledger and journal writes. */
+  async recordObservedOutcome(boundValue: UsdtBoundOperation, outcome: {
+    readonly state: "finalized" | "failed_confirmed_revert";
+    readonly digest: string;
+    readonly settlement: UsdtSettlement | null;
+  }, now: Date): Promise<UsdtExecutionRecord> {
+    const bound = validateUsdtBoundOperation(boundValue); await this.ready();
+    if (!HASH.test(outcome.digest) || (outcome.state === "finalized") !== (outcome.settlement !== null)) fail("observation_outcome_invalid");
+    return this.withLocks([this.lock(bound.operationId)], async () => {
+      const current = await this.load(bound.operationId);
+      if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)) ||
+        current.userOperationHash === null || ["planned", "reserved"].includes(current.state)) fail("observation_source_invalid");
+      if (current.state === "finalized" || current.state === "failed_confirmed_revert") {
+        if (current.state !== outcome.state || current.outcomeDigest !== outcome.digest ||
+          canonicalJson(current.settlement) !== canonicalJson(outcome.settlement)) fail("observation_replay_conflict", "APN_IDEMPOTENCY_CONFLICT");
+        return current;
+      }
+      const lease = await this.usage.load(identity(current.sender), current.reservationId);
+      if (lease === null || lease.policyDigest !== current.policyDigest || lease.amountAtomic !== bound.binding.plan.request.grossAtomic ||
+        !["reserved", "unknown_finality", outcome.state].includes(lease.state)) fail("usage_reservation_mismatch", "APN_STATE_CORRUPT");
+      if (outcome.state === "failed_confirmed_revert" && lease.state === "reserved") {
+        await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
+          policyDigest: current.policyDigest, state: "unknown_finality", expectedCurrentStates: ["reserved"], now });
+      }
+      await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
+        policyDigest: current.policyDigest, state: outcome.state,
+        expectedCurrentStates: ["reserved", "unknown_finality", outcome.state], outcomeDigest: outcome.digest, now });
+      const next = seal({ ...recordBody(current), state: outcome.state, outcomeDigest: outcome.digest,
+        settlement: outcome.settlement, updatedAt: instant(now) });
       await this.write(next); return next;
     });
   }
