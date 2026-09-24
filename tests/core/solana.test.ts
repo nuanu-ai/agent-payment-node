@@ -29,6 +29,36 @@ test("Solana CLI and MCP use the same explicit profile/asset/amount binding", ()
   assert.equal(chainDecimal("0.000000001", 9), "1");
 });
 
+test("local Solana public identity and unsigned prepare recover across restart without signing or sending", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const first = await solanaFixture(temporary.root);
+  const identity = await first.core.execute({ command: "wallet.capabilities-solana", profile: first.account.profile });
+  assert.equal(identity.ok, true, identity.error?.message);
+  assert.equal((identity.data as { account: { address: string; profile: string; provider: string } }).account.address, first.account.address);
+  assert.equal((identity.data as { account: { profile: string } }).account.profile, first.account.profile);
+  assert.equal((identity.data as { account: { provider: string } }).account.provider, "local");
+  assert.equal(JSON.stringify(identity).includes(Buffer.alloc(32, 47).toString("hex")), false);
+
+  const id = await first.prepare("sol", "solana-unsigned-recovery-0001");
+  const prepared = await first.core.execute({ command: "operation.status", operationId: id });
+  assert.equal((prepared.operation as { state: string }).state, "awaiting_approval");
+  const restarted = await solanaFixture(temporary.root, { rpc: first.rpc, wrapping: first.wrapping, admit: false });
+  const resumed = await restarted.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(resumed.ok, true, resumed.error?.message);
+  assert.deepEqual(resumed.operation, prepared.operation);
+  assert.equal(restarted.approval.calls.length, 0);
+  assert.equal(first.rpc.submissions.length, 0);
+  assert.equal(await restarted.storage.effect(restarted.account, id, (await restarted.core.rails.records.findOperation(id))!.fingerprint), null);
+
+  restarted.approval.refuse = true;
+  const refused = await restarted.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal(refused.ok, false);
+  assert.equal((await restarted.core.rails.records.findOperation(id))!.state, "failed_before_effect");
+  assert.equal(first.rpc.submissions.length, 0);
+  assert.equal(first.rpc.simulateCalls, 0);
+  assert.equal(await restarted.storage.effect(restarted.account, id, (await restarted.core.rails.records.findOperation(id))!.fingerprint), null);
+});
+
 for (const asset of ["sol", "usdc"] as const) test(`local ${asset} integrates encrypted custody, human policy, exact wire effect and finalized receipt`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const setup = await solanaFixture(temporary.root);
