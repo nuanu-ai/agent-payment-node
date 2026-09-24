@@ -1,3 +1,4 @@
+import { RelayUnsignedPrepareService, type RelayPreparePorts } from "./relay/prepare.js";
 import type { BoundCommand } from "./command-binder.js";
 import type { OutputEnvelope } from "./commands.js";
 import { ApnCore } from "./core.js";
@@ -38,6 +39,8 @@ import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export interface RuntimeFactoryOptions {
+    readonly relayPrepare?: RelayUnsignedPrepareService;
+    readonly relayPreparePorts?: RelayPreparePorts;
     readonly stargateNative?: StargateNativeService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;

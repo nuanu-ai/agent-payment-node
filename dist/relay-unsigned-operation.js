@@ -1,4 +1,4 @@
-/** An immutable, unsigned Relay intent. No transaction, signature, or execution material is stored. */
+/** An immutable Relay quote projection. Its transactions are unsigned and have no execution path. */
 import { hashObject } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
@@ -21,6 +21,11 @@ const body = z.strictObject({
     sourceAccount: address,
     recipient: address,
     quoteDigest: hash,
+    quote: z.custom((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
+    policyDigest: hash.optional(),
+    policyRevision: z.number().int().positive().optional(),
+    approvalNetworkFeeCeilingWei: positiveAtomic.optional(),
+    depositNetworkFeeCeilingWei: positiveAtomic.optional(),
     amountAtomic: positiveAtomic,
     minOutputAtomic: positiveAtomic,
     createdAt: timestamp,
@@ -36,6 +41,28 @@ export function validateRelayUnsignedOperation(value) {
     const { integrityHash, ...fields } = operation;
     if (hashObject(fields) !== integrityHash || Date.parse(operation.deadline) <= Date.parse(operation.createdAt))
         corrupt();
+    if ([operation.quote, operation.policyDigest, operation.policyRevision,
+        operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value !== undefined) &&
+        [operation.quote, operation.policyDigest, operation.policyRevision,
+            operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value === undefined))
+        corrupt();
+    if (operation.quote !== undefined) {
+        try {
+            const { quoteDigest, ...projection } = operation.quote;
+            if (hashObject(projection) !== quoteDigest || quoteDigest !== operation.quoteDigest ||
+                operation.quote.payer !== operation.sourceAccount.toLowerCase() ||
+                operation.quote.recipient !== operation.recipient.toLowerCase() ||
+                operation.quote.principalAtomic !== operation.amountAtomic ||
+                operation.quote.minimumOutputWei !== operation.minOutputAtomic ||
+                new Date(operation.quote.deadline * 1000).toISOString() !== operation.deadline ||
+                operation.approvalNetworkFeeCeilingWei !== operation.quote.approval.maximumNetworkFeeWei ||
+                operation.depositNetworkFeeCeilingWei !== operation.quote.deposit.maximumNetworkFeeWei)
+                corrupt();
+        }
+        catch {
+            corrupt();
+        }
+    }
     return operation;
 }
 export function freezeRelayUnsignedOperation(input) {
@@ -46,7 +73,8 @@ export function freezeRelayUnsignedOperation(input) {
 }
 export function publicRelayUnsignedOperation(operation) {
     const { integrityHash: _integrityHash, ...publicFields } = validateRelayUnsignedOperation(operation);
-    return { ...publicFields, proofClass: "saved_unsigned_quote", executionAdmitted: false, nextActions: [] };
+    return { ...publicFields, proofClass: "saved_unsigned_quote", balanceEvidence: "not_checked",
+        allowanceEvidence: "not_checked", executionAdmitted: false, nextActions: [] };
 }
 export class RelayUnsignedOperationRepository extends SecureStateStore {
     async loadOperation(profileHash, operationId) {

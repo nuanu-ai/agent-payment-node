@@ -63,7 +63,7 @@ export class OperationService {
                 if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_NOT_FOUND")
                     throw error;
             }
-            await this.assertEvmAccountAvailable(operation.profileHash, operation.sourceChainId, operation.sourceAccount);
+            await this.assertProfileAvailable(operation.profileHash);
             await this.relayUnsigned.persistLocked(operation);
             return operation;
         });

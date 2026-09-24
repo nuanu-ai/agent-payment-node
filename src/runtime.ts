@@ -1,3 +1,4 @@
+import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as waitFor } from "node:timers/promises";
@@ -43,6 +44,7 @@ import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
 export interface CoreDependencies {
+  readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -93,6 +95,7 @@ export interface CoreDependencies {
 }
 
 export class RuntimeContext {
+  readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -144,6 +147,7 @@ export class RuntimeContext {
   private initialized: Promise<void> | undefined;
 
   constructor(dependencies: CoreDependencies) {
+    if (dependencies.relayPrepare !== undefined) this.relayPrepare = dependencies.relayPrepare;
     if (dependencies.stargateNative !== undefined) this.stargateNative = dependencies.stargateNative;
     if (dependencies.stargateToken !== undefined) this.stargateToken = dependencies.stargateToken;
     if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;
