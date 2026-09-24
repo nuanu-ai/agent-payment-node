@@ -100,7 +100,7 @@ export class RelayUnsignedOperationRepository extends SecureStateStore {
         }
         await this.initialize();
         await this.ensureDirectory(`relay-unsigned-operations/${operation.profileHash}`);
-        await this.writeJson(this.path(operation.profileHash, operation.operationId), operation);
+        await this.writeJson(this.path(operation.profileHash, operation.operationId), operation, true);
     }
     path(profileHash, operationId) {
         stateIdentifier(profileHash, "Relay unsigned profile hash");
