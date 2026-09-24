@@ -1,6 +1,10 @@
 import type { Address, Hex } from "./model.js";
 import type { EvmRpcCall } from "./evm-ports.js";
-export declare function evmRpcRecord(value: unknown): Record<string, unknown>;
+export declare function evmRpcRecord(value: unknown, details?: {
+    readonly rpcMethod: string;
+    readonly stage: string;
+    readonly blockTag: string;
+}): Record<string, unknown>;
 export declare function evmRpcQuantity(value: unknown): bigint;
 export declare function evmRpcHex(value: unknown, bytes?: number): Hex;
 export declare function evmRpcWord(value: unknown): bigint;

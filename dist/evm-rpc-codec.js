@@ -2,9 +2,9 @@ import { getAddress } from "viem";
 import { isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { MAX_EVM_UINT } from "./evm-asset.js";
-export function evmRpcRecord(value) {
+export function evmRpcRecord(value, details) {
     if (!isPlainRecord(value))
-        throw new ApnError("APN_RPC_PROTOCOL", "EVM RPC returned a malformed object.");
+        throw new ApnError("APN_RPC_PROTOCOL", "EVM RPC returned a malformed object.", details);
     return value;
 }
 export function evmRpcQuantity(value) {
@@ -34,7 +34,10 @@ export function evmRpcAddress(value) {
     }
 }
 export async function evmRpcBlock(call, tag) {
-    const raw = evmRpcRecord(await call("eth_getBlockByNumber", [tag, false]));
+    const blockTag = tag === "latest" || tag === "safe" || tag === "finalized" ? tag : "number";
+    const raw = evmRpcRecord(await call("eth_getBlockByNumber", [tag, false]), {
+        rpcMethod: "eth_getBlockByNumber", stage: "block_result", blockTag,
+    });
     const number = evmRpcQuantity(raw.number);
     const hash = evmRpcHex(raw.hash, 32);
     if (hash === `0x${"0".repeat(64)}` || (tag.startsWith("0x") && number !== evmRpcQuantity(tag))) {

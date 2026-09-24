@@ -68,7 +68,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     private resolvePublicAddresses;
     private remainingTimeoutMs;
 }
-export declare function parseRpcResultEnvelope(raw: string, id: string): unknown;
+export declare function parseRpcResultEnvelope(raw: string, id: string, method?: string): unknown;
 export declare function parseRpcBatchResultEnvelope(raw: string, ids: readonly number[]): readonly unknown[];
 export declare function parseRpcLogEnvelope(raw: string, id: string): {
     readonly kind: "complete";
