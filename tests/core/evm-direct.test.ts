@@ -255,22 +255,24 @@ test("refused foreground approval never loads the key and missing signature reco
   assert.equal(setup.rpc.submissions.length, 0);
 });
 
-test("ambiguous broadcast reuses identical bytes and blocks retry when fee budget has risen", async (context) => {
+test("ambiguous EVM broadcast terminalizes from receipt when custody material is unavailable", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
   await ensureDirectWallet(setup);
   setup.rpc.submitError = new Error("timeout"); setup.rpc.receiptEnabled = false;
   const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "unknown_finality");
-  const raw = setup.rpc.submissions[0];
   setup.rpc.l1Fee = BigInt(EVM_REQUEST.maxFeeWei);
-  const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
-  await assert.rejects(restarted.core.transfer.resume(prepared.operation_id), { code: "APN_FEE_BUDGET_EXCEEDED" });
+  let custodyCalls = 0;
+  const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping, undefined, () => ({
+    request: async () => { custodyCalls += 1; throw new Error("custody material unavailable"); },
+  }));
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "unknown_finality");
   assert.equal(setup.rpc.submissions.length, 1);
-  setup.rpc.l1Fee = 1000n; setup.rpc.submitError = null;
-  await restarted.core.transfer.resume(prepared.operation_id);
-  assert.equal(setup.rpc.submissions.length, 2);
-  assert.equal(setup.rpc.submissions[1], raw);
+  setup.rpc.receiptEnabled = true;
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
+  assert.equal(setup.rpc.submissions.length, 1);
+  assert.equal(custodyCalls, 0);
   assert.equal(restarted.approval.intents.length, 0);
 });
 

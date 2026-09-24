@@ -196,7 +196,7 @@ test("gas shortage rejects prepare and fee drift durably requires reprepare befo
   assert.equal(next.ok, true, "terminal pre-effect failure must make the reprepare action usable");
 });
 
-test("ambiguous submission recovers identical bytes and completes only on exact Transfer log", async (t) => {
+test("ambiguous submission completes from an exact receipt without a second send", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
@@ -212,22 +212,16 @@ test("ambiguous submission recovers identical bytes and completes only on exact 
   assert.deepEqual(rpc.submissions, [RAW_TRANSACTION]);
 
   rpc.submitError = null;
+  rpc.receipt = exactReceipt();
   const recoveryNative = new TestNative();
   const resumed = await makeCore({ root: temporary.root, rpc, native: recoveryNative }).execute({
     command: "operation.resume",
     operationId,
   });
-  assert.equal(operationRecord(resumed).state, "submitted_pending");
-  assert.equal(recoveryNative.calls[0]?.operation, "effectMaterial.get");
-  assert.deepEqual(rpc.submissions, [RAW_TRANSACTION, RAW_TRANSACTION]);
-
-  rpc.receipt = exactReceipt();
-  const completed = await makeCore({ root: temporary.root, rpc, native: new TestNative() }).execute({
-    command: "operation.resume",
-    operationId,
-  });
-  assert.equal(operationRecord(completed).state, "completed");
-  assert.equal(operationRecord(completed).terminal, true);
+  assert.equal(operationRecord(resumed).state, "completed");
+  assert.equal(recoveryNative.calls.length, 0);
+  assert.deepEqual(rpc.submissions, [RAW_TRANSACTION]);
+  assert.equal(operationRecord(resumed).terminal, true);
 
   const receipt = await makeCore({ root: temporary.root }).execute({ command: "receipt.get", operationId });
   assert.equal(receipt.ok, true);
@@ -235,6 +229,28 @@ test("ambiguous submission recovers identical bytes and completes only on exact 
   assert.equal(safeReceipt.proof_class, "confirmed_receipt_and_exact_transfer_log");
   assert.equal(safeReceipt.exact_transfer_log, true);
   assert.equal(JSON.stringify(receipt).includes(RAW_TRANSACTION), false);
+});
+
+test("ambiguous submission with unavailable receipt stays unknown without nonce proof or resend", async (t) => {
+  for (const outcome of ["null", "error"] as const) {
+    const temporary = await temporaryState();
+    t.after(temporary.cleanup);
+    await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+    const rpc = new TestRpc();
+    const operationId = await prepareTransfer(makeCore({ root: temporary.root, rpc }), `unknown-receipt-${outcome}`);
+    rpc.submitError = new Error("ambiguous send");
+    const approved = await makeCore({ root: temporary.root, rpc, native: new TestNative() }).execute({ command: "transfer.approve", operationId });
+    assert.equal(operationRecord(approved).state, "unknown_finality");
+    rpc.submitError = null;
+    rpc.latestNonceAtomic = "8";
+    rpc.confirmedAtNonce = `0x${"c".repeat(64)}` as Hex;
+    if (outcome === "error") rpc.getReceipt = async () => { throw new Error("receipt provider unavailable"); };
+    const resumed = await makeCore({ root: temporary.root, rpc, native: new TestNative() }).execute({ command: "operation.resume", operationId });
+    assert.equal(operationRecord(resumed).state, "unknown_finality", outcome);
+    assert.equal(operationRecord(resumed).terminal, false, outcome);
+    assert.deepEqual(rpc.submissions, [RAW_TRANSACTION], outcome);
+    assert.equal(rpc.confirmedNonceStartBlockAtomic, null, outcome);
+  }
 });
 
 test("invalid log stays unknown, revert is terminal, and older-block superseding nonce is proven", async (t) => {
@@ -268,12 +284,10 @@ test("invalid log stays unknown, revert is terminal, and older-block superseding
   await ensureWallet(makeCore({ root: supersededState.root, native: new TestNative() }));
   const supersededRpc = new TestRpc();
   const supersededId = await prepareTransfer(makeCore({ root: supersededState.root, rpc: supersededRpc }), "superseded-001");
-  supersededRpc.submitError = new Error("timeout");
   await makeCore({ root: supersededState.root, rpc: supersededRpc, native: new TestNative() }).execute({
     command: "transfer.approve",
     operationId: supersededId,
   });
-  supersededRpc.submitError = null;
   supersededRpc.latestNonceAtomic = "8";
   supersededRpc.confirmedAtNonce = `0x${"c".repeat(64)}` as Hex;
   const superseded = await makeCore({ root: supersededState.root, rpc: supersededRpc, native: new TestNative() }).execute({

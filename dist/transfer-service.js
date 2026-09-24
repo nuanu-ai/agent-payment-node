@@ -233,6 +233,9 @@ export class TransferService {
             let operation = requiredLocal(await this.requiredOperation(operationId));
             if (operation.terminal)
                 return publicOperation(await this.followUsage(operation));
+            if (operation.state === "unknown_finality") {
+                return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
+            }
             if (operation.evm !== undefined) {
                 await this.followUsage(operation);
                 await requireEvmRpc(this.context.requireRpc()).assertChain(operation.chainId);
