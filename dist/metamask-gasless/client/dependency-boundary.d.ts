@@ -1,2 +1,1 @@
-/** The gasless helper supports EVM only. Reject any transitive Solana decoder load. */
-export declare function installGaslessDependencyBoundary(): void;
+export { installRuntimeDependencyBoundary as installGaslessDependencyBoundary } from "../../runtime-dependency-boundary.js";
