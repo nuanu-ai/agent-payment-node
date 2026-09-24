@@ -475,6 +475,19 @@ The opaque request ID is accepted only for an eligible ambiguous provider
 transfer, is never returned verbatim, and cannot be rebound to a different
 request or operation.
 
+For an already submitted local direct transfer, inspect the saved transaction
+hash once without loading custody material or submitting the transaction again:
+
+```sh
+apn operation resume --operation <operation-id> \
+  --rpc-url https://rpc.example \
+  --observe-only true
+```
+
+This mode accepts `submitted_pending` and `unknown_finality`. A missing receipt,
+RPC failure, or incomplete effect evidence leaves the operation unresolved.
+Omitting `--observe-only true` retains ordinary durable resume behavior.
+
 ## Durable commands
 
 ### Generic HTTP requests (v0.5.8)
@@ -667,7 +680,7 @@ apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <addre
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
 apn operation status --operation <operation-id>
 apn operation abandon --operation <operation-id>
-apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>] [--observation-rpc-env <APN_ENV_RPC_URL>]
+apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>] [--observe-only true] [--observation-rpc-env <APN_ENV_RPC_URL>]
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>

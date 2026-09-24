@@ -265,6 +265,12 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     case "operation repair-deployment": return { request: { command: "operation.repair-deployment", operationId: value(options, "--operation") } };
     case "operation abandon": return { request: { command: "operation.abandon", operationId: value(options, "--operation") } };
     case "operation resume": {
+      if (options["--observe-only"] !== undefined && options["--observe-only"] !== "true") {
+        throw new ApnError("APN_INVALID_INPUT", "--observe-only must be the literal true.");
+      }
+      if (options["--observe-only"] !== undefined && (options["--wait-seconds"] !== undefined || options["--observation-rpc-env"] !== undefined)) {
+        throw new ApnError("APN_INVALID_INPUT", "--observe-only cannot be combined with --wait-seconds or --observation-rpc-env.");
+      }
       const observationRpcEnv = options["--observation-rpc-env"] === undefined ? undefined
         : gaslessObservationRpcEnv(options["--observation-rpc-env"]);
       if (observationRpcEnv !== undefined && (options["--rpc-url"] !== undefined || options["--wait-seconds"] !== undefined)) {
@@ -277,6 +283,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
           operationId: value(options, "--operation"),
           ...(options["--wait-seconds"] === undefined ? {} : { waitSeconds: Number(options["--wait-seconds"]) }),
           ...(observationRpcEnv === undefined ? {} : { observationRpcEnv }),
+          ...(options["--observe-only"] === undefined ? {} : { observeOnly: true as const }),
         },
         ...(options["--rpc-url"] === undefined ? {} : { rpcUrl: options["--rpc-url"] }),
       };

@@ -218,10 +218,12 @@ export class TransferService {
             return publicOperation(operation);
         });
     }
-    async resume(operationIdInput, waitSeconds) {
+    async resume(operationIdInput, waitSeconds, observeOnly) {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const found = await this.requiredOperation(operationId);
+        if (observeOnly && found.providerDirect !== undefined)
+            throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a local direct transfer.");
         if (found.providerDirect !== undefined)
             return await this.providerDirect.resume(operationId, waitSeconds);
         if (waitSeconds !== undefined) {
@@ -231,11 +233,17 @@ export class TransferService {
         const { profile, profileHash } = localFound;
         return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
             let operation = requiredLocal(await this.requiredOperation(operationId));
+            if (observeOnly && operation.state !== "submitted_pending" && operation.state !== "unknown_finality" &&
+                !(operation.terminal && operation.transactionHash !== undefined)) {
+                throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires an already submitted local direct transfer.");
+            }
             if (operation.terminal)
                 return publicOperation(await this.followUsage(operation));
             if (operation.state === "unknown_finality") {
                 return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
             }
+            if (observeOnly)
+                return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
             if (operation.evm !== undefined) {
                 await this.followUsage(operation);
                 await requireEvmRpc(this.context.requireRpc()).assertChain(operation.chainId);
