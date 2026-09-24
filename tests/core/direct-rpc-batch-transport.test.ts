@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events";
 import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
 import test, { type TestContext } from "node:test";
+import { decodeFunctionData, toHex } from "viem";
+import { requireEvmFunding, validateEvmFeeQuote } from "../../src/evm-direct.js";
 import { HttpsBaseRpc, parseRpcBatchResultEnvelope } from "../../src/rpc.js";
 import { RECIPIENT, WALLET } from "./helpers.js";
 
@@ -157,4 +159,99 @@ test("Linea grouped prepare enforces ten physical attempts across all phases", a
   await grouped.nonceEstimate(WALLET, { chainId: 59144, from: WALLET, to: RECIPIENT, valueAtomic: "1", data: "0x" });
   await assert.rejects(grouped.feeQuote({ nonceAtomic: "7", gasLimitAtomic: "21000", maxFeePerGasAtomic: "5", maxPriorityFeePerGasAtomic: "1", maximumGasCostAtomic: "105000" }), { code: "APN_RPC_PROTOCOL" });
   assert.equal(reads.length, 10);
+});
+
+const UNICHAIN_HASH = `0x${"d".repeat(64)}`;
+const ORACLE_ABI = [
+  { type: "function", name: "getL1FeeUpperBound", stateMutability: "view", inputs: [{ name: "size", type: "uint256" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "getOperatorFee", stateMutability: "view", inputs: [{ name: "gas", type: "uint256" }], outputs: [{ type: "uint256" }] },
+] as const;
+function unichainRead(method: string, params: readonly unknown[]): unknown {
+  if (method === "eth_chainId") return "0x82";
+  if (method === "eth_getBlockByNumber") return { number: "0x10", hash: UNICHAIN_HASH, baseFeePerGas: "0x2" };
+  if (method === "eth_getBalance") return "0x100000000000000";
+  if (method === "eth_getTransactionCount") return "0x7";
+  if (method === "eth_estimateGas") return "0x5208";
+  if (method === "eth_maxPriorityFeePerGas") return "0x1";
+  if (method === "eth_call") {
+    const [call, block] = params as [{ to: string; data: `0x${string}` }, string];
+    assert.equal(call.to, "0x420000000000000000000000000000000000000F");
+    assert.equal(block, "0x10");
+    const decoded = decodeFunctionData({ abi: ORACLE_ABI, data: call.data });
+    assert.equal(decoded.args[0], decoded.functionName === "getL1FeeUpperBound" ? 512n : 21000n);
+    return toHex(decoded.functionName === "getL1FeeUpperBound" ? 1000n : 7n, { size: 32 });
+  }
+  throw new Error(`unexpected ${method}`);
+}
+
+test("Unichain native opt-in matches scalar balance, nonce, estimate and OP fee quote with nine modeled POSTs", async (t) => {
+  const bodies = mockHttps(t, (body) => {
+    const reads = Array.isArray(body) ? body : [body];
+    const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id, result: unichainRead(entry.method, entry.params) }));
+    return { status: 200, raw: JSON.stringify(Array.isArray(body) ? responses.reverse() : responses[0]) };
+  });
+  const rpc = new HttpsBaseRpc(endpoint).evm;
+  const selection = { chainId: 130 as const, token: "native" as const };
+  const transaction = { chainId: 130 as const, from: WALLET, to: RECIPIENT, valueAtomic: "100", data: "0x" as const };
+  const grouped = rpc.prepareUnichainNative();
+  const balance = await grouped.balance(WALLET, selection);
+  const { nonce, estimated } = await grouped.nonceEstimate(WALLET, transaction);
+  const economics = { nonceAtomic: nonce, ...estimated,
+    maximumGasCostAtomic: (BigInt(estimated.gasLimitAtomic) * BigInt(estimated.maxFeePerGasAtomic)).toString() };
+  const quote = await grouped.feeQuote(economics);
+  assert.equal(bodies.length, 9);
+  assert.equal(bodies.flatMap((raw) => { const body = JSON.parse(raw); return Array.isArray(body) ? body : [body]; }).length, 19);
+  assert.deepEqual(bodies.map((raw) => { const body = JSON.parse(raw); return (Array.isArray(body) ? body : [body]).map((call: any) => call.method); }), [
+    ["eth_chainId", "eth_getBlockByNumber"], ["eth_getBalance"], ["eth_getBlockByNumber", "eth_chainId"],
+    ["eth_chainId", "eth_chainId"], ["eth_getTransactionCount", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getBlockByNumber"],
+    ["eth_chainId", "eth_chainId"], ["eth_chainId", "eth_getBlockByNumber"], ["eth_call", "eth_call"],
+    ["eth_getBlockByNumber", "eth_chainId"],
+  ]);
+  assert.equal(quote.l1DataFeeUpperWei, "1000"); assert.equal(quote.operatorFeeUpperWei, "7");
+  assert.equal(validateEvmFeeQuote(quote, economics), quote);
+  requireEvmFunding(balance, "100", quote, quote.totalQuoteWei);
+  assert.throws(() => requireEvmFunding(balance, "100", quote, quote.maximumExecutionFeeWei), { code: "APN_FEE_BUDGET_EXCEEDED" });
+  const groupedPosts = bodies.length;
+  const scalarBalance = await rpc.balance(WALLET, selection);
+  const scalarNonce = await rpc.nonce(130, WALLET, "pending");
+  const scalarEstimate = await rpc.estimate(transaction);
+  const scalarQuote = await rpc.feeQuote(130, economics);
+  assert.equal(bodies.length - groupedPosts, 19);
+  assert.deepEqual({ ...balance, observedAt: "fixed" }, { ...scalarBalance, observedAt: "fixed" });
+  assert.equal(nonce, scalarNonce); assert.deepEqual(estimated, scalarEstimate);
+  assert.deepEqual({ ...quote, observedAt: "fixed" }, { ...scalarQuote, observedAt: "fixed" });
+});
+
+for (const shape of ["missing", "duplicate", "suberror"] as const) test(`Unichain batch ${shape} aborts after one POST without scalar fallback`, async (t) => {
+  const bodies = mockHttps(t, (body) => {
+    assert.ok(Array.isArray(body));
+    const good = body.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id, result: unichainRead(entry.method, entry.params) }));
+    const rows = shape === "missing" ? [good[0]] : shape === "duplicate" ? [good[0], good[0]] :
+      [good[0], { jsonrpc: "2.0", id: body[1].id, error: { code: -1, message: secret } }];
+    return { status: 200, raw: JSON.stringify(rows) };
+  });
+  const error = await new HttpsBaseRpc(endpoint).evm.prepareUnichainNative().balance(WALLET, { chainId: 130, token: "native" })
+    .then(() => undefined, (failure: unknown) => failure) as any;
+  assert.equal(error?.code, "APN_RPC_PROTOCOL");
+  assert.equal(JSON.stringify({ message: error?.message, details: error?.details }).includes(secret), false);
+  assert.equal(bodies.length, 1);
+});
+
+test("Unichain batch checks selected chain before balance and rejects a changed pinned block before nonce", async (t) => {
+  let wrongChain = true;
+  const bodies = mockHttps(t, (body) => {
+    const reads = Array.isArray(body) ? body : [body];
+    const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id,
+      result: wrongChain && entry.method === "eth_chainId" ? "0xe708" :
+        entry.method === "eth_getBlockByNumber" && entry.params[0] === "0x10"
+          ? { number: "0x10", hash: `0x${"e".repeat(64)}`, baseFeePerGas: "0x2" }
+          : unichainRead(entry.method, entry.params) }));
+    return { status: 200, raw: JSON.stringify(Array.isArray(body) ? responses.reverse() : responses[0]) };
+  });
+  const grouped = new HttpsBaseRpc(endpoint).evm.prepareUnichainNative();
+  await assert.rejects(grouped.balance(WALLET, { chainId: 130, token: "native" }), { code: "APN_CHAIN_MISMATCH" });
+  assert.equal(bodies.length, 1);
+  wrongChain = false;
+  await assert.rejects(grouped.balance(WALLET, { chainId: 130, token: "native" }), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(bodies.length, 4);
 });

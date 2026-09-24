@@ -30,8 +30,8 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
     // The frozen list is checked first: an unlisted network or an unpinned contract is refused before any RPC or custody call.
     const listed = listedEvmAsset(request.asset.chainId, request.asset.token, request.asset.decimals === undefined ? undefined : evmDecimals(request.asset.decimals));
     const selection = listed.selection;
-    if (request.batchRpcReads && (selection.chainId !== 59144 || selection.token !== "native")) {
-        throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads are available only for Linea native transfers.");
+    if (request.batchRpcReads && ((selection.chainId !== 59144 && selection.chainId !== 130) || selection.token !== "native")) {
+        throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads are available only for Linea or Unichain native transfers.");
     }
     const maximumFeeWei = evmUint(request.maxFeeWei, true).toString();
     const priorityFeeWei = request.priorityFeeWei === undefined ? undefined : evmUint(request.priorityFeeWei).toString();
@@ -64,7 +64,7 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
                 chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic,
                 asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
             const rpc = requireEvmRpc(context.requireRpc());
-            const grouped = request.batchRpcReads ? rpc.prepareLineaNative?.() : undefined;
+            const grouped = request.batchRpcReads ? (selection.chainId === 130 ? rpc.prepareUnichainNative?.() : rpc.prepareLineaNative?.()) : undefined;
             if (request.batchRpcReads && grouped === undefined)
                 throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
             const balance = await (grouped ?? rpc).balance(wallet.address, { ...selection, decimals: listed.decimals });

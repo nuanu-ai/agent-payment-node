@@ -28,19 +28,19 @@ test("generic CLI and MCP bind the same explicit core request without changing l
   assert.ok(MCP_TOOLS.some((entry) => entry.name === "apn_wallet_balance_asset"));
 });
 
-test("Linea batched native prepare refuses insufficient balance before nonce and estimate", async (context) => {
+for (const chainId of [59144, 130] as const) test(`chain ${chainId} batched native prepare refuses insufficient balance before nonce and estimate`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root); setup.rpc.chainId = 59144; setup.rpc.nativeAtomic = "1";
+  const setup = evmCore(temporary.root); setup.rpc.chainId = chainId; setup.rpc.nativeAtomic = "1";
   const wallet = await ensureDirectWallet(setup);
   await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
-    admissions: [...evmDirectAdmissions(), directAdmission("eip155:59144", null)], now: setup.clock.now() });
+    admissions: [...evmDirectAdmissions(), directAdmission(`eip155:${chainId}`, null)], now: setup.clock.now() });
   let downstreamReads = 0;
-  Object.assign(setup.rpc.evm, { prepareLineaNative: () => ({
+  Object.assign(setup.rpc.evm, { [chainId === 130 ? "prepareUnichainNative" : "prepareLineaNative"]: () => ({
     balance: setup.rpc.evm.balance,
     nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
     feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },
   }) });
-  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 59144, token: "native" }, batchRpcReads: true }), { code: "APN_INSUFFICIENT_ASSET" });
+  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: "native" }, batchRpcReads: true }), { code: "APN_INSUFFICIENT_ASSET" });
   assert.equal(downstreamReads, 0);
 });
 
