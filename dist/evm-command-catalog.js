@@ -41,7 +41,7 @@ export const EVM_COMMANDS = [
             required("--max-fee-wei", "wei", ["positive_canonical_integer", "total_presubmission_quote_budget_not_onchain_total_cap"]),
             { ...required("--priority-fee-wei", "wei", ["canonical_integer", "owner_tip_per_gas_replaces_rpc_suggestion", "max_fee_per_gas_is_twice_base_fee_plus_tip",
                     "counts_toward_max_fee_wei", "refused_on_arbitrum_inclusive_fees", "part_of_idempotency"]), required: false },
-            { ...required("--rpc-read-mode", "string", ["batch_only", "linea_native_only", "prepare_only", "default_scalar"]), required: false },
+            { ...required("--rpc-read-mode", "string", ["batch_only", "linea_or_unichain_native_only", "prepare_only", "default_scalar"]), required: false },
             required("--idempotency-key", "idempotency_key", ["8_to_200_safe_ascii_characters"]),
         ],
         effect: { class: "payment_prepare", summary: "Persists one exact chain, asset, amount, fee budget and transaction intent; never signs or submits." },
