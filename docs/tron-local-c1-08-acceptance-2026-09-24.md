@@ -1,6 +1,6 @@
 # `tron-local` C1-08 acceptance evidence — 2026-09-24
 
-C1-08 remains in progress. The bounded 0.1 TRX and canonical USDT transfers to fixture B now have terminal solidified receipts and exact receiving evidence. The card's acceptance rubric also calls for interrupted-execution/no-rebroadcast evidence; the records below show one submission for each completed transfer, but do not establish recovery behavior after an interrupted paid execution. The earlier 16 TRX funding operation remains `abandoned_unknown` with usage charged.
+C1-08 is done under the original acceptance rubric: live 0.1 TRX and canonical USDT transfers to fixture B have terminal solidified receipts, exact receiving evidence and resource-fee evidence, and merged PR #261 separately proves interrupted-process recovery without rebroadcast in an offline synthetic test. The offline test did not kill either live paid-transfer process. The earlier separate 16 TRX funding operation remains `abandoned_unknown` with usage charged; it is not resolved by these accepted transfers.
 
 ## Owner policy and no-money prepare
 
@@ -16,7 +16,7 @@ C1-08 remains in progress. The bounded 0.1 TRX and canonical USDT transfers to f
 - APN status: `completed`; result: `tron_solidified_transaction_effect`; receipt hash `b492597518771336b3f463e9bf3a8f95b2670d065215cd97417f3bbc62094418`.
 - Sender and recipient were verified. Actual fee was 1.1 TRX for activation and bandwidth.
 
-This accepts only the bounded TRX paid transfer; it does not close the USDT half or C1-08.
+This accepts only the bounded TRX paid-transfer half. The USDT half and separate offline process-interruption proof are recorded below.
 
 ## Completed fixture A activation
 
@@ -52,4 +52,13 @@ The later successful activation does not prove the earlier transaction had no ef
 - Transaction ID `0c2fb90f451b71653e3a6fd62a6eacd059a1416edd4becbee98371637188998f`; solidified block `86525875`.
 - Actual resource fee: 13.0285 TRX, below the 15 TRX cap. One submission; no retry was made.
 
-The TRX and USDT paid-transfer outcomes are recorded, but no interrupted-execution recovery run for either paid transfer is recorded. Keep C1-08 `in_progress` until that rubric item has evidence; the unsigned `failed_before_effect` attempt is not a substitute for interrupted paid-execution recovery evidence.
+## Interrupted-execution/no-rebroadcast proof (offline)
+
+- Merged [PR #261](https://github.com/nuanu-ai/agent-payment-node/pull/261) adds the real child-process test [`tron-interruption-process.test.ts`](../tests/core/tron-interruption-process.test.ts). It uses a synthetic local TRON fixture; it did not kill a process performing either live paid transfer.
+- Before termination, the first child reached the broadcast hook once. The operation journal was durably `submitting` with reason `submission_intent_persisted`, its `transactionId` matched the received transaction's ID, `rawPayloadHash` was present, and the submission-intent transition hash was 64 hexadecimal characters.
+- The test killed that child with `SIGKILL` and asserted `child.signalCode === "SIGKILL"`. A new process resumed the same operation, observed a synthetic solidified receipt for the same transaction ID, completed the journal/receipt, and recorded zero broadcast calls after restart.
+- The focused test selection passed 4/4 locally. PR #261 CI ran builds and packaging only; this interruption test was not run in CI.
+
+## C1-08 closure
+
+The live paid TRX and USDT receipts satisfy the asset-delivery, activation, fee, and solidified-receipt requirements. The separate offline PR #261 test supplies the rubric's interrupted-execution/no-rebroadcast evidence; do not represent it as a kill/recovery run on a live paid transfer. C1-08 is therefore `done` under the original rubric. The earlier 16 TRX operation remains an unresolved `abandoned_unknown` journal entry with charged usage and stays distinct from this row's accepted transfers.
