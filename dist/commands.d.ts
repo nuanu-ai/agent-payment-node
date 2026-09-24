@@ -6,6 +6,15 @@ import type { ChainProvider } from "./direct-rail-ports.js";
 import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
+    readonly command: "relay.prepare";
+    readonly profile: string;
+    readonly recipient: string;
+    readonly amountAtomic: string;
+    readonly minOutputAtomic: string;
+    readonly maxApprovalNetworkFeeWei: string;
+    readonly maxDepositNetworkFeeWei: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "stargate.native.prepare";
     readonly profile: string;
     readonly amountAtomic: string;

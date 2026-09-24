@@ -1,3 +1,4 @@
+import type { ValidatedRelayQuote } from "./relay/quote.js";
 import { SecureStateStore } from "./secure-state-store.js";
 import { z } from "zod";
 declare const body: z.ZodObject<{
@@ -14,6 +15,11 @@ declare const body: z.ZodObject<{
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
+    quote: z.ZodOptional<z.ZodCustom<ValidatedRelayQuote, ValidatedRelayQuote>>;
+    policyDigest: z.ZodOptional<z.ZodString>;
+    policyRevision: z.ZodOptional<z.ZodNumber>;
+    approvalNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
+    depositNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     amountAtomic: z.ZodString;
     minOutputAtomic: z.ZodString;
     createdAt: z.ZodString;
@@ -33,6 +39,11 @@ declare const schema: z.ZodObject<{
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
+    quote: z.ZodOptional<z.ZodCustom<ValidatedRelayQuote, ValidatedRelayQuote>>;
+    policyDigest: z.ZodOptional<z.ZodString>;
+    policyRevision: z.ZodOptional<z.ZodNumber>;
+    approvalNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
+    depositNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     amountAtomic: z.ZodString;
     minOutputAtomic: z.ZodString;
     createdAt: z.ZodString;
@@ -45,6 +56,8 @@ export declare function validateRelayUnsignedOperation(value: unknown): RelayUns
 export declare function freezeRelayUnsignedOperation(input: RelayUnsignedOperationInput): RelayUnsignedOperation;
 export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOperation): {
     proofClass: "saved_unsigned_quote";
+    balanceEvidence: "not_checked";
+    allowanceEvidence: "not_checked";
     executionAdmitted: false;
     nextActions: readonly [];
     schemaVersion: "apn.relay-unsigned-operation.v1";
@@ -64,6 +77,11 @@ export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOpe
     minOutputAtomic: string;
     createdAt: string;
     deadline: string;
+    quote?: ValidatedRelayQuote | undefined;
+    policyDigest?: string | undefined;
+    policyRevision?: number | undefined;
+    approvalNetworkFeeCeilingWei?: string | undefined;
+    depositNetworkFeeCeilingWei?: string | undefined;
 };
 export declare class RelayUnsignedOperationRepository extends SecureStateStore {
     loadOperation(profileHash: string, operationId: string): Promise<RelayUnsignedOperation | null>;
