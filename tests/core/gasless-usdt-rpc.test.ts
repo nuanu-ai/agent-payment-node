@@ -3,7 +3,7 @@ import test from "node:test";
 import { getAddress, keccak256, pad, type Hex } from "viem";
 import type { GaslessTransport } from "../../src/gasless/https.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
-import { usdtChainPort, usdtSafeSnapshot, usdtSponsorPort } from "../../src/gasless-usdt/rpc.js";
+import { UsdtJsonRpc, usdtChainPort, usdtSafeSnapshot, usdtSponsorPort } from "../../src/gasless-usdt/rpc.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RPC_URL = "https://ethereum.example-rpc.test/";
@@ -70,18 +70,94 @@ test("pins are code hashes read from the owner's RPC; drift, a wrong chain or a 
 
 test("safe snapshot anchors contract reads to the canonical safe block hash", async () => {
   const blockHash = `0x${"ab".repeat(32)}`;
-  const params: unknown[][] = [];
+  const batches: { id: string; method: string; params: unknown[] }[][] = [];
   const peer: GaslessTransport = { request: async (_endpoint, _method, body) => {
-    const request = JSON.parse(body!) as { id: string; method: string; params: unknown[] };
-    params.push(request.params);
-    const result = request.method === "eth_chainId" ? "0x1" : request.method === "eth_getBlockByNumber"
-      ? { number: "0x100", hash: blockHash } : "0x01";
-    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
+    const requests = JSON.parse(body!) as { id: string; method: string; params: unknown[] }[];
+    assert.ok(Array.isArray(requests)); batches.push(requests);
+    return { status: 200, body: JSON.stringify(requests.map(request => ({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "eth_chainId" ? "0x1" : request.method === "eth_getBlockByNumber"
+        ? { number: "0x100", hash: blockHash } : "0x01" })).reverse()) };
   } };
   await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), /gasless_usdt_code_drift/u);
-  assert.deepEqual(params[1], ["safe", false]);
-  assert.deepEqual(params[2], [USDT_GASLESS.token, { blockHash, requireCanonical: true }]);
-  assert.equal(params.length, 3);
+  assert.equal(batches.length, 2);
+  assert.deepEqual(batches[0]!.map(request => request.method), ["eth_chainId", "eth_getBlockByNumber"]);
+  assert.deepEqual(batches[0]![1]!.params, ["safe", false]);
+  assert.equal(batches[1]!.length, 12);
+  assert.deepEqual(batches[1]!.map(request => request.method), ["eth_getCode", "eth_getCode", "eth_getCode",
+    "eth_getCode", "eth_call", "eth_call", "eth_call", "eth_call", "eth_getCode", "eth_call", "eth_call",
+    "eth_getTransactionCount"]);
+  for (const request of batches[1]!) assert.deepEqual(request.params[1], { blockHash, requireCanonical: true });
+  assert.deepEqual(batches[1]![0]!.params[0], USDT_GASLESS.token);
+  assert.deepEqual(batches[1]![8]!.params[0], OWNER);
+});
+
+test("safe snapshot rejects incomplete, duplicate and mismatched JSON-RPC batches without single-read fallback", async () => {
+  for (const fault of ["missing", "duplicate", "foreign", "single"] as const) {
+    let physical = 0;
+    const peer: GaslessTransport = { request: async (_endpoint, _method, body) => {
+      physical += 1;
+      const requests = JSON.parse(body!) as { id: string; method: string }[];
+      const replies = requests.map(request => ({ jsonrpc: "2.0", id: request.id,
+        result: request.method === "eth_chainId" ? "0x1" : { number: "0x100", hash: `0x${"ab".repeat(32)}` } }));
+      if (fault === "missing") replies.pop();
+      if (fault === "duplicate") replies[1] = { ...replies[1]!, id: replies[0]!.id };
+      if (fault === "foreign") replies[1] = { ...replies[1]!, id: "999" };
+      return { status: 200, body: JSON.stringify(fault === "single" ? replies[0] : replies) };
+    } };
+    await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), /gasless_usdt_rpc_batch_envelope/u);
+    assert.equal(physical, 1);
+  }
+  let physical = 0;
+  const secondPhasePeer: GaslessTransport = { request: async (_endpoint, _method, body) => {
+    physical += 1;
+    const requests = JSON.parse(body!) as { id: string; method: string }[];
+    const replies = requests.map(request => ({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "eth_chainId" ? "0x1" : request.method === "eth_getBlockByNumber"
+        ? { number: "0x100", hash: `0x${"ab".repeat(32)}` } : "0x01" }));
+    if (physical === 2) replies.pop();
+    return { status: 200, body: JSON.stringify(replies) };
+  } };
+  await assert.rejects(usdtSafeSnapshot(secondPhasePeer, RPC_URL, OWNER), /gasless_usdt_rpc_batch_envelope/u);
+  assert.equal(physical, 2);
+});
+
+test("JSON-RPC batch maps out-of-order replies and refuses a method error", async () => {
+  const calls = [{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["safe", false] }];
+  const seen: string[] = [];
+  const peer: GaslessTransport = { request: async (_endpoint, _method, body) => {
+    seen.push(body!);
+    const requests = JSON.parse(body!) as { id: string }[];
+    return { status: 200, body: JSON.stringify([
+      { jsonrpc: "2.0", id: requests[1]!.id, result: { hash: "0xabc" } },
+      { jsonrpc: "2.0", id: requests[0]!.id, result: "0x1" },
+    ]) };
+  } };
+  const rpc = new UsdtJsonRpc(peer, RPC_URL, new Set(calls.map(call => call.method)));
+  assert.deepEqual(await rpc.batch(calls), ["0x1", { hash: "0xabc" }]);
+  assert.equal(seen.length, 1);
+  const errorPeer: GaslessTransport = { request: async (_endpoint, _method, body) => {
+    const requests = JSON.parse(body!) as { id: string }[];
+    return { status: 200, body: JSON.stringify([
+      { jsonrpc: "2.0", id: requests[0]!.id, result: "0x1" },
+      { jsonrpc: "2.0", id: requests[1]!.id, error: { code: -32000, message: "historical block unavailable" } },
+    ]) };
+  } };
+  await assert.rejects(new UsdtJsonRpc(errorPeer, RPC_URL, new Set(calls.map(call => call.method))).batch(calls),
+    (error: { code: string; details: { reason: string; method: string } }) =>
+      error.code === "APN_PROVIDER_PROTOCOL" && error.details.reason === "gasless_usdt_sponsor_refused" &&
+      error.details.method === "eth_getBlockByNumber");
+});
+
+test("safe snapshot refuses a wrong chain after one batch and never reads account state", async () => {
+  let physical = 0;
+  const peer: GaslessTransport = { request: async (_endpoint, _method, body) => {
+    physical += 1;
+    const requests = JSON.parse(body!) as { id: string; method: string }[];
+    return { status: 200, body: JSON.stringify(requests.map(request => ({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "eth_chainId" ? "0x89" : { number: "0x100", hash: `0x${"ab".repeat(32)}` } }))) };
+  } };
+  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), /gasless_usdt_chain/u);
+  assert.equal(physical, 1);
 });
 
 test("a receipt counts only at or below the safe head and on the canonical block", async () => {
