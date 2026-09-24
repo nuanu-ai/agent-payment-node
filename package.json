@@ -46,7 +46,7 @@
     "build": "npm run build:ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run test:core",
-    "test:core": "npm run build:ts && npm run build:test && node --test --test-concurrency=1 dist-test/tests/core/*.test.js && node scripts/core-forbidden-surface.mjs",
+    "test:core": "npm run build:ts && npm run build:test && node --test --test-concurrency=1 dist-test/tests/core/*.test.js && node --test tests/packaging/runtime-dependency-boundary.test.mjs && node scripts/core-forbidden-surface.mjs",
     "test:legacy-native-contract": "cargo fmt --check && cargo test --offline --locked && cargo clippy --offline --locked --all-targets -- -D warnings",
     "test:legacy-cask-syntax": "node scripts/core-package-syntax.mjs",
     "test:legacy-cask-behavior": "node --test --test-concurrency=1 tests/packaging/*.test.mjs",
