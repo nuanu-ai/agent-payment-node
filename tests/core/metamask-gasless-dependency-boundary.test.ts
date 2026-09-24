@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 import { installGaslessDependencyBoundary } from "../../src/metamask-gasless/client/dependency-boundary.js";
-import { executeHelperRequest, MM_HELPER_VERSION } from "../../src/metamask-gasless/client/index.js";
 import type { MetaMaskGaslessUnsignedResult } from "../../src/metamask-gasless/model.js";
 import { expectedQuote, intent, NOW, OWNER, quoteInput, SdkExchange, syntheticHome } from
   "./metamask-gasless-client-fixtures/sdk.js";
@@ -24,6 +23,7 @@ test("gasless helper rejects ESM and CommonJS Solana decoder loads while allowin
 
 test("all five supported EVM helper modes run with the decoder boundary installed", async (t) => {
   installGaslessDependencyBoundary();
+  const { executeHelperRequest, MM_HELPER_VERSION } = await import("../../src/metamask-gasless/client/index.js");
   const home = await syntheticHome(); t.after(home.cleanup);
   const options = { homeDirectory: home.home, now: () => NOW };
   const inspected = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect",
@@ -48,6 +48,7 @@ test("all five supported EVM helper modes run with the decoder boundary installe
 
 test("a rejected decoder load returns a closed helper failure", async (t) => {
   installGaslessDependencyBoundary();
+  const { executeHelperRequest, MM_HELPER_VERSION } = await import("../../src/metamask-gasless/client/index.js");
   const home = await syntheticHome(); t.after(home.cleanup);
   let attempts = 0;
   const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote",

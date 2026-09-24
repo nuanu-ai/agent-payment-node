@@ -87,7 +87,7 @@ childProcess.spawn = (executable, args, options) => {
     return actualSpawn(executable, args, options);
   }
   if (executable !== process.execPath || args.length !== 1 || args[0] !==
-    `${initial.packageRoot}/dist/metamask-gasless/client/helper-entry.js`) return forbidden("child-process");
+    `${initial.packageRoot}/dist/metamask-gasless/client/helper-bootstrap.js`) return forbidden("child-process");
   assert.equal(options.shell, false); assert.deepEqual(options.stdio, ["pipe", "pipe", "ignore"]);
   assert.ok(Object.keys(options.env).every(key => ["HOME", "TMPDIR", "LANG", "TZ"].includes(key) || /^LC_[A-Z_]+$/u.test(key)));
   const child = actualSpawn(executable, ["--import", preloadPath, ...args], { ...options,
