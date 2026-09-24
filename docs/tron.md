@@ -57,6 +57,27 @@ the full mainnet genesis block
 `00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc`.
 Endpoint text and raw RPC errors are not included in receipts.
 
+For an endpoint that needs slower request starts, set the optional
+`APN_TRON_RPC_MIN_POST_INTERVAL_MS` to a canonical integer from `0` to `1000`.
+Unset or `0` keeps the current behavior. The interval applies at the physical
+HTTPS POST start after DNS validation for all TRON RPC calls made by this APN
+client, including concurrent calls; it does not
+remove any safety reads or retry a failed request. The maximum is bounded for
+the ten-read TRX preparation: ten requests can each use their ten-second RPC
+deadline, nine 1000 ms gaps add exactly 9 seconds, and the existing ten-second
+transaction-expiry reserve leaves this within the 120-second TRON window.
+Actual response time and head age still matter; preparation refuses when the
+remaining transaction window is insufficient. Endpoint rate limits can vary,
+so select the interval for the intended provider.
+
+```sh
+export APN_TRON_RPC_URL=https://your-tron-mainnet-api.example
+export APN_TRON_RPC_MIN_POST_INTERVAL_MS=1000
+apn pay transfer prepare-tron --profile tron-local --asset trx \
+  --to <tron-recipient> --amount 1 --max-fee-trx 2 \
+  --idempotency-key tron-trx-example-001
+```
+
 ```sh
 export APN_TRON_RPC_URL=https://your-tron-mainnet-api.example
 apn wallet balance-tron --profile tron-local --asset trx
