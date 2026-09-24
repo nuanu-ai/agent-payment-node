@@ -11,23 +11,71 @@ export interface RelayQuoteIntent {
 }
 export declare function relayQuoteRequest(intent: RelayQuoteIntent): Record<string, unknown>;
 export interface ValidatedRelayQuote {
+    readonly schemaVersion: "apn.relay-quote.v1";
+    readonly quoteDigest: string;
     readonly orderId: string;
+    readonly orderSignature: string;
+    readonly solver: string;
+    readonly payer: string;
+    readonly recipient: string;
+    readonly sourceRefundRecipient: string;
+    readonly principalAtomic: string;
+    readonly orderData: Readonly<{
+        version: "v1";
+        solverChainId: "base";
+        solver: string;
+        salt: string;
+        inputs: readonly Readonly<{
+            payment: Readonly<{
+                chainId: "ethereum";
+                currency: string;
+                amount: string;
+                weight: "1";
+            }>;
+            refunds: readonly Readonly<{
+                chainId: "ethereum" | "bnb";
+                recipient: string;
+                currency: string;
+                minimumAmount: "0";
+                deadline: number;
+                extraData: string;
+            }>[];
+        }>[];
+        output: Readonly<{
+            chainId: "bnb";
+            payments: readonly Readonly<{
+                recipient: string;
+                currency: string;
+                minimumAmount: string;
+                expectedAmount: string;
+            }>[];
+            calls: readonly [];
+            deadline: number;
+            extraData: string;
+        }>;
+        fees: readonly [];
+    }>;
+    readonly paymentDetails: Readonly<{
+        chainId: "ethereum";
+        depository: string;
+        currency: string;
+        amount: string;
+    }>;
     readonly minimumOutputWei: string;
     readonly deadline: number;
-    readonly approval: Readonly<{
-        from: string;
-        to: string;
-        data: string;
-        value: "0";
-        chainId: 1;
-    }>;
-    readonly deposit: Readonly<{
-        from: string;
-        to: string;
-        data: string;
-        value: "0";
-        chainId: 1;
-    }>;
+    readonly approval: RelayQuoteTransaction;
+    readonly deposit: RelayQuoteTransaction;
+}
+export interface RelayQuoteTransaction {
+    readonly from: string;
+    readonly to: string;
+    readonly data: string;
+    readonly value: "0";
+    readonly chainId: 1;
+    readonly gas: string;
+    readonly maxFeePerGas: string;
+    readonly maxPriorityFeePerGas: string;
+    readonly maximumNetworkFeeWei: string;
 }
 export declare function validateRelayQuote(value: unknown, intent: RelayQuoteIntent): Promise<ValidatedRelayQuote>;
 /** One POST, no API key, no retry. The caller receives a validated unsigned envelope only. */
