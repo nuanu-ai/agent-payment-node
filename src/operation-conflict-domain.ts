@@ -42,6 +42,7 @@ export function conflictDomainKey(domain: MoneyConflictDomain): string {
 /** Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. */
 export function storedOperationDomains(operation: StoredMoneyOperation): readonly MoneyConflictDomain[] | null {
   try {
+    if (operation.kind === "relay_unsigned") return [evmConflictDomain(operation.record.sourceChainId, operation.record.sourceAccount)];
     if (operation.kind === "direct_transfer") return [evmConflictDomain(operation.record.chainId, operation.record.walletAddress)];
     if (operation.kind === "x402_fetch") {
       // Provider-atomic x402 is Base-only; its record carries the network as CAIP-2 instead of a chain id.

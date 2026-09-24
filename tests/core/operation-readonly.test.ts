@@ -8,6 +8,7 @@ import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/j
 import { OperationService } from "../../src/operation-service.js";
 import { ProviderX402Repository } from "../../src/provider-x402-repository.js";
 import { RailOperationRepository } from "../../src/rail-operation-repository.js";
+import { RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { SecureStateStore } from "../../src/secure-state-store.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
@@ -29,11 +30,12 @@ function repositories(root: string) {
   const bridge = new BridgeOperationRepository(root);
   const gasless = new GaslessOperationRepository(root);
   const metaMask = new MetaMaskGaslessOperationRepository(root);
-  return { state, provider, rail, bridge, gasless, metaMask };
+  const relayUnsigned = new RelayUnsignedOperationRepository(root);
+  return { state, provider, rail, bridge, gasless, metaMask, relayUnsigned };
 }
 
 async function exerciseOperationQueries(root: string): Promise<void> {
-  const { state, provider, rail, bridge, gasless, metaMask } = repositories(root);
+  const { state, provider, rail, bridge, gasless, metaMask, relayUnsigned } = repositories(root);
 
   assert.equal(await state.loadOperation(PROFILE, OPERATION), null);
   assert.equal(await state.findOperation(OPERATION), null);
@@ -53,7 +55,7 @@ async function exerciseOperationQueries(root: string): Promise<void> {
   assert.deepEqual(await state.listX402Receipts(PROFILE), []);
   assert.equal(await state.loadReceipt(PROFILE, OPERATION), null);
 
-  for (const repository of [provider, rail, bridge, gasless, metaMask]) {
+  for (const repository of [provider, rail, bridge, gasless, metaMask, relayUnsigned]) {
     assert.equal(await repository.loadOperation(PROFILE, OPERATION), null);
     assert.equal(await repository.findOperation(OPERATION), null);
     assert.deepEqual(await repository.listOperations(PROFILE), []);
@@ -108,7 +110,7 @@ test("direct loads validate the root and every existing namespace", async (t) =>
   t.after(temporary.cleanup);
   const repos = repositories(temporary.root);
   await repos.state.initialize();
-  for (const namespace of ["operations", "x402-operations", "rail-operations", "bridge-operations", "gasless-operations", "metamask-gasless-operations"]) {
+  for (const namespace of ["operations", "x402-operations", "rail-operations", "bridge-operations", "gasless-operations", "metamask-gasless-operations", "relay-unsigned-operations"]) {
     await mkdir(join(temporary.root, namespace, PROFILE), { recursive: true, mode: 0o700 });
     await chmod(join(temporary.root, namespace), 0o700);
     await chmod(join(temporary.root, namespace, PROFILE), 0o700);
@@ -121,6 +123,7 @@ test("direct loads validate the root and every existing namespace", async (t) =>
     ["bridge-operations", () => repos.bridge.loadOperation(PROFILE, OPERATION)],
     ["gasless-operations", () => repos.gasless.loadOperation(PROFILE, OPERATION)],
     ["metamask-gasless-operations", () => repos.metaMask.loadOperation(PROFILE, OPERATION)],
+    ["relay-unsigned-operations", () => repos.relayUnsigned.loadOperation(PROFILE, OPERATION)],
   ];
 
   await chmod(temporary.root, 0o777);

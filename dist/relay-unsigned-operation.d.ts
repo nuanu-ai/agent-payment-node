@@ -1,0 +1,77 @@
+import { SecureStateStore } from "./secure-state-store.js";
+import { z } from "zod";
+declare const body: z.ZodObject<{
+    schemaVersion: z.ZodLiteral<"apn.relay-unsigned-operation.v1">;
+    kind: z.ZodLiteral<"relay_unsigned">;
+    state: z.ZodLiteral<"prepared">;
+    terminal: z.ZodLiteral<false>;
+    profileHash: z.ZodString;
+    operationId: z.ZodString;
+    idempotencyHash: z.ZodString;
+    requestHash: z.ZodString;
+    sourceChainId: z.ZodLiteral<1>;
+    destinationChainId: z.ZodLiteral<56>;
+    sourceAccount: z.ZodString;
+    recipient: z.ZodString;
+    quoteDigest: z.ZodString;
+    amountAtomic: z.ZodString;
+    minOutputAtomic: z.ZodString;
+    createdAt: z.ZodString;
+    deadline: z.ZodString;
+}, z.core.$strict>;
+declare const schema: z.ZodObject<{
+    schemaVersion: z.ZodLiteral<"apn.relay-unsigned-operation.v1">;
+    kind: z.ZodLiteral<"relay_unsigned">;
+    state: z.ZodLiteral<"prepared">;
+    terminal: z.ZodLiteral<false>;
+    profileHash: z.ZodString;
+    operationId: z.ZodString;
+    idempotencyHash: z.ZodString;
+    requestHash: z.ZodString;
+    sourceChainId: z.ZodLiteral<1>;
+    destinationChainId: z.ZodLiteral<56>;
+    sourceAccount: z.ZodString;
+    recipient: z.ZodString;
+    quoteDigest: z.ZodString;
+    amountAtomic: z.ZodString;
+    minOutputAtomic: z.ZodString;
+    createdAt: z.ZodString;
+    deadline: z.ZodString;
+    integrityHash: z.ZodString;
+}, z.core.$strict>;
+export type RelayUnsignedOperation = z.infer<typeof schema>;
+export type RelayUnsignedOperationInput = z.infer<typeof body>;
+export declare function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOperation;
+export declare function freezeRelayUnsignedOperation(input: RelayUnsignedOperationInput): RelayUnsignedOperation;
+export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOperation): {
+    proofClass: "saved_unsigned_quote";
+    executionAdmitted: false;
+    nextActions: readonly [];
+    schemaVersion: "apn.relay-unsigned-operation.v1";
+    kind: "relay_unsigned";
+    state: "prepared";
+    terminal: false;
+    profileHash: string;
+    operationId: string;
+    idempotencyHash: string;
+    requestHash: string;
+    sourceChainId: 1;
+    destinationChainId: 56;
+    sourceAccount: string;
+    recipient: string;
+    quoteDigest: string;
+    amountAtomic: string;
+    minOutputAtomic: string;
+    createdAt: string;
+    deadline: string;
+};
+export declare class RelayUnsignedOperationRepository extends SecureStateStore {
+    loadOperation(profileHash: string, operationId: string): Promise<RelayUnsignedOperation | null>;
+    findOperation(operationId: string): Promise<RelayUnsignedOperation | null>;
+    listOperations(profileHash: string): Promise<readonly RelayUnsignedOperation[]>;
+    listAllOperations(): Promise<readonly RelayUnsignedOperation[]>;
+    /** Caller holds the shared profile, operation ID, and idempotency locks and checks all money stores. */
+    persistLocked(operation: RelayUnsignedOperation): Promise<void>;
+    private path;
+}
+export {};

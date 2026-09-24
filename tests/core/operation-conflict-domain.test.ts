@@ -16,6 +16,7 @@ interface Stores {
   readonly direct?: readonly Stored[]; readonly x402?: readonly Stored[]; readonly providerX402?: readonly Stored[];
   readonly rails?: readonly Stored[]; readonly bridges?: readonly Stored[]; readonly gasless?: readonly Stored[];
   readonly metaMask?: readonly Stored[]; readonly smartAccount?: readonly Stored[]; readonly facilitator?: readonly Stored[];
+  readonly relayUnsigned?: readonly Stored[];
 }
 
 function service(stores: Stores): OperationService {
@@ -23,7 +24,8 @@ function service(stores: Stores): OperationService {
   const repository = (records?: readonly Stored[]) => ({ listOperations: owned(records) }) as never;
   const state = { listOperations: owned(stores.direct), listX402Operations: owned(stores.x402) } as never;
   return new OperationService(state, repository(stores.providerX402), repository(stores.rails), repository(stores.bridges),
-    repository(stores.gasless), repository(stores.metaMask), repository(stores.smartAccount), repository(stores.facilitator));
+    repository(stores.gasless), repository(stores.metaMask), repository(stores.smartAccount), repository(stores.facilitator),
+    { listOperations: owned(stores.relayUnsigned) } as never);
 }
 const open = (operationId: string, fields: Readonly<Record<string, unknown>>): Stored =>
   ({ operationId, state: "unknown_finality", terminal: false, ...fields });
@@ -126,6 +128,7 @@ test("every stored money family maps to its network and sending account", () => 
   const domains = (operation: unknown) => storedOperationDomains(operation as StoredMoneyOperation);
   const evm = (network: string, account: string) => [{ family: "evm", network, account: account.toLowerCase() }];
   assert.deepEqual(domains({ kind: "direct_transfer", record: open("d", { chainId: 42161, walletAddress: A }) }), evm("42161", A));
+  assert.deepEqual(domains({ kind: "relay_unsigned", record: open("u", { sourceChainId: 1, sourceAccount: A }) }), evm("1", A));
   assert.deepEqual(domains({ kind: "x402_fetch", strategy: "local", record: open("x", { chainId: "10", wallet: A.toLowerCase() }) }), evm("10", A));
   assert.deepEqual(domains({ kind: "x402_fetch", strategy: "provider_atomic", record: open("p", { provider: { payer: B } }) }), evm("8453", B));
   assert.deepEqual(domains({ kind: "rail_transfer", record: open("r", { account: { rail: "solana", address: SOLANA } }) }),
