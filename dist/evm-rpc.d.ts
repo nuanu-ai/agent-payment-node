@@ -2,12 +2,15 @@ import { type EvmAssetSelection } from "./evm-asset.js";
 import { type DirectEvmChainId } from "./evm-direct-networks.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcReceipt } from "./ports.js";
-import type { EvmBalanceSnapshot, EvmFeeQuote, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence } from "./evm-ports.js";
+import type { EvmBalanceSnapshot, EvmFeeQuote, EvmLineaNativePrepareReads, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence } from "./evm-ports.js";
 export declare class EvmRpc implements EvmRpcPort {
     private readonly call;
     private readonly rpcOrigin;
     private readonly maximumSignedBytes;
-    constructor(call: EvmRpcCall, rpcOrigin: string, maximumSignedBytes?: number);
+    private readonly batchCall?;
+    constructor(call: EvmRpcCall, rpcOrigin: string, maximumSignedBytes?: number, batchCall?: EvmRpcBatchCall | undefined);
+    /** One prepare owns this eight-POST read session. No retry or scalar fallback follows a batch rejection. */
+    prepareLineaNative(): EvmLineaNativePrepareReads;
     assertChain(chainId: DirectEvmChainId): Promise<void>;
     balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
     nonce(chainId: DirectEvmChainId, address: Address, tag: "pending" | "latest"): Promise<string>;

@@ -53,7 +53,8 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const parsed = parsePublicHttpsUrl(endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     this.endpoint = parsed;
     this.rpcOrigin = parsed.origin;
-    this.evm = new EvmRpc((method, params) => this.call(method, params), this.rpcOrigin);
+    this.evm = new EvmRpc((method, params) => this.call(method, params), this.rpcOrigin, undefined,
+      (calls) => this.batchCall(calls));
     this.totalDeadlineMs = options.totalDeadlineMs;
     this.x402ChainId = x402Network(options.x402ChainId).chainId;
   }
