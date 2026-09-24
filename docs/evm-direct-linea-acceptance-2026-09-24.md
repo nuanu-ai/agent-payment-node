@@ -5,14 +5,23 @@
 The active owner policy revision 16 admitted this bounded Linea native transfer. One prepare created one operation and one send created one transaction. APN recorded the operation as completed with proof class included_native_transaction_and_receipt. A second read-only resume reconciled the receipt; there was no rebroadcast.
 
 - Chain: Linea, eip155:59144
+
+Canonical APN operation/receipt fields, locally cross-checked:
+
 - Operation: c11ad55bee52aa55615a28affa7aa0f4c9068270ec18904b94e8ac65cc632d61
 - Transaction: 0xb3d8bbd0d4d054f9801d6fa56cc8e3025190dcb82004e01065c7f339ac44cc02
 - Receipt block: 32132324
 - Transfer amount: 1000000000000 wei
+- APN receipt integrity hash: c001494a1e419577ff3825958309cae56ce4244f57c29f799c24346db8096349
+
+Live run balance and receipt observations, not fields of the canonical APN operation/receipt JSON:
+
 - Buyer debit: 2050000147000 wei
 - Seller credit: 1000000000000 wei
 - Actual fee: 1050000147000 wei
-- APN receipt integrity hash: c001494a1e419577ff3825958309cae56ce4244f57c29f799c24346db8096349
+
+Execution context and finality:
+
 - Usage reservation: 730ce8b2ed1227e6a3147ff38de1c56a3f7262c8d941e8b49d720680daf8fb3c, finalized
 - Owner policy digest: f854682c5187bc829d014ae827e9ba10199029257b1e4c8fd589e9d62b6d6699
 - Finality: inclusion_only. This record does not claim safe finality.
