@@ -6,7 +6,7 @@ import type { MetaMaskGaslessUnsignedResult } from "../../src/metamask-gasless/m
 import { expectedQuote, intent, NOW, OWNER, quoteInput, SdkExchange, syntheticHome } from
   "./metamask-gasless-client-fixtures/sdk.js";
 
-const rejected = /gasless dependency boundary rejected Solana decoder/u;
+const rejected = /APN dependency boundary rejected Solana decoder/u;
 
 test("gasless helper rejects ESM and CommonJS Solana decoder loads while allowing EVM SDK", async () => {
   installGaslessDependencyBoundary();
