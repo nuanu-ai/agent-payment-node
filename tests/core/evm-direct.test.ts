@@ -64,6 +64,26 @@ test("Unichain USDC opt-in routes through grouped token reads and refuses insuff
   assert.equal(groupedReads, 1); assert.equal(downstreamReads, 0);
 });
 
+test("Polygon USDC opt-in routes through grouped token reads and refuses insufficient balance before gas reads", async (context) => {
+  const token = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" as const;
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = 137; setup.rpc.assetAtomic = "1";
+  const wallet = await ensureDirectWallet(setup);
+  await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
+    admissions: [...evmDirectAdmissions(), directAdmission("eip155:137", token)], now: setup.clock.now() });
+  let groupedReads = 0, downstreamReads = 0;
+  Object.assign(setup.rpc.evm, { preparePolygonUsdc: () => ({
+    balance: async (address: Address, selection: Parameters<typeof setup.rpc.evm.balance>[1]) => {
+      groupedReads += 1; return await setup.rpc.evm.balance(address, selection);
+    },
+    nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
+    feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },
+  }) });
+  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 137, token }, amount: "1", batchRpcReads: true }),
+    { code: "APN_INSUFFICIENT_ASSET" });
+  assert.equal(groupedReads, 1); assert.equal(downstreamReads, 0);
+});
+
 test("EVM amount handling preserves 0..255 decimals and uint256 without implicit metadata or rounding", () => {
   for (const decimals of [0, 6, 8, 18, 255]) {
     const decimal = decimals === 0 ? "1" : `0.${"0".repeat(decimals - 1)}1`;

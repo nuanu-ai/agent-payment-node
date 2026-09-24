@@ -27,6 +27,7 @@ export class EvmRpc {
     prepareLineaNative() { return this.prepareNativeBatched(59144); }
     prepareUnichainNative() { return this.prepareNativeBatched(130); }
     prepareUnichainUsdc() { return this.prepareNativeBatched(130, "usdc"); }
+    preparePolygonUsdc() { return this.prepareNativeBatched(137, "usdc"); }
     /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
     prepareNativeBatched(chainId, asset = "native") {
         if (this.batchCall === undefined)
@@ -59,7 +60,7 @@ export class EvmRpc {
             balance: async (address, selection) => {
                 onlySelectedChain(selection.chainId);
                 if (asset === "native" ? selection.token !== "native" :
-                    selection.token === "native" || !directEvmListRows(130).some((row) => row.kind === "token" && row.symbol === "USDC" &&
+                    selection.token === "native" || !directEvmListRows(chainId).some((row) => row.kind === "token" && row.symbol === "USDC" &&
                         row.identifier === selection.token && row.decimals === 6)) {
                     throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected asset.");
                 }
