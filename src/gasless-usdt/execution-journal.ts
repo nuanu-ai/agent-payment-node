@@ -1,3 +1,4 @@
+import { open } from "node:fs/promises";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity } from "../asset-usage-ledger.js";
@@ -115,7 +116,19 @@ export class UsdtExecutionJournal extends SecureStateStore {
     if (record.operationId !== operationId) fail("execution_path_binding", "APN_STATE_CORRUPT");
     return record;
   }
-  private async ready(): Promise<void> { await this.initialize(); await this.ensureDirectory("gasless-usdt-executions"); }
+  private async ready(): Promise<void> {
+    await this.initialize();
+    await this.ensureDirectory("gasless-usdt-executions");
+    // ensureDirectory checks the new child but does not persist its name in the root.
+    // Never reserve usage until that parent directory entry is durable. Repeat this
+    // sync on retries after a crash between mkdir and fsync.
+    try { await this.syncExecutionDirectoryParent(); }
+    catch { fail("execution_directory_sync_unavailable"); }
+  }
+  protected async syncExecutionDirectoryParent(): Promise<void> {
+    const handle = await open(this.root, "r");
+    try { await handle.sync(); } finally { await handle.close(); }
+  }
   private async write(record: UsdtExecutionRecord, createOnly = false): Promise<void> {
     await this.writeJson(this.path(record.operationId), record, createOnly);
   }
@@ -145,12 +158,35 @@ export class UsdtExecutionJournal extends SecureStateStore {
     if (snapshot.chainId !== 1n || snapshot.blockNumber.toString() !== b.safeBlockNumber ||
       snapshot.blockHash !== b.safeBlockHash || snapshot.account.entryPointNonce.toString() !== b.account.entryPointNonce ||
       snapshot.account.eoaNonce.toString() !== b.account.eoaNonce || snapshot.account.delegation !== b.account.delegation ||
-      snapshot.account.usdtBalanceAtomic < BigInt(b.plan.request.grossAtomic)) fail("safe_snapshot_changed");
+      snapshot.account.usdtBalanceAtomic.toString() !== b.account.usdtBalanceAtomic) fail("safe_snapshot_changed");
     const usage = await this.usage.usage(identity(b.plan.request.sender), at);
-    evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: identity(b.plan.request.sender).asset,
+    const admission = evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: identity(b.plan.request.sender).asset,
       rail: "gasless", amountAtomic: b.plan.request.grossAtomic, dailyUsageAtomic: usage.amountAtomic,
       asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
+    if (admission.asset.mechanismPins?.gasless === undefined ||
+      canonicalJson(admission.asset.mechanismPins.gasless) !== canonicalJson(USDT_GASLESS.mechanism)) fail("policy_mechanism_changed");
     return { now: at, registry: active.registry };
+  }
+  /** Last read fence immediately before the submitting marker. Dispatch must perform its own fresh guard. */
+  private async submissionFence(bound: UsdtBoundOperation, port: UsdtPreparePort): Promise<Date> {
+    const b = bound.binding;
+    const usage = await this.usage.usage(identity(b.plan.request.sender), port.now());
+    const active = await port.activePolicy(b.profile);
+    // No awaited provider read follows this clock sample before journal publication.
+    const at = port.now(); instant(at);
+    const nowSeconds = BigInt(Math.floor(at.getTime() / 1000));
+    const payload = decodeUsdtPaymasterData(b.paymasterData);
+    if (nowSeconds + 60n > payload.validUntil || payload.validAfter > nowSeconds) fail("paymaster_expired");
+    if (usage.windowStart.slice(0, 10) !== at.toISOString().slice(0, 10)) fail("usage_window_changed");
+    if (active === null || active.profile !== b.profile || active.digest !== active.registry.policyDigest ||
+      active.digest !== b.policyDigest || active.revision !== b.policyRevision || active.activationDigest !== b.activationDigest ||
+      active.accounts.evm !== b.plan.request.sender) fail("policy_changed");
+    const admission = evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: identity(b.plan.request.sender).asset,
+      rail: "gasless", amountAtomic: b.plan.request.grossAtomic, dailyUsageAtomic: usage.amountAtomic,
+      asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
+    if (admission.asset.mechanismPins?.gasless === undefined ||
+      canonicalJson(admission.asset.mechanismPins.gasless) !== canonicalJson(USDT_GASLESS.mechanism)) fail("policy_mechanism_changed");
+    return at;
   }
   /** Create a durable intent, then atomically reserve common usage. Retry repairs only the exact planned intent. */
   async reserve(boundValue: UsdtBoundOperation, intent: UsdtExecutionIntent, port: UsdtPreparePort): Promise<UsdtExecutionRecord> {
@@ -191,11 +227,12 @@ export class UsdtExecutionJournal extends SecureStateStore {
       const current = await this.load(bound.operationId);
       if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound))) fail("execution_binding_changed");
       if (current.state !== "reserved") fail("execution_already_attempted");
-      const checked = await this.guard(bound, port);
+      await this.guard(bound, port);
       const lease = await this.usage.load(identity(current.sender), current.reservationId);
       if (lease === null || lease.state !== "reserved" || lease.policyDigest !== current.policyDigest ||
         lease.amountAtomic !== bound.binding.plan.request.grossAtomic) fail("usage_reservation_mismatch");
-      const next = seal({ ...recordBody(current), state: "submitting", updatedAt: instant(checked.now) });
+      const fenced = await this.submissionFence(bound, port);
+      const next = seal({ ...recordBody(current), state: "submitting", updatedAt: instant(fenced) });
       await this.write(next); return next;
     });
   }

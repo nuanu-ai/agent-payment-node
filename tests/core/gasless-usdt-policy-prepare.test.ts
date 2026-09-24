@@ -512,3 +512,67 @@ test("USDT execution intent survives a crash before usage reserve without consum
   assert.equal((await journal.reserve(bound, intent, f.ports.prepare)).state, "reserved");
   assert.equal((await ledger.usage(identity, NOW)).amountAtomic, "1000000");
 });
+
+test("USDT execution first-use directory must be parent-synced before any reservation or submit marker", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), prepared = await preparePolicyBoundUsdt(f.ports, request());
+  const bound = await new UsdtBoundOperationRepository(temporary.root).create(allowlistProfileHash("owner"), prepared, "effect-first-use", NOW);
+  const intent = usdtExecutionIntent(bound);
+  class UnsupportedSync extends UsdtExecutionJournal {
+    protected override async syncExecutionDirectoryParent(): Promise<void> { throw new Error("directory fsync unsupported"); }
+  }
+  const rejected = new UnsupportedSync(temporary.root);
+  await assert.rejects(() => rejected.reserve(bound, intent, f.ports.prepare), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(await rejected.load(bound.operationId), null);
+  const ledger = new AssetUsageLedger(temporary.root), identity = { account: OWNER, chain: USDT_GASLESS.chain,
+    asset: { kind: "token" as const, identifier: USDT_GASLESS.token } };
+  assert.equal((await ledger.usage(identity, NOW)).amountAtomic, "0");
+  // Restore after the first-use interruption, then race independent instances.
+  const journals = Array.from({ length: 4 }, () => new UsdtExecutionJournal(temporary.root));
+  const reserved = await Promise.all(journals.map(journal => journal.reserve(bound, intent, f.ports.prepare)));
+  assert.equal(reserved.every(record => record.state === "reserved" && record.reservationId === reserved[0]?.reservationId), true);
+  assert.equal((await ledger.usage(identity, NOW)).amountAtomic, "1000000");
+  const attempts = await Promise.allSettled(journals.map(journal => journal.markSubmitting(bound, f.ports.prepare)));
+  assert.equal(attempts.filter(result => result.status === "fulfilled").length, 1);
+  assert.equal(attempts.filter(result => result.status === "rejected").length, 3);
+  assert.equal((await journals[0]!.load(bound.operationId))?.state, "submitting");
+  assert.equal((await ledger.usage(identity, NOW)).amountAtomic, "1000000");
+});
+
+test("USDT submit marker refuses expiry or revocation that arrives during awaited guard reads", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), prepared = await preparePolicyBoundUsdt(f.ports, request());
+  const repo = new UsdtBoundOperationRepository(temporary.root), journal = new UsdtExecutionJournal(temporary.root);
+  const first = await repo.create(allowlistProfileHash("owner"), prepared, "effect-delayed-expiry", NOW);
+  await journal.reserve(first, usdtExecutionIntent(first), f.ports.prepare);
+  let clock = NOW;
+  f.ports.prepare.now = () => clock;
+  const originalSnapshot = f.ports.prepare.safeSnapshot;
+  f.ports.prepare.safeSnapshot = async sender => {
+    const result = await originalSnapshot(sender);
+    clock = new Date(NOW.getTime() + 600_000);
+    return result;
+  };
+  await assert.rejects(() => journal.markSubmitting(first, f.ports.prepare), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await journal.load(first.operationId))?.state, "reserved");
+  f.ports.prepare.safeSnapshot = originalSnapshot;
+  clock = NOW;
+  const originalPolicy = f.ports.prepare.activePolicy;
+  let policyReads = 0;
+  f.ports.prepare.activePolicy = async profile => ++policyReads === 1 ? originalPolicy(profile) : null;
+  await assert.rejects(() => journal.markSubmitting(first, f.ports.prepare), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(policyReads, 2); // first guard passes; the final publication fence catches revocation
+  assert.equal((await journal.load(first.operationId))?.state, "reserved");
+});
+
+test("USDT execution rejects a different sufficient balance under the same claimed safe block", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), prepared = await preparePolicyBoundUsdt(f.ports, request());
+  const bound = await new UsdtBoundOperationRepository(temporary.root).create(allowlistProfileHash("owner"), prepared, "effect-balance-equivocation", NOW);
+  f.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n,
+    blockHash: `0x${"12".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_001n,
+      entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
+  const journal = new UsdtExecutionJournal(temporary.root);
+  await assert.rejects(() => journal.reserve(bound, usdtExecutionIntent(bound), f.ports.prepare), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(await journal.load(bound.operationId), null);
+});
