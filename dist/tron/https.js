@@ -1,24 +1,38 @@
 import { request } from "node:https";
 import { rootCertificates } from "node:tls";
+import { setTimeout as pause } from "node:timers/promises";
 import { ApnError } from "../errors.js";
 import { resolvePublicAddresses } from "../network-policy.js";
 /** Production transport pins one validated public address and built-in TLS roots. */
 export const tronHttpsFetch = createTronHttpsFetch(request, resolvePublicAddresses);
+/** Ten ten-second TRX prepare requests, nine gaps and the ten-second expiry reserve fit the 120-second TRON window. */
+export const TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS = 1_000;
+/** One pacing queue belongs to one APN TRON client, never a process-wide provider limit. */
+export function configuredTronHttpsFetch(options) {
+    return createTronHttpsFetch(request, resolvePublicAddresses, options);
+}
 /** Dependency injection keeps transport failure tests offline and deterministic. */
-export function createTronHttpsFetch(requestHttps, resolveAddresses) {
+export function createTronHttpsFetch(requestHttps, resolveAddresses, pacing = {}) {
+    let lastPostStartAt;
+    let startQueue = Promise.resolve();
     return async (input, init) => {
         if (!(input instanceof URL) || typeof init?.body !== "string" || init.signal === undefined || init.signal === null)
             invalid();
         const endpoint = input;
         const signal = init.signal;
         const body = init.body;
+        const raw = pacing.minimumPostStartIntervalMs;
+        if (raw !== undefined && raw !== "0" && (!/^[1-9][0-9]{0,3}$/u.test(raw) || Number(raw) > TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS)) {
+            throw new ApnError("APN_RPC_CONFIG", "TRON RPC minimum POST interval must be a canonical integer from 0 to 1000 milliseconds.");
+        }
+        const interval = raw === undefined ? 0 : Number(raw);
         const addresses = await resolveBounded(endpoint, signal, resolveAddresses);
         const selected = addresses[0];
         if (selected === undefined)
             invalid();
         if (signal.aborted)
             throw new ApnError("APN_RPC_PROTOCOL", "The bounded TRON HTTPS transport did not return valid evidence.", { reason: "deadline" });
-        return await new Promise((resolve, reject) => {
+        const openRequest = () => new Promise((resolve, reject) => {
             let settled = false;
             const finish = (response) => {
                 if (settled)
@@ -75,6 +89,28 @@ export function createTronHttpsFetch(requestHttps, resolveAddresses) {
             else
                 outgoing.end(body);
         });
+        if (interval === 0)
+            return await openRequest();
+        const now = pacing.now ?? performance.now.bind(performance);
+        const wait = pacing.wait ?? ((milliseconds, abort) => pause(milliseconds, undefined, { signal: abort }));
+        const start = startQueue.then(async () => {
+            const remaining = lastPostStartAt === undefined ? 0 : Math.max(0, lastPostStartAt + interval - now());
+            try {
+                if (remaining > 0)
+                    await wait(remaining, signal);
+            }
+            catch {
+                throw new ApnError("APN_RPC_PROTOCOL", "The bounded TRON request did not start before its deadline.", { reason: "pacing_deadline" });
+            }
+            if (signal.aborted)
+                throw new ApnError("APN_RPC_PROTOCOL", "The bounded TRON request did not start before its deadline.", { reason: "pacing_deadline" });
+            // Keep this timestamp and the physical HTTPS POST start in the same queued turn.
+            lastPostStartAt = now();
+            return { response: openRequest() };
+        });
+        startQueue = start.then(() => { }, () => { });
+        const { response } = await start;
+        return await response;
     };
 }
 async function resolveBounded(endpoint, signal, resolveAddresses) {

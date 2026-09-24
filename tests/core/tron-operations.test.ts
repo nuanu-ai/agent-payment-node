@@ -14,6 +14,14 @@ import { SOL_RECIPIENT } from "./solana-helpers.js";
 import { TRON_RECIPIENT, tronFixture } from "./tron-helpers.js";
 import { reserveRailLease } from "./direct-allowlist-helpers.js";
 
+test("TRX preparation keeps its ten safety reads", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await tronFixture(temporary.root);
+  const before = s.rpc.calls.length;
+  await s.prepare("trx");
+  assert.equal(s.rpc.calls.length - before, 10);
+});
+
 test("TRON assets are default-denied independently before RPC or signer access", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root, { admit: false });
   const request = { command: "transfer.prepare-tron", profile: s.account.profile, asset: "trx", recipient: TRON_RECIPIENT, amount: "0.000001", maximumFee: "30", idempotencyKey: "tron-default-deny-0001" } as const;
