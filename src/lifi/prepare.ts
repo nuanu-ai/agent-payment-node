@@ -26,6 +26,7 @@ export interface BridgePreparationOptions {
   readonly state: StateStore; readonly records: BridgeOperationRepository; readonly quotes: BridgeQuoteRepository;
   readonly operations: OperationService; readonly provider: LifiProviderPort; readonly rpcFor: BridgeRpcFactory; readonly now: () => number;
   readonly providerScheduler?: RpcProviderScheduler;
+  readonly lineaArchiveDeploymentScalarCode?: boolean;
 }
 export class BridgePreparation {
   constructor(private readonly o: BridgePreparationOptions) {}
@@ -66,7 +67,8 @@ export class BridgePreparation {
       // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary. Only the
       // provider-family scheduler/cooldown spans phases. Cold proofs retain bounded request and retry headroom.
       const session = new RpcReadSession({ now: this.o.now, maxHttpRequests: 26, maxHttpAttempts: 28,
-        archiveDeploymentBatchMaxItems: 3, ...(this.o.providerScheduler === undefined ? {} : { providerScheduler: this.o.providerScheduler }) });
+        archiveDeploymentBatchMaxItems: 3, lineaArchiveDeploymentScalarCode: this.o.lineaArchiveDeploymentScalarCode === true,
+        ...(this.o.providerScheduler === undefined ? {} : { providerScheduler: this.o.providerScheduler }) });
       const source = this.o.rpcFor(quote.request.fromChainId, session), destination = this.o.rpcFor(quote.request.toChainId, session);
       const [sourceSafeBlock, destinationSafeBlock, response] = await Promise.all([
         source.block("safe"), destination.block("safe"), this.o.provider.materialize(selected.step),

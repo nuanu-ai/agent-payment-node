@@ -28,6 +28,7 @@ export interface BridgeDependencies {
   readonly rpcFor: BridgeRpcFactory;
   readonly custody: BridgeCustodyPort;
   readonly approval?: BridgeApprovalPort;
+  readonly lineaArchiveDeploymentScalarCode?: boolean;
 }
 export interface BridgeDeploymentMigrationResult {
   readonly schema_version: (BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit)["schemaVersion"];
@@ -161,7 +162,8 @@ export class BridgeService {
   private preparation() {
     const d = this.dependencies();
     return new BridgePreparation({ state: this.context.state, records: this.records, quotes: new BridgeQuoteRepository(this.context.state.root),
-      operations: this.operations, provider: d.provider, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime(), providerScheduler: this.providerScheduler });
+      operations: this.operations, provider: d.provider, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime(),
+      providerScheduler: this.providerScheduler, lineaArchiveDeploymentScalarCode: d.lineaArchiveDeploymentScalarCode === true });
   }
   private execution(op: BridgeOperationRecord) {
     const d = this.dependencies(), m = op.intent.materialization;
