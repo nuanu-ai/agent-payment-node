@@ -29,6 +29,7 @@ import { MCP_TOOLS } from "../../src/mcp-projection.js";
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RECIPIENT = getAddress("0x000000000000000000000000000000000000dEaD");
 const NOW = new Date((0x6aacecdb - 300) * 1000);
+const TEST_USER_OP_HASH = `0x${"ab".repeat(32)}`;
 const QUOTE = { quotes: [{ paymaster: USDT_GASLESS.paymaster, token: USDT_GASLESS.token, postOpGas: "0x4c2c",
   exchangeRate: "0xa38ca6e3", exchangeRateNativeToUsd: "0x948f68af", balanceSlot: "0x2", allowanceSlot: "0x5" }] };
 const PRICE = { slow: { maxFeePerGas: "0x10ef719d", maxPriorityFeePerGas: "0xbb0de7a" },
@@ -441,10 +442,13 @@ test("USDT execution journal reserves once, replays, and durably marks a may-hav
   const ledger = new AssetUsageLedger(temporary.root), identity = { account: OWNER, chain: USDT_GASLESS.chain,
     asset: { kind: "token" as const, identifier: USDT_GASLESS.token } };
   assert.equal((await ledger.usage(identity, NOW)).amountAtomic, "1000000");
-  const submitting = await journal.markSubmitting(bound, f.ports.prepare);
+  await assert.rejects(() => journal.markSubmitting(bound, f.ports.prepare, undefined as unknown as string),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await journal.load(bound.operationId))?.state, "reserved");
+  const submitting = await journal.markSubmitting(bound, f.ports.prepare, TEST_USER_OP_HASH);
   assert.equal(submitting.state, "submitting");
   assert.equal((await journal.load(bound.operationId))?.state, "submitting");
-  await assert.rejects(() => journal.markSubmitting(bound, f.ports.prepare), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(() => journal.markSubmitting(bound, f.ports.prepare, TEST_USER_OP_HASH), { code: "APN_OPERATION_BLOCKED" });
   assert.deepEqual(await journal.reserve(bound, intent, f.ports.prepare), submitting);
   assert.equal((await ledger.usage(identity, NOW)).amountAtomic, "1000000");
   const unknown = await journal.markUnknownFinality(bound, NOW);
@@ -476,7 +480,7 @@ test("USDT execution journal repairs reserve interruption and refuses binding, p
     asset: { kind: "token", identifier: USDT_GASLESS.token } }, NOW)).amountAtomic, "1000000");
   const repaired = await journal.reserve(bound, intent, f.ports.prepare);
   assert.equal(repaired.state, "reserved");
-  const competing = await Promise.allSettled(Array.from({ length: 4 }, () => journal.markSubmitting(bound, f.ports.prepare)));
+  const competing = await Promise.allSettled(Array.from({ length: 4 }, () => journal.markSubmitting(bound, f.ports.prepare, TEST_USER_OP_HASH)));
   assert.equal(competing.filter(result => result.status === "fulfilled").length, 1);
   assert.equal(competing.filter(result => result.status === "rejected").length, 3);
   assert.equal((await journal.load(bound.operationId))?.state, "submitting");
@@ -532,7 +536,7 @@ test("USDT execution first-use directory must be parent-synced before any reserv
   const reserved = await Promise.all(journals.map(journal => journal.reserve(bound, intent, f.ports.prepare)));
   assert.equal(reserved.every(record => record.state === "reserved" && record.reservationId === reserved[0]?.reservationId), true);
   assert.equal((await ledger.usage(identity, NOW)).amountAtomic, "1000000");
-  const attempts = await Promise.allSettled(journals.map(journal => journal.markSubmitting(bound, f.ports.prepare)));
+  const attempts = await Promise.allSettled(journals.map(journal => journal.markSubmitting(bound, f.ports.prepare, TEST_USER_OP_HASH)));
   assert.equal(attempts.filter(result => result.status === "fulfilled").length, 1);
   assert.equal(attempts.filter(result => result.status === "rejected").length, 3);
   assert.equal((await journals[0]!.load(bound.operationId))?.state, "submitting");
@@ -553,14 +557,14 @@ test("USDT submit marker refuses expiry or revocation that arrives during awaite
     clock = new Date(NOW.getTime() + 600_000);
     return result;
   };
-  await assert.rejects(() => journal.markSubmitting(first, f.ports.prepare), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(() => journal.markSubmitting(first, f.ports.prepare, TEST_USER_OP_HASH), { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await journal.load(first.operationId))?.state, "reserved");
   f.ports.prepare.safeSnapshot = originalSnapshot;
   clock = NOW;
   const originalPolicy = f.ports.prepare.activePolicy;
   let policyReads = 0;
   f.ports.prepare.activePolicy = async profile => ++policyReads === 1 ? originalPolicy(profile) : null;
-  await assert.rejects(() => journal.markSubmitting(first, f.ports.prepare), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(() => journal.markSubmitting(first, f.ports.prepare, TEST_USER_OP_HASH), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(policyReads, 2); // first guard passes; the final publication fence catches revocation
   assert.equal((await journal.load(first.operationId))?.state, "reserved");
 });
@@ -584,5 +588,5 @@ test("USDT submission admission excludes its own reservation at the exact daily 
   const bound = await new UsdtBoundOperationRepository(temporary.root).create(allowlistProfileHash("owner"), prepared, "effect-exact-cap", NOW);
   const journal = new UsdtExecutionJournal(temporary.root);
   assert.equal((await journal.reserve(bound, usdtExecutionIntent(bound), f.ports.prepare)).state, "reserved");
-  assert.equal((await journal.markSubmitting(bound, f.ports.prepare)).state, "submitting");
+  assert.equal((await journal.markSubmitting(bound, f.ports.prepare, TEST_USER_OP_HASH)).state, "submitting");
 });

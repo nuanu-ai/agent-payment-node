@@ -87,6 +87,7 @@ export function validateUsdtExecutionRecord(value: unknown): UsdtExecutionRecord
     typeof value.reservationId !== "string" || !HASH.test(value.reservationId) ||
     (value.userOperationHash !== null && (typeof value.userOperationHash !== "string" || !/^0x[0-9a-f]{64}$/u.test(value.userOperationHash))) ||
     ((value.state === "planned" || value.state === "reserved") && value.userOperationHash !== null) ||
+    ((value.state === "submitting" || value.state === "submitted_pending") && value.userOperationHash === null) ||
     !Number.isSafeInteger(value.policyRevision) || (value.policyRevision as number) < 1 ||
     [value.entryPointNonce, value.eoaNonce, value.safeBlockNumber, value.paymasterValidUntil, value.maxFeeAtomic]
       .some(v => typeof v !== "string" || !DECIMAL.test(v)) ||
@@ -235,9 +236,9 @@ export class UsdtExecutionJournal extends SecureStateStore {
     return current;
   }
   /** Persist the may-have-sent boundary. A retry cannot issue another send from this state. */
-  async markSubmitting(boundValue: UsdtBoundOperation, port: UsdtPreparePort, userOperationHash: string | null = null): Promise<UsdtExecutionRecord> {
+  async markSubmitting(boundValue: UsdtBoundOperation, port: UsdtPreparePort, userOperationHash: string): Promise<UsdtExecutionRecord> {
     const bound = validateUsdtBoundOperation(boundValue); await this.ready();
-    if (userOperationHash !== null && !/^0x[0-9a-f]{64}$/u.test(userOperationHash)) fail("user_operation_hash_invalid");
+    if (!/^0x[0-9a-f]{64}$/u.test(userOperationHash)) fail("user_operation_hash_invalid");
     return this.withLocks([this.lock(bound.operationId)], async () => {
       const current = await this.load(bound.operationId);
       if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound))) fail("execution_binding_changed");
