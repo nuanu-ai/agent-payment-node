@@ -132,6 +132,18 @@ export class UsdtExecutionJournal extends SecureStateStore {
   private async write(record: UsdtExecutionRecord, createOnly = false): Promise<void> {
     await this.writeJson(this.path(record.operationId), record, createOnly);
   }
+  private async otherUsage(bound: UsdtBoundOperation, at: Date): Promise<{ amountAtomic: string; windowStart: string }> {
+    const b = bound.binding, account = identity(b.plan.request.sender);
+    const snapshot = await this.usage.usage(account, at);
+    const reservationId = assetUsageReservationId(account, usageKey(bound.operationId));
+    const own = await this.usage.load(account, reservationId);
+    if (own === null) return snapshot;
+    if (own.state !== "reserved" || own.policyDigest !== b.policyDigest || own.rail !== "gasless" ||
+      own.amountAtomic !== b.plan.request.grossAtomic) fail("usage_reservation_mismatch");
+    const other = BigInt(snapshot.amountAtomic) - BigInt(own.amountAtomic);
+    if (other < 0n) fail("usage_total_mismatch", "APN_STATE_CORRUPT");
+    return { amountAtomic: other.toString(), windowStart: snapshot.windowStart };
+  }
   private async guard(bound: UsdtBoundOperation, port: UsdtPreparePort): Promise<{ now: Date; registry: unknown }> {
     validateUsdtBoundOperation(bound);
     const b = bound.binding, at = port.now(); instant(at);
@@ -159,7 +171,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
       snapshot.blockHash !== b.safeBlockHash || snapshot.account.entryPointNonce.toString() !== b.account.entryPointNonce ||
       snapshot.account.eoaNonce.toString() !== b.account.eoaNonce || snapshot.account.delegation !== b.account.delegation ||
       snapshot.account.usdtBalanceAtomic.toString() !== b.account.usdtBalanceAtomic) fail("safe_snapshot_changed");
-    const usage = await this.usage.usage(identity(b.plan.request.sender), at);
+    const usage = await this.otherUsage(bound, at);
     const admission = evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: identity(b.plan.request.sender).asset,
       rail: "gasless", amountAtomic: b.plan.request.grossAtomic, dailyUsageAtomic: usage.amountAtomic,
       asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
@@ -170,7 +182,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
   /** Last read fence immediately before the submitting marker. Dispatch must perform its own fresh guard. */
   private async submissionFence(bound: UsdtBoundOperation, port: UsdtPreparePort): Promise<Date> {
     const b = bound.binding;
-    const usage = await this.usage.usage(identity(b.plan.request.sender), port.now());
+    const usage = await this.otherUsage(bound, port.now());
     const active = await port.activePolicy(b.profile);
     // No awaited provider read follows this clock sample before journal publication.
     const at = port.now(); instant(at);

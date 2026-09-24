@@ -576,3 +576,13 @@ test("USDT execution rejects a different sufficient balance under the same claim
   await assert.rejects(() => journal.reserve(bound, usdtExecutionIntent(bound), f.ports.prepare), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(await journal.load(bound.operationId), null);
 });
+
+test("USDT submission admission excludes its own reservation at the exact daily cap", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(); f.setPolicy(active({ daily: "1000000" }));
+  const prepared = await preparePolicyBoundUsdt(f.ports, request());
+  const bound = await new UsdtBoundOperationRepository(temporary.root).create(allowlistProfileHash("owner"), prepared, "effect-exact-cap", NOW);
+  const journal = new UsdtExecutionJournal(temporary.root);
+  assert.equal((await journal.reserve(bound, usdtExecutionIntent(bound), f.ports.prepare)).state, "reserved");
+  assert.equal((await journal.markSubmitting(bound, f.ports.prepare)).state, "submitting");
+});
