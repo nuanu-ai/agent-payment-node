@@ -442,8 +442,20 @@ approval reset. Every fee row is the native coin itself (`asset: "native"`);
 LI.FI's fixed fee must equal the forwarded amount. The captured Ethereum to
 Base native Stargate Taxi calldata can be decoded offline with asset ID 13:
 transaction value equals the source principal plus the separate LayerZero native
-fee. Its route remains listed but not preparable until native pool pins and
-destination delivery proof are reviewed. A token request can never reuse native
+fee. An offline destination decoder conditionally accepts the canonical
+`OFTReceived` from the official Base native pool when a frozen code and
+configuration pin matches historical deployment evidence at the receipt block.
+The event must bind the source GUID, source EID, recipient and amount; the
+decoded route and source correlation bind the destination EID and sender.
+At the verified `StargatePoolNative` implementation, `OFTReceived` follows a
+successful native outflow. A supplied native call trace or balance snapshot is
+validated, but neither is required: the recipient may spend in the same block.
+A cached failure without a successful event cannot prove delivery. The offline
+tests use synthetic, caller-supplied deployment hashes; there is no independently
+verified historical on-chain pin for this LI.FI lane yet. Live asset ID 13
+mapping, pool/router bytecode and configuration pins, and paid two-chain
+acceptance remain outstanding. The
+route remains listed but not preparable. A token request can never reuse native
 calldata.
 
 Source proof replaces the three ERC-20 `Transfer` logs with the wrap: exactly
