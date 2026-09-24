@@ -233,6 +233,7 @@ export class TransferService {
             let operation = requiredLocal(await this.requiredOperation(operationId));
             if (operation.terminal)
                 return publicOperation(await this.followUsage(operation));
+            const startedUnknownFinality = operation.state === "unknown_finality";
             if (operation.evm !== undefined) {
                 await this.followUsage(operation);
                 await requireEvmRpc(this.context.requireRpc()).assertChain(operation.chainId);
@@ -258,7 +259,7 @@ export class TransferService {
                 throw new ApnError("APN_STATE_CORRUPT", "Signed operation is missing its public effect binding.");
             }
             operation = await this.inspectReceipt(operation, this.context.requireRpc());
-            if (operation.terminal)
+            if (operation.terminal || startedUnknownFinality)
                 return publicOperation(operation);
             const superseding = await this.proveSuperseding(operation, this.context.requireRpc());
             if (superseding !== null)
