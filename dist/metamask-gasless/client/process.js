@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { mmError, mmFail } from "../reasons.js";
 import { helperResponse, MM_HELPER_VERSION } from "./protocol.js";
 const MAX_IO = 1024 * 1024;
-const HELPER_ENTRY = fileURLToPath(new URL("./helper-entry.js", import.meta.url));
+const HELPER_ENTRY = fileURLToPath(new URL("./helper-bootstrap.js", import.meta.url));
 export class MetaMaskGaslessProviderClient {
     environment;
     clock;
