@@ -96,8 +96,13 @@ export class GaslessUsdtCommandExecute {
 
   async execute(profileHash: string, operationId: string): Promise<UsdtExecutionRecord> {
     const bound = await this.load(profileHash, operationId);
-    // Do not prompt or open custody once any prior attempt or reservation exists.
-    if (await this.journal.load(operationId) !== null) {
+    // A previous process may have died after reserving usage but before the may-have-sent marker.
+    // The effect lock serializes this cleanup against an active signer in another process.
+    const prior = await this.journal.load(operationId);
+    if (prior !== null) {
+      if (["planned", "reserved", "failed_before_effect"].includes(prior.state)) {
+        await this.journal.abortUnsent(bound, this.clock.now());
+      }
       throw new ApnError("APN_OPERATION_BLOCKED", "Gasless USDT execution already has a journal record; inspect status.");
     }
     await (this.options.approval ?? new TtyUsdtApproval()).approve(bound);

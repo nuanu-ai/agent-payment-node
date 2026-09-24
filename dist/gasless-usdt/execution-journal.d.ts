@@ -3,7 +3,7 @@ import { type UsdtBoundOperation } from "./bound-operation.js";
 import type { UsdtPreparePort } from "./policy-prepare.js";
 import type { UsdtSettlement } from "./receipt.js";
 export declare const USDT_EXECUTION_SCHEMA: "apn.gasless-usdt-execution.v1";
-export type UsdtExecutionState = "planned" | "reserved" | "submitting" | "submitted_pending" | "unknown_finality" | "finalized" | "failed_confirmed_revert";
+export type UsdtExecutionState = "planned" | "reserved" | "failed_before_effect" | "submitting" | "submitted_pending" | "unknown_finality" | "finalized" | "failed_confirmed_revert";
 export interface UsdtExecutionIntent {
     readonly operationId: string;
     readonly profileHash: string;
@@ -40,6 +40,11 @@ export declare class UsdtExecutionJournal extends SecureStateStore {
     constructor(root: string);
     private path;
     private lock;
+    /** OS advisory lock held from pre-submit recovery through signing and the durable may-have-sent marker. */
+    withEffectLock<T>(operationId: string, action: (abortUnsent: (bound: UsdtBoundOperation, now: Date) => Promise<UsdtExecutionRecord | null>) => Promise<T>): Promise<T>;
+    abortUnsent(bound: UsdtBoundOperation, now: Date): Promise<UsdtExecutionRecord | null>;
+    /** Caller holds the effect lock. The terminal marker is fsynced before releasing a reserved usage lease. */
+    private abortUnsentLocked;
     load(operationId: string): Promise<UsdtExecutionRecord | null>;
     private ready;
     protected syncExecutionDirectoryParent(): Promise<void>;

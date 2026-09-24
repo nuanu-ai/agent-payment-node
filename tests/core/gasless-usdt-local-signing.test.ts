@@ -145,6 +145,73 @@ test("CLI refuses policy and nonce drift before dispatch, and observation never 
   }
 });
 
+test("pre-submit signing and fresh-guard failures durably release usage without a send", async t => {
+  for (const failure of ["signer", "fresh_guard"] as const) {
+    const f = await setup(); t.after(f.temporary.cleanup);
+    const journal = new UsdtExecutionJournal(f.temporary.root);
+    let sends = 0;
+    let snapshots = 0;
+    const port = { ...f.port, safeSnapshot: async (...args: Parameters<typeof f.port.safeSnapshot>) => {
+      const snapshot = await f.port.safeSnapshot(...args);
+      snapshots++;
+      return failure === "fresh_guard" && snapshots >= 3
+        ? { ...snapshot, account: { ...snapshot.account, entryPointNonce: 8n } } : snapshot;
+    } };
+    const sender = new GuardedUsdtSendService(journal, failure === "signer"
+      ? { async sign() { throw new Error("synthetic signer failure"); } } : f.signer,
+    { async send() { sends++; return `0x${"ab".repeat(32)}`; } }, port);
+    await assert.rejects(() => sender.send(f.bound, f.expected));
+    assert.equal(sends, 0);
+    assert.equal((await journal.load(f.bound.operationId))?.state, "failed_before_effect");
+    const usage = await new AssetUsageLedger(f.temporary.root).usage({ account: OWNER, chain: USDT_GASLESS.chain,
+      asset: { kind: "token", identifier: USDT_GASLESS.token } }, NOW);
+    assert.equal(usage.amountAtomic, "0");
+    await assert.rejects(() => sender.send(f.bound, f.expected), { code: "APN_OPERATION_BLOCKED" });
+    assert.equal(sends, 0);
+  }
+});
+
+test("restart aborts a durable unsent reservation without approval or send", async t => {
+  const f = await setup(); t.after(f.temporary.cleanup);
+  const journal = new UsdtExecutionJournal(f.temporary.root);
+  assert.equal((await journal.reserve(f.bound, usdtExecutionIntent(f.bound), f.port)).state, "reserved");
+  const usage = new AssetUsageLedger(f.temporary.root), identity = { account: OWNER, chain: USDT_GASLESS.chain,
+    asset: { kind: "token" as const, identifier: USDT_GASLESS.token } };
+  assert.equal((await usage.usage(identity, NOW)).amountAtomic, "1000000");
+  let prompts = 0, sends = 0;
+  const restarted = new GaslessUsdtCommandExecute(new StateStore(f.temporary.root), { now: () => NOW }, new Wrapping(), {
+    approval: { async approve() { prompts++; } }, signer: f.signer, preparePort: f.port,
+    sendTransport: { async send() { sends++; return `0x${"ab".repeat(32)}`; } },
+  });
+  await assert.rejects(() => restarted.execute(f.bound.profileHash, f.bound.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(prompts, 0); assert.equal(sends, 0);
+  assert.equal((await journal.load(f.bound.operationId))?.state, "failed_before_effect");
+  assert.equal((await usage.usage(identity, NOW)).amountAtomic, "0");
+  await journal.abortUnsent(f.bound, NOW);
+  assert.equal((await usage.usage(identity, NOW)).amountAtomic, "0");
+});
+
+test("active signer holds the effect lock against concurrent restart cleanup", async t => {
+  const f = await setup(); t.after(f.temporary.cleanup);
+  let signerStarted!: () => void, finishSigning!: () => void;
+  const entered = new Promise<void>(resolve => { signerStarted = resolve; });
+  const release = new Promise<void>(resolve => { finishSigning = resolve; });
+  const journal = new UsdtExecutionJournal(f.temporary.root);
+  let sends = 0;
+  const sender = new GuardedUsdtSendService(journal, { async sign(bound, identity) {
+    signerStarted(); await release; return await f.signer.sign(bound, identity);
+  } }, { async send(op) { sends++; return usdtUserOperationHash(op); } }, f.port);
+  const first = sender.send(f.bound, f.expected);
+  await entered;
+  assert.equal((await journal.load(f.bound.operationId))?.state, "reserved");
+  await assert.rejects(() => journal.abortUnsent(f.bound, NOW), { code: "APN_STATE_BUSY" });
+  assert.equal((await journal.load(f.bound.operationId))?.state, "reserved");
+  finishSigning();
+  assert.equal((await first).state, "submitted_pending");
+  assert.equal(await journal.abortUnsent(f.bound, NOW), null);
+  assert.equal(sends, 1);
+});
+
 test("local signer refuses wrong identity, wallet, expired quote and changed signed wire", async t => {
   const f = await setup(); t.after(f.temporary.cleanup);
   for (const expected of [{ ...f.expected, profile: "other" }, { ...f.expected, profileHash: "0".repeat(64) },
