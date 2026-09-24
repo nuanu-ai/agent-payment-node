@@ -10,7 +10,7 @@ import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "./paymaster-
 import type { UsdtPreparePort } from "./policy-prepare.js";
 
 export const USDT_EXECUTION_SCHEMA = "apn.gasless-usdt-execution.v1" as const;
-export type UsdtExecutionState = "planned" | "reserved" | "submitting" | "unknown_finality";
+export type UsdtExecutionState = "planned" | "reserved" | "submitting" | "submitted_pending" | "unknown_finality";
 export interface UsdtExecutionIntent {
   readonly operationId: string;
   readonly profileHash: string;
@@ -33,13 +33,14 @@ export interface UsdtExecutionRecord extends UsdtExecutionIntent {
   readonly schemaVersion: typeof USDT_EXECUTION_SCHEMA;
   readonly reservationId: string;
   readonly state: UsdtExecutionState;
+  readonly userOperationHash: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly integrityHash: string;
 }
 const HASH = /^[a-f0-9]{64}$/u;
 const DECIMAL = /^(0|[1-9][0-9]*)$/u;
-const STATES: readonly UsdtExecutionState[] = ["planned", "reserved", "submitting", "unknown_finality"];
+const STATES: readonly UsdtExecutionState[] = ["planned", "reserved", "submitting", "submitted_pending", "unknown_finality"];
 function fail(reason: string, code: "APN_OPERATION_BLOCKED" | "APN_STATE_CORRUPT" | "APN_IDEMPOTENCY_CONFLICT" = "APN_OPERATION_BLOCKED"): never {
   throw new ApnError(code, `Gasless USDT execution refused: ${reason}.`, { rail: "gasless_usdt", reason });
 }
@@ -70,12 +71,12 @@ function expected(bound: UsdtBoundOperation): UsdtExecutionIntent {
     maxFeeAtomic: request.maxFeeAtomic };
 }
 function exactIntent(record: UsdtExecutionRecord): UsdtExecutionIntent {
-  const { schemaVersion: _schema, reservationId: _reservation, state: _state, createdAt: _created,
+  const { schemaVersion: _schema, reservationId: _reservation, state: _state, userOperationHash: _userOperationHash, createdAt: _created,
     updatedAt: _updated, integrityHash: _integrity, ...intent } = record;
   return intent;
 }
 export function validateUsdtExecutionRecord(value: unknown): UsdtExecutionRecord {
-  const keys = ["schemaVersion", "reservationId", "state", "createdAt", "updatedAt", "integrityHash",
+  const keys = ["schemaVersion", "reservationId", "state", "userOperationHash", "createdAt", "updatedAt", "integrityHash",
     "operationId", "profileHash", "bindingHash", "policyDigest", "policyRevision", "activationDigest", "sender",
     "smartAccount", "recipient", "entryPointNonce", "eoaNonce", "safeBlockNumber", "safeBlockHash", "quoteHash",
     "paymasterValidUntil", "maxFeeAtomic"];
@@ -84,6 +85,8 @@ export function validateUsdtExecutionRecord(value: unknown): UsdtExecutionRecord
     [value.operationId, value.profileHash, value.bindingHash, value.policyDigest, value.activationDigest,
       value.quoteHash, value.integrityHash].some(v => typeof v !== "string" || !HASH.test(v)) ||
     typeof value.reservationId !== "string" || !HASH.test(value.reservationId) ||
+    (value.userOperationHash !== null && (typeof value.userOperationHash !== "string" || !/^0x[0-9a-f]{64}$/u.test(value.userOperationHash))) ||
+    ((value.state === "planned" || value.state === "reserved") && value.userOperationHash !== null) ||
     !Number.isSafeInteger(value.policyRevision) || (value.policyRevision as number) < 1 ||
     [value.entryPointNonce, value.eoaNonce, value.safeBlockNumber, value.paymasterValidUntil, value.maxFeeAtomic]
       .some(v => typeof v !== "string" || !DECIMAL.test(v)) ||
@@ -213,7 +216,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
       const checked = await this.guard(bound, port);
       const body = { schemaVersion: USDT_EXECUTION_SCHEMA, ...wanted,
         reservationId: assetUsageReservationId(identity(wanted.sender), usageKey(wanted.operationId)),
-        state: "planned" as const, createdAt: instant(checked.now), updatedAt: instant(checked.now) };
+        state: "planned" as const, userOperationHash: null, createdAt: instant(checked.now), updatedAt: instant(checked.now) };
       const next = seal(body); await this.write(next, true); return next;
     });
     if (current.state !== "planned") return current;
@@ -232,8 +235,9 @@ export class UsdtExecutionJournal extends SecureStateStore {
     return current;
   }
   /** Persist the may-have-sent boundary. A retry cannot issue another send from this state. */
-  async markSubmitting(boundValue: UsdtBoundOperation, port: UsdtPreparePort): Promise<UsdtExecutionRecord> {
+  async markSubmitting(boundValue: UsdtBoundOperation, port: UsdtPreparePort, userOperationHash: string | null = null): Promise<UsdtExecutionRecord> {
     const bound = validateUsdtBoundOperation(boundValue); await this.ready();
+    if (userOperationHash !== null && !/^0x[0-9a-f]{64}$/u.test(userOperationHash)) fail("user_operation_hash_invalid");
     return this.withLocks([this.lock(bound.operationId)], async () => {
       const current = await this.load(bound.operationId);
       if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound))) fail("execution_binding_changed");
@@ -243,7 +247,18 @@ export class UsdtExecutionJournal extends SecureStateStore {
       if (lease === null || lease.state !== "reserved" || lease.policyDigest !== current.policyDigest ||
         lease.amountAtomic !== bound.binding.plan.request.grossAtomic) fail("usage_reservation_mismatch");
       const fenced = await this.submissionFence(bound, port);
-      const next = seal({ ...recordBody(current), state: "submitting", updatedAt: instant(fenced) });
+      const next = seal({ ...recordBody(current), state: "submitting", userOperationHash, updatedAt: instant(fenced) });
+      await this.write(next); return next;
+    });
+  }
+  /** A matching bundler acknowledgement does not settle the transfer; observation remains required. */
+  async markSubmitted(boundValue: UsdtBoundOperation, userOperationHash: string, now: Date): Promise<UsdtExecutionRecord> {
+    const bound = validateUsdtBoundOperation(boundValue); await this.ready();
+    return this.withLocks([this.lock(bound.operationId)], async () => {
+      const current = await this.load(bound.operationId);
+      if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)) ||
+        current.state !== "submitting" || current.userOperationHash !== userOperationHash) fail("submission_acknowledgement_mismatch");
+      const next = seal({ ...recordBody(current), state: "submitted_pending", updatedAt: instant(now) });
       await this.write(next); return next;
     });
   }
