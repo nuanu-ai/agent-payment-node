@@ -47,6 +47,33 @@ test("Relay prepare freezes one validated quote, replays without another quote, 
   assert.equal(calls, 1);
 });
 
+test("Relay prepare uses the checksummed owner for ledger usage before quoting and replays without quoting", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  let quotes = 0;
+  const service = new RelayUnsignedPrepareService(state, { now: () => instant }, undefined, {
+    activePolicy: async () => policy(), publicAccount: async () => payer,
+    quote: async intent => { quotes++; return validateRelayQuote(await quoteFixture(), intent); },
+  });
+  const first = await service.prepare(input);
+  assert.equal(first.sourceAccount, payer.toLowerCase());
+  assert.equal(quotes, 1);
+  assert.deepEqual(await service.prepare(input), first);
+  assert.equal(quotes, 1);
+});
+
+test("Relay prepare refuses a noncanonical policy owner before the quote", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  let quotes = 0;
+  const service = new RelayUnsignedPrepareService(new StateStore(temporary.root), { now: () => instant }, undefined, {
+    activePolicy: async () => ({ ...policy(), accounts: { evm: payer.toLowerCase() } }),
+    publicAccount: async () => payer,
+    quote: async intent => { quotes++; return validateRelayQuote(await quoteFixture(), intent); },
+  });
+  await assert.rejects(service.prepare(input), { code: "APN_INVALID_INPUT" });
+  assert.equal(quotes, 0);
+});
+
 test("Relay policy and fee caps refuse before or after exactly one quote", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root);
