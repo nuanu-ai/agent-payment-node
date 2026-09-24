@@ -5,7 +5,7 @@ import { evmDecimals, evmToken, evmUint, MAX_DIRECT_TRANSACTION_BYTES, resolveEv
 import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "./evm-direct-networks.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcReceipt } from "./ports.js";
-import type { EvmBalanceSnapshot, EvmFeeQuote, EvmLineaNativePrepareReads, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence } from "./evm-ports.js";
+import type { EvmBalanceSnapshot, EvmFeeQuote, EvmNativePrepareReads, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence } from "./evm-ports.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord, evmTokenBalance, recheckEvmBlock } from "./evm-rpc-codec.js";
 import { observeEvmTransfer } from "./evm-transfer-evidence.js";
 
@@ -24,32 +24,35 @@ export class EvmRpc implements EvmRpcPort {
     }
   }
 
-  /** One prepare owns this eight-POST read session. No retry or scalar fallback follows a batch rejection. */
-  prepareLineaNative(): EvmLineaNativePrepareReads {
+  prepareLineaNative(): EvmNativePrepareReads { return this.prepareNativeBatched(59144); }
+  prepareUnichainNative(): EvmNativePrepareReads { return this.prepareNativeBatched(130); }
+
+  /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
+  private prepareNativeBatched(chainId: 59144 | 130): EvmNativePrepareReads {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     let attempts = 0;
     const attempt = async (method: string, params: readonly unknown[]): Promise<unknown> => {
-      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Linea prepare RPC attempt ceiling exceeded.");
+      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Native prepare RPC attempt ceiling exceeded.");
       return await this.call(method, params);
     };
     const batch = async (calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]): Promise<readonly unknown[]> => {
-      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Linea prepare RPC attempt ceiling exceeded.");
+      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Native prepare RPC attempt ceiling exceeded.");
       return await this.batchCall!(calls);
     };
     const chain = { method: "eth_chainId", params: [] } as const;
     const check = (value: unknown): void => {
-      if (evmRpcQuantity(value) !== 59144n) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+      if (evmRpcQuantity(value) !== BigInt(chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
     };
     const blockFrom = async (value: unknown, tag: string) => await evmRpcBlock(async () => value, tag);
     const recheck = async (value: unknown, block: { readonly tag: Hex; readonly hash: Hex }) => {
       await recheckEvmBlock(async () => value, block);
     };
-    const onlyLinea = (chainId: DirectEvmChainId): void => {
-      if (chainId !== 59144) throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Linea.");
+    const onlySelectedChain = (selected: DirectEvmChainId): void => {
+      if (selected !== chainId) throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected native chain.");
     };
     return {
       balance: async (address, selection) => {
-        onlyLinea(selection.chainId);
+        onlySelectedChain(selection.chainId);
         if (selection.token !== "native") throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the native asset.");
         if (selection.decimals !== undefined) evmDecimals(selection.decimals);
         const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
@@ -62,7 +65,7 @@ export class EvmRpc implements EvmRpcPort {
           blockNumberAtomic: head.number, blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
       },
       nonceEstimate: async (address, transaction) => {
-        onlyLinea(transaction.chainId);
+        onlySelectedChain(transaction.chainId);
         const [nonceChain, estimateChain] = await batch([chain, chain]);
         check(nonceChain); check(estimateChain);
         const [rawNonce, rawGas, rawPriority, rawHead] = await batch([
@@ -87,10 +90,21 @@ export class EvmRpc implements EvmRpcPort {
         check(preChain);
         const head = await blockFrom(rawHead, "latest");
         const execution = evmUint(economics.maximumGasCostAtomic, true);
+        let l1Fee = 0n, operatorFee = 0n;
+        if (chainId === 130) {
+          const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(this.maximumSignedBytes)] });
+          const operatorData = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
+          const [rawL1Fee, rawOperatorFee] = await batch([
+            { method: "eth_call", params: [{ to: GAS_ORACLE, data }, head.tag] },
+            { method: "eth_call", params: [{ to: GAS_ORACLE, data: operatorData }, head.tag] },
+          ]);
+          l1Fee = evmRpcWord(rawL1Fee); operatorFee = evmRpcWord(rawOperatorFee);
+        }
+        const total = evmUint((execution + l1Fee + operatorFee).toString(), true);
         const [rawRecheck, postChain] = await batch([{ method: "eth_getBlockByNumber", params: [head.tag, false] }, chain]);
         await recheck(rawRecheck, head); check(postChain);
-        return { chainId: 59144, l1DataFeeUpperWei: "0", operatorFeeUpperWei: "0", maximumExecutionFeeWei: execution.toString(),
-          totalQuoteWei: execution.toString(), totalFeeEnforcedOnchain: false, blockNumberAtomic: head.number,
+        return { chainId, l1DataFeeUpperWei: l1Fee.toString(), operatorFeeUpperWei: operatorFee.toString(), maximumExecutionFeeWei: execution.toString(),
+          totalQuoteWei: total.toString(), totalFeeEnforcedOnchain: false, blockNumberAtomic: head.number,
           blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
       },
     };
