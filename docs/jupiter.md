@@ -29,7 +29,20 @@ response documented for `GET /swap/v2/build`, including the optional OpenAPI
 pin is Jupiter docs commit `16e9e9d51819331c636079945047a595a44c7ee0`:
 [Build guide](https://github.com/jup-ag/docs/blob/16e9e9d51819331c636079945047a595a44c7ee0/swap/build/index.mdx)
 and [Swap V2 OpenAPI](https://github.com/jup-ag/docs/blob/16e9e9d51819331c636079945047a595a44c7ee0/openapi-spec/swap/v2/swap.yaml).
-The deterministic tests prove only local response shape validation. No live
-Jupiter response, Solana simulation, transaction assembly, signing, or delivery
-has been verified for this codec. The legacy assembled `decodeBuildResponse`
-and the `signable: false` guard remain separate.
+The sanitized fixture at
+`tests/core/jupiter-fixtures/official-sol-usdc-quantum-build-20260924.json`
+records one keyless HTTP 200 response from the official endpoint on
+2026-09-24T23:00:22Z. Its public request used taker
+`GtZc9wfM98Peee7dJrL1dYE54sWU8zA8gYeo9VUfR9ki`, 1,000,000 lamports
+of wrapped SOL, and canonical USDC. The returned exact-input Quantum route
+quoted 116,603 USDC atomic units at 50 bps slippage. The fixture includes
+seven instructions, 39 account metas, five program IDs, and one address lookup
+table. A deterministic test decodes the saved response and checks its exact
+historical hash, including instruction bytes, account roles, and lookup-table
+address order. This assertion is test-only; it does not accept a new quote.
+
+The capture does not prove a deployed JUP6 or Quantum executable matches the
+reviewed sources, and it is not a live transaction observation. No Solana
+simulation, transaction assembly, signing, delivery, or finalized swap is
+verified. The legacy assembled `decodeBuildResponse` and the `signable: false`
+guard remain separate.
