@@ -353,6 +353,11 @@ export class ApnCore {
                 return operationOutcome(operation.kind === "rail_transfer" ? await this.rails.approve(request.operationId) : await this.transfer.approve(request.operationId));
             }
             case "operation.resume": {
+                if (request.observeOnly !== undefined && request.observeOnly !== true)
+                    throw new ApnError("APN_INVALID_INPUT", "observeOnly must be true.");
+                if (request.observeOnly && (request.waitSeconds !== undefined || request.observationRpcEnv !== undefined)) {
+                    throw new ApnError("APN_INVALID_INPUT", "Observation-only direct recovery cannot be combined with wait or gasless observation options.");
+                }
                 if (request.observationRpcEnv !== undefined) {
                     gaslessObservationRpcEnv(request.observationRpcEnv);
                     if (request.waitSeconds !== undefined || this.context.rpcUrl !== undefined)
@@ -360,6 +365,9 @@ export class ApnCore {
                 }
                 await this.context.ready();
                 const operation = await this.operations.required(request.operationId);
+                if (request.observeOnly && (operation.kind !== "direct_transfer" || operation.record.providerDirect !== undefined)) {
+                    throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local direct transfer.");
+                }
                 if (request.observationRpcEnv !== undefined && operation.kind !== "gasless_transfer" && operation.kind !== "metamask_gasless_transfer" &&
                     operation.kind !== "smart_account_gasless_transfer") {
                     throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery requires a saved Local, MetaMask or Smart Account gasless operation.", { reason: "gasless_observation_operation_kind" });
@@ -402,7 +410,7 @@ export class ApnCore {
                         ...(settlementWait === undefined ? {} : { settlementWait }),
                     });
                 }
-                return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds));
+                return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds, request.observeOnly));
             }
             case "operation.repair-deployment": return dataOutcome(await this.bridges.repairDeployment(request.operationId), "local_journal_migration");
             case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));
