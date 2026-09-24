@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, rpcString, nonzeroBytes32, x402RpcLog } from "./base-rpc-codec.js";
 import { x402Network } from "./x402-network.js";
 import { exactKeys, sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
+import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, PRODUCT_VERSION, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { EvmRpc } from "./evm-rpc.js";
 import { parseAtomic } from "./money.js";
@@ -446,17 +446,22 @@ export function classifyX402LogAvailabilityMessage(message) {
     const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most|up to)\b/u.test(text);
     return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
-async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJsonRpcClientError = false) {
+export async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJsonRpcClientError = false, requestTransport = httpsRequest) {
     return await new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
             reject(new ApnError("APN_RPC_CONFIG", "RPC host has no validated address."));
             return;
         }
-        const request = httpsRequest(endpoint, {
+        const request = requestTransport(endpoint, {
             method: "POST",
             family: selected.family,
-            headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body).toString() },
+            headers: {
+                "content-type": "application/json",
+                "content-length": Buffer.byteLength(body).toString(),
+                "accept": "application/json",
+                "user-agent": `APN/${PRODUCT_VERSION}`,
+            },
             lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
         }, (response) => {
             const details = { rpcMethod, ...(response.statusCode === undefined ? {} : { httpStatus: response.statusCode }) };
