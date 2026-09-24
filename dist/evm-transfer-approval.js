@@ -19,7 +19,7 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning,
     if (binding === undefined || operation.economics === undefined)
         throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
     const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
-    await rpc.assertChain(operation.chainId);
+    // The balance reader checks the selected chain before and after its pinned reads.
     const balance = await rpc.balance(operation.walletAddress, {
         chainId: operation.chainId, token: asset.kind === "native" ? "native" : asset.address, decimals: asset.decimals,
     });

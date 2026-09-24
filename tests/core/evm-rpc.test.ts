@@ -6,8 +6,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeFunctionData, toHex } from "viem";
 import { EvmRpc } from "../../src/evm-rpc.js";
+import { checkEvmTransferFunding } from "../../src/evm-transfer-approval.js";
+import { resolveEvmAsset } from "../../src/evm-asset.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
-import type { Address, Hex } from "../../src/model.js";
+import type { Address, Hex, OperationRecord } from "../../src/model.js";
+import type { RpcPort } from "../../src/ports.js";
 import { EVM_BLOCK_HASH, EVM_REQUEST, EVM_TOKEN, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { EVM_USDC } from "./direct-allowlist-helpers.js";
 import { RECIPIENT, WALLET, temporaryState } from "./helpers.js";
@@ -71,6 +74,39 @@ class Wire {
     throw new Error(`unexpected ${method}`);
   };
 }
+
+test("Optimism approval funding uses one chain check at balance entry and retains the pinned and quote checks", async () => {
+  const wire = new Wire(); wire.chain = "0xa";
+  const rpc = new EvmRpc(wire.call, "https://rpc.example");
+  const operation = {
+    chainId: 10, walletAddress: WALLET, recipient: RECIPIENT, amountAtomic: "123", economics: ECONOMICS,
+    evm: { asset: resolveEvmAsset({ chainId: 10, token: "native" }), maxFeeWei: "1000000" },
+  } as OperationRecord;
+  const port = { evm: rpc } as unknown as RpcPort;
+  await checkEvmTransferFunding(port, operation, true);
+  assert.equal(wire.calls.length, 19);
+  assert.equal(wire.calls.filter(({ method }) => method === "eth_chainId").length, 8);
+  assert.equal(wire.calls[0]?.method, "eth_chainId");
+  assert.equal(wire.calls.filter(({ method }) => method === "eth_getBlockByNumber").length, 5);
+  wire.calls.length = 0;
+  await checkEvmTransferFunding(port, operation, false);
+  assert.equal(wire.calls.length, 11);
+  assert.equal(wire.calls.filter(({ method }) => method === "eth_chainId").length, 4);
+  assert.equal(wire.calls[0]?.method, "eth_chainId");
+
+  wire.calls.length = 0; wire.chain = "0x1";
+  await assert.rejects(checkEvmTransferFunding(port, operation, false), { code: "APN_CHAIN_MISMATCH" });
+  assert.deepEqual(wire.calls.map(({ method }) => method), ["eth_chainId"]);
+
+  wire.calls.length = 0; wire.chain = "0xa";
+  const switching = new EvmRpc(async (method, params) => {
+    const value = await wire.call(method, params);
+    if (method === "eth_getBalance") wire.chain = "0x1";
+    return value;
+  }, "https://rpc.example");
+  await assert.rejects(checkEvmTransferFunding({ evm: switching } as unknown as RpcPort, operation, false), { code: "APN_CHAIN_MISMATCH" });
+  assert.equal(wire.calls.some(({ method }) => method === "eth_call"), false);
+});
 
 test("EVM RPC pins exact asset metadata and balances and includes Base L1/operator fees", async () => {
   const wire = new Wire(), rpc = new EvmRpc(wire.call, "https://rpc.example");
