@@ -30,6 +30,9 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
     // The frozen list is checked first: an unlisted network or an unpinned contract is refused before any RPC or custody call.
     const listed = listedEvmAsset(request.asset.chainId, request.asset.token, request.asset.decimals === undefined ? undefined : evmDecimals(request.asset.decimals));
     const selection = listed.selection;
+    if (request.batchRpcReads && (selection.chainId !== 59144 || selection.token !== "native")) {
+        throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads are available only for Linea native transfers.");
+    }
     const maximumFeeWei = evmUint(request.maxFeeWei, true).toString();
     const priorityFeeWei = request.priorityFeeWei === undefined ? undefined : evmUint(request.priorityFeeWei).toString();
     if (priorityFeeWei !== undefined && directEvmNetwork(selection.chainId).feeModel === "arbitrum-inclusive") {
@@ -61,7 +64,10 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
                 chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic,
                 asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
             const rpc = requireEvmRpc(context.requireRpc());
-            const balance = await rpc.balance(wallet.address, { ...selection, decimals: listed.decimals });
+            const grouped = request.batchRpcReads ? rpc.prepareLineaNative?.() : undefined;
+            if (request.batchRpcReads && grouped === undefined)
+                throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
+            const balance = await (grouped ?? rpc).balance(wallet.address, { ...selection, decimals: listed.decimals });
             if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId || balance.asset.decimals !== listed.decimals ||
                 (selection.token === "native" ? balance.asset.kind !== "native" : balance.asset.address !== selection.token)) {
                 throw new ApnError("APN_ASSET_MISMATCH", "Balance does not belong to the exact selected wallet, network and asset.");
@@ -70,7 +76,9 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
             if (evmUint(balance.assetAtomic) < BigInt(amount.atomic))
                 throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
             const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
-            const [rpcNonce, estimated] = await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]);
+            const { nonce: rpcNonce, estimated } = grouped === undefined
+                ? await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]).then(([nonce, fee]) => ({ nonce, estimated: fee }))
+                : await grouped.nonceEstimate(wallet.address, transaction);
             let nonce = BigInt(rpcNonce);
             if (selection.chainId === 1) {
                 const owned = new Set((await occupiedUniswapTokenNonces(state.root, wallet.address)).map(String));
@@ -78,7 +86,7 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
                     nonce += 1n;
             }
             const economics = validateEconomics(nonce.toString(), priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
-            const quote = await rpc.feeQuote(selection.chainId, economics);
+            const quote = grouped === undefined ? await rpc.feeQuote(selection.chainId, economics) : await grouped.feeQuote(economics);
             requireEvmFunding(balance, amount.atomic, quote, maximumFeeWei);
             const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000).toISOString();
             const expiresAt = new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString();

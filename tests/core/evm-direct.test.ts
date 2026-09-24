@@ -10,7 +10,7 @@ import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import type { Address } from "../../src/model.js";
 import { sealReceipt } from "../../src/state-integrity.js";
 import { EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, ensureDirectWallet, evmCore } from "./evm-helpers.js";
-import { EVM_USDC } from "./direct-allowlist-helpers.js";
+import { EVM_USDC, activateDirectPolicy, directAdmission, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 test("generic CLI and MCP bind the same explicit core request without changing legacy commands", () => {
@@ -19,10 +19,29 @@ test("generic CLI and MCP bind the same explicit core request without changing l
   const argv = ["pay", "transfer", "prepare-asset", ...Object.entries(input).flatMap(([name, value]) => [`--${name.replaceAll("_", "-")}`, value])];
   assert.deepEqual(bindArgv(argv), bindMcpInput(tool.command, input));
   assert.equal(bindArgv(argv).request.command, "transfer.prepare");
+  assert.equal((bindArgv(argv).request as { batchRpcReads?: true }).batchRpcReads, undefined);
+  assert.equal((bindArgv([...argv, "--rpc-read-mode", "batch"]).request as { batchRpcReads?: true }).batchRpcReads, true);
+  assert.throws(() => bindArgv([...argv, "--rpc-read-mode", "scalar"]), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bindMcpInput(tool.command, { ...input, chain: "eip155:42170" }), { code: "APN_ALLOWLIST_REFUSED" });
   assert.throws(() => bindMcpInput(tool.command, { ...input, decimals: "256" }), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bindArgv(["pay", "transfer", "prepare", "--profile", "default"]));
   assert.ok(MCP_TOOLS.some((entry) => entry.name === "apn_wallet_balance_asset"));
+});
+
+test("Linea batched native prepare refuses insufficient balance before nonce and estimate", async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = 59144; setup.rpc.nativeAtomic = "1";
+  const wallet = await ensureDirectWallet(setup);
+  await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
+    admissions: [...evmDirectAdmissions(), directAdmission("eip155:59144", null)], now: setup.clock.now() });
+  let downstreamReads = 0;
+  Object.assign(setup.rpc.evm, { prepareLineaNative: () => ({
+    balance: setup.rpc.evm.balance,
+    nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
+    feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },
+  }) });
+  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 59144, token: "native" }, batchRpcReads: true }), { code: "APN_INSUFFICIENT_ASSET" });
+  assert.equal(downstreamReads, 0);
 });
 
 test("EVM amount handling preserves 0..255 decimals and uint256 without implicit metadata or rounding", () => {

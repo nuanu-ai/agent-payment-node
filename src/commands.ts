@@ -138,6 +138,8 @@ export type CommandRequest =
     readonly maxFeeWei?: string;
     /** Owner tip per gas; replaces the RPC suggestion. */
     readonly priorityFeeWei?: string;
+    /** Explicit Linea native prepare read batching; default is scalar RPC. */
+    readonly batchRpcReads?: true;
   }
   | { readonly command: "transfer.approve"; readonly operationId: string }
   | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number;
