@@ -342,6 +342,8 @@ export class ApnCore {
             }
             case "transfer.approve": {
                 const operation = await this.operations.required(request.operationId);
+                if (operation.kind === "relay_unsigned")
+                    throw new ApnError("APN_OPERATION_BLOCKED", "Unsigned Relay operation has no approval or execution path.");
                 if (operation.kind === "gasless_transfer" || operation.kind === "metamask_gasless_transfer" || operation.kind === "smart_account_gasless_transfer" ||
                     operation.kind === "facilitator_gasless_transfer")
                     throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Use the gasless approval command for this USDC transfer.", {
@@ -365,6 +367,8 @@ export class ApnCore {
                 }
                 await this.context.ready();
                 const operation = await this.operations.required(request.operationId);
+                if (operation.kind === "relay_unsigned")
+                    throw new ApnError("APN_OPERATION_BLOCKED", "Unsigned Relay operation has no resume or execution path.");
                 if (request.observeOnly && (operation.kind !== "direct_transfer" || operation.record.providerDirect !== undefined)) {
                     throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local direct transfer.");
                 }
@@ -430,6 +434,8 @@ export class ApnCore {
                 await this.context.ready();
                 await this.x402.recoverRead(request.operationId);
                 const operation = await this.operations.required(request.operationId);
+                if (operation.kind === "relay_unsigned")
+                    return operationOutcome(await this.operations.status(request.operationId));
                 if (operation.kind === "smart_account_gasless_transfer")
                     return operationOutcome(await this.smartAccountGasless.status(request.operationId));
                 if (operation.kind === "facilitator_gasless_transfer")
@@ -454,6 +460,8 @@ export class ApnCore {
                 await this.context.ready();
                 await this.x402.recoverRead(request.operationId);
                 const operation = await this.operations.required(request.operationId);
+                if (operation.kind === "relay_unsigned")
+                    throw new ApnError("APN_RECEIPT_NOT_FOUND", "Unsigned Relay operation has no receipt.");
                 if (operation.kind === "smart_account_gasless_transfer")
                     return receiptOutcome(await this.smartAccountGasless.receipt(request.operationId));
                 if (operation.kind === "facilitator_gasless_transfer")
