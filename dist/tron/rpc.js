@@ -1,4 +1,5 @@
 import { parseJsonWithBigInts } from "@solana/rpc-spec-types";
+import { setTimeout as pause } from "node:timers/promises";
 import { sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
@@ -10,13 +11,19 @@ export const TRON_RPC_METHODS = Object.freeze(["wallet/getblockbynum", "wallet/g
     "wallet/gettransactionbyid", "wallet/gettransactioninfobyid", "walletsolidity/gettransactionbyid",
     "walletsolidity/gettransactioninfobyid", "walletsolidity/getblockbynum", "walletsolidity/getnowblock", "walletsolidity/getaccount",
     "walletsolidity/triggerconstantcontract"]);
+/** Ten prepare reads each have a ten-second transport bound; nine one-second gaps plus the ten-second expiry reserve fit the 120-second TRON window. */
+export const TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS = 1_000;
 export class TronRpc {
     endpoint;
     fetcher;
+    pacing;
     originHash;
-    constructor(endpoint, fetcher = tronHttpsFetch) {
+    lastPostStartAt;
+    startQueue = Promise.resolve();
+    constructor(endpoint, fetcher = tronHttpsFetch, pacing = {}) {
         this.endpoint = endpoint;
         this.fetcher = fetcher;
+        this.pacing = pacing;
         this.originHash = sha256(endpoint ?? "tron_rpc_unconfigured");
     }
     async call(method, body) {
@@ -40,6 +47,7 @@ export class TronRpc {
             const payload = JSON.stringify(body);
             if (Buffer.byteLength(payload) > 32_768)
                 tronProtocolFailure();
+            await this.awaitPostStart(controller.signal);
             const response = await this.fetcher(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
                 body: payload, redirect: "error", credentials: "omit", signal: controller.signal });
             if (!response.ok || response.body === null || !(response.headers.get("content-type") ?? "").includes("application/json"))
@@ -74,6 +82,31 @@ export class TronRpc {
             clearTimeout(deadline);
             await reader?.cancel().catch(() => { });
         }
+    }
+    async awaitPostStart(signal) {
+        const raw = this.pacing.minimumPostStartIntervalMs;
+        if (raw === undefined || raw === "0")
+            return;
+        if (!/^[1-9][0-9]{0,3}$/u.test(raw) || Number(raw) > TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS) {
+            throw new ApnError("APN_RPC_CONFIG", "TRON RPC minimum POST interval must be a canonical integer from 0 to 1000 milliseconds.");
+        }
+        const interval = Number(raw), now = this.pacing.now ?? performance.now.bind(performance);
+        const wait = this.pacing.wait ?? ((milliseconds, abort) => pause(milliseconds, undefined, { signal: abort }));
+        const start = this.startQueue.then(async () => {
+            const remaining = this.lastPostStartAt === undefined ? 0 : Math.max(0, this.lastPostStartAt + interval - now());
+            try {
+                if (remaining > 0)
+                    await wait(remaining, signal);
+            }
+            catch {
+                throw new ApnError("APN_RPC_PROTOCOL", "The bounded TRON request did not start before its deadline.", { reason: "pacing_deadline" });
+            }
+            if (signal.aborted)
+                throw new ApnError("APN_RPC_PROTOCOL", "The bounded TRON request did not start before its deadline.", { reason: "pacing_deadline" });
+            this.lastPostStartAt = now();
+        });
+        this.startQueue = start.catch(() => { });
+        await start;
     }
 }
 export function tronBlock(value) {

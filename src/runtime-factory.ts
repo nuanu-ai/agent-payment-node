@@ -179,7 +179,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60_000 };
   const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
   const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL);
-  const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL);
+  const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL, undefined,
+    { minimumPostStartIntervalMs: process.env.APN_TRON_RPC_MIN_POST_INTERVAL_MS });
   const directRails = options.directRails ?? [new SolanaLocalAdapter(chainAccounts, solanaRpc, () => options.clock?.now() ?? new Date()),
     new SolanaAwalAdapter(chainAccounts, solanaRpc, undefined, undefined, () => options.clock?.now() ?? new Date()),
     new TronLocalAdapter(chainAccounts, tronRpc, () => options.clock?.now() ?? new Date())];

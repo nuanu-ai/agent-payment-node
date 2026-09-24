@@ -1,4 +1,5 @@
 import { parseJsonWithBigInts } from "@solana/rpc-spec-types";
+import { setTimeout as pause } from "node:timers/promises";
 import { sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
@@ -24,9 +25,22 @@ export interface TronRpcPort {
   readonly originHash: string;
   call(method: TronMethod, body: Readonly<Record<string, unknown>>): Promise<unknown>;
 }
+/** Ten prepare reads each have a ten-second transport bound; nine one-second gaps plus the ten-second expiry reserve fit the 120-second TRON window. */
+export const TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS = 1_000;
+export interface TronRpcPacingOptions {
+  /** Optional decimal milliseconds. Unset or zero preserves the existing unpaced behavior. */
+  readonly minimumPostStartIntervalMs?: string | undefined;
+  /** Monotonic clock and cancellable delay are injectable for deterministic tests. */
+  readonly now?: () => number;
+  readonly wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+}
+
 export class TronRpc implements TronRpcPort {
   readonly originHash: string;
-  constructor(private readonly endpoint?: string, private readonly fetcher: typeof fetch = tronHttpsFetch) {
+  private lastPostStartAt: number | undefined;
+  private startQueue: Promise<void> = Promise.resolve();
+  constructor(private readonly endpoint?: string, private readonly fetcher: typeof fetch = tronHttpsFetch,
+    private readonly pacing: TronRpcPacingOptions = {}) {
     this.originHash = sha256(endpoint ?? "tron_rpc_unconfigured");
   }
   async call(method: TronMethod, body: Readonly<Record<string, unknown>>): Promise<unknown> {
@@ -39,6 +53,7 @@ export class TronRpc implements TronRpcPort {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
       const payload = JSON.stringify(body); if (Buffer.byteLength(payload) > 32_768) tronProtocolFailure();
+      await this.awaitPostStart(controller.signal);
       const response = await this.fetcher(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
         body: payload, redirect: "error", credentials: "omit", signal: controller.signal });
       if (!response.ok || response.body === null || !(response.headers.get("content-type") ?? "").includes("application/json")) tronProtocolFailure();
@@ -60,6 +75,24 @@ export class TronRpc implements TronRpcPort {
         "The bounded TRON request did not return valid evidence.",
         { rpcMethod: method, reason: error instanceof SyntaxError ? "invalid_json" : "invalid_response" });
     } finally { clearTimeout(deadline); await reader?.cancel().catch(() => {}); }
+  }
+  private async awaitPostStart(signal: AbortSignal): Promise<void> {
+    const raw = this.pacing.minimumPostStartIntervalMs;
+    if (raw === undefined || raw === "0") return;
+    if (!/^[1-9][0-9]{0,3}$/u.test(raw) || Number(raw) > TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS) {
+      throw new ApnError("APN_RPC_CONFIG", "TRON RPC minimum POST interval must be a canonical integer from 0 to 1000 milliseconds.");
+    }
+    const interval = Number(raw), now = this.pacing.now ?? performance.now.bind(performance);
+    const wait = this.pacing.wait ?? ((milliseconds: number, abort: AbortSignal) => pause(milliseconds, undefined, { signal: abort }));
+    const start = this.startQueue.then(async () => {
+      const remaining = this.lastPostStartAt === undefined ? 0 : Math.max(0, this.lastPostStartAt + interval - now());
+      try { if (remaining > 0) await wait(remaining, signal); }
+      catch { throw new ApnError("APN_RPC_PROTOCOL", "The bounded TRON request did not start before its deadline.", { reason: "pacing_deadline" }); }
+      if (signal.aborted) throw new ApnError("APN_RPC_PROTOCOL", "The bounded TRON request did not start before its deadline.", { reason: "pacing_deadline" });
+      this.lastPostStartAt = now();
+    });
+    this.startQueue = start.catch(() => {});
+    await start;
   }
 }
 export interface TronBlock { readonly id: string; readonly number: bigint; readonly timestamp: bigint; readonly body: Record<string, unknown> }
