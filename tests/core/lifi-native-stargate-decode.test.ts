@@ -5,7 +5,7 @@ import { encodeFunctionData, getAddress, toFunctionSelector } from "viem";
 import { FEE_FORWARDER, FEE_RECIPIENT, STARGATE_SELECTOR, feeForwarderAbi, stargateBridgeAbi } from "../../src/lifi/abi.js";
 import { bridgeAssetRow, bridgeAssetTool } from "../../src/lifi/asset-registry.js";
 import { decodeBridgeCall } from "../../src/lifi/decode.js";
-import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
+import { bridgeDestinationProof, bridgeSourceProof, type NativeStargateDestinationPin } from "../../src/lifi/protocol-evidence.js";
 import { freezeBridgeEnvelopes } from "../../src/lifi/economics.js";
 import type { BridgeAccountSnapshot, BridgeMaterialization, BridgeProtocolReceipt } from "../../src/lifi/model.js";
 import type { BridgeRpcPort } from "../../src/lifi/ports.js";
@@ -20,6 +20,7 @@ const LZ_FEE = 191951159457037n;
 const BRIDGED = SOURCE - FIXED_FEE;
 const VALUE = SOURCE + LZ_FEE;
 const NATIVE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
+const BASE_NATIVE_POOL = getAddress("0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7");
 const GUID = `0x${"12".repeat(32)}` as const;
 
 // Derived from the captured 2026-09-24 unsigned Ethereum -> Base LI.FI step. Identity fields are synthetic;
@@ -139,6 +140,56 @@ test("native Stargate source rejects fee and msg.value mismatches and cannot use
   }
   assert.throws(() => bridgeSourceProof(m, d, { ...good, logs: good.logs.slice(0, 2) }),
     { code: "APN_RPC_PROTOCOL" });
+});
+
+test("native Stargate destination binds pinned Base pool, GUID, EIDs, recipient, amount and native delivery", () => {
+  const m = fixture(), d = decodeBridgeCall(m), source = bridgeSourceProof(m, d, sourceReceipt(m));
+  const amount = source.correlation.kind === "stargateV2" ? source.correlation.amountReceivedAtomic : "0";
+  const received = eventLog(BASE_NATIVE_POOL, "OFTReceived", { guid: GUID, srcEid: 30101,
+    toAddress: OWNER, amountReceivedLD: BigInt(amount) });
+  const result: BridgeProtocolReceipt = { chainId: 8453, transactionHash: `0x${"33".repeat(32)}`,
+    blockNumberAtomic: "123", blockHash: `0x${"44".repeat(32)}`, logs: [received],
+    nativeTransfer: { transactionHash: `0x${"33".repeat(32)}`, from: BASE_NATIVE_POOL,
+      to: OWNER, valueAtomic: amount, traceHash: "a".repeat(64) },
+    nativeBalance: { recipient: OWNER,
+      beforeBlock: { numberAtomic: "122", hash: `0x${"55".repeat(32)}`, timestampAtomic: "1" },
+      afterBlock: { numberAtomic: "123", hash: `0x${"44".repeat(32)}`, timestampAtomic: "2" },
+      beforeBalanceAtomic: "100", afterBalanceAtomic: (100n + BigInt(amount)).toString(), deltaAtomic: amount } };
+  const observedDeployment = { chainId: 8453, peerChainId: 1, tool: "stargateV2",
+    block: result.nativeBalance!.afterBlock, rpcOrigin: "https://offline.example",
+    contractHash: "a".repeat(64), codeHash: "b".repeat(64), configurationHash: "c".repeat(64) } as const;
+  const pin: NativeStargateDestinationPin = { pool: BASE_NATIVE_POOL,
+    frozenDeployment: observedDeployment, observedDeployment,
+    frozenPoolCodeHash: `0x${"dd".repeat(32)}`, observedPoolCodeHash: `0x${"dd".repeat(32)}` };
+  const prove = (receipt: BridgeProtocolReceipt, deployment = pin) => bridgeDestinationProof(source, m, d, receipt, deployment);
+  const proof = prove(result);
+  assert.equal(proof.amountAtomic, amount);
+  assert.equal(proof.nativeTransfer?.from, BASE_NATIVE_POOL);
+  assert.equal(proof.nativeBalance?.deltaAtomic, amount);
+  assert.throws(() => bridgeDestinationProof(source, m, d, result), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove(result, { ...pin, pool: NATIVE_POOL }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove(result, { ...pin, observedPoolCodeHash: `0x${"ee".repeat(32)}` }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove(result, { ...pin, observedDeployment: { ...observedDeployment,
+    configurationHash: "e".repeat(64) } }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove(result, { ...pin, observedDeployment: { ...observedDeployment,
+    block: { ...observedDeployment.block, hash: `0x${"ee".repeat(32)}` } } }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove({ ...result, logs: [{ ...received, address: NATIVE_POOL }] }), { code: "APN_RPC_PROTOCOL" });
+  for (const change of [{ guid: `0x${"66".repeat(32)}` }, { srcEid: 30110 }, { toAddress: NATIVE_POOL },
+    { amountReceivedLD: BigInt(amount) - 1n }]) {
+    assert.throws(() => prove({ ...result, logs: [mutateEvent(received, "OFTReceived", change)] }), { code: "APN_RPC_PROTOCOL" });
+  }
+  const cached = eventLog(BASE_NATIVE_POOL, "UnreceivedTokenCached", { guid: GUID, index: 0, srcEid: 30101,
+    receiver: OWNER, amountLD: BigInt(amount), composeMsg: "0x" });
+  assert.throws(() => prove({ ...result, logs: [cached] }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove({ ...result, logs: [cached, received] }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove({ ...result, logs: [received, received] }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove({ ...result, nativeTransfer: null }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove({ ...result, nativeTransfer: { ...result.nativeTransfer!, valueAtomic: "1" } }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove({ ...result, nativeBalance: { ...result.nativeBalance!, deltaAtomic: "1" } }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => bridgeDestinationProof({ ...source, correlation: { ...source.correlation,
+    destinationEid: 30110 } as typeof source.correlation }, m, d, result, pin), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => bridgeDestinationProof({ ...source, correlation: { ...source.correlation,
+    sender: NATIVE_POOL } as typeof source.correlation }, m, d, result, pin), { code: "APN_RPC_PROTOCOL" });
 });
 
 test("native Stargate fee cap excludes principal but aggregate gas plus LayerZero fee remains bounded", async () => {

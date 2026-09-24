@@ -5,7 +5,7 @@ import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./a
 import { BRIDGE_ASSET_REGISTRY, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
-import type { AcrossCorrelation, BridgeDestinationProof, BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall, StargateCorrelation } from "./model.js";
+import type { AcrossCorrelation, BridgeDeploymentIdentity, BridgeDestinationProof, BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall, StargateCorrelation } from "./model.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeSame, bridgeUint } from "./validation.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
 
@@ -29,6 +29,16 @@ type Transfer = Readonly<{ from: Address; to: Address; value: bigint }>;
 // Official Stargate V2 deployment at ce598b8d16472cd76ee47d30b8a40bc5c1b667bb.
 // This source-only pin does not admit the native asset to the executable deployment registry.
 const ETHEREUM_STARGATE_NATIVE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
+const BASE_STARGATE_NATIVE_POOL = getAddress("0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7");
+
+/** Offline evidence only. The frozen hashes must come from an independently reviewed deployment pin. */
+export interface NativeStargateDestinationPin {
+  readonly pool: Address;
+  readonly frozenDeployment: BridgeDeploymentIdentity;
+  readonly observedDeployment: BridgeDeploymentIdentity;
+  readonly frozenPoolCodeHash: Hex;
+  readonly observedPoolCodeHash: Hex;
+}
 
 export function bridgeSourceProof(materialization: BridgeMaterialization, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeSourceProof {
   const canonical = decodeBridgeCall(materialization);
@@ -48,14 +58,15 @@ export function bridgeSourceProof(materialization: BridgeMaterialization, decode
   };
 }
 
-export function bridgeDestinationProof(source: BridgeSourceProof, materialization: BridgeMaterialization, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeDestinationProof {
+export function bridgeDestinationProof(source: BridgeSourceProof, materialization: BridgeMaterialization, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt,
+  nativeStargatePin?: NativeStargateDestinationPin): BridgeDestinationProof {
   const canonical = decodeBridgeCall(materialization);
   if (!bridgeSame(canonical, decoded) || source.tool !== decoded.tool || source.chainId !== decoded.sourceChainId ||
     source.sourceAmountAtomic !== decoded.sourceAmountAtomic || source.bridgeAmountAtomic !== decoded.bridgeAmountAtomic ||
     source.feeForwardedAtomic !== decoded.feeAmountAtomic || receipt.chainId !== decoded.destinationChainId) fail("destination_binding");
   validateStoredSource(source, decoded); validateReceipt(receipt);
   if (decoded.tool === "across") return acrossDestination(source, decoded, receipt);
-  return stargateDestination(source, decoded, receipt);
+  return stargateDestination(source, decoded, receipt, nativeStargatePin);
 }
 
 /** Prove the canonical Across fill tuple before requesting any destination execution trace. */
@@ -241,19 +252,51 @@ function acrossFilledRelay(source: BridgeSourceProof, decoded: DecodedBridgeCall
   if (info.fillType === 2 && (relayerCredit !== BRIDGE_ZERO_WORD || repaymentChainIdAtomic !== "0")) fail("slow_fill_credit");
   return { info, relayerCredit, repaymentChainIdAtomic };
 }
-function stargateDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeDestinationProof {
+function stargateDestination(source: BridgeSourceProof, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt,
+  nativePin?: NativeStargateDestinationPin): BridgeDestinationProof {
   if (source.correlation.kind !== "stargateV2") return fail("stargate_correlation");
   const c = source.correlation;
-  const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "stargateV2", decoded.destinationToken);
+  const native = decoded.sourceToken === BRIDGE_ZERO_ADDRESS || decoded.destinationToken === BRIDGE_ZERO_ADDRESS;
+  const emitter = native ? validateNativeStargateDestinationPin(decoded, receipt, nativePin)
+    : bridgeProtocolEmitter(decoded.destinationChainId, "stargateV2", decoded.destinationToken);
   const received = oneEvent(receipt, emitter, EVENT_TOPICS.oftReceived, "OFTReceived") as OFTReceived;
   const cached = events(receipt, emitter, EVENT_TOPICS.unreceivedTokenCached, "UnreceivedTokenCached") as readonly { guid: Hex }[];
   if (cached.some((x) => x.guid.toLowerCase() === c.guid) || received.guid.toLowerCase() !== c.guid || received.srcEid !== c.sourceEid ||
     received.toAddress !== c.recipient || received.amountReceivedLD.toString() !== c.amountReceivedAtomic ||
     received.amountReceivedLD < BigInt(decoded.minimumOutputAtomic)) fail("OFTReceived");
+  if (native) {
+    const amount = received.amountReceivedLD.toString();
+    const transfer = nativeTransferProof(decoded, receipt, emitter, amount);
+    const balance = nativeBalanceProof(decoded, receipt);
+    if (BigInt(balance.deltaAtomic) < received.amountReceivedLD) fail("native_destination_balance");
+    return destinationResult(source, decoded, receipt, amount, null, null, null, balance, transfer);
+  }
   const transfers = events(receipt, decoded.destinationToken, EVENT_TOPICS.transfer, "Transfer") as readonly Transfer[];
   const delivered = transfers.filter((x) => x.to === decoded.recipient);
   if (delivered.length !== 1 || delivered[0]!.from !== emitter || delivered[0]!.value !== received.amountReceivedLD) fail("destination_token_movement");
   return destinationResult(source, decoded, receipt, received.amountReceivedLD.toString(), null, null, null, null, null);
+}
+
+function validateNativeStargateDestinationPin(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt,
+  pin: NativeStargateDestinationPin | undefined): Address {
+  if (decoded.protocol.kind !== "stargateV2" || decoded.protocol.assetId !== 13 || decoded.sourceChainId !== 1 ||
+    decoded.destinationChainId !== 8453 || decoded.sourceToken !== BRIDGE_ZERO_ADDRESS ||
+    decoded.destinationToken !== BRIDGE_ZERO_ADDRESS || decoded.protocol.dstEid !== 30184 || pin === undefined ||
+    pin.pool !== BASE_STARGATE_NATIVE_POOL) fail("stargate_native_destination_pin");
+  const frozen = pin.frozenDeployment, observed = pin.observedDeployment;
+  if (frozen.chainId !== 8453 || frozen.peerChainId !== 1 || frozen.tool !== "stargateV2" ||
+    observed.chainId !== frozen.chainId || observed.peerChainId !== frozen.peerChainId || observed.tool !== frozen.tool ||
+    observed.rpcOrigin !== frozen.rpcOrigin || observed.block.numberAtomic !== receipt.blockNumberAtomic ||
+    observed.block.hash !== receipt.blockHash ||
+    bridgeUint(frozen.block.numberAtomic, true, "APN_RPC_PROTOCOL") >
+      bridgeUint(observed.block.numberAtomic, true, "APN_RPC_PROTOCOL") ||
+    !/^[a-f0-9]{64}$/u.test(frozen.contractHash) || !/^[a-f0-9]{64}$/u.test(frozen.codeHash) ||
+    !/^[a-f0-9]{64}$/u.test(frozen.configurationHash) ||
+    frozen.contractHash !== observed.contractHash || frozen.codeHash !== observed.codeHash ||
+    frozen.configurationHash !== observed.configurationHash ||
+    pin.frozenPoolCodeHash === BRIDGE_ZERO_WORD || pin.frozenPoolCodeHash !== pin.observedPoolCodeHash ||
+    bridgeHex(pin.frozenPoolCodeHash, 32, 32, "APN_RPC_PROTOCOL") !== pin.frozenPoolCodeHash) fail("stargate_native_destination_pin");
+  return pin.pool;
 }
 
 /**
