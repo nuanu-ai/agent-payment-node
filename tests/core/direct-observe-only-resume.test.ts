@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runCli } from "../../src/cli.js";
 import { bindArgv } from "../../src/command-binder.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { EVM_REQUEST, EvmTestRpc, evmCore, ensureDirectWallet } from "./evm-helpers.js";
 import { temporaryState } from "./helpers.js";
 
@@ -29,6 +30,32 @@ test("observation-only resume terminalizes a verified receipt without custody or
   assert.equal((result.operation as { state: string }).state, "completed");
   assert.equal(s.rpc.broadcastCount, 1);
   assert.equal(s.wrapping.loads, beforeLoads);
+});
+
+test("observation-only retry reconciles usage after interrupted terminal transition", async (t) => {
+  const s = await pending(t);
+  s.rpc.receiptEnabled = true;
+  const allowlist = (s.core.transfer as unknown as { allowlist: { follow: (...args: unknown[]) => Promise<unknown> } }).allowlist;
+  const follow = allowlist.follow.bind(allowlist);
+  let failOnce = true;
+  allowlist.follow = async (...args) => {
+    if (failOnce) { failOnce = false; throw new Error("injected usage interruption"); }
+    return await follow(...args);
+  };
+  const interrupted = await s.core.execute({ command: "operation.resume", operationId: s.operationId, observeOnly: true });
+  assert.equal(interrupted.ok, false);
+  assert.equal((await s.core.transfer.status(s.operationId) as { state: string }).state, "completed");
+  const stored = (await s.state.findOperation(s.operationId))!;
+  const lease = stored.allowlistLease!;
+  const ledger = new AssetUsageLedger(s.temporary.root);
+  assert.equal((await ledger.load(lease.reservation, lease.reservation.reservationId))?.state, "submitted");
+  const reopened = evmCore(s.temporary.root, s.rpc, s.wrapping);
+  const beforeLoads = s.wrapping.loads;
+  const retried = await reopened.core.execute({ command: "operation.resume", operationId: s.operationId, observeOnly: true });
+  assert.equal(retried.ok, true, retried.error?.message);
+  assert.equal((await ledger.load(lease.reservation, lease.reservation.reservationId))?.state, "finalized");
+  assert.equal(s.wrapping.loads, beforeLoads);
+  assert.equal(s.rpc.broadcastCount, 1);
 });
 
 test("observation-only resume returns on null, receipt RPC error, and missing evidence without custody or another send", async (t) => {

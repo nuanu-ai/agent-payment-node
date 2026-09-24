@@ -238,7 +238,7 @@ export class TransferService {
                 throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires an already submitted local direct transfer.");
             }
             if (operation.terminal)
-                return publicOperation(observeOnly ? operation : await this.followUsage(operation));
+                return publicOperation(await this.followUsage(operation));
             if (operation.state === "unknown_finality") {
                 return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
             }
