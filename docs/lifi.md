@@ -273,6 +273,15 @@ known scalar-only endpoint, so APN sends chain ID and receipt as two sequential
 JSON-RPC objects with the same 750ms per-origin pacing. Archive deployment and
 historical state reads retain their three-item chunk limit.
 
+For one `bridge prepare`, setting `APN_LIFI_LINEA_ARCHIVE_SCALAR_CODE=1` sends
+Linea's pinned deployment `eth_getCode` reads as individual JSON-RPC POSTs to
+the same distinct archive endpoint. Other deployment reads remain batched.
+The option is off by default and has no effect on other chains, other bridge
+commands, or other RPC roles. The three Linea code reads add two physical
+requests to the modeled 19-request prepare (21 of the 26-request ceiling).
+Each scalar code request has one physical attempt; all reads retain the session
+deadline, pacing, telemetry, and atomic cache commit.
+
 Operators must not run a separate synthetic RPC capability preflight before the
 real `bridge prepare`. The prepare command performs the exact chain, deployment,
 configuration and block identity checks that its materialized operation needs.
