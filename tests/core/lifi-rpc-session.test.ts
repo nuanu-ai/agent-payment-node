@@ -657,6 +657,91 @@ test("archive deployment logical batches use sequential three-item chunks with g
   assert.deepEqual(fifteenBodies.map((body) => (JSON.parse(body) as Array<unknown>).length), [3, 3, 3, 3, 3]);
 });
 
+test("Linea opt-in sends pinned deployment code reads as scalar archive POSTs while keeping other reads batched", async () => {
+  const tag = "0x10", address = "0x0000000000000000000000000000000000000001";
+  const posts: Array<{ endpoint: string; rows: Array<{ id: string; method: string; params: readonly unknown[] }>; scalar: boolean }> = [];
+  const transport = { request: async (endpoint: string, _method: string, body: string) => {
+    const parsed = JSON.parse(body) as { id: string; method: string; params: readonly unknown[] } |
+      Array<{ id: string; method: string; params: readonly unknown[] }>;
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    posts.push({ endpoint, rows, scalar: !Array.isArray(parsed) });
+    const result = rows.map((row) => ({ jsonrpc: "2.0", id: row.id,
+      result: row.method === "eth_chainId" ? "0xe708" : row.method === "eth_getBlockByNumber" ? block() : "0x1234" }));
+    return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? result : result[0]) };
+  } };
+  const descriptor = bridgeRpcCall(59144, { APN_LINEA_RPC_URL: "https://primary.example",
+    APN_LINEA_ARCHIVE_RPC_URL: "https://archive.example/path" }, { transport });
+  const items = [
+    { method: "eth_chainId", params: [], decoder: String },
+    ...[1, 2, 3].map((n) => ({ method: "eth_getCode", params: [address.slice(0, -1) + n, tag], decoder: String })),
+    { method: "eth_getBlockByNumber", params: [tag, false], decoder: passthrough },
+    { method: "eth_getStorageAt", params: [address, "0x0", tag], decoder: String },
+  ];
+  const off = new RpcReadSession({ wait: async () => {} });
+  await descriptor.sessionBatchCall(off)(items, "archive_deployment");
+  assert.deepEqual(posts.map((post) => post.rows.length), [3, 3]);
+  posts.length = 0;
+  const on = new RpcReadSession({ lineaArchiveDeploymentScalarCode: true, maxHttpRequests: 26, wait: async () => {} });
+  const values = await descriptor.sessionBatchCall(on)(items, "archive_deployment");
+  assert.equal(values.length, 6);
+  assert.deepEqual(posts.map((post) => post.rows.length), [3, 1, 1, 1]);
+  assert.deepEqual(posts.map((post) => post.scalar), [false, true, true, true]);
+  assert.ok(posts.every((post) => post.endpoint === "https://archive.example/path"));
+  assert.deepEqual(posts.slice(1).map((post) => post.rows[0]!.method), ["eth_getCode", "eth_getCode", "eth_getCode"]);
+  assert.ok(posts.slice(1).every((post) => post.rows[0]!.params[1] === tag));
+  assert.equal(on.telemetry().httpRequests, 4);
+  assert.equal(on.telemetry().httpAttempts, 4);
+  assert.deepEqual(on.telemetry().attemptsByEndpointRole, { primary: 0, receipt: 0, archive: 4 });
+  assert.equal(on.telemetry().remainingHttpRequests, 22);
+});
+
+test("Linea scalar code opt-in does not change other chains or general archive batches", async () => {
+  const calls: Array<{ scalar: boolean; rows: Array<{ id: string }> }> = [];
+  const attempt = async (body: string) => {
+    const parsed = JSON.parse(body) as { id: string } | Array<{ id: string }>;
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    calls.push({ scalar: !Array.isArray(parsed), rows });
+    const responses = rows.map((row) => ({ jsonrpc: "2.0", id: row.id, result: "0x1" }));
+    return Array.isArray(parsed) ? responses : responses[0];
+  };
+  const items = [0, 1, 2].map((index) => ({ method: "eth_getCode", params: [`0x${index}`, "0x10"], decoder: String, batchAttempt: attempt }));
+  const session = new RpcReadSession({ lineaArchiveDeploymentScalarCode: true, wait: async () => {} });
+  await session.readArchiveDeploymentBatch("https://archive.example", 1, items);
+  await session.readBatch("https://archive.example", 59144, items);
+  assert.deepEqual(calls.map((call) => call.scalar), [false, false]);
+});
+
+test("Linea scalar code reads have no retry and respect the physical request ceiling", async () => {
+  const items = (attempt: (body: string) => Promise<unknown>) => [
+    { method: "eth_chainId", params: [], decoder: String, batchAttempt: attempt },
+    { method: "eth_getCode", params: ["0x0000000000000000000000000000000000000001", "0x10"], decoder: String, batchAttempt: attempt },
+    { method: "eth_getCode", params: ["0x0000000000000000000000000000000000000002", "0x10"], decoder: String, batchAttempt: attempt },
+  ];
+  let calls = 0;
+  const failure = async (body: string) => {
+    calls += 1;
+    const parsed = JSON.parse(body) as { id: string } | Array<{ id: string }>;
+    if (!Array.isArray(parsed)) throw new RpcHttpFailure("eth_getCode", 503);
+    return parsed.map((row) => ({ jsonrpc: "2.0", id: row.id, result: "0xe708" }));
+  };
+  await assert.rejects(new RpcReadSession({ lineaArchiveDeploymentScalarCode: true, wait: async () => {} })
+    .readArchiveDeploymentBatch("https://archive.example", 59144, items(failure)), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(calls, 2);
+  calls = 0;
+  const success = async (body: string) => {
+    calls += 1;
+    const parsed = JSON.parse(body) as { id: string } | Array<{ id: string }>;
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    const responses = rows.map((row) => ({ jsonrpc: "2.0", id: row.id, result: "0x1" }));
+    return Array.isArray(parsed) ? responses : responses[0];
+  };
+  const capped = new RpcReadSession({ lineaArchiveDeploymentScalarCode: true, maxHttpRequests: 2, wait: async () => {} });
+  await assert.rejects(capped.readArchiveDeploymentBatch("https://archive.example", 59144, items(success)),
+    { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(calls, 2);
+  assert.equal(capped.telemetry().httpAttempts, 2);
+});
+
 test("archive deployment HTTP 500 is terminal after one physical request", async () => {
   let calls = 0;
   const transport = { request: async () => { calls += 1; return { status: 500, body: "" }; } };
