@@ -322,14 +322,14 @@ export class HttpsBaseRpc {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs());
+        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method);
         return parseRpcResultEnvelope(raw, id);
     }
     async callX402Logs(params) {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params });
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), true);
+        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), "eth_getLogs", true);
         return parseRpcLogEnvelope(raw, id);
     }
     async resolvePublicAddresses() {
@@ -387,7 +387,7 @@ export function classifyX402LogAvailabilityMessage(message) {
     const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most|up to)\b/u.test(text);
     return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
-async function postJson(endpoint, body, addresses, timeoutMs, allowJsonRpcClientError = false) {
+async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJsonRpcClientError = false) {
     return await new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
@@ -400,14 +400,15 @@ async function postJson(endpoint, body, addresses, timeoutMs, allowJsonRpcClient
             headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body).toString() },
             lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
         }, (response) => {
+            const details = { rpcMethod, ...(response.statusCode === undefined ? {} : { httpStatus: response.statusCode }) };
             if ((response.statusCode ?? 0) >= 300 && (response.statusCode ?? 0) < 400) {
                 response.resume();
-                reject(new ApnError("APN_RPC_PROTOCOL", "RPC redirects are forbidden."));
+                reject(new ApnError("APN_RPC_PROTOCOL", "RPC redirects are forbidden.", details));
                 return;
             }
             if (!acceptRpcHttpBody(response.statusCode, allowJsonRpcClientError)) {
                 response.resume();
-                reject(new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status."));
+                reject(new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status.", details));
                 return;
             }
             const declared = Number(response.headers["content-length"] ?? "0");
