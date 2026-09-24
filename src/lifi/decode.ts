@@ -36,11 +36,14 @@ export function decodeBridgeCall(materialization: BridgeMaterialization): Decode
   const minimumOutput = bridgeUint(materialization.minimumOutputAtomic, true);
   const value = bridgeUint(tx.valueAtomic, false);
   const gas = bridgeUint(tx.gasLimitAtomic, true);
-  // A native principal is the transaction value itself and is bound by the amount; the native debit cap bounds fees.
+  // Stargate carries the native principal and the separate LayerZero fee in one transaction value.
+  // Across carries only the principal. The fee cap excludes principal; aggregate gas and value are checked later.
   if (gas > BRIDGE_MAX_GAS || tx.chainId !== request.fromChainId || tx.from !== materialization.sender ||
     bridgeAddress(tx.from) !== tx.from || tx.to !== BRIDGE_DIAMOND || materialization.approvalAddress !== BRIDGE_DIAMOND ||
     materialization.sender !== bridgeAddress(materialization.sender) || materialization.sender === BRIDGE_ZERO_ADDRESS ||
-    (bridgeNativePrincipal(request) ? value !== sourceAmount : value > BigInt(request.maxNativeDebitWei))) fail("transaction_envelope");
+    (bridgeNativePrincipal(request) ?
+      (materialization.tool === "stargateV2" ? value <= sourceAmount || value - sourceAmount > BigInt(request.maxNativeDebitWei) : value !== sourceAmount) :
+      value > BigInt(request.maxNativeDebitWei))) fail("transaction_envelope");
   const nativeConversion = bridgeNativeDenominationConversion(request);
   if (quotedOutput < minimumOutput || minimumOutput < BigInt(request.minOutputAtomic) ||
     (!nativeConversion && (sourceAmount < quotedOutput || sourceAmount - minimumOutput > BigInt(request.maxRouteFeeAtomic))) ||
@@ -97,17 +100,20 @@ function decodeAcross(m: BridgeMaterialization, bridge: BridgeData, swaps: reado
 }
 
 function decodeStargate(m: BridgeMaterialization, bridge: BridgeData, swaps: readonly SwapData[], stargate: StargateData, data: Hex, sourceAmount: bigint, minimum: bigint, value: bigint): DecodedBridgeCall {
-  if (bridgeNativePrincipal(m.request)) fail("stargate_native_principal_unreviewed");
+  const native = bridgeNativePrincipal(m.request);
+  // Only this captured native pair has a reviewed offline calldata shape. Route preparation stays gated separately.
+  if (native && (m.request.fromChainId !== 1 || m.request.toChainId !== 8453 || m.request.toToken !== BRIDGE_ZERO_ADDRESS)) fail("stargate_native_pair_unreviewed");
   const common = decodeCommon(m, bridge, swaps, sourceAmount);
   const expectedEid = destinationEid(m.request.toChainId);
   const p = stargate.sendParams;
-  if (stargate.assetId !== 1 || p.dstEid !== expectedEid || p.to.toLowerCase() !== addressWord(m.request.recipient) ||
+  const nativeFee = native ? value - sourceAmount : value;
+  if (stargate.assetId !== (native ? 13 : 1) || p.dstEid !== expectedEid || p.to.toLowerCase() !== addressWord(m.request.recipient) ||
     p.amountLD !== bridge.minAmount || p.minAmountLD !== minimum || p.extraOptions !== "0x" || p.composeMsg !== "0x" || p.oftCmd !== "0x" ||
-    stargate.fee.nativeFee !== value || value === 0n || stargate.fee.lzTokenFee !== 0n || stargate.refundAddress !== m.sender) fail("stargate_taxi_semantics");
-  validateFeeRows(m, common.fee, value, "stargateV2");
+    stargate.fee.nativeFee !== nativeFee || nativeFee === 0n || stargate.fee.lzTokenFee !== 0n || stargate.refundAddress !== m.sender) fail("stargate_taxi_semantics");
+  validateFeeRows(m, common.fee, nativeFee, "stargateV2");
   return result(m, data, STARGATE_SELECTOR, bridge, common.fee, {
-    kind: "stargateV2", assetId: 1, dstEid: p.dstEid, receiverAddress: bridgeHex(p.to, 32, 32),
-    amountLD: p.amountLD.toString(), minAmountLD: p.minAmountLD.toString(), nativeFee: value.toString(), lzTokenFee: "0",
+    kind: "stargateV2", assetId: native ? 13 : 1, dstEid: p.dstEid, receiverAddress: bridgeHex(p.to, 32, 32),
+    amountLD: p.amountLD.toString(), minAmountLD: p.minAmountLD.toString(), nativeFee: nativeFee.toString(), lzTokenFee: "0",
     refundAddress: stargate.refundAddress, extraOptions: "0x", composeMsg: "0x", oftCmd: "0x",
   }, common.bridgeAmount, value.toString());
 }

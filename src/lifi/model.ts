@@ -80,7 +80,7 @@ export interface AcrossCall {
 }
 export interface StargateCall {
   readonly kind: "stargateV2";
-  readonly assetId: 1;
+  readonly assetId: 1 | 13;
   readonly dstEid: number;
   readonly receiverAddress: Hex;
   readonly amountLD: string;

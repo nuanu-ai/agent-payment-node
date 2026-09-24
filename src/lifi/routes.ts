@@ -135,10 +135,12 @@ export function validateRouteEconomics(m: BridgeMaterialization): string {
     } else additional.push(fee);
   }
   if ((conversion ? sourceIncluded > bridgeUint(r.maxRouteFeeAtomic) : included + output > amount)) bridgeFailure("APN_PROVIDER_PROTOCOL", "token_fee_double_count");
-  // A native principal travels as the bridge transaction's value; an ERC-20 principal never carries value on Across.
+  // Native Stargate adds the separately quoted LayerZero fee to the principal; token Stargate carries only that fee.
+  const stargateFeeValue = m.tool === "stargateV2" && additional.length === 1 ?
+    (bridgeNativePrincipal(r) ? (amount + bridgeUint(additional[0]!.amountAtomic)).toString() : additional[0]!.amountAtomic) : null;
   if (m.tool === "across" ? additional.length !== 0 || m.transaction.valueAtomic !== (bridgeNativePrincipal(r) ? r.amountAtomic : "0") :
     additional.length !== 1 || additional[0]!.chainId !== r.fromChainId || additional[0]!.asset !== "native" ||
-      additional[0]!.amountAtomic !== m.transaction.valueAtomic) bridgeFailure("APN_PROVIDER_PROTOCOL", "native_fee_identity");
+      stargateFeeValue !== m.transaction.valueAtomic) bridgeFailure("APN_PROVIDER_PROTOCOL", "native_fee_identity");
   return conversion ? "0" : (amount - included - output).toString();
 }
 function assertStep(step: Record<string, unknown>, request: BridgeRouteRequest, sender: Address): void {

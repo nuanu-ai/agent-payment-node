@@ -430,8 +430,12 @@ read-only captures of 18 September 2026:
 
 The route estimate must state `skipApproval: true` and must not ask for an
 approval reset. Every fee row is the native coin itself (`asset: "native"`);
-LI.FI's fixed fee must equal the forwarded amount. A Stargate native route is
-listed but not preparable, and a token request can never reuse native calldata.
+LI.FI's fixed fee must equal the forwarded amount. The captured Ethereum to
+Base native Stargate Taxi calldata can be decoded offline with asset ID 13:
+transaction value equals the source principal plus the separate LayerZero native
+fee. Its route remains listed but not preparable until native pool pins and
+destination delivery proof are reviewed. A token request can never reuse native
+calldata.
 
 Source proof replaces the three ERC-20 `Transfer` logs with the wrap: exactly
 one wrapped-native log crediting the source SpokePool with the bridge amount
