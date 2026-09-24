@@ -107,6 +107,34 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
     { state: "capability_unavailable", reason: "policy_revoked_or_changed" });
   active = policy;
   assert.equal((await service.resumeBound(operation.operationId, preparePort)).state, "prepared");
+  const { UsdtExecutionJournal, usdtExecutionIntent } = await moduleAt("gasless-usdt/execution-journal.js");
+  const { AssetUsageLedger } = await moduleAt("asset-usage-ledger.js");
+  const execution = new UsdtExecutionJournal(stateRoot);
+  const usageIdentity = { account: OWNER, chain: USDT_GASLESS.chain,
+    asset: { kind: "token", identifier: USDT_GASLESS.token } };
+  const intent = usdtExecutionIntent(operation);
+  assert.equal(intent.bindingHash, operation.binding.bindingHash);
+  const reserved = await execution.reserve(operation, intent, preparePort);
+  assert.equal(reserved.state, "reserved");
+  assert.equal(reserved.userOperationHash, null);
+  assert.equal(reserved.policyDigest, policy.digest);
+  assert.deepEqual(await execution.reserve(operation, intent, preparePort), reserved);
+  assert.deepEqual(JSON.parse(await readFile(join(stateRoot, "gasless-usdt-executions", `${operation.operationId}.json`), "utf8")), reserved);
+  const reopenedExecution = new UsdtExecutionJournal(stateRoot);
+  const reopenedUsage = new AssetUsageLedger(stateRoot);
+  assert.deepEqual(await reopenedExecution.load(operation.operationId), reserved);
+  assert.equal((await reopenedUsage.load(usageIdentity, reserved.reservationId))?.state, "reserved");
+  assert.equal((await reopenedUsage.usage(usageIdentity, NOW)).amountAtomic, "1000000");
+  await assert.rejects(() => execution.markSubmitting(operation, preparePort, "0xinvalid"),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await execution.load(operation.operationId))?.state, "reserved");
+  const aborted = await reopenedExecution.abortUnsent(operation, NOW);
+  assert.equal(aborted?.state, "failed_before_effect");
+  assert.equal(aborted?.userOperationHash, null);
+  assert.equal((await reopenedUsage.load(usageIdentity, reserved.reservationId))?.state, "failed_before_effect");
+  assert.equal((await reopenedUsage.usage(usageIdentity, NOW)).amountAtomic, "0");
+  assert.deepEqual(await execution.abortUnsent(operation, NOW), aborted);
+  assert.deepEqual(await new UsdtExecutionJournal(stateRoot).load(operation.operationId), aborted);
   const refusedArgs = [...argv]; refusedArgs[refusedArgs.indexOf("--amount") + 1] = "1.000001";
   refusedArgs[refusedArgs.indexOf("--idempotency-key") + 1] = "installed-usdt-over-cap";
   const beforeRefusal = physical;
