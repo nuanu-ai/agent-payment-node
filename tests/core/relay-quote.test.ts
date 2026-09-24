@@ -19,14 +19,43 @@ test("finite request pins the exact route and requests locally verifiable protoc
 test("captured executable quote validates offline and public transport makes one POST", async () => {
   const quote = await fixture();
   const validated = await validateRelayQuote(quote, intent);
+  assert.equal(validated.schemaVersion, "apn.relay-quote.v1");
+  assert.match(validated.quoteDigest, /^[0-9a-f]{64}$/);
+  assert.equal(validated.orderId, quote.protocol.v2.orderId);
+  assert.equal(validated.orderSignature, quote.protocol.v2.orderSignature);
+  assert.equal(validated.solver, quote.protocol.v2.orderData.solver);
+  assert.equal(validated.payer, payer.toLowerCase());
+  assert.equal(validated.recipient, recipient.toLowerCase());
+  assert.equal(validated.sourceRefundRecipient, payer.toLowerCase());
+  assert.equal(validated.principalAtomic, intent.amountAtomic);
+  assert.equal(validated.orderData.salt, quote.protocol.v2.orderData.salt);
+  assert.equal(validated.orderData.inputs[0]?.refunds[0]?.extraData, quote.protocol.v2.orderData.inputs[0].refunds[0].extraData);
+  assert.equal(validated.paymentDetails.depository, ETHEREUM_DEPOSITORY);
   assert.equal(validated.minimumOutputWei, "3049241663777869");
   assert.equal(validated.deposit.to.toLowerCase(), ETHEREUM_DEPOSITORY);
+  for (const [step, source] of [[validated.approval, quote.steps[0].items[0].data],
+    [validated.deposit, quote.steps[1].items[0].data]] as const) {
+    assert.equal(step.gas, source.gas);
+    assert.equal(step.maxFeePerGas, source.maxFeePerGas);
+    assert.equal(step.maxPriorityFeePerGas, source.maxPriorityFeePerGas);
+    assert.equal(step.maximumNetworkFeeWei, (BigInt(source.gas) * BigInt(source.maxFeePerGas)).toString());
+  }
+  assert.ok(Object.isFrozen(validated) && Object.isFrozen(validated.orderData.inputs[0]?.refunds[0]));
+  quote.steps[0].items[0].data.data = "0xdead";
+  assert.notEqual(validated.approval.data, quote.steps[0].items[0].data.data);
+  const expectedDigest = validated.quoteDigest;
+  assert.equal((await validateRelayQuote(await fixture(), intent)).quoteDigest, expectedDigest);
+  const higherFee = await fixture();
+  higherFee.steps[0].items[0].data.maxFeePerGas = "292048424";
+  const repriced = await validateRelayQuote(higherFee, intent);
+  assert.notEqual(repriced.quoteDigest, expectedDigest);
+  assert.equal(repriced.approval.maximumNetworkFeeWei, (73269n * 292048424n).toString());
   let calls = 0;
   const fetcher = (async (_url: unknown, init: RequestInit) => {
     calls += 1;
     assert.equal(init.method, "POST");
     assert.deepEqual(JSON.parse(String(init.body)), relayQuoteRequest(intent));
-    return { ok: true, json: async () => quote } as Response;
+    return { ok: true, json: fixture } as Response;
   }) as typeof fetch;
   assert.deepEqual(await requestRelayQuote(intent, fetcher, () => intent.nowSeconds), validated);
   assert.equal(calls, 1);
@@ -58,6 +87,13 @@ test("order, recipient, minimum, expiry, depository, approval and deposit mutati
     ["native value", q => { q.steps[1].items[0].data.value = "1"; }],
     ["unbounded gas", q => { q.steps[1].items[0].data.gas = "500001"; }],
     ["unbounded fee", q => { q.steps[1].items[0].data.maxFeePerGas = "100000000001"; }],
+    ["missing gas", q => { delete q.steps[1].items[0].data.gas; }],
+    ["missing max fee", q => { delete q.steps[1].items[0].data.maxFeePerGas; }],
+    ["missing priority fee", q => { delete q.steps[1].items[0].data.maxPriorityFeePerGas; }],
+    ["priority exceeds fee", q => { q.steps[1].items[0].data.maxPriorityFeePerGas = "292048424"; }],
+    ["order extension", q => { q.protocol.v2.orderData.untrusted = "carry"; }],
+    ["refund extension", q => { q.protocol.v2.orderData.inputs[0].refunds[0].untrusted = "carry"; }],
+    ["malformed refund extra data", q => { q.protocol.v2.orderData.inputs[0].refunds[0].extraData = "0x01"; }],
     ["trailing calldata", q => { q.steps[1].items[0].data.data += "00"; }],
     ["extension", q => { q.steps[1].items[0].data.authorizationList = []; }],
   ];

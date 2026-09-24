@@ -2,6 +2,7 @@
 import { getOrderId } from "@relay-protocol/settlement-sdk";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import type { Address, Hex } from "viem";
+import { hashObject } from "../canonical.js";
 
 export const ETHEREUM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 export const BNB_NATIVE = "0x0000000000000000000000000000000000000000";
@@ -14,6 +15,7 @@ const APPROVE_ABI = parseAbi(["function approve(address spender, uint256 amount)
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const UINT = /^(0|[1-9][0-9]*)$/;
 const HEX = /^0x(?:[0-9a-fA-F]{2})+$/;
+const BYTES32 = /^0x[0-9a-fA-F]{64}$/;
 const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 const fail = (reason: string): never => { throw new Error(`Relay quote rejected: ${reason}`); };
 const object = (value: unknown, reason: string): Record<string, unknown> =>
@@ -48,11 +50,58 @@ export function relayQuoteRequest(intent: RelayQuoteIntent): Record<string, unkn
 }
 
 export interface ValidatedRelayQuote {
+  readonly schemaVersion: "apn.relay-quote.v1";
+  readonly quoteDigest: string;
   readonly orderId: string;
+  readonly orderSignature: string;
+  readonly solver: string;
+  readonly payer: string;
+  readonly recipient: string;
+  readonly sourceRefundRecipient: string;
+  readonly principalAtomic: string;
+  readonly orderData: Readonly<{
+    version: "v1"; solverChainId: "base"; solver: string; salt: string;
+    inputs: readonly Readonly<{ payment: Readonly<{ chainId: "ethereum"; currency: string; amount: string; weight: "1" }>;
+      refunds: readonly Readonly<{ chainId: "ethereum" | "bnb"; recipient: string; currency: string;
+        minimumAmount: "0"; deadline: number; extraData: string }>[] }>[];
+    output: Readonly<{ chainId: "bnb"; payments: readonly Readonly<{ recipient: string; currency: string;
+      minimumAmount: string; expectedAmount: string }>[]; calls: readonly []; deadline: number; extraData: string }>;
+    fees: readonly [];
+  }>;
+  readonly paymentDetails: Readonly<{ chainId: "ethereum"; depository: string; currency: string; amount: string }>;
   readonly minimumOutputWei: string;
   readonly deadline: number;
-  readonly approval: Readonly<{ from: string; to: string; data: string; value: "0"; chainId: 1 }>;
-  readonly deposit: Readonly<{ from: string; to: string; data: string; value: "0"; chainId: 1 }>;
+  readonly approval: RelayQuoteTransaction;
+  readonly deposit: RelayQuoteTransaction;
+}
+
+export interface RelayQuoteTransaction {
+  readonly from: string; readonly to: string; readonly data: string; readonly value: "0"; readonly chainId: 1;
+  readonly gas: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string;
+  readonly maximumNetworkFeeWei: string;
+}
+
+function onlyKeys(value: Record<string, unknown>, keys: readonly string[], reason: string): void {
+  for (const key of Object.keys(value)) if (!keys.includes(key)) fail(reason);
+}
+function bytes32(value: unknown, reason: string): string {
+  const s = string(value, reason); return BYTES32.test(s) ? s.toLowerCase() : fail(reason);
+}
+function frozen<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) frozen(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+function projectedTransaction(tx: Record<string, unknown>): RelayQuoteTransaction {
+  const gas = amount(tx.gas, "gas");
+  const maxFeePerGas = amount(tx.maxFeePerGas, "max fee");
+  return { from: address(tx.from, "transaction from").toLowerCase(), to: address(tx.to, "transaction to").toLowerCase(),
+    data: string(tx.data, "transaction data").toLowerCase(), value: "0", chainId: 1,
+    gas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(),
+    maxPriorityFeePerGas: amount(tx.maxPriorityFeePerGas, "priority fee").toString(),
+    maximumNetworkFeeWei: (gas * maxFeePerGas).toString() };
 }
 
 function transaction(value: unknown, expectedId: string, intent: RelayQuoteIntent): Record<string, unknown> {
@@ -83,10 +132,15 @@ export async function validateRelayQuote(value: unknown, intent: RelayQuoteInten
   const protocol = object(object(quote.protocol, "protocol").v2, "protocol v2");
   if (protocol.hubType !== "onchain") fail("hub type");
   const order = object(protocol.orderData, "order data");
+  onlyKeys(order, ["version", "solverChainId", "solver", "salt", "inputs", "output", "fees"], "order extension");
   const input = exactlyOne(order.inputs, "inputs");
+  onlyKeys(input, ["payment", "refunds"], "input extension");
   const payment = object(input.payment, "payment");
+  onlyKeys(payment, ["chainId", "currency", "amount", "weight"], "payment extension");
   const output = object(order.output, "output");
+  onlyKeys(output, ["chainId", "payments", "calls", "deadline", "extraData"], "output extension");
   const payee = exactlyOne(output.payments, "output payments");
+  onlyKeys(payee, ["recipient", "currency", "minimumAmount", "expectedAmount"], "payee extension");
   const refunds = array(input.refunds, "refunds");
   if (refunds.length !== 2 || array(output.calls, "calls").length !== 0 || array(order.fees, "fees").length !== 0) fail("order actions");
   if (order.version !== "v1" || order.solverChainId !== "base" ||
@@ -102,10 +156,27 @@ export async function validateRelayQuote(value: unknown, intent: RelayQuoteInten
   for (const [index, expected] of [[0, { chain: "ethereum", recipient: intent.payer, currency: ETHEREUM_USDC }],
     [1, { chain: "bnb", recipient: intent.recipient, currency: BNB_NATIVE }]] as const) {
     const refund = object(refunds[index], "refund");
+    onlyKeys(refund, ["chainId", "recipient", "currency", "minimumAmount", "deadline", "extraData"], "refund extension");
     if (refund.chainId !== expected.chain || !same(address(refund.recipient, "refund recipient"), expected.recipient) ||
       !same(address(refund.currency, "refund currency"), expected.currency) ||
       amount(refund.minimumAmount, "refund minimum") !== 0n || refund.deadline !== deadline) fail("refund");
   }
+  const orderData: ValidatedRelayQuote["orderData"] = {
+    version: "v1", solverChainId: "base", solver: address(order.solver, "solver").toLowerCase(),
+    salt: bytes32(order.salt, "salt"),
+    inputs: [{ payment: { chainId: "ethereum", currency: address(payment.currency, "input currency").toLowerCase(),
+      amount: amount(payment.amount, "input amount").toString(), weight: "1" },
+      refunds: refunds.map((entry, index) => {
+        const refund = object(entry, "refund");
+        return { chainId: index === 0 ? "ethereum" as const : "bnb" as const,
+          recipient: address(refund.recipient, "refund recipient").toLowerCase(),
+          currency: address(refund.currency, "refund currency").toLowerCase(), minimumAmount: "0" as const,
+          deadline: deadline as number, extraData: bytes32(refund.extraData, "refund extra data") };
+      }) }],
+    output: { chainId: "bnb", payments: [{ recipient: address(payee.recipient, "recipient").toLowerCase(),
+      currency: address(payee.currency, "output currency").toLowerCase(), minimumAmount: minimum.toString(),
+      expectedAmount: amount(payee.expectedAmount, "expected output").toString() }], calls: [],
+      deadline: deadline as number, extraData: bytes32(output.extraData, "output extra data") }, fees: [] };
   const details = object(quote.details, "details");
   const currencyIn = object(details.currencyIn, "currency in"), currencyOut = object(details.currencyOut, "currency out");
   const inToken = object(currencyIn.currency, "input token"), outToken = object(currencyOut.currency, "output token");
@@ -115,7 +186,7 @@ export async function validateRelayQuote(value: unknown, intent: RelayQuoteInten
     amount(currencyIn.amount, "details input") !== amount(intent.amountAtomic, "intent input") ||
     amount(currencyOut.minimumAmount, "details minimum") !== minimum) fail("quote details");
   let orderId: string;
-  try { orderId = getOrderId(order as Parameters<typeof getOrderId>[0], CHAINS); }
+  try { orderId = getOrderId(orderData as unknown as Parameters<typeof getOrderId>[0], CHAINS); }
   catch { return fail("order encoding"); }
   if (!same(string(protocol.orderId, "order id"), orderId)) fail("order id");
   const signature = string(protocol.orderSignature, "order signature");
@@ -143,8 +214,15 @@ export async function validateRelayQuote(value: unknown, intent: RelayQuoteInten
       !same(deposited.args[3], orderId)) fail("deposit calldata");
     if (!same(encodeFunctionData({ abi: DEPOSIT_ABI, functionName: "depositErc20", args: [...deposited.args] }), deposit.data as string)) fail("deposit calldata");
   } catch { return fail("call data"); }
-  return { orderId, minimumOutputWei: minimum.toString(), deadline: deadline as number,
-    approval: approval as ValidatedRelayQuote["approval"], deposit: deposit as ValidatedRelayQuote["deposit"] };
+  const projection = { schemaVersion: "apn.relay-quote.v1" as const, orderId: orderId.toLowerCase(),
+    orderSignature: signature.toLowerCase(), solver: RELAY_SOLVER, payer: intent.payer.toLowerCase(),
+    recipient: intent.recipient.toLowerCase(), sourceRefundRecipient: intent.payer.toLowerCase(),
+    principalAtomic: amount(intent.amountAtomic, "amount").toString(), orderData,
+    paymentDetails: { chainId: "ethereum" as const, depository: ETHEREUM_DEPOSITORY,
+      currency: ETHEREUM_USDC.toLowerCase(), amount: amount(paymentDetails.amount, "payment amount").toString() },
+    minimumOutputWei: minimum.toString(), deadline: deadline as number,
+    approval: projectedTransaction(approval), deposit: projectedTransaction(deposit) };
+  return frozen({ ...projection, quoteDigest: hashObject(projection) });
 }
 
 /** One POST, no API key, no retry. The caller receives a validated unsigned envelope only. */
