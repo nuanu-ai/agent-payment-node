@@ -143,6 +143,29 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   assert.equal(refused.error.code, "APN_OPERATION_BLOCKED");
   assert.equal(physical, beforeRefusal, "cap refusal must precede public reads");
   assert.equal((await readdir(join(stateRoot, "gasless-usdt-bound-operations", operation.profileHash))).filter(x => x.endsWith(".json")).length, 1);
+  const attemptedArgs = [...argv];
+  attemptedArgs[attemptedArgs.indexOf("--idempotency-key") + 1] = "installed-usdt-attempted";
+  const attempted = (await runCli(attemptedArgs, {}, options)).operation;
+  const attemptedIntent = usdtExecutionIntent(attempted);
+  const attemptedReservation = await execution.reserve(attempted, attemptedIntent, preparePort);
+  const syntheticHash = `0x${"34".repeat(32)}`;
+  const submitting = await execution.markSubmitting(attempted, preparePort, syntheticHash);
+  assert.equal(submitting.state, "submitting");
+  assert.equal(submitting.userOperationHash, syntheticHash);
+  assert.equal((await runCli(["gasless", "usdt", "execution-status", "--profile-hash", attempted.profileHash,
+    "--operation", attempted.operationId], {}, { stateRoot })).data.execution.state, "submitting");
+  await assert.rejects(() => execution.markSubmitting(attempted, preparePort, syntheticHash),
+    { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(() => execution.markSubmitted(attempted, `0x${"56".repeat(32)}`, NOW),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await reopenedUsage.load(usageIdentity, attemptedReservation.reservationId))?.state, "reserved");
+  const unknown = await new UsdtExecutionJournal(stateRoot).markUnknownFinality(attempted, NOW);
+  assert.equal(unknown.state, "unknown_finality");
+  assert.equal(unknown.userOperationHash, syntheticHash);
+  assert.equal((await reopenedUsage.load(usageIdentity, attemptedReservation.reservationId))?.state, "unknown_finality");
+  assert.equal((await reopenedUsage.usage(usageIdentity, NOW)).amountAtomic, "1000000");
+  assert.equal((await execution.abortUnsent(attempted, NOW)), null);
+  assert.deepEqual(await new UsdtExecutionJournal(stateRoot).load(attempted.operationId), unknown);
   let now = 1_000, attempts = 0;
   const budget = new UsdtCommandReadBudget(new StateStore(stateRoot), { request: async () => {
     attempts++; return { status: 200, body: "{}" }; } }, () => now, async ms => { now += ms; });
