@@ -409,6 +409,7 @@ export type CommandRequest = {
     readonly operationId: string;
     readonly waitSeconds?: number;
     readonly observationRpcEnv?: string;
+    readonly observeOnly?: true;
 } | {
     readonly command: "operation.abandon";
     readonly operationId: string;
