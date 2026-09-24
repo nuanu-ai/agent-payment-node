@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { encodeFunctionData, toFunctionSelector } from "viem";
+import { encodeFunctionData, getAddress, toFunctionSelector } from "viem";
 import { FEE_FORWARDER, FEE_RECIPIENT, STARGATE_SELECTOR, feeForwarderAbi, stargateBridgeAbi } from "../../src/lifi/abi.js";
 import { bridgeAssetRow, bridgeAssetTool } from "../../src/lifi/asset-registry.js";
 import { decodeBridgeCall } from "../../src/lifi/decode.js";
+import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { freezeBridgeEnvelopes } from "../../src/lifi/economics.js";
-import type { BridgeAccountSnapshot, BridgeMaterialization } from "../../src/lifi/model.js";
+import type { BridgeAccountSnapshot, BridgeMaterialization, BridgeProtocolReceipt } from "../../src/lifi/model.js";
 import type { BridgeRpcPort } from "../../src/lifi/ports.js";
 import { validateRouteEconomics } from "../../src/lifi/routes.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
+import { eventLog, mutateEvent } from "./lifi-event-fixtures.js";
 
 const OWNER = "0x1111111111111111111111111111111111111111";
 const SOURCE = 200000000000000n;
@@ -16,6 +19,8 @@ const FIXED_FEE = 500000000000n;
 const LZ_FEE = 191951159457037n;
 const BRIDGED = SOURCE - FIXED_FEE;
 const VALUE = SOURCE + LZ_FEE;
+const NATIVE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
+const GUID = `0x${"12".repeat(32)}` as const;
 
 // Derived from the captured 2026-09-24 unsigned Ethereum -> Base LI.FI step. Identity fields are synthetic;
 // the selector, ABI layout, asset ID, amounts, fee split, and 1508-byte encoding match the captured shape.
@@ -77,6 +82,63 @@ test("native Stargate fails closed on debit cap, asset ID and both fee bindings"
     fixture({ destination: 42161 }),
   ]) assert.throws(() => decodeBridgeCall(bad), { code: "APN_PROVIDER_PROTOCOL" });
   assert.throws(() => validateRouteEconomics(fixture({ feeRow: LZ_FEE + 1n })), { code: "APN_PROVIDER_PROTOCOL" });
+});
+
+function sourceReceipt(m: BridgeMaterialization): BridgeProtocolReceipt {
+  const d = decodeBridgeCall(m);
+  return { chainId: 1, transactionHash: `0x${"11".repeat(32)}`,
+    blockNumberAtomic: "123", blockHash: `0x${"22".repeat(32)}`, logs: [
+      eventLog(BRIDGE_DIAMOND, "LiFiTransferStarted", { bridgeData: {
+        transactionId: d.transactionId, bridge: d.bridgeName, integrator: d.integrator, referrer: d.referrer,
+        sendingAssetId: d.sourceToken, receiver: d.recipient, minAmount: BigInt(d.bridgeAmountAtomic),
+        destinationChainId: BigInt(d.destinationChainId), hasSourceSwaps: true, hasDestinationCall: false } }),
+      eventLog(FEE_FORWARDER, "FeesForwarded", { token: BRIDGE_ZERO_ADDRESS,
+        distributions: [{ recipient: FEE_RECIPIENT, amount: FIXED_FEE }] }),
+      eventLog(NATIVE_POOL, "OFTSent", { guid: GUID, dstEid: 30184, fromAddress: BRIDGE_DIAMOND,
+        amountSentLD: BRIDGED, amountReceivedLD: 197010000000000n }),
+    ] };
+}
+
+test("native Stargate source accepts the exact pool OFTSent without Across wrap or ERC20 transfers", () => {
+  const official = JSON.parse(readFileSync(new URL("../../../data/stargate/2026-09-20/official-registry-and-abi.json", import.meta.url), "utf8"));
+  assert.equal(official.sources[0].commit, "ce598b8d16472cd76ee47d30b8a40bc5c1b667bb");
+  assert.equal(official.deployments.find((row: { chainId: number; asset: string }) => row.chainId === 1 && row.asset === "ETH").pool, NATIVE_POOL);
+  const m = fixture(), d = decodeBridgeCall(m), receipt = sourceReceipt(m);
+  const proof = bridgeSourceProof(m, d, receipt);
+  assert.equal(proof.correlation.kind, "stargateV2");
+  assert.equal(proof.correlation.guid, GUID);
+  assert.equal(proof.correlation.sourceEid, 30101);
+  assert.equal(proof.correlation.destinationEid, 30184);
+  assert.equal(proof.correlation.recipient, OWNER);
+  assert.equal(proof.bridgeAmountAtomic, BRIDGED.toString());
+  assert.equal(d.sourceValueAtomic, (SOURCE + LZ_FEE).toString());
+});
+
+test("native Stargate source rejects wrong pool, GUID, EID, amount, sender, and duplicate events", () => {
+  const m = fixture(), d = decodeBridgeCall(m), good = sourceReceipt(m), sent = good.logs[2]!;
+  const invalid = [
+    [{ ...sent, address: getAddress("0xc026395860Db2d07ee33e05fE50ed7bD583189C7") }],
+    [mutateEvent(sent, "OFTSent", { guid: `0x${"00".repeat(32)}` })],
+    [mutateEvent(sent, "OFTSent", { dstEid: 30110 })],
+    [mutateEvent(sent, "OFTSent", { amountSentLD: BRIDGED - 1n })],
+    [mutateEvent(sent, "OFTSent", { amountReceivedLD: 197009999999999n })],
+    [mutateEvent(sent, "OFTSent", { fromAddress: OWNER })],
+    [sent, sent],
+  ];
+  for (const replacement of invalid) assert.throws(() => bridgeSourceProof(m, d, { ...good,
+    logs: [...good.logs.slice(0, 2), ...replacement] }), { code: "APN_RPC_PROTOCOL" });
+});
+
+test("native Stargate source rejects fee and msg.value mismatches and cannot use an Across receipt", () => {
+  const m = fixture(), d = decodeBridgeCall(m), good = sourceReceipt(m);
+  assert.throws(() => bridgeSourceProof(m, d, { ...good, logs: [good.logs[0]!,
+    mutateEvent(good.logs[1]!, "FeesForwarded", { distributions: [{ recipient: FEE_RECIPIENT, amount: FIXED_FEE + 1n }] }),
+    good.logs[2]!] }), { code: "APN_RPC_PROTOCOL" });
+  for (const bad of [fixture({ value: VALUE + 1n }), fixture({ nativeFee: LZ_FEE + 1n }), fixture({ feeRow: LZ_FEE + 1n })]) {
+    assert.throws(() => bridgeSourceProof(bad, d, good));
+  }
+  assert.throws(() => bridgeSourceProof(m, d, { ...good, logs: good.logs.slice(0, 2) }),
+    { code: "APN_RPC_PROTOCOL" });
 });
 
 test("native Stargate fee cap excludes principal but aggregate gas plus LayerZero fee remains bounded", async () => {
