@@ -350,6 +350,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)), options.gaslessUsdtPrepareOptions),
     } : {}),
     bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
+      lineaArchiveDeploymentScalarCode: bound.request.command === "bridge.prepare" &&
+        process.env.APN_LIFI_LINEA_ARCHIVE_SCALAR_CODE === "1",
       custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
       ...(bound.request.command === "bridge.approve" ? { approval: new TtyBridgeApproval() } : {}) },
     chainAccounts, directRails,
