@@ -14,12 +14,12 @@ export function decodeBridgeCall(materialization) {
     const value = bridgeUint(tx.valueAtomic, false);
     const gas = bridgeUint(tx.gasLimitAtomic, true);
     // Stargate carries the native principal and the separate LayerZero fee in one transaction value.
-    // Across carries only the principal. The complete native debit is checked against the owner cap later.
+    // Across carries only the principal. The fee cap excludes principal; aggregate gas and value are checked later.
     if (gas > BRIDGE_MAX_GAS || tx.chainId !== request.fromChainId || tx.from !== materialization.sender ||
         bridgeAddress(tx.from) !== tx.from || tx.to !== BRIDGE_DIAMOND || materialization.approvalAddress !== BRIDGE_DIAMOND ||
         materialization.sender !== bridgeAddress(materialization.sender) || materialization.sender === BRIDGE_ZERO_ADDRESS ||
         (bridgeNativePrincipal(request) ?
-            (materialization.tool === "stargateV2" ? value <= sourceAmount || value > BigInt(request.maxNativeDebitWei) : value !== sourceAmount) :
+            (materialization.tool === "stargateV2" ? value <= sourceAmount || value - sourceAmount > BigInt(request.maxNativeDebitWei) : value !== sourceAmount) :
             value > BigInt(request.maxNativeDebitWei)))
         fail("transaction_envelope");
     const nativeConversion = bridgeNativeDenominationConversion(request);

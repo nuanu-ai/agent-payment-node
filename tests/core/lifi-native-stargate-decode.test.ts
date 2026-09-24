@@ -4,7 +4,9 @@ import { encodeFunctionData, toFunctionSelector } from "viem";
 import { FEE_FORWARDER, FEE_RECIPIENT, STARGATE_SELECTOR, feeForwarderAbi, stargateBridgeAbi } from "../../src/lifi/abi.js";
 import { bridgeAssetRow, bridgeAssetTool } from "../../src/lifi/asset-registry.js";
 import { decodeBridgeCall } from "../../src/lifi/decode.js";
-import type { BridgeMaterialization } from "../../src/lifi/model.js";
+import { freezeBridgeEnvelopes } from "../../src/lifi/economics.js";
+import type { BridgeAccountSnapshot, BridgeMaterialization } from "../../src/lifi/model.js";
+import type { BridgeRpcPort } from "../../src/lifi/ports.js";
 import { validateRouteEconomics } from "../../src/lifi/routes.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 
@@ -36,7 +38,7 @@ function fixture(options: { assetId?: number; nativeFee?: bigint; forwardedFee?:
     routeId: "synthetic-route", stepId: "synthetic-step", tool: "stargateV2", sender: OWNER,
     request: { fromChainId: 1, toChainId: options.destination ?? 8453, fromToken: BRIDGE_ZERO_ADDRESS,
       toToken: BRIDGE_ZERO_ADDRESS, recipient: OWNER, amountAtomic: SOURCE.toString(),
-      minOutputAtomic: "100000000000000", maxNativeDebitWei: (options.cap ?? 600000000000000n).toString(),
+      minOutputAtomic: "100000000000000", maxNativeDebitWei: (options.cap ?? SOURCE).toString(),
       maxRouteFeeAtomic: "100000000000000", slippageBps: 50 },
     approvalAddress: BRIDGE_DIAMOND, quotedOutputAtomic: "198000000000000", minimumOutputAtomic: "197010000000000",
     feeCosts: [
@@ -69,10 +71,36 @@ test("captured native Stargate ABI shape decodes principal and separate LayerZer
 
 test("native Stargate fails closed on debit cap, asset ID and both fee bindings", () => {
   for (const bad of [
-    fixture({ cap: SOURCE }), fixture({ value: SOURCE }), fixture({ value: VALUE + 1n }),
+    fixture({ cap: LZ_FEE - 1n }), fixture({ value: SOURCE }), fixture({ value: VALUE + 1n }),
     fixture({ assetId: 1 }), fixture({ nativeFee: LZ_FEE + 1n }),
     fixture({ forwardedFee: FIXED_FEE + 1n }), fixture({ feeRow: LZ_FEE + 1n }),
     fixture({ destination: 42161 }),
   ]) assert.throws(() => decodeBridgeCall(bad), { code: "APN_PROVIDER_PROTOCOL" });
   assert.throws(() => validateRouteEconomics(fixture({ feeRow: LZ_FEE + 1n })), { code: "APN_PROVIDER_PROTOCOL" });
+});
+
+test("native Stargate fee cap excludes principal but aggregate gas plus LayerZero fee remains bounded", async () => {
+  const m = fixture();
+  const origin = "https://rpc.example";
+  const blockHash = `0x${"ab".repeat(32)}`;
+  const rpc = { chainId: 1, origin,
+    async estimate() { return { gasLimitAtomic: m.transaction.gasLimitAtomic,
+      maxFeePerGasAtomic: "1000000", maxPriorityFeePerGasAtomic: "500000" }; },
+    async prices() { throw new Error("native principal requires no approval"); },
+    async feeQuote({ economics }: { economics: { maximumGasCostAtomic: string } }) {
+      return { chainId: 1, l1DataFeeUpperWei: "0", operatorFeeUpperWei: "0", maximumExecutionFeeWei: economics.maximumGasCostAtomic,
+        totalQuoteWei: economics.maximumGasCostAtomic, totalFeeEnforcedOnchain: false, blockNumberAtomic: "1", blockHash,
+        rpcOrigin: origin, observedAt: "2026-09-24T00:00:00.000Z" };
+    } } as unknown as BridgeRpcPort;
+  const balance = 600000000000000n;
+  const account = { chainId: 1, rpcOrigin: origin, block: { numberAtomic: "1", hash: blockHash, timestampAtomic: "1" },
+    owner: OWNER, token: BRIDGE_ZERO_ADDRESS, spender: BRIDGE_DIAMOND, balanceAtomic: balance.toString(), nativeBalanceWei: balance.toString(),
+    allowanceAtomic: "0", latestNonceAtomic: "5", pendingNonceAtomic: "5" } as BridgeAccountSnapshot;
+  const gasFee = BigInt(m.transaction.gasLimitAtomic) * 1500000n;
+  const effects = await freezeBridgeEnvelopes(m, account, rpc);
+  assert.deepEqual(effects.map((effect) => [effect.role, effect.valueAtomic]), [["bridge", VALUE.toString()]]);
+  assert.equal(effects[0]!.feeQuote.totalQuoteWei, gasFee.toString());
+  await assert.rejects(freezeBridgeEnvelopes({ ...m, request: { ...m.request,
+    maxNativeDebitWei: (LZ_FEE + gasFee - 1n).toString() } }, account, rpc),
+  (error: any) => error.code === "APN_FEE_BUDGET_EXCEEDED" && error.details.reason === "aggregate_native_debit");
 });
