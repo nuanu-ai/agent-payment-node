@@ -9,6 +9,11 @@ export declare class UsdtJsonRpc {
     private sequence;
     constructor(transport: GaslessTransport, endpoint: string, methods: ReadonlySet<string>);
     call(method: string, params: readonly unknown[]): Promise<unknown>;
+    /** One physical exchange. Every response must match exactly one requested id, in any order. */
+    batch(calls: readonly {
+        readonly method: string;
+        readonly params: readonly unknown[];
+    }[]): Promise<readonly unknown[]>;
 }
 /** Read one authenticated safe-block account view. Every contract and account read uses the same safe tag. */
 export declare function usdtSafeSnapshot(transport: GaslessTransport, rpcUrl: string, sender: Address): Promise<{

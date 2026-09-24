@@ -17,7 +17,7 @@ export interface UsdtCommandPrepareOptions {
     readonly wait?: (milliseconds: number) => Promise<void>;
     readonly pacingNow?: () => number;
 }
-/** One command owns exactly nineteen RPC attempts at most: fourteen safe-chain reads and five sponsor reads. */
+/** One command owns exactly seven physical RPC attempts at most: two safe-chain batches and five sponsor reads. */
 export declare class UsdtCommandReadBudget implements GaslessTransport {
     private readonly state;
     private readonly transport;

@@ -7,7 +7,7 @@ import { temporaryState } from "./helpers.js";
 
 const ENDPOINT = "https://public.pimlico.io/v2/1/rpc";
 
-test("gasless USDT physical reads persist a 750 ms family gap across command sessions and stop at nineteen", async t => {
+test("gasless USDT physical reads persist a 750 ms family gap across command sessions and stop at seven", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   let now = 1_000, attempts = 0;
   const starts: number[] = [], waits: number[] = [];
@@ -21,12 +21,12 @@ test("gasless USDT physical reads persist a 750 ms family gap across command ses
   await sibling.request(ENDPOINT, "POST", "{}", 1024, "APN_RPC_CONFIG");
   assert.deepEqual(starts, [1_000, 1_750]);
   assert.deepEqual(waits, [750]);
-  for (let index = 1; index < 19; index += 1) await sibling.request(ENDPOINT, "POST", "{}", 1024, "APN_RPC_CONFIG");
-  assert.equal(sibling.count(), 19);
-  assert.equal(attempts, 20);
+  for (let index = 1; index < 7; index += 1) await sibling.request(ENDPOINT, "POST", "{}", 1024, "APN_RPC_CONFIG");
+  assert.equal(sibling.count(), 7);
+  assert.equal(attempts, 8);
   await assert.rejects(() => sibling.request(ENDPOINT, "POST", "{}", 1024, "APN_RPC_CONFIG"),
     { code: "APN_RPC_CONFIG" });
-  assert.equal(attempts, 20);
+  assert.equal(attempts, 8);
   assert.equal(starts.every((value, index) => index === 0 || value - starts[index - 1]! >= 750), true);
 });
 
