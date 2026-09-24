@@ -362,7 +362,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const id = (++this.sequence).toString();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs());
+    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method);
     return parseRpcResultEnvelope(raw, id);
   }
 
@@ -374,7 +374,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const id = (++this.sequence).toString();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params });
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), true);
+    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), "eth_getLogs", true);
     return parseRpcLogEnvelope(raw, id);
   }
 
@@ -440,6 +440,7 @@ async function postJson(
   body: string,
   addresses: readonly PinnedAddress[],
   timeoutMs: number,
+  rpcMethod: string,
   allowJsonRpcClientError = false,
 ): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
@@ -451,11 +452,12 @@ async function postJson(
       headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body).toString() },
       lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
     }, (response) => {
+      const details = { rpcMethod, ...(response.statusCode === undefined ? {} : { httpStatus: response.statusCode }) };
       if ((response.statusCode ?? 0) >= 300 && (response.statusCode ?? 0) < 400) {
-        response.resume(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC redirects are forbidden.")); return;
+        response.resume(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC redirects are forbidden.", details)); return;
       }
       if (!acceptRpcHttpBody(response.statusCode, allowJsonRpcClientError)) {
-        response.resume(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status.")); return;
+        response.resume(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status.", details)); return;
       }
       const declared = Number(response.headers["content-length"] ?? "0");
       if (Number.isFinite(declared) && declared > MAX_RPC_RESPONSE_BYTES) { response.destroy(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC response exceeds the size limit.")); return; }
