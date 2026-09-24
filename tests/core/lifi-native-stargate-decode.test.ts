@@ -166,6 +166,19 @@ test("native Stargate destination binds pinned Base pool, GUID, EIDs, recipient,
   assert.equal(proof.amountAtomic, amount);
   assert.equal(proof.nativeTransfer?.from, BASE_NATIVE_POOL);
   assert.equal(proof.nativeBalance?.deltaAtomic, amount);
+  // A recipient can spend in the same block. Neither tracing nor a positive block delta is required.
+  const noCorroboration = prove({ ...result, nativeTransfer: null, nativeBalance: null });
+  assert.equal(noCorroboration.amountAtomic, amount);
+  assert.equal(noCorroboration.nativeTransfer, null);
+  assert.equal(noCorroboration.nativeBalance, null);
+  const spentSameBlock = prove({ ...result, nativeTransfer: null, nativeBalance: {
+    ...result.nativeBalance!, afterBalanceAtomic: "100", deltaAtomic: "0" } });
+  assert.equal(spentSameBlock.amountAtomic, amount);
+  assert.equal(spentSameBlock.nativeBalance?.deltaAtomic, "0");
+  const netNegative = prove({ ...result, nativeTransfer: null, nativeBalance: {
+    ...result.nativeBalance!, beforeBalanceAtomic: "200", afterBalanceAtomic: "100", deltaAtomic: "-100" } });
+  assert.equal(netNegative.amountAtomic, amount);
+  assert.equal(netNegative.nativeBalance, null);
   assert.throws(() => bridgeDestinationProof(source, m, d, result), { code: "APN_RPC_PROTOCOL" });
   assert.throws(() => prove(result, { ...pin, pool: NATIVE_POOL }), { code: "APN_RPC_PROTOCOL" });
   assert.throws(() => prove(result, { ...pin, observedPoolCodeHash: `0x${"ee".repeat(32)}` }), { code: "APN_RPC_PROTOCOL" });
@@ -183,7 +196,6 @@ test("native Stargate destination binds pinned Base pool, GUID, EIDs, recipient,
   assert.throws(() => prove({ ...result, logs: [cached] }), { code: "APN_RPC_PROTOCOL" });
   assert.throws(() => prove({ ...result, logs: [cached, received] }), { code: "APN_RPC_PROTOCOL" });
   assert.throws(() => prove({ ...result, logs: [received, received] }), { code: "APN_RPC_PROTOCOL" });
-  assert.throws(() => prove({ ...result, nativeTransfer: null }), { code: "APN_RPC_PROTOCOL" });
   assert.throws(() => prove({ ...result, nativeTransfer: { ...result.nativeTransfer!, valueAtomic: "1" } }), { code: "APN_RPC_PROTOCOL" });
   assert.throws(() => prove({ ...result, nativeBalance: { ...result.nativeBalance!, deltaAtomic: "1" } }), { code: "APN_RPC_PROTOCOL" });
   assert.throws(() => bridgeDestinationProof({ ...source, correlation: { ...source.correlation,

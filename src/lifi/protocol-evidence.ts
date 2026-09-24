@@ -266,9 +266,10 @@ function stargateDestination(source: BridgeSourceProof, decoded: DecodedBridgeCa
     received.amountReceivedLD < BigInt(decoded.minimumOutputAtomic)) fail("OFTReceived");
   if (native) {
     const amount = received.amountReceivedLD.toString();
-    const transfer = nativeTransferProof(decoded, receipt, emitter, amount);
-    const balance = nativeBalanceProof(decoded, receipt);
-    if (BigInt(balance.deltaAtomic) < received.amountReceivedLD) fail("native_destination_balance");
+    // At the pinned StargatePoolNative bytecode, OFTReceived follows the successful native _outflow CALL.
+    // A recipient may spend in the same block, so block-boundary balance is corroboration, not delivery proof.
+    const transfer = receipt.nativeTransfer == null ? null : nativeTransferProof(decoded, receipt, emitter, amount);
+    const balance = receipt.nativeBalance == null ? null : nativeStargateBalanceCorroboration(decoded, receipt);
     return destinationResult(source, decoded, receipt, amount, null, null, null, balance, transfer);
   }
   const transfers = events(receipt, decoded.destinationToken, EVENT_TOPICS.transfer, "Transfer") as readonly Transfer[];
@@ -340,6 +341,15 @@ function nativeBalanceProof(decoded: DecodedBridgeCall, receipt: BridgeProtocolR
     BigInt(proof.afterBalanceAtomic) < BigInt(proof.beforeBalanceAtomic) ||
     BigInt(proof.afterBalanceAtomic) - BigInt(proof.beforeBalanceAtomic) !== BigInt(proof.deltaAtomic)) fail("native_destination_balance");
   return proof;
+}
+function nativeStargateBalanceCorroboration(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeDestinationProof["nativeBalance"] {
+  const proof = receipt.nativeBalance!;
+  if (proof.recipient !== decoded.recipient || proof.afterBlock.numberAtomic !== receipt.blockNumberAtomic ||
+    proof.afterBlock.hash !== receipt.blockHash || BigInt(proof.beforeBlock.numberAtomic) + 1n !== BigInt(proof.afterBlock.numberAtomic) ||
+    !/^-?[0-9]+$/u.test(proof.deltaAtomic) ||
+    BigInt(proof.afterBalanceAtomic) - BigInt(proof.beforeBalanceAtomic) !== BigInt(proof.deltaAtomic)) fail("native_destination_balance");
+  // The durable schema stores unsigned corroboration only. A same-block spend can make the net delta negative.
+  return BigInt(proof.deltaAtomic) < 0n ? null : proof;
 }
 
 function validateReceipt(receipt: BridgeProtocolReceipt): void {
