@@ -29,6 +29,7 @@ import { SolanaLocalAdapter } from "./solana/local-adapter.js";
 import { SolanaAwalAdapter } from "./solana/awal-adapter.js";
 import { TronLocalAdapter } from "./tron/local-adapter.js";
 import { TronRpc } from "./tron/rpc.js";
+import { configuredTronHttpsFetch } from "./tron/https.js";
 import { LocalBridgeCustody } from "./lifi/custody.js";
 import { LifiProvider } from "./lifi/provider.js";
 import { bridgeRpcFactory } from "./lifi/rpc.js";
@@ -77,7 +78,7 @@ export function createApnCore(bound, options = {}) {
         maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60_000 };
     const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
     const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL);
-    const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL, undefined, { minimumPostStartIntervalMs: process.env.APN_TRON_RPC_MIN_POST_INTERVAL_MS });
+    const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL, configuredTronHttpsFetch({ minimumPostStartIntervalMs: process.env.APN_TRON_RPC_MIN_POST_INTERVAL_MS }));
     const directRails = options.directRails ?? [new SolanaLocalAdapter(chainAccounts, solanaRpc, () => options.clock?.now() ?? new Date()),
         new SolanaAwalAdapter(chainAccounts, solanaRpc, undefined, undefined, () => options.clock?.now() ?? new Date()),
         new TronLocalAdapter(chainAccounts, tronRpc, () => options.clock?.now() ?? new Date())];

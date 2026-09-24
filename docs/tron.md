@@ -59,8 +59,9 @@ Endpoint text and raw RPC errors are not included in receipts.
 
 For an endpoint that needs slower request starts, set the optional
 `APN_TRON_RPC_MIN_POST_INTERVAL_MS` to a canonical integer from `0` to `1000`.
-Unset or `0` keeps the current behavior. The interval applies to starts of all
-TRON RPC POSTs made by this APN client, including concurrent calls; it does not
+Unset or `0` keeps the current behavior. The interval applies at the physical
+HTTPS POST start after DNS validation for all TRON RPC calls made by this APN
+client, including concurrent calls; it does not
 remove any safety reads or retry a failed request. The maximum is bounded for
 the ten-read TRX preparation: ten requests can each use their ten-second RPC
 deadline, nine 1000 ms gaps add exactly 9 seconds, and the existing ten-second
