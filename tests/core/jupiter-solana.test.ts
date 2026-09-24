@@ -10,7 +10,7 @@ import { ApnError } from "../../src/errors.js";
 import { associatedUsdc } from "../../src/solana/accounts.js";
 import {
   ADDRESS_LOOKUP_TABLE_PROGRAM, COMPUTE_BUDGET_PROGRAM, EMPTY_PROGRAM_SNAPSHOT, JUPITER_V6_PROGRAM, SOLANA_USDC_MINT, SYSTEM_PROGRAM,
-  WRAPPED_SOL_MINT, assertJupiterSignable, createProgramSnapshot, decodeBuildResponse, decodeOrderResponse, decodeQuoteResponse,
+  WRAPPED_SOL_MINT, assertJupiterSignable, createProgramSnapshot, decodeBuildResponse, decodeRawBuildResponse, decodeOrderResponse, decodeQuoteResponse,
   guardJupiterTransaction, parseJupiterV0Envelope, proveJupiterSimulation, validateProgramSnapshot,
   validateFinalizedJupiterReceipt,
   type JupiterGuardPolicy, type SolanaAccountDescriptor, type SolanaAccountResolverPort, type SolanaAddressTableDescriptor,
@@ -84,6 +84,19 @@ function buildWire(raw = transaction(), overrides: Record<string, unknown> = {})
     prioritizationFeeLamports: "0", tipLamports: "0", rentFeeLamports: "0", platformFeeAtomic: "0", referralFeeAtomic: "0", ...overrides };
 }
 
+function rawInstructionWire(): Record<string, unknown> {
+  return { programId: JUPITER_V6_PROGRAM, accounts: [{ pubkey: TAKER, isWritable: true, isSigner: true }], data: "AQID" };
+}
+function rawBuildWire(): Record<string, unknown> {
+  return { inputMint: WRAPPED_SOL_MINT, outputMint: SOLANA_USDC_MINT, inAmount: "1000000", outAmount: "150000",
+    otherAmountThreshold: "148500", swapMode: "ExactIn", slippageBps: 100,
+    routePlan: [{ percent: 100, bps: 10000, swapInfo: { ammKey: AMM, label: "Raydium", inputMint: WRAPPED_SOL_MINT,
+      outputMint: SOLANA_USDC_MINT, inAmount: "1000000", outAmount: "150000" } }],
+    computeBudgetInstructions: [], setupInstructions: [], swapInstruction: rawInstructionWire(), cleanupInstruction: null,
+    otherInstructions: [], tipInstruction: null, addressesByLookupTableAddress: null,
+    blockhashWithMetadata: { blockhash: Array.from({ length: 32 }, (_, index) => index), lastValidBlockHeight: 999 } };
+}
+
 test("program snapshots are sorted, immutable in shape, and default deny", () => {
   assert.equal(EMPTY_PROGRAM_SNAPSHOT.entries.length, 0);
   const snapshot = PROGRAM_SNAPSHOT;
@@ -105,6 +118,54 @@ test("quote/build codecs bind exact pair, exact-input mode, requestId, and canon
   const ordered = decodeOrderResponse({ requestId: "request_12345678", transaction: transaction(), lastValidBlockHeight: "999", rfqExpiresAt: null, quote: quoteWire() });
   assert.equal(ordered.quote.responseHash, quote.responseHash);
   assert.throws(() => decodeBuildResponse(buildWire(`${transaction()}=`)));
+});
+
+test("raw Jupiter /build decoder accepts minimal and OpenAPI enriched response shapes", () => {
+  const minimal = decodeRawBuildResponse(rawBuildWire());
+  assert.equal(minimal.swapInstruction.data, "AQID");
+  assert.equal(minimal.priceImpactPct, undefined);
+  assert.equal(minimal.blockhashWithMetadata.fetchedAt, undefined);
+  assert.match(minimal.responseHash, /^[a-f0-9]{64}$/u);
+  assert.equal(Object.isFrozen(minimal.swapInstruction.accounts), true);
+  const enriched = rawBuildWire();
+  enriched.priceImpactPct = "0.001";
+  enriched.routePlan = [{ ...(enriched.routePlan as Record<string, unknown>[])[0], usdValue: 1.5 }];
+  enriched.computeBudgetInstructions = [rawInstructionWire()];
+  enriched.setupInstructions = [rawInstructionWire()];
+  enriched.cleanupInstruction = rawInstructionWire();
+  enriched.otherInstructions = [rawInstructionWire()];
+  enriched.tipInstruction = rawInstructionWire();
+  enriched.addressesByLookupTableAddress = { [AMM]: [TAKER, RECIPIENT_ATA] };
+  enriched.blockhashWithMetadata = { ...(enriched.blockhashWithMetadata as Record<string, unknown>),
+    fetchedAt: { secs_since_epoch: 1_790_000_000, nanos_since_epoch: 123_456_789 } };
+  const decoded = decodeRawBuildResponse(enriched);
+  assert.equal(decoded.routePlan[0]?.usdValue, 1.5);
+  assert.deepEqual(decoded.addressesByLookupTableAddress?.[AMM], [TAKER, RECIPIENT_ATA]);
+  assert.equal(decoded.blockhashWithMetadata.fetchedAt?.nanos_since_epoch, 123_456_789);
+  assert.notEqual(decoded.responseHash, minimal.responseHash);
+  assert.throws(() => decodeBuildResponse(enriched));
+});
+
+test("raw Jupiter /build decoder rejects mutated shape, route, instruction, lookup, and blockhash", () => {
+  const reject = (mutate: (wire: Record<string, unknown>) => void) => {
+    const wire = rawBuildWire(); mutate(wire);
+    assert.throws(() => decodeRawBuildResponse(wire), (error: unknown) => error instanceof ApnError && error.code === "APN_PROVIDER_PROTOCOL");
+  };
+  reject((wire) => { wire.swapTransaction = transaction(); });
+  reject((wire) => { delete wire.swapInstruction; });
+  reject((wire) => { wire.inAmount = "01"; });
+  reject((wire) => { wire.otherAmountThreshold = "150001"; });
+  reject((wire) => { wire.routePlan = [{ ...((wire.routePlan as Record<string, unknown>[])[0]), bps: "10000" }]; });
+  reject((wire) => { wire.routePlan = [{ ...((wire.routePlan as Record<string, unknown>[])[0]), usdValue: Number.NaN }]; });
+  reject((wire) => { wire.swapInstruction = { ...rawInstructionWire(), data: "AQI=" + "=" }; });
+  reject((wire) => { wire.swapInstruction = { ...rawInstructionWire(), accounts: [{ pubkey: TAKER, isWritable: 1, isSigner: true }] }; });
+  reject((wire) => { wire.addressesByLookupTableAddress = { bad: [TAKER] }; });
+  reject((wire) => { wire.addressesByLookupTableAddress = { [AMM]: ["bad"] }; });
+  reject((wire) => { wire.blockhashWithMetadata = { blockhash: [1], lastValidBlockHeight: 999 }; });
+  reject((wire) => { wire.blockhashWithMetadata = { blockhash: Array(32).fill(256), lastValidBlockHeight: 999 }; });
+  reject((wire) => { wire.blockhashWithMetadata = { blockhash: Array(32).fill(1), lastValidBlockHeight: 1.5 }; });
+  reject((wire) => { wire.blockhashWithMetadata = { blockhash: Array(32).fill(1), lastValidBlockHeight: 999,
+    fetchedAt: { secs_since_epoch: 1, nanos_since_epoch: 1_000_000_000 } }; });
 });
 
 test("V0 address tables bind owner, data digest, index order, and loaded account roles", async () => {

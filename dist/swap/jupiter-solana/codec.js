@@ -45,6 +45,112 @@ export function decodeBuildResponse(value) {
     canonicalBase64(body.swapTransaction);
     return Object.freeze({ ...body, responseHash: sha256(canonicalJson(body)) });
 }
+const RAW_BUILD_KEYS = ["inputMint", "outputMint", "inAmount", "outAmount", "otherAmountThreshold", "swapMode", "slippageBps", "routePlan",
+    "computeBudgetInstructions", "setupInstructions", "swapInstruction", "cleanupInstruction", "otherInstructions", "tipInstruction",
+    "addressesByLookupTableAddress", "blockhashWithMetadata"];
+export function decodeRawBuildResponse(value) {
+    const record = exactOptional(value, RAW_BUILD_KEYS, ["priceImpactPct"], "Jupiter raw build response");
+    const inputMint = rawAddress(record.inputMint);
+    const outputMint = rawAddress(record.outputMint);
+    const inAmount = rawAmount(record.inAmount);
+    const outAmount = rawAmount(record.outAmount);
+    const otherAmountThreshold = rawAmount(record.otherAmountThreshold, true);
+    if (BigInt(otherAmountThreshold) > BigInt(outAmount))
+        invalid("Jupiter raw build threshold exceeds output.");
+    if (typeof record.swapMode !== "string" || record.swapMode.length === 0 || record.swapMode.length > 32)
+        invalid("Jupiter raw build swap mode is invalid.");
+    const routePlan = rawArray(record.routePlan, rawRouteStep, "Jupiter raw build route");
+    if (routePlan.length === 0)
+        invalid("Jupiter raw build route is empty.");
+    const body = {
+        inputMint, outputMint, inAmount, outAmount, otherAmountThreshold, swapMode: record.swapMode,
+        slippageBps: safeInteger(record.slippageBps, 0, 10_000),
+        ...(Object.hasOwn(record, "priceImpactPct") ? { priceImpactPct: rawDecimal(record.priceImpactPct, "Jupiter raw build price impact") } : {}),
+        routePlan,
+        computeBudgetInstructions: rawArray(record.computeBudgetInstructions, rawInstruction, "Jupiter compute budget instructions"),
+        setupInstructions: rawArray(record.setupInstructions, rawInstruction, "Jupiter setup instructions"),
+        swapInstruction: rawInstruction(record.swapInstruction),
+        cleanupInstruction: record.cleanupInstruction === null ? null : rawInstruction(record.cleanupInstruction),
+        otherInstructions: rawArray(record.otherInstructions, rawInstruction, "Jupiter other instructions"),
+        tipInstruction: record.tipInstruction === null ? null : rawInstruction(record.tipInstruction),
+        addressesByLookupTableAddress: rawLookupTables(record.addressesByLookupTableAddress),
+        blockhashWithMetadata: rawBlockhash(record.blockhashWithMetadata),
+    };
+    return Object.freeze({ ...body, responseHash: sha256(canonicalJson(body)) });
+}
+function rawRouteStep(value) {
+    const record = exactOptional(value, ["percent", "bps", "swapInfo"], ["usdValue"], "Jupiter raw route step");
+    const info = exact(record.swapInfo, ["ammKey", "label", "inputMint", "outputMint", "inAmount", "outAmount"], "Jupiter raw swap info");
+    if (typeof info.label !== "string" || info.label.length === 0 || info.label.length > 96)
+        invalid("Jupiter raw route label is invalid.");
+    const swapInfo = Object.freeze({ ammKey: rawAddress(info.ammKey), label: info.label, inputMint: rawAddress(info.inputMint),
+        outputMint: rawAddress(info.outputMint), inAmount: rawAmount(info.inAmount), outAmount: rawAmount(info.outAmount) });
+    return Object.freeze({ percent: safeNumber(record.percent, 0, 100), bps: safeNumber(record.bps, 0, 10_000),
+        ...(Object.hasOwn(record, "usdValue") ? { usdValue: safeNumber(record.usdValue, 0, Number.MAX_SAFE_INTEGER) } : {}), swapInfo });
+}
+function rawInstruction(value) {
+    const record = exact(value, ["programId", "accounts", "data"], "Jupiter raw instruction");
+    if (typeof record.data !== "string" || Buffer.from(record.data, "base64").toString("base64") !== record.data)
+        invalid("Jupiter raw instruction data is not canonical base64.");
+    const accounts = rawArray(record.accounts, (item) => {
+        const account = exact(item, ["pubkey", "isWritable", "isSigner"], "Jupiter raw instruction account");
+        if (typeof account.isWritable !== "boolean" || typeof account.isSigner !== "boolean")
+            invalid("Jupiter raw instruction account roles are invalid.");
+        return Object.freeze({ pubkey: rawAddress(account.pubkey), isWritable: account.isWritable, isSigner: account.isSigner });
+    }, "Jupiter raw instruction accounts");
+    return Object.freeze({ programId: rawAddress(record.programId), accounts, data: record.data });
+}
+function rawLookupTables(value) {
+    if (value === null)
+        return null;
+    if (!isPlainRecord(value))
+        invalid("Jupiter raw address lookup tables are invalid.");
+    const tables = Object.create(null);
+    for (const [key, addresses] of Object.entries(value))
+        tables[rawAddress(key)] = rawArray(addresses, rawAddress, "Jupiter raw lookup table addresses");
+    return Object.freeze(tables);
+}
+function rawBlockhash(value) {
+    const record = exactOptional(value, ["blockhash", "lastValidBlockHeight"], ["fetchedAt"], "Jupiter raw blockhash metadata");
+    if (!Array.isArray(record.blockhash) || record.blockhash.length !== 32)
+        invalid("Jupiter raw blockhash must contain 32 bytes.");
+    const blockhash = Object.freeze(record.blockhash.map((byte) => safeInteger(byte, 0, 255)));
+    let fetchedAt;
+    if (Object.hasOwn(record, "fetchedAt")) {
+        const timestamp = exact(record.fetchedAt, ["secs_since_epoch", "nanos_since_epoch"], "Jupiter raw blockhash fetchedAt");
+        fetchedAt = Object.freeze({ secs_since_epoch: safeInteger(timestamp.secs_since_epoch, 0, Number.MAX_SAFE_INTEGER),
+            nanos_since_epoch: safeInteger(timestamp.nanos_since_epoch, 0, 999_999_999) });
+    }
+    return Object.freeze({ blockhash, lastValidBlockHeight: safeInteger(record.lastValidBlockHeight, 0, Number.MAX_SAFE_INTEGER),
+        ...(fetchedAt === undefined ? {} : { fetchedAt }) });
+}
+function rawArray(value, decode, label) {
+    if (!Array.isArray(value))
+        invalid(`${label} must be an array.`);
+    return Object.freeze(value.map(decode));
+}
+function rawAddress(value) {
+    if (typeof value !== "string")
+        invalid("Jupiter raw Solana address is invalid.");
+    return canonicalAddress(value);
+}
+function rawAmount(value, allowZero = false) { atomic(value, allowZero); return value; }
+function rawDecimal(value, label) {
+    if (typeof value !== "string" || !/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/u.test(value))
+        invalid(`${label} is invalid.`);
+    return value;
+}
+function safeNumber(value, minimum, maximum) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum)
+        invalid("Jupiter raw number is invalid.");
+    return value;
+}
+function exactOptional(value, required, optional, label) {
+    if (!isPlainRecord(value) || required.some((key) => !Object.hasOwn(value, key)) ||
+        Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key)))
+        invalid(`${label} schema is invalid.`);
+    return value;
+}
 function routeLeg(value) {
     const record = exact(value, ["percent", "swapInfo"], "Jupiter quote route leg");
     const info = exact(record.swapInfo, ["ammKey", "label", "inputMint", "outputMint", "inAmount", "outAmount", "feeAmount", "feeMint"], "Jupiter route swap info");
