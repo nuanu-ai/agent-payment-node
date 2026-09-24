@@ -329,7 +329,7 @@ export class HttpsBaseRpc {
         const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
         const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method);
-        return parseRpcResultEnvelope(raw, id);
+        return parseRpcResultEnvelope(raw, id, method);
     }
     async batchCall(calls) {
         if (!Array.isArray(calls) || calls.length < 1 || calls.length > MAX_RPC_BATCH_CALLS ||
@@ -373,10 +373,13 @@ export class HttpsBaseRpc {
         return Math.min(20_000, remaining);
     }
 }
-export function parseRpcResultEnvelope(raw, id) {
+export function parseRpcResultEnvelope(raw, id, method) {
     const message = strictRpcRecord(raw);
     if (!exactKeys(message, ["jsonrpc", "id", "result"]) || message.jsonrpc !== "2.0" || message.id !== id) {
-        throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.");
+        throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.", {
+            rpcMethod: method !== undefined && (BATCH_READ_METHODS.has(method) || method === "eth_sendRawTransaction") ? method : "unknown",
+            stage: "result_envelope",
+        });
     }
     return message.result;
 }

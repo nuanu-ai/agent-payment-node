@@ -5,8 +5,8 @@ import { MAX_EVM_UINT } from "./evm-asset.js";
 import type { Address, Hex } from "./model.js";
 import type { EvmRpcCall } from "./evm-ports.js";
 
-export function evmRpcRecord(value: unknown): Record<string, unknown> {
-  if (!isPlainRecord(value)) throw new ApnError("APN_RPC_PROTOCOL", "EVM RPC returned a malformed object.");
+export function evmRpcRecord(value: unknown, details?: { readonly rpcMethod: string; readonly stage: string; readonly blockTag: string }): Record<string, unknown> {
+  if (!isPlainRecord(value)) throw new ApnError("APN_RPC_PROTOCOL", "EVM RPC returned a malformed object.", details);
   return value;
 }
 
@@ -35,7 +35,10 @@ export function evmRpcAddress(value: unknown): Address {
 }
 
 export async function evmRpcBlock(call: EvmRpcCall, tag: string): Promise<{ readonly tag: Hex; readonly number: string; readonly hash: Hex; readonly raw: Record<string, unknown> }> {
-  const raw = evmRpcRecord(await call("eth_getBlockByNumber", [tag, false]));
+  const blockTag = tag === "latest" || tag === "safe" || tag === "finalized" ? tag : "number";
+  const raw = evmRpcRecord(await call("eth_getBlockByNumber", [tag, false]), {
+    rpcMethod: "eth_getBlockByNumber", stage: "block_result", blockTag,
+  });
   const number = evmRpcQuantity(raw.number);
   const hash = evmRpcHex(raw.hash, 32);
   if (hash === `0x${"0".repeat(64)}` || (tag.startsWith("0x") && number !== evmRpcQuantity(tag))) {
