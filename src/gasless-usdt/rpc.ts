@@ -179,9 +179,9 @@ export function usdtRecoveryPort(transport: GaslessTransport, rpcUrl: string): U
         entryPoint: rpcAddress(value.entryPoint), paymaster: rpcAddress(value.paymaster), success: value.success,
         transactionHash };
     },
-    async canonicalSafeReceipt(transactionHash) {
+    async canonicalFinalizedReceipt(transactionHash) {
       if (rpcQuantity(await chainRpc.call("eth_chainId", [])) !== 1n) usdtFailure("APN_CHAIN_MISMATCH", "gasless_usdt_chain");
-      return await chain.receiptAt(transactionHash);
+      return await chain.receiptAt(transactionHash, "finalized");
     },
   };
 }
@@ -217,12 +217,12 @@ export function usdtChainPort(transport: GaslessTransport, rpcUrl: string): Usdt
       const eoaNonce = rpcQuantity(await rpc.call("eth_getTransactionCount", [sender, "latest"]));
       return { usdtBalanceAtomic: balance, entryPointNonce, eoaNonce, delegation: code === "0x" ? "empty" : "expected" };
     },
-    async receiptAt(transactionHash) {
+    async receiptAt(transactionHash, finality = "safe") {
       const raw = await rpc.call("eth_getTransactionReceipt", [transactionHash]);
       if (raw === null) return null;
       const receipt = rpcRecord(raw), height = rpcQuantity(receipt.blockNumber);
-      const safe = rpcRecord(await rpc.call("eth_getBlockByNumber", ["safe", false]));
-      if (height > rpcQuantity(safe.number)) return null;
+      const head = rpcRecord(await rpc.call("eth_getBlockByNumber", [finality, false]));
+      if (height > rpcQuantity(head.number)) return null;
       const block = rpcRecord(await rpc.call("eth_getBlockByNumber", [`0x${height.toString(16)}`, false]));
       if (rpcHex(block.hash, 32, 32) !== rpcHex(receipt.blockHash, 32, 32) || rpcHex(receipt.transactionHash, 32, 32) !== transactionHash.toLowerCase()) {
         usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_not_canonical");

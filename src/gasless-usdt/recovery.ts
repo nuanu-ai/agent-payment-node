@@ -17,7 +17,8 @@ export interface UsdtUserOperationReceipt {
 }
 export interface UsdtRecoveryPort {
   userOperationReceipt(hash: Hex): Promise<UsdtUserOperationReceipt | null>;
-  canonicalSafeReceipt(transactionHash: Hex): Promise<UsdtChainReceipt | null>;
+  /** Returns a receipt only when its block is canonical and at or below Ethereum's finalized head. */
+  canonicalFinalizedReceipt(transactionHash: Hex): Promise<UsdtChainReceipt | null>;
 }
 
 function plan(bound: UsdtBoundOperation): UsdtTransferPlan {
@@ -56,7 +57,7 @@ export class UsdtRecoveryService {
       if (locator !== null && locator.userOpHash.toLowerCase() === hash &&
         locator.sender === current.sender && locator.entryPoint === USDT_GASLESS.entryPoint &&
         locator.paymaster === USDT_GASLESS.paymaster) {
-        const receipt = await this.port.canonicalSafeReceipt(locator.transactionHash);
+        const receipt = await this.port.canonicalFinalizedReceipt(locator.transactionHash);
         if (receipt !== null && receipt.transactionHash.toLowerCase() === locator.transactionHash.toLowerCase()) {
           if (locator.success) {
             const settlement = verifyUsdtReceipt(plan(bound), hash, receipt);

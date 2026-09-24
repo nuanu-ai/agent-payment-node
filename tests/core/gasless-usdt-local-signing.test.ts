@@ -220,7 +220,7 @@ test("recovery finalizes an observed pending UserOperation once and replays with
   let lookups = 0;
   const port: UsdtRecoveryPort = { userOperationReceipt: async () => { lookups++; return { userOpHash: signed.userOperationHash,
     sender: OWNER, entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
-    success: true, transactionHash: TX }; }, canonicalSafeReceipt: async () => observedReceipt(signed.userOperationHash, true, OWNER) };
+    success: true, transactionHash: TX }; }, canonicalFinalizedReceipt: async () => observedReceipt(signed.userOperationHash, true, OWNER) };
   const recovery = new UsdtRecoveryService(journal, port, () => NOW);
   const result = await recovery.observe(f.bound);
   assert.equal(result.state, "finalized");
@@ -239,7 +239,7 @@ test("recovery releases usage only for canonical failed UserOperationEvent", asy
   await journal.markSubmitting(f.bound, f.port, signed.userOperationHash);
   const recovery = new UsdtRecoveryService(journal, { userOperationReceipt: async () => ({ userOpHash: signed.userOperationHash,
     sender: OWNER, entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
-    success: false, transactionHash: TX }), canonicalSafeReceipt: async () => observedReceipt(signed.userOperationHash, false, OWNER) }, () => NOW);
+    success: false, transactionHash: TX }), canonicalFinalizedReceipt: async () => observedReceipt(signed.userOperationHash, false, OWNER) }, () => NOW);
   const result = await recovery.observe(f.bound);
   assert.equal(result.state, "failed_confirmed_revert");
   assert.equal(result.settlement, null);
@@ -260,7 +260,7 @@ test("pre-send crash, pending, malformed, mismatched and unavailable observation
       return { userOpHash: caseName === "wrong_hash" ? `0x${"aa".repeat(32)}` : signed.userOperationHash,
         sender: OWNER, entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
         success: true, transactionHash: TX };
-    }, canonicalSafeReceipt: async () => caseName === "malformed" ? null :
+    }, canonicalFinalizedReceipt: async () => caseName === "malformed" ? null :
       observedReceipt(caseName === "wrong_chain_event" ? `0x${"bb".repeat(32)}` : signed.userOperationHash, true, OWNER) };
     const recovery = new UsdtRecoveryService(journal, port, () => NOW);
     assert.equal((await recovery.observe(f.bound)).state, "unknown_finality", caseName);
