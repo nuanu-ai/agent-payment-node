@@ -45,4 +45,8 @@ export interface StargateV2QuoteEvidence {
     readonly requestHash: string;
     readonly quoteHash: string;
 }
-export declare function quoteStargateV2Direct(request: StargateV2QuoteRequest, call: EvmRpcCall): Promise<StargateV2QuoteEvidence>;
+export type StargateReadBatch = (calls: readonly {
+    readonly method: string;
+    readonly params: readonly unknown[];
+}[]) => Promise<readonly unknown[]>;
+export declare function quoteStargateV2Direct(request: StargateV2QuoteRequest, call: EvmRpcCall, batch?: StargateReadBatch): Promise<StargateV2QuoteEvidence>;

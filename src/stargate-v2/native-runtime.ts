@@ -6,6 +6,7 @@ import type { Address } from "../model.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import type { StateStore } from "../state.js";
 import { BridgeHttps } from "../lifi/https.js";
+import { parseRpcBatchResultEnvelope } from "../rpc.js";
 import { STARGATE_SEND_ABI } from "./abi.js";
 import { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNativeSigner, prepareStargateV2NativeEth,
   stargateV2NativeCanonicalReceipt, type StargateConfirmedReceipt, type StargateNativeExecutionPorts,
@@ -46,6 +47,8 @@ function transactionByHash(value: unknown, requested: unknown) {
 export type StargateRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getTransactionCount" |
   "eth_getCode" | "eth_call" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "eth_sendRawTransaction" |
   "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getLogs";
+const STARGATE_BATCH_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount",
+  "eth_getCode", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas"]);
 const STARGATE_RPC_METHODS: readonly StargateRpcMethod[] = ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount",
   "eth_getCode", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionReceipt",
   "eth_getTransactionByHash", "eth_getLogs"];
@@ -55,6 +58,19 @@ export class StargateJsonRpc {
   constructor(url: string, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps()) {
     const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Stargate RPC endpoint", 2048);
     if (parsed.search !== "" || parsed.hash !== "") blocked("rpc_url"); this.endpoint = parsed.toString(); this.origin = parsed.origin;
+  }
+  async batchCall(calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]): Promise<readonly unknown[]> {
+    if (!Array.isArray(calls) || calls.length < 1 || calls.length > 16 || calls.some(item =>
+      item === null || typeof item !== "object" || !STARGATE_BATCH_METHODS.has(item.method) || !Array.isArray(item.params))) {
+      throw new ApnError("APN_RPC_PROTOCOL", "Invalid Stargate read-only RPC batch.");
+    }
+    const ids = calls.map(() => ++this.sequence);
+    if (ids.some(id => !Number.isSafeInteger(id))) throw new ApnError("APN_RPC_PROTOCOL", "Stargate RPC ID range exhausted.");
+    const body = canonicalJson(calls.map((item, index) => ({ jsonrpc: "2.0", id: ids[index], method: item.method, params: item.params })));
+    if (Buffer.byteLength(body) > 2 * 1024 * 1024) throw new ApnError("APN_RPC_PROTOCOL", "Stargate batch request too large.");
+    const response = await this.https.request(this.endpoint, "POST", body, 2 * 1024 * 1024, "APN_RPC_CONFIG");
+    if (response.status !== 200) blocked("rpc_status");
+    return parseRpcBatchResultEnvelope(response.body, ids);
   }
   async call(method: string, params: readonly unknown[]): Promise<unknown> {
     if (!STARGATE_RPC_METHODS.includes(method as StargateRpcMethod)) blocked("rpc_method");
@@ -99,19 +115,25 @@ export class StargateNativeService {
   }
   private async ports(profile: string, owner: Address): Promise<StargateNativeExecutionPorts> {
     const signer = await this.local.port(profile, owner), { source, destination } = this.remote();
+    const prepareBatch = this.environment.APN_STARGATE_NATIVE_PREPARE_BATCH === "1";
     return {
+      ...(prepareBatch ? { sourcePrepareBatch: (calls: readonly { method: string; params: readonly unknown[] }[]) => source.batchCall(calls),
+        destinationPrepareBatch: (calls: readonly { method: string; params: readonly unknown[] }[]) => destination.batchCall(calls) } : {}),
       sourceCall: (method, params) => source.call(method, params), destinationCall: (method, params) => destination.call(method, params),
-      destinationBalance: async (recipient, finalityTag) => {
-        const block = record(await destination.call("eth_getBlockByNumber", [finalityTag, false]));
-        return { balanceAtomic: quantity(await destination.call("eth_getBalance", [recipient, block.number])).toString(),
-          blockNumberAtomic: quantity(block.number).toString(), blockHash: hash(block.hash) };
-      },
+      destinationBalance: async (recipient, finalityTag) => await stargateDestinationBalance(destination, recipient, finalityTag),
       prepareEnvelope: async tx => {
-        if (quantity(await source.call("eth_chainId", [])) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Ethereum RPC identity changed.");
-        const block = record(await source.call("eth_getBlockByNumber", ["latest", false]));
+        const [chain, head] = prepareBatch ? await source.batchCall([{ method: "eth_chainId", params: [] },
+          { method: "eth_getBlockByNumber", params: ["latest", false] }]) :
+          [await source.call("eth_chainId", []), await source.call("eth_getBlockByNumber", ["latest", false])];
+        if (quantity(chain) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Ethereum RPC identity changed.");
+        const block = record(head);
         const rpcTx = { from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.valueAtomic).toString(16)}` };
-        const [nonce, balance, gas, tip] = await Promise.all([source.call("eth_getTransactionCount", [tx.from, "pending"]),
-          source.call("eth_getBalance", [tx.from, "pending"]), source.call("eth_estimateGas", [rpcTx]), source.call("eth_maxPriorityFeePerGas", [])]);
+        const [nonce, balance, gas, tip] = prepareBatch ? await source.batchCall([
+          { method: "eth_getTransactionCount", params: [tx.from, "pending"] },
+          { method: "eth_getBalance", params: [tx.from, "pending"] },
+          { method: "eth_estimateGas", params: [rpcTx] }, { method: "eth_maxPriorityFeePerGas", params: [] }]) :
+          await Promise.all([source.call("eth_getTransactionCount", [tx.from, "pending"]),
+            source.call("eth_getBalance", [tx.from, "pending"]), source.call("eth_estimateGas", [rpcTx]), source.call("eth_maxPriorityFeePerGas", [])]);
         const gasLimit = quantity(gas) * 12n / 10n + 1n, priority = quantity(tip), maxFee = 2n * quantity(block.baseFeePerGas) + priority;
         return { nonceAtomic: quantity(nonce).toString(), gasLimitAtomic: gasLimit.toString(), maxFeePerGasAtomic: maxFee.toString(),
           maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() };
@@ -128,6 +150,17 @@ export class StargateNativeService {
     this.source = new StargateJsonRpc(source); this.destination = new StargateJsonRpc(destination);
     return { source: this.source, destination: this.destination };
   }
+}
+
+export async function stargateDestinationBalance(rpc: Pick<StargateJsonRpc, "call">, recipient: Address,
+  finalityTag: Parameters<StargateNativeExecutionPorts["destinationBalance"]>[1]) {
+  const block = record(await rpc.call("eth_getBlockByNumber", [finalityTag, false]));
+  const number = quantity(block.number), blockHash = hash(block.hash);
+  const balance = quantity(await rpc.call("eth_getBalance", [recipient, block.number]));
+  const checked = record(await rpc.call("eth_getBlockByNumber", [`0x${number.toString(16)}`, false]));
+  if (quantity(checked.number) !== number || hash(checked.hash) !== blockHash)
+    throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline block changed around the balance read.");
+  return { balanceAtomic: balance.toString(), blockNumberAtomic: number.toString(), blockHash };
 }
 
 export async function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex,

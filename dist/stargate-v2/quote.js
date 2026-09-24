@@ -32,20 +32,40 @@ const decodeExact = (raw, parameters) => {
         return protocol("returndata is malformed");
     }
 };
-export async function quoteStargateV2Direct(request, call) {
+export async function quoteStargateV2Direct(request, call, batch) {
     const snapshot = canonicalJson(request), amount = uint(request.amountAtomic), recipient = canonicalAddress(request.recipient);
     const extraOptions = request.extraOptions ?? "0x";
     if (!/^0x(?:[0-9a-f]{2})*$/u.test(extraOptions) || size(extraOptions) > 1024)
         protocol("extra options are malformed");
     const route = stargateV2Route({ chainId: request.sourceChainId, token: request.sourceToken }, { chainId: request.destinationChainId, token: request.destinationToken });
-    await assertChain(call, route.from.chainId);
-    const block = await evmRpcBlock(call, "latest"), code = boundedResult(await call("eth_getCode", [route.from.pool, block.tag]));
-    if (code === "0x")
-        protocol("the pinned source contract has no code");
+    let block;
+    if (batch === undefined) {
+        await assertChain(call, route.from.chainId);
+        block = await evmRpcBlock(call, "latest");
+    }
+    else {
+        const [chain, rawBlock] = await batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+        if (evmRpcQuantity(chain) !== BigInt(route.from.chainId))
+            throw new ApnError("APN_CHAIN_MISMATCH", "Stargate RPC chain identity does not match the source route.");
+        block = await evmRpcBlock(async () => rawBlock, "latest");
+    }
+    let code;
     const sendParam = { dstEid: route.to.eid, to: pad(recipient, { size: 32 }), amountLD: amount, minAmountLD: 0n,
         extraOptions, composeMsg: "0x", oftCmd: "0x" };
     const quoteOftData = encodeFunctionData({ abi: STARGATE_QUOTE_ABI, functionName: "quoteOFT", args: [sendParam] });
-    const oftRaw = boundedResult(await call("eth_call", [{ to: route.from.pool, data: quoteOftData }, block.tag]));
+    let oftRaw;
+    if (batch === undefined) {
+        code = boundedResult(await call("eth_getCode", [route.from.pool, block.tag]));
+        oftRaw = boundedResult(await call("eth_call", [{ to: route.from.pool, data: quoteOftData }, block.tag]));
+    }
+    else {
+        const values = await batch([{ method: "eth_getCode", params: [route.from.pool, block.tag] },
+            { method: "eth_call", params: [{ to: route.from.pool, data: quoteOftData }, block.tag] }]);
+        code = boundedResult(values[0]);
+        oftRaw = boundedResult(values[1]);
+    }
+    if (code === "0x")
+        protocol("the pinned source contract has no code");
     const [limit, details, receipt] = decodeExact(oftRaw, STARGATE_QUOTE_OFT_OUTPUT);
     if (details.length > 8 || details.some((entry) => Buffer.byteLength(entry.description, "utf8") > 256 || /[\u0000-\u001f\u007f]/u.test(entry.description))) {
         protocol("fee details are malformed");
@@ -62,8 +82,17 @@ export async function quoteStargateV2Direct(request, call) {
     const [fee] = decodeExact(feeRaw, STARGATE_QUOTE_SEND_OUTPUT);
     if (fee.lzTokenFee !== 0n)
         protocol("native fee quote unexpectedly returned an LZ token fee");
-    await recheckEvmBlock(call, block);
-    await assertChain(call, route.from.chainId);
+    if (batch === undefined) {
+        await recheckEvmBlock(call, block);
+        await assertChain(call, route.from.chainId);
+    }
+    else {
+        const [rawBlock, chain] = await batch([{ method: "eth_getBlockByNumber", params: [block.tag, false] },
+            { method: "eth_chainId", params: [] }]);
+        await recheckEvmBlock(async () => rawBlock, block);
+        if (evmRpcQuantity(chain) !== BigInt(route.from.chainId))
+            throw new ApnError("APN_CHAIN_MISMATCH", "Stargate RPC chain identity does not match the source route.");
+    }
     if (snapshot !== canonicalJson(request))
         protocol("quote request mutated during the pinned reads");
     const evidence = {
