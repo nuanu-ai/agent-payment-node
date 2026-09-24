@@ -56,7 +56,7 @@ export type ErrorCode =
   | "APN_RECEIPT_NOT_FOUND"
   | "APN_INTERNAL";
 
-export type ErrorDetail = string | boolean | readonly string[];
+export type ErrorDetail = string | number | boolean | readonly string[];
 export type ErrorDetails = Readonly<Record<string, ErrorDetail>>;
 
 export class ApnError extends Error {

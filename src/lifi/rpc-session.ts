@@ -275,11 +275,16 @@ export class RpcReadSession {
         seen.add(id);
         if (Object.hasOwn(row, "error")) {
           const error = row.error;
-          if (typeof error === "object" && error !== null && !Array.isArray(error) &&
-              [-32600, -32601].includes((error as Record<string, unknown>).code as number)) {
-            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod: chunkMethod });
+          const provider = typeof error === "object" && error !== null && !Array.isArray(error)
+            ? error as Record<string, unknown> : null;
+          const details = { rpcMethod: requests[offset]!.method, rpcSubcallId: id,
+            ...(provider !== null && typeof provider.code === "number" && Number.isSafeInteger(provider.code)
+              ? { providerCode: provider.code } : {}),
+            ...(provider !== null && typeof provider.retryable === "boolean" ? { retryable: provider.retryable } : {}) };
+          if (provider !== null && [-32600, -32601].includes(provider.code as number)) {
+            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", details);
           }
-          throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch contains a JSON-RPC sub-error.", { rpcMethod: chunkMethod });
+          throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch contains a JSON-RPC sub-error.", details);
         }
         if (!Object.hasOwn(row, "result") || Object.keys(row).some((key) => !["jsonrpc", "id", "result"].includes(key))) {
           throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.", { rpcMethod: chunkMethod });

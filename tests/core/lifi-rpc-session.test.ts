@@ -671,6 +671,75 @@ test("archive deployment HTTP 500 is terminal after one physical request", async
   assert.equal(calls, 1); assert.equal(session.telemetry().httpAttempts, 1);
 });
 
+test("archive batch sub-error identifies its original method by response id without leaking provider content", async () => {
+  const secret = "provider-secret-calldata", address = "0x0000000000000000000000000000000000000001";
+  let calls = 0;
+  const transport = { request: async (_endpoint: string, _method: string, body: string) => {
+    calls += 1;
+    const requests = JSON.parse(body) as Array<{ id: string; method: string }>;
+    return { status: 200, body: JSON.stringify([
+      { jsonrpc: "2.0", id: requests[2]!.id, result: "0x0" },
+      { jsonrpc: "2.0", id: requests[1]!.id, error: { code: -31001, retryable: true,
+        message: secret, data: { calldata: secret }, extra: `https://archive.example/${secret}` } },
+      { jsonrpc: "2.0", id: requests[0]!.id, result: "0x1" },
+    ]) };
+  } };
+  const descriptor = bridgeRpcCall(1, { APN_ETHEREUM_RPC_URL: "https://ethereum.example",
+    APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" }, { transport });
+  const session = new RpcReadSession({ wait: async () => {} });
+  const batch = descriptor.sessionBatchCall(session);
+  await assert.rejects(batch([
+    { method: "eth_chainId", params: [], decoder: String },
+    { method: "eth_getCode", params: [address, "0x10"], decoder: String },
+    { method: "eth_getStorageAt", params: [address, "0x0", "0x10"], decoder: String },
+  ], "archive_deployment"), (error: unknown) => {
+    assert.ok(error instanceof ApnError);
+    assert.equal(error.code, "APN_RPC_PROTOCOL");
+    assert.deepEqual(error.details, { rpcMethod: "eth_getCode", rpcSubcallId: "2", providerCode: -31001,
+      retryable: true, endpointRole: "archive" });
+    assert.equal(JSON.stringify(error).includes(secret), false);
+    assert.equal(error.message.includes(secret), false);
+    return true;
+  });
+  assert.equal(calls, 1); assert.equal(session.telemetry().httpAttempts, 1);
+});
+
+test("batch sub-error diagnostics omit malformed provider fields and reject unknown or duplicate ids", async () => {
+  const origin = "https://archive.example", methods = ["eth_chainId", "eth_getCode", "eth_getBalance"];
+  for (const errorValue of [null, { code: "-31001", retryable: "true", message: "secret" },
+    { code: 1.5, retryable: 1, data: "secret" }]) {
+    const attempt = async (body: string) => {
+      const requests = JSON.parse(body) as Array<{ id: string }>;
+      return requests.map((request, index) => index === 1
+        ? { jsonrpc: "2.0", id: request.id, error: errorValue }
+        : { jsonrpc: "2.0", id: request.id, result: "0x1" });
+    };
+    const items = methods.map((method, index) => ({ method, params: [index], decoder: String, batchAttempt: attempt }));
+    await assert.rejects(new RpcReadSession({ wait: async () => {} }).readBatch(origin, 1, items), (error: unknown) => {
+      assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_RPC_PROTOCOL");
+      assert.deepEqual(error.details, { rpcMethod: "eth_getCode", rpcSubcallId: "2" });
+      assert.equal(JSON.stringify(error).includes("secret"), false);
+      return true;
+    });
+  }
+  for (const invalidId of ["999", "1"]) {
+    const attempt = async (body: string) => {
+      const requests = JSON.parse(body) as Array<{ id: string }>;
+      return [
+        { jsonrpc: "2.0", id: requests[0]!.id, result: "0x1" },
+        { jsonrpc: "2.0", id: invalidId, error: { code: -31001, message: "secret" } },
+        { jsonrpc: "2.0", id: requests[2]!.id, result: "0x1" },
+      ];
+    };
+    const items = methods.map((method, index) => ({ method, params: [index], decoder: String, batchAttempt: attempt }));
+    await assert.rejects(new RpcReadSession({ wait: async () => {} }).readBatch(origin, 1, items), (error: unknown) => {
+      assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_RPC_PROTOCOL");
+      assert.deepEqual(error.details, { rpcMethod: "batch" });
+      return true;
+    });
+  }
+});
+
 test("archive deployment chunks retry only the failed chunk with its exact body and stop after a terminal failure", async () => {
   const bodies: string[] = []; let attemptNumber = 0;
   const attempt = async (body: string) => {
