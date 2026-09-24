@@ -27,9 +27,10 @@ export class EvmRpc implements EvmRpcPort {
   prepareLineaNative(): EvmNativePrepareReads { return this.prepareNativeBatched(59144); }
   prepareUnichainNative(): EvmNativePrepareReads { return this.prepareNativeBatched(130); }
   prepareUnichainUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(130, "usdc"); }
+  preparePolygonUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(137, "usdc"); }
 
   /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
-  private prepareNativeBatched(chainId: 59144 | 130, asset: "native" | "usdc" = "native"): EvmNativePrepareReads {
+  private prepareNativeBatched(chainId: 59144 | 130 | 137, asset: "native" | "usdc" = "native"): EvmNativePrepareReads {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     let attempts = 0;
     const attempt = async (method: string, params: readonly unknown[]): Promise<unknown> => {
@@ -55,7 +56,7 @@ export class EvmRpc implements EvmRpcPort {
       balance: async (address, selection) => {
         onlySelectedChain(selection.chainId);
         if (asset === "native" ? selection.token !== "native" :
-          selection.token === "native" || !directEvmListRows(130).some((row) => row.kind === "token" && row.symbol === "USDC" &&
+          selection.token === "native" || !directEvmListRows(chainId).some((row) => row.kind === "token" && row.symbol === "USDC" &&
             row.identifier === selection.token && row.decimals === 6)) {
           throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected asset.");
         }
