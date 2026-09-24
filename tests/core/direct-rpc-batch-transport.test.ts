@@ -344,3 +344,79 @@ for (const fault of ["no-code", "wrong-decimals"] as const) test(`Unichain USDC 
     { chainId: 130, token: UNICHAIN_USDC, decimals: 6 }), { code: "APN_ASSET_MISMATCH" });
   assert.equal(bodies.length, fault === "no-code" ? 2 : 3);
 });
+
+const POLYGON_USDC = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" as const;
+const POLYGON_HASH = `0x${"d".repeat(64)}`;
+function polygonUsdcRead(method: string, params: readonly unknown[]): unknown {
+  if (method === "eth_chainId") return "0x89";
+  if (method === "eth_getBlockByNumber") return { number: "0x10", hash: POLYGON_HASH, baseFeePerGas: "0x2" };
+  if (method === "eth_getBalance") return "0x100000000000000";
+  if (method === "eth_getCode") { assert.equal(params[0], POLYGON_USDC); assert.equal(params[1], "0x10"); return "0x6001"; }
+  if (method === "eth_call") {
+    const call = params[0] as { to: string; data: string };
+    assert.equal(call.to, POLYGON_USDC); assert.equal(params[1], "0x10");
+    if (call.data === "0x313ce567") return toHex(6n, { size: 32 });
+    assert.equal(call.data, `0x70a08231${WALLET.slice(2).toLowerCase().padStart(64, "0")}`);
+    return toHex(2_000_000n, { size: 32 });
+  }
+  if (method === "eth_getTransactionCount") return "0x7";
+  if (method === "eth_estimateGas") return "0x5208";
+  if (method === "eth_maxPriorityFeePerGas") return "0x1";
+  throw new Error(`unexpected ${method}`);
+}
+
+test("Polygon USDC opt-in matches scalar reads with eight POSTs for 20 logical reads", async (t) => {
+  const bodies = mockHttps(t, (body) => {
+    const reads = Array.isArray(body) ? body : [body];
+    const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id, result: polygonUsdcRead(entry.method, entry.params) }));
+    return { status: 200, raw: JSON.stringify(Array.isArray(body) ? responses.reverse() : responses[0]) };
+  });
+  const rpc = new HttpsBaseRpc(endpoint).evm;
+  const selection = { chainId: 137 as const, token: POLYGON_USDC, decimals: 6 };
+  const transaction = { chainId: 137 as const, from: WALLET, to: POLYGON_USDC, valueAtomic: "0", data: "0xa9059cbb" as const };
+  const grouped = rpc.preparePolygonUsdc();
+  const balance = await grouped.balance(WALLET, selection);
+  const { nonce, estimated } = await grouped.nonceEstimate(WALLET, transaction);
+  const economics = { nonceAtomic: nonce, ...estimated,
+    maximumGasCostAtomic: (BigInt(estimated.gasLimitAtomic) * BigInt(estimated.maxFeePerGasAtomic)).toString() };
+  const quote = await grouped.feeQuote(economics);
+  assert.equal(bodies.length, 8);
+  assert.equal(bodies.flatMap((raw) => { const body = JSON.parse(raw); return Array.isArray(body) ? body : [body]; }).length, 20);
+  assert.equal(quote.totalQuoteWei, economics.maximumGasCostAtomic);
+  assert.equal(quote.l1DataFeeUpperWei, "0"); assert.equal(quote.operatorFeeUpperWei, "0");
+  const groupedPosts = bodies.length;
+  const scalarBalance = await rpc.balance(WALLET, selection);
+  const scalarNonce = await rpc.nonce(137, WALLET, "pending");
+  const scalarEstimate = await rpc.estimate(transaction);
+  const scalarQuote = await rpc.feeQuote(137, economics);
+  assert.equal(bodies.length - groupedPosts, 20);
+  assert.deepEqual({ ...balance, observedAt: "fixed" }, { ...scalarBalance, observedAt: "fixed" });
+  assert.equal(nonce, scalarNonce); assert.deepEqual(estimated, scalarEstimate);
+  assert.deepEqual({ ...quote, observedAt: "fixed" }, { ...scalarQuote, observedAt: "fixed" });
+});
+
+for (const fault of ["chain", "reorg", "missing-id", "no-code", "wrong-decimals"] as const)
+  test(`Polygon USDC batch refuses ${fault} without scalar fallback`, async (t) => {
+    const bodies = mockHttps(t, (body) => {
+      const reads = Array.isArray(body) ? body : [body];
+      const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id,
+        result: fault === "chain" && entry.method === "eth_chainId" ? "0x1" :
+          fault === "reorg" && entry.method === "eth_getBlockByNumber" && entry.params[0] === "0x10"
+            ? { number: "0x10", hash: `0x${"e".repeat(64)}`, baseFeePerGas: "0x2" } :
+          fault === "no-code" && entry.method === "eth_getCode" ? "0x" :
+          fault === "wrong-decimals" && entry.method === "eth_call" && entry.params[0]?.data === "0x313ce567"
+            ? toHex(18n, { size: 32 }) : polygonUsdcRead(entry.method, entry.params) }));
+      return { status: 200, raw: JSON.stringify(fault === "missing-id" ? responses.slice(0, 1) : responses.reverse()) };
+    });
+    const code = fault === "chain" ? "APN_CHAIN_MISMATCH" : fault === "no-code" || fault === "wrong-decimals" ? "APN_ASSET_MISMATCH" : "APN_RPC_PROTOCOL";
+    await assert.rejects(new HttpsBaseRpc(endpoint).evm.preparePolygonUsdc().balance(WALLET,
+      { chainId: 137, token: POLYGON_USDC, decimals: 6 }), { code });
+    assert.equal(bodies.length, fault === "chain" || fault === "missing-id" ? 1 : fault === "no-code" ? 2 : 3);
+  });
+
+test("Polygon USDC batch refuses HTTP 403 after one POST", async (t) => {
+  const bodies = mockHttps(t, () => ({ status: 403, raw: secret }));
+  await assert.rejects(new HttpsBaseRpc(endpoint).evm.preparePolygonUsdc().balance(WALLET,
+    { chainId: 137, token: POLYGON_USDC, decimals: 6 }), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(bodies.length, 1);
+});

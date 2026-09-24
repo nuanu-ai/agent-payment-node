@@ -31,8 +31,9 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
     const listed = listedEvmAsset(request.asset.chainId, request.asset.token, request.asset.decimals === undefined ? undefined : evmDecimals(request.asset.decimals));
     const selection = listed.selection;
     if (request.batchRpcReads && !((selection.chainId === 59144 && selection.token === "native") ||
-        (selection.chainId === 130 && (selection.token === "native" || directEvmListRows(130).some((row) => row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6))))) {
-        throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Linea native, Unichain native, or Unichain USDC.");
+        ((selection.chainId === 130 || selection.chainId === 137) &&
+            (selection.chainId === 130 && selection.token === "native" || directEvmListRows(selection.chainId).some((row) => row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6))))) {
+        throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Linea native, Unichain native or USDC, or Polygon USDC.");
     }
     const maximumFeeWei = evmUint(request.maxFeeWei, true).toString();
     const priorityFeeWei = request.priorityFeeWei === undefined ? undefined : evmUint(request.priorityFeeWei).toString();
@@ -67,7 +68,7 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
             const rpc = requireEvmRpc(context.requireRpc());
             const grouped = request.batchRpcReads ? (selection.chainId === 130
                 ? (selection.token === "native" ? rpc.prepareUnichainNative?.() : rpc.prepareUnichainUsdc?.())
-                : rpc.prepareLineaNative?.()) : undefined;
+                : selection.chainId === 137 ? rpc.preparePolygonUsdc?.() : rpc.prepareLineaNative?.()) : undefined;
             if (request.batchRpcReads && grouped === undefined)
                 throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
             const balance = await (grouped ?? rpc).balance(wallet.address, { ...selection, decimals: listed.decimals });
