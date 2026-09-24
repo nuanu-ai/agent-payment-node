@@ -22,13 +22,13 @@ finality matrix is in the [direct EVM runbook](evm-direct-live-acceptance-2026-0
 
 ## RPC request accounting
 
-The trace's logical/physical request accounting recorded 19 RPC requests during
-prepare and 41 during approval, against a public endpoint. Merged PR #259 is a
-source change that removes a duplicate chain check in approval funding and is
-expected to reduce the approval request count from 41 to 39. No post-merge live
-run has verified that reduction. Preserve the recorded request counts in a
-follow-up audit of the method mix and repeated work; this record does not claim
-that the request volume has been optimized or independently explained.
+Before PR #259, the live trace recorded 19 physical JSON-RPC calls during
+prepare and 41 physical calls during approval, against a public endpoint. PR
+#259 is a source change that removes a duplicate chain check in approval
+funding and is expected to reduce approval calls from 41 to 39. No post-merge
+live run has verified that reduction. Audit the method mix and repeated work;
+this record does not claim that the request volume has been optimized or
+independently explained.
 
 ## Remaining C2-08 rows
 
