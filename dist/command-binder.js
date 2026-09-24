@@ -258,6 +258,7 @@ function bindParsedCatalog(parsed) {
                 command: "transfer.prepare", profile: value(options, "--profile"), asset: bindListedAsset(options),
                 recipient: value(options, "--to"), amount: value(options, "--amount"), maxFeeWei: value(options, "--max-fee-wei"),
                 ...(options["--priority-fee-wei"] === undefined ? {} : { priorityFeeWei: value(options, "--priority-fee-wei") }),
+                ...(options["--rpc-read-mode"] === undefined ? {} : { batchRpcReads: lineaBatchMode(options["--rpc-read-mode"]) }),
                 idempotencyKey: value(options, "--idempotency-key"),
             },
             rpcUrl: value(options, "--rpc-url"),
@@ -342,5 +343,10 @@ function value(options, name) {
     if (selected === undefined)
         throw new ApnError("APN_INTERNAL", "The command catalog omitted a required request binding.");
     return selected;
+}
+function lineaBatchMode(value) {
+    if (value !== "batch")
+        throw new ApnError("APN_INVALID_INPUT", "RPC read mode must be batch when supplied.");
+    return true;
 }
 //# sourceMappingURL=command-binder.js.map

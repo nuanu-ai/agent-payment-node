@@ -39,6 +39,8 @@ export interface EvmTransactionInput {
 }
 
 export interface EvmRpcPort {
+  /** Optional, command-scoped Linea native prepare read grouping. */
+  prepareLineaNative?(): EvmLineaNativePrepareReads;
   assertChain(chainId: DirectEvmChainId): Promise<void>;
   balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
   nonce(chainId: DirectEvmChainId, address: Address, tag: "pending" | "latest"): Promise<string>;
@@ -50,3 +52,9 @@ export interface EvmRpcPort {
 }
 
 export type EvmRpcCall = (method: string, params: readonly unknown[]) => Promise<unknown>;
+export type EvmRpcBatchCall = (calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]) => Promise<readonly unknown[]>;
+export interface EvmLineaNativePrepareReads {
+  balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
+  nonceEstimate(address: Address, transaction: EvmTransactionInput): Promise<{ readonly nonce: string; readonly estimated: FeeEstimate }>;
+  feeQuote(economics: Economics): Promise<EvmFeeQuote>;
+}

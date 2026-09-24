@@ -14,13 +14,98 @@ export class EvmRpc {
     call;
     rpcOrigin;
     maximumSignedBytes;
-    constructor(call, rpcOrigin, maximumSignedBytes = MAX_DIRECT_TRANSACTION_BYTES) {
+    batchCall;
+    constructor(call, rpcOrigin, maximumSignedBytes = MAX_DIRECT_TRANSACTION_BYTES, batchCall) {
         this.call = call;
         this.rpcOrigin = rpcOrigin;
         this.maximumSignedBytes = maximumSignedBytes;
+        this.batchCall = batchCall;
         if (!Number.isSafeInteger(maximumSignedBytes) || maximumSignedBytes < MAX_DIRECT_TRANSACTION_BYTES || maximumSignedBytes > 16 * 1024) {
             throw new ApnError("APN_RPC_CONFIG", "Signed transaction size bound is invalid.");
         }
+    }
+    /** One prepare owns this eight-POST read session. No retry or scalar fallback follows a batch rejection. */
+    prepareLineaNative() {
+        if (this.batchCall === undefined)
+            throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
+        let attempts = 0;
+        const attempt = async (method, params) => {
+            if (++attempts > 10)
+                throw new ApnError("APN_RPC_PROTOCOL", "Linea prepare RPC attempt ceiling exceeded.");
+            return await this.call(method, params);
+        };
+        const batch = async (calls) => {
+            if (++attempts > 10)
+                throw new ApnError("APN_RPC_PROTOCOL", "Linea prepare RPC attempt ceiling exceeded.");
+            return await this.batchCall(calls);
+        };
+        const chain = { method: "eth_chainId", params: [] };
+        const check = (value) => {
+            if (evmRpcQuantity(value) !== 59144n)
+                throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+        };
+        const blockFrom = async (value, tag) => await evmRpcBlock(async () => value, tag);
+        const recheck = async (value, block) => {
+            await recheckEvmBlock(async () => value, block);
+        };
+        const onlyLinea = (chainId) => {
+            if (chainId !== 59144)
+                throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Linea.");
+        };
+        return {
+            balance: async (address, selection) => {
+                onlyLinea(selection.chainId);
+                if (selection.token !== "native")
+                    throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the native asset.");
+                if (selection.decimals !== undefined)
+                    evmDecimals(selection.decimals);
+                const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+                check(preChain);
+                const head = await blockFrom(rawHead, "latest");
+                const nativeAtomic = evmRpcQuantity(await attempt("eth_getBalance", [address, head.tag])).toString();
+                const [rawRecheck, postChain] = await batch([{ method: "eth_getBlockByNumber", params: [head.tag, false] }, chain]);
+                await recheck(rawRecheck, head);
+                check(postChain);
+                return { address, asset: resolveEvmAsset(selection), assetAtomic: nativeAtomic, nativeAtomic,
+                    blockNumberAtomic: head.number, blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
+            },
+            nonceEstimate: async (address, transaction) => {
+                onlyLinea(transaction.chainId);
+                const [nonceChain, estimateChain] = await batch([chain, chain]);
+                check(nonceChain);
+                check(estimateChain);
+                const [rawNonce, rawGas, rawPriority, rawHead] = await batch([
+                    { method: "eth_getTransactionCount", params: [address, "pending"] },
+                    { method: "eth_estimateGas", params: [{ from: transaction.from, to: transaction.to, data: transaction.data,
+                                value: `0x${evmUint(transaction.valueAtomic).toString(16)}` }] },
+                    { method: "eth_maxPriorityFeePerGas", params: [] },
+                    { method: "eth_getBlockByNumber", params: ["latest", false] },
+                ]);
+                const nonce = evmRpcQuantity(rawNonce).toString(), gas = evmRpcQuantity(rawGas), priority = evmRpcQuantity(rawPriority);
+                const head = await blockFrom(rawHead, "latest");
+                const maximum = 2n * evmRpcQuantity(head.raw.baseFeePerGas) + priority;
+                if (maximum === 0n)
+                    throw new ApnError("APN_RPC_PROTOCOL", "The selected RPC quoted a zero gas price.");
+                evmUint(maximum.toString(), true);
+                const [noncePostChain, estimatePostChain] = await batch([chain, chain]);
+                check(noncePostChain);
+                check(estimatePostChain);
+                return { nonce, estimated: { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: maximum.toString(),
+                        maxPriorityFeePerGasAtomic: priority.toString() } };
+            },
+            feeQuote: async (economics) => {
+                const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+                check(preChain);
+                const head = await blockFrom(rawHead, "latest");
+                const execution = evmUint(economics.maximumGasCostAtomic, true);
+                const [rawRecheck, postChain] = await batch([{ method: "eth_getBlockByNumber", params: [head.tag, false] }, chain]);
+                await recheck(rawRecheck, head);
+                check(postChain);
+                return { chainId: 59144, l1DataFeeUpperWei: "0", operatorFeeUpperWei: "0", maximumExecutionFeeWei: execution.toString(),
+                    totalQuoteWei: execution.toString(), totalFeeEnforcedOnchain: false, blockNumberAtomic: head.number,
+                    blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
+            },
+        };
     }
     async assertChain(chainId) {
         directEvmChain(chainId);
