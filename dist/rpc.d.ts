@@ -1,8 +1,6 @@
-import { request as httpsRequest } from "node:https";
 import type { EvmChainId } from "./evm-asset.js";
 import { EvmRpc } from "./evm-rpc.js";
 import type { Address, Hex } from "./model.js";
-import { type PinnedAddress } from "./network-policy.js";
 import type { BalanceSnapshot, FeeEstimate, RpcPort, RpcReceipt, X402AuthorizationState, X402AuthorizationUsedLogs, X402BlockReference, X402PrepareEvidence, X402RpcBlock, X402RpcHead, X402RpcPort, X402RpcReceipt, X402TransferLogs } from "./ports.js";
 export type ReadOnlyRpcBatchCall = {
     readonly method: string;
@@ -81,6 +79,5 @@ export declare function parseRpcLogEnvelope(raw: string, id: string): {
     readonly kind: "range_unavailable";
 };
 export declare function classifyX402LogAvailabilityMessage(message: string): "pruned" | "range_unavailable" | null;
-export declare function postJson(endpoint: URL, body: string, addresses: readonly PinnedAddress[], timeoutMs: number, rpcMethod: string, allowJsonRpcClientError?: boolean, requestTransport?: typeof httpsRequest): Promise<string>;
 export { isPublicIp } from "./network-policy.js";
 export declare function acceptRpcHttpBody(status: number | undefined, allowJsonRpcClientError: boolean): boolean;

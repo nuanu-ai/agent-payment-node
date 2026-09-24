@@ -4,8 +4,9 @@ import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, rpcString, non
 import { x402Network } from "./x402-network.js";
 import type { EvmChainId } from "./evm-asset.js";
 import { exactKeys, sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, PRODUCT_VERSION, TRANSFER_TOPIC } from "./constants.js";
+import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { jsonRpcRequestHeaders } from "./rpc-request-headers.js";
 import { EvmRpc } from "./evm-rpc.js";
 import { parseAtomic } from "./money.js";
 import type { Address, Hex } from "./model.js";
@@ -495,27 +496,21 @@ export function classifyX402LogAvailabilityMessage(
   return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
 
-export async function postJson(
+async function postJson(
   endpoint: URL,
   body: string,
   addresses: readonly PinnedAddress[],
   timeoutMs: number,
   rpcMethod: string,
   allowJsonRpcClientError = false,
-  requestTransport: typeof httpsRequest = httpsRequest,
 ): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const selected = addresses[0];
     if (selected === undefined) { reject(new ApnError("APN_RPC_CONFIG", "RPC host has no validated address.")); return; }
-    const request = requestTransport(endpoint, {
+    const request = httpsRequest(endpoint, {
       method: "POST",
       family: selected.family,
-      headers: {
-        "content-type": "application/json",
-        "content-length": Buffer.byteLength(body).toString(),
-        "accept": "application/json",
-        "user-agent": `APN/${PRODUCT_VERSION}`,
-      },
+      headers: jsonRpcRequestHeaders(body),
       lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
     }, (response) => {
       const details = { rpcMethod, ...(response.statusCode === undefined ? {} : { httpStatus: response.statusCode }) };

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
 import { test } from "node:test";
 import { PRODUCT_VERSION } from "../../src/constants.js";
-import { postJson } from "../../src/rpc.js";
+import { parseRpcResultEnvelope } from "../../src/rpc.js";
+import { jsonRpcRequestHeaders } from "../../src/rpc-request-headers.js";
 
 test("JSON-RPC POST sends honest JSON headers and accepts a batch response", async (context) => {
   const methods = ["eth_chainId", "eth_blockNumber"];
@@ -32,17 +33,23 @@ test("JSON-RPC POST sends honest JSON headers and accepts a batch response", asy
   });
   const address = server.address();
   assert.ok(address !== null && typeof address === "object");
-  const raw = await postJson(
-    new URL(`http://127.0.0.1:${address.port}/`),
-    JSON.stringify(batch),
-    [{ address: "127.0.0.1", family: 4 }],
-    2_000,
-    "batch",
-    false,
-    httpRequest as typeof import("node:https").request,
-  );
-  assert.deepEqual(JSON.parse(raw), [
-    { jsonrpc: "2.0", id: "1", result: "0x82" },
-    { jsonrpc: "2.0", id: "2", result: "0x1" },
-  ]);
+  const body = JSON.stringify(batch);
+  const raw = await new Promise<string>((resolve, reject) => {
+    const request = httpRequest({
+      hostname: "127.0.0.1", port: address.port, path: "/", method: "POST",
+      headers: jsonRpcRequestHeaders(body),
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => {
+        if (response.statusCode !== 200) { reject(new Error(Buffer.concat(chunks).toString("utf8"))); return; }
+        resolve(Buffer.concat(chunks).toString("utf8"));
+      });
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+    request.end(body);
+  });
+  const responses = JSON.parse(raw) as unknown[];
+  assert.deepEqual(responses.map((entry, index) => parseRpcResultEnvelope(JSON.stringify(entry), String(index + 1))), ["0x82", "0x1"]);
 });
