@@ -30,6 +30,13 @@ export interface UsdtBoundOperation {
 export type UsdtBoundRecovery =
   | { readonly state: "prepared"; readonly operation: UsdtBoundOperation }
   | { readonly state: "capability_unavailable" | "recovery_required"; readonly reason: string; readonly operation: UsdtBoundOperation };
+export interface UsdtBoundReplayIntent {
+  readonly profile: string;
+  readonly recipient: Address;
+  readonly grossAtomic: string;
+  readonly maxFeeAtomic: string;
+  readonly minReceivedAtomic: string;
+}
 
 const HASH = /^[a-f0-9]{64}$/u;
 const KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -263,6 +270,26 @@ export class UsdtBoundOperationRepository {
       if (claimed.profileHash === profileHash && claimed.operationId === operationId) return claimed;
     }
     return null;
+  }
+  /** Read the durable claim before fresh policy or RPC work; repair claim-only publication for an exact caller intent. */
+  async replay(profileHash: string, idempotencyKey: string, intent: UsdtBoundReplayIntent): Promise<UsdtBoundOperation | null> {
+    if (!HASH.test(profileHash) || !KEY.test(idempotencyKey)) fail("bound_input", "APN_INVALID_INPUT");
+    if (!await this.dir(this.root, false) || !await this.dir(this.directory, false)) return null;
+    const record = await this.readClaim(idempotencyKey);
+    if (record === null) return null;
+    const saved = record.binding, request = saved.plan.request;
+    if (record.profileHash !== profileHash || saved.profile !== intent.profile || saved.chain !== USDT_GASLESS.chain ||
+      saved.token !== USDT_GASLESS.token || request.recipient !== intent.recipient ||
+      request.grossAtomic !== intent.grossAtomic || request.maxFeeAtomic !== intent.maxFeeAtomic ||
+      request.minReceivedAtomic !== intent.minReceivedAtomic) fail("bound_idempotency", "APN_IDEMPOTENCY_CONFLICT");
+    await this.dir(this.profilePath(profileHash), true);
+    const finalPath = this.path(profileHash, record.operationId), final = await this.readRecord(finalPath);
+    if (final !== null) {
+      if (canonicalJson(final) !== canonicalJson(record)) fail("bound_publish_conflict", "APN_IDEMPOTENCY_CONFLICT");
+      return final;
+    }
+    await this.publish(this.profilePath(profileHash), finalPath, record);
+    return record;
   }
   async create(profileHash: string, binding: UsdtPolicyPrepared, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation> {
     if (!HASH.test(profileHash) || !KEY.test(idempotencyKey) || !Number.isFinite(now.getTime())) fail("bound_input", "APN_INVALID_INPUT");

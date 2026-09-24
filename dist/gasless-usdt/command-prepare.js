@@ -73,6 +73,9 @@ export class GaslessUsdtCommandPrepare {
     }
     async prepare(input) {
         const profileHash = allowlistProfileHash(input.profile);
+        const saved = await this.operations.forProfile(profileHash).replayBound(input.idempotencyKey, input);
+        if (saved !== null)
+            return saved;
         const active = await (this.options.preparePort === undefined
             ? loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, input.profile)
             : this.options.preparePort.activePolicy(input.profile));

@@ -31,6 +31,9 @@ export class GaslessUsdtOperationService {
     async prepareBound(binding, idempotencyKey, now) {
         return new UsdtBoundOperationRepository(this.repository.root).create(this.boundProfile(), binding, idempotencyKey, now);
     }
+    async replayBound(idempotencyKey, intent) {
+        return await new UsdtBoundOperationRepository(this.repository.root).replay(this.boundProfile(), idempotencyKey, intent);
+    }
     async statusBound(operationId) {
         const record = await new UsdtBoundOperationRepository(this.repository.root).load(this.boundProfile(), operationId);
         if (record === null)

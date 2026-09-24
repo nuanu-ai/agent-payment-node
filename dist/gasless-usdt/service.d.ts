@@ -1,5 +1,5 @@
 import { type UsdtOperationInput, type UsdtOperationRecord, type UsdtOperationRepository } from "./operation.js";
-import { type UsdtBoundOperation, type UsdtBoundRecovery } from "./bound-operation.js";
+import { type UsdtBoundOperation, type UsdtBoundRecovery, type UsdtBoundReplayIntent } from "./bound-operation.js";
 import type { UsdtPolicyPrepared, UsdtPreparePort } from "./policy-prepare.js";
 /** Read-only operation boundary for the gasless USDT foundation. No signer or dispatcher is reachable. */
 export declare class GaslessUsdtOperationService {
@@ -14,6 +14,7 @@ export declare class GaslessUsdtOperationService {
     resume(operationId: string): Promise<UsdtOperationRecord>;
     /** Persist the complete domain preparation. This cannot reserve usage or reach a signer. */
     prepareBound(binding: UsdtPolicyPrepared, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation>;
+    replayBound(idempotencyKey: string, intent: UsdtBoundReplayIntent): Promise<UsdtBoundOperation | null>;
     statusBound(operationId: string): Promise<UsdtBoundOperation>;
     /** Fresh, read-only recovery classification. No saved state is changed. */
     resumeBound(operationId: string, port: UsdtPreparePort): Promise<UsdtBoundRecovery>;

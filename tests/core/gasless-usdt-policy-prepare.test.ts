@@ -95,7 +95,7 @@ test("installed CLI and MCP prepare save the same unsigned bound operation; stat
     operationId: record.operationId });
   assert.equal(status.ok, true);
   assert.deepEqual(status.operation, cli.operation);
-  assert.equal(f.offered.length, 2);
+  assert.equal(f.offered.length, 1);
   assert.equal(f.offered.every(op => op.signature !== "0x"), true); // estimate placeholder only; no signer is reachable
 });
 
@@ -130,6 +130,54 @@ test("bound USDT key replays exact material and conflicts on a changed intent wi
     ["gasless_usdt_bound_journal_only_across_profiles"]);
   const mcpKey = MCP_TOOLS.find(tool => tool.name === "apn_gasless_usdt_prepare")!.inputSchema.properties.idempotency_key;
   assert.match(JSON.stringify(mcpKey), /gasless_usdt_bound_journal_only_across_profiles/u);
+});
+
+test("CLI and MCP replay the first bound claim after time, policy, safe block and sponsor drift without fresh reads", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), options = { stateRoot: temporary.root, clock: { now: () => new Date(NOW.getTime() + 86_400_000) },
+    gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor },
+    ids: { next: () => "12345678-1234-4234-8234-123456789abc" } };
+  const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "drift-replay-001"];
+  const first = await runCli(argv, {}, options);
+  assert.equal(first.ok, true, JSON.stringify(first.error));
+  const record = first.operation as { operationId: string; profileHash: string };
+  const finalPath = join(temporary.root, "gasless-usdt-bound-operations", record.profileHash, `${record.operationId}.json`);
+  await rm(finalPath);
+  let newReads = 0;
+  f.ports.prepare.now = () => new Date(NOW.getTime() + 86_400_000);
+  f.ports.prepare.activePolicy = async () => { newReads += 1; return null; };
+  f.ports.prepare.dailyUsage = async () => { newReads += 1; return "999999999"; };
+  f.ports.prepare.safeSnapshot = async () => { newReads += 1; throw new Error("safe block drift"); };
+  f.ports.sponsor.tokenQuote = async () => { newReads += 1; throw new Error("quote drift"); };
+  f.ports.sponsor.gasPrice = async () => { newReads += 1; throw new Error("price drift"); };
+  f.ports.sponsor.paymasterData = async () => { newReads += 1; throw new Error("sponsor drift"); };
+  const replay = await runCli(argv, {}, options);
+  assert.equal(replay.ok, true, JSON.stringify(replay.error));
+  assert.deepEqual(replay.operation, first.operation);
+  assert.equal(newReads, 0);
+  assert.equal((JSON.parse(await readFile(finalPath, "utf8")) as { operationId: string }).operationId, record.operationId);
+  const server = createMcpServer(options), [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "gasless-usdt-drift-replay", version: "1.0.0" });
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const mcp = await client.callTool({ name: "apn_gasless_usdt_prepare", arguments: { profile: "owner", to: RECIPIENT,
+    amount: "1", max_fee: "0.5", min_received: "0.5", idempotency_key: "drift-replay-001" } });
+  assert.equal(mcp.content[0]?.type, "text");
+  if (mcp.content[0]?.type !== "text") throw new Error("MCP text result missing");
+  assert.equal(mcp.content[0].text, JSON.stringify(first));
+  assert.equal(newReads, 0);
+  const changed = [...argv]; changed[changed.indexOf("--to") + 1] = getAddress("0x0000000000000000000000000000000000001111");
+  assert.equal((await runCli(changed, {}, options)).error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  for (const [flag, value] of [["--amount", "0.9"], ["--max-fee", "0.4"], ["--min-received", "0.6"]] as const) {
+    const altered = [...argv]; altered[altered.indexOf(flag) + 1] = value;
+    assert.equal((await runCli(altered, {}, options)).error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  }
+  const other = [...argv]; other[other.indexOf("--profile") + 1] = "other";
+  assert.equal((await runCli(other, {}, options)).error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  assert.equal(newReads, 0);
+  assert.equal(f.offered.length, 1);
 });
 
 test("the same key can independently prepare an older direct rail and the bound USDT journal", async t => {
