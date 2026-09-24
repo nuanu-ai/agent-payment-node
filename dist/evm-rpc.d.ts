@@ -11,6 +11,7 @@ export declare class EvmRpc implements EvmRpcPort {
     constructor(call: EvmRpcCall, rpcOrigin: string, maximumSignedBytes?: number, batchCall?: EvmRpcBatchCall | undefined);
     prepareLineaNative(): EvmNativePrepareReads;
     prepareUnichainNative(): EvmNativePrepareReads;
+    prepareUnichainUsdc(): EvmNativePrepareReads;
     /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
     private prepareNativeBatched;
     assertChain(chainId: DirectEvmChainId): Promise<void>;

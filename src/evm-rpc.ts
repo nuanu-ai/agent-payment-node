@@ -2,7 +2,7 @@ import { encodeFunctionData } from "viem";
 import { MAX_NONCE_SCAN_BLOCKS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { evmDecimals, evmToken, evmUint, MAX_DIRECT_TRANSACTION_BYTES, resolveEvmAsset, type EvmAssetSelection } from "./evm-asset.js";
-import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "./evm-direct-networks.js";
+import { directEvmChain, directEvmListRows, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "./evm-direct-networks.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcReceipt } from "./ports.js";
 import type { EvmBalanceSnapshot, EvmFeeQuote, EvmNativePrepareReads, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence } from "./evm-ports.js";
@@ -26,17 +26,18 @@ export class EvmRpc implements EvmRpcPort {
 
   prepareLineaNative(): EvmNativePrepareReads { return this.prepareNativeBatched(59144); }
   prepareUnichainNative(): EvmNativePrepareReads { return this.prepareNativeBatched(130); }
+  prepareUnichainUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(130, "usdc"); }
 
   /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
-  private prepareNativeBatched(chainId: 59144 | 130): EvmNativePrepareReads {
+  private prepareNativeBatched(chainId: 59144 | 130, asset: "native" | "usdc" = "native"): EvmNativePrepareReads {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     let attempts = 0;
     const attempt = async (method: string, params: readonly unknown[]): Promise<unknown> => {
-      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Native prepare RPC attempt ceiling exceeded.");
+      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Batched prepare RPC attempt ceiling exceeded.");
       return await this.call(method, params);
     };
     const batch = async (calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]): Promise<readonly unknown[]> => {
-      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Native prepare RPC attempt ceiling exceeded.");
+      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Batched prepare RPC attempt ceiling exceeded.");
       return await this.batchCall!(calls);
     };
     const chain = { method: "eth_chainId", params: [] } as const;
@@ -48,20 +49,41 @@ export class EvmRpc implements EvmRpcPort {
       await recheckEvmBlock(async () => value, block);
     };
     const onlySelectedChain = (selected: DirectEvmChainId): void => {
-      if (selected !== chainId) throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected native chain.");
+      if (selected !== chainId) throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected chain.");
     };
     return {
       balance: async (address, selection) => {
         onlySelectedChain(selection.chainId);
-        if (selection.token !== "native") throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the native asset.");
+        if (asset === "native" ? selection.token !== "native" :
+          selection.token === "native" || !directEvmListRows(130).some((row) => row.kind === "token" && row.symbol === "USDC" &&
+            row.identifier === selection.token && row.decimals === 6)) {
+          throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected asset.");
+        }
         if (selection.decimals !== undefined) evmDecimals(selection.decimals);
         const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
         check(preChain);
         const head = await blockFrom(rawHead, "latest");
-        const nativeAtomic = evmRpcQuantity(await attempt("eth_getBalance", [address, head.tag])).toString();
+        let nativeAtomic: string, assetAtomic: string, observedDecimals: number | undefined;
+        if (asset === "native") {
+          nativeAtomic = evmRpcQuantity(await attempt("eth_getBalance", [address, head.tag])).toString();
+          assetAtomic = nativeAtomic;
+        } else {
+          const token = selection.token as Address;
+          const data = `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}`;
+          const [rawNative, rawCode, rawToken, rawDecimals] = await batch([
+            { method: "eth_getBalance", params: [address, head.tag] },
+            { method: "eth_getCode", params: [token, head.tag] },
+            { method: "eth_call", params: [{ to: token, data }, head.tag] },
+            { method: "eth_call", params: [{ to: token, data: "0x313ce567" }, head.tag] },
+          ]);
+          nativeAtomic = evmRpcQuantity(rawNative).toString();
+          if (evmRpcHex(rawCode) === "0x") throw new ApnError("APN_ASSET_MISMATCH", "The selected token address has no contract on this chain.");
+          assetAtomic = evmRpcWord(rawToken).toString();
+          if (rawDecimals !== "0x") observedDecimals = evmDecimals(Number(evmRpcWord(rawDecimals)));
+        }
         const [rawRecheck, postChain] = await batch([{ method: "eth_getBlockByNumber", params: [head.tag, false] }, chain]);
         await recheck(rawRecheck, head); check(postChain);
-        return { address, asset: resolveEvmAsset(selection), assetAtomic: nativeAtomic, nativeAtomic,
+        return { address, asset: resolveEvmAsset(selection, observedDecimals), assetAtomic, nativeAtomic,
           blockNumberAtomic: head.number, blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
       },
       nonceEstimate: async (address, transaction) => {
