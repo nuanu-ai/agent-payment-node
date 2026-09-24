@@ -65,6 +65,7 @@
     "@metamask/smart-accounts-kit": "2.0.0",
     "@metamask/x402": "1.0.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@relay-protocol/settlement-sdk": "0.0.143",
     "@solana-program/system": "0.14.1",
     "@solana-program/token": "0.16.1",
     "@solana/kit": "8.2.0",

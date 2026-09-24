@@ -1,0 +1,143 @@
+{
+  "steps": [
+    {
+      "id": "approve",
+      "kind": "transaction",
+      "items": [
+        {
+          "status": "incomplete",
+          "data": {
+            "from": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+            "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "data": "0x095ea7b30000000000000000000000004cd00e387622c35bddb9b4c962c136462338bc3100000000000000000000000000000000000000000000000000000000002625a0",
+            "value": "0",
+            "chainId": 1,
+            "gas": "73269",
+            "maxFeePerGas": "292048423",
+            "maxPriorityFeePerGas": "100000000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deposit",
+      "kind": "transaction",
+      "items": [
+        {
+          "status": "incomplete",
+          "data": {
+            "from": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+            "to": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+            "data": "0xe80179520000000000000000000000000b4dd0c3da001fa146eed3f80b01860bef6b8a14000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000002625a00a8d40c1ab30e8f5ce84029dbedc139498ca53aeacdb4bbabe656267d5691666",
+            "value": "0",
+            "chainId": 1,
+            "gas": "76337",
+            "maxFeePerGas": "292048423",
+            "maxPriorityFeePerGas": "100000000"
+          }
+        }
+      ],
+      "depositAddress": ""
+    }
+  ],
+  "details": {
+    "sender": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+    "recipient": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+    "currencyIn": {
+      "currency": {
+        "chainId": 1,
+        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "symbol": "USDC",
+        "name": "USD Coin",
+        "decimals": 6,
+        "metadata": {
+          "logoURI": "https://coin-images.coingecko.com/coins/images/6319/large/usdc.png?1696506694",
+          "verified": true
+        }
+      },
+      "amount": "2500000",
+      "amountFormatted": "2.5",
+      "amountUsd": "2.499738",
+      "minimumAmount": "2500000"
+    },
+    "currencyOut": {
+      "currency": {
+        "chainId": 56,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "name": "Binance Coin",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+          "verified": true
+        }
+      },
+      "amount": "3144520639143930",
+      "amountFormatted": "0.00314452063914393",
+      "amountUsd": "2.441451",
+      "minimumAmount": "3049241663777869"
+    }
+  },
+  "protocol": {
+    "v2": {
+      "orderId": "0x0a8d40c1ab30e8f5ce84029dbedc139498ca53aeacdb4bbabe656267d5691666",
+      "hubType": "onchain",
+      "orderData": {
+        "version": "v1",
+        "solverChainId": "base",
+        "solver": "0xf70da97812cb96acdf810712aa562db8dfa3dbef",
+        "salt": "0x2fe94154197e31a78d10c4c85c87ff14c9e5eb524b4f5685ddba97f2fd85c2d2",
+        "inputs": [
+          {
+            "payment": {
+              "chainId": "ethereum",
+              "currency": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount": "2500000",
+              "weight": "1"
+            },
+            "refunds": [
+              {
+                "chainId": "ethereum",
+                "recipient": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+                "currency": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "minimumAmount": "0",
+                "deadline": 1790893002,
+                "extraData": "0x000000000000000000000000b92fe925dc43a0ecde6c8b1a2709c170ec4fff4f"
+              },
+              {
+                "chainId": "bnb",
+                "recipient": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+                "currency": "0x0000000000000000000000000000000000000000",
+                "minimumAmount": "0",
+                "deadline": 1790893002,
+                "extraData": "0x000000000000000000000000b92fe925dc43a0ecde6c8b1a2709c170ec4fff4f"
+              }
+            ]
+          }
+        ],
+        "output": {
+          "chainId": "bnb",
+          "payments": [
+            {
+              "recipient": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+              "currency": "0x0000000000000000000000000000000000000000",
+              "minimumAmount": "3049241663777869",
+              "expectedAmount": "3144520639143930"
+            }
+          ],
+          "calls": [],
+          "deadline": 1790893002,
+          "extraData": "0x000000000000000000000000b92fe925dc43a0ecde6c8b1a2709c170ec4fff4f"
+        },
+        "fees": []
+      },
+      "orderSignature": "0x8eed6a77ba47236e38b2b2df4a6faae2bc232f32b59251651defc6d429f1e5d230a9b3a0381feb5f4e05eea814f3923a05e6ee20cfe583cbd7c34471b4b20bfd1c",
+      "paymentDetails": {
+        "chainId": "ethereum",
+        "depository": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "currency": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "amount": "2500000"
+      }
+    }
+  }
+}
