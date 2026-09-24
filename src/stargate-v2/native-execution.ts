@@ -230,6 +230,16 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
   if (uint(prepared.nativeBalanceAtomic) < maximumDebit) fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
   const finalityPolicy = stargateV2RouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN);
   const destination = await ports.destinationBalance(recipient, finalityPolicy.destination.blockTag); uint(destination.balanceAtomic); uint(destination.blockNumberAtomic); hex32(destination.blockHash);
+  // The quote's earlier recheck does not cover config, credit, or the final fee read.
+  const [sourceBlock, sourceChain] = ports.sourcePrepareBatch === undefined
+    ? [await ports.sourceCall("eth_getBlockByNumber", [quoteTag, false]), undefined]
+    : await ports.sourcePrepareBatch([{ method: "eth_getBlockByNumber", params: [quoteTag, false] },
+      { method: "eth_chainId", params: [] }]);
+  if (sourceChain !== undefined && rpcQuantity(sourceChain) !== BigInt(SOURCE_CHAIN)) fail("APN_CHAIN_MISMATCH", "source_chain_drift");
+  if (sourceBlock === null || typeof sourceBlock !== "object" || Array.isArray(sourceBlock)) fail("APN_RPC_PROTOCOL", "source_block");
+  const checkedSource = sourceBlock as Record<string, unknown>;
+  if (rpcQuantity(checkedSource.number) !== BigInt(quote.block.numberAtomic) ||
+    hex32(checkedSource.hash) !== quote.block.hash) fail("APN_RPC_PROTOCOL", "source_block_changed_after_prepare_reads");
   const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
   const body = {
     schemaVersion: "apn.stargate-v2-native-operation.v2" as const, operationId, profile, profileHash, idempotencyHash,
@@ -359,7 +369,7 @@ function validateDestination(operation: StargateNativeOperation, source: Stargat
 }
 
 async function readSourceConfig(call: EvmRpcCall, tag: string, operation?: StargateNativeOperation, batch?: StargateReadBatch): Promise<{ codeHash: Hex }> {
-  const result = await readPoolConfig(call, SOURCE_CHAIN, SOURCE_POOL, SOURCE_EID, tag, batch);
+  const result = await readPoolConfig(call, SOURCE_CHAIN, SOURCE_POOL, SOURCE_EID, tag, batch, operation === undefined && batch !== undefined);
   const read = async (name: "status" | "paths") => decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: name,
     data: await call("eth_call", [{ to: SOURCE_POOL, data: encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: name,
       ...(name === "paths" ? { args: [DESTINATION_EID] } : {}) }) }, tag]) as Hex });
@@ -393,7 +403,7 @@ async function readSourceConfig(call: EvmRpcCall, tag: string, operation?: Starg
   return result;
 }
 async function readPoolConfig(call: EvmRpcCall, chainId: number, pool: Address, eid: number, tag: string,
-  batch?: StargateReadBatch): Promise<{ codeHash: Hex }> {
+  batch?: StargateReadBatch, deferChainDrift = false): Promise<{ codeHash: Hex }> {
   let code: unknown;
   let groupedReads: readonly unknown[] | undefined;
   if (batch === undefined) {
@@ -423,7 +433,7 @@ async function readPoolConfig(call: EvmRpcCall, chainId: number, pool: Address, 
       const checked = head as Record<string, unknown>;
       if (rpcQuantity(checked.number) !== rpcQuantity(pinnedTag) || checked.hash !== pinnedHash) fail("APN_RPC_PROTOCOL", "pool_block_changed");
       if (rpcQuantity(chain) !== BigInt(chainId)) fail("APN_CHAIN_MISMATCH", "pool_chain_drift");
-    } else if (rpcQuantity((await batch([{ method: "eth_chainId", params: [] }]))[0]) !== BigInt(chainId)) fail("APN_CHAIN_MISMATCH", "pool_chain_drift");
+    } else if (!deferChainDrift && rpcQuantity((await batch([{ method: "eth_chainId", params: [] }]))[0]) !== BigInt(chainId)) fail("APN_CHAIN_MISMATCH", "pool_chain_drift");
   }
   if (typeof code !== "string" || !CODE.test(code) || code === "0x") fail("APN_RPC_PROTOCOL", "source_code");
   const read = async (name: "token" | "localEid" | "sharedDecimals" | "status" | "stargateType") => decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: name,

@@ -6,7 +6,7 @@ import { createApnCore } from "../../src/runtime-factory.js";
 import { StateStore } from "../../src/state.js";
 import { STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
 import { StargateJsonRpc, StargateNativeService, confirmedStargateSourceReceipt,
-  observeStargateDestination } from "../../src/stargate-v2/native-runtime.js";
+  observeStargateDestination, stargateDestinationBalance } from "../../src/stargate-v2/native-runtime.js";
 import { temporaryState } from "./helpers.js";
 
 const SOURCE = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
@@ -142,4 +142,13 @@ test("Stargate read batch restores shuffled IDs and refuses malformed responses 
     await assert.rejects(rpc.batchCall([{ method: "eth_sendRawTransaction", params: ["0x12"] }]), { code: "APN_RPC_PROTOCOL" });
     assert.equal(posts, 1);
   }
+});
+
+
+test("destination balance snapshot rejects same-height reorg after the balance read", async () => {
+  let blocks = 0;
+  const rpc = { call: async (method: string) => method === "eth_getBalance" ? "0x10" :
+    { number: "0x20", hash: ++blocks === 1 ? BLOCK : DEST_TX } };
+  await assert.rejects(stargateDestinationBalance(rpc as any, OWNER, "safe"), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(blocks, 2);
 });

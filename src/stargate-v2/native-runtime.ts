@@ -120,11 +120,7 @@ export class StargateNativeService {
       ...(prepareBatch ? { sourcePrepareBatch: (calls: readonly { method: string; params: readonly unknown[] }[]) => source.batchCall(calls),
         destinationPrepareBatch: (calls: readonly { method: string; params: readonly unknown[] }[]) => destination.batchCall(calls) } : {}),
       sourceCall: (method, params) => source.call(method, params), destinationCall: (method, params) => destination.call(method, params),
-      destinationBalance: async (recipient, finalityTag) => {
-        const block = record(await destination.call("eth_getBlockByNumber", [finalityTag, false]));
-        return { balanceAtomic: quantity(await destination.call("eth_getBalance", [recipient, block.number])).toString(),
-          blockNumberAtomic: quantity(block.number).toString(), blockHash: hash(block.hash) };
-      },
+      destinationBalance: async (recipient, finalityTag) => await stargateDestinationBalance(destination, recipient, finalityTag),
       prepareEnvelope: async tx => {
         const [chain, head] = prepareBatch ? await source.batchCall([{ method: "eth_chainId", params: [] },
           { method: "eth_getBlockByNumber", params: ["latest", false] }]) :
@@ -154,6 +150,17 @@ export class StargateNativeService {
     this.source = new StargateJsonRpc(source); this.destination = new StargateJsonRpc(destination);
     return { source: this.source, destination: this.destination };
   }
+}
+
+export async function stargateDestinationBalance(rpc: Pick<StargateJsonRpc, "call">, recipient: Address,
+  finalityTag: Parameters<StargateNativeExecutionPorts["destinationBalance"]>[1]) {
+  const block = record(await rpc.call("eth_getBlockByNumber", [finalityTag, false]));
+  const number = quantity(block.number), blockHash = hash(block.hash);
+  const balance = quantity(await rpc.call("eth_getBalance", [recipient, block.number]));
+  const checked = record(await rpc.call("eth_getBlockByNumber", [`0x${number.toString(16)}`, false]));
+  if (quantity(checked.number) !== number || hash(checked.hash) !== blockHash)
+    throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline block changed around the balance read.");
+  return { balanceAtomic: balance.toString(), blockNumberAtomic: number.toString(), blockHash };
 }
 
 export async function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex,

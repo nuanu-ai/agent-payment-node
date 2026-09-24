@@ -432,7 +432,7 @@ test("production file journal absent-record load is a true local read without di
   await assert.rejects(lstat(join(root, "stargate-v2-native")), (error: any) => error.code === "ENOENT");
 });
 
-test("opted-in Stargate native prepare matches scalar frozen evidence with fifteen modeled POSTs", async () => {
+test("opted-in Stargate native prepare matches scalar frozen evidence with sixteen modeled POSTs", async () => {
   const scalar = setup(), expected = await prepareStargateV2NativeEth(request(), scalar.ports, scalar.journal);
   const grouped = setup();
   const posts: string[][] = [];
@@ -464,6 +464,8 @@ test("opted-in Stargate native prepare matches scalar frozen evidence with fifte
     destinationBalance: async recipient => {
       const [block] = await destinationBatch([{ method: "eth_getBlockByNumber", params: ["safe", false] }]);
       const [balance] = await destinationBatch([{ method: "eth_getBalance", params: [recipient, (block as any).number] }]);
+      const [checked] = await destinationBatch([{ method: "eth_getBlockByNumber", params: [(block as any).number, false] }]);
+      assert.equal((checked as any).hash, (block as any).hash);
       return { balanceAtomic: BigInt(balance as string).toString(), blockNumberAtomic: "16", blockHash: DEST_BLOCK };
     },
   };
@@ -475,8 +477,8 @@ test("opted-in Stargate native prepare matches scalar frozen evidence with fifte
   };
   const actual = await prepareStargateV2NativeEth(request(), measured, grouped.journal);
   assert.deepEqual(actual, expected);
-  assert.equal(posts.length, 15);
-  assert.deepEqual(posts.map(group => group.length), [2, 2, 1, 2, 7, 1, 2, 2, 6, 2, 1, 2, 4, 1, 1]);
+  assert.equal(posts.length, 16);
+  assert.deepEqual(posts.map(group => group.length), [2, 2, 1, 2, 7, 2, 2, 6, 2, 1, 2, 4, 1, 1, 1, 2]);
 });
 
 test("opted-in Stargate native prepare rejects changed pinned destination block and final fee", async () => {
@@ -502,4 +504,22 @@ test("opted-in Stargate native prepare rejects changed pinned destination block 
       { code: changed === "block" ? "APN_RPC_PROTOCOL" : "APN_REPREPARE_REQUIRED" });
     assert.equal(s.journal.value, null);
   }
+});
+
+
+test("opted-in Stargate prepare rejects a same-height source reorg after final fee and before journal save", async () => {
+  const s = setup(); let numbered = 0;
+  const source = async (method: string, params: readonly unknown[]) => {
+    if (method === "eth_getBlockByNumber" && params[0] === "0x10" && ++numbered === 2)
+      return { number: "0x10", hash: DEST_BLOCK };
+    return s.ports.sourceCall(method, params);
+  };
+  const destination = async (method: string, params: readonly unknown[]) => method === "eth_getBlockByNumber"
+    ? { number: "0x10", hash: DEST_BLOCK } : s.ports.destinationCall(method, params);
+  const ports: StargateNativeExecutionPorts = { ...s.ports, sourceCall: source, destinationCall: destination,
+    sourcePrepareBatch: async calls => await Promise.all(calls.map(item => source(item.method, item.params))),
+    destinationPrepareBatch: async calls => await Promise.all(calls.map(item => destination(item.method, item.params))),
+  };
+  await assert.rejects(prepareStargateV2NativeEth(request(), ports, s.journal), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(s.journal.value, null);
 });

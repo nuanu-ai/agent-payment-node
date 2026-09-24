@@ -213,6 +213,19 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
     uint(destination.balanceAtomic);
     uint(destination.blockNumberAtomic);
     hex32(destination.blockHash);
+    // The quote's earlier recheck does not cover config, credit, or the final fee read.
+    const [sourceBlock, sourceChain] = ports.sourcePrepareBatch === undefined
+        ? [await ports.sourceCall("eth_getBlockByNumber", [quoteTag, false]), undefined]
+        : await ports.sourcePrepareBatch([{ method: "eth_getBlockByNumber", params: [quoteTag, false] },
+            { method: "eth_chainId", params: [] }]);
+    if (sourceChain !== undefined && rpcQuantity(sourceChain) !== BigInt(SOURCE_CHAIN))
+        fail("APN_CHAIN_MISMATCH", "source_chain_drift");
+    if (sourceBlock === null || typeof sourceBlock !== "object" || Array.isArray(sourceBlock))
+        fail("APN_RPC_PROTOCOL", "source_block");
+    const checkedSource = sourceBlock;
+    if (rpcQuantity(checkedSource.number) !== BigInt(quote.block.numberAtomic) ||
+        hex32(checkedSource.hash) !== quote.block.hash)
+        fail("APN_RPC_PROTOCOL", "source_block_changed_after_prepare_reads");
     const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
     const body = {
         schemaVersion: "apn.stargate-v2-native-operation.v2", operationId, profile, profileHash, idempotencyHash,
@@ -378,7 +391,7 @@ function validateDestination(operation, source, evidence) {
     }
 }
 async function readSourceConfig(call, tag, operation, batch) {
-    const result = await readPoolConfig(call, SOURCE_CHAIN, SOURCE_POOL, SOURCE_EID, tag, batch);
+    const result = await readPoolConfig(call, SOURCE_CHAIN, SOURCE_POOL, SOURCE_EID, tag, batch, operation === undefined && batch !== undefined);
     const read = async (name) => decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: name,
         data: await call("eth_call", [{ to: SOURCE_POOL, data: encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: name,
                     ...(name === "paths" ? { args: [DESTINATION_EID] } : {}) }) }, tag]) });
@@ -422,7 +435,7 @@ async function readSourceConfig(call, tag, operation, batch) {
     }
     return result;
 }
-async function readPoolConfig(call, chainId, pool, eid, tag, batch) {
+async function readPoolConfig(call, chainId, pool, eid, tag, batch, deferChainDrift = false) {
     let code;
     let groupedReads;
     if (batch === undefined) {
@@ -463,7 +476,7 @@ async function readPoolConfig(call, chainId, pool, eid, tag, batch) {
             if (rpcQuantity(chain) !== BigInt(chainId))
                 fail("APN_CHAIN_MISMATCH", "pool_chain_drift");
         }
-        else if (rpcQuantity((await batch([{ method: "eth_chainId", params: [] }]))[0]) !== BigInt(chainId))
+        else if (!deferChainDrift && rpcQuantity((await batch([{ method: "eth_chainId", params: [] }]))[0]) !== BigInt(chainId))
             fail("APN_CHAIN_MISMATCH", "pool_chain_drift");
     }
     if (typeof code !== "string" || !CODE.test(code) || code === "0x")

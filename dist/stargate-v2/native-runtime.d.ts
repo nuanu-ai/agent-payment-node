@@ -1,5 +1,6 @@
 import { type Hex } from "viem";
 import type { WrappingSecretPort } from "../macos-keychain.js";
+import type { Address } from "../model.js";
 import type { StateStore } from "../state.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { type StargateConfirmedReceipt, type StargateNativeExecutionPorts, type StargateNativeOperation } from "./native-execution.js";
@@ -39,6 +40,11 @@ export declare class StargateNativeService {
     private ports;
     private remote;
 }
+export declare function stargateDestinationBalance(rpc: Pick<StargateJsonRpc, "call">, recipient: Address, finalityTag: Parameters<StargateNativeExecutionPorts["destinationBalance"]>[1]): Promise<{
+    balanceAtomic: string;
+    blockNumberAtomic: string;
+    blockHash: `0x${string}`;
+}>;
 export declare function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex, finalityTag: StargateConfirmedReceipt["finality"]): Promise<StargateConfirmedReceipt | null>;
 export declare function observeStargateDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateNativeExecutionPorts["observeDestination"]>[0]): Promise<{
     mode: "oft_received";
