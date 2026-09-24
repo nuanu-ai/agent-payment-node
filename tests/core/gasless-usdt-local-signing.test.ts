@@ -7,7 +7,9 @@ import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { UsdtBoundOperationRepository } from "../../src/gasless-usdt/bound-operation.js";
+import { UsdtExecutionJournal } from "../../src/gasless-usdt/execution-journal.js";
 import { LocalUsdtSigningService, verifySignedUsdtOperation } from "../../src/gasless-usdt/local-signing.js";
+import { GuardedUsdtSendService } from "../../src/gasless-usdt/send.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
 import { preparePolicyBoundUsdt } from "../../src/gasless-usdt/policy-prepare.js";
 import { usdtUserOperationHash, usdtUserOperationTypedData } from "../../src/gasless-usdt/userop.js";
@@ -46,10 +48,11 @@ async function setup(key: typeof KEY | typeof WRONG_KEY = KEY, delegation: "empt
   const price = { slow: { maxFeePerGas: "0x10ef719d", maxPriorityFeePerGas: "0xbb0de7a" },
     standard: { maxFeePerGas: "0x11c8374b", maxPriorityFeePerGas: "0xc468333" },
     fast: { maxFeePerGas: "0x12a0fcf9", maxPriorityFeePerGas: "0xcdc27ec" } };
-  const prepared = await preparePolicyBoundUsdt({ prepare: { now: () => NOW, activePolicy: async () => active,
+  const port = { now: () => NOW, activePolicy: async () => active,
     dailyUsage: async () => "0", safeSnapshot: async () => ({ chainId: 1n, blockNumber: 26_002_950n,
       blockHash: `0x${"12".repeat(32)}` as const,
-      account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation } }) },
+      account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation } }) };
+  const prepared = await preparePolicyBoundUsdt({ prepare: port,
     sponsor: { tokenQuote: async () => quote, gasPrice: async () => price,
       paymasterData: async () => ({ paymaster: USDT_GASLESS.paymaster, paymasterData: PAYMASTER_DATA }) } },
   { profile: "owner", chain: USDT_GASLESS.chain, token: USDT_GASLESS.token, sponsorUrl: USDT_GASLESS.bundlerUrl,
@@ -58,7 +61,7 @@ async function setup(key: typeof KEY | typeof WRONG_KEY = KEY, delegation: "empt
   const expected = { profile: "owner", profileHash: bound.profileHash, operationId: bound.operationId,
     bindingHash: bound.binding.bindingHash };
   const signer = new LocalUsdtSigningService(state, wrapping, () => NOW);
-  return { temporary, bound, expected, signer };
+  return { temporary, bound, expected, signer, port, active };
 }
 
 test("local custody signs exact bound UserOperation hash and first-use authorization", async t => {
@@ -119,4 +122,73 @@ test("local signer refuses wrong identity, wallet, expired quote and changed sig
   await assert.rejects(() => expired.sign(f.bound, f.expected), { code: "APN_REPREPARE_REQUIRED" });
   const wrong = await setup(WRONG_KEY); t.after(wrong.temporary.cleanup);
   await assert.rejects(() => wrong.signer.sign(wrong.bound, wrong.expected), { code: "APN_WALLET_MISMATCH" });
+});
+
+test("guarded send records exact hash before one call and refuses replay", async t => {
+  const f = await setup(); t.after(f.temporary.cleanup);
+  const journal = new UsdtExecutionJournal(f.temporary.root);
+  let calls = 0;
+  const send = new GuardedUsdtSendService(journal, f.signer, { async send(op) {
+    calls++;
+    const before = await journal.load(f.bound.operationId);
+    assert.equal(before?.state, "submitting");
+    assert.equal(before.userOperationHash, usdtUserOperationHash(op));
+    return usdtUserOperationHash(op);
+  } }, f.port);
+  const result = await send.send(f.bound, f.expected);
+  assert.equal(result.state, "submitted_pending"); assert.equal(calls, 1);
+  await assert.rejects(() => send.send(f.bound, f.expected), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(calls, 1);
+});
+
+test("guarded send treats timeout and mismatching acknowledgement as unknown with no rebroadcast", async t => {
+  for (const outcome of ["timeout", "mismatch"] as const) {
+    const f = await setup(); t.after(f.temporary.cleanup);
+    const journal = new UsdtExecutionJournal(f.temporary.root);
+    let calls = 0;
+    const send = new GuardedUsdtSendService(journal, f.signer, { async send() {
+      calls++;
+      if (outcome === "timeout") throw new Error("synthetic timeout");
+      return `0x${"ff".repeat(32)}`;
+    } }, f.port);
+    const result = await send.send(f.bound, f.expected);
+    assert.equal(result.state, "unknown_finality"); assert.equal(calls, 1);
+    await assert.rejects(() => send.send(f.bound, f.expected), { code: "APN_OPERATION_BLOCKED" });
+    assert.equal(calls, 1);
+  }
+});
+
+test("persisted submitting intent after a pre-send crash blocks every later send", async t => {
+  const f = await setup(); t.after(f.temporary.cleanup);
+  class Interrupted extends UsdtExecutionJournal {
+    override async markSubmitting(...args: Parameters<UsdtExecutionJournal["markSubmitting"]>): ReturnType<UsdtExecutionJournal["markSubmitting"]> {
+      const record = await super.markSubmitting(...args);
+      throw new Error(`crash after ${record.state}`);
+    }
+  }
+  const journal = new Interrupted(f.temporary.root);
+  let calls = 0;
+  const send = new GuardedUsdtSendService(journal, f.signer, { async send() { calls++; return `0x${"aa".repeat(32)}`; } }, f.port);
+  await assert.rejects(() => send.send(f.bound, f.expected), /crash after submitting/u);
+  assert.equal((await journal.load(f.bound.operationId))?.state, "submitting");
+  assert.equal(calls, 0);
+  await assert.rejects(() => new GuardedUsdtSendService(new UsdtExecutionJournal(f.temporary.root), f.signer,
+    { async send() { calls++; return `0x${"aa".repeat(32)}`; } }, f.port).send(f.bound, f.expected), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(calls, 0);
+});
+
+test("guarded send blocks changed policy or nonce before any dispatch", async t => {
+  for (const drift of ["policy", "nonce"] as const) {
+    const f = await setup(); t.after(f.temporary.cleanup);
+    const port = { ...f.port, activePolicy: async () => drift === "policy" ? null : f.active,
+      safeSnapshot: async (...args: Parameters<typeof f.port.safeSnapshot>) => {
+        const snapshot = await f.port.safeSnapshot(...args);
+        return drift === "nonce" ? { ...snapshot, account: { ...snapshot.account, entryPointNonce: 8n } } : snapshot;
+      } };
+    let calls = 0;
+    const send = new GuardedUsdtSendService(new UsdtExecutionJournal(f.temporary.root), f.signer,
+      { async send() { calls++; return `0x${"aa".repeat(32)}`; } }, port);
+    await assert.rejects(() => send.send(f.bound, f.expected), { code: "APN_OPERATION_BLOCKED" });
+    assert.equal(calls, 0);
+  }
 });
