@@ -22,3 +22,14 @@ The pinned official-source review is bundled at
 `data/swap/jupiter-solana-abi-blocker-2026-09-17.json`. It records the verified
 exact-input instruction discriminators and fixed accounts, plus the unresolved
 route-dependent remaining-account, build-fixture, and deployed-artifact gaps.
+
+The source-only `decodeRawBuildResponse` codec accepts the raw instruction
+response documented for `GET /swap/v2/build`, including the optional OpenAPI
+`priceImpactPct`, route `usdValue`, and blockhash `fetchedAt` fields. The source
+pin is Jupiter docs commit `16e9e9d51819331c636079945047a595a44c7ee0`:
+[Build guide](https://github.com/jup-ag/docs/blob/16e9e9d51819331c636079945047a595a44c7ee0/swap/build/index.mdx)
+and [Swap V2 OpenAPI](https://github.com/jup-ag/docs/blob/16e9e9d51819331c636079945047a595a44c7ee0/openapi-spec/swap/v2/swap.yaml).
+The deterministic tests prove only local response shape validation. No live
+Jupiter response, Solana simulation, transaction assembly, signing, or delivery
+has been verified for this codec. The legacy assembled `decodeBuildResponse`
+and the `signable: false` guard remain separate.
