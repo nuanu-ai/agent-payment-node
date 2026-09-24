@@ -12,6 +12,11 @@ import { parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
 const AUTHORIZATION_STATE_SELECTOR = "0xe94a0102";
 const AUTHORIZATION_USED_TOPIC = "0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5";
 const MAX_X402_LOGS = 256;
+const MAX_RPC_BATCH_CALLS = 16;
+const BATCH_READ_METHODS = new Set([
+    "eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_call",
+    "eth_getTransactionCount", "eth_getTransactionReceipt", "eth_maxPriorityFeePerGas", "eth_estimateGas",
+]);
 export class HttpsBaseRpc {
     evm;
     endpoint;
@@ -325,6 +330,29 @@ export class HttpsBaseRpc {
         const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method);
         return parseRpcResultEnvelope(raw, id);
     }
+    async batchCall(calls) {
+        if (!Array.isArray(calls) || calls.length < 1 || calls.length > MAX_RPC_BATCH_CALLS ||
+            calls.some((call) => call === null || typeof call !== "object" ||
+                !BATCH_READ_METHODS.has(call.method) || !Array.isArray(call.params))) {
+            throw new ApnError("APN_INVALID_INPUT", "RPC batch contains an invalid read request.");
+        }
+        const ids = calls.map(() => {
+            this.sequence += 1n;
+            if (this.sequence > BigInt(Number.MAX_SAFE_INTEGER)) {
+                throw new ApnError("APN_RPC_PROTOCOL", "RPC batch ID range is exhausted.");
+            }
+            return Number(this.sequence);
+        });
+        const body = JSON.stringify(calls.map((call, index) => ({
+            jsonrpc: "2.0", id: ids[index], method: call.method, params: call.params,
+        })));
+        if (Buffer.byteLength(body) > MAX_RPC_RESPONSE_BYTES) {
+            throw new ApnError("APN_INVALID_INPUT", "RPC batch request exceeds the size limit.");
+        }
+        const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
+        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), "batch");
+        return parseRpcBatchResultEnvelope(raw, ids);
+    }
     async callX402Logs(params) {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params });
@@ -350,6 +378,37 @@ export function parseRpcResultEnvelope(raw, id) {
         throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.");
     }
     return message.result;
+}
+export function parseRpcBatchResultEnvelope(raw, ids) {
+    if (ids.length < 1 || ids.length > MAX_RPC_BATCH_CALLS ||
+        ids.some((id) => !Number.isSafeInteger(id) || id < 1) || new Set(ids).size !== ids.length) {
+        throw new ApnError("APN_RPC_PROTOCOL", "RPC batch request IDs are invalid.");
+    }
+    let parsed;
+    try {
+        parsed = parseJsonWithDuplicateRejection(raw);
+    }
+    catch {
+        throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not strict JSON.");
+    }
+    if (!Array.isArray(parsed) || parsed.length !== ids.length) {
+        throw new ApnError("APN_RPC_PROTOCOL", "RPC batch response count is invalid.");
+    }
+    const expected = new Set(ids);
+    const results = new Map();
+    for (const entry of parsed) {
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC batch response envelope is invalid.");
+        }
+        const message = entry;
+        if (!exactKeys(message, ["jsonrpc", "id", "result"]) || message.jsonrpc !== "2.0" ||
+            typeof message.id !== "number" || !Number.isSafeInteger(message.id) || !expected.has(message.id) ||
+            results.has(message.id)) {
+            throw new ApnError("APN_RPC_PROTOCOL", "RPC batch response envelope is invalid.");
+        }
+        results.set(message.id, message.result);
+    }
+    return ids.map((id) => results.get(id));
 }
 export function parseRpcLogEnvelope(raw, id) {
     const message = strictRpcRecord(raw);
