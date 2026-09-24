@@ -65,8 +65,8 @@ export class RelayUnsignedPrepareService {
     const publicAccount = await (this.ports.publicAccount?.(input.profile) ??
       this.state.loadWallet(profileHash).then(wallet => wallet?.address ?? null));
     if (publicAccount?.toLowerCase() !== payer) refuse("relay_public_profile_owner_mismatch");
-    const usage = await (this.ports.dailyUsage?.(payer, now) ?? new AssetUsageLedger(this.state.root).usage({
-      account: payer, chain: "eip155:1", asset: { kind: "token", identifier: ETHEREUM_USDC },
+    const usage = await (this.ports.dailyUsage?.(active.accounts.evm, now) ?? new AssetUsageLedger(this.state.root).usage({
+      account: active.accounts.evm, chain: "eip155:1", asset: { kind: "token", identifier: ETHEREUM_USDC },
     }, now).then(value => value.amountAtomic));
     const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:1",
       asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: input.amountAtomic,
