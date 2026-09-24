@@ -156,6 +156,59 @@ test("Relay releases its owner lock during quote so wallet ensure can finish", a
   assert.equal((await pending).state, "prepared");
 });
 
+test("rebind at the final owner-lock boundary prevents stale unsigned persistence", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  let release!: () => void, reached!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const boundary = new Promise<void>(resolve => { reached = resolve; });
+  class BoundaryState extends StateStore {
+    private ownerAcquisitions = 0;
+    protected override async beforeLockAcquire(key: string): Promise<void> {
+      if (key === evmAddressLock(payer) && ++this.ownerAcquisitions === 2) { reached(); await gate; }
+    }
+  }
+  const state = new BoundaryState(temporary.root); await state.initialize();
+  const repository = new StateProfileRepository(state), old = providerProfile(state, "other", recipient);
+  await repository.save(old);
+  const pending = serviceFor(state, () => {}).prepare(input);
+  await boundary;
+  try {
+    await repository.save({ ...old, public_address: payer,
+      account_binding_hash: accountBindingHash(old.provider_id, payer), revision: 2 });
+  } finally { release(); }
+  await assert.rejects(pending, { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(new OperationService(state).required(state.operationId("default", input.idempotencyKey)),
+    { code: "APN_OPERATION_NOT_FOUND" });
+});
+
+test("Relay waiting for profile lock does not hold the owner lock needed by provider rebind", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  let waiting!: () => void;
+  const attempted = new Promise<void>(resolve => { waiting = resolve; });
+  class WatchedState extends StateStore {
+    watchProfile = false;
+    protected override async beforeLockAcquire(key: string): Promise<void> {
+      if (this.watchProfile && key === `profile:${this.profileHash("default")}`) waiting();
+    }
+  }
+  const state = new WatchedState(temporary.root); await state.initialize();
+  const repository = new StateProfileRepository(state), old = providerProfile(state, "other", recipient);
+  await repository.save(old);
+  let release!: () => void, held!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const acquired = new Promise<void>(resolve => { held = resolve; });
+  const profileLock = state.withLocks([`profile:${state.profileHash("default")}`], async () => { held(); await gate; });
+  await acquired; state.watchProfile = true;
+  const pending = serviceFor(state, () => {}).prepare(input);
+  await attempted;
+  try {
+    await repository.save({ ...old, public_address: payer,
+      account_binding_hash: accountBindingHash(old.provider_id, payer), revision: 2 });
+  } finally { release(); }
+  await profileLock;
+  await assert.rejects(pending, { code: "APN_OPERATION_BLOCKED" });
+});
+
 test("Relay prepare freezes one validated quote, replays without another quote, and survives restart", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root);

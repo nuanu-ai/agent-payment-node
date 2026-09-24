@@ -75,8 +75,8 @@ export class RelayUnsignedPrepareService {
     const pin = admission.asset.mechanismPins?.bridge;
     if (pin?.provider !== "relay" || pin.reference !== RELAY_ROUTE_REFERENCE) refuse("relay_route_pin_required");
     await this.state.initialize();
-    // Keep this address lock short. Profile writers take profile before address,
-    // and a provider quote can wait on the network.
+    // Fail closed before quoting. The final owner check and create-only write
+    // share one profile/operation/address critical section in OperationService.
     const checkOwner = async () => await this.state.withLocks([evmAddressLock(payer)],
       async () => await assertExclusiveEvmOwner(this.state, payer, profileHash));
     await checkOwner();
@@ -93,7 +93,6 @@ export class RelayUnsignedPrepareService {
       BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
       throw new ApnError("APN_OPERATION_BLOCKED", "Relay quote identity, deadline, or fee ceiling changed.");
     }
-    await checkOwner();
     const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
       kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
       requestHash, sourceChainId: 1, destinationChainId: 56, sourceAccount: payer, recipient: intent.recipient,
