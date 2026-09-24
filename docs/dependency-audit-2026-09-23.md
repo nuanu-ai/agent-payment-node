@@ -29,3 +29,9 @@ APN loads the MetaMask SDK and Fox SDK for its gasless EVM helper (`src/metamask
 5. Repeat both audit modes after each upstream change. Require a clean `npm ci`, build, typecheck, relevant tests, and identical package lock and shrinkwrap before treating the advisory as resolved. Separately inspect runtime call paths and attacker-controlled input boundaries for the three vulnerable functions.
 
 The existing five-high sprint figure is still current. This document closes the measurement task and leaves dependency remediation open.
+
+## 24 Sep remediation candidate
+
+The Solana web3 package imports `jayson/lib/client/browser` for JSON-RPC. Jayson 5.0.0 still provides that entry point and removes its `stream-json` dependency. A scoped npm override pins Jayson 5.0.0 below `@solana/web3.js`; the two lockfiles remain byte-identical. An offline `Connection.getSlot()` RPC test exercises request construction and response parsing through the overridden client. This is a major-version override outside the parent's declared `^4.1.1` range, so this test is a compatibility check for the observed APN dependency path, not a general Jayson 4-to-5 equivalence claim.
+
+A repeated production audit after a clean install reports **53 affected records: 5 high, 0 moderate, 48 low, 0 critical**. The `stream-json` advisory and package are absent. The remaining high `bigint-buffer` and low `elliptic` findings still require upstream replacement or separately evidenced input/call-path mitigation; this change does not close C1-11. Current published `@metamask/fox-sdk@2.9.0` still pins `@solana/spl-token@0.4.14`, and the latest published `bigint-buffer@1.1.5` and `elliptic@6.6.1` remain affected. APN's MetaMask gasless helper imports Fox EVM and keyring entry points rather than its Solana entry point, but that source boundary alone does not prove the high advisory unreachable in every transitive SDK path.
