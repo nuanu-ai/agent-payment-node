@@ -146,8 +146,8 @@ For a direct transfer already in `unknown_finality`, `operation resume` checks
 the saved transaction's receipt and can complete or confirm a revert when the
 existing receipt proof is sufficient. If the receipt is absent, unreadable, or
 still insufficient, it remains nonterminal. Resume does not submit the signed
-transaction again or attempt nonce-based superseding proof from that starting
-state.
+transaction again, load custody material, or attempt nonce-based superseding
+proof from that starting state.
 
 Monad's asynchronous execution also applies a per-account reserve-balance rule,
 which APN does not model and this change did not verify. A native MON transfer
