@@ -38,8 +38,8 @@ export function usdtUserOperation(plan: UsdtTransferPlan, input: {
 }
 
 /** EntryPoint v0.8 EIP-712 hash; the 7702 marker makes the EntryPoint hash the delegate in place of initCode. */
-export function usdtUserOperationHash(op: UsdtUserOperation): Hex {
-  return hashTypedData({
+export function usdtUserOperationTypedData(op: UsdtUserOperation) {
+  return {
     types: { PackedUserOperation: [
       { type: "address", name: "sender" }, { type: "uint256", name: "nonce" }, { type: "bytes", name: "initCode" },
       { type: "bytes", name: "callData" }, { type: "bytes32", name: "accountGasLimits" }, { type: "uint256", name: "preVerificationGas" },
@@ -55,5 +55,9 @@ export function usdtUserOperationHash(op: UsdtUserOperation): Hex {
       paymasterAndData: concat([op.paymaster, padHex(op.paymasterVerificationGasLimit, { size: 16 }),
         padHex(op.paymasterPostOpGasLimit, { size: 16 }), op.paymasterData]),
     },
-  });
+  } as const;
+}
+
+export function usdtUserOperationHash(op: UsdtUserOperation): Hex {
+  return hashTypedData(usdtUserOperationTypedData(op));
 }
