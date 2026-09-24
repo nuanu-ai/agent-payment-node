@@ -1,3 +1,4 @@
+import type { Address } from "../model.js";
 import { type UsdtPolicyPrepared, type UsdtPreparePort } from "./policy-prepare.js";
 export declare const USDT_BOUND_OPERATION_SCHEMA: "apn.gasless-usdt-bound-operation.v1";
 type Persisted<T> = T extends bigint ? string : T extends readonly (infer Item)[] ? readonly Persisted<Item>[] : T extends object ? {
@@ -23,6 +24,13 @@ export type UsdtBoundRecovery = {
     readonly reason: string;
     readonly operation: UsdtBoundOperation;
 };
+export interface UsdtBoundReplayIntent {
+    readonly profile: string;
+    readonly recipient: Address;
+    readonly grossAtomic: string;
+    readonly maxFeeAtomic: string;
+    readonly minReceivedAtomic: string;
+}
 /** Validate both hashes and the relationships that a rehashed but inconsistent record could violate. */
 export declare function validateUsdtBoundOperation(value: unknown): UsdtBoundOperation;
 /** Separate bound journal: one key claims across its profiles, independently of every other payment family's claims. */
@@ -44,6 +52,8 @@ export declare class UsdtBoundOperationRepository {
     private publish;
     private cleanupOldTemps;
     load(profileHash: string, operationId: string): Promise<UsdtBoundOperation | null>;
+    /** Read the durable claim before fresh policy or RPC work; repair claim-only publication for an exact caller intent. */
+    replay(profileHash: string, idempotencyKey: string, intent: UsdtBoundReplayIntent): Promise<UsdtBoundOperation | null>;
     create(profileHash: string, binding: UsdtPolicyPrepared, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation>;
 }
 /** Classification reads only. Drift or revocation never advances the operation or authorizes an effect. */
