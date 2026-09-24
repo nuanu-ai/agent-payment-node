@@ -11,7 +11,7 @@ import type { UsdtPreparePort } from "./policy-prepare.js";
 import type { UsdtSettlement } from "./receipt.js";
 
 export const USDT_EXECUTION_SCHEMA = "apn.gasless-usdt-execution.v1" as const;
-export type UsdtExecutionState = "planned" | "reserved" | "submitting" | "submitted_pending" | "unknown_finality" | "finalized" | "failed_confirmed_revert";
+export type UsdtExecutionState = "planned" | "reserved" | "failed_before_effect" | "submitting" | "submitted_pending" | "unknown_finality" | "finalized" | "failed_confirmed_revert";
 export interface UsdtExecutionIntent {
   readonly operationId: string;
   readonly profileHash: string;
@@ -43,7 +43,7 @@ export interface UsdtExecutionRecord extends UsdtExecutionIntent {
 }
 const HASH = /^[a-f0-9]{64}$/u;
 const DECIMAL = /^(0|[1-9][0-9]*)$/u;
-const STATES: readonly UsdtExecutionState[] = ["planned", "reserved", "submitting", "submitted_pending", "unknown_finality", "finalized", "failed_confirmed_revert"];
+const STATES: readonly UsdtExecutionState[] = ["planned", "reserved", "failed_before_effect", "submitting", "submitted_pending", "unknown_finality", "finalized", "failed_confirmed_revert"];
 function fail(reason: string, code: "APN_OPERATION_BLOCKED" | "APN_STATE_CORRUPT" | "APN_IDEMPOTENCY_CONFLICT" = "APN_OPERATION_BLOCKED"): never {
   throw new ApnError(code, `Gasless USDT execution refused: ${reason}.`, { rail: "gasless_usdt", reason });
 }
@@ -90,7 +90,7 @@ export function validateUsdtExecutionRecord(value: unknown): UsdtExecutionRecord
       value.quoteHash, value.integrityHash].some(v => typeof v !== "string" || !HASH.test(v)) ||
     typeof value.reservationId !== "string" || !HASH.test(value.reservationId) ||
     (value.userOperationHash !== null && (typeof value.userOperationHash !== "string" || !/^0x[0-9a-f]{64}$/u.test(value.userOperationHash))) ||
-    ((value.state === "planned" || value.state === "reserved") && value.userOperationHash !== null) ||
+    ((value.state === "planned" || value.state === "reserved" || value.state === "failed_before_effect") && value.userOperationHash !== null) ||
     ((value.state === "submitting" || value.state === "submitted_pending" || value.state === "finalized" ||
       value.state === "failed_confirmed_revert") && value.userOperationHash === null) ||
     (terminal && (typeof value.outcomeDigest !== "string" || !HASH.test(value.outcomeDigest) ||
@@ -119,6 +119,38 @@ export class UsdtExecutionJournal extends SecureStateStore {
     return `gasless-usdt-executions/${operationId}.json`;
   }
   private lock(operationId: string): string { return `gasless-usdt-execution:${operationId}`; }
+  /** OS advisory lock held from pre-submit recovery through signing and the durable may-have-sent marker. */
+  async withEffectLock<T>(operationId: string,
+    action: (abortUnsent: (bound: UsdtBoundOperation, now: Date) => Promise<UsdtExecutionRecord | null>) => Promise<T>): Promise<T> {
+    await this.initialize();
+    return await this.withLocks([`gasless-usdt-effect:${operationId}`], async () =>
+      await action(async (bound, now) => await this.abortUnsentLocked(bound, now)));
+  }
+  async abortUnsent(bound: UsdtBoundOperation, now: Date): Promise<UsdtExecutionRecord | null> {
+    return await this.withEffectLock(bound.operationId, async abort => await abort(bound, now));
+  }
+  /** Caller holds the effect lock. The terminal marker is fsynced before releasing a reserved usage lease. */
+  private async abortUnsentLocked(boundValue: UsdtBoundOperation, now: Date): Promise<UsdtExecutionRecord | null> {
+    const bound = validateUsdtBoundOperation(boundValue); await this.ready();
+    return await this.withLocks([this.lock(bound.operationId)], async () => {
+      const current = await this.load(bound.operationId);
+      if (current === null) return null;
+      if (canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound))) fail("execution_binding_changed");
+      if (!["planned", "reserved", "failed_before_effect"].includes(current.state)) return null;
+      const next = current.state === "failed_before_effect" ? current : seal({ ...recordBody(current),
+        state: "failed_before_effect", updatedAt: instant(now) });
+      if (next !== current) await this.write(next);
+      const lease = await this.usage.load(identity(current.sender), current.reservationId);
+      if (lease !== null) {
+        if (lease.policyDigest !== current.policyDigest || lease.amountAtomic !== bound.binding.plan.request.grossAtomic ||
+          !["reserved", "failed_before_effect"].includes(lease.state)) fail("usage_reservation_mismatch", "APN_STATE_CORRUPT");
+        await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
+          policyDigest: current.policyDigest, state: "failed_before_effect", expectedCurrentStates: ["reserved", "failed_before_effect"],
+          outcomeDigest: hashObject({ operationId: bound.operationId, bindingHash: bound.binding.bindingHash, result: "failed_before_effect" }), now });
+      }
+      return next;
+    });
+  }
   async load(operationId: string): Promise<UsdtExecutionRecord | null> {
     if (!HASH.test(operationId)) fail("operation_id_invalid");
     const value = await this.readJson(this.path(operationId));

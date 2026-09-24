@@ -16,6 +16,7 @@ import type { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import type { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
 import type { GaslessUsdtCommandPrepare } from "./gasless-usdt/command-prepare.js";
+import type { GaslessUsdtCommandExecute } from "./gasless-usdt/command-execute.js";
 import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
@@ -52,6 +53,7 @@ export interface CoreDependencies {
     readonly gasless?: GaslessDependencies;
     readonly gaslessUsdt?: GaslessUsdtOperationService;
     readonly gaslessUsdtPrepare?: GaslessUsdtCommandPrepare;
+    readonly gaslessUsdtExecute?: GaslessUsdtCommandExecute;
     readonly bridge?: BridgeDependencies;
     readonly circleApproval?: CircleV2ApprovalExecutor;
     readonly circleSource?: CircleV2SourceService;
@@ -104,6 +106,7 @@ export declare class RuntimeContext {
     readonly gasless?: GaslessDependencies;
     readonly gaslessUsdt?: GaslessUsdtOperationService;
     readonly gaslessUsdtPrepare?: GaslessUsdtCommandPrepare;
+    readonly gaslessUsdtExecute?: GaslessUsdtCommandExecute;
     readonly bridge?: BridgeDependencies;
     readonly circleApproval?: CircleV2ApprovalExecutor;
     readonly circleSource?: CircleV2SourceService;

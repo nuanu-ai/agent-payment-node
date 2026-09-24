@@ -238,6 +238,18 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Gasless USDT prepare runtime is unavailable.", { reason: "gasless_usdt_prepare_runtime_unavailable" });
                 return operationOutcome(await service.prepare(request));
             }
+            case "gasless.usdt.execute":
+            case "gasless.usdt.execution-status":
+            case "gasless.usdt.observe": {
+                const service = this.context.gaslessUsdtExecute;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Gasless USDT execution runtime is unavailable.");
+                if (request.command === "gasless.usdt.execute")
+                    return operationOutcome(await service.execute(request.profileHash, request.operationId));
+                if (request.command === "gasless.usdt.observe")
+                    return operationOutcome(await service.observe(request.profileHash, request.operationId));
+                return dataOutcome(await service.status(request.profileHash, request.operationId), "local_gasless_usdt_execution_journal");
+            }
             case "gasless.usdt.status":
             case "gasless.usdt.resume":
                 if (this.context.gaslessUsdt === undefined)

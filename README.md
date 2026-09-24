@@ -644,7 +644,7 @@ apn stargate token observe --operation <operation-id>
 apn stargate token status --operation <operation-id>
 apn stargate token receipt --operation <operation-id>
 apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>]
-apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] --to <address> --amount <decimal> --max-fee-wei <wei> [--priority-fee-wei <wei>] --idempotency-key <key>
+apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] --to <address> --amount <decimal> --max-fee-wei <wei> [--priority-fee-wei <wei>] [--rpc-read-mode batch] --idempotency-key <key>
 apn --version
 apn mcp serve
 apn mcp config
@@ -701,6 +701,9 @@ apn oneclick source status --operation <operation-id>
 apn gasless usdt prepare --profile <profile> --to <address> --amount <gross-USDT> --max-fee <USDT> --min-received <USDT> --idempotency-key <key>
 apn gasless usdt status --profile-hash <hash> --operation <operation-id>
 apn gasless usdt resume --profile-hash <hash> --operation <operation-id>
+apn gasless usdt execute --profile-hash <hash> --operation <operation-id>
+apn gasless usdt execution-status --profile-hash <hash> --operation <operation-id>
+apn gasless usdt observe --profile-hash <hash> --operation <operation-id>
 apn gasless capabilities [--profile <profile>]
 apn gasless balance --profile <profile> --chain <chain-id>
 apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --idempotency-key <key>

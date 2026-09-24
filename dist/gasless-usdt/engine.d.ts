@@ -19,7 +19,7 @@ export interface UsdtAccountState {
 export interface UsdtChainPort {
     verifyPins(): Promise<void>;
     account(sender: UsdtTransferRequest["sender"]): Promise<UsdtAccountState>;
-    receiptAt(transactionHash: Hex): Promise<UsdtChainReceipt | null>;
+    receiptAt(transactionHash: Hex, finality?: "safe" | "finalized"): Promise<UsdtChainReceipt | null>;
 }
 export declare function quoteUsdtGasless(ports: {
     sponsor: UsdtSponsorPort;

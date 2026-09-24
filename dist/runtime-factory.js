@@ -39,6 +39,7 @@ import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
 import { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
 import { GaslessUsdtCommandPrepare } from "./gasless-usdt/command-prepare.js";
+import { GaslessUsdtCommandExecute } from "./gasless-usdt/command-execute.js";
 import { UsdtOperationRepository } from "./gasless-usdt/operation.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
@@ -205,7 +206,13 @@ export function createApnCore(bound, options = {}) {
         ...(bound.request.command === "gasless.usdt.prepare" || options.gaslessUsdtPrepare !== undefined ? {
             gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock, options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)), options.gaslessUsdtPrepareOptions),
         } : {}),
+        ...(["gasless.usdt.execute", "gasless.usdt.execution-status", "gasless.usdt.observe"].includes(bound.request.command) ||
+            options.gaslessUsdtExecute !== undefined ? {
+            gaslessUsdtExecute: options.gaslessUsdtExecute ?? new GaslessUsdtCommandExecute(state, clock, wrappingSecret, options.gaslessUsdtExecuteOptions),
+        } : {}),
         bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
+            lineaArchiveDeploymentScalarCode: bound.request.command === "bridge.prepare" &&
+                process.env.APN_LIFI_LINEA_ARCHIVE_SCALAR_CODE === "1",
             custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
             ...(bound.request.command === "bridge.approve" ? { approval: new TtyBridgeApproval() } : {}) },
         chainAccounts, directRails,

@@ -20,6 +20,7 @@ export class RuntimeContext {
     gasless;
     gaslessUsdt;
     gaslessUsdtPrepare;
+    gaslessUsdtExecute;
     bridge;
     circleApproval;
     circleSource;
@@ -85,6 +86,8 @@ export class RuntimeContext {
             this.gaslessUsdt = dependencies.gaslessUsdt;
         if (dependencies.gaslessUsdtPrepare !== undefined)
             this.gaslessUsdtPrepare = dependencies.gaslessUsdtPrepare;
+        if (dependencies.gaslessUsdtExecute !== undefined)
+            this.gaslessUsdtExecute = dependencies.gaslessUsdtExecute;
         if (dependencies.bridge !== undefined)
             this.bridge = dependencies.bridge;
         if (dependencies.circleApproval !== undefined)

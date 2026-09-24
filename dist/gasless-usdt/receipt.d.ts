@@ -1,4 +1,4 @@
-import type { Hex } from "../model.js";
+import type { Address, Hex } from "../model.js";
 import { type UsdtTransferPlan } from "./model.js";
 export interface UsdtReceiptLog {
     readonly address: string;
@@ -11,6 +11,8 @@ export interface UsdtChainReceipt {
     readonly status: "success" | "reverted";
     readonly logs: readonly UsdtReceiptLog[];
 }
+/** A failed UserOperationEvent in a successful, canonical EntryPoint transaction proves no account effect. */
+export declare function verifyUsdtRevert(sender: Address, userOpHash: Hex, receipt: UsdtChainReceipt): void;
 /** Public accounting a completed transfer proves; nothing here comes from the bundler's own report. */
 export interface UsdtSettlement {
     readonly transactionHash: Hex;

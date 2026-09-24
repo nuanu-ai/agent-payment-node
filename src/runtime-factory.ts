@@ -76,6 +76,7 @@ import { TtyBridgeApproval } from "./lifi/tty.js";
 import type { GaslessDependencies } from "./gasless/service.js";
 import { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
 import { GaslessUsdtCommandPrepare, type UsdtCommandPrepareOptions } from "./gasless-usdt/command-prepare.js";
+import { GaslessUsdtCommandExecute, type UsdtCommandExecuteOptions } from "./gasless-usdt/command-execute.js";
 import { UsdtOperationRepository } from "./gasless-usdt/operation.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
@@ -135,6 +136,8 @@ export interface RuntimeFactoryOptions {
   readonly gaslessUsdt?: GaslessUsdtOperationService;
   readonly gaslessUsdtPrepare?: GaslessUsdtCommandPrepare;
   readonly gaslessUsdtPrepareOptions?: UsdtCommandPrepareOptions;
+  readonly gaslessUsdtExecute?: GaslessUsdtCommandExecute;
+  readonly gaslessUsdtExecuteOptions?: UsdtCommandExecuteOptions;
   readonly bridge?: BridgeDependencies;
   readonly circleApproval?: CircleApprovalService;
   readonly circleSource?: CircleV2SourceService;
@@ -348,6 +351,11 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(bound.request.command === "gasless.usdt.prepare" || options.gaslessUsdtPrepare !== undefined ? {
       gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock,
         options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)), options.gaslessUsdtPrepareOptions),
+    } : {}),
+    ...(["gasless.usdt.execute", "gasless.usdt.execution-status", "gasless.usdt.observe"].includes(bound.request.command) ||
+      options.gaslessUsdtExecute !== undefined ? {
+      gaslessUsdtExecute: options.gaslessUsdtExecute ?? new GaslessUsdtCommandExecute(state, clock, wrappingSecret,
+        options.gaslessUsdtExecuteOptions),
     } : {}),
     bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
       lineaArchiveDeploymentScalarCode: bound.request.command === "bridge.prepare" &&

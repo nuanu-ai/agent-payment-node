@@ -231,6 +231,10 @@ export type CommandRequest = {
     readonly profileHash: string;
     readonly operationId: string;
 } | {
+    readonly command: "gasless.usdt.execute" | "gasless.usdt.execution-status" | "gasless.usdt.observe";
+    readonly profileHash: string;
+    readonly operationId: string;
+} | {
     readonly command: "gasless.usdt.prepare";
     readonly profile: string;
     readonly recipient: Address;

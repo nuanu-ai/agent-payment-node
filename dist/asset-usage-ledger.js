@@ -117,6 +117,25 @@ export class AssetUsageLedger extends SecureStateStore {
             amountAtomic: sumUsage(await this.loadBucket(identity), now),
         }));
     }
+    /** Read the daily total and one reservation from the same locked bucket snapshot. */
+    async usageWithReservation(identityValue, reservationIdValue, now) {
+        const identity = validateIdentity(identityValue);
+        const reservationId = digest(reservationIdValue, "Reservation id");
+        const at = instant(now);
+        await this.ready();
+        return await this.withLocks([this.bucketLock(identity)], async () => {
+            const records = await this.loadBucket(identity);
+            return {
+                snapshot: {
+                    windowPolicy: ASSET_USAGE_WINDOW,
+                    windowStart: `${at.slice(0, 10)}T00:00:00.000Z`,
+                    windowEnd: new Date(Date.parse(`${at.slice(0, 10)}T00:00:00.000Z`) + 86_400_000).toISOString(),
+                    amountAtomic: sumUsage(records, now),
+                },
+                reservation: records.find(record => record.reservationId === reservationId) ?? null,
+            };
+        });
+    }
     async load(identityValue, reservationIdValue) {
         const identity = validateIdentity(identityValue);
         const reservationId = digest(reservationIdValue, "Reservation id");

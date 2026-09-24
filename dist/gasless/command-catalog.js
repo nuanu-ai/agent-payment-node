@@ -42,6 +42,22 @@ export const GASLESS_COMMANDS = [
         summary: "Re-read a saved gasless USDT operation; no state transition is performed.", options: [profileHash, operation],
         effect: { class: "local_read", summary: "Reads the explicitly bound gasless USDT journal; never signs or submits." }, approval: readApproval, output,
         states: done, recovery: [], examples: ["apn gasless usdt resume --profile-hash <hash> --operation <operation-id>"] },
+    { path: ["gasless", "usdt", "execute"], synopsis: "apn gasless usdt execute --profile-hash <hash> --operation <operation-id>",
+        summary: "Approve and send one existing bound Ethereum USDT operation from a foreground terminal.", options: [profileHash, operation],
+        effect: { class: "payment_submit", summary: "Rechecks owner policy, usage, safe account and quote; locally signs, journals the UserOperation hash, and makes at most one keyless Pimlico send." },
+        approval: { class: "foreground_tty", when: "Each new bound operation; CLI only." }, output,
+        states: { terminal: ["finalized", "failed_confirmed_revert"], non_terminal: ["submitted_pending", "unknown_finality"] },
+        recovery: [{ command_path: ["gasless", "usdt", "observe"], when: "Observe the original hash through finalized Ethereum evidence; never resubmit." }],
+        examples: ["apn gasless usdt execute --profile-hash <hash> --operation <operation-id>"] },
+    { path: ["gasless", "usdt", "execution-status"], synopsis: "apn gasless usdt execution-status --profile-hash <hash> --operation <operation-id>",
+        summary: "Read the local execution journal for a bound gasless USDT operation.", options: [profileHash, operation],
+        effect: { class: "local_read", summary: "Reads local bound and execution journals only." }, approval: readApproval, output,
+        states: done, recovery: [], examples: ["apn gasless usdt execution-status --profile-hash <hash> --operation <operation-id>"] },
+    { path: ["gasless", "usdt", "observe"], synopsis: "apn gasless usdt observe --profile-hash <hash> --operation <operation-id>",
+        summary: "Observe the original submitted hash through finalized Ethereum receipts.", options: [profileHash, operation],
+        effect: { class: "network_read", summary: "Reads the keyless bundler and public Ethereum RPC; records a verified outcome or unknown finality, never signs or sends." },
+        approval: readApproval, output, states: done, recovery: [],
+        examples: ["apn gasless usdt observe --profile-hash <hash> --operation <operation-id>"] },
     { path: ["gasless", "capabilities"], synopsis: "apn gasless capabilities [--profile <profile>]",
         summary: "Show exact mainnet USDC fee-transfer adapters and separate acceptance for all four profile types.",
         options: [{ ...profile, required: false }], effect: { class: "none", summary: "Static discovery; no wallet, state, Keychain, RPC or provider access." },
@@ -97,11 +113,11 @@ export function bindGaslessCommand(path, o) {
         return { command: "gasless.usdt.prepare", profile: o["--profile"], idempotencyKey: o["--idempotency-key"],
             recipient: gaslessAddress(o["--to"], "APN_INVALID_INPUT"), grossAtomic: gaslessDecimal(o["--amount"], 6, true),
             maxFeeAtomic: gaslessDecimal(o["--max-fee"], 6), minReceivedAtomic: gaslessDecimal(o["--min-received"], 6, true) };
-    if (path === "gasless usdt status" || path === "gasless usdt resume") {
+    if (["gasless usdt status", "gasless usdt resume", "gasless usdt execute", "gasless usdt execution-status", "gasless usdt observe"].includes(path)) {
         const profileHash = o["--profile-hash"];
         if (!/^[a-f0-9]{64}$/u.test(profileHash))
             gaslessFailure("APN_INVALID_INPUT", "gasless_usdt_profile_hash");
-        return { command: path.endsWith("status") ? "gasless.usdt.status" : "gasless.usdt.resume", profileHash,
+        return { command: `gasless.usdt.${path.split(" ").at(-1)}`, profileHash,
             operationId: o["--operation"] };
     }
     if (path === "gasless transfer approve")
