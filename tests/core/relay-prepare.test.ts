@@ -12,7 +12,8 @@ import { accountBindingHash, capabilityHash, metamaskDirectCapabilitySnapshot, t
 import { StateProfileRepository } from "../../src/profile-repository.js";
 import { evmAddressLock } from "../../src/evm-address-ownership.js";
 import { bindArgv } from "../../src/command-binder.js";
-import { temporaryState } from "./helpers.js";
+import { temporaryState, TestNative } from "./helpers.js";
+import { ApnCore } from "../../src/core.js";
 
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const recipient = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
@@ -113,6 +114,46 @@ test("provider rebind waits for both old and new owner locks", async t => {
   assert.equal(saved, false);
   release(); await Promise.all([lock, pending]);
   assert.equal((await repository.load(old.profile_hash))?.public_address, payer);
+});
+
+test("Relay releases its owner lock during quote so rebind can finish, then refuses the changed owner", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  const repository = new StateProfileRepository(state), old = providerProfile(state, "other", recipient);
+  await repository.save(old);
+  let release!: () => void, entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const quoting = new Promise<void>(resolve => { entered = resolve; });
+  const service = new RelayUnsignedPrepareService(state, { now: () => instant }, undefined, {
+    activePolicy: async () => policy(), publicAccount: async () => payer, dailyUsage: async () => "0",
+    quote: async intent => { entered(); await gate; return validateRelayQuote(await quoteFixture(), intent); },
+  });
+  const pending = service.prepare(input); await quoting;
+  try {
+    await repository.save({ ...old, public_address: payer,
+      account_binding_hash: accountBindingHash(old.provider_id, payer), revision: 2 });
+  } finally { release(); }
+  await assert.rejects(pending, { code: "APN_OPERATION_BLOCKED" });
+});
+
+test("Relay releases its owner lock during quote so wallet ensure can finish", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  let release!: () => void, entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const quoting = new Promise<void>(resolve => { entered = resolve; });
+  const service = new RelayUnsignedPrepareService(state, { now: () => instant }, undefined, {
+    activePolicy: async () => policy(), publicAccount: async () => payer, dailyUsage: async () => "0",
+    quote: async intent => { entered(); await gate; return validateRelayQuote(await quoteFixture(), intent); },
+  });
+  const pending = service.prepare(input); await quoting;
+  const native = new TestNative(); native.walletAddress = payer;
+  const core = new ApnCore({ state, native });
+  try {
+    const ensured = await core.wallet.ensure("default") as { readonly address: string };
+    assert.equal(ensured.address, payer);
+  } finally { release(); }
+  assert.equal((await pending).state, "prepared");
 });
 
 test("Relay prepare freezes one validated quote, replays without another quote, and survives restart", async t => {
