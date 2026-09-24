@@ -645,6 +645,7 @@ cache: every run reads the chains.
 
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
+apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
 apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>
 apn stargate native execute --operation <operation-id>
 apn stargate native observe --operation <operation-id>

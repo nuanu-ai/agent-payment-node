@@ -1,3 +1,4 @@
+import { RelayUnsignedPrepareService, type RelayPreparePorts } from "./relay/prepare.js";
 import { userInfo } from "node:os";
 import { resolve } from "node:path";
 import type { BoundCommand } from "./command-binder.js";
@@ -117,6 +118,8 @@ import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
 export interface RuntimeFactoryOptions {
+  readonly relayPrepare?: RelayUnsignedPrepareService;
+  readonly relayPreparePorts?: RelayPreparePorts;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -307,6 +310,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(stargateNative === undefined ? {} : { stargateNative }),
     ...(stargateToken === undefined ? {} : { stargateToken }),
     // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
+    ...(bound.request.command === "relay.prepare" || options.relayPrepare !== undefined ? { relayPrepare: options.relayPrepare ?? new RelayUnsignedPrepareService(state, clock, undefined, options.relayPreparePorts) } : {}),
     ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
       portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
     } : {}),
