@@ -5,6 +5,7 @@ import { x402Network } from "./x402-network.js";
 import { exactKeys, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { jsonRpcRequestHeaders } from "./rpc-request-headers.js";
 import { EvmRpc } from "./evm-rpc.js";
 import { parseAtomic } from "./money.js";
 import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses } from "./network-policy.js";
@@ -456,7 +457,7 @@ async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJs
         const request = httpsRequest(endpoint, {
             method: "POST",
             family: selected.family,
-            headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body).toString() },
+            headers: jsonRpcRequestHeaders(body),
             lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
         }, (response) => {
             const details = { rpcMethod, ...(response.statusCode === undefined ? {} : { httpStatus: response.statusCode }) };
