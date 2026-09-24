@@ -39,9 +39,10 @@ export interface EvmTransactionInput {
 }
 
 export interface EvmRpcPort {
-  /** Optional, command-scoped native prepare read grouping. */
+  /** Optional, command-scoped direct prepare read grouping. */
   prepareLineaNative?(): EvmNativePrepareReads;
   prepareUnichainNative?(): EvmNativePrepareReads;
+  prepareUnichainUsdc?(): EvmNativePrepareReads;
   assertChain(chainId: DirectEvmChainId): Promise<void>;
   balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
   nonce(chainId: DirectEvmChainId, address: Address, tag: "pending" | "latest"): Promise<string>;

@@ -162,6 +162,7 @@ test("Linea grouped prepare enforces ten physical attempts across all phases", a
 });
 
 const UNICHAIN_HASH = `0x${"d".repeat(64)}`;
+const UNICHAIN_USDC = "0x078D782b760474a361dDA0AF3839290b0EF57AD6" as const;
 const ORACLE_ABI = [
   { type: "function", name: "getL1FeeUpperBound", stateMutability: "view", inputs: [{ name: "size", type: "uint256" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "getOperatorFee", stateMutability: "view", inputs: [{ name: "gas", type: "uint256" }], outputs: [{ type: "uint256" }] },
@@ -254,4 +255,92 @@ test("Unichain batch checks selected chain before balance and rejects a changed 
   wrongChain = false;
   await assert.rejects(grouped.balance(WALLET, { chainId: 130, token: "native" }), { code: "APN_RPC_PROTOCOL" });
   assert.equal(bodies.length, 4);
+});
+
+function unichainUsdcRead(method: string, params: readonly unknown[]): unknown {
+  if (method === "eth_getCode") { assert.equal(params[0], UNICHAIN_USDC); assert.equal(params[1], "0x10"); return "0x6001"; }
+  if (method === "eth_call" && (params[0] as { to: string }).to === UNICHAIN_USDC) {
+    const call = params[0] as { data: string };
+    assert.equal(params[1], "0x10");
+    if (call.data === "0x313ce567") return toHex(6n, { size: 32 });
+    assert.equal(call.data, `0x70a08231${WALLET.slice(2).toLowerCase().padStart(64, "0")}`);
+    return toHex(2_000_000n, { size: 32 });
+  }
+  return unichainRead(method, params);
+}
+
+test("Unichain USDC opt-in matches scalar token and OP fee values in nine POSTs instead of 22", async (t) => {
+  const bodies = mockHttps(t, (body) => {
+    const reads = Array.isArray(body) ? body : [body];
+    const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id, result: unichainUsdcRead(entry.method, entry.params) }));
+    return { status: 200, raw: JSON.stringify(Array.isArray(body) ? responses.reverse() : responses[0]) };
+  });
+  const rpc = new HttpsBaseRpc(endpoint).evm;
+  const selection = { chainId: 130 as const, token: UNICHAIN_USDC, decimals: 6 };
+  const transaction = { chainId: 130 as const, from: WALLET, to: UNICHAIN_USDC, valueAtomic: "0", data: "0xa9059cbb" as const };
+  const grouped = rpc.prepareUnichainUsdc();
+  const balance = await grouped.balance(WALLET, selection);
+  const { nonce, estimated } = await grouped.nonceEstimate(WALLET, transaction);
+  const economics = { nonceAtomic: nonce, ...estimated,
+    maximumGasCostAtomic: (BigInt(estimated.gasLimitAtomic) * BigInt(estimated.maxFeePerGasAtomic)).toString() };
+  const quote = await grouped.feeQuote(economics);
+  assert.equal(bodies.length, 9);
+  assert.equal(bodies.flatMap((raw) => { const body = JSON.parse(raw); return Array.isArray(body) ? body : [body]; }).length, 22);
+  assert.deepEqual(bodies.map((raw) => { const body = JSON.parse(raw); return (Array.isArray(body) ? body : [body]).map((call: any) => call.method); }), [
+    ["eth_chainId", "eth_getBlockByNumber"], ["eth_getBalance", "eth_getCode", "eth_call", "eth_call"], ["eth_getBlockByNumber", "eth_chainId"],
+    ["eth_chainId", "eth_chainId"], ["eth_getTransactionCount", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getBlockByNumber"],
+    ["eth_chainId", "eth_chainId"], ["eth_chainId", "eth_getBlockByNumber"], ["eth_call", "eth_call"],
+    ["eth_getBlockByNumber", "eth_chainId"],
+  ]);
+  assert.equal(balance.assetAtomic, "2000000"); assert.equal(balance.nativeAtomic, BigInt("0x100000000000000").toString());
+  assert.equal(balance.asset.decimalsSource, "onchain"); assert.equal(quote.totalQuoteWei, (BigInt(economics.maximumGasCostAtomic) + 1007n).toString());
+  const groupedPosts = bodies.length;
+  const scalarBalance = await rpc.balance(WALLET, selection);
+  const scalarNonce = await rpc.nonce(130, WALLET, "pending");
+  const scalarEstimate = await rpc.estimate(transaction);
+  const scalarQuote = await rpc.feeQuote(130, economics);
+  assert.equal(bodies.length - groupedPosts, 22);
+  assert.deepEqual({ ...balance, observedAt: "fixed" }, { ...scalarBalance, observedAt: "fixed" });
+  assert.equal(nonce, scalarNonce); assert.deepEqual(estimated, scalarEstimate);
+  assert.deepEqual({ ...quote, observedAt: "fixed" }, { ...scalarQuote, observedAt: "fixed" });
+});
+
+test("Unichain USDC batch refuses chain mismatch and pinned block reorg before nonce reads", async (t) => {
+  let wrongChain = true;
+  const bodies = mockHttps(t, (body) => {
+    const reads = Array.isArray(body) ? body : [body];
+    const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id,
+      result: wrongChain && entry.method === "eth_chainId" ? "0x1" :
+        entry.method === "eth_getBlockByNumber" && entry.params[0] === "0x10"
+          ? { number: "0x10", hash: `0x${"e".repeat(64)}`, baseFeePerGas: "0x2" }
+          : unichainUsdcRead(entry.method, entry.params) }));
+    return { status: 200, raw: JSON.stringify(Array.isArray(body) ? responses.reverse() : responses[0]) };
+  });
+  const grouped = new HttpsBaseRpc(endpoint).evm.prepareUnichainUsdc();
+  await assert.rejects(grouped.balance(WALLET, { chainId: 130, token: UNICHAIN_USDC, decimals: 6 }), { code: "APN_CHAIN_MISMATCH" });
+  assert.equal(bodies.length, 1);
+  wrongChain = false;
+  await assert.rejects(grouped.balance(WALLET, { chainId: 130, token: UNICHAIN_USDC, decimals: 6 }), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(bodies.length, 4);
+});
+
+test("Unichain USDC batch rejects provider 403 after one POST without scalar fallback", async (t) => {
+  const bodies = mockHttps(t, () => ({ status: 403, raw: secret }));
+  await assert.rejects(new HttpsBaseRpc(endpoint).evm.prepareUnichainUsdc().balance(WALLET,
+    { chainId: 130, token: UNICHAIN_USDC, decimals: 6 }), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(bodies.length, 1);
+});
+
+for (const fault of ["no-code", "wrong-decimals"] as const) test(`Unichain USDC batch refuses ${fault} before nonce reads`, async (t) => {
+  const bodies = mockHttps(t, (body) => {
+    const reads = Array.isArray(body) ? body : [body];
+    const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id,
+      result: fault === "no-code" && entry.method === "eth_getCode" ? "0x" :
+        fault === "wrong-decimals" && entry.method === "eth_call" && entry.params[0]?.data === "0x313ce567"
+          ? toHex(18n, { size: 32 }) : unichainUsdcRead(entry.method, entry.params) }));
+    return { status: 200, raw: JSON.stringify(Array.isArray(body) ? responses.reverse() : responses[0]) };
+  });
+  await assert.rejects(new HttpsBaseRpc(endpoint).evm.prepareUnichainUsdc().balance(WALLET,
+    { chainId: 130, token: UNICHAIN_USDC, decimals: 6 }), { code: "APN_ASSET_MISMATCH" });
+  assert.equal(bodies.length, fault === "no-code" ? 2 : 3);
 });
