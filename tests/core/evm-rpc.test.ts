@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeFunctionData, toHex } from "viem";
 import { EvmRpc } from "../../src/evm-rpc.js";
+import { evmRpcBlock } from "../../src/evm-rpc-codec.js";
+import { ApnError } from "../../src/errors.js";
 import { checkEvmTransferFunding } from "../../src/evm-transfer-approval.js";
 import { resolveEvmAsset } from "../../src/evm-asset.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
@@ -33,6 +35,33 @@ test("production RPC envelope parser rejects duplicate, conflicting and extra JS
     '{"jsonrpc":"2.0","id":"1","id":"1","error":{"message":"pruned"}}',
     '{"jsonrpc":"2.0","id":"1","error":{"message":"pruned"},"extra":true}',
   ]) assert.throws(() => parseRpcLogEnvelope(raw, "1"), { code: "APN_RPC_PROTOCOL" });
+});
+
+test("malformed RPC envelope reports a bounded method and stage without response data", () => {
+  const secret = "https://private.example/key?token=secret";
+  const raw = JSON.stringify({ jsonrpc: "2.0", id: "1", error: { message: secret } });
+  assert.throws(() => parseRpcResultEnvelope(raw, "1", "eth_chainId"), (error: unknown) => {
+    assert.ok(error instanceof ApnError);
+    assert.equal(error.code, "APN_RPC_PROTOCOL");
+    assert.deepEqual(error.details, { rpcMethod: "eth_chainId", stage: "result_envelope" });
+    assert.equal(JSON.stringify(error).includes(secret), false);
+    return true;
+  });
+  assert.throws(() => parseRpcResultEnvelope(raw, "1", secret), {
+    code: "APN_RPC_PROTOCOL", details: { rpcMethod: "unknown", stage: "result_envelope" },
+  });
+});
+
+test("null EVM block reports the fixed method and bounded tag category", async () => {
+  await assert.rejects(evmRpcBlock(async () => null, "latest"), (error: unknown) => {
+    assert.ok(error instanceof ApnError);
+    assert.equal(error.code, "APN_RPC_PROTOCOL");
+    assert.deepEqual(error.details, { rpcMethod: "eth_getBlockByNumber", stage: "block_result", blockTag: "latest" });
+    return true;
+  });
+  await assert.rejects(evmRpcBlock(async () => null, "0x1234private"), {
+    code: "APN_RPC_PROTOCOL", details: { rpcMethod: "eth_getBlockByNumber", stage: "block_result", blockTag: "number" },
+  });
 });
 
 class Wire {
