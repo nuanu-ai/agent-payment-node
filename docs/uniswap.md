@@ -45,6 +45,10 @@ that exact pin.
   transaction with `eth_call` and `eth_estimateGas` at the same block, and
   saves the quote, the unsigned transaction and the chain evidence under the
   state root, keyed by the quote hash. It needs `APN_ETHEREUM_RPC_URL`.
+  Set `APN_UNISWAP_NATIVE_BATCH_READS=1` to group independent native quote reads into
+  strict JSON-RPC batches of at most three requests. A provider batch error aborts the
+  quote; APN does not fall back to scalar reads. The modeled successful ETH to USDT
+  quote uses ten HTTP POSTs without retries.
 - `prepare` requires the owner's active sealed policy to admit both assets
   for the `swap` rail with the keyless pin. Without it, `prepare` refuses with
   `swap_owner_admission_required`. The per-operation cap is checked here, and
