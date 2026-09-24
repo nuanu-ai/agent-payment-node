@@ -431,3 +431,95 @@ test("production file journal absent-record load is a true local read without di
   const journal = new FileStargateNativeJournal(root); assert.equal(await journal.load("c".repeat(64)), null);
   await assert.rejects(lstat(join(root, "stargate-v2-native")), (error: any) => error.code === "ENOENT");
 });
+
+test("opted-in Stargate native prepare matches scalar frozen evidence with sixteen modeled POSTs", async () => {
+  const scalar = setup(), expected = await prepareStargateV2NativeEth(request(), scalar.ports, scalar.journal);
+  const grouped = setup();
+  const posts: string[][] = [];
+  const baseSourceCall = grouped.ports.sourceCall, destinationCall = grouped.ports.destinationCall;
+  const sourceCall = async (method: string, params: readonly unknown[]) => { posts.push([method]); return method === "eth_maxPriorityFeePerGas" ? "0x1" : baseSourceCall(method, params); };
+  const destination = async (method: string, params: readonly unknown[]) => method === "eth_getBlockByNumber"
+    ? { number: "0x10", hash: DEST_BLOCK } : method === "eth_getBalance" ? "0x1f4" : destinationCall(method, params);
+  const sourceBatch: NonNullable<StargateNativeExecutionPorts["sourcePrepareBatch"]> = async calls => {
+    posts.push(calls.map(item => item.method)); return await Promise.all(calls.map(item => item.method === "eth_maxPriorityFeePerGas" ? "0x1" : baseSourceCall(item.method, item.params)));
+  };
+  const destinationBatch: NonNullable<StargateNativeExecutionPorts["destinationPrepareBatch"]> = async calls => {
+    posts.push(calls.map(item => item.method)); return await Promise.all(calls.map(item => destination(item.method, item.params)));
+  };
+  const ports: StargateNativeExecutionPorts = { ...grouped.ports, destinationCall: destination,
+    sourceCall, sourcePrepareBatch: sourceBatch, destinationPrepareBatch: destinationBatch,
+    prepareEnvelope: async tx => {
+      const [chain, block] = await sourceBatch([{ method: "eth_chainId", params: [] },
+        { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+      assert.equal(chain, "0x1"); assert.equal((block as any).hash, BLOCK);
+      const [nonce, balance, gas, tip] = await sourceBatch([
+        { method: "eth_getTransactionCount", params: [tx.from, "pending"] },
+        { method: "eth_getBalance", params: [tx.from, "pending"] },
+        { method: "eth_estimateGas", params: [{ from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.valueAtomic).toString(16)}` }] },
+        { method: "eth_maxPriorityFeePerGas", params: [] },
+      ]);
+      return { nonceAtomic: BigInt(nonce as string).toString(), nativeBalanceAtomic: BigInt(balance as string).toString(),
+        gasLimitAtomic: (BigInt(gas as string) * 12n / 10n + 1n).toString(), maxFeePerGasAtomic: "2", maxPriorityFeePerGasAtomic: BigInt(tip as string).toString() };
+    },
+    destinationBalance: async recipient => {
+      const [block] = await destinationBatch([{ method: "eth_getBlockByNumber", params: ["safe", false] }]);
+      const [balance] = await destinationBatch([{ method: "eth_getBalance", params: [recipient, (block as any).number] }]);
+      const [checked] = await destinationBatch([{ method: "eth_getBlockByNumber", params: [(block as any).number, false] }]);
+      assert.equal((checked as any).hash, (block as any).hash);
+      return { balanceAtomic: BigInt(balance as string).toString(), blockNumberAtomic: "16", blockHash: DEST_BLOCK };
+    },
+  };
+  // Match the scalar fixture's envelope and destination snapshot while measuring transport phases.
+  const originalEnvelope = grouped.ports.prepareEnvelope, originalBalance = grouped.ports.destinationBalance;
+  const measured: StargateNativeExecutionPorts = { ...ports,
+    prepareEnvelope: async tx => { await ports.prepareEnvelope(tx); return originalEnvelope(tx); },
+    destinationBalance: async (recipient, tag) => { await ports.destinationBalance(recipient, tag); return originalBalance(recipient, tag); },
+  };
+  const actual = await prepareStargateV2NativeEth(request(), measured, grouped.journal);
+  assert.deepEqual(actual, expected);
+  assert.equal(posts.length, 16);
+  assert.deepEqual(posts.map(group => group.length), [2, 2, 1, 2, 7, 2, 2, 6, 2, 1, 2, 4, 1, 1, 1, 2]);
+});
+
+test("opted-in Stargate native prepare rejects changed pinned destination block and final fee", async () => {
+  for (const changed of ["block", "fee"] as const) {
+    const s = setup(); let heads = 0, quotes = 0;
+    const destination = async (method: string, params: readonly unknown[]) => method === "eth_getBlockByNumber"
+      ? { number: "0x10", hash: ++heads > 1 && changed === "block" ? BLOCK : DEST_BLOCK } : s.ports.destinationCall(method, params);
+    const source = async (method: string, params: readonly unknown[]) => {
+      if (method === "eth_call" && changed === "fee") {
+        try {
+          const decoded = decodeFunctionData({ abi: STARGATE_QUOTE_ABI, data: (params[0] as { data: Hex }).data });
+          if (decoded.functionName === "quoteSend" && ++quotes === 2)
+            return encodeAbiParameters(STARGATE_QUOTE_SEND_OUTPUT, [{ nativeFee: FEE + 1n, lzTokenFee: 0n }]);
+        } catch { /* the call uses the send ABI */ }
+      }
+      return s.ports.sourceCall(method, params);
+    };
+    const ports: StargateNativeExecutionPorts = { ...s.ports, sourceCall: source, destinationCall: destination,
+      sourcePrepareBatch: async calls => await Promise.all(calls.map(item => source(item.method, item.params))),
+      destinationPrepareBatch: async calls => await Promise.all(calls.map(item => destination(item.method, item.params))),
+    };
+    await assert.rejects(prepareStargateV2NativeEth(request(), ports, s.journal),
+      { code: changed === "block" ? "APN_RPC_PROTOCOL" : "APN_REPREPARE_REQUIRED" });
+    assert.equal(s.journal.value, null);
+  }
+});
+
+
+test("opted-in Stargate prepare rejects a same-height source reorg after final fee and before journal save", async () => {
+  const s = setup(); let numbered = 0;
+  const source = async (method: string, params: readonly unknown[]) => {
+    if (method === "eth_getBlockByNumber" && params[0] === "0x10" && ++numbered === 2)
+      return { number: "0x10", hash: DEST_BLOCK };
+    return s.ports.sourceCall(method, params);
+  };
+  const destination = async (method: string, params: readonly unknown[]) => method === "eth_getBlockByNumber"
+    ? { number: "0x10", hash: DEST_BLOCK } : s.ports.destinationCall(method, params);
+  const ports: StargateNativeExecutionPorts = { ...s.ports, sourceCall: source, destinationCall: destination,
+    sourcePrepareBatch: async calls => await Promise.all(calls.map(item => source(item.method, item.params))),
+    destinationPrepareBatch: async calls => await Promise.all(calls.map(item => destination(item.method, item.params))),
+  };
+  await assert.rejects(prepareStargateV2NativeEth(request(), ports, s.journal), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(s.journal.value, null);
+});

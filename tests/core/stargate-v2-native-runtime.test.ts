@@ -6,7 +6,7 @@ import { createApnCore } from "../../src/runtime-factory.js";
 import { StateStore } from "../../src/state.js";
 import { STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
 import { StargateJsonRpc, StargateNativeService, confirmedStargateSourceReceipt,
-  observeStargateDestination } from "../../src/stargate-v2/native-runtime.js";
+  observeStargateDestination, stargateDestinationBalance } from "../../src/stargate-v2/native-runtime.js";
 import { temporaryState } from "./helpers.js";
 
 const SOURCE = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
@@ -122,4 +122,33 @@ test("CLI binding dispatches status locally and observe explicitly through the S
     { stateRoot: temporary.root, stargateNative: service }).execute({ command: "stargate.native.observe", operationId: id });
   assert.deepEqual(calls, [`status:${id}`, `observe:${id}`]); assert.equal(status.proof_class, "durable_public_state");
   assert.equal(observe.operation && (observe.operation as any).phase, "observed");
+});
+
+test("Stargate read batch restores shuffled IDs and refuses malformed responses without retry", async () => {
+  for (const shape of ["shuffled", "missing", "duplicate", "suberror"] as const) {
+    let posts = 0;
+    const rpc = new StargateJsonRpc("https://rpc.example", { request: async (...args: any[]) => {
+      posts++;
+      const sent = JSON.parse(args[2]); assert.ok(Array.isArray(sent));
+      const rows = sent.map((item: any, index: number) => ({ jsonrpc: "2.0", id: item.id, result: index === 0 ? "0x1" : "0x82" }));
+      const received = shape === "shuffled" ? rows.reverse() : shape === "missing" ? rows.slice(0, 1) :
+        shape === "duplicate" ? [rows[0], rows[0]] : [rows[0], { jsonrpc: "2.0", id: rows[1]!.id, error: { code: -1, message: "private" } }];
+      return { status: 200, body: JSON.stringify(received) };
+    } } as any);
+    const batch = rpc.batchCall([{ method: "eth_chainId", params: [] }, { method: "eth_getBalance", params: [OWNER, "latest"] }]);
+    if (shape === "shuffled") assert.deepEqual(await batch, ["0x1", "0x82"]);
+    else await assert.rejects(batch, { code: "APN_RPC_PROTOCOL" });
+    assert.equal(posts, 1);
+    await assert.rejects(rpc.batchCall([{ method: "eth_sendRawTransaction", params: ["0x12"] }]), { code: "APN_RPC_PROTOCOL" });
+    assert.equal(posts, 1);
+  }
+});
+
+
+test("destination balance snapshot rejects same-height reorg after the balance read", async () => {
+  let blocks = 0;
+  const rpc = { call: async (method: string) => method === "eth_getBalance" ? "0x10" :
+    { number: "0x20", hash: ++blocks === 1 ? BLOCK : DEST_TX } };
+  await assert.rejects(stargateDestinationBalance(rpc as any, OWNER, "safe"), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(blocks, 2);
 });

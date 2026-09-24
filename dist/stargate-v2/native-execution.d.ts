@@ -4,7 +4,7 @@ import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
 import { type StargateV2FinalityPolicyProvenance, type StargateV2FinalityTag, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
-import { type StargateV2QuoteEvidence } from "./quote.js";
+import { type StargateReadBatch, type StargateV2QuoteEvidence } from "./quote.js";
 export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality";
 export interface StargateNativeTransition {
     readonly phase: StargateNativePhase;
@@ -123,6 +123,8 @@ export interface StargateConfirmedReceipt {
 export interface StargateNativeExecutionPorts {
     readonly sourceCall: EvmRpcCall;
     readonly destinationCall: EvmRpcCall;
+    readonly sourcePrepareBatch?: StargateReadBatch;
+    readonly destinationPrepareBatch?: StargateReadBatch;
     readonly destinationBalance: (recipient: Address, finalityTag: StargateV2FinalityTag) => Promise<Readonly<{
         balanceAtomic: string;
         blockNumberAtomic: string;
