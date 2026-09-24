@@ -97,6 +97,25 @@ test("mismatched allowance refuses and reverted swap requires explicit cleanup",
   g.observations.set(H("3"), { status: "success", transactionHash: H("3"), gasDebitWei: "50", allowanceAtomic: "0" }); g.allowance("0");
   op = await g.runtime.status(op.operationId); assert.equal(op.phase, "cleaned");
 });
+test("successful swap with residual allowance requires explicit cleanup and a zero-allowance observation", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); let op = await f.runtime.approve(f.operation.operationId);
+  f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" }); f.allowance("1000000");
+  op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "approval_observed");
+  op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "submitted"); assert.deepEqual(f.sends, ["approval", "swap"]);
+  f.observations.set(H("2"), { status: "success", transactionHash: H("2"), gasDebitWei: "100", allowanceAtomic: "1", inputDebitAtomic: "1000000", outputCreditAtomic: "990000" }); f.allowance("1");
+  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "swap_effect_mismatch");
+  assert.equal(op.receipt, null); assert.equal(op.swapAttempt?.transactionHash, H("2")); assert.equal(f.sends.filter((kind) => kind === "swap").length, 1);
+
+  op = await f.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.equal(op.receipt, null);
+  assert.deepEqual(f.sends, ["approval", "swap", "cleanup"]);
+  f.observations.set(H("3"), { status: "success", transactionHash: H("3"), gasDebitWei: "50", allowanceAtomic: "1" });
+  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleanup_unknown_finality"); assert.equal(op.receipt, null);
+  assert.equal(f.sends.filter((kind) => kind === "swap").length, 1);
+
+  f.observations.set(H("3"), { status: "success", transactionHash: H("3"), gasDebitWei: "50", allowanceAtomic: "0" }); f.allowance("0");
+  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleaned"); assert.equal(op.receipt, null);
+  assert.equal(f.sends.filter((kind) => kind === "swap").length, 1);
+});
 test("post-approval revalidation drift durably requires explicit cleanup and never signs the swap", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); let op = await f.runtime.approve(f.operation.operationId);
   f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" }); f.allowance("1000000");
