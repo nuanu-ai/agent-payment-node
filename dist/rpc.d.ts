@@ -2,6 +2,10 @@ import type { EvmChainId } from "./evm-asset.js";
 import { EvmRpc } from "./evm-rpc.js";
 import type { Address, Hex } from "./model.js";
 import type { BalanceSnapshot, FeeEstimate, RpcPort, RpcReceipt, X402AuthorizationState, X402AuthorizationUsedLogs, X402BlockReference, X402PrepareEvidence, X402RpcBlock, X402RpcHead, X402RpcPort, X402RpcReceipt, X402TransferLogs } from "./ports.js";
+export type ReadOnlyRpcBatchCall = {
+    readonly method: string;
+    readonly params: readonly unknown[];
+};
 export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     readonly evm: EvmRpc;
     readonly endpoint: URL;
@@ -59,11 +63,13 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params: readonly unknown[]): Promise<unknown>;
     coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>): Promise<readonly unknown[]>;
     private call;
+    batchCall(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]>;
     private callX402Logs;
     private resolvePublicAddresses;
     private remainingTimeoutMs;
 }
 export declare function parseRpcResultEnvelope(raw: string, id: string): unknown;
+export declare function parseRpcBatchResultEnvelope(raw: string, ids: readonly number[]): readonly unknown[];
 export declare function parseRpcLogEnvelope(raw: string, id: string): {
     readonly kind: "complete";
     readonly value: unknown;
