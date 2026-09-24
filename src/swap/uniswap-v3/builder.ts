@@ -14,6 +14,7 @@ import { readUniswapV3Quote } from "./onchain.js";
 import { UNISWAP_V3_KEYLESS_MECHANISM_PIN, uniswapV3Pair, type UniswapV3PinVerifier } from "./pins.js";
 import { SavedUniswapQuoteStore, UNISWAP_KEYLESS_EXECUTION_SCHEMA, uniswapEvidenceHash, uniswapGasDisplay,
   type UniswapKeylessEvidence, type UniswapKeylessMaterial } from "./material.js";
+import { nativeReads, type NativeBatchCall } from "./native-rpc.js";
 
 export interface UniswapKeylessQuoteRequest {
   readonly profile: string; readonly account: string; readonly recipient: string; readonly outputToken: string; readonly amountAtomic: string;
@@ -33,8 +34,16 @@ export class KeylessUniswapQuoteBuilder implements GuardedSwapReadOnlyBuilder<Un
   async quote(input: UniswapKeylessQuoteRequest & { readonly now: Date }): Promise<unknown> {
     const request = validateRequest(input), now = Math.floor(input.now.getTime() / 1000);
     if (request.deadline <= now || request.deadline - now > 1_800) invalid("Uniswap quote deadline must be in the next 30 minutes.");
-    await this.assertChain();
-    const block = await evmRpcBlock(this.call, "latest"), baseFee = evmRpcQuantity(block.raw.baseFeePerGas);
+    const grouped = (this.call as NativeBatchCall).batch !== undefined;
+    if (grouped) (this.call as NativeBatchCall).beginQuote?.();
+    let block: Awaited<ReturnType<typeof evmRpcBlock>>;
+    if (grouped) {
+      const [chain, raw] = await nativeReads(this.call, [{ method: "eth_chainId", params: [] },
+        { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+      this.checkChain(chain);
+      block = await evmRpcBlock(async () => raw, "latest");
+    } else { await this.assertChain(); block = await evmRpcBlock(this.call, "latest"); }
+    const baseFee = evmRpcQuantity(block.raw.baseFeePerGas);
     const codePins = await this.verifyPins(this.call, block.tag), pair = request.pair;
     const pool = await readUniswapV3Quote(this.call, pair, request.amount, block.tag);
     if (pool.priceImpactBps > request.ownerSlippageCapBps) blocked("Pool price impact exceeds the owner slippage cap.", "uniswap_price_impact");
@@ -44,18 +53,42 @@ export class KeylessUniswapQuoteBuilder implements GuardedSwapReadOnlyBuilder<Un
       minimumOutputAtomic: minimum.toString(), deadline: request.deadline, pair });
     const tx = { from: request.account, to: UNISWAP_ROUTER, data: encoded.data, value: `0x${request.amount.toString(16)}` };
     let callResult: `0x${string}`, gasEstimate: bigint;
-    try { callResult = evmRpcHex(await this.call("eth_call", [tx, block.tag]));
-      gasEstimate = evmRpcQuantity(await this.call("eth_estimateGas", [tx, block.tag])); }
-    catch { return blocked("Exact Universal Router simulation reverted or was unavailable.", "uniswap_simulation"); }
+    let groupedBalance: unknown;
+    try {
+      if (grouped) {
+        const values = await nativeReads(this.call, [{ method: "eth_call", params: [tx, block.tag] },
+          { method: "eth_estimateGas", params: [tx, block.tag] },
+          { method: "eth_getBalance", params: [request.account, block.tag] }]);
+        callResult = evmRpcHex(values[0]); gasEstimate = evmRpcQuantity(values[1]); groupedBalance = values[2];
+      } else { callResult = evmRpcHex(await this.call("eth_call", [tx, block.tag]));
+        gasEstimate = evmRpcQuantity(await this.call("eth_estimateGas", [tx, block.tag])); }
+    }
+    catch (error) {
+      if (grouped && error instanceof ApnError &&
+        !(error.code === "APN_RPC_PROTOCOL" && error.details?.rpcSubcallId !== undefined &&
+          (error.details?.rpcMethod === "eth_call" || error.details?.rpcMethod === "eth_estimateGas"))) throw error;
+      return blocked("Exact Universal Router simulation reverted or was unavailable.", "uniswap_simulation");
+    }
     const gasLimit = (gasEstimate * GAS_MARGIN_NUMERATOR + GAS_MARGIN_DENOMINATOR - 1n) / GAS_MARGIN_DENOMINATOR;
     if (gasLimit > request.maxGasLimit) blocked("Simulated gas with margin exceeds the owner gas cap.", "uniswap_gas_cap");
     if (baseFee + request.maxPriorityFeePerGas > request.maxFeePerGas) blocked("Owner fee cap is below the current base fee plus priority fee.", "uniswap_fee_cap");
-    const balance = evmRpcQuantity(await this.call("eth_getBalance", [request.account, block.tag]));
+    const balance = evmRpcQuantity(grouped ? groupedBalance : await this.call("eth_getBalance", [request.account, block.tag]));
     if (balance < request.amount + gasLimit * request.maxFeePerGas) blocked("Account balance does not cover input plus the maximum network fee.", "uniswap_native_balance");
-    await recheckEvmBlock(this.call, block);
-    const head = await evmRpcBlock(this.call, "latest"), drift = BigInt(head.number) - BigInt(block.number);
+    let head: Awaited<ReturnType<typeof evmRpcBlock>>;
+    if (grouped) {
+      const [rawRecheck, rawHead, chain] = await nativeReads(this.call, [
+        { method: "eth_getBlockByNumber", params: [block.tag, false] },
+        { method: "eth_getBlockByNumber", params: ["latest", false] },
+        { method: "eth_chainId", params: [] },
+      ]);
+      if ((await evmRpcBlock(async () => rawRecheck, block.tag)).hash !== block.hash) {
+        throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.");
+      }
+      head = await evmRpcBlock(async () => rawHead, "latest"); this.checkChain(chain);
+    } else { await recheckEvmBlock(this.call, block); head = await evmRpcBlock(this.call, "latest"); }
+    const drift = BigInt(head.number) - BigInt(block.number);
     if (drift < 0n || drift > BigInt(MAX_HEAD_DRIFT)) blocked("Quote block is outside the allowed head drift.", "uniswap_head_drift");
-    await this.assertChain();
+    if (!grouped) await this.assertChain();
     const envelope: UniswapTransactionEnvelope = { from: request.account, to: UNISWAP_ROUTER, data: encoded.data,
       value: request.amount.toString(), gasLimit: gasLimit.toString(), chainId: 1, maxFeePerGas: request.maxFeePerGas.toString(),
       maxPriorityFeePerGas: request.maxPriorityFeePerGas.toString() };
@@ -89,8 +122,10 @@ export class KeylessUniswapQuoteBuilder implements GuardedSwapReadOnlyBuilder<Un
   async load(quoteHash: string): Promise<UniswapKeylessMaterial | null> { return await this.quotes.load(quoteHash); }
 
   private async assertChain(): Promise<void> {
-    if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap requires exact Ethereum chain 1 RPC.");
+    this.checkChain(await this.call("eth_chainId", []));
   }
+  private checkChain(value: unknown): void { if (evmRpcQuantity(value) !== 1n)
+    throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap requires exact Ethereum chain 1 RPC."); }
 }
 
 function validateRequest(input: UniswapKeylessQuoteRequest & { readonly now: Date }) {
