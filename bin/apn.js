@@ -1,2 +1,5 @@
 #!/usr/bin/env node
-import "../dist/bin.js";
+import { installRuntimeDependencyBoundary } from "../dist/runtime-dependency-boundary.js";
+
+installRuntimeDependencyBoundary();
+await import("../dist/bin.js");
