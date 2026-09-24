@@ -9,7 +9,7 @@ import { mmError, mmFail } from "../reasons.js";
 import { helperResponse, MM_HELPER_VERSION, type HelperRequest } from "./protocol.js";
 
 const MAX_IO = 1024 * 1024;
-const HELPER_ENTRY = fileURLToPath(new URL("./helper-entry.js", import.meta.url));
+const HELPER_ENTRY = fileURLToPath(new URL("./helper-bootstrap.js", import.meta.url));
 
 export interface HelperRunnerOptions { readonly environment: NodeJS.ProcessEnv; readonly timeoutMs: number }
 export interface MetaMaskGaslessHelperRunner { run(request: HelperRequest, options: HelperRunnerOptions): Promise<unknown> }
