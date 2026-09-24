@@ -11,7 +11,7 @@ import { USDT_GASLESS } from "./model.js";
 import { preparePolicyBoundUsdt } from "./policy-prepare.js";
 import { usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
 import { GaslessUsdtOperationService } from "./service.js";
-/** One command owns exactly nineteen RPC attempts at most: fourteen safe-chain reads and five sponsor reads. */
+/** One command owns exactly seven physical RPC attempts at most: two safe-chain batches and five sponsor reads. */
 export class UsdtCommandReadBudget {
     state;
     transport;
@@ -38,7 +38,7 @@ export class UsdtCommandReadBudget {
     count() { return this.attempts; }
     async request(endpoint, method, body, maxBytes, code) {
         this.guard(0);
-        if (this.attempts >= 19)
+        if (this.attempts >= 7)
             throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read budget exhausted.", { reason: "gasless_usdt_read_budget" });
         this.attempts += 1;
         const result = await this.scheduler.schedule(endpoint, this.now, this.wait, (milliseconds) => this.guard(milliseconds), async () => {
