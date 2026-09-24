@@ -62,7 +62,7 @@ class FailOnceEffectJournal extends UniswapTokenEffectJournal {
     return await super.seal(op, kind, transactionHash, envelope, now, providerId);
   }
 }
-async function production(root: string, now: Date, account: string, key: Hex, allowanceInput: string) {
+async function production(root: string, now: Date, account: string, key: Hex, allowanceInput: string, pooled = false) {
   const state = new StateStore(root), master = Buffer.alloc(32, 73), wrapping = { load: async () => Buffer.from(master), create: async () => Buffer.from(master) };
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("token-swap", key, account);
   let allowance = allowanceInput, phrase = "", observedTx: unknown = null, observedReceipt: unknown = null, finalizedSwap = false;
@@ -88,7 +88,8 @@ async function production(root: string, now: Date, account: string, key: Hex, al
   const terminal = async () => ({ fd: 1, write: async (screen: string) => { phrase = /Type ([a-z0-9-]+) and/u.exec(screen)?.[1] ?? ""; },
     read: async function* () { yield Buffer.from(`${phrase}\n`); }, close: async () => undefined });
   let rpcNow = now.getTime(); const sessionCall = (maxHttpRequests: number) => createTokenRpc({ environment: {
-    APN_ETHEREUM_RPC_URL: "https://rpc.example", APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example",
+    ...(pooled ? { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify(["https://rpc.example"]) }
+      : { APN_ETHEREUM_RPC_URL: "https://rpc.example" }), APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example",
   }, state, now: () => rpcNow, pacingNow: () => rpcNow, wait: async (milliseconds) => { rpcNow += milliseconds; }, maxHttpRequests,
     deadlineMs: 300_000, transport: { request: async (_url, _method, body) => { const request = JSON.parse(body!); const rows = Array.isArray(request) ? request : [request];
       const response = await Promise.all(rows.map(async (row: any) => ({ jsonrpc: "2.0", id: row.id, result: await rawCall(row.method, row.params) })));
@@ -328,6 +329,28 @@ test("production token RPC phases stay within exact physical budgets through fin
       usageState: usage.state, cleanupReason: "measured_cleanup" }, at));
   p.setAllowance("1000000"); p.clearObservation(); call = p.sessionCall(14); const cleanup = await runtime(call, "cleanup").cleanup(cleanupOp.operationId); telemetry = call.telemetry!()!;
   assert.equal(cleanup.phase, "cleanup_submitted"); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [14, 24]);
+});
+
+test("single-primary pooled quote and prepare use eight and nine physical requests with bounded pin batches", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const at = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
+    account = privateKeyToAccount(key).address; await setup(temporary.root, "3000000", account);
+  const p = await production(temporary.root, at, account, key, "0", true);
+  const pins = async (call: TokenRpcCall, tag: Hex) => { let cursor = 0;
+    for (const size of [3, 3, 3]) await tokenBatch(call, "archive", Array.from({ length: size }, () => ({
+      method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], cachePolicy: "immutable" as const,
+      decoder: (value: unknown) => value }))); };
+  const runtime = (call: TokenRpcCall) => createUniswapTokenRuntime({ state: p.state, wrapping: p.wrapping,
+    clock: { now: () => at }, call, foreground: "refuse", verifyPins: pins });
+  let call = p.sessionCall(8); const quote = await runtime(call).quote({ ...quoteRequest(), account, recipient: account,
+    deadline: Math.floor(at.getTime() / 1000) + 600 }) as { quoteHash: string };
+  assert.deepEqual([call.telemetry!()!.httpAttempts, call.telemetry!()!.logicalItems], [8, 18]);
+  call = p.sessionCall(9); const op = await runtime(call).prepare({ command: "swap.uniswap-token.prepare", profile: "token-swap",
+    quoteHash: quote.quoteHash, idempotencyKey: "pooled-rpc-budget" });
+  assert.equal(op.phase, "prepared"); assert.deepEqual([call.telemetry!()!.httpAttempts, call.telemetry!()!.logicalItems], [9, 21]);
+  const rows = (await new UniswapTokenRpcBudgetJournal(temporary.root).load(op.operationId))!.rows;
+  assert.deepEqual(rows.map((row) => [row.command, row.cap, row.physicalRequests]), [
+    ["swap.uniswap-token.quote", 8, 8], ["swap.uniswap-token.prepare", 9, 9],
+  ]);
 });
 
 test("post-wallet-save journal failure commits nonce and restart repairs and broadcasts the cached effect once", async (t) => {

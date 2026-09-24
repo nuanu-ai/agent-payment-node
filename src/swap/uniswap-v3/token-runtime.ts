@@ -23,7 +23,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
     async quote(request: Extract<CommandRequest, {
         readonly command: "swap.uniswap-token.quote";
     }>) { const binding = domainHash("apn.uniswap-token-quote-attempt.v1", canonicalJson(request));
-      const cap = this.poolCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote"); let result: { readonly quoteHash: string } | undefined;
+      const cap = this.quotePrepareCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote"); let result: { readonly quoteHash: string } | undefined;
       try { result = await this.builder.quote(request) as { readonly quoteHash: string }; return result; }
       finally { if (reservation !== undefined) { await this.rpcBudget!.settle(binding, reservation, this.rpc?.telemetry?.() ?? null,
           this.rpc?.effectAttempts?.() ?? 0, this.rpc?.primaryPoolTelemetry?.()); if (result !== undefined) await this.rpcBudget!.linkQuote(binding, result.quoteHash); } } }
@@ -37,7 +37,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
             blocked("Token quote expired.", "uniswap_token_quote_expired");
         const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
             quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
-        const cap = this.poolCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
+        const cap = this.quotePrepareCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
         try { await this.ports.confirm(material); }
         finally { if (reservation !== undefined) await this.rpcBudget!.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null,
           this.rpc?.effectAttempts?.() ?? 0, this.rpc?.primaryPoolTelemetry?.()); }
@@ -68,5 +68,6 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
         finally { await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0,
           this.rpc?.primaryPoolTelemetry?.()); } }); }
     private poolCap(base: number) { return base + (this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
+    private quotePrepareCap(base: number) { return this.rpc?.primaryPoolEnabled?.() === true ? this.poolCap(base) - 1 : base; }
 }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
