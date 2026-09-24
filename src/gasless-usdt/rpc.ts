@@ -12,6 +12,7 @@ import type { UsdtUserOperation } from "./userop.js";
 const MAX_RESPONSE = 1024 * 1024;
 const SPONSOR_METHODS = new Set(["pimlico_getTokenQuotes", "pimlico_getUserOperationGasPrice", "pm_getPaymasterData",
   "eth_getUserOperationReceipt"]);
+const SEND_METHODS = new Set(["eth_sendUserOperation"]);
 const CHAIN_METHODS = new Set(["eth_chainId", "eth_getCode", "eth_call", "eth_getTransactionCount", "eth_getTransactionReceipt",
   "eth_getBlockByNumber"]);
 const READS = parseAbi(["function basisPointsRate() view returns (uint256)", "function maximumFee() view returns (uint256)",
@@ -153,6 +154,12 @@ export function usdtSponsorPort(transport: GaslessTransport): UsdtSponsorPort {
       return rpcHex(value.receipt.transactionHash, 32, 32);
     },
   };
+}
+
+/** A single keyless Pimlico dispatch. The caller must persist its submitting intent first. */
+export function usdtSendPort(transport: GaslessTransport): (op: UsdtUserOperation) => Promise<Hex> {
+  const rpc = new UsdtJsonRpc(transport, USDT_GASLESS.bundlerUrl, SEND_METHODS);
+  return async op => rpcHex(await rpc.call("eth_sendUserOperation", [op, USDT_GASLESS.entryPoint]), 32, 32);
 }
 
 /** Canonical Ethereum reads through the owner's explicit `APN_ETHEREUM_RPC_URL`; no default endpoint exists. */
