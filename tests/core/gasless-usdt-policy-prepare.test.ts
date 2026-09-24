@@ -7,14 +7,22 @@ import { hashObject } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import type { ActiveAssetPolicy } from "../../src/allowlist-active-policy.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
-import { preparePolicyBoundUsdt, type UsdtPolicyPrepareRequest, type UsdtPreparePort } from "../../src/gasless-usdt/policy-prepare.js";
+import { preparePolicyBoundUsdt, type UsdtPolicyPrepared, type UsdtPolicyPrepareRequest, type UsdtPreparePort } from "../../src/gasless-usdt/policy-prepare.js";
 import type { UsdtSponsorPort } from "../../src/gasless-usdt/engine.js";
 import type { UsdtUserOperation } from "../../src/gasless-usdt/userop.js";
 import type { Hex } from "../../src/model.js";
 import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
 import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
 import { USDT_BOUND_OPERATION_SCHEMA, UsdtBoundOperationRepository, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
-import { temporaryState } from "./helpers.js";
+import { TestNative, TestRpc, ensureWallet, makeCore, temporaryState } from "./helpers.js";
+import { bindArgv } from "../../src/command-binder.js";
+import { runCli } from "../../src/cli.js";
+import { createMcpServer } from "../../src/mcp-server.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
+import { createApnCore } from "../../src/runtime-factory.js";
+import { COMMANDS } from "../../src/command-catalog.js";
+import { MCP_TOOLS } from "../../src/mcp-projection.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RECIPIENT = getAddress("0x000000000000000000000000000000000000dEaD");
@@ -52,6 +60,144 @@ function fixture() {
     setUsage: (value: string) => { usage = value; }, setQuote: (value: typeof QUOTE) => { quote = value; },
     setPrice: (value: typeof PRICE) => { price = value; } };
 }
+
+test("installed CLI and MCP prepare save the same unsigned bound operation; status reads it", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), options = { stateRoot: temporary.root, clock: { now: () => NOW },
+    gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor },
+    ids: { next: () => "12345678-1234-4234-8234-123456789abc" } };
+  const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "installed-001"];
+  const bound = bindArgv(argv);
+  assert.equal(bound.request.command, "gasless.usdt.prepare");
+  const cli = await runCli(argv, {}, options);
+  assert.equal(cli.ok, true, JSON.stringify(cli.error));
+  const server = createMcpServer(options), [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "gasless-usdt-prepare-test", version: "1.0.0" });
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const result = await client.callTool({ name: "apn_gasless_usdt_prepare", arguments: { profile: "owner", to: RECIPIENT,
+    amount: "1", max_fee: "0.5", min_received: "0.5", idempotency_key: "installed-001" } });
+  assert.equal(result.content[0]?.type, "text");
+  if (result.content[0]?.type !== "text") throw new Error("MCP text result missing");
+  assert.equal(result.content[0].text, JSON.stringify(cli));
+  const record = cli.operation as { operationId: string; profileHash: string; signerBoundary: string; dispatch: string;
+    usageReservation: string; binding: UsdtPolicyPrepared };
+  assert.equal(record.profileHash, allowlistProfileHash("owner"));
+  assert.equal(record.signerBoundary, "unavailable");
+  assert.equal(record.dispatch, "disabled");
+  assert.equal(record.usageReservation, "disabled");
+  assert.equal(record.binding.account.entryPointNonce, "7");
+  assert.equal(record.binding.plan.feeCapAtomic, "500000");
+  const status = await createApnCore(bindArgv(["gasless", "usdt", "status", "--profile-hash", record.profileHash,
+    "--operation", record.operationId]), options).execute({ command: "gasless.usdt.status", profileHash: record.profileHash,
+    operationId: record.operationId });
+  assert.equal(status.ok, true);
+  assert.deepEqual(status.operation, cli.operation);
+  assert.equal(f.offered.length, 1);
+  assert.equal(f.offered.every(op => op.signature !== "0x"), true); // estimate placeholder only; no signer is reachable
+});
+
+test("command refuses inactive or changed policy before RPC or journal publication", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  for (const mutate of [(f: ReturnType<typeof fixture>) => f.setPolicy(null),
+    (f: ReturnType<typeof fixture>) => f.setPolicy(active({ owner: RECIPIENT })),
+    (f: ReturnType<typeof fixture>) => f.setPolicy(active({ per: "999999" }))]) {
+    const f = fixture(); mutate(f);
+    const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+      "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "refuse-001"];
+    const outcome = await runCli(argv, {}, { stateRoot: temporary.root, clock: { now: () => NOW },
+      gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } });
+    assert.equal(outcome.ok, false);
+    assert.equal(f.offered.length, 0);
+  }
+});
+
+test("bound USDT key replays exact material and conflicts on a changed intent within its journal", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), options = { stateRoot: temporary.root, clock: { now: () => NOW },
+    gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } };
+  const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "family-local-001"];
+  const first = await runCli(argv, {}, options), replay = await runCli(argv, {}, options);
+  assert.equal(first.ok, true); assert.deepEqual(replay.operation, first.operation);
+  const changed = [...argv]; changed[changed.indexOf("--to") + 1] = getAddress("0x0000000000000000000000000000000000001111");
+  const conflict = await runCli(changed, {}, options);
+  assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  const definition = COMMANDS.find(command => command.path.join(" ") === "gasless usdt prepare")!;
+  assert.deepEqual(definition.options.find(option => option.name === "--idempotency-key")?.constraints,
+    ["gasless_usdt_bound_journal_only_across_profiles"]);
+  const mcpKey = MCP_TOOLS.find(tool => tool.name === "apn_gasless_usdt_prepare")!.inputSchema.properties.idempotency_key;
+  assert.match(JSON.stringify(mcpKey), /gasless_usdt_bound_journal_only_across_profiles/u);
+});
+
+test("CLI and MCP replay the first bound claim after time, policy, safe block and sponsor drift without fresh reads", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = fixture(), options = { stateRoot: temporary.root, clock: { now: () => new Date(NOW.getTime() + 86_400_000) },
+    gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor },
+    ids: { next: () => "12345678-1234-4234-8234-123456789abc" } };
+  const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "drift-replay-001"];
+  const first = await runCli(argv, {}, options);
+  assert.equal(first.ok, true, JSON.stringify(first.error));
+  const record = first.operation as { operationId: string; profileHash: string };
+  const finalPath = join(temporary.root, "gasless-usdt-bound-operations", record.profileHash, `${record.operationId}.json`);
+  await rm(finalPath);
+  let newReads = 0;
+  f.ports.prepare.now = () => new Date(NOW.getTime() + 86_400_000);
+  f.ports.prepare.activePolicy = async () => { newReads += 1; return null; };
+  f.ports.prepare.dailyUsage = async () => { newReads += 1; return "999999999"; };
+  f.ports.prepare.safeSnapshot = async () => { newReads += 1; throw new Error("safe block drift"); };
+  f.ports.sponsor.tokenQuote = async () => { newReads += 1; throw new Error("quote drift"); };
+  f.ports.sponsor.gasPrice = async () => { newReads += 1; throw new Error("price drift"); };
+  f.ports.sponsor.paymasterData = async () => { newReads += 1; throw new Error("sponsor drift"); };
+  const replay = await runCli(argv, {}, options);
+  assert.equal(replay.ok, true, JSON.stringify(replay.error));
+  assert.deepEqual(replay.operation, first.operation);
+  assert.equal(newReads, 0);
+  assert.equal((JSON.parse(await readFile(finalPath, "utf8")) as { operationId: string }).operationId, record.operationId);
+  const server = createMcpServer(options), [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "gasless-usdt-drift-replay", version: "1.0.0" });
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const mcp = await client.callTool({ name: "apn_gasless_usdt_prepare", arguments: { profile: "owner", to: RECIPIENT,
+    amount: "1", max_fee: "0.5", min_received: "0.5", idempotency_key: "drift-replay-001" } });
+  assert.equal(mcp.content[0]?.type, "text");
+  if (mcp.content[0]?.type !== "text") throw new Error("MCP text result missing");
+  assert.equal(mcp.content[0].text, JSON.stringify(first));
+  assert.equal(newReads, 0);
+  const changed = [...argv]; changed[changed.indexOf("--to") + 1] = getAddress("0x0000000000000000000000000000000000001111");
+  assert.equal((await runCli(changed, {}, options)).error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  for (const [flag, value] of [["--amount", "0.9"], ["--max-fee", "0.4"], ["--min-received", "0.6"]] as const) {
+    const altered = [...argv]; altered[altered.indexOf(flag) + 1] = value;
+    assert.equal((await runCli(altered, {}, options)).error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  }
+  const other = [...argv]; other[other.indexOf("--profile") + 1] = "other";
+  assert.equal((await runCli(other, {}, options)).error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  assert.equal(newReads, 0);
+  assert.equal(f.offered.length, 1);
+});
+
+test("the same key can independently prepare an older direct rail and the bound USDT journal", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const key = "cross-family-local-001";
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  const directRpc = new TestRpc();
+  const direct = await makeCore({ root: temporary.root, rpc: directRpc }).execute({ command: "transfer.prepare",
+    profile: "default", recipient: RECIPIENT, amount: "1", idempotencyKey: key });
+  assert.equal(direct.ok, true, JSON.stringify(direct.error));
+  const f = fixture(), usdt = await runCli(["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", key], {},
+  { stateRoot: temporary.root, clock: { now: () => NOW },
+    gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } });
+  assert.equal(usdt.ok, true, JSON.stringify(usdt.error));
+  assert.notEqual((direct.operation as { operationId: string }).operationId,
+    (usdt.operation as { operationId: string }).operationId);
+  assert.equal(directRpc.submissions.length, 0);
+  assert.equal(f.offered.length, 1);
+});
 
 test("policy prepare freezes owner, safe block, exact approval sequence and sponsored unsigned operation", async () => {
   const f = fixture();

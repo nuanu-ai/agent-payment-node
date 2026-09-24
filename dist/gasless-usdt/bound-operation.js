@@ -133,7 +133,7 @@ export function validateUsdtBoundOperation(value) {
         fail("binding_integrity");
     return freeze(value);
 }
-/** Separate v2 journal keeps old dormant v1 records readable while requiring the complete new binding. */
+/** Separate bound journal: one key claims across its profiles, independently of every other payment family's claims. */
 export class UsdtBoundOperationRepository {
     root;
     directory;
@@ -333,6 +333,31 @@ export class UsdtBoundOperationRepository {
                 return claimed;
         }
         return null;
+    }
+    /** Read the durable claim before fresh policy or RPC work; repair claim-only publication for an exact caller intent. */
+    async replay(profileHash, idempotencyKey, intent) {
+        if (!HASH.test(profileHash) || !KEY.test(idempotencyKey))
+            fail("bound_input", "APN_INVALID_INPUT");
+        if (!await this.dir(this.root, false) || !await this.dir(this.directory, false))
+            return null;
+        const record = await this.readClaim(idempotencyKey);
+        if (record === null)
+            return null;
+        const saved = record.binding, request = saved.plan.request;
+        if (record.profileHash !== profileHash || saved.profile !== intent.profile || saved.chain !== USDT_GASLESS.chain ||
+            saved.token !== USDT_GASLESS.token || request.recipient !== intent.recipient ||
+            request.grossAtomic !== intent.grossAtomic || request.maxFeeAtomic !== intent.maxFeeAtomic ||
+            request.minReceivedAtomic !== intent.minReceivedAtomic)
+            fail("bound_idempotency", "APN_IDEMPOTENCY_CONFLICT");
+        await this.dir(this.profilePath(profileHash), true);
+        const finalPath = this.path(profileHash, record.operationId), final = await this.readRecord(finalPath);
+        if (final !== null) {
+            if (canonicalJson(final) !== canonicalJson(record))
+                fail("bound_publish_conflict", "APN_IDEMPOTENCY_CONFLICT");
+            return final;
+        }
+        await this.publish(this.profilePath(profileHash), finalPath, record);
+        return record;
     }
     async create(profileHash, binding, idempotencyKey, now) {
         if (!HASH.test(profileHash) || !KEY.test(idempotencyKey) || !Number.isFinite(now.getTime()))

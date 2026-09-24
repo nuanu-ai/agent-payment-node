@@ -2,7 +2,8 @@ import {
   prepareUsdtOperation, refuseUsdtApproval, refuseUsdtDispatch, refuseUsdtRecovery, refuseUsdtSigner,
   resumeUsdtOperation, statusUsdtOperation, type UsdtOperationInput, type UsdtOperationRecord, type UsdtOperationRepository,
 } from "./operation.js";
-import { classifyUsdtBoundRecovery, UsdtBoundOperationRepository, type UsdtBoundOperation, type UsdtBoundRecovery } from "./bound-operation.js";
+import { classifyUsdtBoundRecovery, UsdtBoundOperationRepository, type UsdtBoundOperation, type UsdtBoundRecovery,
+  type UsdtBoundReplayIntent } from "./bound-operation.js";
 import type { UsdtPolicyPrepared, UsdtPreparePort } from "./policy-prepare.js";
 import { ApnError } from "../errors.js";
 
@@ -35,6 +36,10 @@ export class GaslessUsdtOperationService {
   /** Persist the complete domain preparation. This cannot reserve usage or reach a signer. */
   async prepareBound(binding: UsdtPolicyPrepared, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation> {
     return new UsdtBoundOperationRepository(this.repository.root).create(this.boundProfile(), binding, idempotencyKey, now);
+  }
+
+  async replayBound(idempotencyKey: string, intent: UsdtBoundReplayIntent): Promise<UsdtBoundOperation | null> {
+    return await new UsdtBoundOperationRepository(this.repository.root).replay(this.boundProfile(), idempotencyKey, intent);
   }
 
   async statusBound(operationId: string): Promise<UsdtBoundOperation> {
