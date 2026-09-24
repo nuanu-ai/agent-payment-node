@@ -32,6 +32,8 @@ export function conflictDomainKey(domain) {
 /** Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. */
 export function storedOperationDomains(operation) {
     try {
+        if (operation.kind === "relay_unsigned")
+            return [evmConflictDomain(operation.record.sourceChainId, operation.record.sourceAccount)];
         if (operation.kind === "direct_transfer")
             return [evmConflictDomain(operation.record.chainId, operation.record.walletAddress)];
         if (operation.kind === "x402_fetch") {

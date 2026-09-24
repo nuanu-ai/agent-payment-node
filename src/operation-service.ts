@@ -34,8 +34,11 @@ import type { SmartAccountGaslessRepositoryPort } from "./smart-account-gasless/
 import { FacilitatorGaslessOperationRepository, type FacilitatorGaslessRepositoryPort } from "./facilitator-gasless/operation-repository.js";
 import type { FacilitatorOperationRecord } from "./facilitator-gasless/operation-model.js";
 import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
+import { RelayUnsignedOperationRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation,
+  type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
 
 export type StoredMoneyOperation =
+  | { readonly kind: "relay_unsigned"; readonly record: RelayUnsignedOperation }
   | { readonly kind: "facilitator_gasless_transfer"; readonly record: FacilitatorOperationRecord }
   | { readonly kind: "smart_account_gasless_transfer"; readonly record: SmartAccountGaslessOperationRecord }
   | { readonly kind: "metamask_gasless_transfer"; readonly record: MetaMaskGaslessOperationRecord }
@@ -56,7 +59,36 @@ export class OperationService {
     private readonly metaMaskGasless: MetaMaskGaslessRepositoryPort = new MetaMaskGaslessOperationRepository(state.root),
     private readonly smartAccountGasless: SmartAccountGaslessRepositoryPort = new SmartAccountGaslessOperationRepository(state.root),
     private readonly facilitatorGasless: FacilitatorGaslessRepositoryPort = new FacilitatorGaslessOperationRepository(state.root),
+    private readonly relayUnsigned = new RelayUnsignedOperationRepository(state.root),
   ) {}
+
+  /** Registry-only insertion. A future prepare flow must supply a validated unsigned quote. */
+  async persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation> {
+    validateRelayUnsignedOperation(operation);
+    await this.state.initialize();
+    return await this.state.withLocks([
+      `profile:${operation.profileHash}`, `operation:${operation.operationId}`,
+      `operation:idempotency:${operation.idempotencyHash}`,
+    ], async () => {
+      const existing = await this.resolvePrepare({ kind: "relay_unsigned", profileHash: operation.profileHash,
+        operationId: operation.operationId, idempotencyHash: operation.idempotencyHash, requestHash: operation.requestHash });
+      if (existing !== null) {
+        if (existing.kind !== "relay_unsigned" || existing.record.integrityHash !== operation.integrityHash) {
+          throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Relay unsigned operation cannot be changed or replayed with different inputs.");
+        }
+        return existing.record;
+      }
+      try {
+        await this.required(operation.operationId);
+        throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Operation ID is already bound to another money operation.");
+      } catch (error) {
+        if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_NOT_FOUND") throw error;
+      }
+      await this.assertEvmAccountAvailable(operation.profileHash, operation.sourceChainId, operation.sourceAccount);
+      await this.relayUnsigned.persistLocked(operation);
+      return operation;
+    });
+  }
 
   async resolvePrepare(input: {
     readonly kind: StoredMoneyOperation["kind"];
@@ -77,6 +109,7 @@ export class OperationService {
   /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
   async findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null> {
     const matches = [
+      ...(await this.relayUnsigned.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "relay_unsigned" as const, record })),
       ...(await this.facilitatorGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "facilitator_gasless_transfer" as const, record })),
       ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
       ...(await this.metaMaskGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "metamask_gasless_transfer" as const, record })),
@@ -132,6 +165,7 @@ export class OperationService {
 
   private async profileOperations(profileHash: string): Promise<readonly StoredMoneyOperation[]> {
     return [
+      ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned" as const, record })),
       ...(await this.facilitatorGasless.listOperations(profileHash)).map((record) => ({ kind: "facilitator_gasless_transfer" as const, record })),
       ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
       ...(await this.metaMaskGasless.listOperations(profileHash)).map((record) => ({ kind: "metamask_gasless_transfer" as const, record })),
@@ -173,7 +207,8 @@ export class OperationService {
     const metaMaskGasless = await this.metaMaskGasless.findOperation(canonicalId);
     const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
     const facilitatorGasless = await this.facilitatorGasless.findOperation(canonicalId);
-    if ([direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless]
+    const relayUnsigned = await this.relayUnsigned.findOperation(canonicalId);
+    if ([direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
       .filter((value) => value !== null).length > 1) {
       throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
     }
@@ -186,11 +221,13 @@ export class OperationService {
     if (metaMaskGasless !== null) return { kind: "metamask_gasless_transfer", record: metaMaskGasless };
     if (smartAccountGasless !== null) return { kind: "smart_account_gasless_transfer", record: smartAccountGasless };
     if (facilitatorGasless !== null) return { kind: "facilitator_gasless_transfer", record: facilitatorGasless };
+    if (relayUnsigned !== null) return { kind: "relay_unsigned", record: relayUnsigned };
     throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
   }
 
   async status(operationId: string): Promise<unknown> {
     const operation = await this.required(operationId);
+    if (operation.kind === "relay_unsigned") return publicRelayUnsignedOperation(operation.record);
     if (operation.kind === "direct_transfer") return publicOperation(operation.record);
     if (operation.kind === "rail_transfer") return publicRailOperation(operation.record);
     if (operation.kind === "bridge_route") return publicStoredBridgeOperation(operation.record);

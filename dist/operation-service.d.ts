@@ -16,7 +16,11 @@ import type { SmartAccountGaslessOperationRecord } from "./smart-account-gasless
 import type { SmartAccountGaslessRepositoryPort } from "./smart-account-gasless/ports.js";
 import { type FacilitatorGaslessRepositoryPort } from "./facilitator-gasless/operation-repository.js";
 import type { FacilitatorOperationRecord } from "./facilitator-gasless/operation-model.js";
+import { RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
 export type StoredMoneyOperation = {
+    readonly kind: "relay_unsigned";
+    readonly record: RelayUnsignedOperation;
+} | {
     readonly kind: "facilitator_gasless_transfer";
     readonly record: FacilitatorOperationRecord;
 } | {
@@ -55,7 +59,10 @@ export declare class OperationService {
     private readonly metaMaskGasless;
     private readonly smartAccountGasless;
     private readonly facilitatorGasless;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort);
+    private readonly relayUnsigned;
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository);
+    /** Registry-only insertion. A future prepare flow must supply a validated unsigned quote. */
+    persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation>;
     resolvePrepare(input: {
         readonly kind: StoredMoneyOperation["kind"];
         readonly profileHash: string;
