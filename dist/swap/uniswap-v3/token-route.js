@@ -69,6 +69,39 @@ export function encodeUniswapTokenApproval(tokenAddress, amount) {
 }
 export async function verifyUniswapTokenRoutePins(call, tag) {
     const rpc = call, pins = UNISWAP_V3_CODE_PINS.filter((pin) => pin.address === UNISWAP_USDC || pin.address === ETHEREUM_USDT);
+    if (rpc.primaryPoolEnabled?.() === true) {
+        // The pooled archive transport verifies chain 1 and the primary block hash before its first tagged read.
+        // Its nine pin reads therefore fit in three provider-compatible batches without repeating eth_chainId.
+        const first = await tokenBatch(rpc, "archive", [
+            { method: "eth_getCode", params: [UNISWAP_V3_SWAP_ROUTER, tag], cachePolicy: "immutable", decoder: tokenHex() },
+            { method: "eth_getCode", params: [UNISWAP_V3_USDC_USDT_100, tag], cachePolicy: "immutable", decoder: tokenHex() },
+            { method: "eth_getCode", params: [pins[0].address, tag], cachePolicy: "immutable", decoder: tokenHex() },
+        ]);
+        code(first[0], UNISWAP_V3_SWAP_ROUTER_CODE_HASH);
+        code(first[1], UNISWAP_V3_USDC_USDT_100_CODE_HASH);
+        code(first[2], pins[0].codeHash);
+        const second = await tokenBatch(rpc, "archive", [
+            { method: "eth_getCode", params: [pins[1].address, tag], cachePolicy: "immutable", decoder: tokenHex() },
+            { method: "eth_getStorageAt", params: [UNISWAP_USDC, USDC_IMPLEMENTATION_SLOT, tag], cachePolicy: "immutable", decoder: tokenHex(32) },
+            { method: "eth_getCode", params: [USDC_IMPLEMENTATION_PIN.address, tag], cachePolicy: "immutable", decoder: tokenHex() },
+        ]);
+        code(second[0], pins[1].codeHash);
+        const word = evmRpcHex(second[1], 32);
+        if (!/^0x0{24}/u.test(word) || getAddress(`0x${word.slice(26)}`) !== USDC_IMPLEMENTATION_PIN.address)
+            blocked("USDC implementation pin changed.", "uniswap_code_pin_drift");
+        code(second[2], USDC_IMPLEMENTATION_PIN.codeHash);
+        const safety = await tokenBatch(rpc, "archive", ["deprecated", "basisPointsRate", "maximumFee"].map((functionName) => ({
+            method: "eth_call", params: [{ to: ETHEREUM_USDT,
+                    data: encodeFunctionData({ abi: USDT_SAFETY, functionName: functionName }) }, tag],
+            cachePolicy: "immutable", decoder: usdtDecoder(functionName)
+        })));
+        assertUsdtSafety("deprecated", safety[0]);
+        assertUsdtSafety("basisPointsRate", safety[1]);
+        assertUsdtSafety("maximumFee", safety[2]);
+        if (UNISWAP_V3_FACTORY !== "0x1F98431c8aD98523631AE4a59f267346ea31F984")
+            throw new ApnError("APN_STATE_CORRUPT", "Uniswap factory pin changed.");
+        return;
+    }
     const first = await tokenBatch(rpc, "archive", [
         { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
         { method: "eth_getCode", params: [UNISWAP_V3_SWAP_ROUTER, tag], cachePolicy: "immutable", decoder: tokenHex() },

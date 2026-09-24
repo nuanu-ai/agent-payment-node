@@ -25,7 +25,7 @@ export class InstalledUniswapTokenRuntime {
     inventory() { return this.builder.inventory(); }
     async quote(request) {
         const binding = domainHash("apn.uniswap-token-quote-attempt.v1", canonicalJson(request));
-        const cap = this.poolCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote");
+        const cap = this.quotePrepareCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote");
         let result;
         try {
             result = await this.builder.quote(request);
@@ -49,7 +49,7 @@ export class InstalledUniswapTokenRuntime {
             blocked("Token quote expired.", "uniswap_token_quote_expired");
         const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
             quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
-        const cap = this.poolCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
+        const cap = this.quotePrepareCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
         try {
             await this.ports.confirm(material);
         }
@@ -102,6 +102,7 @@ export class InstalledUniswapTokenRuntime {
         });
     }
     poolCap(base) { return base + (this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
+    quotePrepareCap(base) { return this.rpc?.primaryPoolEnabled?.() === true ? this.poolCap(base) - 1 : base; }
 }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-runtime.js.map

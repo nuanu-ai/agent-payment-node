@@ -385,8 +385,8 @@ function uniswapTokenRpcBudget(command: string): { readonly maxHttpRequests: num
   if (command === "swap.uniswap-token.inventory") return { maxHttpRequests: 1, deadlineMs: 1_000 };
   const overhead = process.env.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === undefined || process.env.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === ""
     ? 0 : tokenPrimaryCandidates(process.env).length;
-  if (command === "swap.uniswap-token.quote") return { maxHttpRequests: 8 + overhead, deadlineMs: 60_000 };
-  if (command === "swap.uniswap-token.prepare") return { maxHttpRequests: 9 + overhead, deadlineMs: 60_000 };
+  if (command === "swap.uniswap-token.quote") return { maxHttpRequests: (overhead === 0 ? 8 : 7 + overhead), deadlineMs: 60_000 };
+  if (command === "swap.uniswap-token.prepare") return { maxHttpRequests: (overhead === 0 ? 9 : 8 + overhead), deadlineMs: 60_000 };
   if (command === "swap.uniswap-token.approve") return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
   if (command === "swap.uniswap-token.execute") return { maxHttpRequests: 24, deadlineMs: 150_000 };
   if (command === "swap.uniswap-token.status") return { maxHttpRequests: 8 + overhead, deadlineMs: 45_000 };
