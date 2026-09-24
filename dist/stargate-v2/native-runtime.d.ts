@@ -10,6 +10,10 @@ export declare class StargateJsonRpc {
     readonly origin: string;
     private readonly endpoint;
     constructor(url: string, https?: Pick<BridgeHttps, "request">);
+    batchCall(calls: readonly {
+        readonly method: string;
+        readonly params: readonly unknown[];
+    }[]): Promise<readonly unknown[]>;
     call(method: string, params: readonly unknown[]): Promise<unknown>;
 }
 export declare class StargateNativeService {

@@ -185,13 +185,13 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
         return existing;
     }
     const quote = await quoteStargateV2Direct({ sourceChainId: SOURCE_CHAIN, destinationChainId: DESTINATION_CHAIN,
-        sourceToken: "native", destinationToken: "native", recipient, amountAtomic: amount.toString() }, ports.sourceCall);
+        sourceToken: "native", destinationToken: "native", recipient, amountAtomic: amount.toString() }, ports.sourceCall, ports.sourcePrepareBatch);
     assertLane(quote);
     if (quote.quote.amountSentAtomic !== amount.toString())
         fail("APN_OPERATION_BLOCKED", "dust_amount_not_supported");
     const quoteTag = `0x${BigInt(quote.block.numberAtomic).toString(16)}`;
-    const config = await readSourceConfig(ports.sourceCall, quoteTag);
-    const destinationConfig = await readPoolConfig(ports.destinationCall, DESTINATION_CHAIN, DESTINATION_POOL, DESTINATION_EID, "latest");
+    const config = await readSourceConfig(ports.sourceCall, quoteTag, undefined, ports.sourcePrepareBatch);
+    const destinationConfig = await readPoolConfig(ports.destinationCall, DESTINATION_CHAIN, DESTINATION_POOL, DESTINATION_EID, "latest", ports.destinationPrepareBatch);
     const sendParam = { dstEid: DESTINATION_EID, to: pad(recipient, { size: 32 }), amountLD: amount,
         minAmountLD: BigInt(quote.quote.minimumOutputAtomic), extraOptions: "0x", composeMsg: "0x", oftCmd: "0x" };
     const finalFee = await requoteFinalSend(ports.sourceCall, sendParam, quoteTag);
@@ -377,12 +377,24 @@ function validateDestination(operation, source, evidence) {
             fail("APN_RPC_PROTOCOL", "destination_balance_delta");
     }
 }
-async function readSourceConfig(call, tag, operation) {
-    const result = await readPoolConfig(call, SOURCE_CHAIN, SOURCE_POOL, SOURCE_EID, tag);
+async function readSourceConfig(call, tag, operation, batch) {
+    const result = await readPoolConfig(call, SOURCE_CHAIN, SOURCE_POOL, SOURCE_EID, tag, batch);
     const read = async (name) => decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: name,
         data: await call("eth_call", [{ to: SOURCE_POOL, data: encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: name,
                     ...(name === "paths" ? { args: [DESTINATION_EID] } : {}) }) }, tag]) });
-    const [status, credit] = await Promise.all([read("status"), read("paths")]);
+    let status, credit;
+    if (batch === undefined) {
+        const values = await Promise.all([read("status"), read("paths")]);
+        status = values[0];
+        credit = values[1];
+    }
+    else {
+        const raw = await batch(["status", "paths"].map(name => ({ method: "eth_call", params: [{ to: SOURCE_POOL,
+                    data: encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: name,
+                        ...(name === "paths" ? { args: [DESTINATION_EID] } : {}) }) }, tag] })));
+        status = decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "status", data: raw[0] });
+        credit = decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "paths", data: raw[1] });
+    }
     if (status !== 1 || (operation !== undefined && BigInt(credit) < BigInt(operation.amountAtomic) / 1000000000000n))
         fail("APN_REPREPARE_REQUIRED", "source_status_or_credit");
     if (operation !== undefined) {
@@ -410,15 +422,57 @@ async function readSourceConfig(call, tag, operation) {
     }
     return result;
 }
-async function readPoolConfig(call, chainId, pool, eid, tag) {
-    if (rpcQuantity(await call("eth_chainId", [])) !== BigInt(chainId))
-        fail("APN_CHAIN_MISMATCH", "pool_chain_id");
-    const code = await call("eth_getCode", [pool, tag]);
+async function readPoolConfig(call, chainId, pool, eid, tag, batch) {
+    let code;
+    let groupedReads;
+    if (batch === undefined) {
+        if (rpcQuantity(await call("eth_chainId", [])) !== BigInt(chainId))
+            fail("APN_CHAIN_MISMATCH", "pool_chain_id");
+        code = await call("eth_getCode", [pool, tag]);
+    }
+    else {
+        let pinnedTag = tag, pinnedHash;
+        if (tag === "latest") {
+            const [chain, head] = await batch([{ method: "eth_chainId", params: [] },
+                { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+            if (rpcQuantity(chain) !== BigInt(chainId))
+                fail("APN_CHAIN_MISMATCH", "pool_chain_id");
+            if (head === null || typeof head !== "object" || Array.isArray(head))
+                fail("APN_RPC_PROTOCOL", "pool_block");
+            const headRecord = head;
+            pinnedTag = `0x${rpcQuantity(headRecord.number).toString(16)}`;
+            pinnedHash = headRecord.hash;
+            if (typeof pinnedHash !== "string" || !HASH.test(pinnedHash))
+                fail("APN_RPC_PROTOCOL", "pool_block_hash");
+        }
+        const names = ["token", "localEid", "sharedDecimals", "status", "stargateType"];
+        groupedReads = await batch([...(tag === "latest" ? [] : [{ method: "eth_chainId", params: [] }]),
+            { method: "eth_getCode", params: [pool, pinnedTag] }, ...names.map(name => ({ method: "eth_call",
+                params: [{ to: pool, data: encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: name }) }, pinnedTag] }))]);
+        if (tag !== "latest" && rpcQuantity(groupedReads[0]) !== BigInt(chainId))
+            fail("APN_CHAIN_MISMATCH", "pool_chain_id");
+        code = groupedReads[tag === "latest" ? 0 : 1];
+        if (tag === "latest") {
+            const [head, chain] = await batch([{ method: "eth_getBlockByNumber", params: [pinnedTag, false] },
+                { method: "eth_chainId", params: [] }]);
+            if (head === null || typeof head !== "object" || Array.isArray(head))
+                fail("APN_RPC_PROTOCOL", "pool_block");
+            const checked = head;
+            if (rpcQuantity(checked.number) !== rpcQuantity(pinnedTag) || checked.hash !== pinnedHash)
+                fail("APN_RPC_PROTOCOL", "pool_block_changed");
+            if (rpcQuantity(chain) !== BigInt(chainId))
+                fail("APN_CHAIN_MISMATCH", "pool_chain_drift");
+        }
+        else if (rpcQuantity((await batch([{ method: "eth_chainId", params: [] }]))[0]) !== BigInt(chainId))
+            fail("APN_CHAIN_MISMATCH", "pool_chain_drift");
+    }
     if (typeof code !== "string" || !CODE.test(code) || code === "0x")
         fail("APN_RPC_PROTOCOL", "source_code");
     const read = async (name) => decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: name,
         data: await call("eth_call", [{ to: pool, data: encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: name }) }, tag]) });
-    const [token, actualEid, decimals, status, stargateType] = await Promise.all([read("token"), read("localEid"), read("sharedDecimals"), read("status"), read("stargateType")]);
+    const [token, actualEid, decimals, status, stargateType] = groupedReads === undefined ?
+        await Promise.all([read("token"), read("localEid"), read("sharedDecimals"), read("status"), read("stargateType")]) :
+        ["token", "localEid", "sharedDecimals", "status", "stargateType"].map((name, index) => decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: name, data: groupedReads[index + (tag === "latest" ? 1 : 2)] }));
     let configuredToken;
     try {
         configuredToken = getAddress(token);
@@ -428,7 +482,7 @@ async function readPoolConfig(call, chainId, pool, eid, tag) {
     }
     if (configuredToken !== zeroAddress || actualEid !== eid || decimals !== 6 || status !== 1 || stargateType !== 0)
         fail("APN_RPC_PROTOCOL", "pool_contract_config");
-    if (rpcQuantity(await call("eth_chainId", [])) !== BigInt(chainId))
+    if (batch === undefined && rpcQuantity(await call("eth_chainId", [])) !== BigInt(chainId))
         fail("APN_CHAIN_MISMATCH", "pool_chain_drift");
     return { codeHash: keccak256(code) };
 }

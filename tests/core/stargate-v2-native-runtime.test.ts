@@ -123,3 +123,23 @@ test("CLI binding dispatches status locally and observe explicitly through the S
   assert.deepEqual(calls, [`status:${id}`, `observe:${id}`]); assert.equal(status.proof_class, "durable_public_state");
   assert.equal(observe.operation && (observe.operation as any).phase, "observed");
 });
+
+test("Stargate read batch restores shuffled IDs and refuses malformed responses without retry", async () => {
+  for (const shape of ["shuffled", "missing", "duplicate", "suberror"] as const) {
+    let posts = 0;
+    const rpc = new StargateJsonRpc("https://rpc.example", { request: async (...args: any[]) => {
+      posts++;
+      const sent = JSON.parse(args[2]); assert.ok(Array.isArray(sent));
+      const rows = sent.map((item: any, index: number) => ({ jsonrpc: "2.0", id: item.id, result: index === 0 ? "0x1" : "0x82" }));
+      const received = shape === "shuffled" ? rows.reverse() : shape === "missing" ? rows.slice(0, 1) :
+        shape === "duplicate" ? [rows[0], rows[0]] : [rows[0], { jsonrpc: "2.0", id: rows[1]!.id, error: { code: -1, message: "private" } }];
+      return { status: 200, body: JSON.stringify(received) };
+    } } as any);
+    const batch = rpc.batchCall([{ method: "eth_chainId", params: [] }, { method: "eth_getBalance", params: [OWNER, "latest"] }]);
+    if (shape === "shuffled") assert.deepEqual(await batch, ["0x1", "0x82"]);
+    else await assert.rejects(batch, { code: "APN_RPC_PROTOCOL" });
+    assert.equal(posts, 1);
+    await assert.rejects(rpc.batchCall([{ method: "eth_sendRawTransaction", params: ["0x12"] }]), { code: "APN_RPC_PROTOCOL" });
+    assert.equal(posts, 1);
+  }
+});
