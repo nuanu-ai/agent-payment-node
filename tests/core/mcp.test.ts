@@ -98,7 +98,7 @@ const TOOL_NAMES = [
   "apn_x402_inspect_network",
   "apn_x402_fetch_prepare_network",
   "apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare", "apn_bridge_approve",
-  "apn_gasless_usdt_status", "apn_gasless_usdt_resume",
+  "apn_gasless_usdt_prepare", "apn_gasless_usdt_status", "apn_gasless_usdt_resume",
   "apn_gasless_capabilities", "apn_gasless_balance", "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve",
   "apn_oneclick_source_submit", "apn_oneclick_source_status",
 ] as const;
@@ -254,6 +254,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_bridge_routes", properties: ["profile", "from_chain", "to_chain", "from_token", "to_token", "amount", "to", "min_output", "max_native_debit_wei", "max_route_fee", "slippage_bps"], required: ["profile", "from_chain", "to_chain", "from_token", "to_token", "amount", "to", "min_output", "max_native_debit_wei", "max_route_fee", "slippage_bps"], defaults: {} },
       { name: "apn_bridge_prepare", properties: ["profile", "quote", "route", "idempotency_key"], required: ["profile", "quote", "route", "idempotency_key"], defaults: {} },
       { name: "apn_bridge_approve", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_gasless_usdt_prepare", properties: ["profile", "to", "amount", "max_fee", "min_received", "idempotency_key"], required: ["profile", "to", "amount", "max_fee", "min_received", "idempotency_key"], defaults: {} },
       { name: "apn_gasless_usdt_status", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], defaults: {} },
       { name: "apn_gasless_usdt_resume", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], defaults: {} },
       { name: "apn_gasless_capabilities", properties: ["profile"], required: [], defaults: {} },

@@ -19,6 +19,7 @@ import { MM_TEST_RECIPIENT, mmFixture } from "./metamask-gasless-helpers.js";
 const LOCAL_CHAINS = [1, 10, 130, 137, 8453, 42161, 43114] as const;
 const METAMASK_CHAINS = [1, 10, 137, 143, 1329, 8453, 42161, 59144] as const;
 const GASLESS_PATHS = [
+  "gasless usdt prepare",
   "gasless usdt status",
   "gasless usdt resume",
   "gasless capabilities",
@@ -27,6 +28,7 @@ const GASLESS_PATHS = [
   "gasless transfer approve",
 ] as const;
 const GASLESS_TOOLS = [
+  "apn_gasless_usdt_prepare",
   "apn_gasless_usdt_status",
   "apn_gasless_usdt_resume",
   "apn_gasless_capabilities",

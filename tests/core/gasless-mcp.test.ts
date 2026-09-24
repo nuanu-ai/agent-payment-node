@@ -20,6 +20,7 @@ import { GASLESS_TEST_RECIPIENT, gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 const GASLESS_TOOL_NAMES = [
+  "apn_gasless_usdt_prepare",
   "apn_gasless_usdt_status",
   "apn_gasless_usdt_resume",
   "apn_gasless_capabilities",
@@ -44,7 +45,7 @@ test("CLI and MCP discovery expose the terminal permission-invalidation recovery
   }
 });
 
-test("gasless CLI and MCP project the same six strict tools and canonical inputs", () => {
+test("gasless CLI and MCP project the same seven strict tools and canonical inputs", () => {
   const tools = projectMcpTools().filter((item) => item.name.startsWith("apn_gasless_"));
   assert.deepEqual(tools.map((item) => item.name), GASLESS_TOOL_NAMES);
   assert.deepEqual(tools.map((item) => ({
@@ -53,6 +54,8 @@ test("gasless CLI and MCP project the same six strict tools and canonical inputs
     required: item.inputSchema.required,
     additionalProperties: item.inputSchema.additionalProperties,
   })), [
+    { name: "apn_gasless_usdt_prepare", properties: ["profile", "to", "amount", "max_fee", "min_received", "idempotency_key"],
+      required: ["profile", "to", "amount", "max_fee", "min_received", "idempotency_key"], additionalProperties: false },
     { name: "apn_gasless_usdt_status", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], additionalProperties: false },
     { name: "apn_gasless_usdt_resume", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], additionalProperties: false },
     { name: "apn_gasless_capabilities", properties: ["profile"], required: [], additionalProperties: false },
