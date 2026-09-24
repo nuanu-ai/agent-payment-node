@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger, ASSET_USAGE_WINDOW, type AssetUsageIdentity } from "../../src/core.js";
+import { assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { temporaryState } from "./helpers.js";
 
 const EVM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -117,6 +118,23 @@ test("concurrent duplicate reservation is idempotent and concurrent distinct res
   const rejected = raced.find((result): result is PromiseRejectedResult => result.status === "rejected");
   assert.equal(rejected?.reason?.code, "APN_OPERATION_BLOCKED");
   assert.equal((await second.usage(identity, new Date("2026-09-17T11:00:00.000Z"))).amountAtomic, "100");
+});
+
+test("concurrent usage snapshots include their own reservation exactly when it is charged", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const writer = new AssetUsageLedger(temporary.root);
+  const reader = new AssetUsageLedger(temporary.root);
+  const key = "atomic-snapshot-reservation-01";
+  const reservationId = assetUsageReservationId(identity, key);
+  const now = new Date("2026-09-17T10:00:00.000Z");
+  const reads = Array.from({ length: 20 }, () => reader.usageWithReservation(identity, reservationId, now));
+  const [, ...snapshots] = await Promise.all([reserve(writer, key, "100", "gasless", now), ...reads]);
+  for (const { snapshot, reservation } of snapshots) {
+    assert.equal(snapshot.amountAtomic, reservation === null ? "0" : reservation.amountAtomic);
+  }
+  const settled = await reader.usageWithReservation(identity, reservationId, now);
+  assert.equal(settled.snapshot.amountAtomic, "100");
+  assert.equal(settled.reservation?.state, "reserved");
 });
 
 test("reservations and unresolved usage survive a new store instance", async (t) => {

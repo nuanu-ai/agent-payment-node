@@ -134,9 +134,8 @@ export class UsdtExecutionJournal extends SecureStateStore {
   }
   private async otherUsage(bound: UsdtBoundOperation, at: Date): Promise<{ amountAtomic: string; windowStart: string }> {
     const b = bound.binding, account = identity(b.plan.request.sender);
-    const snapshot = await this.usage.usage(account, at);
     const reservationId = assetUsageReservationId(account, usageKey(bound.operationId));
-    const own = await this.usage.load(account, reservationId);
+    const { snapshot, reservation: own } = await this.usage.usageWithReservation(account, reservationId, at);
     if (own === null) return snapshot;
     if (own.state !== "reserved" || own.policyDigest !== b.policyDigest || own.rail !== "gasless" ||
       own.amountAtomic !== b.plan.request.grossAtomic) fail("usage_reservation_mismatch");
