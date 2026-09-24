@@ -63,9 +63,12 @@ export class TronRpc {
             return value;
         }
         catch (error) {
-            if (error instanceof ApnError)
-                throw error;
-            throw new ApnError(method === "wallet/broadcasttransaction" ? "APN_RPC_AMBIGUOUS" : "APN_RPC_PROTOCOL", "The bounded TRON request did not return valid evidence.");
+            if (error instanceof ApnError) {
+                if (error.code !== "APN_RPC_PROTOCOL")
+                    throw error;
+                throw new ApnError(error.code, error.message, { ...error.details, rpcMethod: method });
+            }
+            throw new ApnError(method === "wallet/broadcasttransaction" ? "APN_RPC_AMBIGUOUS" : "APN_RPC_PROTOCOL", "The bounded TRON request did not return valid evidence.", { rpcMethod: method, reason: error instanceof SyntaxError ? "invalid_json" : "invalid_response" });
         }
         finally {
             clearTimeout(deadline);
