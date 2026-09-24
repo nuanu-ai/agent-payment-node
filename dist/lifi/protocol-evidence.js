@@ -1,4 +1,4 @@
-import { decodeEventLog, keccak256 } from "viem";
+import { decodeEventLog, getAddress, keccak256 } from "viem";
 import { canonicalJson, sha256 } from "../canonical.js";
 import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./abi.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
@@ -6,17 +6,23 @@ import { decodeBridgeCall } from "./decode.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeSame, bridgeUint } from "./validation.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
+// Official Stargate V2 deployment at ce598b8d16472cd76ee47d30b8a40bc5c1b667bb.
+// This source-only pin does not admit the native asset to the executable deployment registry.
+const ETHEREUM_STARGATE_NATIVE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
 export function bridgeSourceProof(materialization, decoded, receipt) {
     const canonical = decodeBridgeCall(materialization);
     if (!bridgeSame(canonical, decoded) || receipt.chainId !== decoded.sourceChainId)
         fail("source_binding");
     validateReceipt(receipt);
     validateCommonSourceEvents(decoded, receipt);
-    if (decoded.sourceToken === BRIDGE_ZERO_ADDRESS)
+    const nativeStargate = decoded.tool === "stargateV2" && decoded.sourceToken === BRIDGE_ZERO_ADDRESS;
+    if (nativeStargate)
+        validateNativeStargateSource(decoded, materialization);
+    else if (decoded.sourceToken === BRIDGE_ZERO_ADDRESS)
         nativeMovement(decoded.sourceChainId, receipt, "wrap", decoded.bridgeAmountAtomic);
     else
         validateSourceTransfers(decoded, receipt);
-    const correlation = decoded.tool === "across" ? acrossSource(decoded, receipt) : stargateSource(decoded, receipt);
+    const correlation = decoded.tool === "across" ? acrossSource(decoded, receipt) : stargateSource(decoded, receipt, nativeStargate);
     return {
         tool: decoded.tool, chainId: receipt.chainId, transactionHash: receipt.transactionHash,
         blockNumberAtomic: receipt.blockNumberAtomic, blockHash: receipt.blockHash,
@@ -140,10 +146,23 @@ function acrossSource(decoded, receipt) {
         exclusivityDeadline: String(e.exclusivityDeadline), message: bridgeHex(e.message, 4096),
     };
 }
-function stargateSource(decoded, receipt) {
+function validateNativeStargateSource(decoded, materialization) {
+    if (decoded.protocol.kind !== "stargateV2" || decoded.protocol.assetId !== 13 ||
+        decoded.sourceChainId !== 1 || decoded.destinationChainId !== 8453 ||
+        decoded.sourceToken !== BRIDGE_ZERO_ADDRESS || decoded.destinationToken !== BRIDGE_ZERO_ADDRESS ||
+        decoded.protocol.dstEid !== 30184 || decoded.protocol.receiverAddress !== addressWord(decoded.recipient) ||
+        decoded.protocol.amountLD !== decoded.bridgeAmountAtomic || decoded.protocol.minAmountLD !== decoded.minimumOutputAtomic ||
+        decoded.protocol.lzTokenFee !== "0" || decoded.protocol.refundAddress !== decoded.sender ||
+        decoded.protocol.extraOptions !== "0x" || decoded.protocol.composeMsg !== "0x" || decoded.protocol.oftCmd !== "0x" ||
+        BigInt(decoded.protocol.nativeFee) <= 0n ||
+        BigInt(decoded.sourceValueAtomic) !== BigInt(decoded.sourceAmountAtomic) + BigInt(decoded.protocol.nativeFee) ||
+        materialization.transaction.valueAtomic !== decoded.sourceValueAtomic)
+        fail("stargate_native_source_binding");
+}
+function stargateSource(decoded, receipt, native = false) {
     if (decoded.protocol.kind !== "stargateV2")
         return fail("stargate_shape");
-    const emitter = bridgeProtocolEmitter(decoded.sourceChainId, "stargateV2", decoded.sourceToken);
+    const emitter = native ? ETHEREUM_STARGATE_NATIVE_POOL : bridgeProtocolEmitter(decoded.sourceChainId, "stargateV2", decoded.sourceToken);
     const e = oneEvent(receipt, emitter, EVENT_TOPICS.oftSent, "OFTSent");
     if (e.guid.toLowerCase() === BRIDGE_ZERO_WORD || e.dstEid !== decoded.protocol.dstEid || e.fromAddress !== BRIDGE_DIAMOND ||
         e.amountSentLD.toString() !== decoded.bridgeAmountAtomic || e.amountReceivedLD < BigInt(decoded.minimumOutputAtomic))
