@@ -128,9 +128,10 @@ while scalar recovery remains compatible.
 
 The distinct archive is independently chain-checked and must return the exact
 hash for the primary's numeric pinned block before historical state is used.
-Its anchor request is explicit in telemetry and budgets. With three primaries,
-the effect-bearing reservations are quote 11, prepare 12, approval 17, and swap
-24 physical attempts, totaling the durable operation ceiling of 64. Status and
+Its anchor request verifies the archive chain, allowing nine token code and
+safety reads to fit in three batches of three. With three primaries,
+the effect-bearing reservations are quote 10, prepare 11, approval 17, and swap
+24 physical attempts, totaling 62 against the durable operation ceiling of 64. Status and
 cleanup reserve no new cumulative effect budget but enforce request-session
 caps of 11 and 17. Durable telemetry stores only opaque provider IDs, finite
 outcome/reason enums, and counters.

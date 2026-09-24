@@ -10,6 +10,7 @@ import { ETHEREUM_USDT, UNISWAP_V3_QUOTER_V2 } from "../../src/swap/uniswap-v3/p
 import { temporaryState } from "./helpers.js";
 import { ApnError } from "../../src/errors.js";
 import { tokenPrimaryCandidates } from "../../src/swap/uniswap-v3/token-rpc-pool.js";
+import { verifyUniswapTokenRoutePins, UNISWAP_V3_SWAP_ROUTER, UNISWAP_V3_USDC_USDT_100 } from "../../src/swap/uniswap-v3/token-route.js";
 
 const URLS = { APN_ETHEREUM_RPC_URL: "https://rpc.example", APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
 const H = `0x${"a".repeat(64)}`;
@@ -215,7 +216,7 @@ test("pool quote counts exact anchor and each failed candidate without exceeding
     const temp = await temporaryState(); t.after(temp.cleanup); let physical = 0;
     const environment = { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify([
       "https://one.example", "https://two.example", "https://three.example"]), APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
-    const rpc = createTokenRpc({ environment, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 11, deadlineMs: 10_000,
+    const rpc = createTokenRpc({ environment, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 10, deadlineMs: 10_000,
       wait: async () => {}, pacingNow: () => physical * 1_000,
       transport: { request: async (url, _method, body) => { physical += 1; const origin = new URL(url).origin;
         if (origin !== "https://archive.example" && Number(origin.slice(8, 11) === "one" ? 0 : origin.slice(8, 11) === "two" ? 1 : 2) < failures)
@@ -225,7 +226,7 @@ test("pool quote counts exact anchor and each failed candidate without exceeding
             if (tx.to === UNISWAP_V3_QUOTER_V2) return `0x${word(1_000_000n)}${word(0n)}${word(0n)}${word(0n)}`;
             if (tx.data?.startsWith("0xdd62ed3e")) return `0x${word(0n)}`; return "0x"; }
           if (method === "eth_getBalance") return "0x1000000"; return poolValue(method, params); }) }; } } });
-    const pins = async (call: any, tag: any) => { let cursor = 0; for (const size of [3, 3, 3, 1]) await tokenBatch(call, "archive",
+    const pins = async (call: any, tag: any) => { let cursor = 0; for (const size of [3, 3, 3]) await tokenBatch(call, "archive",
       Array.from({ length: size }, () => ({ method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], decoder: tokenHex() }))); };
     const builder = new UniswapTokenQuoteBuilder(rpc, { save: async (material: unknown) => material } as any,
       async () => "d".repeat(64), () => new Date("2026-09-23T00:00:00.000Z"), pins);
@@ -234,9 +235,31 @@ test("pool quote counts exact anchor and each failed candidate without exceeding
       approvalCapAtomic: "1000000", deadline: Math.floor(Date.parse("2026-09-23T00:10:00.000Z") / 1000),
       maxApprovalGasLimit: "100000", maxSwapGasLimit: "200000", maxCleanupGasLimit: "100000", maxFeePerGas: "2",
       maxPriorityFeePerGas: "1", maxNativeDebitWei: "800000" });
-    assert.equal(physical, 9 + failures); assert.equal(rpc.telemetry!()?.httpAttempts, 9 + failures);
-    assert.equal(rpc.telemetry!()?.logicalItems, 19 + 2 * failures); assert.ok(physical <= 11);
+    assert.equal(physical, 8 + failures); assert.equal(rpc.telemetry!()?.httpAttempts, 8 + failures);
+    assert.equal(rpc.telemetry!()?.logicalItems, 18 + 2 * failures); assert.ok(physical <= 10);
   }
+});
+
+test("pooled production pin verifier uses its archive chain anchor before a three-item pin batch", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const batches: { origin: string; methods: string[]; addresses: string[] }[] = []; let tick = 0;
+  const environment = { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify(["https://primary.example"]),
+    APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
+  const rpc = createTokenRpc({ environment, state: new StateStore(temp.root), now: Date.now, pacingNow: () => ++tick * 1_000,
+    maxHttpRequests: 3, deadlineMs: 10_000, wait: async () => {}, transport: { request: async (url, _method, body) => { const rows = JSON.parse(body!) as any[];
+      batches.push({ origin: new URL(url).origin, methods: rows.map((row) => row.method),
+        addresses: rows.map((row) => String(row.params?.[0] ?? "")) });
+      return { status: 200, body: batchResponse(body!, (method, params) => method === "eth_getCode" ? "0x6000" : poolValue(method, params)) }; } } });
+  await tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain },
+    { method: "eth_getBlockByNumber", params: ["latest", false], decoder: tokenBlock }]);
+  await assert.rejects(verifyUniswapTokenRoutePins(rpc, "0x10"), { code: "APN_OPERATION_BLOCKED",
+    details: { reason: "uniswap_code_pin_drift" } });
+  assert.deepEqual(batches.map((batch) => [batch.origin, batch.methods]), [
+    ["https://primary.example", ["eth_chainId", "eth_getBlockByNumber"]],
+    ["https://archive.example", ["eth_chainId", "eth_getBlockByNumber"]],
+    ["https://archive.example", ["eth_getCode", "eth_getCode", "eth_getCode"]],
+  ]);
+  assert.deepEqual(batches[2]!.addresses.slice(0, 2), [UNISWAP_V3_SWAP_ROUTER, UNISWAP_V3_USDC_USDT_100]);
+  assert.equal(rpc.telemetry!()?.httpAttempts, 3);
 });
 
 test("cross-process probe lock persists every semantic quarantine before a peer can contact the candidate", async (t) => {
@@ -290,11 +313,11 @@ test("pool refuses submission before semantic selection and never fails over on 
 
 test("maximum three-provider effect reservations fit the cumulative 64-request envelope", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const journal = new UniswapTokenRpcBudgetJournal(temp.root), binding = "e".repeat(64);
-  const caps = [["quote", 11, "quote"], ["prepare", 12, "prepare"], ["approve", 17, "approval_effect"], ["execute", 24, "swap_effect"]] as const;
+  const caps = [["quote", 10, "quote"], ["prepare", 11, "prepare"], ["approve", 17, "approval_effect"], ["execute", 24, "swap_effect"]] as const;
   for (const [command, cap, kind] of caps) { const reservation = await journal.reserve(binding, command, cap, cap, kind);
     await journal.settle(binding, reservation, { ...new RpcReadSession().telemetry(), httpAttempts: cap, httpRequests: cap }, 0); }
-  assert.equal(caps.reduce((sum, row) => sum + row[1], 0), 64);
-  await assert.rejects(journal.reserve(binding, "extra-effect", 1), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(caps.reduce((sum, row) => sum + row[1], 0), 62);
+  await assert.rejects(journal.reserve(binding, "extra-effect", 3), { code: "APN_RPC_BUDGET_EXCEEDED" });
 });
 
 test("durable operation budget caps only new effects and never blocks status or cleanup recovery", async (t) => {
