@@ -49,4 +49,6 @@ export declare class EncryptedWalletStore {
     clear(secret: WalletSecretState): void;
     private requiredWrappingSecret;
 }
+/** Validate public envelope identity without loading or exposing the signing key. */
+export declare function walletEnvelopeIdentity(value: unknown, profile: string): WalletIdentity;
 export {};

@@ -9,6 +9,7 @@ import { OperationService } from "../operation-service.js";
 import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
+import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { ETHEREUM_USDC, requestRelayQuote, type RelayQuoteIntent, type ValidatedRelayQuote } from "./quote.js";
 
 export const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
@@ -73,27 +74,31 @@ export class RelayUnsignedPrepareService {
       dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
     const pin = admission.asset.mechanismPins?.bridge;
     if (pin?.provider !== "relay" || pin.reference !== RELAY_ROUTE_REFERENCE) refuse("relay_route_pin_required");
-    await this.operations.assertProfileAvailable(profileHash);
-    const intent: RelayQuoteIntent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
-      minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000) };
-    const quote = await (this.ports.quote?.(intent) ?? requestRelayQuote(intent));
-    const { quoteDigest, ...projection } = quote;
-    if (hashObject(projection) !== quoteDigest || quote.payer !== payer || quote.recipient !== intent.recipient ||
-      quote.principalAtomic !== input.amountAtomic || BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
-      quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
-      (active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
-      BigInt(quote.approval.maximumNetworkFeeWei) > BigInt(input.maxApprovalNetworkFeeWei) ||
-      BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
-      throw new ApnError("APN_OPERATION_BLOCKED", "Relay quote identity, deadline, or fee ceiling changed.");
-    }
-    const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
-      kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
-      requestHash, sourceChainId: 1, destinationChainId: 56, sourceAccount: payer, recipient: intent.recipient,
-      quoteDigest, quote, policyDigest: active.digest, policyRevision: active.revision,
-      approvalNetworkFeeCeilingWei: quote.approval.maximumNetworkFeeWei,
-      depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
-      amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
-      createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
-    return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+    await this.state.initialize();
+    return await this.state.withLocks([evmAddressLock(payer)], async () => {
+      await assertExclusiveEvmOwner(this.state, payer, profileHash);
+      await this.operations.assertProfileAvailable(profileHash);
+      const intent: RelayQuoteIntent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
+        minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000) };
+      const quote = await (this.ports.quote?.(intent) ?? requestRelayQuote(intent));
+      const { quoteDigest, ...projection } = quote;
+      if (hashObject(projection) !== quoteDigest || quote.payer !== payer || quote.recipient !== intent.recipient ||
+        quote.principalAtomic !== input.amountAtomic || BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
+        quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
+        (active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
+        BigInt(quote.approval.maximumNetworkFeeWei) > BigInt(input.maxApprovalNetworkFeeWei) ||
+        BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Relay quote identity, deadline, or fee ceiling changed.");
+      }
+      const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
+        kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
+        requestHash, sourceChainId: 1, destinationChainId: 56, sourceAccount: payer, recipient: intent.recipient,
+        quoteDigest, quote, policyDigest: active.digest, policyRevision: active.revision,
+        approvalNetworkFeeCeilingWei: quote.approval.maximumNetworkFeeWei,
+        depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
+        amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
+        createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
+      return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+    });
   }
 }

@@ -245,6 +245,10 @@ function parseEnvelope(value, profile) {
             corrupt("Wallet cipher encoding is invalid.");
     return value;
 }
+/** Validate public envelope identity without loading or exposing the signing key. */
+export function walletEnvelopeIdentity(value, profile) {
+    return parseEnvelope(value, profile).identity;
+}
 function parseSecret(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["version", "privateKey", "directEffects", "x402Effects"]) || value.version !== SECRET_VERSION)
         corrupt("Wallet secret schema is invalid.");
