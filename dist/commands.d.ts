@@ -38,6 +38,10 @@ export type CommandRequest = {
     readonly command: "relay.arbitrum.observe";
     readonly operationId: string;
 } | {
+    readonly command: "relay.arbitrum.approval-check";
+    readonly profile: string;
+    readonly operationId: string;
+} | {
     readonly command: "relay.native.prepare";
     readonly profile: string;
     readonly recipient: string;

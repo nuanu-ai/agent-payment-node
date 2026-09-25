@@ -81,6 +81,7 @@ export async function preflightRelayArbitrumApproval(operation: RelayUnsignedOpe
     confirmedNonce: confirmedNonce.toString(), pendingNonce: pendingNonce.toString(),
     baseFeePerGas: baseFee.toString(), quotedMaxFeePerGas: quote.approval.maxFeePerGas,
     quotedMaxPriorityFeePerGas: quote.approval.maxPriorityFeePerGas,
+    observedAt: observedAt.toISOString(),
     readOnlyConditionsSatisfied: reasons.length === 0, reasons, rpcBatches: 3 as const,
     proofClass: "read_only_rpc_observation" as const, executionAdmitted: false as const,
     nextActions: [] as const });

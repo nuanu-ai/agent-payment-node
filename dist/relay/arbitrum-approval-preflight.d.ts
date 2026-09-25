@@ -32,6 +32,7 @@ export declare function preflightRelayArbitrumApproval(operation: RelayUnsignedO
     baseFeePerGas: string;
     quotedMaxFeePerGas: string;
     quotedMaxPriorityFeePerGas: string;
+    observedAt: string;
     readOnlyConditionsSatisfied: boolean;
     reasons: readonly string[];
     rpcBatches: 3;
@@ -69,6 +70,7 @@ export declare class RelayArbitrumApprovalPreflightReader {
         baseFeePerGas: string;
         quotedMaxFeePerGas: string;
         quotedMaxPriorityFeePerGas: string;
+        observedAt: string;
         readOnlyConditionsSatisfied: boolean;
         reasons: readonly string[];
         rpcBatches: 3;
