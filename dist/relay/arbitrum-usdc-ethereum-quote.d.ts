@@ -1,5 +1,5 @@
-export declare const RELAY_ARBITRUM_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-export declare const RELAY_ETHEREUM_USDC_RECIPIENT = "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04";
+export declare const RELAY_ARBITRUM_USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
+export declare const RELAY_ETHEREUM_USDC_RECIPIENT: "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04";
 export interface RelayArbitrumQuoteIntent {
     readonly payer: string;
     readonly amountAtomic: string;
@@ -21,7 +21,7 @@ export declare function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknow
     sourceRefundRecipient: string;
     principalAtomic: string;
     minimumOutputAtomic: string;
-    deadline: unknown;
+    deadline: number;
     providerFeeAtomic: string;
     quotedDepositNetworkFeeWei: string;
     orderData: {

@@ -231,7 +231,7 @@ export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value, intent) 
         routeReference: "arbitrum-usdc-ethereum-usdc-observation-v1",
         statusLocator: locator, orderId: orderId.toLowerCase(), orderSignature: signature.toLowerCase(),
         solver: RELAY_SOLVER, payer, recipient, sourceRefundRecipient: payer,
-        principalAtomic: intent.amountAtomic, minimumOutputAtomic: minimum.toString(), deadline,
+        principalAtomic: intent.amountAtomic, minimumOutputAtomic: minimum.toString(), deadline: deadline,
         providerFeeAtomic: feeAmounts.relayer.toString(), quotedDepositNetworkFeeWei: feeAmounts.gas.toString(),
         orderData, paymentDetails: { chainId: "arbitrum", depository: ETHEREUM_DEPOSITORY,
             currency: RELAY_ARBITRUM_USDC.toLowerCase(), amount: intent.amountAtomic }, approval, deposit };
