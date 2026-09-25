@@ -13,6 +13,8 @@ import { inspectSolana } from "../../src/solana/evidence.js";
 import { solanaMessage } from "../../src/solana/message.js";
 import { temporaryState } from "./helpers.js";
 import { OperationService } from "../../src/operation-service.js";
+import { transitionRail } from "../../src/rail-operation-model.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 
@@ -112,6 +114,102 @@ for (const asset of ["sol", "usdc"] as const) test(`${asset} completed RPC statu
   s.rpc.corruptEffect = false;
   const recovered = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal((recovered.operation as { state: string }).state, "completed"); assert.equal(s.rpc.submissions.length, 1);
+});
+
+test("local SOL resume releases locks during saved-effect observation and discards a competing journal update", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare(); s.rpc.finalized = false;
+  const pending = await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal((pending.operation as { state: string }).state, "submitted_pending");
+  const frozen = (await s.core.rails.records.findOperation(id))!;
+  s.rpc.finalized = true;
+  let releaseInspect!: () => void;
+  const inspectionBlocked = new Promise<void>((resolve) => { releaseInspect = resolve; });
+  let markInspectEntered!: () => void;
+  const inspectEntered = new Promise<void>((resolve) => { markInspectEntered = resolve; });
+  const inspect = s.adapter.inspect.bind(s.adapter);
+  let inspectCalls = 0;
+  Object.assign(s.adapter, { inspect: async (...args: Parameters<typeof inspect>) => {
+    inspectCalls++;
+    assert.equal(args[2], frozen.transactionId);
+    assert.equal(args[3], frozen.rawPayloadHash);
+    assert.deepEqual(args[4], frozen.send ?? null);
+    markInspectEntered(); await inspectionBlocked;
+    return await inspect(...args);
+  } });
+  const resumed = s.core.rails.resume(id);
+  await inspectEntered;
+  // This writer needs the same profile and operation locks. It can advance while RPC waits.
+  await Promise.race([
+    s.core.context.state.withLocks([`profile:${frozen.profileHash}`, `operation:${id}`], async () => {
+      const current = (await s.core.rails.records.findOperation(id))!;
+      await s.core.rails.records.persist(transitionRail(current, { state: "unknown_finality", at: s.now.toISOString(),
+        reason: "concurrent_observation_update", proofClass: "effect_outcome_unknown" }));
+    }),
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("resume held locks during inspection")), 2000)),
+  ]);
+  releaseInspect();
+  const stale = await resumed as { state: string; reason: string };
+  assert.equal(stale.state, "unknown_finality");
+  assert.equal(stale.reason, "concurrent_observation_update");
+  assert.equal((await s.core.rails.records.findOperation(id))!.evidence, null);
+  const completed = await s.core.rails.resume(id) as { state: string };
+  assert.equal(completed.state, "completed");
+  const stored = (await s.core.rails.records.findOperation(id))!;
+  assert.equal(stored.transitions.filter((entry) => entry.state === "completed").length, 1);
+  const lease = stored.allowlistLease!.reservation;
+  assert.equal((await new AssetUsageLedger(temporary.root).load(lease, lease.reservationId))?.state, "finalized");
+  assert.equal(s.rpc.submissions.length, 1);
+  assert.equal(inspectCalls, 2);
+});
+
+test("local SOL submitting timeout resumes observation without a second send", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare(); s.rpc.submissionTimeout = true;
+  const persist = s.core.rails.records.persist.bind(s.core.rails.records);
+  Object.assign(s.core.rails.records, { persist: async (record: Parameters<typeof persist>[0]) => {
+    if (record.state === "unknown_finality" && record.reason === "submission_outcome_unknown") throw new Error("synthetic crash after send timeout");
+    return await persist(record);
+  } });
+  await assert.rejects(s.core.rails.approve(id), /synthetic crash/);
+  Object.assign(s.core.rails.records, { persist });
+  assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting");
+  assert.equal(s.rpc.submissions.length, 1);
+  const resumed = await s.core.rails.resume(id) as { state: string; reason: string };
+  assert.equal(resumed.state, "completed");
+  const stored = (await s.core.rails.records.findOperation(id))!;
+  assert.ok(stored.transitions.some((entry) => entry.state === "unknown_finality" && entry.reason === "interrupted_submission_observation_only"));
+  assert.equal(s.rpc.submissions.length, 1);
+  const lease = stored.allowlistLease!.reservation;
+  assert.equal((await new AssetUsageLedger(temporary.root).load(lease, lease.reservationId))?.state, "finalized");
+});
+
+test("simultaneous local SOL observations finalize one journal transition and one usage lease", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare(); s.rpc.finalized = false;
+  assert.equal((await s.core.rails.approve(id) as { state: string }).state, "submitted_pending");
+  s.rpc.finalized = true;
+  const inspect = s.adapter.inspect.bind(s.adapter);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let entered = 0;
+  let bothEntered!: () => void;
+  const started = new Promise<void>((resolve) => { bothEntered = resolve; });
+  Object.assign(s.adapter, { inspect: async (...args: Parameters<typeof inspect>) => {
+    if (++entered === 2) bothEntered();
+    await gate;
+    return await inspect(...args);
+  } });
+  const first = s.core.rails.resume(id);
+  const second = s.core.rails.resume(id);
+  await started; release();
+  const results = await Promise.all([first, second]) as { state: string }[];
+  assert.deepEqual(results.map((result) => result.state), ["completed", "completed"]);
+  const stored = (await s.core.rails.records.findOperation(id))!;
+  assert.equal(stored.transitions.filter((entry) => entry.state === "completed").length, 1);
+  const lease = stored.allowlistLease!.reservation;
+  assert.equal((await new AssetUsageLedger(temporary.root).load(lease, lease.reservationId))?.state, "finalized");
+  assert.equal(s.rpc.submissions.length, 1);
 });
 
 test("finalized rollback records actual fee and no delivered principal or rent", async (t) => {

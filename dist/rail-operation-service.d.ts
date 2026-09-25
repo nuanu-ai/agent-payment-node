@@ -20,6 +20,8 @@ export declare class RailOperationService {
     }): Promise<unknown>;
     approve(operationId: string): Promise<unknown>;
     resume(operationId: string): Promise<unknown>;
+    /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
+    private resumeLocalSolana;
     receipt(operationId: string): Promise<unknown>;
     private locked;
     private required;
@@ -34,6 +36,7 @@ export declare class RailOperationService {
     private firstLocalSubmit;
     private submit;
     private inspect;
+    private inspectEvidence;
     private assertEffect;
     private move;
     /** After the foreground decision and every pre-send check, before signing or a provider send. Refusals end the operation. */
