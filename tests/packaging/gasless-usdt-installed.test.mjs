@@ -69,12 +69,19 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   gasPrice: async () => { physical++; sponsorCalls++; return PRICE; },
   paymasterData: async () => { physical++; sponsorCalls++; return { paymaster: USDT_GASLESS.paymaster,
     paymasterData: PAYMASTER_DATA }; } };
-  let forbiddenEffects = 0;
-  const noEffect = async () => { forbiddenEffects++; throw new Error("synthetic fixture forbids execution"); };
-  const executionDisabled = { approval: { approve: noEffect }, signer: { sign: noEffect },
-    sendTransport: { send: noEffect } };
+  const effects = { approval: 0, signer: 0, dispatch: 0, walletSecret: 0 };
+  const executionDisabled = {
+    approval: { async approve() { effects.approval++; throw new Error("synthetic approval refusal"); } },
+    signer: { async sign() { effects.signer++; throw new Error("synthetic fixture forbids signing"); } },
+    sendTransport: { async send() { effects.dispatch++; throw new Error("synthetic fixture forbids dispatch"); } },
+  };
+  const wrappingSecret = {
+    async load() { effects.walletSecret++; throw new Error("synthetic fixture forbids wallet secret access"); },
+    async create() { effects.walletSecret++; throw new Error("synthetic fixture forbids wallet secret access"); },
+  };
   const stateRoot = join(sandbox, "state"), options = { stateRoot, clock: { now: () => NOW },
-    gaslessUsdtPrepareOptions: { preparePort, sponsorPort }, gaslessUsdtExecuteOptions: executionDisabled };
+    wrappingSecret, gaslessUsdtPrepareOptions: { preparePort, sponsorPort },
+    gaslessUsdtExecuteOptions: executionDisabled };
   const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
     "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "installed-usdt-001"];
   const prepared = await runCli(argv, {}, options);
@@ -150,6 +157,17 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   const attemptedArgs = [...argv];
   attemptedArgs[attemptedArgs.indexOf("--idempotency-key") + 1] = "installed-usdt-attempted";
   const attempted = (await runCli(attemptedArgs, {}, options)).operation;
+  const executeArgs = ["gasless", "usdt", "execute", "--profile-hash", attempted.profileHash,
+    "--operation", attempted.operationId];
+  const approvalRefused = await runCli(executeArgs, {}, options);
+  assert.equal(approvalRefused.ok, false);
+  assert.equal(effects.approval, 1);
+  assert.equal(effects.signer, 0);
+  assert.equal(effects.dispatch, 0);
+  assert.equal(effects.walletSecret, 0);
+  assert.equal(await execution.load(attempted.operationId), null,
+    "refusing approval must stop before reservation or execution journal creation");
+  assert.equal((await reopenedUsage.usage(usageIdentity, NOW)).amountAtomic, "0");
   const attemptedIntent = usdtExecutionIntent(attempted);
   const attemptedReservation = await execution.reserve(attempted, attemptedIntent, preparePort);
   const syntheticHash = `0x${"34".repeat(32)}`;
@@ -168,21 +186,26 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   await assert.rejects(() => execution.markSubmitted(attempted, `0x${"56".repeat(32)}`, NOW),
     { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await reopenedUsage.load(usageIdentity, attemptedReservation.reservationId))?.state, "reserved");
-  const { UsdtRecoveryService } = await moduleAt("gasless-usdt/recovery.js");
   let lookups = 0, canonicalReads = 0;
-  const recovery = new UsdtRecoveryService(new UsdtExecutionJournal(stateRoot), {
+  const observeArgs = ["gasless", "usdt", "observe", "--profile-hash", attempted.profileHash,
+    "--operation", attempted.operationId];
+  const observeOptions = { ...options, gaslessUsdtExecuteOptions: { ...executionDisabled, recoveryPort: {
     userOperationReceipt: async hash => { lookups++; assert.equal(hash, syntheticHash);
       return { userOpHash: `0x${"78".repeat(32)}`, sender: OWNER,
         entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
         success: true, transactionHash: `0x${"9a".repeat(32)}` }; },
     canonicalFinalizedReceipt: async () => { canonicalReads++; throw new Error("wrong locator must not be followed"); },
-  }, () => NOW);
-  const unknown = await recovery.observe(attempted);
+  } } };
+  const observed = await runCli(observeArgs, {}, observeOptions);
+  assert.equal(observed.ok, true, JSON.stringify(observed.error));
+  const unknown = observed.operation;
   assert.equal(unknown.state, "unknown_finality");
   assert.equal(unknown.userOperationHash, syntheticHash);
   assert.equal(lookups, 1);
   assert.equal(canonicalReads, 0);
-  assert.deepEqual(await recovery.observe(attempted), unknown);
+  const repeatedObservation = await runCli(observeArgs, {}, observeOptions);
+  assert.equal(repeatedObservation.ok, true, JSON.stringify(repeatedObservation.error));
+  assert.deepEqual(repeatedObservation.operation, unknown);
   assert.equal(lookups, 2);
   assert.equal((await reopenedUsage.load(usageIdentity, attemptedReservation.reservationId))?.state, "unknown_finality");
   assert.equal((await reopenedUsage.usage(usageIdentity, NOW)).amountAtomic, "1000000");
@@ -196,7 +219,7 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
     { code: "APN_STATE_CORRUPT" });
   await writeFile(executionPath, originalExecutionBytes);
   assert.deepEqual(await new UsdtExecutionJournal(stateRoot).load(attempted.operationId), unknown);
-  assert.equal(forbiddenEffects, 0);
+  assert.deepEqual(effects, { approval: 1, signer: 0, dispatch: 0, walletSecret: 0 });
   let now = 1_000, attempts = 0;
   const budget = new UsdtCommandReadBudget(new StateStore(stateRoot), { request: async () => {
     attempts++; return { status: 200, body: "{}" }; } }, () => now, async ms => { now += ms; });
