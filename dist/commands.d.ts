@@ -35,6 +35,9 @@ export type CommandRequest = {
     readonly quoteFile: string;
     readonly idempotencyKey: string;
 } | {
+    readonly command: "relay.arbitrum.observe";
+    readonly operationId: string;
+} | {
     readonly command: "relay.native.prepare";
     readonly profile: string;
     readonly recipient: string;
