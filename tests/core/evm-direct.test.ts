@@ -14,6 +14,24 @@ import { EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, ens
 import { EVM_USDC, activateDirectPolicy, directAdmission, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
+for (const chainId of [8453, 1, 56] as const) test(`chain ${chainId} arms direct RPC guard through prepare, approval and resume`, async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = chainId;
+  if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
+  let armed = 0;
+  Object.assign(setup.rpc, { armEvmDirectRpcGuard: () => { armed += 1; } });
+  const wallet = await ensureDirectWallet(setup);
+  if (chainId === 56) await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
+    admissions: [...evmDirectAdmissions(), directAdmission("eip155:56", null)], now: setup.clock.now() });
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: "native" } }) as { operation_id: string };
+  assert.equal(armed, 1);
+  await setup.core.transfer.approve(prepared.operation_id);
+  assert.ok(armed >= 2, "approval and send use the guarded RPC port");
+  const beforeResume = armed;
+  await setup.core.transfer.resume(prepared.operation_id);
+  assert.equal(armed, beforeResume + 1);
+});
+
 test("generic CLI and MCP bind the same explicit core request without changing legacy commands", () => {
   const input = { profile: "default", chain: "eip155:8453", asset: EVM_USDC[8453], decimals: "6", rpc_url: "https://rpc.example", to: EVM_REQUEST.recipient, amount: "1.25", max_fee_wei: EVM_REQUEST.maxFeeWei, idempotency_key: EVM_REQUEST.idempotencyKey };
   const tool = MCP_TOOLS.find((entry) => entry.name === "apn_pay_transfer_prepare_asset")!;

@@ -292,7 +292,7 @@ export class HttpsBaseRpc {
             return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction]), 32);
         }
         catch (error) {
-            if (error instanceof ApnError && error.code === "APN_RPC_BUDGET_EXCEEDED")
+            if (error instanceof ApnError && (error.code === "APN_RPC_BUDGET_EXCEEDED" || error.code === "APN_PROVIDER_UNAVAILABLE"))
                 throw error;
             if (error instanceof ApnError && error.details?.httpStatus === 429)
                 throw error;

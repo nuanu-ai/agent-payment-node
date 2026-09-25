@@ -78,7 +78,7 @@ export async function prepareEvmTransfer(
       chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic,
       asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
     const rpcPort = context.requireRpc();
-    if (selection.chainId === 1 || selection.chainId === 56) rpcPort.armEvmDirectRpcGuard?.();
+    if (selection.chainId === 1 || selection.chainId === 56 || selection.chainId === 8453) rpcPort.armEvmDirectRpcGuard?.();
     const rpc = requireEvmRpc(rpcPort);
     const ethereumNative = selection.chainId === 1 && selection.token === "native";
     const grouped = request.batchRpcReads || ethereumNative || selection.chainId === 56 ? (ethereumNative ? rpc.prepareEthereumNative?.() : selection.chainId === 56 ? rpc.prepareBnbNative?.() : selection.chainId === 130
