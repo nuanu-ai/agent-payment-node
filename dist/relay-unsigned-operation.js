@@ -117,7 +117,7 @@ export function freezeRelayUnsignedOperation(input) {
         corrupt();
     return validateRelayUnsignedOperation({ ...parsed.data, integrityHash: hashObject(parsed.data) });
 }
-export function publicRelayUnsignedOperation(operation, retirement = null) {
+export function publicRelayUnsignedOperation(operation, retirement = null, sourceCompletion = null) {
     const { integrityHash: _integrityHash, statusLocator: _locator, quote, nativeQuote, ...publicFields } = validateRelayUnsignedOperation(operation);
     const publicQuote = quote === undefined ? {} : { quote: (({ statusLocator: _hidden, ...fields }) => fields)(quote) };
     const publicNativeQuote = nativeQuote === undefined ? {} : {
@@ -126,7 +126,10 @@ export function publicRelayUnsignedOperation(operation, retirement = null) {
     return { ...publicFields, ...publicQuote, ...publicNativeQuote,
         ...(retirement === null ? {} : { state: "retired", terminal: true,
             retiredAt: retirement.retiredAt, retirementIntegrityHash: retirement.integrityHash }),
-        proofClass: "saved_unsigned_quote", balanceEvidence: "not_checked",
+        ...(sourceCompletion === null ? {} : { state: "source_confirmed", terminal: true,
+            sourceEffectTerminal: true, sourceJournalIntegrityHash: sourceCompletion.journalIntegrityHash }),
+        proofClass: sourceCompletion === null ? "saved_unsigned_quote" : "source_effect_confirmed",
+        balanceEvidence: "not_checked",
         allowanceEvidence: "not_checked", statusObservable: operation.statusLocator !== undefined,
         executionAdmitted: false, nextActions: [] };
 }
