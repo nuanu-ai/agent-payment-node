@@ -3,7 +3,7 @@ import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { loadActiveAssetPolicyRegistry, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
-import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { OperationService } from "../operation-service.js";
 import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../relay-unsigned-operation.js";
@@ -84,9 +84,9 @@ export class RelayUnsignedPrepareService {
     }, now).then(value => value.amountAtomic));
     const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:1",
       asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: input.amountAtomic,
-      dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-    const pin = admission.asset.mechanismPins?.bridge;
-    if (pin?.provider !== "relay" || pin.reference !== (route === "base" ? RELAY_BASE_ROUTE_REFERENCE : RELAY_ROUTE_REFERENCE))
+      dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(),
+      mechanism: { provider: "relay", reference: route === "base" ? RELAY_BASE_ROUTE_REFERENCE : RELAY_ROUTE_REFERENCE } });
+    if (!bridgeMechanismAdmitted(admission, { provider: "relay", reference: route === "base" ? RELAY_BASE_ROUTE_REFERENCE : RELAY_ROUTE_REFERENCE }))
       refuse("relay_route_pin_required");
     await this.state.initialize();
     // Fail closed before quoting. The final owner check and create-only write

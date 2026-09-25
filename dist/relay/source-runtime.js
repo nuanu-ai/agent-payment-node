@@ -163,7 +163,7 @@ export class RelayEthereumSourceRuntime {
                     blocked("active_policy_missing");
                 const reserveInput = { account: getAddress(op.sourceAccount), chain: "eip155:1",
                     asset: { kind: "token", identifier: ETHEREUM_USDC }, registry: active.registry,
-                    rail: "bridge", amountAtomic: op.amountAtomic, idempotencyKey: `relay-execute:${op.operationId}`, now: this.clock.now() };
+                    rail: "bridge", mechanism: { provider: "relay", reference: relayExecutionRoute(op) }, amountAtomic: op.amountAtomic, idempotencyKey: `relay-execute:${op.operationId}`, now: this.clock.now() };
                 const previous = await this.usage.load(this.usageIdentity(op), this.usageReservationId(op));
                 if (previous?.state === "failed_before_effect") {
                     await this.withNoEffectProof(op, async () => {

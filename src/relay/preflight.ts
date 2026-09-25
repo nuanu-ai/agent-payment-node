@@ -2,14 +2,14 @@
 import { ApnError } from "../errors.js";
 import { loadActiveAssetPolicyRegistry, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
-import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { evmRpcQuantity, evmRpcWord, evmRpcRecord, evmRpcHex } from "../evm-rpc-codec.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import { StateStore } from "../state.js";
 import type { ClockPort } from "../ports.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
-import { RELAY_ROUTE_REFERENCE } from "./prepare.js";
+import { relayExecutionRoute } from "./execution-route.js";
 
 export type RelayReadCall = { readonly method: string; readonly params: readonly unknown[] };
 export interface RelayPreflightPorts {
@@ -58,9 +58,9 @@ export class RelayReadOnlyPreflightService {
         asset: { kind: "token", identifier: ETHEREUM_USDC } }, now).then(value => value.amountAtomic));
     const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:1",
       asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: operation.amountAtomic,
-      dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-    const pin = admission.asset.mechanismPins?.bridge;
-    if (pin?.provider !== "relay" || pin.reference !== RELAY_ROUTE_REFERENCE) blocked("relay_route_pin_changed");
+      dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(),
+      mechanism: { provider: "relay", reference: relayExecutionRoute(operation) } });
+    if (!bridgeMechanismAdmitted(admission, { provider: "relay", reference: relayExecutionRoute(operation) })) blocked("relay_route_pin_changed");
     if (quote.paymentDetails.depository.toLowerCase() !== ETHEREUM_DEPOSITORY ||
       quote.approval.to.toLowerCase() !== ETHEREUM_USDC.toLowerCase() ||
       quote.deposit.to.toLowerCase() !== ETHEREUM_DEPOSITORY ||

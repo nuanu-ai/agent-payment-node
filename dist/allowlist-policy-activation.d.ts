@@ -1,6 +1,6 @@
 import type { AllowlistPolicyAccounts } from "./allowlist-policy-v2.js";
 import type { StagedAllowlistPolicyRecord } from "./allowlist-policy-store.js";
-import { type AssetPolicyRail, type AssetPolicyRegistry } from "./asset-policy-registry.js";
+import { type AssetPolicyRail, type AssetPolicyRegistry, type AssetMechanismOption } from "./asset-policy-registry.js";
 import { type SwapMechanismPin } from "./swap/pin.js";
 import { type TtyTransferApprovalOptions } from "./tty-approval.js";
 export type AllowlistPolicyAction = "activate" | "revoke";
@@ -32,6 +32,7 @@ export interface AllowlistAdmissionView {
         provider: string;
         reference: string;
     }> | SwapMechanismPin | null;
+    readonly mechanismOptions?: readonly AssetMechanismOption[];
 }
 export declare function allowlistAdmissions(registry: AssetPolicyRegistry): readonly AllowlistAdmissionView[];
 export declare function allowlistDecisionFingerprint(input: {

@@ -13,9 +13,13 @@ export interface AllowlistPolicyAdmissionInput {
     readonly kind: CandidateKind;
     readonly identifier?: string;
     readonly rail: CandidateRail;
-    readonly maximumPerTransferAtomic: string;
+    readonly maximumPerTransferAtomic?: string;
     readonly dailyLimitAtomic: string;
     readonly mechanism?: AllowlistAdmissionMechanismPin;
+    /** Bridge only: exact alternative pins, each with its own per-transfer ceiling. */
+    readonly mechanisms?: readonly (AllowlistMechanismPin & {
+        readonly maximumPerTransferAtomic: string;
+    })[];
 }
 export interface AllowlistPolicyOverlayInput {
     readonly overlayVersion: string;

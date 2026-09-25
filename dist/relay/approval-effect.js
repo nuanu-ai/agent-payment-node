@@ -5,7 +5,7 @@ import { hashObject, domainHash, canonicalJson } from "../canonical.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
-import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { relayExecutionRoute } from "./execution-route.js";
@@ -211,9 +211,9 @@ export class RelayApprovalEffectService {
         const usage = await this.ports.dailyUsage(op.sourceAccount, now);
         const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:1",
             asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: op.amountAtomic,
-            dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-        const pin = admission.asset.mechanismPins?.bridge;
-        if (pin?.provider !== "relay" || pin.reference !== relayExecutionRoute(op))
+            dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(),
+            mechanism: { provider: "relay", reference: relayExecutionRoute(op) } });
+        if (!bridgeMechanismAdmitted(admission, { provider: "relay", reference: relayExecutionRoute(op) }))
             blocked("route_pin");
         const execution = await this.ports.executionAdmission(op);
         if (execution === null || execution.requestId !== op.statusLocator?.requestId ||

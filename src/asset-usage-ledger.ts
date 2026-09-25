@@ -55,6 +55,7 @@ export interface AssetUsageReservation extends AssetUsageIdentity {
 export interface AssetUsageReserveInput extends AssetUsageIdentity {
   readonly registry: unknown;
   readonly rail: AssetPolicyRail;
+  readonly mechanism?: Readonly<{ provider: string; reference: string }>;
   readonly amountAtomic: string;
   readonly idempotencyKey: string;
   readonly now: Date;
@@ -114,7 +115,7 @@ export class AssetUsageLedger extends SecureStateStore {
     const registry = validateAssetPolicyRegistry(input.registry);
     const at = instant(input.now);
     const initial = evaluateAssetPolicy(registry, {
-      chain: input.chain, asset: input.asset, rail: input.rail,
+      chain: input.chain, asset: input.asset, rail: input.rail, ...(input.mechanism === undefined ? {} : { mechanism: input.mechanism }),
       amountAtomic: input.amountAtomic, dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at,
     });
     const account = canonicalAccount(initial.chain, input.account, false);
@@ -131,7 +132,7 @@ export class AssetUsageLedger extends SecureStateStore {
           assertBucketWindow(reservations, at);
           const usage = sumUsage(reservations, input.now);
           evaluateAssetPolicy(registry, {
-            chain: identity.chain, asset: identity.asset, rail: input.rail,
+            chain: identity.chain, asset: identity.asset, rail: input.rail, ...(input.mechanism === undefined ? {} : { mechanism: input.mechanism }),
             amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at,
           });
           const reopened = seal({ ...withoutDigest(existing), state: "reserved", reservedAt: at, updatedAt: at,
@@ -144,7 +145,7 @@ export class AssetUsageLedger extends SecureStateStore {
       assertBucketWindow(reservations, at);
       const usage = sumUsage(reservations, input.now);
       evaluateAssetPolicy(registry, {
-        chain: identity.chain, asset: identity.asset, rail: input.rail,
+        chain: identity.chain, asset: identity.asset, rail: input.rail, ...(input.mechanism === undefined ? {} : { mechanism: input.mechanism }),
         amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at,
       });
       const body: ReservationBody = {

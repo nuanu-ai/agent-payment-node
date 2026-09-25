@@ -252,3 +252,26 @@ async function mcp(client: Client, name: string, args: Record<string, unknown>):
   if (content?.type !== "text") throw new Error("expected MCP text");
   return JSON.parse(content.text) as OutputEnvelope;
 }
+
+test("bridge alternatives survive stage, status, activation and active-policy recovery", async t => {
+  const { temporary, cli, stage, decide } = await setup(t);
+  const admissions = [{ chain: "eip155:1", kind: "token", identifier: USDC, rail: "bridge", dailyLimitAtomic: "2500000",
+    mechanisms: [
+      { provider: "relay", reference: "ethereum-usdc-bnb-native-v1", maximumPerTransferAtomic: "2500000" },
+      { provider: "relay", reference: "ethereum-usdc-base-eth-v1", maximumPerTransferAtomic: "300000" },
+    ] }];
+  const file = policy({ overlayVersion: "owner.multi.1", accounts: { evm: EVM_OWNER }, admissions });
+  const staged = await stage(file);
+  assert.equal(staged.ok, true, JSON.stringify(staged.error));
+  const status = await cli(["allowlist", "policy", "status", "--profile", PROFILE]);
+  assert.deepEqual((status.data as any).staged.admissions[0].mechanismOptions, admissions[0]!.mechanisms);
+  const decision = await decide("activate", 1);
+  assert.equal(decision.envelope.ok, true, JSON.stringify(decision.envelope.error));
+  assert.ok(decision.script.screen().includes("reference ethereum-usdc-base-eth-v1; per operation 0.3 USDC"));
+  const active = await loadActiveAssetPolicyRegistry(temporary.root, PROFILE, NOW);
+  assert.deepEqual(active?.registry, (staged.data as any).registry);
+  assert.equal(evaluateAssetPolicy(active!.registry, { chain: "eip155:1", asset: { kind: "token", identifier: USDC },
+    rail: "bridge", amountAtomic: "300000", dailyUsageAtomic: "0", asOfDate: "2026-09-18", asOf: NOW.toISOString(),
+    mechanism: { provider: "relay", reference: "ethereum-usdc-base-eth-v1" } }).caps.maximumPerTransferAtomic, "300000");
+  assert.equal((await new AllowlistPolicyStore(temporary.root).read(PROFILE)).records.length, 1);
+});

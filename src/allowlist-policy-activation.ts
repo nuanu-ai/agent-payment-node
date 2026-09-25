@@ -7,6 +7,7 @@ import {
   type AssetAtomicCaps,
   type AssetPolicyRail,
   type AssetPolicyRegistry,
+  type AssetMechanismOption,
 } from "./asset-policy-registry.js";
 import { swapMechanismDigest, type SwapMechanismPin } from "./swap/pin.js";
 import { exactChainConsent, TTY_APPROVAL_DEADLINE_MS, type TtyTransferApprovalOptions } from "./tty-approval.js";
@@ -43,6 +44,7 @@ export interface AllowlistAdmissionView {
   readonly maximumPerTransferAtomic: string;
   readonly dailyLimitAtomic: string;
   readonly mechanism: Readonly<{ provider: string; reference: string }> | SwapMechanismPin | null;
+  readonly mechanismOptions?: readonly AssetMechanismOption[];
 }
 
 export function allowlistAdmissions(registry: AssetPolicyRegistry): readonly AllowlistAdmissionView[] {
@@ -51,7 +53,8 @@ export function allowlistAdmissions(registry: AssetPolicyRegistry): readonly All
     const mechanism = rail === "direct" ? undefined : asset.mechanismPins?.[rail];
     return { network: chain.name, chain: chain.chain, symbol: asset.symbol, kind: asset.kind, identifier: asset.identifier,
       decimals: asset.decimals, rail, maximumPerTransferAtomic: caps.maximumPerTransferAtomic, dailyLimitAtomic: caps.dailyLimitAtomic,
-      mechanism: mechanism ?? null };
+      mechanism: mechanism ?? null,
+      ...(rail === "bridge" && asset.mechanismOptions !== undefined ? { mechanismOptions: asset.mechanismOptions.bridge } : {}) };
   })));
 }
 
@@ -91,6 +94,8 @@ export function allowlistDecisionLines(intent: AllowlistPolicyDecisionIntent, ap
       `   Per operation: ${display(row.maximumPerTransferAtomic, row.decimals)} ${row.symbol} (${row.maximumPerTransferAtomic} atomic, ${row.decimals} decimals)`,
       `   Daily (UTC): ${display(row.dailyLimitAtomic, row.decimals)} ${row.symbol} (${row.dailyLimitAtomic} atomic)`,
       ...(row.mechanism === null ? [] : [`   Mechanism pin: ${mechanismText(row.mechanism)}`]),
+      ...(row.mechanismOptions === undefined ? [] : row.mechanismOptions.map((option) =>
+        `   Mechanism pin: provider ${option.provider}; reference ${option.reference}; per operation ${display(option.maximumPerTransferAtomic, row.decimals)} ${row.symbol} (${option.maximumPerTransferAtomic} atomic)`)),
     ]),
     "Daily caps count this asset's combined usage on every rail during the UTC day.",
     `Policy digest: ${registry.policyDigest}`,

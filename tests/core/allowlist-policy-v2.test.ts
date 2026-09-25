@@ -110,3 +110,42 @@ test("sealed order is code-unit order, so the registry bytes never depend on the
   try { assert.equal(compileAllowlistPolicyOverlayV2(input).registry.policyDigest, expected.policyDigest); }
   finally { String.prototype.localeCompare = original; }
 });
+
+test("exact Relay alternatives retain the BNB cap, bound Base at 0.3 USDC, and share the asset daily ceiling", () => {
+  const bridge = { chain: "eip155:1", kind: "token" as const, identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    rail: "bridge" as const, dailyLimitAtomic: "2500000", mechanisms: [
+      { provider: "relay", reference: "ethereum-usdc-bnb-native-v1", maximumPerTransferAtomic: "2500000" },
+      { provider: "relay", reference: "ethereum-usdc-base-eth-v1", maximumPerTransferAtomic: "300000" },
+    ] };
+  const swap = { chain: bridge.chain, kind: bridge.kind, identifier: bridge.identifier, rail: "swap" as const,
+    maximumPerTransferAtomic: "2500000", dailyLimitAtomic: "2500000", mechanism: uniswapPin() };
+  const input = overlayV2({ accounts: { evm: EVM_OWNER }, admissions: [bridge, swap] });
+  const { overlay, registry } = compileAllowlistPolicyOverlayV2(input);
+  assert.deepEqual(compileAllowlistPolicyOverlayV2(structuredClone(input)).registry, registry);
+  assert.deepEqual(overlay.admissions[0], bridge);
+  const base = { chain: bridge.chain, asset: { kind: "token" as const, identifier: bridge.identifier }, rail: "bridge" as const,
+    dailyUsageAtomic: "0", ...at("2026-09-18T02:00:00.000Z") };
+  const bnbPin = { provider: "relay", reference: bridge.mechanisms[0]!.reference };
+  const basePin = { provider: "relay", reference: bridge.mechanisms[1]!.reference };
+  assert.equal(evaluateAssetPolicy(registry, { ...base, amountAtomic: "2500000", mechanism: bnbPin }).caps.maximumPerTransferAtomic, "2500000");
+  assert.equal(evaluateAssetPolicy(registry, { ...base, amountAtomic: "300000", mechanism: basePin }).caps.maximumPerTransferAtomic, "300000");
+  for (const request of [
+    { amountAtomic: "300001", mechanism: basePin },
+    { amountAtomic: "1", mechanism: { ...basePin, reference: bnbPin.reference + "-other" } },
+    { amountAtomic: "1" },
+    { amountAtomic: "1", mechanism: { provider: "other", reference: bnbPin.reference } },
+    { amountAtomic: "1", mechanism: bnbPin, dailyUsageAtomic: "2500000" },
+    { amountAtomic: "200001", mechanism: basePin, dailyUsageAtomic: "2300000" },
+  ]) assert.throws(() => evaluateAssetPolicy(registry, { ...base, ...request }), { code: "APN_OPERATION_BLOCKED" });
+  // Swap and bridge use the same asset ledger bucket; either rail's usage consumes the shared 2.5 USDC limit.
+  assert.throws(() => evaluateAssetPolicy(registry, { ...base, rail: "swap", amountAtomic: "200000", dailyUsageAtomic: "2400000" }),
+    { code: "APN_OPERATION_BLOCKED" });
+  for (const admissions of [
+    [{ ...bridge, mechanisms: [bridge.mechanisms[0], bridge.mechanisms[0]] }],
+    [{ ...bridge, mechanisms: [{ ...bridge.mechanisms[0], reference: "*" }, bridge.mechanisms[1]] }],
+    [{ ...bridge, mechanism: bridge.mechanisms[0] }],
+    [bridge, bridge],
+    [{ ...bridge, dailyLimitAtomic: "300000" }],
+  ]) assert.throws(() => compileAllowlistPolicyOverlayV2(overlayV2({ accounts: { evm: EVM_OWNER }, admissions: admissions as never })),
+    { code: "APN_INVALID_INPUT" });
+});
