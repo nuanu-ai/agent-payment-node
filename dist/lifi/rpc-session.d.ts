@@ -99,7 +99,7 @@ export declare class RpcReadSession {
     currentTime(): number;
     /** Reserve a physical POST for an effect before signing. Reads and pool probes share this limit. */
     reserveExternalAttempt(): void;
-    consumeExternalAttempt(): void;
+    externalAttempt<T>(origin: string, task: () => Promise<T>): Promise<T>;
     recordPhysicalAttempt(endpointRole: "primary" | "receipt" | "archive", methods: readonly string[]): void;
     wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt?: EvmRpcCall): EvmRpcCall;
     read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall, decoder?: RpcDecoder): Promise<unknown>;

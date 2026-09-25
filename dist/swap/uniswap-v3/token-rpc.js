@@ -3,6 +3,7 @@ import { ApnError } from "../../errors.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { BridgeHttps } from "../../lifi/https.js";
 import { bridgeRpcCall, RpcProviderScheduler, RpcReadSession } from "../../lifi/rpc.js";
+import { submitDirect } from "../../lifi/rpc-support.js";
 import { tokenPrimaryCandidates } from "./token-rpc-pool.js";
 export async function tokenBatch(call, route, items) {
     if (items.length < 1 || items.length > 3)
@@ -54,11 +55,8 @@ export function createTokenRpc(input) {
         if (selected === null)
             throw new ApnError("APN_RPC_CONFIG", "Uniswap token primary provider is not semantically selected.", { reason: "token_primary_not_selected" });
         const descriptor = resolve().descriptors[selected];
-        if (method === "eth_sendRawTransaction") {
-            resolve().session.consumeExternalAttempt();
-            effects += 1;
-            return await descriptor.call(method, params);
-        }
+        if (method === "eth_sendRawTransaction")
+            return await submitDirect(method, params, async () => await resolve().session.externalAttempt(descriptor.origin, async () => { effects += 1; return await descriptor.attempt(method, params); }));
         return await descriptor.sessionCall(resolve().session)(method, params);
     });
     Object.defineProperties(call, {
@@ -194,15 +192,12 @@ function createLegacyTokenRpc(input) {
             maxHttpRequests: input.maxHttpRequests, maxHttpAttempts: input.maxHttpRequests, maxReadAttempts: 1, deadlineMs: input.deadlineMs,
             now: input.now, ...(input.wait === undefined ? {} : { wait: input.wait }), providerScheduler: scheduler });
         const descriptor = bridgeRpcCall(1, input.environment, { transport: input.transport ?? new BridgeHttps(undefined, undefined, 2_500) });
-        return { session, direct: descriptor.call, read: descriptor.sessionCall(session), batch: descriptor.sessionBatchCall(session) };
+        return { session, descriptor, read: descriptor.sessionCall(session), batch: descriptor.sessionBatchCall(session) };
     })();
     let effects = 0, archiveVerified = false;
     const call = (async (method, params) => {
-        if (method === "eth_sendRawTransaction") {
-            resolve().session.consumeExternalAttempt();
-            effects += 1;
-            return await resolve().direct(method, params);
-        }
+        if (method === "eth_sendRawTransaction")
+            return await submitDirect(method, params, async () => await resolve().session.externalAttempt(resolve().descriptor.origin, async () => { effects += 1; return await resolve().descriptor.attempt(method, params); }));
         return await resolve().read(method, params);
     });
     Object.defineProperties(call, { batch: { value: async (route, items) => {

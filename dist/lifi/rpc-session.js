@@ -92,10 +92,13 @@ export class RpcReadSession {
         this.assertBeforeAttempt("eth_sendRawTransaction");
         this.externalReservations += 1;
     }
-    consumeExternalAttempt() {
-        this.reserveExternalAttempt();
-        this.externalReservations -= 1;
-        this.externalAttempts += 1;
+    async externalAttempt(origin, task) {
+        return await this.schedule(origin, async () => {
+            this.reserveExternalAttempt();
+            this.externalReservations -= 1;
+            this.externalAttempts += 1;
+            return await task();
+        });
     }
     recordPhysicalAttempt(endpointRole, methods) {
         this.roleAttempts[endpointRole] += 1;
