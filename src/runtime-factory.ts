@@ -199,8 +199,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     const sourceUrl = bound.rpcUrl ?? "";
     const bnbUrl = bound.bnbRpcUrl ?? "";
     // Construct only keyless readers. No wallet, signer, custody, or execution runtime is installed.
-    const source = new RelayEthereumFinalityRpc(sourceUrl, options.relayObserveSourceRpc);
-    const bnbInvocation = () => new RelayBnbReadOnlyRpc(bnbUrl, options.relayObserveBnbRpc);
+    const source = new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc);
+    const bnbInvocation = () => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc);
     return new ApnCore({ state, relayObserve: options.relayObserve ??
       new RelayObserveService(state, source, bnbInvocation,
         new RelayKeylessStatusService(state, options.relayStatusFetch)) });

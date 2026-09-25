@@ -795,7 +795,9 @@ to the Ethereum USDC to BNB lane and refuse this native operation.
 `relay observe` reads one saved Ethereum USDC to BNB operation. Supply explicit
 credential-free public HTTPS Ethereum and BNB RPC URLs. It checks the finalized
 source deposit, the saved Relay status locator, and a safe BNB recipient credit
-with at most three paced Ethereum and eight paced BNB RPC POSTs. A provider
+with at most three Ethereum and eight BNB RPC POSTs. Their physical starts use
+the persisted provider-family scheduler with a minimum 750 ms interval across
+processes. A provider
 success bound to the source hash and one qualifying destination candidate can
 yield `operationalAcceptance: true`. The output always keeps
 `paidAcceptance: false` and `causalLinkCryptographicallyProven: false`.

@@ -28,7 +28,7 @@ export class RelayObserveService {
         if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
             throw new ApnError("APN_OPERATION_BLOCKED", "Relay operation is retired.");
         const result = (state, reason, sourceFinalized = false, providerStatus = null, providerStatusBound = false, destinationProof = null) => ({
-            operationId, requestId: op.statusLocator?.requestId ?? null, state, reason, sourceFinalized,
+            operationId, state, reason, sourceFinalized,
             providerStatus, providerStatusBound, destinationProof, causalLinkCryptographicallyProven: false,
             paidAcceptance: false, operationalAcceptance: state === "operational_acceptance",
         });
