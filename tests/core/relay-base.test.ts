@@ -175,6 +175,7 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   assert.equal(observed.state, "recipient_credit_observed");
   assert.equal(observed.destinationProof?.status, "recipient_credit_proven");
   assert.equal(observed.paidAcceptance, false); assert.equal(observed.sourceFinalized, false);
+  assert.equal(observed.sourceObservationReason, "source_effect_not_recorded");
   assert.equal(observed.operationalAcceptance, false);
   assert.equal(statusCalls, 1); assert.equal(rpcCalls, 1);
   const routedService = new RelayBaseObserveService(state, () => ({ ...ports }),
@@ -230,6 +231,7 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   const operational = await operationalService.observe(op.operationId);
   assert.equal(operational.state, "operational_acceptance");
   assert.equal(operational.sourceFinalized, true);
+  assert.equal(operational.sourceObservationReason, "source_finalized");
   assert.equal(operational.providerStatusBound, true);
   assert.equal(operational.sourceUsageFinalized, true);
   assert.equal(operational.sourceDepositHash, sourceHash);
@@ -243,6 +245,23 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   assert.equal((await operationalService.observe(op.operationId)).state, "operational_acceptance");
   assert.equal((await effects.load(op.profileHash, op.operationId))?.integrityHash, confirmedJournal?.integrityHash);
   assert.equal((await usage.load(identity, reservationId))?.reservationDigest, finalizedUsage?.reservationDigest);
+  const finalizedObservation = await finalized.finalizedDeposit();
+  for (const [source, expectedReason] of [
+    [{ finalizedDeposit: async () => { throw new Error("private RPC response and credential"); } }, "source_rpc_unavailable"],
+    [{ finalizedDeposit: async () => null }, "source_observation_pending"],
+    [{ finalizedDeposit: async () => ({ ...finalizedObservation,
+      transaction: { ...finalizedObservation.transaction, from: recipient } }) }, "source_identity_mismatch"],
+    [{ finalizedDeposit: async () => ({ ...finalizedObservation,
+      receipt: { ...finalizedObservation.receipt, status: "reverted" as const } }) }, "source_deposit_reverted"],
+  ] as const) {
+    const diagnostic = await new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
+      new RelayKeylessStatusService(state, boundFetcher), source, usage).observe(op.operationId);
+    assert.equal(diagnostic.sourceObservationReason, expectedReason);
+    assert.equal(diagnostic.sourceFinalized, false);
+    assert.equal(diagnostic.sourceUsageFinalized, false);
+    assert.equal(diagnostic.operationalAcceptance, false);
+    assert.equal(JSON.stringify(diagnostic).includes("private RPC response and credential"), false);
+  }
   const directOnly = await new RelayBaseObserveService(state, () => ({ ...ports }),
     new RelayKeylessStatusService(state, boundFetcher), finalized, usage).observe(op.operationId);
   assert.equal(directOnly.state, "recipient_credit_observed");

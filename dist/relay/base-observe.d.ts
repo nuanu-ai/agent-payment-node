@@ -22,6 +22,7 @@ export declare class RelayBaseObserveService {
         providerStatusBound: boolean;
         sourceUsageFinalized: boolean;
         sourceDepositHash: string | null;
+        sourceObservationReason: string;
         causalLinkCryptographicallyProven: false;
         paidAcceptance: false;
         operationalAcceptance: boolean;

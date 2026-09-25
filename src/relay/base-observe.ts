@@ -58,7 +58,7 @@ export class RelayBaseObserveService {
       sourceFinalized = false, providerStatusBound = false, sourceUsageFinalized = false,
       sourceDepositHash: string | null = null) => ({
       operationId, state, reason, providerStatus, destinationProof, sourceFinalized, providerStatusBound,
-      sourceUsageFinalized, sourceDepositHash,
+      sourceUsageFinalized, sourceDepositHash, sourceObservationReason,
       causalLinkCryptographicallyProven: false as const, paidAcceptance: false as const,
       operationalAcceptance: state === "operational_acceptance",
     });
@@ -68,12 +68,22 @@ export class RelayBaseObserveService {
       deposit?.attempt?.attemptNumber === 1 &&
       ["submitting", "tx_known", "confirmed"].includes(deposit.phase)
       ? deposit.attempt.transactionHash : null;
+    // Fixed, non-sensitive reasons distinguish an RPC failure from a pending or
+    // mismatched source proof. Never return the RPC error or transaction payload.
+    let sourceObservationReason = sourceHash === null ? "source_effect_not_recorded" :
+      this.source === undefined ? "source_observer_unavailable" : "source_observation_pending";
     let sourceFinalized = false;
     if (sourceHash && this.source) {
+      let observation: Awaited<ReturnType<RelaySourceFinalityPorts["finalizedDeposit"]>>;
       try {
-        const observation = await this.source.finalizedDeposit(sourceHash as Hex);
-        sourceFinalized = observation !== null && verifyDepositObservation(op, sourceHash as Hex, observation) === "confirmed";
-      } catch { sourceFinalized = false; }
+        observation = await this.source.finalizedDeposit(sourceHash as Hex);
+      } catch { sourceObservationReason = "source_rpc_unavailable"; observation = null; }
+      if (observation !== null) {
+        try {
+          sourceFinalized = verifyDepositObservation(op, sourceHash as Hex, observation) === "confirmed";
+          sourceObservationReason = sourceFinalized ? "source_finalized" : "source_deposit_reverted";
+        } catch { sourceObservationReason = "source_identity_mismatch"; }
+      }
     }
     const usageBound = sourceFinalized && sourceHash ? await this.reconcileFinalizedSource(op, sourceHash) : false;
     if (op.statusLocator === undefined) return result("prepared_waiting", "status_locator_missing");
