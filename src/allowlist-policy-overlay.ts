@@ -41,9 +41,11 @@ export interface AllowlistPolicyAdmissionInput {
   readonly kind: CandidateKind;
   readonly identifier?: string;
   readonly rail: CandidateRail;
-  readonly maximumPerTransferAtomic: string;
+  readonly maximumPerTransferAtomic?: string;
   readonly dailyLimitAtomic: string;
   readonly mechanism?: AllowlistAdmissionMechanismPin;
+  /** Bridge only: exact alternative pins, each with its own per-transfer ceiling. */
+  readonly mechanisms?: readonly (AllowlistMechanismPin & { readonly maximumPerTransferAtomic: string })[];
 }
 
 export interface AllowlistPolicyOverlayInput {
@@ -108,10 +110,11 @@ export function compileAllowlistPolicyOverlay(
       decimals: asset.decimals,
       rails,
       caps: {
-        maximumPerTransferAtomic: admission.maximumPerTransferAtomic,
+        maximumPerTransferAtomic: admission.maximumPerTransferAtomic ?? maximumMechanismCap(admission.mechanisms!),
         dailyLimitAtomic: admission.dailyLimitAtomic,
       },
       ...(admission.mechanism === undefined ? {} : { mechanismPins: { [admission.rail]: admission.mechanism } }),
+      ...(admission.mechanisms === undefined ? {} : { mechanismOptions: { bridge: admission.mechanisms } }),
     } as const;
     const current = chains.get(asset.chain);
     if (current === undefined) {
@@ -184,26 +187,45 @@ function overlayInput(value: AllowlistPolicyOverlayInput, inventory: AllowlistIn
 /** One owner-supplied admission row: exact identity, one rail, positive owner caps and the rail's pinned mechanism. */
 export function validateAllowlistAdmission(value: unknown): AllowlistPolicyAdmissionInput {
   if (!isPlainRecord(value) || !exactKeys(value, [
-    "chain", "kind", ...(value.identifier === undefined ? [] : ["identifier"]), "rail", "maximumPerTransferAtomic",
+    "chain", "kind", ...(value.identifier === undefined ? [] : ["identifier"]), "rail",
+    ...(value.maximumPerTransferAtomic === undefined ? [] : ["maximumPerTransferAtomic"]),
     "dailyLimitAtomic", ...(value.mechanism === undefined ? [] : ["mechanism"]),
+    ...(value.mechanisms === undefined ? [] : ["mechanisms"]),
   ]) || typeof value.chain !== "string" || (value.kind !== "native" && value.kind !== "token") ||
       (value.identifier !== undefined && typeof value.identifier !== "string") ||
       (value.rail !== "direct" && value.rail !== "gasless" && value.rail !== "x402" && value.rail !== "bridge" && value.rail !== "swap")) {
     invalid("Allowlist admission row is invalid.", "invalid_admission");
   }
-  const maximum = positiveAtomic(value.maximumPerTransferAtomic, "maximum_per_transfer");
+  const alternatives = value.mechanisms;
+  if (alternatives !== undefined && (value.rail !== "bridge" || value.mechanism !== undefined ||
+      value.maximumPerTransferAtomic !== undefined || !Array.isArray(alternatives) || alternatives.length < 2 || alternatives.length > 16)) {
+    invalid("Bridge alternatives require two to sixteen exact pins and no legacy cap or pin.", "invalid_mechanisms");
+  }
+  const mechanisms = alternatives === undefined ? undefined : alternatives.map((item: unknown) => {
+    if (!isPlainRecord(item) || !exactKeys(item, ["provider", "reference", "maximumPerTransferAtomic"]))
+      invalid("Bridge mechanism alternative is invalid.", "invalid_mechanisms");
+    const pin = mechanismPin({ provider: item.provider, reference: item.reference })!;
+    return { ...pin, maximumPerTransferAtomic: positiveAtomic(item.maximumPerTransferAtomic, "maximum_per_transfer") };
+  });
+  if (mechanisms !== undefined && new Set(mechanisms.map((item) => `${item.provider}\0${item.reference}`)).size !== mechanisms.length)
+    invalid("Bridge mechanism alternatives contain a duplicate pin.", "duplicate_mechanism");
+  const maximum = mechanisms === undefined ? positiveAtomic(value.maximumPerTransferAtomic, "maximum_per_transfer") : maximumMechanismCap(mechanisms);
   const daily = positiveAtomic(value.dailyLimitAtomic, "daily_limit");
   if (BigInt(maximum) > BigInt(daily)) invalid("Per-transfer cap cannot exceed daily cap.", "cap_order");
   const mechanism = value.rail === "swap" ? swapMechanismPin(value.mechanism) : mechanismPin(value.mechanism);
-  if (value.rail !== "direct" && mechanism === undefined) {
+  if (value.rail !== "direct" && mechanism === undefined && mechanisms === undefined) {
     invalid("The selected rail requires a nonempty pinned provider mechanism.", "mechanism_required");
   }
   if (value.rail === "direct" && mechanism !== undefined) {
     invalid("Direct admission does not accept provider mechanism metadata.", "mechanism_not_applicable");
   }
   return { chain: value.chain, kind: value.kind, ...(value.identifier === undefined ? {} : { identifier: value.identifier }),
-    rail: value.rail, maximumPerTransferAtomic: maximum, dailyLimitAtomic: daily,
-    ...(mechanism === undefined ? {} : { mechanism }) };
+    rail: value.rail, ...(mechanisms === undefined ? { maximumPerTransferAtomic: maximum } : {}), dailyLimitAtomic: daily,
+    ...(mechanism === undefined ? {} : { mechanism }), ...(mechanisms === undefined ? {} : { mechanisms }) };
+}
+
+function maximumMechanismCap(value: readonly { readonly maximumPerTransferAtomic: string }[]): string {
+  return value.reduce((max, item) => BigInt(item.maximumPerTransferAtomic) > BigInt(max) ? item.maximumPerTransferAtomic : max, "0");
 }
 
 function mechanismPin(value: unknown): AllowlistMechanismPin | undefined {

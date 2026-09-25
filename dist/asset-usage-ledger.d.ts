@@ -38,6 +38,10 @@ export interface AssetUsageReservation extends AssetUsageIdentity {
 export interface AssetUsageReserveInput extends AssetUsageIdentity {
     readonly registry: unknown;
     readonly rail: AssetPolicyRail;
+    readonly mechanism?: Readonly<{
+        provider: string;
+        reference: string;
+    }>;
     readonly amountAtomic: string;
     readonly idempotencyKey: string;
     readonly now: Date;

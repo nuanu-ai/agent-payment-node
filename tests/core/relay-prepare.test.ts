@@ -531,3 +531,33 @@ test("Relay rejects changed quote digest and CLI binds the finite prepare inputs
   await assert.rejects(service.prepare(input), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(new OperationService(state).required(state.operationId("default", input.idempotencyKey)), { code: "APN_OPERATION_NOT_FOUND" });
 });
+
+test("Relay prepares select the exact alternative before quote and enforce the Base ceiling", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  const legacy = policy();
+  const { mechanismPins: _oldPins, ...source } = legacy.registry.chains[0]!.assets[0]!;
+  const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2", registryVersion: "test.multi.1",
+    publishedAt: legacy.registry.publishedAt, effectiveDate: legacy.registry.effectiveDate,
+    ...(legacy.registry.effectiveAt === undefined ? {} : { effectiveAt: legacy.registry.effectiveAt }),
+    ...(legacy.registry.expiresAt === undefined ? {} : { expiresAt: legacy.registry.expiresAt }),
+    chains: [{ ...legacy.registry.chains[0]!, assets: [{ ...source,
+      railCaps: { bridge: { maximumPerTransferAtomic: "2500000", dailyLimitAtomic: "2500000" } },
+      mechanismOptions: { bridge: [
+        { provider: "relay", reference: RELAY_ROUTE_REFERENCE, maximumPerTransferAtomic: "2500000" },
+        { provider: "relay", reference: "ethereum-usdc-base-eth-v1", maximumPerTransferAtomic: "300000" },
+      ] } }] }] });
+  const active = { ...legacy, registry, digest: registry.policyDigest };
+  let quotes = 0;
+  const service = new RelayUnsignedPrepareService(state, { now: () => instant }, undefined, {
+    activePolicy: async () => active, publicAccount: async () => payer, dailyUsage: async () => "0",
+    quote: async () => { quotes++; throw new Error("quote reached"); },
+  });
+  await assert.rejects(service.prepareBase({ ...input, amountAtomic: "300001", idempotencyKey: "relay-base-over-cap" }),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(quotes, 0);
+  await assert.rejects(service.prepareBase({ ...input, amountAtomic: "300000", idempotencyKey: "relay-base-at-cap" }), /quote reached/u);
+  assert.equal(quotes, 1);
+  await assert.rejects(service.prepare({ ...input, idempotencyKey: "relay-bnb-original-cap" }), /quote reached/u);
+  assert.equal(quotes, 2);
+});

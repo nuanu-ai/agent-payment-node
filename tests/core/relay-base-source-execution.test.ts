@@ -105,7 +105,10 @@ test("Base approval revalidation requires the Base policy pin", async t => {
         assets: [{ kind: "token", identifier: ETHEREUM_USDC, symbol: "USDC", decimals: 6,
           rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
           railCaps: { bridge: { maximumPerTransferAtomic: "3000000", dailyLimitAtomic: "5000000" } },
-          mechanismPins: { bridge: { provider: "relay", reference } } }] }] });
+          ...(reference === "both" ? { mechanismOptions: { bridge: [
+            { provider: "relay", reference: "ethereum-usdc-bnb-native-v1", maximumPerTransferAtomic: "3000000" },
+            { provider: "relay", reference: RELAY_BASE_ROUTE_REFERENCE, maximumPerTransferAtomic: "3000000" },
+          ] } } : { mechanismPins: { bridge: { provider: "relay", reference } } }) }] }] });
     return { profile: "default" as const, registry, digest: op.policyDigest!, revision: op.policyRevision!,
       accounts: { evm: owner }, activationDigest: "a".repeat(64), activatedAt: now.toISOString() };
   };
@@ -123,6 +126,8 @@ test("Base approval revalidation requires the Base policy pin", async t => {
   await assert.rejects(new RelayApprovalEffectService(state, ports(RELAY_BASE_ROUTE_REFERENCE)).run(op.operationId),
     /funding reached/u);
   assert.equal(fundingReads, 1);
+  await assert.rejects(new RelayApprovalEffectService(state, ports("both")).run(op.operationId), /funding reached/u);
+  assert.equal(fundingReads, 2);
 });
 
 test("interrupted Base approval and deposit markers resume without a second signature or send", async t => {
