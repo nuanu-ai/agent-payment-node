@@ -1,5 +1,6 @@
 import { request as httpsRequest } from "node:https";
 import { performance } from "node:perf_hooks";
+import { isDeepStrictEqual } from "node:util";
 import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, rpcString, nonzeroBytes32, x402RpcLog } from "./base-rpc-codec.js";
 import { x402Network } from "./x402-network.js";
 import type { EvmChainId } from "./evm-asset.js";
@@ -34,6 +35,7 @@ const AUTHORIZATION_STATE_SELECTOR = "0xe94a0102";
 const AUTHORIZATION_USED_TOPIC = "0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5";
 const MAX_X402_LOGS = 256;
 const MAX_RPC_BATCH_CALLS = 16;
+const MAX_RPC_BATCH_ENVELOPES = 24;
 const BATCH_READ_METHODS = new Set([
   "eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_call",
   "eth_getTransactionCount", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_maxPriorityFeePerGas", "eth_estimateGas",
@@ -457,27 +459,36 @@ export function parseRpcBatchResultEnvelope(raw: string, ids: readonly number[])
     ids.some((id) => !Number.isSafeInteger(id) || id < 1) || new Set(ids).size !== ids.length) {
     throw new ApnError("APN_RPC_PROTOCOL", "RPC batch request IDs are invalid.");
   }
+  if (Buffer.byteLength(raw) > MAX_RPC_RESPONSE_BYTES) {
+    throw new ApnError("APN_RPC_PROTOCOL", "RPC response exceeds the size limit.");
+  }
   let parsed: unknown;
   try { parsed = parseJsonWithDuplicateRejection(raw); }
   catch { throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not strict JSON."); }
-  if (!Array.isArray(parsed) || parsed.length !== ids.length) {
+  if (!Array.isArray(parsed) || parsed.length < ids.length || parsed.length > MAX_RPC_BATCH_ENVELOPES) {
     throw new ApnError("APN_RPC_PROTOCOL", "RPC batch response count is invalid.");
   }
   const expected = new Set(ids);
-  const results = new Map<number, unknown>();
+  const results = new Map<number, Record<string, unknown>>();
   for (const entry of parsed) {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       throw new ApnError("APN_RPC_PROTOCOL", "RPC batch response envelope is invalid.");
     }
     const message = entry as Record<string, unknown>;
     if (!exactKeys(message, ["jsonrpc", "id", "result"]) || message.jsonrpc !== "2.0" ||
-      typeof message.id !== "number" || !Number.isSafeInteger(message.id) || !expected.has(message.id) ||
-      results.has(message.id)) {
+      typeof message.id !== "number" || !Number.isSafeInteger(message.id) || !expected.has(message.id)) {
       throw new ApnError("APN_RPC_PROTOCOL", "RPC batch response envelope is invalid.");
     }
-    results.set(message.id, message.result);
+    const previous = results.get(message.id);
+    if (previous !== undefined && !isDeepStrictEqual(previous, message)) {
+      throw new ApnError("APN_RPC_PROTOCOL", "RPC batch response envelope is invalid.");
+    }
+    results.set(message.id, message);
   }
-  return ids.map((id) => results.get(id));
+  if (results.size !== ids.length) {
+    throw new ApnError("APN_RPC_PROTOCOL", "RPC batch response is missing an ID.");
+  }
+  return ids.map((id) => results.get(id)!.result);
 }
 
 export function parseRpcLogEnvelope(raw: string, id: string):
