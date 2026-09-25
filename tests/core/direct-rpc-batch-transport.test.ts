@@ -6,7 +6,10 @@ import test, { type TestContext } from "node:test";
 import { decodeFunctionData, toHex } from "viem";
 import { requireEvmFunding, validateEvmFeeQuote } from "../../src/evm-direct.js";
 import { HttpsBaseRpc, parseRpcBatchResultEnvelope } from "../../src/rpc.js";
-import { RECIPIENT, WALLET } from "./helpers.js";
+import { RelayNativeSourceRuntime } from "../../src/relay/native-source.js";
+import type { RelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
+import { StateStore } from "../../src/state.js";
+import { RECIPIENT, WALLET, temporaryState } from "./helpers.js";
 
 const secret = "private-rpc-url-token";
 const endpoint = `https://8.8.8.8/${secret}?key=${secret}`;
@@ -49,6 +52,36 @@ test("batch transport sends one read-only POST and restores request order from r
   });
   assert.deepEqual(await new HttpsBaseRpc(endpoint).batchCall(read), ["0x1", "0x10"]);
   assert.equal(bodies.length, 1);
+});
+
+test("BNB native funding accepts the gas price read batch before signing and blocks invalid fees without a send", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const hash = `0x${"a".repeat(64)}`;
+  const op = { sourceAccount: WALLET, nativeQuote: { deposit: { value: "100", maxFeePerGas: "10" } },
+    depositNetworkFeeCeilingWei: "100" } as RelayUnsignedOperation;
+  let gasPrice = "0x5", sends = 0;
+  const bodies = mockHttps(t, (body) => {
+    assert.ok(Array.isArray(body));
+    const methods = body.map((item: { method: string }) => item.method);
+    const results = methods.length === 2 ? ["0x38", { number: "0x10", hash }] :
+      [{ number: "0x10", hash }, "0xc9", "0x1", gasPrice, "0x38"];
+    assert.deepEqual(methods, methods.length === 2 ? ["eth_chainId", "eth_getBlockByNumber"] :
+      ["eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount", "eth_gasPrice", "eth_chainId"]);
+    return { status: 200, raw: JSON.stringify(body.map((item: { id: number }, index: number) =>
+      ({ jsonrpc: "2.0", id: item.id, result: results[index] })).reverse()) };
+  });
+  const rpc = new HttpsBaseRpc(endpoint);
+  const runtime = new RelayNativeSourceRuntime(new StateStore(temp.root),
+    { load: async () => Buffer.alloc(32), create: async () => Buffer.alloc(32) },
+    { confirm: async () => true, rpc: { batchCall: calls => rpc.batchCall(calls),
+      submitRawTransaction: async () => { sends++; throw new Error("unexpected send"); } } });
+  assert.equal(await runtime["funding"](op, rpc), 1n);
+  assert.equal(bodies.length, 2);
+  gasPrice = "0xb";
+  await assert.rejects(runtime["funding"](op, rpc), { code: "APN_OPERATION_BLOCKED",
+    details: { reason: "native_funding_or_fee" } });
+  assert.equal(bodies.length, 4);
+  assert.equal(sends, 0);
 });
 
 test("batch parser accepts only identical duplicate envelopes and preserves request order", () => {
