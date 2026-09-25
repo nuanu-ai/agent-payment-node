@@ -4,13 +4,16 @@
  * local age limit is an APN freshness rule, not a provider quote expiry.
  */
 import { canonicalJson, sha256 } from "../canonical.js";
+import { decodeFunctionData, encodeFunctionData, getAddress } from "viem";
 import { SEI_GASZIP_QUOTE_DESTINATION } from "./asset-registry.js";
+import { FEE_FORWARDER, FEE_FORWARDER_NATIVE_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, GASZIP_SELECTOR, gasZipBridgeAbi } from "./abi.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHex, bridgeOpaque, bridgeRecord, bridgeUint } from "./validation.js";
 export const SEI_GASZIP_LOCAL_MAX_AGE_MS = 60_000;
 export const SEI_GASZIP_SOURCE_CHAIN_ID = 1;
 export const SEI_GASZIP_BUYER = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
 const SOURCE_AMOUNT = "200000000000000";
-const SELECTOR = "0x606326ff";
+export const SEI_GASZIP_VERIFIED_FACET = getAddress("0x65d6b9a368be49bca4964b66e54f828cab64b8f9");
+export const SEI_GASZIP_SHORT_CHAIN_ID = 246;
 const MAX_QUOTE_BYTES = 256 * 1024;
 function fail(reason) { return bridgeFailure("APN_PROVIDER_PROTOCOL", `sei_gaszip_${reason}`); }
 function object(value) { return bridgeRecord(value); }
@@ -19,6 +22,21 @@ function token(value, chainId, symbol) {
     if (row.chainId !== chainId || bridgeAddress(row.address) !== BRIDGE_ZERO_ADDRESS ||
         row.symbol !== symbol || row.decimals !== 18)
         fail("token_identity");
+}
+function rejectUnsafeMetadata(value) {
+    if (Array.isArray(value)) {
+        for (const item of value)
+            rejectUnsafeMetadata(item);
+        return;
+    }
+    if (value === null || typeof value !== "object")
+        return;
+    const row = value;
+    for (const key of ["verificationStatus", "result", "providerResult"])
+        if (typeof row[key] === "string" && ["flagged", "deny", "denied"].includes(row[key].toLowerCase()))
+            fail("unsafe_token_metadata");
+    for (const child of Object.values(row))
+        rejectUnsafeMetadata(child);
 }
 function time(value) {
     if (!Number.isSafeInteger(value) || value < 0 || value > Date.parse("9999-12-31T23:59:59.999Z"))
@@ -42,11 +60,53 @@ function sameAction(value, fromChainId, toChainId, amount, sender, recipient, to
         bridgeAddress(action.toAddress) !== recipient)
         fail("action_binding");
 }
+/** Decode the exact v2.0.4 verified facet ABI and the single native fee-forwarding step. */
+function inspectCalldata(data, transactionId, bridgeAmount, feeAmount, owner) {
+    if (data.slice(0, 10) !== GASZIP_SELECTOR)
+        fail("transaction_selector");
+    try {
+        const decoded = decodeFunctionData({ abi: gasZipBridgeAbi, data });
+        if (decoded.functionName !== "swapAndStartBridgeTokensViaGasZip" ||
+            encodeFunctionData({ abi: gasZipBridgeAbi, functionName: decoded.functionName, args: decoded.args }).toLowerCase() !== data)
+            fail("calldata_noncanonical");
+        const [bridge, swaps, gasZip] = decoded.args;
+        if (bridge.transactionId.toLowerCase() !== transactionId || bridge.bridge !== "gasZipBridge" ||
+            bridge.integrator !== "lifi-api" || bridge.referrer !== BRIDGE_ZERO_ADDRESS ||
+            bridge.sendingAssetId !== BRIDGE_ZERO_ADDRESS || bridge.receiver !== owner ||
+            bridge.minAmount !== bridgeAmount || bridge.destinationChainId !== 1329n ||
+            bridge.hasSourceSwaps !== true || bridge.hasDestinationCall !== false)
+            fail("calldata_bridge_data");
+        if (swaps.length !== 1)
+            fail("calldata_swap_count");
+        const swap = swaps[0];
+        if (swap.callTo !== FEE_FORWARDER || swap.approveTo !== FEE_FORWARDER ||
+            swap.sendingAssetId !== BRIDGE_ZERO_ADDRESS || swap.receivingAssetId !== BRIDGE_ZERO_ADDRESS ||
+            swap.fromAmount !== BigInt(SOURCE_AMOUNT) || swap.requiresDeposit !== true ||
+            swap.callData.slice(0, 10) !== FEE_FORWARDER_NATIVE_SELECTOR)
+            fail("calldata_fee_step");
+        const forwarded = decodeFunctionData({ abi: feeForwarderAbi, data: swap.callData });
+        if (forwarded.functionName !== "forwardNativeFees" ||
+            encodeFunctionData({ abi: feeForwarderAbi, functionName: forwarded.functionName, args: forwarded.args }).toLowerCase() !== swap.callData ||
+            forwarded.args[0].length !== 1 || forwarded.args[0][0].recipient !== FEE_RECIPIENT ||
+            forwarded.args[0][0].amount !== feeAmount)
+            fail("calldata_fee_distribution");
+        const receiverWord = `0x${owner.slice(2).toLowerCase()}${"0".repeat(24)}`;
+        if (gasZip.receiverAddress.toLowerCase() !== receiverWord ||
+            gasZip.destinationChains !== BigInt(SEI_GASZIP_SHORT_CHAIN_ID))
+            fail("calldata_gaszip_data");
+    }
+    catch (error) {
+        if (error instanceof Error && error.name === "ApnError")
+            throw error;
+        fail("calldata_ABI_decode");
+    }
+}
 /** Accept one already fetched provider response. `fetchedAtMs` must come from the caller's trusted fetch clock. */
 export function inspectSeiGasZipQuote(value, fetchedAtMs) {
     const fetchedAt = time(fetchedAtMs), bytes = canonicalJson(value);
     if (Buffer.byteLength(bytes, "utf8") > MAX_QUOTE_BYTES)
         fail("quote_size");
+    rejectUnsafeMetadata(value);
     const q = object(value), action = object(q.action), estimate = object(q.estimate), tx = object(q.transactionRequest);
     const owner = SEI_GASZIP_BUYER, destination = SEI_GASZIP_QUOTE_DESTINATION;
     if (q.type !== "lifi" || q.tool !== destination.tool || q.integrator !== "lifi-api" ||
@@ -115,11 +175,12 @@ export function inspectSeiGasZipQuote(value, fetchedAtMs) {
         if (tx[key] !== undefined)
             quantity(tx[key]);
     const data = bridgeHex(tx.data, BRIDGE_MAX_CALLDATA_BYTES);
-    if (data.length <= 10 || data.slice(0, 10) !== SELECTOR)
+    if (data.length <= 10 || data.slice(0, 10) !== GASZIP_SELECTOR)
         fail("transaction_selector");
     const transactionId = bridgeHex(q.transactionId, 32, 32);
-    if (transactionId === `0x${"0".repeat(64)}` || !data.includes(transactionId.slice(2)))
+    if (transactionId === `0x${"0".repeat(64)}`)
         fail("transaction_id_binding");
+    inspectCalldata(data, transactionId, bridgeAmount, feeAmount, owner);
     return {
         kind: "sei_gaszip_quote_inspection", signable: false, execution_blocked: true,
         reason: "source_destination_contract_observer_recovery_and_policy_unreviewed", providerExpiry: null,
@@ -130,6 +191,7 @@ export function inspectSeiGasZipQuote(value, fetchedAtMs) {
         sourceAmountAtomic: SOURCE_AMOUNT, bridgeAmountAtomic: bridgeAmount.toString(),
         quotedOutputAtomic: quoted.toString(), minimumOutputAtomic: minimum.toString(), feeAtomic: feeAmount.toString(),
         transactionTarget: BRIDGE_DIAMOND, transactionValueAtomic: source.toString(), transactionDataDigest: sha256(data),
+        verifiedFacet: SEI_GASZIP_VERIFIED_FACET, gasZipShortChainId: SEI_GASZIP_SHORT_CHAIN_ID, feeRecipient: FEE_RECIPIENT,
     };
 }
 /** Reparse and compare the entire quote at the original capture time. Always returns a blocked inspection. */
