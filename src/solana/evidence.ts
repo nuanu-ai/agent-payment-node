@@ -22,11 +22,11 @@ export async function inspectSolana(rpc: SolanaRpcPort, account: ChainAccount, p
   if (statuses[0] === null) return { status: "unproven", reason: "signature_history_unavailable" };
   const status = rpcRecord(statuses[0]);
   if (status.confirmationStatus !== "finalized" || status.confirmations !== null) return { status: "pending", reason: "not_finalized" };
-  const [result, wireValue] = await solanaReadBatch(rpc, [
-    { method: "getTransaction", params: [transactionId, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }] },
-    { method: "getTransaction", params: [transactionId, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }] },
-  ]);
+  // Some public RPCs answer each encoding but reject or stall a batch containing both.
+  // Keep the two independently validated reads separate during terminal observation.
+  const result = await rpc.call("getTransaction", [transactionId, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
   if (result === null) return { status: "unproven", reason: "finalized_transaction_unavailable" };
+  const wireValue = await rpc.call("getTransaction", [transactionId, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
   const tx = rpcRecord(result); const meta = rpcRecord(tx.meta); const transaction = rpcRecord(tx.transaction); const message = rpcRecord(transaction.message);
   const slot = rpcAtomic(tx.slot);
   if (slot !== rpcAtomic(status.slot) || rpcAtomic(rpcRecord(response.context).slot) < slot || stringify(meta.err) !== stringify(status.err)) protocolFailure();
