@@ -11,6 +11,15 @@ export const ASSET_POLICY_REGISTRY_SCHEMA_V2 = "apn.asset-policy-registry.v2";
 const MAX_CHAINS = 64;
 const MAX_ASSETS_PER_CHAIN = 256;
 const MAX_UINT256 = (1n << 256n) - 1n;
+export function bridgeMechanismAdmitted(admission, mechanism) {
+    if (admission.rail !== "bridge")
+        return false;
+    const options = admission.asset.mechanismOptions?.bridge;
+    if (options !== undefined)
+        return options.some((option) => option.provider === mechanism.provider && option.reference === mechanism.reference);
+    const pin = admission.asset.mechanismPins?.bridge;
+    return pin?.provider === mechanism.provider && pin.reference === mechanism.reference;
+}
 export function assetPolicyDigest(value) {
     validateRegistryBody(value);
     return domainHash(value.schemaVersion, canonicalJson(value));
@@ -66,7 +75,16 @@ export function evaluateAssetPolicy(registryValue, input) {
         invalid("The asset policy registry lacks caps for the admitted rail.");
     const amount = atomic(input.amountAtomic, true, "Transfer amount");
     const usage = atomic(input.dailyUsageAtomic, false, "Daily usage");
-    const perTransfer = BigInt(caps.maximumPerTransferAtomic);
+    const options = asset.mechanismOptions?.bridge;
+    let selected;
+    if (rail === "bridge" && options !== undefined) {
+        if (input.mechanism === undefined)
+            denied("An exact bridge mechanism is required by the asset policy.");
+        selected = options.find((option) => option.provider === input.mechanism.provider && option.reference === input.mechanism.reference);
+        if (selected === undefined)
+            denied("The bridge mechanism is not admitted by the asset policy.");
+    }
+    const perTransfer = BigInt(selected?.maximumPerTransferAtomic ?? caps.maximumPerTransferAtomic);
     const dailyLimit = BigInt(caps.dailyLimitAtomic);
     if (amount > perTransfer)
         denied("The transfer exceeds the asset policy per-transfer cap.");
@@ -81,7 +99,8 @@ export function evaluateAssetPolicy(registryValue, input) {
         family: chain.family,
         asset,
         rail,
-        caps: { maximumPerTransferAtomic: caps.maximumPerTransferAtomic, dailyLimitAtomic: caps.dailyLimitAtomic },
+        caps: { maximumPerTransferAtomic: selected?.maximumPerTransferAtomic ?? caps.maximumPerTransferAtomic,
+            dailyLimitAtomic: caps.dailyLimitAtomic },
         amountAtomic: amount.toString(),
         dailyUsageAtomic: usage.toString(),
         dailyRemainingAtomic: (dailyLimit - usage - amount).toString(),
@@ -90,10 +109,13 @@ export function evaluateAssetPolicy(registryValue, input) {
 function validateEvaluationInput(value) {
     if (!isPlainRecord(value) || !exactKeys(value, [
         "chain", "asset", "rail", "amountAtomic", "dailyUsageAtomic", "asOfDate", ...(value.asOf === undefined ? [] : ["asOf"]),
+        ...(value.mechanism === undefined ? [] : ["mechanism"]),
     ]) || typeof value.chain !== "string" || !isPlainRecord(value.asset) ||
         !exactKeys(value.asset, ["kind", "identifier"]) ||
         (value.asset.kind !== "native" && value.asset.kind !== "token") ||
-        (value.asset.kind === "native" ? value.asset.identifier !== null : typeof value.asset.identifier !== "string")) {
+        (value.asset.kind === "native" ? value.asset.identifier !== null : typeof value.asset.identifier !== "string") ||
+        (value.mechanism !== undefined && (!isPlainRecord(value.mechanism) || !exactKeys(value.mechanism, ["provider", "reference"]) ||
+            typeof value.mechanism.provider !== "string" || typeof value.mechanism.reference !== "string"))) {
         invalid("The asset policy evaluation input schema is invalid.");
     }
 }
@@ -144,7 +166,8 @@ function validateChain(value, schema) {
 function validateAsset(family, value, schema) {
     const perRail = schema === ASSET_POLICY_REGISTRY_SCHEMA_V2;
     if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", perRail ? "railCaps" : "caps",
-        ...(value.mechanismPins === undefined ? [] : ["mechanismPins"])]) ||
+        ...(value.mechanismPins === undefined ? [] : ["mechanismPins"]),
+        ...(value.mechanismOptions === undefined ? [] : ["mechanismOptions"])]) ||
         (value.kind !== "native" && value.kind !== "token") ||
         typeof value.symbol !== "string" || !/^[A-Z0-9][A-Z0-9._-]{0,15}$/u.test(value.symbol) ||
         typeof value.decimals !== "number" || !Number.isSafeInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) {
@@ -164,6 +187,27 @@ function validateAsset(family, value, schema) {
         validateCaps(value.caps);
     if (value.mechanismPins !== undefined)
         validateMechanismPins(value.mechanismPins);
+    if (value.mechanismOptions !== undefined) {
+        const options = value.mechanismOptions;
+        if (schema !== ASSET_POLICY_REGISTRY_SCHEMA_V2 || !value.rails.bridge ||
+            !isPlainRecord(value.mechanismOptions) || !exactKeys(value.mechanismOptions, ["bridge"]) ||
+            !Array.isArray(options.bridge) || options.bridge.length < 2 ||
+            options.bridge.length > 16 || value.mechanismPins?.bridge !== undefined)
+            invalid("Bridge mechanism alternatives are invalid.");
+        const keys = new Set();
+        for (const option of options.bridge) {
+            if (!isPlainRecord(option) || !exactKeys(option, ["provider", "reference", "maximumPerTransferAtomic"]))
+                invalid("Bridge mechanism alternative is invalid.");
+            validateMechanismPins({ bridge: { provider: option.provider, reference: option.reference } });
+            const cap = atomic(option.maximumPerTransferAtomic, true, "Bridge mechanism cap");
+            if (cap > BigInt(value.railCaps.bridge.maximumPerTransferAtomic))
+                invalid("Bridge mechanism cap exceeds rail cap.");
+            const key = `${option.provider}\0${option.reference}`;
+            if (keys.has(key))
+                invalid("Bridge mechanism alternative is duplicated.");
+            keys.add(key);
+        }
+    }
     const mechanismPins = value.mechanismPins;
     const swapPin = mechanismPins?.swap;
     if (value.rails.swap !== (swapPin !== undefined))

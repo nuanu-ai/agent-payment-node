@@ -16,6 +16,11 @@ export interface AssetAtomicCaps {
     readonly maximumPerTransferAtomic: string;
     readonly dailyLimitAtomic: string;
 }
+export interface AssetMechanismOption {
+    readonly provider: string;
+    readonly reference: string;
+    readonly maximumPerTransferAtomic: string;
+}
 export interface AssetPolicyRow {
     readonly kind: "native" | "token";
     /** Null is the only native identity. Token identities are canonical contract or mint addresses. */
@@ -42,6 +47,9 @@ export interface AssetPolicyRow {
         }>;
         swap: SwapMechanismPin;
     }>>;
+    readonly mechanismOptions?: Readonly<{
+        bridge: readonly AssetMechanismOption[];
+    }>;
 }
 export interface AssetPolicyChain {
     /** Exact network identity: eip155 chain ID, Solana genesis hash, or TRON genesis block ID. */
@@ -72,6 +80,11 @@ export interface AssetPolicyEvaluationInput {
         identifier: string;
     }>;
     readonly rail: AssetPolicyRail;
+    /** Required for a rail with alternative exact mechanism pins. */
+    readonly mechanism?: Readonly<{
+        provider: string;
+        reference: string;
+    }>;
     readonly amountAtomic: string;
     /** Already charged or reserved for this asset in the applicable UTC owner day. */
     readonly dailyUsageAtomic: string;
@@ -95,6 +108,10 @@ export interface AssetPolicyAdmission {
     readonly dailyUsageAtomic: string;
     readonly dailyRemainingAtomic: string;
 }
+export declare function bridgeMechanismAdmitted(admission: AssetPolicyAdmission, mechanism: {
+    readonly provider: string;
+    readonly reference: string;
+}): boolean;
 export declare function assetPolicyDigest(value: UnsignedAssetPolicyRegistry): string;
 export declare function sealAssetPolicyRegistry(value: UnsignedAssetPolicyRegistry): AssetPolicyRegistry;
 export declare function validateAssetPolicyRegistry(value: unknown): AssetPolicyRegistry;

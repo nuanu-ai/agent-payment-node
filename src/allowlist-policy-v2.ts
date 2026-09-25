@@ -81,6 +81,7 @@ interface MergedRow {
   readonly rails: Record<CandidateRail, boolean>;
   readonly railCaps: Partial<Record<CandidateRail, AssetAtomicCaps>>;
   readonly pins: Partial<Record<CandidateRail, AllowlistAdmissionMechanismPin>>;
+  bridgeOptions?: AllowlistPolicyAdmissionInput["mechanisms"];
 }
 
 /**
@@ -101,8 +102,11 @@ export function compileAllowlistPolicyOverlayV2(
     const row = merged.get(key) ?? { asset, rails: { direct: false, gasless: false, x402: false, bridge: false, swap: false },
       railCaps: {}, pins: {} };
     row.rails[admission.rail] = true;
-    row.railCaps[admission.rail] = { maximumPerTransferAtomic: admission.maximumPerTransferAtomic, dailyLimitAtomic: admission.dailyLimitAtomic };
+    row.railCaps[admission.rail] = { maximumPerTransferAtomic: admission.maximumPerTransferAtomic ??
+      admission.mechanisms!.reduce((max, option) => BigInt(option.maximumPerTransferAtomic) > BigInt(max) ? option.maximumPerTransferAtomic : max, "0"),
+      dailyLimitAtomic: admission.dailyLimitAtomic };
     if (admission.mechanism !== undefined) row.pins[admission.rail] = admission.mechanism;
+    if (admission.mechanisms !== undefined) row.bridgeOptions = admission.mechanisms;
     merged.set(key, row);
   }
   const chains = new Map<string, AssetPolicyChain>();
@@ -111,6 +115,7 @@ export function compileAllowlistPolicyOverlayV2(
       kind: row.asset.kind, identifier: row.asset.identifier, symbol: row.asset.symbol, decimals: row.asset.decimals,
       rails: row.rails as AssetRailAdmission, railCaps: row.railCaps,
       ...(Object.keys(row.pins).length === 0 ? {} : { mechanismPins: row.pins as NonNullable<AssetPolicyRow["mechanismPins"]> }),
+      ...(row.bridgeOptions === undefined ? {} : { mechanismOptions: { bridge: row.bridgeOptions } }),
     };
     const current = chains.get(row.asset.chain);
     chains.set(row.asset.chain, current === undefined
