@@ -23,6 +23,11 @@ const HASH = /^[a-f0-9]{64}$/u, TX_HASH = /^0x[a-f0-9]{64}$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay BNB source execution is blocked.", { reason }); }
 function corrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Relay BNB source state is invalid: ${reason}.`); }
+/** Provider locator stays in the durable owner journal, never in CLI or MCP output. */
+export function publicRelayNativeSourceJournal(journal) {
+    const { requestId: _requestId, ...publicFields } = journal;
+    return publicFields;
+}
 function journalBody(j) {
     const { integrityHash: _, ...body } = j;
     return body;

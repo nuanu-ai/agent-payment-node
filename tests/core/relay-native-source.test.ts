@@ -6,7 +6,7 @@ import { bindArgv } from "../../src/command-binder.js";
 import { runCli } from "../../src/cli.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce,
-  createRelayNativeSourceRuntime } from "../../src/relay/native-source.js";
+  createRelayNativeSourceRuntime, publicRelayNativeSourceJournal } from "../../src/relay/native-source.js";
 import { RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, validateRelayNativeQuote,
   verifySavedRelayNativeQuote } from "../../src/relay/native-quote.js";
 import { StateStore } from "../../src/state.js";
@@ -52,6 +52,9 @@ test("native journal marks a single dispatch before send and never repeats an am
   const send = async (_raw: Hex) => { sends++; throw new Error("lost send response"); };
   journal = await dispatchRelayNativeDepositOnce(op, journal, store, send, raw, now);
   assert.equal(journal.phase, "submitting"); assert.equal(sends, 1);
+  assert.equal(journal.requestId, op.statusLocator!.requestId);
+  assert.equal("requestId" in publicRelayNativeSourceJournal(journal), false);
+  assert.equal(JSON.stringify(publicRelayNativeSourceJournal(journal)).includes(op.statusLocator!.requestId), false);
   const replay = await dispatchRelayNativeDepositOnce(op, journal, store, send, raw, now);
   assert.deepEqual(replay, journal); assert.equal(sends, 1);
   await assert.rejects(store.advance(op, journal.integrityHash, "submitting", null, now),
