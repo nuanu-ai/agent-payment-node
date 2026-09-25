@@ -62,8 +62,31 @@ test("Relay status binds CLI and spends exactly one keyless GET without modifyin
   const result = await new RelayKeylessStatusService(new StateStore(temp.root), fetcher).status(operationId);
   assert.equal(calls, 1);
   assert.equal(result.status, "success"); assert.equal(result.proofClass, "provider_assertion");
+  assert.equal(result.chainIdentityObserved, true);
   assert.equal(result.independentOnchainProof, false); assert.equal(result.paidAcceptance, false);
   assert.deepEqual(result.inTxHashes, [hash]); assert.deepEqual(result.txHashes, [hash]);
+  assert.deepEqual(await readFile(path), before);
+});
+
+test("Relay accepts schema-valid waiting status without chain IDs or transaction hashes", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const op = await savedOperation();
+  await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
+  const path = join(temp.root, "relay-unsigned-operations", op.profileHash, `${operationId}.json`);
+  const before = await readFile(path);
+  let calls = 0;
+  const service = new RelayKeylessStatusService(new StateStore(temp.root), async () => {
+    calls++; return response({ status: "waiting" });
+  });
+  const result = await service.status(operationId);
+  assert.equal(calls, 1);
+  assert.equal(result.status, "waiting");
+  assert.equal(result.chainIdentityObserved, false);
+  assert.equal(result.sourceChainId, 1); assert.equal(result.destinationChainId, 56);
+  assert.deepEqual(result.inTxHashes, []); assert.deepEqual(result.txHashes, []);
+  assert.equal(result.proofClass, "provider_assertion");
+  assert.equal(result.independentOnchainProof, false); assert.equal(result.paidAcceptance, false);
+  assert.equal(result.executionAdmitted, false); assert.deepEqual(result.nextActions, []);
   assert.deepEqual(await readFile(path), before);
 });
 
@@ -108,19 +131,46 @@ test("retired quote and malformed retirement marker fail before any Relay reques
   assert.equal(calls, 0);
 });
 
-test("Relay status rejects redirects, chain mismatch, malformed hashes and oversized bodies", async t => {
+test("Relay status protocol gates have fixed diagnostic reasons and one request budget", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const op = await savedOperation();
   await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
-  for (const providerResponse of [Response.redirect("https://evil.example/", 302),
-    response(payload("success", { destinationChainId: 8453 })),
-    response(payload("success", { txHashes: ["0x1234"] })),
-    response(payload("success", { extra: "x".repeat(65_536) }))]) {
+  const path = join(temp.root, "relay-unsigned-operations", op.profileHash, `${operationId}.json`);
+  const before = await readFile(path);
+  for (const [providerResponse, expectedReason] of [
+    [Response.redirect("https://evil.example/", 302), "relay_status_http_invalid"],
+    [new Response("{}", { status: 200, headers: { "content-length": "oops" } }), "relay_status_content_length_invalid"],
+    [new Response(null, { status: 200 }), "relay_status_body_missing"],
+    [new Response("x".repeat(65_537)), "relay_status_body_oversized"],
+    [new Response("{"), "relay_status_json_invalid"],
+    [response([]), "relay_status_payload_invalid"],
+    [response({ status: "unknown" }), "relay_status_value_invalid"],
+    [response(payload("success", { originChainId: "1" })), "relay_status_origin_chain_id_invalid"],
+    [response(payload("success", { originChainId: 8453 })), "relay_status_origin_chain_id_mismatch"],
+    [response(payload("success", { destinationChainId: null })), "relay_status_destination_chain_id_invalid"],
+    [response(payload("success", { destinationChainId: 8453 })), "relay_status_destination_chain_id_mismatch"],
+    [response(payload("success", { inTxHashes: ["0x1234"] })), "relay_status_in_tx_hashes_invalid"],
+    [response(payload("success", { txHashes: ["0x1234"] })), "relay_status_tx_hashes_invalid"],
+    [response(payload("failure", { failReason: "unsafe detail" })), "relay_status_fail_reason_invalid"],
+    [response(payload("refund", { refundFailReason: "unsafe detail" })), "relay_status_refund_fail_reason_invalid"],
+  ] as const) {
     let calls = 0;
     const service = new RelayKeylessStatusService(new StateStore(temp.root), async () => { calls++; return providerResponse; });
-    await assert.rejects(service.status(operationId), { code: "APN_PROVIDER_PROTOCOL" });
+    await assert.rejects(service.status(operationId), { code: "APN_PROVIDER_PROTOCOL", details: { reason: expectedReason } });
     assert.equal(calls, 1);
+    assert.deepEqual(await readFile(path), before);
   }
+});
+
+test("Relay status accepts a matching single chain ID without asserting complete chain identity", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const op = await savedOperation();
+  await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
+  const service = new RelayKeylessStatusService(new StateStore(temp.root), async () =>
+    response({ status: "pending", originChainId: 1, txHashes: [hash.toUpperCase().replace("0X", "0x")] }));
+  const result = await service.status(operationId);
+  assert.equal(result.chainIdentityObserved, false);
+  assert.deepEqual(result.txHashes, [hash]);
 });
 
 test("Relay delayed, refund and failure are provider assertions with sanitized reasons", async t => {
