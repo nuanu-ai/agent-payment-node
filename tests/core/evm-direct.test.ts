@@ -9,6 +9,7 @@ import { evmAmount, MAX_EVM_UINT, resolveEvmAsset } from "../../src/evm-asset.js
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import type { Address } from "../../src/model.js";
 import { sealReceipt } from "../../src/state-integrity.js";
+import { publicReceipt } from "../../src/transfer-policy.js";
 import { EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { EVM_USDC, activateDirectPolicy, directAdmission, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -125,8 +126,9 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.equal(setup.approval.intents.length, 1);
   const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
   assert.deepEqual(await restarted.core.transfer.status(prepared.operation_id), approved);
-  const receipt = await restarted.core.transfer.receipt(prepared.operation_id) as { state: string };
+  const receipt = await restarted.core.transfer.receipt(prepared.operation_id) as { state: string; finality: string };
   assert.equal(receipt.state, "completed");
+  assert.equal(receipt.finality, chainId === 42161 ? "rpc_safe_inclusion" : "inclusion_only");
   await restarted.core.transfer.resume(prepared.operation_id);
   assert.equal(setup.rpc.submissions.length, 1);
   assert.equal(restarted.approval.intents.length, 0);
@@ -323,26 +325,31 @@ test("terminal EVM operation with missing or forged receipt fails closed even wh
   await assert.rejects(setup.core.transfer.status(prepared.operation_id), { code: "APN_STATE_CORRUPT" });
 });
 
-test("Arbitrum receipt without safe proof stays nonterminal and resumes without another signature or submission", async (context) => {
+for (const [chainId, feeModel] of [[42161, "arbitrum-inclusive"], [56, undefined]] as const) test(`chain ${chainId} receipt without safe proof stays nonterminal and resumes without another signature or submission`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root); setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
-  await ensureDirectWallet(setup);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = chainId; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
+  const wallet = await ensureDirectWallet(setup);
+  if (chainId === 56) await activateDirectPolicy(temporary.root, "default", { accounts: { evm: wallet.address },
+    admissions: [...evmDirectAdmissions(), directAdmission("eip155:56", null)], now: setup.clock.now() });
   const evidence = setup.rpc.evm.evidence;
   setup.rpc.evm.evidence = async (...args) => {
     const { safeBlockNumberAtomic: _number, safeBlockHash: _hash, ...latestOnly } = await evidence(...args);
     return latestOnly;
   };
-  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: "native" } }) as { operation_id: string };
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { terminal: boolean }).terminal, false);
+  assert.equal((await setup.state.findOperation(prepared.operation_id))!.state, "unknown_finality");
   assert.equal(setup.rpc.broadcastCount, 1); assert.equal(setup.approval.intents.length, 1);
   setup.rpc.evm.evidence = evidence;
   const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
   assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
   assert.equal(setup.rpc.broadcastCount, 1); assert.equal(restarted.approval.intents.length, 0);
   const receipt = await restarted.core.transfer.receipt(prepared.operation_id) as { finality: string; fee_model: string };
-  assert.equal(receipt.finality, "rpc_safe_inclusion"); assert.equal(receipt.fee_model, "arbitrum-inclusive");
+  assert.equal(receipt.finality, "rpc_safe_inclusion"); assert.equal(receipt.fee_model, feeModel);
   const stored = (await setup.state.findOperation(prepared.operation_id))!;
   const record = (await setup.state.loadReceipt(stored.profileHash, stored.operationId))!;
+  const { safeBlockNumberAtomic: _safeNumber, safeBlockHash: _safeHash, ...withoutSafe } = record.evmEvidence!;
+  assert.equal((publicReceipt({ ...record, evmEvidence: withoutSafe }) as { finality: string }).finality, "inclusion_only");
   const { assertDirectTerminalReceiptAuthority } = await import("../../src/direct-terminal-receipt.js");
   for (const override of [{ safeBlockNumberAtomic: undefined, safeBlockHash: undefined }, { safeBlockNumberAtomic: "1" }, { safeBlockHash: `0x${"c".repeat(64)}` }]) {
     assert.throws(() => assertDirectTerminalReceiptAuthority(stored, { ...record, evmEvidence: { ...record.evmEvidence!, ...override } } as typeof record), { code: "APN_STATE_CORRUPT" });
