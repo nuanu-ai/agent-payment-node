@@ -36,6 +36,11 @@ export interface RelayNativeSourceJournal {
   readonly phase: Phase; readonly marker: string | null; readonly markedAt: string | null;
   readonly transactionHash: string | null; readonly observedAt: string | null; readonly integrityHash: string;
 }
+/** Provider locator stays in the durable owner journal, never in CLI or MCP output. */
+export function publicRelayNativeSourceJournal(journal: RelayNativeSourceJournal) {
+  const { requestId: _requestId, ...publicFields } = journal;
+  return publicFields;
+}
 function journalBody(j: RelayNativeSourceJournal): Omit<RelayNativeSourceJournal, "integrityHash"> {
   const { integrityHash: _, ...body } = j; return body;
 }

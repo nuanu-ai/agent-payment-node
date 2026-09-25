@@ -31,6 +31,7 @@ import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
 import { mmFail } from "./metamask-gasless/reasons.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { publicRelayNativeSourceJournal } from "./relay/native-source.js";
 import { OperationAbandonService } from "./operation-abandon-service.js";
 import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
 import { saRequest } from "./smart-account-gasless/schema.js";
@@ -188,7 +189,7 @@ export class ApnCore {
         canonicalOperationId(request.operationId);
         const service = this.context.relayNativeExecute;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay native execute runtime and foreground confirmation are required.");
-        return dataOutcome(await service.execute(request.operationId), "source_effect_journal");
+        return dataOutcome(publicRelayNativeSourceJournal(await service.execute(request.operationId)), "source_effect_journal");
       }
       case "relay.retire": {
         const service = this.context.relayRetire;

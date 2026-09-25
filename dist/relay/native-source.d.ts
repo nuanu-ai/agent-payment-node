@@ -22,6 +22,21 @@ export interface RelayNativeSourceJournal {
     readonly observedAt: string | null;
     readonly integrityHash: string;
 }
+/** Provider locator stays in the durable owner journal, never in CLI or MCP output. */
+export declare function publicRelayNativeSourceJournal(journal: RelayNativeSourceJournal): {
+    schemaVersion: "apn.relay-native-source-journal.v1";
+    profileHash: string;
+    operationId: string;
+    operationIntegrityHash: string;
+    quoteDigest: string;
+    depositEnvelopeHash: string;
+    phase: Phase;
+    marker: string | null;
+    markedAt: string | null;
+    transactionHash: string | null;
+    observedAt: string | null;
+    integrityHash: string;
+};
 export declare class RelayNativeSourceJournalRepository extends SecureStateStore {
     private path;
     load(op: RelayUnsignedOperation): Promise<RelayNativeSourceJournal | null>;
