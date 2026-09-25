@@ -26,8 +26,8 @@ export declare class RelayRetireService {
         operationId: string;
         idempotencyHash: string;
         requestHash: string;
-        sourceChainId: 1;
-        destinationChainId: 56;
+        sourceChainId: 1 | 56;
+        destinationChainId: 137 | 56;
         sourceAccount: string;
         recipient: string;
         quoteDigest: string;
@@ -40,6 +40,7 @@ export declare class RelayRetireService {
             endpoint: string;
         } | undefined;
         quote?: import("./quote.js").ValidatedRelayQuote | undefined;
+        nativeQuote?: import("./native-quote.js").ValidatedRelayNativeQuote | undefined;
         policyDigest?: string | undefined;
         policyRevision?: number | undefined;
         approvalNetworkFeeCeilingWei?: string | undefined;
