@@ -6,7 +6,7 @@ import { type RelayEffectJournal } from "./effect-journal.js";
 export interface RelayExecutionSummary {
     readonly operationId: string;
     readonly sourceChainId: 1;
-    readonly destinationChainId: 56;
+    readonly destinationChainId: 56 | 8453;
     readonly sourceAccount: string;
     readonly sourceToken: string;
     readonly amountAtomic: string;
