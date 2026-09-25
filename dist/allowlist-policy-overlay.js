@@ -46,6 +46,7 @@ export function compileAllowlistPolicyOverlay(raw, inventory = loadAllowlistInve
                 dailyLimitAtomic: admission.dailyLimitAtomic,
             },
             ...(admission.mechanism === undefined ? {} : { mechanismPins: { [admission.rail]: admission.mechanism } }),
+            ...(admission.recipient === undefined ? {} : { gaslessRecipient: admission.recipient }),
             ...(admission.mechanisms === undefined ? {} : { mechanismOptions: { bridge: admission.mechanisms } }),
         };
         const current = chains.get(asset.chain);
@@ -124,6 +125,7 @@ export function validateAllowlistAdmission(value) {
         "chain", "kind", ...(value.identifier === undefined ? [] : ["identifier"]), "rail",
         ...(value.maximumPerTransferAtomic === undefined ? [] : ["maximumPerTransferAtomic"]),
         "dailyLimitAtomic", ...(value.mechanism === undefined ? [] : ["mechanism"]),
+        ...(value.recipient === undefined ? [] : ["recipient"]),
         ...(value.mechanisms === undefined ? [] : ["mechanisms"]),
     ]) || typeof value.chain !== "string" || (value.kind !== "native" && value.kind !== "token") ||
         (value.identifier !== undefined && typeof value.identifier !== "string") ||
@@ -154,9 +156,26 @@ export function validateAllowlistAdmission(value) {
     if (value.rail === "direct" && mechanism !== undefined) {
         invalid("Direct admission does not accept provider mechanism metadata.", "mechanism_not_applicable");
     }
+    let recipient;
+    if (value.recipient !== undefined) {
+        if (value.rail !== "gasless" || (value.chain !== "eip155:1" && value.chain !== "eip155:8453") ||
+            mechanism === undefined || !("provider" in mechanism) || mechanism.provider !== "local" ||
+            typeof value.recipient !== "string") {
+            invalid("Recipient pins are available only for Ethereum and Base local gasless admissions.", "recipient_not_applicable");
+        }
+        try {
+            recipient = getAddress(value.recipient);
+            if (recipient !== value.recipient || recipient === "0x0000000000000000000000000000000000000000")
+                throw new Error("recipient");
+        }
+        catch {
+            invalid("Gasless recipient must be one canonical nonzero EVM address.", "invalid_recipient");
+        }
+    }
     return { chain: value.chain, kind: value.kind, ...(value.identifier === undefined ? {} : { identifier: value.identifier }),
         rail: value.rail, ...(mechanisms === undefined ? { maximumPerTransferAtomic: maximum } : {}), dailyLimitAtomic: daily,
-        ...(mechanism === undefined ? {} : { mechanism }), ...(mechanisms === undefined ? {} : { mechanisms }) };
+        ...(mechanism === undefined ? {} : { mechanism }), ...(recipient === undefined ? {} : { recipient }),
+        ...(mechanisms === undefined ? {} : { mechanisms }) };
 }
 function maximumMechanismCap(value) {
     return value.reduce((max, item) => BigInt(item.maximumPerTransferAtomic) > BigInt(max) ? item.maximumPerTransferAtomic : max, "0");

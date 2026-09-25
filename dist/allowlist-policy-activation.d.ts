@@ -33,6 +33,7 @@ export interface AllowlistAdmissionView {
         reference: string;
     }> | SwapMechanismPin | null;
     readonly mechanismOptions?: readonly AssetMechanismOption[];
+    readonly recipient?: string;
 }
 export declare function allowlistAdmissions(registry: AssetPolicyRegistry): readonly AllowlistAdmissionView[];
 export declare function allowlistDecisionFingerprint(input: {
