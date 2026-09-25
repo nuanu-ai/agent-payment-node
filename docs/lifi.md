@@ -1,5 +1,25 @@
 # LI.FI EVM cross-chain assets
 
+## Sei native quote inspection (C2-08 Phase 1)
+
+`src/lifi/sei-gaszip-quote.ts` inspects one LI.FI `GET /v1/quote` response for
+0.0002 native ETH on Ethereum chain 1 to native SEI on Sei EVM chain 1329, with
+the C2-08 buyer as both owner and recipient. It binds the `gasZipBridge` tool,
+native token metadata, action and included steps, quoted output and fixed LI.FI
+fee, plus the Ethereum transaction request's sender, chain, target, value,
+calldata and transaction ID. The complete response and transaction request have
+separate digests. Revalidation reparses the response and rejects any changed
+field or an age of 60 seconds or more since the caller's trusted fetch time.
+
+The LI.FI response has no provider expiry or deadline. The 60 second rule is a
+local freshness limit, **not** a provider validity guarantee. The result always
+has `signable: false`, `execution_blocked: true` and `providerExpiry: null`.
+The selector check and response digest do not prove the GasZip calldata's
+on-chain semantics. Sei and `gasZipBridge` remain outside the executable LI.FI
+chain, asset, tool, allowlist, signer, sender and observer paths. Source and
+destination contract proofs, observer and recovery behavior, and active owner
+policy are still required before any execution design or funding attempt.
+
 This APN 0.5.26 package includes local-wallet route selection and execution for
 the admitted assets between Ethereum, Base, Arbitrum One and the finite native
 destinations below. It implements
