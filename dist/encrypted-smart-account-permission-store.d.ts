@@ -13,7 +13,10 @@ export declare class EncryptedSmartAccountPermissionStore implements SmartAccoun
     private readonly files;
     constructor(state: StateStore, wrappingSecret: WrappingSecretPort);
     load(profileHash: string): Promise<SmartAccountPermissionRecord | null>;
+    /** Scan only while the caller holds evmAddressLock(address). Every entry is authenticated. */
+    listAll(): Promise<readonly SmartAccountPermissionRecord[]>;
     save(record: SmartAccountPermissionRecord): Promise<void>;
+    private writeProtected;
     remove(profileHash: string): Promise<void>;
     compareAndSet(expected: SmartAccountPermissionRecord, replacement: SmartAccountPermissionRecord | null): Promise<boolean>;
 }

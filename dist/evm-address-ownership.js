@@ -2,6 +2,7 @@ import { ApnError } from "./errors.js";
 import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
 import { listEncryptedWalletEnvelopes, listLocalWallets } from "./wallet-import-collision.js";
 import { stateCorrupt, stateSecurity } from "./secure-state-store.js";
+import { isGrantedPermissionRecord } from "./metamask-smart-account-record.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const PROFILE_HASH = /^[a-f0-9]{64}$/u;
 /** All callers that inspect or change an EVM owner must share this kernel lock. */
@@ -37,5 +38,22 @@ export async function assertExclusiveEvmOwner(state, address, ownProfileHash) {
         const identity = walletEnvelopeIdentity(envelope.value, envelope.profile);
         check(state.profileHash(identity.profile), identity.address);
     }
+}
+/** Execution-only Relay owner check. Call immediately before signing and again
+ * before first submission. No network operation belongs in this critical section. */
+export async function assertExclusiveRelayExecutionOwner(state, permissions, address, ownProfileHash) {
+    const target = address.toLowerCase();
+    if (!ADDRESS.test(address) || !PROFILE_HASH.test(ownProfileHash)) {
+        throw new ApnError("APN_INVALID_INPUT", "Relay execution ownership identity is invalid.");
+    }
+    await state.withLocks([evmAddressLock(address)], async () => {
+        await assertExclusiveEvmOwner(state, address, ownProfileHash);
+        for (const record of await permissions.listAll()) {
+            if (isGrantedPermissionRecord(record) && record.owner_address.toLowerCase() === target &&
+                record.profile_hash !== ownProfileHash) {
+                throw new ApnError("APN_OPERATION_BLOCKED", "EVM address has a Smart Account grant in another APN profile.");
+            }
+        }
+    });
 }
 //# sourceMappingURL=evm-address-ownership.js.map
