@@ -3,6 +3,7 @@ export declare const ACROSS_SELECTOR: Hex;
 export declare const STARGATE_SELECTOR: Hex;
 export declare const FEE_FORWARDER_SELECTOR: Hex;
 export declare const FEE_FORWARDER_NATIVE_SELECTOR: Hex;
+export declare const GASZIP_SELECTOR: Hex;
 export declare const FEE_FORWARDER: Address;
 export declare const FEE_RECIPIENT: Address;
 export declare const LAYER_ZERO_ENDPOINT: `0x${string}`;
@@ -217,6 +218,82 @@ export declare const stargateBridgeAbi: readonly [{
             readonly name: "refundAddress";
         }];
         readonly name: "stargateData";
+    }];
+    readonly outputs: readonly [];
+}];
+export declare const gasZipBridgeAbi: readonly [{
+    readonly name: "swapAndStartBridgeTokensViaGasZip";
+    readonly type: "function";
+    readonly stateMutability: "payable";
+    readonly inputs: readonly [{
+        readonly type: "tuple";
+        readonly components: readonly [{
+            readonly type: "bytes32";
+            readonly name: "transactionId";
+        }, {
+            readonly type: "string";
+            readonly name: "bridge";
+        }, {
+            readonly type: "string";
+            readonly name: "integrator";
+        }, {
+            readonly type: "address";
+            readonly name: "referrer";
+        }, {
+            readonly type: "address";
+            readonly name: "sendingAssetId";
+        }, {
+            readonly type: "address";
+            readonly name: "receiver";
+        }, {
+            readonly type: "uint256";
+            readonly name: "minAmount";
+        }, {
+            readonly type: "uint256";
+            readonly name: "destinationChainId";
+        }, {
+            readonly type: "bool";
+            readonly name: "hasSourceSwaps";
+        }, {
+            readonly type: "bool";
+            readonly name: "hasDestinationCall";
+        }];
+        readonly name: "bridgeData";
+    }, {
+        readonly type: "tuple[]";
+        readonly components: readonly [{
+            readonly type: "address";
+            readonly name: "callTo";
+        }, {
+            readonly type: "address";
+            readonly name: "approveTo";
+        }, {
+            readonly type: "address";
+            readonly name: "sendingAssetId";
+        }, {
+            readonly type: "address";
+            readonly name: "receivingAssetId";
+        }, {
+            readonly type: "uint256";
+            readonly name: "fromAmount";
+        }, {
+            readonly type: "bytes";
+            readonly name: "callData";
+        }, {
+            readonly type: "bool";
+            readonly name: "requiresDeposit";
+        }];
+        readonly name: "swapData";
+    }, {
+        readonly type: "tuple";
+        readonly components: readonly [{
+            readonly type: "bytes32";
+            readonly name: "receiverAddress";
+        }, {
+            readonly type: "uint256";
+            readonly name: "destinationChains";
+        }];
+        readonly name: "gasZipData";
     }];
     readonly outputs: readonly [];
 }];

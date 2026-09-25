@@ -5,6 +5,7 @@ export const ACROSS_SELECTOR = "0x1794958f" as Hex;
 export const STARGATE_SELECTOR = "0xa6010a66" as Hex;
 export const FEE_FORWARDER_SELECTOR = "0x332d746b" as Hex;
 export const FEE_FORWARDER_NATIVE_SELECTOR = "0x0e8ae67f" as Hex;
+export const GASZIP_SELECTOR = "0x606326ff" as Hex;
 
 export const FEE_FORWARDER = "0xCE40449B773a3E6E5e769ADb4e567179d4828cbd" as Address;
 export const FEE_RECIPIENT = "0xC06ebbefD94032B85424D51906e2A335EFAe264B" as Address;
@@ -19,6 +20,12 @@ export const acrossBridgeAbi = parseAbi([
 
 export const stargateBridgeAbi = parseAbi([
   `function swapAndStartBridgeTokensViaStargate(${BRIDGE_DATA} bridgeData,${SWAP_DATA} swapData,(uint16 assetId,(uint32 dstEid,bytes32 to,uint256 amountLD,uint256 minAmountLD,bytes extraOptions,bytes composeMsg,bytes oftCmd) sendParams,(uint256 nativeFee,uint256 lzTokenFee) fee,address refundAddress) stargateData) payable`,
+]);
+
+// Etherscan exact-match verified Ethereum GasZipFacet 0x65d6b9a368be49bca4964b66e54f828cab64b8f9,
+// source @custom:version 2.0.4. GasZipData is (bytes32,uint256) in this deployed ABI.
+export const gasZipBridgeAbi = parseAbi([
+  `function swapAndStartBridgeTokensViaGasZip(${BRIDGE_DATA} bridgeData,${SWAP_DATA} swapData,(bytes32 receiverAddress,uint256 destinationChains) gasZipData) payable`,
 ]);
 
 export const feeForwarderAbi = parseAbi([

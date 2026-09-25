@@ -2,6 +2,8 @@ import type { Address } from "../model.js";
 export declare const SEI_GASZIP_LOCAL_MAX_AGE_MS = 60000;
 export declare const SEI_GASZIP_SOURCE_CHAIN_ID = 1;
 export declare const SEI_GASZIP_BUYER: Address;
+export declare const SEI_GASZIP_VERIFIED_FACET: `0x${string}`;
+export declare const SEI_GASZIP_SHORT_CHAIN_ID = 246;
 export interface SeiGasZipQuoteInspection {
     readonly kind: "sei_gaszip_quote_inspection";
     readonly signable: false;
@@ -29,6 +31,9 @@ export interface SeiGasZipQuoteInspection {
     readonly transactionTarget: Address;
     readonly transactionValueAtomic: string;
     readonly transactionDataDigest: string;
+    readonly verifiedFacet: Address;
+    readonly gasZipShortChainId: 246;
+    readonly feeRecipient: Address;
 }
 /** Accept one already fetched provider response. `fetchedAtMs` must come from the caller's trusted fetch clock. */
 export declare function inspectSeiGasZipQuote(value: unknown, fetchedAtMs: number): SeiGasZipQuoteInspection;
