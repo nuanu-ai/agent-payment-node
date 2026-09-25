@@ -1,4 +1,6 @@
 import { RelayUnsignedPrepareService } from "./relay/prepare.js";
+import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
+import { ApnError } from "./errors.js";
 import { userInfo } from "node:os";
 import { resolve } from "node:path";
 import { ApnCore } from "./core.js";
@@ -167,6 +169,15 @@ export function createApnCore(bound, options = {}) {
         ...(stargateToken === undefined ? {} : { stargateToken }),
         // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
         ...(bound.request.command === "relay.prepare" || options.relayPrepare !== undefined ? { relayPrepare: options.relayPrepare ?? new RelayUnsignedPrepareService(state, clock, undefined, options.relayPreparePorts) } : {}),
+        ...(bound.request.command === "relay.preflight" || options.relayPreflight !== undefined ? {
+            relayPreflight: options.relayPreflight ?? new RelayReadOnlyPreflightService(state, clock, options.relayPreflightPorts ?? {
+                batch: calls => {
+                    if (rpc === undefined || !(rpc instanceof HttpsBaseRpc))
+                        throw new ApnError("APN_RPC_CONFIG", "Relay preflight requires its explicit HTTPS RPC.");
+                    return rpc.batchCall(calls);
+                },
+            }),
+        } : {}),
         ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
             portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
         } : {}),

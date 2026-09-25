@@ -15,6 +15,10 @@ export type CommandRequest = {
     readonly maxDepositNetworkFeeWei: string;
     readonly idempotencyKey: string;
 } | {
+    readonly command: "relay.preflight";
+    readonly profile: string;
+    readonly operationId: string;
+} | {
     readonly command: "stargate.native.prepare";
     readonly profile: string;
     readonly amountAtomic: string;

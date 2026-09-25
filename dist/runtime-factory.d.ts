@@ -1,4 +1,5 @@
 import { RelayUnsignedPrepareService, type RelayPreparePorts } from "./relay/prepare.js";
+import { RelayReadOnlyPreflightService, type RelayPreflightPorts } from "./relay/preflight.js";
 import type { BoundCommand } from "./command-binder.js";
 import type { OutputEnvelope } from "./commands.js";
 import { ApnCore } from "./core.js";
@@ -41,6 +42,8 @@ import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export interface RuntimeFactoryOptions {
     readonly relayPrepare?: RelayUnsignedPrepareService;
     readonly relayPreparePorts?: RelayPreparePorts;
+    readonly relayPreflight?: RelayReadOnlyPreflightService;
+    readonly relayPreflightPorts?: RelayPreflightPorts;
     readonly stargateNative?: StargateNativeService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;

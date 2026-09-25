@@ -53,6 +53,8 @@ function bindParsedCatalog(parsed) {
     const options = parsed.values;
     if (parsed.command.path.join(" ") === "relay prepare")
         return { request: { command: "relay.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
+    if (parsed.command.path.join(" ") === "relay preflight")
+        return { request: { command: "relay.preflight", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path[0] === "stargate") {
         switch (parsed.command.path.join(" ")) {
             case "stargate native prepare": return { request: { command: "stargate.native.prepare", profile: value(options, "--profile"),
