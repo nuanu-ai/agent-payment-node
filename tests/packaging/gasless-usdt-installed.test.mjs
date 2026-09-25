@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -69,8 +69,12 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   gasPrice: async () => { physical++; sponsorCalls++; return PRICE; },
   paymasterData: async () => { physical++; sponsorCalls++; return { paymaster: USDT_GASLESS.paymaster,
     paymasterData: PAYMASTER_DATA }; } };
+  let forbiddenEffects = 0;
+  const noEffect = async () => { forbiddenEffects++; throw new Error("synthetic fixture forbids execution"); };
+  const executionDisabled = { approval: { approve: noEffect }, signer: { sign: noEffect },
+    sendTransport: { send: noEffect } };
   const stateRoot = join(sandbox, "state"), options = { stateRoot, clock: { now: () => NOW },
-    gaslessUsdtPrepareOptions: { preparePort, sponsorPort } };
+    gaslessUsdtPrepareOptions: { preparePort, sponsorPort }, gaslessUsdtExecuteOptions: executionDisabled };
   const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
     "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "installed-usdt-001"];
   const prepared = await runCli(argv, {}, options);
@@ -100,8 +104,6 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   const { GaslessUsdtOperationService } = await moduleAt("gasless-usdt/service.js");
   const { UsdtOperationRepository } = await moduleAt("gasless-usdt/operation.js");
   const service = new GaslessUsdtOperationService(new UsdtOperationRepository(stateRoot)).forProfile(operation.profileHash);
-  assert.throws(() => service.sign(), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
-  assert.throws(() => service.dispatch(), { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
   const revoked = await service.resumeBound(operation.operationId, preparePort);
   assert.deepEqual({ state: revoked.state, reason: revoked.reason },
     { state: "capability_unavailable", reason: "policy_revoked_or_changed" });
@@ -119,6 +121,8 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   assert.equal(reserved.userOperationHash, null);
   assert.equal(reserved.policyDigest, policy.digest);
   assert.deepEqual(await execution.reserve(operation, intent, preparePort), reserved);
+  await assert.rejects(() => execution.reserve(operation, { ...intent, recipient: OWNER }, preparePort),
+    { code: "APN_IDEMPOTENCY_CONFLICT" });
   assert.deepEqual(JSON.parse(await readFile(join(stateRoot, "gasless-usdt-executions", `${operation.operationId}.json`), "utf8")), reserved);
   const reopenedExecution = new UsdtExecutionJournal(stateRoot);
   const reopenedUsage = new AssetUsageLedger(stateRoot);
@@ -152,20 +156,47 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   const submitting = await execution.markSubmitting(attempted, preparePort, syntheticHash);
   assert.equal(submitting.state, "submitting");
   assert.equal(submitting.userOperationHash, syntheticHash);
+  assert.equal(submitting.bindingHash, attempted.binding.bindingHash);
+  assert.equal(submitting.quoteHash, attemptedIntent.quoteHash);
+  assert.equal(submitting.reservationId, attemptedReservation.reservationId);
+  assert.deepEqual(await new UsdtExecutionJournal(stateRoot).load(attempted.operationId), submitting);
   assert.equal((await runCli(["gasless", "usdt", "execution-status", "--profile-hash", attempted.profileHash,
     "--operation", attempted.operationId], {}, { stateRoot })).data.execution.state, "submitting");
   await assert.rejects(() => execution.markSubmitting(attempted, preparePort, syntheticHash),
     { code: "APN_OPERATION_BLOCKED" });
+  assert.deepEqual(await execution.reserve(attempted, attemptedIntent, preparePort), submitting);
   await assert.rejects(() => execution.markSubmitted(attempted, `0x${"56".repeat(32)}`, NOW),
     { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await reopenedUsage.load(usageIdentity, attemptedReservation.reservationId))?.state, "reserved");
-  const unknown = await new UsdtExecutionJournal(stateRoot).markUnknownFinality(attempted, NOW);
+  const { UsdtRecoveryService } = await moduleAt("gasless-usdt/recovery.js");
+  let lookups = 0, canonicalReads = 0;
+  const recovery = new UsdtRecoveryService(new UsdtExecutionJournal(stateRoot), {
+    userOperationReceipt: async hash => { lookups++; assert.equal(hash, syntheticHash);
+      return { userOpHash: `0x${"78".repeat(32)}`, sender: OWNER,
+        entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
+        success: true, transactionHash: `0x${"9a".repeat(32)}` }; },
+    canonicalFinalizedReceipt: async () => { canonicalReads++; throw new Error("wrong locator must not be followed"); },
+  }, () => NOW);
+  const unknown = await recovery.observe(attempted);
   assert.equal(unknown.state, "unknown_finality");
   assert.equal(unknown.userOperationHash, syntheticHash);
+  assert.equal(lookups, 1);
+  assert.equal(canonicalReads, 0);
+  assert.deepEqual(await recovery.observe(attempted), unknown);
+  assert.equal(lookups, 2);
   assert.equal((await reopenedUsage.load(usageIdentity, attemptedReservation.reservationId))?.state, "unknown_finality");
   assert.equal((await reopenedUsage.usage(usageIdentity, NOW)).amountAtomic, "1000000");
   assert.equal((await execution.abortUnsent(attempted, NOW)), null);
   assert.deepEqual(await new UsdtExecutionJournal(stateRoot).load(attempted.operationId), unknown);
+  const executionPath = join(stateRoot, "gasless-usdt-executions", `${attempted.operationId}.json`);
+  const originalExecutionBytes = await readFile(executionPath);
+  assert.ok(originalExecutionBytes.toString("utf8").includes(syntheticHash));
+  await writeFile(executionPath, originalExecutionBytes.toString("utf8").replace(syntheticHash, `0x${"ab".repeat(32)}`));
+  await assert.rejects(() => new UsdtExecutionJournal(stateRoot).load(attempted.operationId),
+    { code: "APN_STATE_CORRUPT" });
+  await writeFile(executionPath, originalExecutionBytes);
+  assert.deepEqual(await new UsdtExecutionJournal(stateRoot).load(attempted.operationId), unknown);
+  assert.equal(forbiddenEffects, 0);
   let now = 1_000, attempts = 0;
   const budget = new UsdtCommandReadBudget(new StateStore(stateRoot), { request: async () => {
     attempts++; return { status: 200, body: "{}" }; } }, () => now, async ms => { now += ms; });
