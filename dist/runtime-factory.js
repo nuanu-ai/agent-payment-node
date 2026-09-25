@@ -1,5 +1,6 @@
 import { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
+import { RelayRetireService } from "./relay/retire.js";
 import { ApnError } from "./errors.js";
 import { userInfo } from "node:os";
 import { resolve } from "node:path";
@@ -169,6 +170,7 @@ export function createApnCore(bound, options = {}) {
         ...(stargateToken === undefined ? {} : { stargateToken }),
         // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
         ...(bound.request.command === "relay.prepare" || options.relayPrepare !== undefined ? { relayPrepare: options.relayPrepare ?? new RelayUnsignedPrepareService(state, clock, undefined, options.relayPreparePorts) } : {}),
+        ...(bound.request.command === "relay.retire" ? { relayRetire: new RelayRetireService(state, clock, wrappingSecret) } : {}),
         ...(bound.request.command === "relay.preflight" || options.relayPreflight !== undefined ? {
             relayPreflight: options.relayPreflight ?? new RelayReadOnlyPreflightService(state, clock, options.relayPreflightPorts ?? {
                 batch: calls => {

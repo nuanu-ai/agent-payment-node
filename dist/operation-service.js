@@ -17,7 +17,7 @@ import { SmartAccountGaslessOperationRepository } from "./smart-account-gasless/
 import { publicSmartAccountGaslessOperation } from "./smart-account-gasless/receipt.js";
 import { FacilitatorGaslessOperationRepository } from "./facilitator-gasless/operation-repository.js";
 import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
-import { RelayUnsignedOperationRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation } from "./relay-unsigned-operation.js";
+import { RelayUnsignedOperationRepository, RelayRetirementRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation } from "./relay-unsigned-operation.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
 export class OperationService {
     state;
@@ -99,7 +99,15 @@ export class OperationService {
         return matches[0] ?? null;
     }
     async assertProfileAvailable(profileHash) {
-        const blocking = (await this.profileOperations(profileHash)).find(({ record }) => !record.terminal);
+        let blocking;
+        for (const operation of await this.profileOperations(profileHash)) {
+            if (operation.record.terminal)
+                continue;
+            if (operation.kind === "relay_unsigned" && await new RelayRetirementRepository(this.state.root).load(operation.record) !== null)
+                continue;
+            blocking = operation;
+            break;
+        }
         if (blocking !== undefined) {
             throw new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this profile is not terminal.", {
                 blockingOperationId: blocking.record.operationId,
@@ -125,6 +133,8 @@ export class OperationService {
         }
         for (const operation of await this.profileOperations(profileHash)) {
             if (operation.record.terminal)
+                continue;
+            if (operation.kind === "relay_unsigned" && await new RelayRetirementRepository(this.state.root).load(operation.record) !== null)
                 continue;
             const held = storedOperationDomains(operation);
             const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
@@ -212,7 +222,7 @@ export class OperationService {
     async status(operationId) {
         const operation = await this.required(operationId);
         if (operation.kind === "relay_unsigned")
-            return publicRelayUnsignedOperation(operation.record);
+            return this.relayStatus(operation.record);
         if (operation.kind === "direct_transfer")
             return publicOperation(operation.record);
         if (operation.kind === "rail_transfer")
@@ -230,6 +240,9 @@ export class OperationService {
         return operation.strategy === "local"
             ? publicX402Operation(operation.record)
             : publicProviderX402Operation(operation.record);
+    }
+    async relayStatus(operation) {
+        return publicRelayUnsignedOperation(operation, await new RelayRetirementRepository(this.state.root).load(operation));
     }
     // Test and embedding ports written before the compatibility reader expose the
     // original current-record methods. Keep those ports working while the concrete

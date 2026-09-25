@@ -60,19 +60,30 @@ declare const schema: z.ZodObject<{
 }, z.core.$strict>;
 export type RelayUnsignedOperation = z.infer<typeof schema>;
 export type RelayUnsignedOperationInput = z.infer<typeof body>;
+declare const retirementSchema: z.ZodObject<{
+    schemaVersion: z.ZodLiteral<"apn.relay-retirement.v1">;
+    profileHash: z.ZodString;
+    operationId: z.ZodString;
+    preparedIntegrityHash: z.ZodString;
+    retiredAt: z.ZodString;
+    integrityHash: z.ZodString;
+}, z.core.$strict>;
+export type RelayRetirement = z.infer<typeof retirementSchema>;
 export declare function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOperation;
 export declare function freezeRelayUnsignedOperation(input: RelayUnsignedOperationInput): RelayUnsignedOperation;
-export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOperation): {
+export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOperation, retirement?: RelayRetirement | null): {
     proofClass: "saved_unsigned_quote";
     balanceEvidence: "not_checked";
     allowanceEvidence: "not_checked";
     statusObservable: boolean;
     executionAdmitted: false;
     nextActions: readonly [];
+    state: "prepared" | "retired";
+    terminal: boolean;
+    retiredAt?: string;
+    retirementIntegrityHash?: string;
     schemaVersion: "apn.relay-unsigned-operation.v1";
     kind: "relay_unsigned";
-    state: "prepared";
-    terminal: false;
     profileHash: string;
     operationId: string;
     idempotencyHash: string;
@@ -96,6 +107,13 @@ export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOpe
     approvalNetworkFeeCeilingWei?: string | undefined;
     depositNetworkFeeCeilingWei?: string | undefined;
 };
+/** Separate create-only marker preserves the original prepared quote byte for byte. */
+export declare class RelayRetirementRepository extends SecureStateStore {
+    private path;
+    load(operation: RelayUnsignedOperation): Promise<RelayRetirement | null>;
+    /** Caller holds profile and operation locks and has checked all effect stores. */
+    persistLocked(operation: RelayUnsignedOperation, retiredAt: string): Promise<RelayRetirement>;
+}
 export declare class RelayUnsignedOperationRepository extends SecureStateStore {
     loadOperation(profileHash: string, operationId: string): Promise<RelayUnsignedOperation | null>;
     findOperation(operationId: string): Promise<RelayUnsignedOperation | null>;

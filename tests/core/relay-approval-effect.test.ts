@@ -11,6 +11,7 @@ import { RelayApprovalEffectService, type RelayApprovalCustodyPort, type RelayAp
 import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, validateRelayQuote } from "../../src/relay/quote.js";
 import { RELAY_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
+import { RelayRetireService } from "../../src/relay/retire.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 
@@ -107,6 +108,30 @@ test("missing external requestId admission blocks old saved operation before sig
   const service = new RelayApprovalEffectService(f.state, { ...f.ports, executionAdmission: async () => null });
   await assert.rejects(service.run(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(f.counts.signs, 0); assert.equal(f.counts.sends, 0);
+});
+
+test("retired Relay operation cannot enter approval signing or submission", async t => {
+  const f = await setup(t);
+  await new RelayRetireService(f.state, { now: () => now }).retire({ profile: "default", operationId: f.op.operationId });
+  await assert.rejects(new RelayApprovalEffectService(f.state, f.ports).run(f.op.operationId),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.deepEqual(f.counts, { signs: 0, sends: 0, observations: 0 });
+});
+
+test("retirement and approval effect cannot deadlock after the journal is created", { timeout: 5000 }, async t => {
+  const f = await setup(t);
+  let entered!: () => void, release!: () => void;
+  const signing = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const effect = new RelayApprovalEffectService(f.state, { ...f.ports,
+    sign: async op => { entered(); await gate; return f.ports.sign(op); } }).run(f.op.operationId);
+  await signing;
+  try {
+    await assert.rejects(new RelayRetireService(f.state, { now: () => now }).retire({
+      profile: "default", operationId: f.op.operationId }), { code: "APN_OPERATION_BLOCKED" });
+  } finally { release(); }
+  await effect;
+  assert.equal(f.counts.signs, 1); assert.equal(f.counts.sends, 1);
 });
 
 test("signer failure and crash before custody seal leave signing marker and never re-sign", async t => {
