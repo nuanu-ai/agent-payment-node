@@ -184,6 +184,10 @@ export class RailOperationService {
         }, { waitMs: 300_000 });
     }
     async approve(operationId) {
+        const found = await this.required(canonicalOperationId(operationId));
+        if (found.account.rail === "solana" && found.account.provider === "local" && found.allowlist !== undefined) {
+            return await this.approveLocalSolana(found.operationId, found.profileHash);
+        }
         return await this.locked(operationId, async (operation) => {
             if (operation.terminal)
                 return operation;
@@ -220,20 +224,131 @@ export class RailOperationService {
             }
             const allowlistLease = await this.reserveUsage(operation);
             operation = await this.move(operation, "signing_started", "foreground_signing_started", "durable_pre_effect", undefined, send, allowlistLease);
-            let effect;
+            return await this.finishLocalApproval(operation, adapter);
+        });
+    }
+    /** The owner prompt and send-window reads run under a durable claim, outside money-operation locks. */
+    async approveLocalSolana(operationId, profileHash) {
+        const state = this.context.state;
+        const keys = [`profile:${profileHash}`, `operation:${operationId}`];
+        const claims = new RailApprovalClaimStore(state.root);
+        return await state.withLocks([`rail:approval-claim:${operationId}`], async () => {
+            const staged = await state.withLocks(keys, async () => {
+                const operation = await this.required(operationId);
+                await this.records.repairReceipt(operation);
+                await this.followUsage(operation);
+                const saved = await claims.load(operationId);
+                if (operation.terminal) {
+                    if (saved?.profileHash === profileHash)
+                        await claims.removeIfMatches(saved);
+                    return { done: publicRailOperation(operation) };
+                }
+                if (operation.state !== "awaiting_approval") {
+                    if (saved?.profileHash === profileHash)
+                        await claims.removeIfMatches(saved);
+                    throw new ApnError("APN_OPERATION_BLOCKED", "The operation has already entered execution; use operation resume.");
+                }
+                if (this.context.railApproval === undefined)
+                    throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "A foreground terminal is required for direct-rail approval.");
+                if (operation.allowlist === undefined)
+                    corrupt();
+                if (saved !== null && (saved.profileHash !== profileHash || saved.operationIntegrityHash !== operation.integrityHash ||
+                    saved.fingerprint !== operation.fingerprint || saved.accountIdentityHash !== operation.account.identityHash ||
+                    saved.policyHash !== operation.policyHash || canonicalJson(saved.allowlist) !== canonicalJson(operation.allowlist))) {
+                    if (saved.profileHash === profileHash)
+                        await claims.removeIfMatches(saved);
+                    throw new ApnError("APN_PROFILE_DRIFT", "The pending Solana approval claim no longer matches its operation.");
+                }
+                const claim = saved ?? sealApprovalClaim({ schemaVersion: "apn.rail-approval-claim.v1", profileHash, operationId,
+                    operationIntegrityHash: operation.integrityHash, fingerprint: operation.fingerprint,
+                    accountIdentityHash: operation.account.identityHash, policyHash: operation.policyHash, allowlist: operation.allowlist });
+                if (saved === null)
+                    await claims.create(claim);
+                return { operation, claim };
+            });
+            if ("done" in staged)
+                return staged.done;
+            const { operation, claim } = staged;
+            const adapter = this.adapter(operation);
+            const approval = this.context.railApproval;
             try {
-                effect = await adapter.sign(binding(operation));
+                await this.revalidate(operation, adapter);
+                await approval.approve({ account: operation.account, operationId, fingerprint: operation.fingerprint, policyHash: operation.policyHash,
+                    prepared: operation.prepared, allowlist: claim.allowlist });
+                await this.revalidate(operation, adapter);
             }
             catch (error) {
-                const recovered = await adapter.recoverEffect(binding(operation));
-                if (recovered === null)
-                    await this.move(operation, "failed_before_effect", "custody_proved_no_sealed_effect", "durable_pre_effect");
+                await this.failApprovalClaim(operation, claim, claims, "approval_or_pre_effect_validation_refused");
                 throw error;
             }
-            this.assertEffect(operation, effect);
-            operation = await this.move(operation, "signed_not_submitted", "encrypted_effect_bound", "durable_signed_effect", effect);
-            return await this.firstLocalSubmit(operation, adapter, effect);
+            let send;
+            if (adapter.bindSend !== undefined) {
+                try {
+                    send = await this.patientBind(operation, adapter.bindSend.bind(adapter));
+                }
+                catch (error) {
+                    await this.failApprovalClaim(operation, claim, claims, railSendReason(error, "pre_send_guard_refused"));
+                    throw error;
+                }
+            }
+            try {
+                return await state.withLocks(keys, async () => {
+                    const latest = await this.required(operationId);
+                    await this.records.repairReceipt(latest);
+                    await this.followUsage(latest);
+                    const saved = await claims.load(operationId);
+                    if (latest.integrityHash !== operation.integrityHash || saved?.integrityHash !== claim.integrityHash) {
+                        if (saved?.integrityHash === claim.integrityHash)
+                            await claims.removeIfMatches(claim);
+                        return publicRailOperation(latest);
+                    }
+                    const currentAccount = await this.policies.account(latest.profile, latest.account.rail);
+                    if (canonicalJson(currentAccount) !== canonicalJson(latest.account))
+                        throw new ApnError("APN_PROFILE_DRIFT", "The Solana account changed during approval.");
+                    const policy = await this.policies.authorize(currentAccount, latest.prepared.asset.alias, latest.prepared.maximumFeeAtomic);
+                    if (policy.policyHash !== latest.policyHash)
+                        throw new ApnError("APN_PROFILE_DRIFT", "The Solana policy changed during approval.");
+                    await this.allowlist.confirm(railAllowlistSubject(latest), claim.allowlist);
+                    if (this.context.clock.now().getTime() >= Date.parse(latest.prepared.expiresAt))
+                        throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen direct-rail approval expired.");
+                    const allowlistLease = await this.reserveUsage(latest);
+                    const started = await this.move(latest, "signing_started", "foreground_signing_started", "durable_pre_effect", undefined, send, allowlistLease);
+                    await claims.removeIfMatches(claim);
+                    return publicRailOperation(await this.finishLocalApproval(started, adapter));
+                });
+            }
+            catch (error) {
+                await state.withLocks(keys, async () => { await claims.removeIfMatches(claim); });
+                throw error;
+            }
+        }, { waitMs: 300_000 });
+    }
+    async failApprovalClaim(operation, claim, claims, reason) {
+        await this.context.state.withLocks([`profile:${operation.profileHash}`, `operation:${operation.operationId}`], async () => {
+            const latest = await this.required(operation.operationId);
+            const saved = await claims.load(operation.operationId);
+            if (saved?.integrityHash !== claim.integrityHash)
+                return;
+            if (latest.integrityHash === operation.integrityHash && latest.state === "awaiting_approval") {
+                await this.move(latest, "failed_before_effect", reason, "durable_pre_effect");
+            }
+            await claims.removeIfMatches(claim);
         });
+    }
+    async finishLocalApproval(operation, adapter) {
+        let effect;
+        try {
+            effect = await adapter.sign(binding(operation));
+        }
+        catch (error) {
+            const recovered = await adapter.recoverEffect(binding(operation));
+            if (recovered === null)
+                await this.move(operation, "failed_before_effect", "custody_proved_no_sealed_effect", "durable_pre_effect");
+            throw error;
+        }
+        this.assertEffect(operation, effect);
+        operation = await this.move(operation, "signed_not_submitted", "encrypted_effect_bound", "durable_signed_effect", effect);
+        return await this.firstLocalSubmit(operation, adapter, effect);
     }
     async resume(operationId) {
         const found = await this.required(canonicalOperationId(operationId));
@@ -523,6 +638,55 @@ class RailPrepareClaimStore extends SecureStateStore {
     async removeIfMatches(claim) {
         if ((await this.load(claim.idempotencyHash))?.integrityHash === claim.integrityHash)
             await this.remove(claim.idempotencyHash);
+    }
+}
+function sealApprovalClaim(body) {
+    return validateApprovalClaim({ ...body, integrityHash: hashObject(body) });
+}
+function validateApprovalClaim(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "profileHash", "operationId", "operationIntegrityHash",
+        "fingerprint", "accountIdentityHash", "policyHash", "allowlist", "integrityHash"]) ||
+        value.schemaVersion !== "apn.rail-approval-claim.v1")
+        corrupt();
+    for (const key of ["profileHash", "operationId", "operationIntegrityHash", "fingerprint", "accountIdentityHash", "policyHash", "integrityHash"]) {
+        if (typeof value[key] !== "string" || !CLAIM_HASH.test(value[key]))
+            corrupt();
+    }
+    validateDirectAllowlistBinding(value.allowlist);
+    const { integrityHash, ...body } = value;
+    if (hashObject(body) !== integrityHash)
+        corrupt();
+    return value;
+}
+class RailApprovalClaimStore extends SecureStateStore {
+    initialized;
+    async ready() {
+        this.initialized ??= (async () => { await super.initialize(); await this.ensureDirectory("rail-approval-claims"); })();
+        await this.initialized;
+    }
+    path(operationId) {
+        if (!CLAIM_HASH.test(operationId))
+            corrupt();
+        return `rail-approval-claims/${operationId}.json`;
+    }
+    async load(operationId) {
+        await this.ready();
+        const value = await this.readJson(this.path(operationId));
+        if (value === null)
+            return null;
+        const claim = validateApprovalClaim(value);
+        if (claim.operationId !== operationId)
+            corrupt();
+        return claim;
+    }
+    async create(claim) {
+        validateApprovalClaim(claim);
+        await this.ready();
+        await this.writeJson(this.path(claim.operationId), claim, true);
+    }
+    async removeIfMatches(claim) {
+        if ((await this.load(claim.operationId))?.integrityHash === claim.integrityHash)
+            await this.removeFile(this.path(claim.operationId));
     }
 }
 //# sourceMappingURL=rail-operation-service.js.map
