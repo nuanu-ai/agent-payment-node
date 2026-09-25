@@ -17,8 +17,7 @@ import type { ProfilePolicyPort } from "./profile-policy.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
-import { TtyRelayExecuteConfirmation, TtyTransferApproval } from "./tty-approval.js";
-import type { RelayExecuteConfirmation, RelayExecuteHandler } from "./runtime.js";
+import { TtyTransferApproval } from "./tty-approval.js";
 import { HttpsX402Http } from "./x402-http.js";
 import { AWAL_PROVIDER_ID, AwalProcessAdapter } from "./awal-process-adapter.js";
 import { TtyForegroundAuthentication } from "./foreground-auth.js";
@@ -123,8 +122,6 @@ import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
 export interface RuntimeFactoryOptions {
-  readonly relayExecute?: RelayExecuteHandler;
-  readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly relayPreparePorts?: RelayPreparePorts;
   readonly relayPreflight?: RelayReadOnlyPreflightService;
@@ -286,21 +283,6 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       : undefined
   );
   const clock = options.clock ?? { now: () => new Date() };
-  if (bound.request.command === "relay.execute") {
-    let endpoint: URL;
-    try { endpoint = new URL(bound.rpcUrl ?? ""); }
-    catch { throw new ApnError("APN_RPC_CONFIG", "Relay execution requires a credential-free HTTPS RPC origin."); }
-    if (endpoint.protocol !== "https:" || endpoint.username !== "" || endpoint.password !== "" ||
-      endpoint.pathname !== "/" || endpoint.search !== "" || endpoint.hash !== "") {
-      throw new ApnError("APN_RPC_CONFIG", "Relay execution requires a credential-free HTTPS RPC origin.");
-    }
-  }
-  const relayExecuteConfirmation = bound.request.command === "relay.execute"
-    ? options.relayExecuteConfirmation ?? ((summary) => new TtyRelayExecuteConfirmation().confirm(summary))
-    : undefined;
-  // The production source transport remains unavailable until its physical POST budget and pacing
-  // are enforced outside the source execution lock. An injected handler is for synthetic tests only.
-  const relayExecute = bound.request.command === "relay.execute" ? options.relayExecute : undefined;
   const stargateNative = options.stargateNative ?? (bound.request.command.startsWith("stargate.native.")
     ? new StargateNativeService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
   const stargateToken = options.stargateToken ?? (bound.request.command.startsWith("stargate.token.")
@@ -333,7 +315,6 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     : undefined);
   return new ApnCore({
     state,
-    ...(relayExecute === undefined ? {} : { relayExecute, relayExecuteConfirmation: relayExecuteConfirmation! }),
     ...(stargateNative === undefined ? {} : { stargateNative }),
     ...(stargateToken === undefined ? {} : { stargateToken }),
     // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.

@@ -15,6 +15,7 @@ import { createRelayEthereumSourceRuntime, RelayEthereumSourceRuntime, type Rela
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator, validateRelayQuote } from "../../src/relay/quote.js";
 import { RELAY_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
 import { StateStore } from "../../src/state.js";
+import { TtyRelayExecuteConfirmation } from "../../src/tty-approval.js";
 import { temporaryState } from "./helpers.js";
 
 const key = `0x${"1".repeat(64)}` as Hex;
@@ -133,6 +134,31 @@ test("declined foreground authorization makes no source RPC request or effect", 
   await assert.rejects(denied.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(f.evidence.sends, 0);
   assert.equal(f.evidence.batches, 0);
+});
+
+test("TTY Relay authorization declines before source RPC, signing, or journal effects", async t => {
+  const f = await setup(t);
+  let screen = "";
+  const terminal = { fd: 0, write: async (value: string) => { screen += value; },
+    read: async function* () { yield Buffer.from("decline\n"); }, close: async () => {} };
+  const authorization = new TtyRelayExecuteConfirmation({ openTerminal: async () => terminal,
+    isTerminal: () => true });
+  const runtime = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc, authorization, { now: () => now });
+  await assert.rejects(runtime.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.ok(screen.includes(f.op.amountAtomic));
+  assert.ok(screen.includes(f.op.recipient));
+  assert.ok(!screen.includes(requestId));
+  assert.equal(f.evidence.batches, 0);
+  assert.equal(f.evidence.sends, 0);
+  assert.equal(await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId), null);
+
+  const noTerminal = new TtyRelayExecuteConfirmation({ openTerminal: async () => terminal,
+    isTerminal: () => false });
+  const noninteractive = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc, noTerminal, { now: () => now });
+  await assert.rejects(noninteractive.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(f.evidence.batches, 0);
+  assert.equal(f.evidence.sends, 0);
+  assert.equal(await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId), null);
 });
 
 test("finalized canonical approval advances to one deposit send", async t => {
