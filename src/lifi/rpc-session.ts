@@ -194,7 +194,7 @@ export class RpcReadSession {
     this.externalReservations += 1;
   }
   async externalAttempt<T>(origin: string, task: () => Promise<T>): Promise<T> {
-    return await this.schedule(origin, async () => {
+    return await this.schedule(origin, "eth_sendRawTransaction", async () => {
       this.reserveExternalAttempt();
       this.externalReservations -= 1;
       this.externalAttempts += 1;

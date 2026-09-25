@@ -135,7 +135,7 @@ export class RpcReadSession {
         this.externalReservations += 1;
     }
     async externalAttempt(origin, task) {
-        return await this.schedule(origin, async () => {
+        return await this.schedule(origin, "eth_sendRawTransaction", async () => {
             this.reserveExternalAttempt();
             this.externalReservations -= 1;
             this.externalAttempts += 1;
@@ -158,7 +158,7 @@ export class RpcReadSession {
     async submit(origin, method, params, oneAttempt) {
         if (method !== "eth_sendRawTransaction")
             throw invalidRpcReadMethod();
-        return await this.schedule(origin, async () => await oneAttempt(method, params));
+        return await this.schedule(origin, method, async () => await oneAttempt(method, params));
     }
     async read(origin, chainId, method, params, oneAttempt, decoder = identity) {
         assertRpcReadMethod(method);
@@ -370,7 +370,7 @@ export class RpcReadSession {
     async retry(origin, method, oneAttempt, retryHttp500 = true, methodsForAttempt = [method], allowRetry = true) {
         for (let attempt = 0;; attempt += 1) {
             try {
-                return await this.schedule(origin, () => {
+                return await this.schedule(origin, method, () => {
                     this.assertBeforeAttempt(method);
                     this.httpAttempts += 1;
                     this.recordAttemptShape(methodsForAttempt);
@@ -404,11 +404,14 @@ export class RpcReadSession {
             }
         }
     }
-    schedule(originInput, task) {
+    schedule(originInput, method, task) {
         this.assertBeforeQueue("rpc");
         return this.providerScheduler.schedule(originInput, this.now, this.wait, (delay) => this.assertBeforeWait("rpc", delay), async () => {
             this.assertDeadline("rpc");
             return await task();
+        }, this.physicalBudget === undefined ? undefined : async () => {
+            this.assertDeadline(method);
+            await this.physicalBudget.beforePost(method);
         });
     }
     recordAttemptShape(methods) {
