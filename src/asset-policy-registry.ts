@@ -54,6 +54,8 @@ export interface AssetPolicyRow {
     swap: SwapMechanismPin;
   }>>;
   readonly mechanismOptions?: Readonly<{ bridge: readonly AssetMechanismOption[] }>;
+  /** Optional canonical recipient bound only to Ethereum or Base local gasless admission. */
+  readonly gaslessRecipient?: string;
 }
 
 export interface AssetPolicyChain {
@@ -246,6 +248,9 @@ function validateChain(value: unknown, schema: AssetPolicyRegistrySchema): asser
   const identities = new Set<string>();
   for (const asset of value.assets) {
     validateAsset(value.family, asset, schema);
+    if (asset.gaslessRecipient !== undefined && value.chain !== "eip155:1" && value.chain !== "eip155:8453") {
+      invalid("A local gasless recipient pin requires Ethereum or Base.");
+    }
     const identity = asset.kind === "native" ? "native" : `token:${asset.identifier}`;
     if (identities.has(identity)) invalid("An asset policy chain contains a duplicate asset identity.");
     identities.add(identity);
@@ -256,7 +261,8 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: A
   const perRail = schema === ASSET_POLICY_REGISTRY_SCHEMA_V2;
   if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", perRail ? "railCaps" : "caps",
     ...(value.mechanismPins === undefined ? [] : ["mechanismPins"]),
-    ...(value.mechanismOptions === undefined ? [] : ["mechanismOptions"])]) ||
+    ...(value.mechanismOptions === undefined ? [] : ["mechanismOptions"]),
+    ...(value.gaslessRecipient === undefined ? [] : ["gaslessRecipient"])]) ||
       (value.kind !== "native" && value.kind !== "token") ||
       typeof value.symbol !== "string" || !/^[A-Z0-9][A-Z0-9._-]{0,15}$/u.test(value.symbol) ||
       typeof value.decimals !== "number" || !Number.isSafeInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) {
@@ -271,6 +277,13 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: A
   if (perRail) validateRailCaps(value.rails, value.railCaps);
   else validateCaps(value.caps);
   if (value.mechanismPins !== undefined) validateMechanismPins(value.mechanismPins);
+  if (value.gaslessRecipient !== undefined) {
+    if (family !== "evm" || !value.rails.gasless ||
+        (value.mechanismPins as AssetPolicyRow["mechanismPins"])?.gasless?.provider !== "local" ||
+        typeof value.gaslessRecipient !== "string" || canonicalEvmRecipient(value.gaslessRecipient) !== value.gaslessRecipient) {
+      invalid("A local gasless recipient pin must be one canonical EVM address.");
+    }
+  }
   if (value.mechanismOptions !== undefined) {
     const options = value.mechanismOptions as { bridge: AssetMechanismOption[] };
     if (schema !== ASSET_POLICY_REGISTRY_SCHEMA_V2 || !value.rails.bridge ||
@@ -293,6 +306,13 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: A
   const swapPin = mechanismPins?.swap;
   if (value.rails.swap !== (swapPin !== undefined)) invalid("Swap admission requires exactly one immutable swap mechanism pin.");
   if (mechanismPins !== undefined && "direct" in mechanismPins) invalid("Direct admission cannot carry mechanism metadata.");
+}
+
+function canonicalEvmRecipient(value: string): string | null {
+  try {
+    const result = getAddress(value);
+    return result === "0x0000000000000000000000000000000000000000" ? null : result;
+  } catch { return null; }
 }
 
 function validateMechanismPins(value: unknown): void {

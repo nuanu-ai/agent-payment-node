@@ -33,6 +33,8 @@ export function compileAllowlistPolicyOverlayV2(raw, inventory = loadAllowlistIn
             dailyLimitAtomic: admission.dailyLimitAtomic };
         if (admission.mechanism !== undefined)
             row.pins[admission.rail] = admission.mechanism;
+        if (admission.recipient !== undefined)
+            row.gaslessRecipient = admission.recipient;
         if (admission.mechanisms !== undefined)
             row.bridgeOptions = admission.mechanisms;
         merged.set(key, row);
@@ -44,6 +46,7 @@ export function compileAllowlistPolicyOverlayV2(raw, inventory = loadAllowlistIn
             rails: row.rails, railCaps: row.railCaps,
             ...(Object.keys(row.pins).length === 0 ? {} : { mechanismPins: row.pins }),
             ...(row.bridgeOptions === undefined ? {} : { mechanismOptions: { bridge: row.bridgeOptions } }),
+            ...(row.gaslessRecipient === undefined ? {} : { gaslessRecipient: row.gaslessRecipient }),
         };
         const current = chains.get(row.asset.chain);
         chains.set(row.asset.chain, current === undefined

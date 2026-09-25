@@ -81,6 +81,7 @@ interface MergedRow {
   readonly rails: Record<CandidateRail, boolean>;
   readonly railCaps: Partial<Record<CandidateRail, AssetAtomicCaps>>;
   readonly pins: Partial<Record<CandidateRail, AllowlistAdmissionMechanismPin>>;
+  gaslessRecipient?: string;
   bridgeOptions?: AllowlistPolicyAdmissionInput["mechanisms"];
 }
 
@@ -106,6 +107,7 @@ export function compileAllowlistPolicyOverlayV2(
       admission.mechanisms!.reduce((max, option) => BigInt(option.maximumPerTransferAtomic) > BigInt(max) ? option.maximumPerTransferAtomic : max, "0"),
       dailyLimitAtomic: admission.dailyLimitAtomic };
     if (admission.mechanism !== undefined) row.pins[admission.rail] = admission.mechanism;
+    if (admission.recipient !== undefined) row.gaslessRecipient = admission.recipient;
     if (admission.mechanisms !== undefined) row.bridgeOptions = admission.mechanisms;
     merged.set(key, row);
   }
@@ -116,6 +118,7 @@ export function compileAllowlistPolicyOverlayV2(
       rails: row.rails as AssetRailAdmission, railCaps: row.railCaps,
       ...(Object.keys(row.pins).length === 0 ? {} : { mechanismPins: row.pins as NonNullable<AssetPolicyRow["mechanismPins"]> }),
       ...(row.bridgeOptions === undefined ? {} : { mechanismOptions: { bridge: row.bridgeOptions } }),
+      ...(row.gaslessRecipient === undefined ? {} : { gaslessRecipient: row.gaslessRecipient }),
     };
     const current = chains.get(row.asset.chain);
     chains.set(row.asset.chain, current === undefined

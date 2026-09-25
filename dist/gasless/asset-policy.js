@@ -65,6 +65,9 @@ export class GaslessAssetPolicy {
         if (admission.asset.decimals !== 6 || pinned === undefined || canonicalJson(pinned) !== canonicalJson(pin)) {
             refused("gasless_allowlist_mechanism");
         }
+        if (admission.asset.gaslessRecipient !== undefined && admission.asset.gaslessRecipient !== intent.request.recipient) {
+            refused("gasless_allowlist_recipient");
+        }
     }
     async prepare(intent, operationId) {
         const active = await this.active(intent.profile);
