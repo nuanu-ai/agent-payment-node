@@ -19,7 +19,7 @@ export interface DirectAllowlistSubject extends AssetUsageIdentity {
 export type DirectAllowlistRefusal = "allowlist_network_unlisted" | "allowlist_asset_unlisted" | "allowlist_decimals_mismatch" | "allowlist_network_not_enabled" | "allowlist_policy_required" | "allowlist_policy_expired" | "allowlist_policy_not_effective" | "allowlist_policy_changed" | "allowlist_account_mismatch" | "allowlist_direct_not_admitted" | "allowlist_per_transfer_cap_exceeded" | "allowlist_daily_cap_exceeded" | "allowlist_binding_missing";
 /** Where the owning journal says the effect is. The ledger follows it forward and never moves backward. */
 export type DirectUsageTarget = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
-/** The frozen-list row for a direct transfer. Pure: it runs before any RPC, custody or signing call. */
+/** A pinned direct row. Pure: it runs before any RPC, custody or signing call. */
 export declare function requireListedDirectAsset(chain: string, asset: AssetUsageIdentity["asset"]): CandidateAsset;
 /** The reservation idempotency key is derived from the operation, so a replayed approval can never reserve twice. */
 export declare function directUsageKey(operationId: string): string;

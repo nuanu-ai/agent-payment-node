@@ -3,7 +3,7 @@ import { ApnError } from "./errors.js";
 import { evmToken } from "./evm-asset.js";
 import { directEvmListRows, directEvmNetworkByCaip2 } from "./evm-direct-networks.js";
 /**
- * Direct EVM transfers accept only frozen-list networks and pinned list contracts. This runs in the CLI/MCP binder and
+ * Direct EVM transfers accept only frozen-list networks and pinned direct contracts. This runs in the CLI/MCP binder and
  * again at prepare, before any RPC, custody or signing call.
  */
 export function listedEvmAsset(chainValue, tokenValue, decimals) {
@@ -14,7 +14,7 @@ export function listedEvmAsset(chainValue, tokenValue, decimals) {
     const token = evmToken(tokenValue);
     const row = requireListedDirectAsset(chain, token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: token });
     if (decimals !== undefined && decimals !== row.decimals) {
-        refuse("allowlist_decimals_mismatch", "The supplied decimals differ from the frozen allowlist row for this asset.", { chain, decimals: String(row.decimals) });
+        refuse("allowlist_decimals_mismatch", "The supplied decimals differ from the pinned direct row for this asset.", { chain, decimals: String(row.decimals) });
     }
     const network = directEvmNetworkByCaip2(chain);
     if (network === undefined) {

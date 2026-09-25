@@ -1,5 +1,6 @@
 import { loadAllowlistInventory, type CandidateAsset } from "./allowlist-inventory.js";
 import { ApnError } from "./errors.js";
+import { DIRECT_EVM_SUPPLEMENTAL_ASSETS } from "./evm-direct-supplemental-assets.js";
 
 /**
  * How a network charges a direct transfer, beyond `gas limit x max fee per gas`:
@@ -81,8 +82,8 @@ export function directEvmRequiresSafeHead(chainId: DirectEvmChainId): boolean {
 }
 
 /**
- * The frozen list rows of one direct network: its native coin and pinned token contracts with list decimals. The
- * registry's native coin must agree with the list row, so a list revision cannot silently rename or re-scale it.
+ * Direct rows of one network: frozen native/token identities plus the three C1-12 direct-only token deployments.
+ * The registry's native coin must agree with the frozen row, so a list revision cannot silently rename or re-scale it.
  */
 export function directEvmListRows(chainId: DirectEvmChainId): readonly CandidateAsset[] {
   const selected = directEvmNetwork(chainId);
@@ -92,5 +93,5 @@ export function directEvmListRows(chainId: DirectEvmChainId): readonly Candidate
       rows.some((row) => row.family !== "evm")) {
     throw new ApnError("APN_STATE_CORRUPT", "The direct EVM network registry disagrees with the frozen allowlist.", { chain: selected.caip2 });
   }
-  return rows;
+  return [...rows, ...DIRECT_EVM_SUPPLEMENTAL_ASSETS.filter((row) => row.chain === selected.caip2)];
 }

@@ -8,7 +8,6 @@ import {
   type CandidateKind,
   type CandidateRail,
   loadAllowlistInventory,
-  resolveAllowlistAsset,
 } from "./allowlist-inventory.js";
 import {
   sealAssetPolicyRegistry,
@@ -20,6 +19,7 @@ import { parseAtomic } from "./money.js";
 import { stateCorrupt } from "./secure-state-store.js";
 import { tronAddress } from "./tron/codec.js";
 import { validateSwapMechanismPin, type SwapMechanismPin } from "./swap/pin.js";
+import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
 
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA = "apn.allowlist-policy-overlay.v1" as const;
 export const ALLOWLIST_POLICY_RECORD_SCHEMA = "apn.allowlist-policy-record.v1" as const;
@@ -100,7 +100,7 @@ export function compileAllowlistPolicyOverlay(
   };
   const chains = new Map<string, UnsignedAssetPolicyRegistry["chains"][number]>();
   for (const admission of overlay.admissions) {
-    const asset = resolveAllowlistAsset(admission, inventory);
+    const asset = resolveDirectPolicyAsset(admission, inventory);
     const rails = { direct: admission.rail === "direct", gasless: admission.rail === "gasless",
       x402: admission.rail === "x402", bridge: admission.rail === "bridge", swap: admission.rail === "swap" } satisfies AssetRailAdmission;
     const row = {
@@ -173,7 +173,7 @@ function overlayInput(value: AllowlistPolicyOverlayInput, inventory: AllowlistIn
   const identities = new Set<string>();
   let family: string | undefined;
   for (const row of admissions) {
-    const asset = resolveAllowlistAsset(row, inventory);
+    const asset = resolveDirectPolicyAsset(row, inventory);
     if (family === undefined) family = asset.family;
     if (asset.family !== family) invalid("One overlay cannot widen across account families.", "family_widening");
     const identity = `${asset.chain}\0${asset.kind}\0${asset.identifier ?? ""}\0${row.rail}`;
