@@ -24,6 +24,7 @@ export interface UniswapTokenExecutionPorts {
     releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     commitNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     guard(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+    reserveSendCapacity?(): void;
     revalidate(operation: UniswapTokenOperation): Promise<void>;
     reserveUsage(operation: UniswapTokenOperation): Promise<TokenUsageBinding>;
     currentUsage(operation: UniswapTokenOperation): Promise<TokenUsageBinding>;

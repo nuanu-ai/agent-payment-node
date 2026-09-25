@@ -26,6 +26,8 @@ export interface RpcReadSessionOptions {
     readonly deadlineMs?: number;
     /** HTTP chunk bound for one atomic historical deployment read. General batches retain RPC_BATCH_MAX_ITEMS. */
     readonly archiveDeploymentBatchMaxItems?: number;
+    /** One-prepare opt-in: Linea deployment code reads use scalar archive POSTs. */
+    readonly lineaArchiveDeploymentScalarCode?: boolean;
     /** Backward-compatible alias. */
     readonly maxUniqueCalls?: number;
     readonly now?: () => number;
@@ -67,6 +69,7 @@ export declare class RpcReadSession {
     private readonly maxHttpAttempts;
     private readonly maxReadAttempts;
     private readonly archiveDeploymentBatchMaxItems;
+    private readonly lineaArchiveDeploymentScalarCode;
     private readonly now;
     private readonly wait;
     private readonly deadline;
@@ -77,6 +80,8 @@ export declare class RpcReadSession {
     private logicalItems;
     private httpRequests;
     private httpAttempts;
+    private externalAttempts;
+    private externalReservations;
     private batchCount;
     private dedupHits;
     private cacheHits;
@@ -92,6 +97,9 @@ export declare class RpcReadSession {
     constructor(options?: RpcReadSessionOptions);
     telemetry(): RpcReadTelemetry;
     currentTime(): number;
+    /** Reserve a physical POST for an effect before signing. Reads and pool probes share this limit. */
+    reserveExternalAttempt(): void;
+    externalAttempt<T>(origin: string, task: () => Promise<T>): Promise<T>;
     recordPhysicalAttempt(endpointRole: "primary" | "receipt" | "archive", methods: readonly string[]): void;
     wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt?: EvmRpcCall): EvmRpcCall;
     read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall, decoder?: RpcDecoder): Promise<unknown>;

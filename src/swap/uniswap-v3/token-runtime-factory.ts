@@ -37,6 +37,7 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
     releaseNonce: async (op, kind, nonce) => { await custody.releaseNonce(op, kind, nonce); },
     commitNonce: async (op, kind, nonce) => { await custody.commitNonce(op, kind, nonce); },
     guard: async (op, kind, nonce) => await guard.inspect(op, kind, nonce), reserveUsage: async (op) => await usage.reserve(op),
+    reserveSendCapacity: () => (call as TokenRpcCall).reserveEffectSlot?.(),
     currentUsage: async (op) => await usage.current(op), followUsage: async (op, target) => await usage.follow(op, target),
     revalidate: async (op) => await revalidator.revalidate(op), seal: async (op, kind, nonce) => await custody.seal(op, kind, nonce),
     probeSealed: async (op, kind, nonce) => await custody.probeSealed(op, kind, nonce),
