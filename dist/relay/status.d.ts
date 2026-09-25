@@ -10,6 +10,7 @@ export declare class RelayKeylessStatusService {
         sourceChainId: 1;
         destinationChainId: 56;
         status: string;
+        chainIdentityObserved: boolean;
         inTxHashes: readonly string[];
         txHashes: readonly string[];
         failReason: string | null;
