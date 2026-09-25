@@ -1,4 +1,5 @@
 import type { ValidatedRelayQuote } from "./relay/quote.js";
+import { type ValidatedRelayNativeQuote } from "./relay/native-quote.js";
 import { SecureStateStore } from "./secure-state-store.js";
 import { z } from "zod";
 declare const body: z.ZodObject<{
@@ -10,8 +11,8 @@ declare const body: z.ZodObject<{
     operationId: z.ZodString;
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
-    sourceChainId: z.ZodLiteral<1>;
-    destinationChainId: z.ZodLiteral<56>;
+    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
@@ -20,6 +21,7 @@ declare const body: z.ZodObject<{
         endpoint: z.ZodString;
     }, z.core.$strict>>;
     quote: z.ZodOptional<z.ZodCustom<ValidatedRelayQuote, ValidatedRelayQuote>>;
+    nativeQuote: z.ZodOptional<z.ZodCustom<ValidatedRelayNativeQuote, ValidatedRelayNativeQuote>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
     approvalNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
@@ -38,8 +40,8 @@ declare const schema: z.ZodObject<{
     operationId: z.ZodString;
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
-    sourceChainId: z.ZodLiteral<1>;
-    destinationChainId: z.ZodLiteral<56>;
+    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
@@ -48,6 +50,7 @@ declare const schema: z.ZodObject<{
         endpoint: z.ZodString;
     }, z.core.$strict>>;
     quote: z.ZodOptional<z.ZodCustom<ValidatedRelayQuote, ValidatedRelayQuote>>;
+    nativeQuote: z.ZodOptional<z.ZodCustom<ValidatedRelayNativeQuote, ValidatedRelayNativeQuote>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
     approvalNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
@@ -88,8 +91,8 @@ export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOpe
     operationId: string;
     idempotencyHash: string;
     requestHash: string;
-    sourceChainId: 1;
-    destinationChainId: 56;
+    sourceChainId: 1 | 56;
+    destinationChainId: 137 | 56;
     sourceAccount: string;
     recipient: string;
     quoteDigest: string;
@@ -102,6 +105,7 @@ export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOpe
         endpoint: string;
     } | undefined;
     quote?: ValidatedRelayQuote | undefined;
+    nativeQuote?: ValidatedRelayNativeQuote | undefined;
     policyDigest?: string | undefined;
     policyRevision?: number | undefined;
     approvalNetworkFeeCeilingWei?: string | undefined;
