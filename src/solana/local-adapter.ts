@@ -129,7 +129,17 @@ export class SolanaLocalAdapter implements DirectRailPort {
     if (existing !== null) return existing;
     if (binding.send === null) mismatch();
     await this.revalidate(binding.account, binding.prepared, binding.send);
+    return await this.sealRevalidated(binding);
+  }
+  async sealRevalidated(binding: RailEffectBinding): Promise<RailSignedEffect> {
+    const existing = await this.recoverEffect(binding);
+    if (existing !== null) return existing;
+    if (binding.send === null) mismatch();
+    if (this.now().getTime() >= Date.parse(binding.prepared.expiresAt)) expired();
+    validateRailPrepared(binding.prepared, binding.account);
+    validateRailSendBinding(binding.send, binding.prepared);
     const message = await validateSolanaMessage(binding.prepared, binding.send);
+    if (sha256(message.unsignedPayload) !== binding.send.simulation.payloadHash) mismatch();
     const effect = await this.storage.withSeed(binding.account, async (seed) => {
       const signer = await createKeyPairSignerFromPrivateKeyBytes(seed);
       if (signer.address !== binding.account.address) mismatch();

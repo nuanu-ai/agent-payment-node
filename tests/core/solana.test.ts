@@ -231,6 +231,131 @@ test("local SOL approval retry reuses a matching durable claim after restart", a
   assert.deepEqual(await readdir(directory), []);
 });
 
+test("local SOL signer RPC read releases money locks and policy drift prevents sealing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-signer-rpc-drift-0001");
+  const policy = await s.core.rails.policies.requiredPolicy(s.account, "sol");
+  let entered!: () => void; const started = new Promise<void>((resolve) => { entered = resolve; });
+  let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const batch = s.rpc.batch.bind(s.rpc);
+  Object.assign(s.rpc, { batch: async (...args: Parameters<typeof batch>) => {
+    if ((await s.core.rails.records.findOperation(id))?.state === "signing_started") { entered(); await blocked; }
+    return await batch(...args);
+  } });
+  const approving = s.core.rails.approve(id);
+  await started;
+  try {
+    const { policyHash: _old, ...body } = policy;
+    await Promise.race([
+      s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => {
+        await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
+      }),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("signer RPC held money-operation locks")), 2000)),
+    ]);
+  } finally { release(); }
+  await assert.rejects(approving);
+  const current = (await s.core.rails.records.findOperation(id))!;
+  assert.equal(current.state, "failed_before_effect");
+  assert.equal(await s.storage.effect(s.account, id, current.fingerprint), null);
+  assert.equal(s.rpc.submissions.length, 0);
+});
+
+test("local SOL first submit releases money locks and a concurrent resume does not resend", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-submit-unlocked-0001");
+  let entered!: () => void; const started = new Promise<void>((resolve) => { entered = resolve; });
+  let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const submit = s.adapter.submit.bind(s.adapter);
+  Object.assign(s.adapter, { submit: async (...args: Parameters<typeof submit>) => {
+    const result = await submit(...args); entered(); await blocked; return result;
+  } });
+  const approving = s.core.rails.approve(id);
+  await started;
+  try {
+    assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting");
+    await Promise.race([
+      s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => true),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("submit held money-operation locks")), 2000)),
+    ]);
+    const resumed = s.core.rails.resume(id);
+    release();
+    const [a, b] = await Promise.all([approving, resumed]) as [{ state: string }, { state: string }];
+    assert.equal(a.state, "completed"); assert.equal(b.state, "completed");
+  } finally { release(); }
+  assert.equal(s.rpc.submissions.length, 1);
+  const stored = (await s.core.rails.records.findOperation(id))!;
+  assert.equal(stored.transitions.filter((entry) => entry.state === "submitting").length, 1);
+  const lease = stored.allowlistLease!.reservation;
+  assert.equal((await new AssetUsageLedger(temporary.root).load(lease, lease.reservationId))?.state, "finalized");
+});
+
+test("local SOL signed-effect revalidation releases locks and rejects policy drift before send", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-signed-rpc-drift-0001");
+  const policy = await s.core.rails.policies.requiredPolicy(s.account, "sol");
+  let entered!: () => void; const started = new Promise<void>((resolve) => { entered = resolve; });
+  let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const batch = s.rpc.batch.bind(s.rpc);
+  Object.assign(s.rpc, { batch: async (...args: Parameters<typeof batch>) => {
+    if ((await s.core.rails.records.findOperation(id))?.state === "signed_not_submitted") { entered(); await blocked; }
+    return await batch(...args);
+  } });
+  const approving = s.core.rails.approve(id);
+  await started;
+  try {
+    const { policyHash: _old, ...body } = policy;
+    await Promise.race([
+      s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => {
+        await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
+      }),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("signed-effect RPC held money-operation locks")), 2000)),
+    ]);
+  } finally { release(); }
+  assert.equal((await approving as { state: string }).state, "failed_before_effect");
+  assert.ok(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint));
+  assert.equal(s.rpc.submissions.length, 0);
+});
+
+test("local SOL resumes a sealed effect after crash before the signed journal without signing twice", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-sealed-crash-0001");
+  const seal = s.adapter.sealRevalidated!.bind(s.adapter);
+  let seals = 0;
+  Object.assign(s.adapter, { sealRevalidated: async (...args: Parameters<typeof seal>) => { seals++; return await seal(...args); } });
+  const persist = s.core.rails.records.persist.bind(s.core.rails.records);
+  let crash = true;
+  Object.assign(s.core.rails.records, { persist: async (record: Parameters<typeof persist>[0]) => {
+    if (crash && record.state === "signed_not_submitted") { crash = false; throw new Error("synthetic crash after custody seal"); }
+    return await persist(record);
+  } });
+  await assert.rejects(s.core.rails.approve(id), /synthetic crash/);
+  Object.assign(s.core.rails.records, { persist });
+  assert.equal((await s.core.rails.records.findOperation(id))!.state, "signing_started");
+  assert.ok(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint));
+  const restarted = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
+  assert.equal((await restarted.core.rails.resume(id) as { state: string }).state, "completed");
+  assert.equal(seals, 1);
+  assert.equal(s.rpc.submissions.length, 1);
+});
+
+test("local SOL crash after submitting marker but before transport never retries send", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-submit-marker-crash-0001");
+  Object.assign(s.adapter, { submit: async () => { throw new Error("synthetic crash before transport"); } });
+  const persist = s.core.rails.records.persist.bind(s.core.rails.records);
+  Object.assign(s.core.rails.records, { persist: async (record: Parameters<typeof persist>[0]) => {
+    if (record.state === "unknown_finality" && record.reason === "submission_outcome_unknown") throw new Error("synthetic crash before outcome journal");
+    return await persist(record);
+  } });
+  await assert.rejects(s.core.rails.approve(id), /synthetic crash before outcome journal/);
+  assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting");
+  assert.equal(s.rpc.submissions.length, 0);
+  const restarted = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
+  restarted.rpc.absentHistory = true;
+  assert.equal((await restarted.core.rails.resume(id) as { state: string }).state, "unknown_finality");
+  assert.equal(s.rpc.submissions.length, 0);
+});
+
 test("duplicate local SOL prepare shares one claim and leaves money-operation locks free during RPC", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const input = { profile: s.account.profile, rail: "solana", asset: "sol", recipient: SOL_RECIPIENT,

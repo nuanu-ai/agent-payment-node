@@ -30,12 +30,19 @@ type Fixture = Awaited<ReturnType<typeof tronFixture>> | Awaited<ReturnType<type
 function observeSigning(root: string, s: Fixture): () => { state: string; lease: DirectAssetUsageLease | undefined; ledger: string | undefined } | undefined {
   let observed: { state: string; lease: DirectAssetUsageLease | undefined; ledger: string | undefined } | undefined;
   const adapter = s.adapter as unknown as DirectRailPort, sign = adapter.sign.bind(adapter);
-  adapter.sign = async (binding) => {
+  const observe = async (binding: Parameters<DirectRailPort["sign"]>[0]) => {
     const journal = (await s.core.rails.records.findOperation(binding.operationId))!, lease = journal.allowlistLease;
     observed = { state: journal.state, lease, ledger: lease === undefined ? undefined
       : (await new AssetUsageLedger(root).load(lease.reservation, lease.reservation.reservationId))?.state };
+  };
+  adapter.sign = async (binding) => {
+    await observe(binding);
     return await sign(binding);
   };
+  if (adapter.sealRevalidated !== undefined) {
+    const seal = adapter.sealRevalidated.bind(adapter);
+    adapter.sealRevalidated = async (binding) => { await observe(binding); return await seal(binding); };
+  }
   return () => observed;
 }
 

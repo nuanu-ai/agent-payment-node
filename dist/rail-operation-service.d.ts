@@ -26,9 +26,12 @@ export declare class RailOperationService {
     private approveLocalSolana;
     private failApprovalClaim;
     private finishLocalApproval;
+    /** The claim lock serializes recovery, while RPC revalidation and the one send run outside money-operation locks. */
+    private executeLocalSolanaClaimed;
     resume(operationId: string): Promise<unknown>;
     /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
     private resumeLocalSolana;
+    private resumeLocalSolanaClaimed;
     receipt(operationId: string): Promise<unknown>;
     private locked;
     private required;
@@ -40,6 +43,7 @@ export declare class RailOperationService {
      */
     private patientBind;
     private revalidate;
+    private assertCurrentRailPolicy;
     private firstLocalSubmit;
     private submit;
     private inspect;

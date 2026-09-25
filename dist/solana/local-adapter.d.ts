@@ -30,6 +30,7 @@ export declare class SolanaLocalAdapter implements DirectRailPort {
      */
     bindSend(account: ChainAccount, prepared: RailPreparedTransfer): Promise<RailSendBinding>;
     sign(binding: RailEffectBinding): Promise<RailSignedEffect>;
+    sealRevalidated(binding: RailEffectBinding): Promise<RailSignedEffect>;
     recoverEffect(binding: RailEffectBinding): Promise<RailSignedEffect | null>;
     submit(binding: RailEffectBinding, effect: RailSignedEffect | null): Promise<{
         readonly transactionId: string;
