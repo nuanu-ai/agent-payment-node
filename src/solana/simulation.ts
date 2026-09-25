@@ -37,7 +37,12 @@ export async function simulateSolanaSend(rpc: SolanaRpcPort, unsignedPayload: st
     response = await rpc.call("simulateTransaction", [unsignedPayload, {
       sigVerify: false, replaceRecentBlockhash: false, commitment: "confirmed", encoding: "base64", innerInstructions: false,
     }]);
-  } catch { return simulationFailure("solana_simulation_unavailable"); }
+  } catch (error) {
+    // A provider cooldown or exhausted operation budget is an explicit refusal to continue.
+    // It must not enter patientBind's transient whole-bind retry loop.
+    if (error instanceof ApnError && (error.code === "APN_RPC_RATE_LIMITED" || error.code === "APN_RPC_BUDGET_EXCEEDED")) throw error;
+    return simulationFailure("solana_simulation_unavailable");
+  }
   let slot: bigint; let value: Record<string, unknown>;
   try {
     const record = rpcRecord(response);
