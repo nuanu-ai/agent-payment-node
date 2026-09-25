@@ -22,6 +22,10 @@ export declare class RailOperationService {
     /** A durable, key-scoped claim survives a crash; only its short commit phases hold money-operation locks. */
     private prepareLocalSolana;
     approve(operationId: string): Promise<unknown>;
+    /** The owner prompt and send-window reads run under a durable claim, outside money-operation locks. */
+    private approveLocalSolana;
+    private failApprovalClaim;
+    private finishLocalApproval;
     resume(operationId: string): Promise<unknown>;
     /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
     private resumeLocalSolana;
