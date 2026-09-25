@@ -23,7 +23,7 @@ const input = { profile: "default", owner, amountAtomic: "500000", minOutputAtom
   maxProviderFeeAtomic: "401482", maxApprovalNetworkFeeWei: "2000000000000",
   maxDepositNetworkFeeWei: "2000000000000", quoteFile, idempotencyKey: "relay-arb-prepare-0001" };
 
-function active() {
+function active(profile = "default", account = owner) {
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2",
     registryVersion: "test.relay.arb.1", publishedAt: "2026-09-25T00:00:00.000Z",
     effectiveDate: "2026-09-25", effectiveAt: "2026-09-25T00:00:00.000Z",
@@ -32,9 +32,35 @@ function active() {
         rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
         railCaps: { bridge: { maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "2000000" } },
         mechanismPins: { bridge: { provider: "relay", reference: RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } } }] }] });
-  return { profile: "default", registry, digest: registry.policyDigest, revision: 1,
-    accounts: { evm: owner }, activationDigest: "a".repeat(64), activatedAt: now.toISOString() };
+  return { profile, registry, digest: registry.policyDigest, revision: 1,
+    accounts: { evm: account }, activationDigest: "a".repeat(64), activatedAt: now.toISOString() };
 }
+
+test("buyer profile prepares under its own pinned active policy and rejects profile, account, or revoked policy", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  const buyerInput = { ...input, profile: "evm-live-buyer", idempotencyKey: "relay-arb-buyer-0001" };
+  let selected: ReturnType<typeof active> | null = active("evm-live-buyer");
+  const service = new RelayUnsignedPrepareService(state, { now: () => now }, undefined,
+    { activePolicy: async profile => { assert.equal(profile, "evm-live-buyer"); return selected; },
+      dailyUsage: async () => "0" });
+  const prepared = await service.prepareArbitrum(buyerInput);
+  const saved = await new RelayUnsignedOperationRepository(temporary.root).loadOperation(
+    state.profileHash("evm-live-buyer"), prepared.operationId);
+  assert.equal(saved?.arbitrumDraft?.profile, "evm-live-buyer");
+  assert.equal(saved?.profileHash, state.profileHash("evm-live-buyer"));
+  assert.equal(saved?.arbitrumDraft?.policyDigest, selected?.digest);
+  selected = active("default");
+  await assert.rejects(service.prepareArbitrum({ ...buyerInput, idempotencyKey: "relay-arb-buyer-0002" }),
+    { code: "APN_ALLOWLIST_REFUSED" });
+  selected = active("evm-live-buyer", RELAY_ETHEREUM_USDC_RECIPIENT);
+  await assert.rejects(service.prepareArbitrum({ ...buyerInput, idempotencyKey: "relay-arb-buyer-0003" }),
+    { code: "APN_ALLOWLIST_REFUSED" });
+  selected = null;
+  await assert.rejects(service.prepareArbitrum({ ...buyerInput, idempotencyKey: "relay-arb-buyer-0004" }),
+    { code: "APN_ALLOWLIST_REFUSED" });
+  assert.equal((await new RelayUnsignedOperationRepository(temporary.root).listAllOperations()).length, 1);
+});
 
 test("offline command prepares one durable unsigned Arbitrum operation and replay does not reopen the quote", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);

@@ -2,7 +2,7 @@ import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { RELAY_ARBITRUM_USDC, RELAY_ETHEREUM_USDC_RECIPIENT } from "./arbitrum-usdc-ethereum-quote.js";
 export declare const RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE = "arbitrum-usdc-ethereum-usdc-source-draft-v1";
 export interface RelayArbitrumSourceDraftInput {
-    readonly profile: "default";
+    readonly profile: string;
     readonly owner: string;
     readonly publicAccount: string;
     readonly amountAtomic: string;
@@ -22,7 +22,7 @@ export interface RelayArbitrumSourceDraft {
     readonly sourceToken: typeof RELAY_ARBITRUM_USDC;
     readonly destinationToken: string;
     readonly recipient: typeof RELAY_ETHEREUM_USDC_RECIPIENT;
-    readonly profile: "default";
+    readonly profile: string;
     readonly owner: string;
     readonly amountAtomic: string;
     readonly minimumOutputAtomic: string;

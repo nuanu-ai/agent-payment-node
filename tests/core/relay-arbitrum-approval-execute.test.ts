@@ -28,7 +28,7 @@ const account = privateKeyToAccount(`0x${"1".repeat(64)}`);
 const fixtureOwner = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const now = new Date(1790347296 * 1000);
 const quoteFile = resolve("tests/core/relay-fixtures/arbitrum-usdc-ethereum-usdc-quote-20260925.json");
-function active(owner: string) {
+function active(owner: string, profile = "default") {
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2",
     registryVersion: "test.relay.arb.approval.execute.1", publishedAt: "2026-09-25T00:00:00.000Z",
     effectiveDate: "2026-09-25", effectiveAt: "2026-09-25T00:00:00.000Z",
@@ -37,22 +37,22 @@ function active(owner: string) {
         rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
         railCaps: { bridge: { maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "2000000" } },
         mechanismPins: { bridge: { provider: "relay", reference: RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } } }] }] });
-  return { profile: "default", registry, digest: registry.policyDigest, revision: 1,
+  return { profile, registry, digest: registry.policyDigest, revision: 1,
     accounts: { evm: owner }, activationDigest: "a".repeat(64), activatedAt: now.toISOString() };
 }
-async function setup(policyFactory?: (root: string) => Promise<ActiveAssetPolicy>) {
+async function setup(policyFactory?: (root: string) => Promise<ActiveAssetPolicy>, profile = "default") {
   const temporary = await temporaryState();
   const state = new StateStore(temporary.root);
-  const policy = policyFactory === undefined ? active(fixtureOwner) :
+  const policy = policyFactory === undefined ? active(fixtureOwner, profile) :
     { ...await policyFactory(temporary.root), accounts: { evm: fixtureOwner } };
   const prepared = await new RelayUnsignedPrepareService(state, { now: () => now }, undefined,
     { activePolicy: async () => policy, dailyUsage: async () => "0" }).prepareArbitrum({
-    profile: "default", owner: fixtureOwner, amountAtomic: "500000", minOutputAtomic: "94065",
+    profile, owner: fixtureOwner, amountAtomic: "500000", minOutputAtomic: "94065",
     maxProviderFeeAtomic: "401482", maxApprovalNetworkFeeWei: "2000000000000",
     maxDepositNetworkFeeWei: "2000000000000", quoteFile, idempotencyKey: "relay-arb-execute-test",
   });
   const saved = await import("../../src/relay-unsigned-operation.js").then(m =>
-    new m.RelayUnsignedOperationRepository(temporary.root).loadOperation(state.profileHash("default"), prepared.operationId));
+    new m.RelayUnsignedOperationRepository(temporary.root).loadOperation(state.profileHash(profile), prepared.operationId));
   assert.ok(saved);
   const rawQuote = JSON.parse(await readFile(quoteFile, "utf8")) as any;
   for (const step of rawQuote.steps) step.items[0].data.from = account.address;
@@ -131,7 +131,7 @@ function harness(state: StateStore, op: RelayUnsignedOperation, options: {
     send: async raw => { sends++; return options.send?.(raw) ?? (await import("viem")).keccak256(raw); },
     ...(options.storedPolicy ? {} : { activePolicyUnderLock: async () => {
       if (++policyReads === options.revokeAtPolicyRead) return null;
-      return { ...active(fixtureOwner), accounts: { evm: account.address.toLowerCase() } };
+      return { ...active(fixtureOwner, op.arbitrumDraft!.profile), accounts: { evm: account.address.toLowerCase() } };
     } }),
     dailyUsage: async () => "0", now: () => now,
     operation: async () => op, journals: journal.repository,
@@ -160,6 +160,16 @@ test("approval executes one exact signed transaction; replay is observation-only
   assert.equal((await lease(state, op))?.state, "submitted");
   assert.equal((await h.service.execute("default", op.operationId)).state, "observation_only");
   assert.deepEqual(h.counts(), { reads: 3, signs: 1, sends: 1, confirmations: 1 });
+});
+
+test("buyer approval execution reads its selected profile policy and rejects profile mismatch", async t => {
+  const { temporary, state, op } = await setup(undefined, "evm-live-buyer"); t.after(temporary.cleanup);
+  const h = harness(state, op);
+  await assert.rejects(h.service.execute("default", op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(h.counts().sends, 0);
+  const first = await h.service.execute("evm-live-buyer", op.operationId);
+  assert.equal(first.state, "approval_submitted");
+  assert.equal(h.counts().sends, 1);
 });
 
 test("uncertain send and HTTP 429 each retain a single durable attempt", async t => {

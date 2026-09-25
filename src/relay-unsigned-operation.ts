@@ -69,7 +69,7 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
         draft.executionAdmitted !== false || draft.nextActions.length !== 0 ||
         operation.quote !== undefined || operation.nativeQuote !== undefined ||
         operation.sourceChainId !== 42161 || operation.destinationChainId !== 1 ||
-        operation.profileHash !== sha256("profile\0default") || draft.profile !== "default" ||
+        operation.profileHash !== sha256(`profile\0${draft.profile}`) ||
         operation.sourceAccount !== draft.owner || operation.recipient !== draft.recipient.toLowerCase() ||
         operation.quoteDigest !== draft.quoteDigest || operation.amountAtomic !== draft.amountAtomic ||
         operation.minOutputAtomic !== draft.minimumOutputAtomic ||
