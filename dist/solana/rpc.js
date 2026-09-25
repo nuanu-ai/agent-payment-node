@@ -52,6 +52,11 @@ export class SolanaRpcBudget {
         finally {
             release();
         }
+        let cancelled = false;
+        return () => { if (!cancelled) {
+            cancelled = true;
+            this.physical -= 1;
+        } };
     }
 }
 const READ_METHODS = new Set([
@@ -75,11 +80,13 @@ export function assertSolanaNetworkValue(value) {
 export class SolanaRpc {
     endpoint;
     fetcher;
+    pacer;
     originHash;
     budget;
-    constructor(endpoint, fetcher = solanaHttpsFetch, budget) {
+    constructor(endpoint, fetcher = solanaHttpsFetch, budget, pacer) {
         this.endpoint = endpoint;
         this.fetcher = fetcher;
+        this.pacer = pacer;
         this.originHash = endpoint === undefined ? sha256("solana_rpc_unconfigured") : sha256(endpoint);
         // Stage integration passes one bounded budget through an operation, outside state locks.
         this.budget = budget;
@@ -134,7 +141,22 @@ export class SolanaRpc {
         catch {
             return protocolFailure();
         }
-        await this.budget?.acquire(logicalCalls);
+        const cancelUnstarted = await this.budget?.acquire(logicalCalls);
+        let started = false;
+        try {
+            if (this.pacer === undefined) {
+                started = true;
+                return await this.post(url, payload, effect);
+            }
+            return await this.pacer.schedule(url.toString(), () => { started = true; return this.post(url, payload, effect); });
+        }
+        catch (error) {
+            if (!started)
+                cancelUnstarted?.();
+            throw error;
+        }
+    }
+    async post(url, payload, effect) {
         const controller = new AbortController();
         const deadline = setTimeout(() => controller.abort(), 10_000);
         deadline.unref();

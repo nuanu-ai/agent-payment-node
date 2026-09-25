@@ -30,7 +30,8 @@ import { EncryptedSmartAccountX402MaterialStore } from "./encrypted-smart-accoun
 import { MetaMaskSmartAccountX402Adapter } from "./metamask-smart-account-x402.js";
 import { ChainAccountStore } from "./chain-account-store.js";
 import { TtyChainPolicyApproval, TtyRailApproval } from "./tty-approval.js";
-import { SolanaRpc } from "./solana/rpc.js";
+import { SolanaRpc, SolanaRpcBudget } from "./solana/rpc.js";
+import { SolanaRpcPacer } from "./solana/pacing.js";
 import { SolanaLocalAdapter } from "./solana/local-adapter.js";
 import { SolanaAwalAdapter } from "./solana/awal-adapter.js";
 import { TronLocalAdapter } from "./tron/local-adapter.js";
@@ -84,7 +85,8 @@ export function createApnCore(bound, options = {}) {
     } : { maxGasLimitAtomic: "100000", maxFeePerGasWei: "2000000000",
         maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60_000 };
     const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
-    const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL);
+    // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
+    const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL, undefined, new SolanaRpcBudget({ maxPhysicalRequests: 24, wait: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) }), new SolanaRpcPacer(state));
     const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL, configuredTronHttpsFetch({ minimumPostStartIntervalMs: process.env.APN_TRON_RPC_MIN_POST_INTERVAL_MS }));
     const directRails = options.directRails ?? [new SolanaLocalAdapter(chainAccounts, solanaRpc, () => options.clock?.now() ?? new Date()),
         new SolanaAwalAdapter(chainAccounts, solanaRpc, undefined, undefined, () => options.clock?.now() ?? new Date()),

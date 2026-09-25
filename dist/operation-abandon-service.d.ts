@@ -14,4 +14,6 @@ export declare class OperationAbandonService {
     constructor(context: RuntimeContext, rails: RailOperationService, gasless: GaslessService, metaMaskGasless: MetaMaskGaslessService, facilitatorGasless?: FacilitatorGaslessService | undefined);
     abandon(operationIdInput: string): Promise<unknown>;
     private abandonRail;
+    /** A Solana RPC cooldown and the owner's acknowledgement hold only this narrow claim lock. */
+    private abandonLocalSolana;
 }

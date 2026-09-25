@@ -765,3 +765,31 @@ test("Solana expired unlanded transfer is owner-abandoned only after its finaliz
   assert.equal(approval.calls.length, 1); assert.equal(s.rpc.submissions.length, 1);
   await new OperationService(s.core.context.state).assertProfileAvailable(s.account.profileHash);
 });
+
+test("Solana abandon leaves money locks available during RPC and rejects policy drift", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const approval = new RailAbandonApproval();
+  const s = await solanaFixture(temporary.root, { abandonApproval: approval }); const id = await s.prepare();
+  s.rpc.submissionTimeout = true;
+  const first = await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal((first.operation as { state: string }).state, "unknown_finality");
+  s.rpc.absentHistory = true; s.rpc.blockHeight = 201n;
+  const original = s.adapter.assertValidityExpired!.bind(s.adapter);
+  let release!: () => void, entered!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  Object.assign(s.adapter, { assertValidityExpired: async (...args: Parameters<typeof original>) => {
+    entered(); await blocked; return await original(...args);
+  } });
+  const abandon = s.core.execute({ command: "operation.abandon", operationId: id });
+  await started;
+  const policy = await s.core.rails.policies.requiredPolicy(s.account, "sol");
+  const { policyHash: _old, ...body } = policy;
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
+    await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
+  });
+  release();
+  const result = await abandon;
+  assert.equal(result.error?.code, "APN_PROFILE_DRIFT");
+  assert.equal((await s.core.rails.records.findOperation(id))?.state, "unknown_finality");
+  assert.equal(s.rpc.submissions.length, 1);
+});
