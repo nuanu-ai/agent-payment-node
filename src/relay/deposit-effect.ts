@@ -1,7 +1,10 @@
 /** Internal Ethereum Relay source deposit. All money and observation ports are injected. */
 import { randomBytes } from "node:crypto";
 import { decodeFunctionData, encodeFunctionData, keccak256, parseAbi, parseTransaction, recoverTransactionAddress, type Hex } from "viem";
+import { canonicalJson, domainHash } from "../canonical.js";
+import { EncryptedWalletStore, walletCustodyLock, type DirectEffectMaterial } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
+import type { WrappingSecretPort } from "../macos-keychain.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
@@ -20,6 +23,49 @@ export interface RelayDepositCustodyPort {
   /** Durable, operation-bound storage. An unreadable or missing sealed value must fail closed. */
   load(op: RelayUnsignedOperation): Promise<RelaySignedDeposit | null>;
   seal(op: RelayUnsignedOperation, signed: RelaySignedDeposit): Promise<void>;
+}
+function depositBinding(op: RelayUnsignedOperation): string {
+  return domainHash("apn.relay-deposit-envelope.v1", canonicalJson({ operationId: op.operationId,
+    quoteDigest: op.quoteDigest, deposit: op.quote!.deposit }));
+}
+function depositKey(op: RelayUnsignedOperation): string {
+  return domainHash("apn.relay-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
+}
+/** Encrypted, hash-bound signed material for the one permitted deposit attempt. */
+export class RelayEncryptedDepositCustody implements RelayDepositCustodyPort {
+  private readonly wallets: EncryptedWalletStore;
+  constructor(private readonly state: StateStore, wrapping: WrappingSecretPort) {
+    this.wallets = new EncryptedWalletStore(state, wrapping);
+  }
+  async load(op: RelayUnsignedOperation): Promise<RelaySignedDeposit | null> {
+    return this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
+      const wallet = await this.wallets.describe("default");
+      if (wallet === null) return null;
+      try {
+        if (!same(wallet.identity.address, op.sourceAccount)) corrupt("deposit custody owner");
+        const stored = wallet.secret.directEffects[depositKey(op)];
+        if (stored === undefined) return null;
+        if (stored.payloadHash !== depositBinding(op) || stored.transactionHash !== stored.rawTransactionHash ||
+          keccak256(stored.rawTransaction) !== stored.transactionHash) corrupt("deposit custody binding");
+        return { rawTransaction: stored.rawTransaction, transactionHash: stored.transactionHash };
+      } finally { this.wallets.clear(wallet.secret); }
+    });
+  }
+  async seal(op: RelayUnsignedOperation, signed: RelaySignedDeposit): Promise<void> {
+    await this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
+      const wallet = await this.wallets.describe("default");
+      if (wallet === null) blocked("encrypted_custody_missing");
+      try {
+        if (!same(wallet.identity.address, op.sourceAccount)) corrupt("deposit custody owner");
+        if (wallet.secret.directEffects[depositKey(op)] !== undefined) blocked("signed_deposit_already_sealed");
+        const verified = await verifySignedEnvelope(op, signed.rawTransaction, signed.transactionHash);
+        const entry: DirectEffectMaterial = { payloadHash: depositBinding(op), transactionHash: verified.transactionHash,
+          rawTransaction: verified.rawTransaction, rawTransactionHash: verified.transactionHash };
+        wallet.secret.directEffects[depositKey(op)] = entry;
+        await this.wallets.save(wallet.identity, wallet.secret);
+      } finally { this.wallets.clear(wallet.secret); }
+    });
+  }
 }
 export interface RelayDepositObservation {
   readonly transaction: Readonly<{ hash: string; from: string; to: string | null; input: string; value: bigint; chainId: number }>;

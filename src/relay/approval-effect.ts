@@ -5,7 +5,7 @@ import { hashObject, domainHash, canonicalJson } from "../canonical.js";
 import { EncryptedWalletStore, walletCustodyLock, type DirectEffectMaterial } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
-import { RelayUnsignedOperationRepository, validateRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
+import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
@@ -25,6 +25,9 @@ function binding(op: RelayUnsignedOperation): string {
 function key(op: RelayUnsignedOperation): string {
   return domainHash("apn.relay-approval-custody.v1", canonicalJson({ operationId: op.operationId }));
 }
+function depositKey(op: RelayUnsignedOperation): string {
+  return domainHash("apn.relay-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
+}
 export interface RelaySignedApproval { readonly rawTransaction: Hex; readonly transactionHash: Hex }
 export interface RelayApprovalCustodyPort {
   load(op: RelayUnsignedOperation): Promise<RelaySignedApproval | null>;
@@ -42,7 +45,8 @@ export class RelayEncryptedApprovalCustody implements RelayApprovalCustodyPort {
         const wallet = await this.wallets.describe("default");
         if (wallet === null) corrupt("custody envelope disappeared");
         try {
-          if (wallet.secret.directEffects[key(op)] !== undefined) blocked("signed_effect_custody_exists");
+          if (wallet.secret.directEffects[key(op)] !== undefined ||
+            wallet.secret.directEffects[depositKey(op)] !== undefined) blocked("signed_effect_custody_exists");
         } finally { this.wallets.clear(wallet.secret); }
       }
       return action();
@@ -72,8 +76,9 @@ export class RelayEncryptedApprovalCustody implements RelayApprovalCustodyPort {
     try {
       if (!same(wallet.identity.address, op.sourceAccount)) corrupt("custody owner");
       if (wallet.secret.directEffects[key(op)] !== undefined) blocked("signed_effect_already_sealed");
-      const entry: DirectEffectMaterial = { payloadHash: binding(op), transactionHash: signed.transactionHash,
-        rawTransaction: signed.rawTransaction, rawTransactionHash: signed.transactionHash };
+      const verified = await verifySigned(op, signed.rawTransaction, signed.transactionHash);
+      const entry: DirectEffectMaterial = { payloadHash: binding(op), transactionHash: verified.transactionHash,
+        rawTransaction: verified.rawTransaction, rawTransactionHash: verified.transactionHash };
       wallet.secret.directEffects[key(op)] = entry;
       await this.wallets.save(wallet.identity, wallet.secret);
     } finally { this.wallets.clear(wallet.secret); }
@@ -96,6 +101,11 @@ export interface RelayApprovalPorts {
   /** External owner gate. It must validate a durable Relay requestId binding; no default exists here. */
   executionAdmission(op: RelayUnsignedOperation): Promise<null | Readonly<{
     requestId: string; operationIntegrityHash: string; quoteDigest: string }>>;
+  /** Fresh source state before signing and again before the first submission. */
+  funding(op: RelayUnsignedOperation): Promise<Readonly<{
+    chainId: number; nativeBalanceWei: bigint; tokenBalanceAtomic: bigint; allowanceAtomic: bigint;
+    currentMaxFeePerGasWei: bigint; nextNonce: bigint;
+  }>>;
   sign(op: RelayUnsignedOperation): Promise<Hex>;
   send(rawTransaction: Hex): Promise<string>;
   observe(transactionHash: Hex): Promise<RelayApprovalObservation | null>;
@@ -116,17 +126,18 @@ export class RelayApprovalEffectService {
     return this.state.withLocks([`relay-approval:${profileHash}:${operationId}`], async () => {
       const op = await this.operations.loadOperation(profileHash, operationId);
       if (op === null) blocked("prepared_operation_missing");
+      if (await new RelayRetirementRepository(this.state.root).load(op) !== null) blocked("operation_retired");
       this.assertEnvelope(op);
       let journal = await this.effects.load(profileHash, operationId);
       if (journal === null) journal = await this.effects.create(profileHash, operationId, this.ports.now().toISOString());
       let effect = journal.effects[0];
       if (effect.phase === "confirmed" || effect.phase === "failed") return journal;
       if (effect.phase === "pending") {
-        await this.revalidate(op);
+        const nonce = await this.revalidate(op);
         journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
           { kind: "mark_signing", role: "approval", marker: randomBytes(32).toString("hex"), at: this.ports.now().toISOString() });
         const raw = await this.ports.sign(op);
-        const signed = await verifySigned(op, raw);
+        const signed = await verifySigned(op, raw, undefined, nonce);
         await this.ports.custody.seal(op, signed);
         effect = journal.effects[0];
       }
@@ -139,10 +150,10 @@ export class RelayApprovalEffectService {
         effect = journal.effects[0];
       }
       if (effect.phase === "sealed") {
-        await this.revalidate(op);
+        const nonce = await this.revalidate(op);
         const signed = await this.ports.custody.load(op);
         if (signed === null || !same(signed.transactionHash, effect.attempt!.transactionHash!)) corrupt("sealed custody missing");
-        await verifySigned(op, signed.rawTransaction, signed.transactionHash);
+        await verifySigned(op, signed.rawTransaction, signed.transactionHash, nonce);
         journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
           { kind: "mark_submitting", role: "approval", at: this.ports.now().toISOString() });
         try { await this.ports.send(signed.rawTransaction); } catch { /* Ambiguous send: observe saved hash only. */ }
@@ -165,6 +176,8 @@ export class RelayApprovalEffectService {
     validateRelayUnsignedOperation(op);
     const quote = op.quote, approval = quote?.approval;
     if (!quote || !approval || !op.policyDigest || !op.policyRevision || !op.approvalNetworkFeeCeilingWei ||
+      !op.depositNetworkFeeCeilingWei || !op.statusLocator || !quote.statusLocator ||
+      op.statusLocator.requestId !== quote.statusLocator.requestId ||
       quote.quoteDigest !== op.quoteDigest || op.sourceChainId !== 1 || approval.chainId !== 1 ||
       !same(approval.from, op.sourceAccount) || !same(approval.to, ETHEREUM_USDC) ||
       !same(quote.paymentDetails.depository, ETHEREUM_DEPOSITORY) || approval.value !== "0" ||
@@ -172,7 +185,7 @@ export class RelayApprovalEffectService {
       BigInt(approval.gas) * BigInt(approval.maxFeePerGas) > BigInt(op.approvalNetworkFeeCeilingWei) ||
       BigInt(approval.maxPriorityFeePerGas) > BigInt(approval.maxFeePerGas)) blocked("saved_approval_envelope");
   }
-  private async revalidate(op: RelayUnsignedOperation): Promise<void> {
+  private async revalidate(op: RelayUnsignedOperation): Promise<bigint> {
     this.assertEnvelope(op);
     const now = this.ports.now();
     if (!Number.isFinite(now.getTime()) || now.getTime() + 60_000 >= Date.parse(op.deadline)) blocked("quote_deadline");
@@ -188,14 +201,24 @@ export class RelayApprovalEffectService {
     const pin = admission.asset.mechanismPins?.bridge;
     if (pin?.provider !== "relay" || pin.reference !== RELAY_ROUTE_REFERENCE) blocked("route_pin");
     const execution = await this.ports.executionAdmission(op);
-    if (execution === null || !/^[A-Za-z0-9._:-]{8,256}$/u.test(execution.requestId) ||
+    if (execution === null || execution.requestId !== op.statusLocator?.requestId ||
       execution.operationIntegrityHash !== op.integrityHash || execution.quoteDigest !== op.quoteDigest) {
       blocked("relay_request_id_execution_admission_required");
     }
+    const funding = await this.ports.funding(op);
+    if (funding.chainId !== 1 || funding.nativeBalanceWei < BigInt(op.approvalNetworkFeeCeilingWei!) + BigInt(op.depositNetworkFeeCeilingWei!) ||
+      funding.tokenBalanceAtomic < BigInt(op.amountAtomic) || funding.allowanceAtomic < 0n ||
+      funding.currentMaxFeePerGasWei < 0n || funding.currentMaxFeePerGasWei > BigInt(op.quote!.approval.maxFeePerGas) ||
+      funding.nextNonce < 0n) blocked("source_funding_or_fee");
+    const after = this.ports.now();
+    if (!Number.isFinite(after.getTime()) || after.getTime() + 60_000 >= Date.parse(op.deadline) ||
+      (active.registry.expiresAt !== undefined && after.toISOString() >= active.registry.expiresAt)) blocked("deadline_during_revalidation");
+    return funding.nextNonce;
   }
 }
 
-export async function verifySigned(op: RelayUnsignedOperation, raw: Hex, claimedHash?: string): Promise<RelaySignedApproval> {
+export async function verifySigned(op: RelayUnsignedOperation, raw: Hex, claimedHash?: string,
+  expectedNonce?: bigint): Promise<RelaySignedApproval> {
   if (!TX.test(raw)) corrupt("signed raw encoding");
   const hash = keccak256(raw);
   if (claimedHash !== undefined && !same(claimedHash, hash)) corrupt("signed hash");
@@ -208,6 +231,7 @@ export async function verifySigned(op: RelayUnsignedOperation, raw: Hex, claimed
     tx.gas !== BigInt(expected.gas) || tx.maxFeePerGas !== BigInt(expected.maxFeePerGas) ||
     tx.maxPriorityFeePerGas !== BigInt(expected.maxPriorityFeePerGas) ||
     (tx.accessList?.length ?? 0) !== 0 || tx.nonce === undefined ||
+    (expectedNonce !== undefined && BigInt(tx.nonce) !== expectedNonce) ||
     tx.gas * tx.maxFeePerGas > BigInt(op.approvalNetworkFeeCeilingWei!)) corrupt("signed envelope drift");
   return { rawTransaction: raw, transactionHash: hash };
 }
