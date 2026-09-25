@@ -94,6 +94,23 @@ test("offline journal seals exact signed approval/deposit, marks send first, and
     maxPriorityFeePerGas: 0n });
   await assert.rejects(advanceArbitrumSourceEffectJournal(j, op,
     { kind: "seal_signed", role: "approval", rawTransaction: wrongSigner, nonce: "7" }), { code: "APN_STATE_CORRUPT" });
+  const exactTransaction = { type: "eip1559" as const, chainId: 42161, nonce: 7,
+    to: approvalEnvelope.to as Hex, data: approvalEnvelope.data as Hex, value: 0n,
+    gas: BigInt(approvalEnvelope.gas), maxFeePerGas: BigInt(approvalEnvelope.maxFeePerGas),
+    maxPriorityFeePerGas: 0n };
+  const mutations = [
+    { label: "calldata", fields: { data: "0x095ea7b3" as Hex } },
+    { label: "value", fields: { value: 1n } },
+    { label: "gas limit", fields: { gas: exactTransaction.gas + 1n } },
+    { label: "max fee", fields: { maxFeePerGas: exactTransaction.maxFeePerGas + 1n } },
+    { label: "priority fee", fields: { maxPriorityFeePerGas: 1n } },
+  ] as const;
+  for (const mutation of mutations) {
+    const rawTransaction = await account.signTransaction({ ...exactTransaction, ...mutation.fields });
+    await assert.rejects(advanceArbitrumSourceEffectJournal(j, op,
+      { kind: "seal_signed", role: "approval", rawTransaction, nonce: "7" }),
+    { code: "APN_STATE_CORRUPT" }, mutation.label);
+  }
   await assert.rejects(advanceArbitrumSourceEffectJournal(j, op,
     { kind: "seal_signed", role: "approval", rawTransaction: approvalRaw, nonce: "8" }), { code: "APN_STATE_CORRUPT" });
   j = await advanceArbitrumSourceEffectJournal(j, op,
@@ -127,6 +144,11 @@ test("offline journal seals exact signed approval/deposit, marks send first, and
   tampered.effects[1].attempt.rawTransaction = approvalRaw;
   const { integrityHash: _hash, ...body } = tampered; tampered.integrityHash = hashObject(body);
   await assert.rejects(validateArbitrumSourceEffectJournal(tampered, op), { code: "APN_STATE_CORRUPT" });
+  const wrongHash = structuredClone(j) as any;
+  wrongHash.effects[1].attempt.transactionHash = `0x${"f".repeat(64)}`;
+  const { integrityHash: _wrongHash, ...wrongHashBody } = wrongHash;
+  wrongHash.integrityHash = hashObject(wrongHashBody);
+  await assert.rejects(validateArbitrumSourceEffectJournal(wrongHash, op), { code: "APN_STATE_CORRUPT" });
   j = await advanceArbitrumSourceEffectJournal(j, op,
     { kind: "record_verified_observation", role: "deposit", outcome: "confirmed", proofDigest: "e".repeat(64) });
   assert.equal(await arbitrumSourceRecoveryClass(j, op), "completed");
@@ -154,4 +176,46 @@ test("repository binds saved operation and CAS, detects corruption even with rec
   const { integrityHash: _hash, ...body } = forged; forged.integrityHash = hashObject(body);
   await writeFile(path, JSON.stringify(forged), { mode: 0o600 });
   await assert.rejects(repository.load(op.profileHash, op.operationId), { code: "APN_STATE_CORRUPT" });
+});
+
+test("repository persists only an injected verified observation and reopens its proof binding", async t => {
+  const { temporary, op: real } = await prepared(); t.after(temporary.cleanup);
+  const op = syntheticSignerOp(real);
+  // The synthetic owner has a test key; the production loader remains unchanged and strict.
+  const syntheticRepository = (verifier?: ConstructorParameters<typeof ArbitrumSourceEffectJournalRepository>[1]) => {
+    const repository = new ArbitrumSourceEffectJournalRepository(temporary.root, verifier);
+    (repository as any).operations = { loadOperation: async () => op };
+    return repository;
+  };
+  const withoutProof = syntheticRepository();
+  let j = await withoutProof.create(op.profileHash, op.operationId, t0);
+  j = await withoutProof.beginSigning(op.profileHash, op.operationId, j.integrityHash, "approval", t1);
+  j = await withoutProof.transition(op.profileHash, op.operationId, j.integrityHash,
+    { kind: "seal_signed", role: "approval", rawTransaction: await sign(op, "approval", 7), nonce: "7" });
+  j = await withoutProof.transition(op.profileHash, op.operationId, j.integrityHash,
+    { kind: "mark_submitting", role: "approval", at: t1 });
+  j = await withoutProof.transition(op.profileHash, op.operationId, j.integrityHash,
+    { kind: "record_send", role: "approval", outcome: "uncertain" });
+  const proofDigest = "c".repeat(64);
+  const event = { kind: "record_verified_observation" as const, role: "approval" as const,
+    outcome: "confirmed" as const, proofDigest };
+  await assert.rejects(withoutProof.transition(op.profileHash, op.operationId, j.integrityHash, event),
+    { code: "APN_OPERATION_BLOCKED" });
+  let checks = 0;
+  const withProof = syntheticRepository(async input => {
+    checks++;
+    assert.equal(input.operation.integrityHash, op.integrityHash);
+    assert.equal(input.journal.effects[0].attempt?.transactionHash, j.effects[0].attempt?.transactionHash);
+    return input.role === "approval" && input.outcome === "confirmed" && input.proofDigest === proofDigest;
+  });
+  await assert.rejects(withProof.transition(op.profileHash, op.operationId, j.integrityHash,
+    { ...event, proofDigest: "d".repeat(64) }), { code: "APN_OPERATION_BLOCKED" });
+  assert.deepEqual(await withoutProof.load(op.profileHash, op.operationId), j);
+  const confirmed = await withProof.transition(op.profileHash, op.operationId, j.integrityHash, event);
+  assert.equal(checks, 2);
+  assert.equal(confirmed.effects[0].phase, "confirmed");
+  assert.equal(confirmed.effects[0].attempt?.observationDigest, proofDigest);
+  assert.deepEqual(await syntheticRepository()
+    .load(op.profileHash, op.operationId), confirmed);
+  assert.equal(await arbitrumSourceRecoveryClass(confirmed, op), "approval_confirmed");
 });
