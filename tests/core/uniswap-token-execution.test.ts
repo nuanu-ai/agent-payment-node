@@ -19,11 +19,11 @@ async function fixture(root: string, allowance = "0") {
   const operation = await journal.save(newUniswapTokenOperation({ operationId: "a".repeat(64), profile: "token-swap", account: ACCOUNT, route,
     approvalCapAtomic: "1000000", allowanceAtPrepare: allowance, approvalGas: gas, swapGas: gas, cleanupGas: gas,
     maximumNativeDebitWei: "600000", policyDigest: domainHash("p", "p"), mechanismDigest: domainHash("m", "m"), now: NOW }));
-  const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance,
+  const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance, currentNow = NOW,
     sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0, rejectRevalidation = false, guardError: unknown = null, rejectSeal = false,
-    currentUsageState: AssetUsageState = "reserved", capacityCalls = 0, rejectCapacityAt = 0;
+    currentUsageState: AssetUsageState = "reserved", capacityCalls = 0, rejectCapacityAt = 0, failReleaseOnce = false;
   const released: string[] = [], committed: string[] = [];
-  const ports = { now: () => NOW, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
+  const ports = { now: () => currentNow, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
     withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(), allocateNonce: async () => String(7 + sends.length),
     releaseNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { released.push(`${kind}:${nonce}`); },
     commitNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { committed.push(`${kind}:${nonce}`); },
@@ -31,7 +31,8 @@ async function fixture(root: string, allowance = "0") {
     reserveSendCapacity: () => { capacityCalls += 1; if (capacityCalls === rejectCapacityAt) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Physical cap reached."); },
     reserveUsage: async () => { currentUsageState = "reserved"; return { reservationId: "d".repeat(64), state: currentUsageState }; },
     currentUsage: async (op: { usageReservationId: string | null }) => ({ reservationId: op.usageReservationId!, state: currentUsageState }),
-    followUsage: async (_op: unknown, target: AssetUsageState) => { currentUsageState = target; return { reservationId: "d".repeat(64), state: currentUsageState }; },
+    followUsage: async (_op: unknown, target: AssetUsageState) => { if (target === "failed_before_effect" && failReleaseOnce) { failReleaseOnce = false; throw new Error("injected ledger failure"); }
+      currentUsageState = target; return { reservationId: "d".repeat(64), state: currentUsageState }; },
     seal: async (_op: unknown, kind: TokenEffectKind) => { if (rejectSeal) throw new Error("sign failed"); return { transactionHash: kind === "approval" ? H("1") : kind === "swap" ? H("2") : H("3"), envelopeHash: "e".repeat(64) }; },
     probeSealed: async () => null,
     send: async (_op: unknown, kind: TokenEffectKind) => { sends.push(kind); return sendResult; },
@@ -40,8 +41,62 @@ async function fixture(root: string, allowance = "0") {
     allowance: (v: string) => { currentAllowance = v; }, sendResult: (v: "accepted" | "ambiguous") => { sendResult = v; },
     rejectRevalidation: () => { rejectRevalidation = true; }, rejectGuard: (error: unknown = new Error("refused")) => { guardError = error; },
     rejectSeal: () => { rejectSeal = true; }, usageState: (state: AssetUsageState) => { currentUsageState = state; }, released, committed,
-    revalidations: () => revalidations, rejectCapacityOn: (call: number) => { rejectCapacityAt = call; } };
+    revalidations: () => revalidations, rejectCapacityOn: (call: number) => { rejectCapacityAt = call; },
+    now: (value: Date) => { currentNow = value; }, failNextRelease: () => { failReleaseOnce = true; } };
 }
+test("expired quote retires a canonical safe approval and releases principal without sending a swap", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "approval_submitted");
+  f.now(new Date("2030-03-18T00:00:01.000Z"));
+  op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "approval_submitted"); assert.equal(op.usageState, "reserved");
+  f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" });
+  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleaned"); assert.equal(op.usageState, "failed_before_effect");
+  assert.equal(op.cleanupReason, "deadline_expired_after_approval"); assert.deepEqual(op.cleanupEvidence, {
+    schemaVersion: "apn.uniswap-token-expired-approval-evidence.v1", kind: "expired_approval_no_swap",
+    approvalTransactionHash: H("1"), observedAllowanceAtomic: "1000000", observedAt: "2030-03-18T00:00:01.000Z" });
+  assert.equal(op.approvalAttempt?.transactionHash, H("1")); assert.equal(op.swapAttempt, null); assert.equal(op.accumulatedNativeDebitWei, "100");
+  assert.deepEqual(f.sends, ["approval"]); assert.equal((await f.runtime.execute(op.operationId)).integrityHash, op.integrityHash);
+  assert.equal((await f.runtime.status(op.operationId)).integrityHash, op.integrityHash);
+});
+test("expired approval retirement resumes after a crash between terminal journal and ledger writes", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  let op = await f.runtime.approve(f.operation.operationId);
+  f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" });
+  f.now(new Date("2030-03-18T00:00:01.000Z")); f.failNextRelease();
+  await assert.rejects(f.runtime.status(op.operationId), /injected ledger failure/u);
+  op = (await f.journal.load(op.operationId))!; assert.equal(op.phase, "cleaned"); assert.equal(op.usageState, "reserved");
+  assert.deepEqual(f.sends, ["approval"]);
+  op = await f.runtime.execute(op.operationId); assert.equal(op.usageState, "failed_before_effect");
+  assert.deepEqual(f.sends, ["approval"]); assert.equal((await f.runtime.status(op.operationId)).integrityHash, op.integrityHash);
+});
+test("a previously observed approval retires only after its quote expires", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  let op = await f.runtime.approve(f.operation.operationId);
+  f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" });
+  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "approval_observed"); assert.equal(op.usageState, "reserved");
+  f.now(new Date("2030-03-18T00:00:01.000Z")); op = await f.runtime.status(op.operationId);
+  assert.equal(op.phase, "cleaned"); assert.equal(op.usageState, "failed_before_effect"); assert.deepEqual(f.sends, ["approval"]);
+});
+test("approval allowance mismatch cannot release an expired quote reservation", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  let op = await f.runtime.approve(f.operation.operationId);
+  f.now(new Date("2030-03-18T00:00:01.000Z"));
+  f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "999999" });
+  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.usageState, "reserved");
+  assert.equal(op.cleanupEvidence, null); assert.deepEqual(f.sends, ["approval"]);
+});
+test("an expired quote never releases principal while a swap attempt or uncertain approval exists", async (t) => {
+  const pending = await temporaryState(); t.after(pending.cleanup); const a = await fixture(pending.root);
+  let op = await a.runtime.approve(a.operation.operationId); a.now(new Date("2030-03-18T00:00:01.000Z"));
+  op = await a.runtime.status(op.operationId); assert.equal(op.phase, "approval_submitted"); assert.equal(op.usageState, "reserved");
+  const sent = await temporaryState(); t.after(sent.cleanup); const b = await fixture(sent.root);
+  op = await b.runtime.approve(b.operation.operationId);
+  b.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" });
+  op = await b.runtime.execute(op.operationId); assert.equal(op.phase, "approval_observed");
+  op = await b.runtime.execute(op.operationId); assert.equal(op.phase, "submitted");
+  b.now(new Date("2030-03-18T00:00:01.000Z")); op = await b.runtime.status(op.operationId);
+  assert.equal(op.phase, "submitted"); assert.equal(op.usageState, "submitted"); assert.equal(op.swapAttempt?.transactionHash, H("2"));
+});
 test("capacity exhaustion after sealing preserves signed but unsubmitted state without a send", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   f.rejectCapacityOn(2);

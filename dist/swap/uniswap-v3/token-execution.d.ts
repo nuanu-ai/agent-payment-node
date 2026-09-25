@@ -61,6 +61,7 @@ export declare class UniswapTokenExecution {
     private finishStart;
     private submit;
     private observeApproval;
+    private retireExpiredApproval;
     private observeSwap;
     private observeCleanup;
     private cleaned;

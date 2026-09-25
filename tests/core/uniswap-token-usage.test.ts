@@ -85,14 +85,36 @@ async function setup(root: string, daily = "1500000", account = ACCOUNT) {
   return { ledger, usage, policy };
 }
 
-function operation(policyDigest: string, id: string, account = ACCOUNT, profile = "token-swap") {
+function operation(policyDigest: string, id: string, account = ACCOUNT, profile = "token-swap", deadline = 1_900_000_000) {
   const gas = { gasLimit: "100000", maxFeePerGas: "2", maxPriorityFeePerGas: "1" };
   return newUniswapTokenOperation({ operationId: id.repeat(64), profile, account,
     route: createUniswapTokenRoute({ inputToken: UNISWAP_USDC, outputToken: ETHEREUM_USDT, recipient: account,
-      amountIn: "1000000", amountOutMinimum: "990000", deadline: 1_900_000_000 }), approvalCapAtomic: "1000000",
+      amountIn: "1000000", amountOutMinimum: "990000", deadline }), approvalCapAtomic: "1000000",
     allowanceAtPrepare: "0", approvalGas: gas, swapGas: gas, cleanupGas: gas, maximumNativeDebitWei: "600000",
     policyDigest, mechanismDigest: swapMechanismDigest(UNISWAP_TOKEN_MECHANISM_PIN), now: NOW });
 }
+test("expired approval retires principal in the real ledger and admits a fresh exact-allowance quote", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const after = new Date(NOW.getTime() + 11_000), s = await setup(temporary.root, "1000000"),
+    usage = new UniswapTokenUsage(new StateStore(temporary.root), { now: () => after }, s.ledger),
+    journal = new UniswapTokenJournal(temporary.root), base = await journal.save(operation(s.policy.policyDigest, "a", ACCOUNT,
+      "token-swap", Math.floor(NOW.getTime() / 1000) + 10)), reservation = await s.usage.reserve(base),
+    approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: reservation.reservationId,
+      usageState: reservation.state }, NOW)), hash = `0x${"1".repeat(64)}`;
+  const submitted = await journal.save(transitionUniswapToken(approved, "approval_submitted", { approvalAttempt: {
+    ...tokenAttempt(approved, "approval", "7", NOW), transactionHash: hash } }, NOW));
+  await assert.rejects(usage.follow(submitted, "failed_before_effect"), { code: "APN_STATE_CORRUPT" });
+  const observed = await journal.save(transitionUniswapToken(submitted, "approval_observed", { accumulatedNativeDebitWei: "100" }, after));
+  const cleaned = await journal.save(transitionUniswapToken(observed, "cleaned", { cleanupReason: "deadline_expired_after_approval",
+    cleanupEvidence: { schemaVersion: "apn.uniswap-token-expired-approval-evidence.v1", kind: "expired_approval_no_swap",
+      approvalTransactionHash: hash, observedAllowanceAtomic: "1000000", observedAt: after.toISOString() } }, after));
+  const released = await usage.follow(cleaned, "failed_before_effect"); assert.equal(released.state, "failed_before_effect");
+  assert.deepEqual(await usage.follow(cleaned, "failed_before_effect"), released);
+  assert.equal((await s.ledger.usage({ account: ACCOUNT, chain: "eip155:1", asset: { kind: "token", identifier: UNISWAP_USDC } }, after)).amountAtomic, "0");
+  assert.equal(await usage.admitQuote(quoteRequest(), after), s.policy.policyDigest);
+  const fresh = await journal.save(operation(s.policy.policyDigest, "b"));
+  assert.equal((await usage.reserve(fresh)).state, "reserved");
+});
 function quoteRequest() { return { command: "swap.uniswap-token.quote" as const, profile: "token-swap", account: ACCOUNT, recipient: ACCOUNT,
   sourceToken: UNISWAP_USDC, outputToken: ETHEREUM_USDT, amountAtomic: "1000000", minimumOutputAtomic: "990000",
   approvalCapAtomic: "1000000", deadline: 1_900_000_000, maxApprovalGasLimit: "100000", maxSwapGasLimit: "100000",

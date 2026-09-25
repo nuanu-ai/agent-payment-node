@@ -60,9 +60,14 @@ export function validateUniswapTokenOperation(value) {
     if (approvalStarted && op.allowanceAtPrepare === "0" && op.approvalAttempt === null || swapStarted && op.swapAttempt === null || cleanupStarted && op.cleanupAttempt === null)
         corrupt("Uniswap token attempt binding is invalid.");
     const hashes = [op.approvalAttempt, op.swapAttempt, op.cleanupAttempt].some((row) => row?.transactionHash !== null && row?.transactionHash !== undefined);
-    if (evidence !== null && (op.phase !== "cleanup_required" && op.phase !== "cleaned" || op.cleanupReason !== "zero_allowance_no_effect" ||
+    if (evidence?.kind === "zero_allowance_no_effect" && (op.phase !== "cleanup_required" && op.phase !== "cleaned" || op.cleanupReason !== "zero_allowance_no_effect" ||
         op.accumulatedNativeDebitWei !== "0" || hashes || op.phase === "cleaned" && op.usageState !== "failed_before_effect"))
         corrupt("Uniswap token no-effect cleanup evidence is invalid.");
+    if (evidence?.kind === "expired_approval_no_swap" && (op.phase !== "cleaned" || op.cleanupReason !== "deadline_expired_after_approval" ||
+        op.approvalAttempt?.transactionHash !== evidence.approvalTransactionHash || op.swapAttempt !== null || op.cleanupAttempt !== null ||
+        evidence.observedAllowanceAtomic !== route.amountIn || !["reserved", "failed_before_effect"].includes(op.usageState ?? "") ||
+        Date.parse(evidence.observedAt) < route.deadline * 1000 || evidence.observedAt > op.updatedAt))
+        corrupt("Uniswap token expired approval evidence is invalid.");
     if (failure !== null && op.phase !== "cleanup_required" && op.phase !== "cleaned")
         corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
@@ -119,6 +124,13 @@ function attempt(v) {
 function validateCleanupEvidence(v) {
     if (v === null)
         return;
+    if (isPlainRecord(v) && v.kind === "expired_approval_no_swap") {
+        if (!exactKeys(v, ["schemaVersion", "kind", "approvalTransactionHash", "observedAllowanceAtomic", "observedAt"]) ||
+            v.schemaVersion !== "apn.uniswap-token-expired-approval-evidence.v1" || !/^0x[a-f0-9]{64}$/u.test(v.approvalTransactionHash) ||
+            !/^[1-9][0-9]*$/u.test(v.observedAllowanceAtomic) || !canonicalInstant(v.observedAt))
+            corrupt("Uniswap token expired approval evidence is invalid.");
+        return;
+    }
     if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "source", "observedAllowanceAtomic", "observedAt"]) ||
         v.schemaVersion !== "apn.uniswap-token-cleanup-evidence.v1" || v.kind !== "zero_allowance_no_effect" ||
         !["current_allowance", "legacy_usage_reconciliation"].includes(v.source) || v.observedAllowanceAtomic !== "0" ||
