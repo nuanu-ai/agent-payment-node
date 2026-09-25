@@ -120,6 +120,16 @@ RPC for EVM operations.
 
 ### The send guard
 
+The native local adapter requests the fresh blockhash and confirmed block height
+in one JSON-RPC batch when the RPC transport supports batching. This saves one
+physical POST at the send guard without moving the approval, simulation, signer
+or durable submission checkpoints. The operation service currently holds its
+state lock across network calls. The shared physical request budget and pacing
+from the RPC transport are therefore not enabled for the live direct rail: safe
+two-per-second pacing needs the service to release and reacquire that lock with
+the operation and policy revalidated at each checkpoint. Live request counts
+and rate-limit acceptance remain unverified.
+
 After the owner approves and before anything is signed, the send guard runs
 once:
 
