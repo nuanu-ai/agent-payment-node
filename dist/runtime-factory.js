@@ -84,9 +84,11 @@ export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
     if (bound.request.command === "relay.base.observe") {
         const baseUrl = bound.rpcUrl ?? "";
-        const baseInvocation = () => new RelayBnbReadOnlyRpc(baseUrl, state, options.relayObserveBaseRpc);
+        const baseInvocation = () => new RelayBnbReadOnlyRpc(baseUrl, state, options.relayObserveBaseRpc, undefined, 8453);
+        const source = bound.ethereumRpcUrl === undefined ? undefined :
+            new RelayEthereumFinalityRpc(bound.ethereumRpcUrl, state, options.relayObserveSourceRpc);
         return new ApnCore({ state, relayBaseObserve: options.relayBaseObserve ??
-                new RelayBaseObserveService(state, baseInvocation, new RelayKeylessStatusService(state, options.relayStatusFetch)) });
+                new RelayBaseObserveService(state, baseInvocation, new RelayKeylessStatusService(state, options.relayStatusFetch), source) });
     }
     if (bound.request.command === "relay.observe") {
         const sourceUrl = bound.rpcUrl ?? "";

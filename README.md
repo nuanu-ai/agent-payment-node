@@ -661,7 +661,7 @@ returned. The signer must perform network reads outside that lock.
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
 apn relay base prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
-apn relay base observe --operation <operation-id> --rpc-url <base-rpc>
+apn relay base observe --operation <operation-id> --rpc-url <base-rpc> [--ethereum-rpc-url <source-rpc>]
 apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
 apn relay native prepare --profile <bnb-owner-profile> --recipient <pinned-destination-address> --amount-atomic <bnb-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <bnb-wei> --idempotency-key <key>
 apn relay preflight --profile default --operation <operation-id> --rpc-url <ethereum-rpc>

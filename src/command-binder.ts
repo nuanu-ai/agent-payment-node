@@ -31,6 +31,7 @@ export interface BoundCommand {
   readonly request: CommandRequest;
   readonly rpcUrl?: string;
   readonly bnbRpcUrl?: string;
+  readonly ethereumRpcUrl?: string;
 }
 
 export function bindArgv(argv: readonly string[]): BoundCommand {
@@ -75,7 +76,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   if (parsed.command.path.join(" ") === "relay retire") return { request: { command: "relay.retire", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
   if (parsed.command.path.join(" ") === "relay status") return { request: { command: "relay.status", operationId: value(options, "--operation") } };
   if (parsed.command.path.join(" ") === "relay observe") return { request: { command: "relay.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), bnbRpcUrl: value(options, "--bnb-rpc-url") };
-  if (parsed.command.path.join(" ") === "relay base observe") return { request: { command: "relay.base.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+  if (parsed.command.path.join(" ") === "relay base observe") return { request: { command: "relay.base.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), ...(options["--ethereum-rpc-url"] === undefined ? {} : { ethereumRpcUrl: options["--ethereum-rpc-url"] }) };
   if (parsed.command.path[0] === "stargate") {
     switch (parsed.command.path.join(" ")) {
       case "stargate native prepare": return { request: { command: "stargate.native.prepare", profile: value(options, "--profile"),

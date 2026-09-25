@@ -13,6 +13,11 @@ export interface RelayBnbReceipt {
     readonly status: "success" | "reverted";
     readonly blockNumber: bigint;
     readonly blockHash: string;
+    readonly logs?: readonly Readonly<{
+        address: string;
+        topics: readonly string[];
+        data: string;
+    }>[];
 }
 export interface RelayBnbBlock {
     readonly number: bigint;
@@ -43,6 +48,9 @@ export interface RelayBnbProofPorts {
     finalityCheckpoint(): Promise<RelayBnbBlock | null>;
     /** null when trace support or exhaustive success semantics are unavailable. */
     nativeTrace(hash: string): Promise<RelayBnbNativeTrace | null>;
+    /** Base only: bytecode identity and two balances from one pinned inclusion window. */
+    routerCodeHash?(address: string, block: bigint): Promise<string>;
+    adjacentBalances?(address: string, block: bigint, expectedBlockHash: string): Promise<readonly [bigint, bigint]>;
 }
 export interface RelaySourceDepositProof {
     readonly transactionHash: string;
@@ -63,7 +71,7 @@ export interface RelayBnbRecipientCreditEvidence {
     readonly recipient: string;
     readonly minimumOutputWei: string;
     readonly creditedWei: string;
-    readonly method: "direct_native_transaction" | "receipt_bound_native_trace";
+    readonly method: "direct_native_transaction" | "receipt_bound_native_trace" | "verified_relay_router_event_balance";
 }
 export type RelayBnbProofResult = Readonly<{
     /** A candidate hash can be an unrelated transfer, even when its recipient credit is real. */
