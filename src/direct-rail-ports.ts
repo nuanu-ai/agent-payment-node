@@ -171,6 +171,8 @@ export interface DirectRailPort {
   bindSend?(account: ChainAccount, prepared: RailPreparedTransfer): Promise<RailSendBinding>;
   /** Local-only: seal exactly one matching effect before returning it. */
   sign(binding: RailEffectBinding): Promise<RailSignedEffect>;
+  /** Local SOL only: seal after the service revalidated RPC outside its money-operation locks. No network calls. */
+  sealRevalidated?(binding: RailEffectBinding): Promise<RailSignedEffect>;
   recoverEffect(binding: RailEffectBinding): Promise<RailSignedEffect | null>;
   /** Called only after durable `submitting`; a thrown error is ambiguous. */
   submit(binding: RailEffectBinding, effect: RailSignedEffect | null): Promise<{ readonly transactionId: string }>;

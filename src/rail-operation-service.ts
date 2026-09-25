@@ -260,14 +260,14 @@ export class RailOperationService {
         }
       }
       try {
-        return await state.withLocks(keys, async () => {
+        const committed = await state.withLocks(keys, async () => {
           const latest = await this.required(operationId);
           await this.records.repairReceipt(latest);
           await this.followUsage(latest);
           const saved = await claims.load(operationId);
           if (latest.integrityHash !== operation.integrityHash || saved?.integrityHash !== claim.integrityHash) {
             if (saved?.integrityHash === claim.integrityHash) await claims.removeIfMatches(claim);
-            return publicRailOperation(latest);
+            return { done: publicRailOperation(latest) } as const;
           }
           const currentAccount = await this.policies.account(latest.profile, latest.account.rail);
           if (canonicalJson(currentAccount) !== canonicalJson(latest.account)) throw new ApnError("APN_PROFILE_DRIFT", "The Solana account changed during approval.");
@@ -278,8 +278,10 @@ export class RailOperationService {
           const allowlistLease = await this.reserveUsage(latest);
           const started = await this.move(latest, "signing_started", "foreground_signing_started", "durable_pre_effect", undefined, send, allowlistLease);
           await claims.removeIfMatches(claim);
-          return publicRailOperation(await this.finishLocalApproval(started, adapter));
+          return { started } as const;
         });
+        if ("done" in committed) return committed.done;
+        return await this.executeLocalSolanaClaimed(committed.started, adapter, true);
       } catch (error) {
         await state.withLocks(keys, async () => { await claims.removeIfMatches(claim); });
         throw error;
@@ -310,6 +312,108 @@ export class RailOperationService {
     operation = await this.move(operation, "signed_not_submitted", "encrypted_effect_bound", "durable_signed_effect", effect);
     return await this.firstLocalSubmit(operation, adapter, effect);
   }
+  /** The claim lock serializes recovery, while RPC revalidation and the one send run outside money-operation locks. */
+  private async executeLocalSolanaClaimed(initial: RailOperationRecord, adapter: DirectRailPort, mayStartSigning = false): Promise<unknown> {
+    const keys = [`profile:${initial.profileHash}`, `operation:${initial.operationId}`];
+    const state = this.context.state;
+    let signed: RailOperationRecord;
+    let effect: RailSignedEffect;
+    if (initial.state === "signing_started") {
+      const recovered = await state.withLocks(keys, async () => {
+        const latest = await this.required(initial.operationId);
+        if (latest.integrityHash !== initial.integrityHash) return { done: latest } as const;
+        const sealed = await adapter.recoverEffect(binding(latest));
+        if (sealed === null) return mayStartSigning
+          ? { pending: latest } as const
+          : { done: await this.move(latest, "failed_before_effect", "custody_proved_no_sealed_effect", "durable_pre_effect") } as const;
+        this.assertEffect(latest, sealed);
+        return { signed: await this.move(latest, "signed_not_submitted", "encrypted_effect_recovered", "durable_signed_effect", sealed), effect: sealed } as const;
+      });
+      if ("done" in recovered) return publicRailOperation(recovered.done);
+      if ("signed" in recovered) { signed = recovered.signed!; effect = recovered.effect!; }
+      else {
+        const pending = recovered.pending;
+        try { await this.revalidate(pending, adapter); }
+        catch (error) {
+          await state.withLocks(keys, async () => {
+            const latest = await this.required(initial.operationId);
+            if (latest.integrityHash === pending.integrityHash && await adapter.recoverEffect(binding(latest)) === null)
+              await this.move(latest, "failed_before_effect", "custody_proved_no_sealed_effect", "durable_pre_effect");
+          });
+          throw error;
+        }
+        const sealed = await state.withLocks(keys, async () => {
+          const latest = await this.required(initial.operationId);
+          if (latest.integrityHash !== pending.integrityHash) return { done: latest } as const;
+          try { await this.assertCurrentRailPolicy(latest); }
+          catch (error) {
+            await this.move(latest, "failed_before_effect", "pre_sign_owner_or_policy_changed", "durable_pre_effect");
+            throw error;
+          }
+          if (adapter.sealRevalidated === undefined) corrupt();
+          let value: RailSignedEffect;
+          try { value = await adapter.sealRevalidated(binding(latest)); }
+          catch (error) {
+            if (await adapter.recoverEffect(binding(latest)) === null)
+              await this.move(latest, "failed_before_effect", "custody_proved_no_sealed_effect", "durable_pre_effect");
+            throw error;
+          }
+          this.assertEffect(latest, value);
+          return { signed: await this.move(latest, "signed_not_submitted", "encrypted_effect_bound", "durable_signed_effect", value), effect: value } as const;
+        });
+        if ("done" in sealed) return publicRailOperation(sealed.done);
+        signed = sealed.signed; effect = sealed.effect;
+      }
+    } else if (initial.state === "signed_not_submitted") {
+      const recovered = await state.withLocks(keys, async () => {
+        const latest = await this.required(initial.operationId);
+        if (latest.integrityHash !== initial.integrityHash) return { done: latest } as const;
+        const sealed = await adapter.recoverEffect(binding(latest));
+        if (sealed === null) corrupt();
+        this.assertEffect(latest, sealed);
+        return { signed: latest, effect: sealed } as const;
+      });
+      if ("done" in recovered) return publicRailOperation(recovered.done);
+      signed = recovered.signed; effect = recovered.effect;
+    } else return publicRailOperation(initial);
+
+    try { await this.revalidate(signed, adapter); }
+    catch {
+      return await state.withLocks(keys, async () => {
+        const latest = await this.required(initial.operationId);
+        return publicRailOperation(latest.integrityHash === signed.integrityHash
+          ? await this.move(latest, "failed_before_effect", "never_submitted_frozen_effect_no_longer_valid", "durable_pre_effect") : latest);
+      });
+    }
+    const committed = await state.withLocks(keys, async () => {
+      const latest = await this.required(initial.operationId);
+      if (latest.integrityHash !== signed.integrityHash) return { done: latest } as const;
+      try { await this.assertCurrentRailPolicy(latest); }
+      catch {
+        return { done: await this.move(latest, "failed_before_effect", "never_submitted_frozen_effect_no_longer_valid", "durable_pre_effect") } as const;
+      }
+      // The intent is durable before adapter.submit can make even one physical send attempt.
+      return { submitting: await this.move(latest, "submitting", "submission_intent_persisted", "effect_outcome_unknown") } as const;
+    });
+    if ("done" in committed) return publicRailOperation(committed.done);
+    const submitting = committed.submitting;
+    let transactionId: string | null = null;
+    try {
+      const result = await adapter.submit(binding(submitting), effect);
+      validateRailTransactionId(result.transactionId, submitting.account.rail);
+      if (result.transactionId !== effect.transactionId) throw new Error("effect mismatch");
+      transactionId = result.transactionId;
+    } catch { /* Even a pre-send exception is conservatively ambiguous after the durable intent. */ }
+    const acknowledged = await state.withLocks(keys, async () => {
+      const latest = await this.required(initial.operationId);
+      if (latest.integrityHash !== submitting.integrityHash) return latest;
+      return transactionId === null
+        ? await this.move(latest, "unknown_finality", "submission_outcome_unknown", "effect_outcome_unknown")
+        : await this.move(latest, "submitted_pending", "submission_identifier_bound", "submission_acknowledged", { transactionId });
+    });
+    if (acknowledged.state !== "submitted_pending") return publicRailOperation(acknowledged);
+    return await this.resumeLocalSolanaClaimed(acknowledged.operationId, acknowledged.profileHash);
+  }
   async resume(operationId: string): Promise<unknown> {
     const found = await this.required(canonicalOperationId(operationId));
     if (found.account.rail === "solana" && found.account.provider === "local") return await this.resumeLocalSolana(found.operationId, found.profileHash);
@@ -332,31 +436,29 @@ export class RailOperationService {
   }
   /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
   private async resumeLocalSolana(operationId: string, profileHash: string): Promise<unknown> {
+    const found = await this.required(operationId);
+    if (found.state !== "signing_started" && found.state !== "signed_not_submitted" && found.state !== "submitting")
+      return await this.resumeLocalSolanaClaimed(operationId, profileHash);
+    return await this.context.state.withLocks([`rail:approval-claim:${operationId}`],
+      async () => await this.resumeLocalSolanaClaimed(operationId, profileHash), { waitMs: 300_000 });
+  }
+  private async resumeLocalSolanaClaimed(operationId: string, profileHash: string): Promise<unknown> {
     const keys = [`profile:${profileHash}`, `operation:${operationId}`];
     const snapshot = await this.context.state.withLocks(keys, async () => {
       let operation = await this.required(operationId);
       await this.records.repairReceipt(operation);
       await this.followUsage(operation);
-      if (operation.terminal || operation.state === "awaiting_approval") return { operation, observe: false } as const;
-      const adapter = this.adapter(operation);
+      if (operation.terminal || operation.state === "awaiting_approval") return { operation, mode: "done" } as const;
       if (operation.state === "signing_started" || operation.state === "signed_not_submitted") {
-        const effect = await adapter.recoverEffect(binding(operation));
-        if (effect === null) {
-          if (operation.state !== "signing_started") corrupt();
-          operation = await this.move(operation, "failed_before_effect", "custody_proved_no_sealed_effect", "durable_pre_effect");
-        } else {
-          this.assertEffect(operation, effect);
-          if (operation.state === "signing_started") operation = await this.move(operation, "signed_not_submitted", "encrypted_effect_recovered", "durable_signed_effect", effect);
-          operation = await this.firstLocalSubmit(operation, adapter, effect);
-        }
-        return { operation, observe: false } as const;
+        return { operation, mode: "execute" } as const;
       }
       // A crashed submit is ambiguous. Persist this boundary before any unlocked observation;
       // recovery must never call submit again.
       if (operation.state === "submitting") operation = await this.move(operation, "unknown_finality", "interrupted_submission_observation_only", "effect_outcome_unknown");
-      return { operation, observe: true } as const;
+      return { operation, mode: "observe" } as const;
     });
-    if (!snapshot.observe) return publicRailOperation(snapshot.operation);
+    if (snapshot.mode === "done") return publicRailOperation(snapshot.operation);
+    if (snapshot.mode === "execute") return await this.executeLocalSolanaClaimed(snapshot.operation, this.adapter(snapshot.operation));
     const frozen = snapshot.operation;
     const inspection = await this.inspectEvidence(frozen, this.adapter(frozen));
     return await this.context.state.withLocks(keys, async () => {
@@ -424,13 +526,17 @@ export class RailOperationService {
     }
   }
   private async revalidate(operation: RailOperationRecord, adapter: DirectRailPort): Promise<void> {
+    const current = await this.assertCurrentRailPolicy(operation);
+    await adapter.revalidate(current, operation.prepared, operation.send ?? null);
+  }
+  private async assertCurrentRailPolicy(operation: RailOperationRecord): Promise<RailOperationRecord["account"]> {
     if (this.context.clock.now().getTime() >= Date.parse(operation.prepared.expiresAt)) throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen direct-rail approval expired.");
     const current = await this.policies.account(operation.profile, operation.account.rail);
     if (canonicalJson(current) !== canonicalJson(operation.account)) throw new ApnError("APN_PROFILE_DRIFT", "The direct-rail account changed.");
     const policy = await this.policies.authorize(current, operation.prepared.asset.alias, operation.prepared.maximumFeeAtomic);
     if (policy.policyHash !== operation.policyHash) throw new ApnError("APN_PROFILE_DRIFT", "The chain policy changed after preparation.");
     if (operation.allowlist !== undefined) await this.allowlist.confirm(railAllowlistSubject(operation), operation.allowlist);
-    await adapter.revalidate(current, operation.prepared, operation.send ?? null);
+    return current;
   }
   private async firstLocalSubmit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect): Promise<RailOperationRecord> {
     try { await this.revalidate(operation, adapter); }
