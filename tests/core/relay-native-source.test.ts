@@ -17,11 +17,16 @@ import { RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENC
   RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, validateRelayNativeQuote,
   verifySavedRelayNativeQuote } from "../../src/relay/native-quote.js";
 import { StateStore } from "../../src/state.js";
+import { RelayNativeObserveService } from "../../src/relay/native-observe.js";
+import { RelayKeylessStatusService } from "../../src/relay/status.js";
+import { RelayEthereumFinalityRpc } from "../../src/relay/observe-rpc.js";
+import type { HttpsBaseRpc } from "../../src/rpc.js";
 import { TtyRelayNativeExecuteConfirmation } from "../../src/tty-approval.js";
 import { temporaryState } from "./helpers.js";
 
 const now = new Date(1790909529 * 1000);
 const fixture = async () => JSON.parse(await readFile("tests/core/relay-fixtures/bnb-native-polygon-native-quote-20260925.json", "utf8"));
+const txHash = (digit: string) => `0x${digit.repeat(64)}`;
 async function prepared(state: StateStore, monad = false) {
   const recipient = monad ? RELAY_BNB_SOURCE : RELAY_POLYGON_RECIPIENT;
   const raw = monad ? JSON.parse(await readFile("tests/core/relay-fixtures/bnb-native-monad-native-quote-20260925.json", "utf8")) : await fixture();
@@ -55,6 +60,101 @@ async function preparedDefault(state: StateStore) {
     minOutputAtomic: quote.minimumOutputWei, createdAt: now.toISOString(),
     deadline: new Date(quote.deadline * 1000).toISOString() });
 }
+
+test("native observation reconciles one BNB source send and bounded Monad recipient credit", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root), op = await prepared(state, true);
+  const walletFields = { schemaVersion: "apn.state.v1" as const, profile: "evm-live-buyer" as const,
+    profileHash: op.profileHash, address: RELAY_BNB_SOURCE as Hex, createdAt: now.toISOString(),
+    bindingHash: hashObject({ profile: "evm-live-buyer", address: RELAY_BNB_SOURCE, createdAt: now.toISOString() }) };
+  const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2",
+    registryVersion: "relay-native-observe.test.1", publishedAt: "2026-09-30T00:00:00.000Z",
+    effectiveDate: "2026-09-30", effectiveAt: "2026-09-30T00:00:00.000Z",
+    chains: [{ chain: "eip155:56", family: "evm", name: "BNB Smart Chain", assets: [{ kind: "native", identifier: null,
+      symbol: "BNB", decimals: 18, rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
+      railCaps: { bridge: { maximumPerTransferAtomic: "2000000000000000", dailyLimitAtomic: "3000000000000000" } },
+      mechanismPins: { bridge: { provider: "relay", reference: RELAY_BNB_MONAD_ROUTE_REFERENCE } } }] }] });
+  // The journal and usage record are bound to the same saved policy and operation.
+  const { integrityHash: _old, ...fields } = op;
+  const saved = freezeRelayUnsignedOperation({ ...fields, policyDigest: registry.policyDigest });
+  await new RelayUnsignedOperationRepository(temp.root).persistLocked(saved);
+  await state.writeNewWallet({ ...walletFields, integrityHash: hashObject(walletFields) });
+  const identity = { account: RELAY_BNB_SOURCE, chain: "eip155:56", asset: { kind: "native" as const, identifier: null } };
+  const ledger = new AssetUsageLedger(temp.root), reservationId = assetUsageReservationId(identity,
+    `relay-native-execute:${saved.operationId}`);
+  await ledger.reserve({ ...identity, registry, rail: "bridge", amountAtomic: saved.amountAtomic,
+    idempotencyKey: `relay-native-execute:${saved.operationId}`, now });
+  const journals = new RelayNativeSourceJournalRepository(temp.root);
+  let journal = await journals.advance(saved, null, "pending", null, now);
+  journal = await journals.advance(saved, journal.integrityHash, "signing_started", null, now);
+  journal = await journals.advance(saved, journal.integrityHash, "sealed", txHash("a"), now);
+  journal = await journals.advance(saved, journal.integrityHash, "submitting", null, now);
+  const sourceBlock = txHash("b"), destinationBlock = txHash("d"), safeBlock = txHash("e"), destinationHash = txHash("c");
+  const sourceObservation = { transaction: { hash: txHash("a"), from: saved.sourceAccount,
+    to: saved.nativeQuote!.deposit.to, input: saved.nativeQuote!.deposit.data,
+    value: BigInt(saved.amountAtomic), chainId: 56 },
+    receipt: { transactionHash: txHash("a"), status: "success" as const, blockNumber: 100n, blockHash: sourceBlock },
+    canonicalBlockHash: sourceBlock };
+  let payload = { status: "success", originChainId: 56, destinationChainId: 143,
+    inTxHashes: [txHash("a")], txHashes: [destinationHash] };
+  let destinationReads = 0;
+  const destination = () => ({ chainId: async () => { destinationReads++; return 143; },
+    transaction: async () => { destinationReads++; return { hash: destinationHash, chainId: 143,
+      to: saved.recipient, valueWei: BigInt(saved.minOutputAtomic), blockNumber: 200n, blockHash: destinationBlock }; },
+    receipt: async () => { destinationReads++; return { transactionHash: destinationHash, status: "success" as const,
+      blockNumber: 200n, blockHash: destinationBlock }; },
+    block: async (number: bigint) => { destinationReads++; return { number, hash: number === 200n ? destinationBlock : safeBlock }; },
+    finalityCheckpoint: async () => { destinationReads++; return { number: 205n, hash: safeBlock }; },
+    nativeTrace: async () => null });
+  let observation = sourceObservation;
+  let sourceReady = false;
+  const status = new RelayKeylessStatusService(state, async () => new Response(JSON.stringify(payload), { status: 200 }));
+  assert.equal((await status.status(saved.operationId)).status, "success");
+  const service = new RelayNativeObserveService(state, { finalizedDeposit: async () => sourceReady ? observation : null }, destination,
+    status,
+    { now: () => now });
+  assert.equal((await service.observe(saved)).state, "source_unproven");
+  assert.equal((await journals.load(saved))?.phase, "submitting");
+  assert.equal((await ledger.load(identity, reservationId))?.state, "reserved");
+  sourceReady = true;
+  const accepted = await service.observe(saved);
+  assert.equal(accepted.state, "operational_acceptance", JSON.stringify(accepted));
+  assert.equal(accepted.paidAcceptance, false); assert.equal(accepted.causalLinkCryptographicallyProven, false);
+  assert.equal((await journals.load(saved))?.phase, "confirmed");
+  assert.equal((await ledger.load(identity, reservationId))?.state, "finalized");
+  assert.equal(destinationReads, 6);
+  assert.equal((await service.observe(saved)).state, "operational_acceptance");
+  payload = { ...payload, inTxHashes: [txHash("f")], txHashes: [destinationHash] };
+  assert.equal((await service.observe(saved)).state, "recipient_credit_observed");
+  payload = { ...payload, txHashes: [destinationHash, txHash("9")] };
+  const readsBeforeAmbiguous = destinationReads;
+  assert.equal((await service.observe(saved)).state, "provider_candidate_unproven");
+  assert.equal(destinationReads, readsBeforeAmbiguous);
+  observation = { ...sourceObservation, transaction: { ...sourceObservation.transaction, from: RELAY_POLYGON_RECIPIENT } };
+  assert.equal((await service.observe(saved)).state, "source_unproven");
+});
+
+test("BNB source reader requires fifteen stable confirmations in three read batches", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root), sourceHash = txHash("a"), includedHash = txHash("b");
+  await state.initialize();
+  let calls = 0, head = 114n;
+  const batchCall = async () => {
+    calls++;
+    if (calls === 1 || calls === 3) return ["0x38", { hash: sourceHash, from: RELAY_BNB_SOURCE,
+      to: "0x0000000000000000000000000000000000000001", input: "0x1234", value: "0x1",
+      chainId: "0x38", blockNumber: "0x64", blockHash: includedHash },
+      { transactionHash: sourceHash, status: "0x1", blockNumber: "0x64", blockHash: includedHash }];
+    return [{ number: "0x64", hash: includedHash }, { number: `0x${head.toString(16)}`, hash: txHash("c") }];
+  };
+  const reader = new RelayEthereumFinalityRpc("https://example.com", state,
+    { batchCall } as unknown as HttpsBaseRpc, undefined, 56);
+  assert.equal(await reader.finalizedDeposit(sourceHash as Hex), null);
+  assert.equal(calls, 2);
+  head = 115n;
+  assert.ok(await reader.finalizedDeposit(sourceHash as Hex));
+  assert.equal(calls, 5);
+});
 
 test("saved native quote keeps solver signature and exact deposit binding at execution", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);

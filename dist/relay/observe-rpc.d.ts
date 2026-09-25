@@ -9,16 +9,18 @@ import type { RelaySourceFinalityPorts } from "./observe.js";
 export declare class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
     private readonly url;
     private readonly guardFactory;
+    private readonly expectedChainId;
     private readonly rpc;
-    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guardFactory?: () => EvmDirectRpcGuard);
+    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guardFactory?: () => EvmDirectRpcGuard, expectedChainId?: 1 | 56);
     private read;
     finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null>;
 }
 export declare class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     private readonly url;
+    private readonly expectedChainId;
     private readonly rpc;
     private readonly guard;
-    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guard?: EvmDirectRpcGuard);
+    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guard?: EvmDirectRpcGuard, expectedChainId?: 56 | 137 | 143 | 8453);
     get physicalPosts(): number;
     private read;
     chainId(): Promise<number>;

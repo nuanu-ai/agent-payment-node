@@ -1,4 +1,4 @@
-/** Read-only cross-chain evidence for one saved Ethereum USDC to BNB Relay operation. */
+/** Relay cross-chain observation; native source reconciliation may update local state. */
 import type { Hex } from "viem";
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
@@ -8,6 +8,7 @@ import { proveRelayBnbDestination, type RelayBnbProofPorts, type RelayBnbProofRe
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RelayKeylessStatusService } from "./status.js";
 import { BNB_NATIVE, ETHEREUM_USDC } from "./quote.js";
+import { RelayNativeObserveService } from "./native-observe.js";
 
 const OPERATION = /^[a-f0-9]{64}$/u;
 export interface RelaySourceFinalityPorts {
@@ -31,12 +32,13 @@ export interface RelayObserveResult {
   readonly operationalAcceptance: boolean;
 }
 
-/** No signer, wallet, send, journal mutation, or retry surface is reachable here. */
+/** No signer, send, or retry surface is reachable here. */
 export class RelayObserveService {
   private readonly usedBnbInvocations = new WeakSet<RelayBnbProofPorts>();
   /** The factory must return a fresh budgeted BNB adapter for each observation. */
   private readonly bnbInvocation: () => RelayBnbProofPorts;
-  constructor(private readonly state: StateStore, private readonly source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts, private readonly status = new RelayKeylessStatusService(state)) {
+  constructor(private readonly state: StateStore, private readonly source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts,
+    private readonly status = new RelayKeylessStatusService(state), private readonly native?: RelayNativeObserveService) {
     this.bnbInvocation = bnbInvocation;
   }
 
@@ -46,6 +48,10 @@ export class RelayObserveService {
     if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
     if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
       throw new ApnError("APN_OPERATION_BLOCKED", "Relay operation is retired.");
+    if (op.nativeQuote !== undefined) {
+      if (this.native === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay native observer is unavailable.");
+      return this.native.observe(op);
+    }
     const quote = op.quote;
     if (op.sourceChainId !== 1 || op.destinationChainId !== 56 || quote === undefined ||
       op.nativeQuote !== undefined || quote.paymentDetails?.chainId !== "ethereum" ||

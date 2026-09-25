@@ -3,6 +3,7 @@ import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import { RelayRetireService } from "./relay/retire.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
 import { RelayObserveService } from "./relay/observe.js";
+import { RelayNativeObserveService } from "./relay/native-observe.js";
 import { RelayBaseObserveService } from "./relay/base-observe.js";
 import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "./relay/observe-rpc.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
@@ -93,8 +94,10 @@ export function createApnCore(bound, options = {}) {
         // Construct only keyless readers. No wallet, signer, custody, or execution runtime is installed.
         const source = new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc);
         const bnbInvocation = () => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc);
+        const nativeSource = new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc, undefined, 56);
+        const native = new RelayNativeObserveService(state, nativeSource, chainId => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, undefined, chainId), new RelayKeylessStatusService(state, options.relayStatusFetch), options.clock);
         return new ApnCore({ state, relayObserve: options.relayObserve ??
-                new RelayObserveService(state, source, bnbInvocation, new RelayKeylessStatusService(state, options.relayStatusFetch)) });
+                new RelayObserveService(state, source, bnbInvocation, new RelayKeylessStatusService(state, options.relayStatusFetch), native) });
     }
     const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
     const approvalLimits = bound.request.command === "circle.approval.prepare" ? {
