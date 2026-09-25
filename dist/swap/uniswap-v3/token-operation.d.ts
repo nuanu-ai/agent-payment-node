@@ -38,6 +38,14 @@ export interface UniswapTokenCleanupEvidence {
     readonly observedAllowanceAtomic: "0";
     readonly observedAt: string;
 }
+export interface UniswapTokenExpiredApprovalEvidence {
+    readonly schemaVersion: "apn.uniswap-token-expired-approval-evidence.v1";
+    readonly kind: "expired_approval_no_swap";
+    readonly approvalTransactionHash: string;
+    readonly observedAllowanceAtomic: string;
+    readonly observedAt: string;
+    readonly source?: never;
+}
 export interface UniswapTokenFailureDiagnostic {
     readonly code: string | null;
     readonly reason: string | null;
@@ -71,7 +79,7 @@ export interface UniswapTokenOperation {
     readonly swapAttempt: UniswapTokenAttempt | null;
     readonly cleanupAttempt: UniswapTokenAttempt | null;
     readonly cleanupReason: string | null;
-    readonly cleanupEvidence?: UniswapTokenCleanupEvidence | null;
+    readonly cleanupEvidence?: UniswapTokenCleanupEvidence | UniswapTokenExpiredApprovalEvidence | null;
     readonly preSignFailure?: UniswapTokenFailureDiagnostic | null;
     readonly receipt: UniswapTokenReceipt | null;
     readonly previousIntegrityHash: string | null;
