@@ -29,9 +29,9 @@ export interface RelayEffectJournal {
   readonly integrityHash: string;
 }
 export type RelayEffectEvent =
-  | Readonly<{ kind: "mark_signing"; role: "approval"; marker: string; at: string }>
-  | Readonly<{ kind: "seal_signed"; role: "approval"; transactionHash: string }>
-  | Readonly<{ kind: "mark_submitting"; role: "approval"; at: string }>
+  | Readonly<{ kind: "mark_signing"; role: RelayEffectRole; marker: string; at: string }>
+  | Readonly<{ kind: "seal_signed"; role: RelayEffectRole; transactionHash: string }>
+  | Readonly<{ kind: "mark_submitting"; role: RelayEffectRole; at: string }>
   | Readonly<{ kind: "mark_submission"; role: RelayEffectRole; marker: string; at: string }>
   | Readonly<{ kind: "record_transaction"; role: RelayEffectRole; transactionHash: string }>
   | Readonly<{ kind: "observe"; role: RelayEffectRole; outcome: "confirmed" | "failed"; at: string }>;
@@ -52,7 +52,6 @@ function prepared(op: RelayUnsignedOperation): asserts op is RelayUnsignedOperat
 }
 function validateEffect(effect: RelayEffect, role: RelayEffectRole): void {
   if (effect.role !== role || !["pending", "signing_started", "sealed", "submitting", "submission_marked", "tx_known", "confirmed", "failed"].includes(effect.phase)) corrupt("effect role or phase");
-  if (role === "deposit" && ["signing_started", "sealed", "submitting"].includes(effect.phase)) corrupt("deposit approval-only phase");
   if (effect.phase === "pending") {
     if (effect.attempt !== null || effect.observedAt !== null) corrupt("pending attempt");
     return;
@@ -60,8 +59,8 @@ function validateEffect(effect: RelayEffect, role: RelayEffectRole): void {
   if (effect.attempt === null || !hexHash(effect.attempt.marker) || !iso(effect.attempt.markedAt) ||
     (effect.attempt.transactionHash !== null && !TX.test(effect.attempt.transactionHash)) ||
     (effect.attempt.attemptNumber !== undefined && effect.attempt.attemptNumber !== 1)) corrupt("attempt marker");
-  if (role === "approval" && ["signing_started", "sealed", "submitting"].includes(effect.phase) &&
-    effect.attempt.attemptNumber !== 1) corrupt("approval attempt number");
+  if (["signing_started", "sealed", "submitting"].includes(effect.phase) &&
+    effect.attempt.attemptNumber !== 1) corrupt("effect attempt number");
   if ((effect.phase === "signing_started" || effect.phase === "submission_marked") && (effect.attempt.transactionHash !== null || effect.observedAt !== null)) corrupt("marked state");
   if (["sealed", "submitting", "tx_known"].includes(effect.phase) && (effect.attempt.transactionHash === null || effect.observedAt !== null)) corrupt("known transaction");
   if ((effect.phase === "confirmed" || effect.phase === "failed") &&
