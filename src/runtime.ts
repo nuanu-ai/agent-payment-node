@@ -2,6 +2,7 @@ import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
+import type { RelayObserveService } from "./relay/observe.js";
 import type { RelayEffectJournal } from "./relay/effect-journal.js";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
@@ -70,6 +71,7 @@ export interface CoreDependencies {
   readonly relayPreflight?: RelayReadOnlyPreflightService;
   readonly relayRetire?: RelayRetireService;
   readonly relayStatus?: RelayKeylessStatusService;
+  readonly relayObserve?: RelayObserveService;
   readonly relayExecute?: RelayExecuteHandler;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
@@ -126,6 +128,7 @@ export class RuntimeContext {
   readonly relayPreflight?: RelayReadOnlyPreflightService;
   readonly relayRetire?: RelayRetireService;
   readonly relayStatus?: RelayKeylessStatusService;
+  readonly relayObserve?: RelayObserveService;
   readonly relayExecute?: RelayExecuteHandler;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
@@ -183,6 +186,7 @@ export class RuntimeContext {
     if (dependencies.relayPreflight !== undefined) this.relayPreflight = dependencies.relayPreflight;
     if (dependencies.relayRetire !== undefined) this.relayRetire = dependencies.relayRetire;
     if (dependencies.relayStatus !== undefined) this.relayStatus = dependencies.relayStatus;
+    if (dependencies.relayObserve !== undefined) this.relayObserve = dependencies.relayObserve;
     if (dependencies.relayExecute !== undefined) this.relayExecute = dependencies.relayExecute;
     if (dependencies.relayExecuteConfirmation !== undefined) this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
     if (dependencies.stargateNative !== undefined) this.stargateNative = dependencies.stargateNative;

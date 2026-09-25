@@ -6,6 +6,8 @@ import { hashObject } from "../../src/canonical.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
 import { RelayObserveService } from "../../src/relay/observe.js";
+import { bindArgv } from "../../src/command-binder.js";
+import { runCli } from "../../src/cli.js";
 import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "../../src/relay/observe-rpc.js";
 import { RelayKeylessStatusService } from "../../src/relay/status.js";
 import { ETHEREUM_DEPOSITORY, relayStatusLocator, validateRelayQuote } from "../../src/relay/quote.js";
@@ -250,4 +252,86 @@ test("a reused BNB adapter is refused before a second observation spends its bud
   const before = f.counts().bnbReads;
   await assert.rejects(service.observe(f.op.operationId), { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert.equal(f.counts().bnbReads, before);
+});
+
+test("Relay observe CLI binds two explicit public RPCs and rejects extra capabilities", () => {
+  const argv = ["relay", "observe", "--operation", "2".repeat(64),
+    "--rpc-url", "https://ethereum-rpc.publicnode.com",
+    "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"];
+  assert.deepEqual(bindArgv(argv), { request: { command: "relay.observe", operationId: "2".repeat(64) },
+    rpcUrl: "https://ethereum-rpc.publicnode.com", bnbRpcUrl: "https://bsc-rpc.publicnode.com" });
+  for (const invalid of [argv.slice(0, -2), [...argv, "--profile", "default"],
+    [...argv, "--dry-run", "false"], [...argv, "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"],
+    [...argv.slice(0, -1), "https://user:pass@bsc-rpc.publicnode.com"]])
+    assert.throws(() => bindArgv(invalid), { code: "APN_INVALID_INPUT" });
+});
+
+test("Relay observe CLI emits operational evidence with a bounded keyless adapter invocation", async t => {
+  const f = await fixture(); t.after(f.temp.cleanup); await f.journal();
+  const operationPath = join(f.temp.root, "relay-unsigned-operations", f.op.profileHash, `${f.op.operationId}.json`);
+  const journalPath = join(f.temp.root, "relay-effect-journals", f.op.profileHash, `${f.op.operationId}.json`);
+  const before = await Promise.all([readFile(operationPath), readFile(journalPath)]);
+  const methods: string[] = [];
+  const sourceStarts: number[] = [], bnbStarts: number[] = [];
+  let providerReads = 0;
+  const sourceRpc = { batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
+    sourceStarts.push(Date.now());
+    methods.push(...calls.map(call => `eth:${call.method}`));
+    if (calls[0]?.method === "eth_chainId") return ["0x1", {
+      ...f.sourceObservation.transaction, blockNumber: "0x64", blockHash: sourceBlock,
+      chainId: "0x1", value: "0x0" }, {
+      ...f.sourceObservation.receipt, blockNumber: "0x64", status: "0x1" }];
+    return [{ number: "0x64", hash: sourceBlock }, { number: "0x65", hash: safeHash }];
+  } } as unknown as HttpsBaseRpc;
+  const bnbRpc = { batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
+    bnbStarts.push(Date.now());
+    const call = calls[0]!; methods.push(`bnb:${call.method}`);
+    if (call.method === "eth_chainId") return ["0x38"];
+    if (call.method === "eth_getTransactionByHash") return [{ hash: bnbHash, chainId: "0x38",
+      to: recipient, value: `0x${BigInt(f.op.minOutputAtomic).toString(16)}`,
+      blockNumber: "0xc8", blockHash: bnbBlock }];
+    if (call.method === "eth_getTransactionReceipt") return [{ transactionHash: bnbHash,
+      status: "0x1", blockNumber: "0xc8", blockHash: bnbBlock }];
+    if (call.method === "eth_getBlockByNumber") return [{ number: call.params[0] === "safe" ? "0xcd" : call.params[0],
+      hash: call.params[0] === "0xc8" ? bnbBlock : safeHash }];
+    throw new Error("Unexpected RPC method");
+  } } as unknown as HttpsBaseRpc;
+  const result = await runCli(["relay", "observe", "--operation", f.op.operationId,
+    "--rpc-url", "https://ethereum-rpc.publicnode.com", "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"], {},
+  { stateRoot: f.temp.root, relayObserveSourceRpc: sourceRpc, relayObserveBnbRpc: bnbRpc,
+    relayStatusFetch: async () => { providerReads++; return new Response(JSON.stringify(f.payload)); } });
+  assert.equal(result.ok, true);
+  assert.equal(result.proof_class, "read_only_rpc_observation");
+  const evidence = result.data as Awaited<ReturnType<RelayObserveService["observe"]>>;
+  assert.equal(evidence.state, "operational_acceptance");
+  assert.equal(evidence.operationalAcceptance, true);
+  assert.equal(evidence.paidAcceptance, false);
+  assert.equal(evidence.causalLinkCryptographicallyProven, false);
+  assert.equal(evidence.destinationProof?.status, "recipient_credit_proven");
+  assert.equal(methods.filter(method => method.startsWith("bnb:")).length, 6);
+  assert.equal(methods.filter(method => method.startsWith("eth:eth_chainId")).length, 1);
+  assert.equal(methods.length, 13);
+  assert.equal(providerReads, 1);
+  assert.equal(sourceStarts.length, 3);
+  assert.ok(sourceStarts.slice(1).every((start, index) => start - sourceStarts[index]! >= 450));
+  assert.ok(bnbStarts.slice(1).every((start, index) => start - bnbStarts[index]! >= 450));
+  assert.deepEqual(await Promise.all([readFile(operationPath), readFile(journalPath)]), before);
+});
+
+test("Relay observe CLI keeps provider failure and source mismatch below operational acceptance", async t => {
+  const f = await fixture(); t.after(f.temp.cleanup); await f.journal();
+  const args = ["relay", "observe", "--operation", f.op.operationId,
+    "--rpc-url", "https://ethereum-rpc.publicnode.com", "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"];
+  for (const payload of [{ ...f.payload, status: "failure" },
+    { ...f.payload, inTxHashes: [hash("9")] }]) {
+    const service = new RelayObserveService(f.state, f.source, () => ({ ...f.bnb }),
+      new RelayKeylessStatusService(f.state, async () => new Response(JSON.stringify(payload))));
+    const result = await runCli(args, {}, { stateRoot: f.temp.root, relayObserve: service });
+    assert.equal(result.ok, true);
+    const evidence = result.data as Awaited<ReturnType<RelayObserveService["observe"]>>;
+    assert.equal(evidence.state, "recipient_credit_observed");
+    assert.equal(evidence.operationalAcceptance, false);
+    assert.equal(evidence.paidAcceptance, false);
+    assert.equal(evidence.causalLinkCryptographicallyProven, false);
+  }
 });

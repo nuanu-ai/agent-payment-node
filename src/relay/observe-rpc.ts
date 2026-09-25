@@ -24,9 +24,22 @@ function status(value: unknown): "success" | "reverted" {
 
 export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
   private readonly rpc: HttpsBaseRpc;
+  private lastStart = 0;
+  private pending: Promise<unknown> = Promise.resolve();
   constructor(url: string, rpc?: HttpsBaseRpc) { this.rpc = rpc ?? new HttpsBaseRpc(url); }
+  private async read(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
+    const task = this.pending.then(async () => {
+      const wait = Math.max(0, this.lastStart + 500 - Date.now());
+      if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+      this.lastStart = Date.now();
+      // One batch is one physical POST. HTTP 429 fails without a retry.
+      return this.rpc.batchCall(calls);
+    });
+    this.pending = task.catch(() => undefined);
+    return task;
+  }
   async finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null> {
-    const [chain, rawTx, rawReceipt] = await this.rpc.batchCall([
+    const [chain, rawTx, rawReceipt] = await this.read([
       { method: "eth_chainId", params: [] },
       { method: "eth_getTransactionByHash", params: [hash] },
       { method: "eth_getTransactionReceipt", params: [hash] },
@@ -36,14 +49,14 @@ export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
     const tx = evmRpcRecord(rawTx), receipt = evmRpcRecord(rawReceipt);
     const number = evmRpcQuantity(receipt.blockNumber);
     const inclusion = `0x${number.toString(16)}`;
-    const [rawBlock, rawFinalized] = await this.rpc.batchCall([
+    const [rawBlock, rawFinalized] = await this.read([
       { method: "eth_getBlockByNumber", params: [inclusion, false] },
       { method: "eth_getBlockByNumber", params: ["finalized", false] },
     ]);
     if (rawBlock === null || rawFinalized === null) return null;
     const included = evmRpcBlockResult(rawBlock, inclusion), finalized = evmRpcBlockResult(rawFinalized, "finalized");
     if (BigInt(finalized.number) < number) return null;
-    const [rawIncludedAgain, rawFinalizedAgain] = await this.rpc.batchCall([
+    const [rawIncludedAgain, rawFinalizedAgain] = await this.read([
       { method: "eth_getBlockByNumber", params: [included.tag, false] },
       { method: "eth_getBlockByNumber", params: [finalized.tag, false] },
     ]);

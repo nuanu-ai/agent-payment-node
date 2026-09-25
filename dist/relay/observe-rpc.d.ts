@@ -6,7 +6,10 @@ import type { RelayBnbProofPorts, RelayBnbBlock, RelayBnbReceipt, RelayBnbTransa
 import type { RelaySourceFinalityPorts } from "./observe.js";
 export declare class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
     private readonly rpc;
+    private lastStart;
+    private pending;
     constructor(url: string, rpc?: HttpsBaseRpc);
+    private read;
     finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null>;
 }
 export declare class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
