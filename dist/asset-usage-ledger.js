@@ -52,6 +52,18 @@ export class AssetUsageLedger extends SecureStateStore {
             const existing = reservations.find((entry) => entry.reservationId === reservationId);
             if (existing !== undefined) {
                 assertReplay(existing, initial.policyDigest, initial.registryVersion, input.rail, initial.amountAtomic, idempotencyHash);
+                if (input.retryFailedBeforeEffect === true && existing.state === "failed_before_effect") {
+                    assertBucketWindow(reservations, at);
+                    const usage = sumUsage(reservations, input.now);
+                    evaluateAssetPolicy(registry, {
+                        chain: identity.chain, asset: identity.asset, rail: input.rail,
+                        amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at,
+                    });
+                    const reopened = seal({ ...withoutDigest(existing), state: "reserved", reservedAt: at, updatedAt: at,
+                        effectAt: null, outcomeDigest: null });
+                    await this.writeJson(this.recordPath(identity, reservationId), reopened);
+                    return reopened;
+                }
                 return existing;
             }
             assertBucketWindow(reservations, at);

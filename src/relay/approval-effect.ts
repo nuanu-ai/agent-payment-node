@@ -129,11 +129,14 @@ export class RelayApprovalEffectService {
       if (await new RelayRetirementRepository(this.state.root).load(op) !== null) blocked("operation_retired");
       this.assertEnvelope(op);
       let journal = await this.effects.load(profileHash, operationId);
+      // Refusals that occur before any effect intent must not strand a pending journal.
+      // The runtime can then prove that its cap reservation is safe to release.
+      const firstNonce = journal === null ? await this.revalidate(op) : null;
       if (journal === null) journal = await this.effects.create(profileHash, operationId, this.ports.now().toISOString());
       let effect = journal.effects[0];
       if (effect.phase === "confirmed" || effect.phase === "failed") return journal;
       if (effect.phase === "pending") {
-        const nonce = await this.revalidate(op);
+        const nonce = firstNonce ?? await this.revalidate(op);
         journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
           { kind: "mark_signing", role: "approval", marker: randomBytes(32).toString("hex"), at: this.ports.now().toISOString() });
         const raw = await this.ports.sign(op);
