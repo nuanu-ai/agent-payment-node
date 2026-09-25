@@ -7,6 +7,9 @@ import { privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
 import { hashObject } from "../../src/canonical.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
+import { activeAssetPolicyFromState, type ActiveAssetPolicy } from "../../src/allowlist-active-policy.js";
+import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
+import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { bindArgv } from "../../src/command-binder.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
@@ -37,10 +40,11 @@ function active(owner: string) {
   return { profile: "default", registry, digest: registry.policyDigest, revision: 1,
     accounts: { evm: owner }, activationDigest: "a".repeat(64), activatedAt: now.toISOString() };
 }
-async function setup() {
+async function setup(policyFactory?: (root: string) => Promise<ActiveAssetPolicy>) {
   const temporary = await temporaryState();
   const state = new StateStore(temporary.root);
-  const policy = active(fixtureOwner);
+  const policy = policyFactory === undefined ? active(fixtureOwner) :
+    { ...await policyFactory(temporary.root), accounts: { evm: fixtureOwner } };
   const prepared = await new RelayUnsignedPrepareService(state, { now: () => now }, undefined,
     { activePolicy: async () => policy, dailyUsage: async () => "0" }).prepareArbitrum({
     profile: "default", owner: fixtureOwner, amountAtomic: "500000", minOutputAtomic: "94065",
@@ -59,31 +63,51 @@ async function setup() {
   const op = freezeRelayUnsignedOperation({ ...opFields, sourceAccount: account.address.toLowerCase(), arbitrumDraft: draft });
   return { temporary, state, op, policy: { ...policy, accounts: { evm: account.address.toLowerCase() } } };
 }
+async function storedPolicy(root: string) {
+  const inventory = loadAllowlistInventory();
+  const store = new AllowlistPolicyStore(root);
+  const staged = await store.prepare({ overlayVersion: "test.relay.arb.lock.1", profile: "default",
+    account: account.address, datasetVersion: inventory.dataset.version,
+    datasetSha256: inventory.dataset.sha256, inventorySha256: inventory.inventorySha256,
+    effectiveAt: "2026-09-25T00:00:00.000Z", expiresAt: "2026-10-03T00:00:00.000Z",
+    admissions: [{ chain: "eip155:42161", kind: "token", identifier: RELAY_ARBITRUM_USDC,
+      rail: "bridge", maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "2000000",
+      mechanism: { provider: "relay", reference: RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } }], now });
+  const activated = await store.appendDecision("default", null, { status: "active", revision: staged.revision,
+    stagedRecordDigest: staged.recordDigest, policyDigest: staged.registry.policyDigest,
+    registry: staged.registry, approvalFingerprint: "a".repeat(64), decidedAt: now.toISOString() });
+  const policy = activeAssetPolicyFromState(await store.read("default"), now);
+  assert.ok(policy);
+  return { store, staged, activated, policy };
+}
 function memoryJournal(op: RelayUnsignedOperation) {
   let current: ArbitrumSourceEffectJournal | null = null;
   const repository = {
     load: async () => current,
-    create: async (_profile: string, _id: string, at: string) => {
+    createUnderLocks: async (_profile: string, _id: string, at: string) => {
       assert.equal(current, null); current = await createArbitrumSourceEffectJournal(op, at); return current;
     },
-    beginSigning: async (_profile: string, _id: string, expected: string, _role: string, at: string) => {
+    beginSigningUnderLocks: async (_profile: string, _id: string, expected: string, _role: string, at: string) => {
       assert.equal(current?.integrityHash, expected);
       current = await advanceArbitrumSourceEffectJournal(current!, op,
         { kind: "begin_signing", role: "approval", marker: randomBytes(32).toString("hex"), at });
       return current;
     },
-    transition: async (_profile: string, _id: string, expected: string,
-      event: Parameters<ArbitrumSourceEffectJournalRepository["transition"]>[3]) => {
+    transitionUnderLocks: async (_profile: string, _id: string, expected: string,
+      event: Parameters<ArbitrumSourceEffectJournalRepository["transitionUnderLocks"]>[3]) => {
       assert.equal(current?.integrityHash, expected);
       current = await advanceArbitrumSourceEffectJournal(current!, op, event); return current;
     },
-  } as unknown as Pick<ArbitrumSourceEffectJournalRepository, "load" | "create" | "beginSigning" | "transition">;
+  } as unknown as Pick<ArbitrumSourceEffectJournalRepository,
+    "load" | "createUnderLocks" | "beginSigningUnderLocks" | "transitionUnderLocks">;
   return { repository, current: () => current };
 }
 function harness(state: StateStore, op: RelayUnsignedOperation, options: {
   allowances?: readonly bigint[]; send?: (raw: Hex) => Promise<Hex>; failReadAt?: number;
+  storedPolicy?: boolean; onSign?: () => Promise<void>; onConfirm?: () => Promise<void>;
+  revokeAtPolicyRead?: number;
 } = {}) {
-  let reads = 0, signs = 0, sends = 0, confirmations = 0;
+  let reads = 0, signs = 0, sends = 0, confirmations = 0, policyReads = 0;
   const journal = memoryJournal(op);
   const allowances = options.allowances ?? [0n, 0n, 0n];
   const reader = { read: async () => {
@@ -95,16 +119,20 @@ function harness(state: StateStore, op: RelayUnsignedOperation, options: {
       observedAt: now.toISOString() };
   } } as unknown as Pick<RelayArbitrumApprovalPreflightReader, "read">;
   const service = new RelayArbitrumApprovalExecuteService(state, reader, {
-    confirm: async summary => { confirmations++; assert.equal(summary.approvalValueAtomic, "500000"); return true; },
+    confirm: async summary => { confirmations++; assert.equal(summary.approvalValueAtomic, "500000");
+      await options.onConfirm?.(); return true; },
     signer: { sign: async (operation, nonce) => {
-      signs++;
+      signs++; await options.onSign?.();
       const envelope = (operation.arbitrumDraft!.rawQuote as any).steps[0].items[0].data;
       return account.signTransaction({ type: "eip1559", chainId: 42161, nonce: Number(nonce),
         to: envelope.to as Hex, data: envelope.data as Hex, value: 0n, gas: BigInt(envelope.gas),
         maxFeePerGas: BigInt(envelope.maxFeePerGas), maxPriorityFeePerGas: BigInt(envelope.maxPriorityFeePerGas) });
     } },
     send: async raw => { sends++; return options.send?.(raw) ?? (await import("viem")).keccak256(raw); },
-    activePolicy: async () => ({ ...active(fixtureOwner), accounts: { evm: account.address.toLowerCase() } }),
+    ...(options.storedPolicy ? {} : { activePolicyUnderLock: async () => {
+      if (++policyReads === options.revokeAtPolicyRead) return null;
+      return { ...active(fixtureOwner), accounts: { evm: account.address.toLowerCase() } };
+    } }),
     dailyUsage: async () => "0", now: () => now,
     operation: async () => op, journals: journal.repository,
   }, {} as WrappingSecretPort);
@@ -162,4 +190,66 @@ test("approval already sufficient and pre-send reorg never dispatch", async t =>
   assert.equal(result.approvalPhase, "sealed");
   assert.equal(reorg.counts().sends, 0);
   assert.equal((await lease(second.state, second.op))?.state, "reserved");
+});
+
+test("final policy read refuses a revoked policy before send", async t => {
+  const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
+  const h = harness(state, op, { revokeAtPolicyRead: 3 });
+  const result = await h.service.execute("default", op.operationId);
+  assert.equal(result.state, "observation_only");
+  assert.equal(result.reason, "active_policy_revoked_or_changed");
+  assert.equal(h.counts().sends, 0);
+  assert.equal(h.counts().signs, 1);
+});
+
+test("authenticated policy revocation during owner challenge blocks signing without a lock wait", async t => {
+  let stored!: Awaited<ReturnType<typeof storedPolicy>>;
+  const { temporary, state, op } = await setup(async root => {
+    stored = await storedPolicy(root); return stored.policy;
+  });
+  t.after(temporary.cleanup);
+  const h = harness(state, op, { storedPolicy: true, onConfirm: async () => {
+    await stored.store.appendDecision("default", stored.activated.entryDigest, {
+      status: "revoked", revision: stored.staged.revision,
+      stagedRecordDigest: stored.staged.recordDigest,
+      policyDigest: stored.staged.registry.policyDigest,
+      approvalFingerprint: "b".repeat(64), decidedAt: new Date(now.getTime() + 1000).toISOString(),
+    });
+  } });
+  await assert.rejects(h.service.execute("default", op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(h.counts().signs, 0);
+  assert.equal(h.counts().sends, 0);
+});
+
+test("authenticated policy revocation waits through the one send and then completes", async t => {
+  let stored!: Awaited<ReturnType<typeof storedPolicy>>;
+  const { temporary, state, op } = await setup(async root => {
+    stored = await storedPolicy(root); return stored.policy;
+  });
+  t.after(temporary.cleanup);
+  let revoked = false;
+  let revocation: Promise<unknown> | undefined;
+  const h = harness(state, op, { storedPolicy: true, onSign: async () => {
+    revocation = stored.store.appendDecision("default", stored.activated.entryDigest, {
+      status: "revoked", revision: stored.staged.revision,
+      stagedRecordDigest: stored.staged.recordDigest,
+      policyDigest: stored.staged.registry.policyDigest,
+      approvalFingerprint: "b".repeat(64), decidedAt: new Date(now.getTime() + 1000).toISOString(),
+    }).then(value => { revoked = true; return value; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+  }, send: async raw => {
+    assert.equal(revoked, false);
+    return (await import("viem")).keccak256(raw);
+  } });
+  const result = await Promise.race([
+    h.service.execute("default", op.operationId),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("execute lock deadlock")), 3000)),
+  ]);
+  assert.equal(result.state, "approval_submitted");
+  assert.equal(h.counts().sends, 1);
+  assert.ok(revocation);
+  await Promise.race([revocation, new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("revocation lock deadlock")), 3000))]);
+  assert.equal(revoked, true);
+  assert.equal(activeAssetPolicyFromState(await stored.store.read("default"), now), null);
 });
