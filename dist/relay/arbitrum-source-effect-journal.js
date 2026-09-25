@@ -256,41 +256,51 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     }
     async create(profileHash, operationId, createdAt) {
         await this.initialize();
-        return this.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`], async () => {
-            const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
-            if (await new RelayRetirementRepository(this.root).load(op) !== null)
-                blocked("operation_retired");
-            if (await this.readJson(path) !== null)
-                blocked("journal_already_exists");
-            const j = await createArbitrumSourceEffectJournal(op, createdAt);
-            await this.ensureDirectory(`relay-arbitrum-source-effect-journals/${profileHash}`);
-            await this.writeJson(path, j, true);
-            return j;
-        });
+        return this.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`], async () => this.createUnderLocks(profileHash, operationId, createdAt));
+    }
+    /** Caller holds profile, operation and effect locks in the shared canonical order. */
+    async createUnderLocks(profileHash, operationId, createdAt) {
+        await this.initialize();
+        const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
+        if (await new RelayRetirementRepository(this.root).load(op) !== null)
+            blocked("operation_retired");
+        if (await this.readJson(path) !== null)
+            blocked("journal_already_exists");
+        const j = await createArbitrumSourceEffectJournal(op, createdAt);
+        await this.ensureDirectory(`relay-arbitrum-source-effect-journals/${profileHash}`);
+        await this.writeJson(path, j, true);
+        return j;
     }
     async transition(profileHash, operationId, expectedIntegrityHash, event) {
         await this.initialize();
-        return this.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`], async () => {
-            const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
-            if (await new RelayRetirementRepository(this.root).load(op) !== null)
-                blocked("operation_retired");
-            const data = await this.readJson(path);
-            if (data === null)
-                throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay Arbitrum source effect journal was not found.");
-            const j = await validateArbitrumSourceEffectJournal(data, op);
-            if (j.integrityHash !== expectedIntegrityHash)
-                blocked("stale_journal_revision");
-            if (event.kind === "record_verified_observation" &&
-                (this.verifiedObservation === undefined || !(await this.verifiedObservation({ operation: op,
-                    journal: j, role: event.role, outcome: event.outcome, proofDigest: event.proofDigest }))))
-                blocked("verified_observation_unavailable");
-            const next = await advanceArbitrumSourceEffectJournal(j, op, event);
-            await this.writeJson(path, next);
-            return next;
-        });
+        return this.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`], async () => this.transitionUnderLocks(profileHash, operationId, expectedIntegrityHash, event));
+    }
+    /** Caller holds profile, operation and effect locks in the shared canonical order. */
+    async transitionUnderLocks(profileHash, operationId, expectedIntegrityHash, event) {
+        await this.initialize();
+        const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
+        if (await new RelayRetirementRepository(this.root).load(op) !== null)
+            blocked("operation_retired");
+        const data = await this.readJson(path);
+        if (data === null)
+            throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay Arbitrum source effect journal was not found.");
+        const j = await validateArbitrumSourceEffectJournal(data, op);
+        if (j.integrityHash !== expectedIntegrityHash)
+            blocked("stale_journal_revision");
+        if (event.kind === "record_verified_observation" &&
+            (this.verifiedObservation === undefined || !(await this.verifiedObservation({ operation: op,
+                journal: j, role: event.role, outcome: event.outcome, proofDigest: event.proofDigest }))))
+            blocked("verified_observation_unavailable");
+        const next = await advanceArbitrumSourceEffectJournal(j, op, event);
+        await this.writeJson(path, next);
+        return next;
     }
     async beginSigning(profileHash, operationId, expectedIntegrityHash, role, at) {
         return this.transition(profileHash, operationId, expectedIntegrityHash, { kind: "begin_signing", role, marker: randomBytes(32).toString("hex"), at });
+    }
+    /** Caller holds profile, operation and effect locks in the shared canonical order. */
+    async beginSigningUnderLocks(profileHash, operationId, expectedIntegrityHash, role, at) {
+        return this.transitionUnderLocks(profileHash, operationId, expectedIntegrityHash, { kind: "begin_signing", role, marker: randomBytes(32).toString("hex"), at });
     }
     /** Only a separately wired canonical read may create this proof. It does not authorize deposit dispatch. */
     async skipApproval(profileHash, operationId, expectedIntegrityHash) {
@@ -334,10 +344,10 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
         });
     }
     /** Atomically create a skipped journal only after an injected fresh canonical allowance read. */
-    async skipApprovalIfVerified(profileHash, operationId, expectedIntegrityHash, verifier, policyUnderLock) {
+    async skipApprovalIfVerified(profileHash, operationId, expectedIntegrityHash, verifier, policyUnderLock, additionalLocks = []) {
         await this.initialize();
         return this.withLocks([`profile:${profileHash}`, `profile:${allowlistProfileHash("default")}`,
-            `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`], async () => {
+            `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`, ...additionalLocks], async () => {
             const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
             if (await new RelayRetirementRepository(this.root).load(op) !== null)
                 blocked("operation_retired");

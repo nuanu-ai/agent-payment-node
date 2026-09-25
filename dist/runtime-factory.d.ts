@@ -5,6 +5,7 @@ import { RelayObserveService } from "./relay/observe.js";
 import { RelayBaseObserveService } from "./relay/base-observe.js";
 import { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
 import { RelayArbitrumApprovalDecisionService } from "./relay/arbitrum-approval-decision.js";
+import { RelayArbitrumApprovalExecuteService } from "./relay/arbitrum-approval-execute.js";
 import type { BoundCommand } from "./command-binder.js";
 import type { OutputEnvelope } from "./commands.js";
 import { ApnCore } from "./core.js";
@@ -61,7 +62,9 @@ export interface RuntimeFactoryOptions {
     readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
     readonly relayArbitrumObserveRpc?: HttpsBaseRpc;
     readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
+    readonly relayArbitrumApprovalExecute?: RelayArbitrumApprovalExecuteService;
     readonly relayArbitrumApprovalRpc?: Pick<HttpsBaseRpc, "batchCall">;
+    readonly relayArbitrumApprovalExecuteRpc?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
     readonly relayObserveBaseRpc?: HttpsBaseRpc;
     readonly relayObserveSourceRpc?: HttpsBaseRpc;
     readonly relayObserveBnbRpc?: HttpsBaseRpc;

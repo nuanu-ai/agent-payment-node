@@ -2,6 +2,7 @@
 import { ApnError } from "../errors.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
+import { evmAddressLock } from "../evm-address-ownership.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import { ArbitrumSourceEffectJournalRepository } from "./arbitrum-source-effect-journal.js";
 import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
@@ -74,7 +75,7 @@ export class RelayArbitrumApprovalDecisionService {
             return { policyDigest: verified.value.policyDigest, policyRevision: verified.value.policyRevision,
                 allowanceAtomic: verified.value.allowanceAtomic, blockNumber: verified.value.observationBlockNumber,
                 blockHash: verified.value.observationBlockHash, observedAt: verified.value.observedAt };
-        }, this.ports.activePolicy);
+        }, this.ports.activePolicy, [`relay-arbitrum-approval-execute:${operationId}`, evmAddressLock(operation.sourceAccount)]);
         if (journal === null) {
             if (verified.value === null)
                 return blocked("canonical_allowance_read_missing");
