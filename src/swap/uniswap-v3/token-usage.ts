@@ -82,7 +82,12 @@ export class UniswapTokenUsage {
     };
     if (target === "unknown_finality") { if (current.state === "reserved") await move("submitted"); if (current.state === "submitted") await move(target); }
     else if (target === "failed_confirmed_revert") { if (current.state === "reserved") await move("submitted"); await move(target, true); }
-    else if (target === "failed_before_effect") { if (current.state !== "reserved") corrupt("Uniswap token usage cannot release after a possible principal effect."); await move(target, true); }
+    else if (target === "failed_before_effect") {
+      if (current.state !== "reserved" || op.swapAttempt !== null ||
+          op.approvalAttempt?.transactionHash != null && (op.phase !== "cleaned" || op.cleanupEvidence?.kind !== "expired_approval_no_swap"))
+        corrupt("Uniswap token usage cannot release after a possible principal effect.");
+      await move(target, true);
+    }
     else { if (target === "finalized" && current.state === "reserved") await move("submitted"); await move(target, target === "finalized"); }
     return { reservationId: expected, state: current.state };
   }
