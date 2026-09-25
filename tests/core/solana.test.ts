@@ -14,7 +14,7 @@ import { inspectSolana } from "../../src/solana/evidence.js";
 import { solanaMessage } from "../../src/solana/message.js";
 import { temporaryState } from "./helpers.js";
 import { OperationService } from "../../src/operation-service.js";
-import { transitionRail } from "../../src/rail-operation-model.js";
+import { transitionRail, type RailOperationRecord } from "../../src/rail-operation-model.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { DirectAllowlistGate } from "../../src/direct-allowlist-gate.js";
 import { railAllowlistSubject } from "../../src/rail-direct-allowlist.js";
@@ -46,6 +46,17 @@ async function writeDurableSolanaClaim(root: string, s: Awaited<ReturnType<typeo
   const contents = `${canonicalJson({ ...body, integrityHash: hashObject(body) })}\n`;
   await writeFile(join(directory, `${idempotencyHash}.json`), contents, { mode: 0o600 });
   return { directory, idempotencyHash, operationId, contents, allowlist, policyHash };
+}
+
+async function writeDurableApprovalClaim(root: string, operation: RailOperationRecord) {
+  const body = { schemaVersion: "apn.rail-approval-claim.v1", profileHash: operation.profileHash,
+    operationId: operation.operationId, operationIntegrityHash: operation.integrityHash,
+    fingerprint: operation.fingerprint, accountIdentityHash: operation.account.identityHash,
+    policyHash: operation.policyHash, allowlist: operation.allowlist };
+  const directory = join(root, "rail-approval-claims");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(directory, `${operation.operationId}.json`), `${canonicalJson({ ...body, integrityHash: hashObject(body) })}\n`, { mode: 0o600 });
+  return directory;
 }
 
 test("Solana CLI and MCP use the same explicit profile/asset/amount binding", () => {
@@ -89,6 +100,135 @@ test("local Solana public identity and unsigned prepare recover across restart w
   assert.equal(first.rpc.submissions.length, 0);
   assert.equal(first.rpc.simulateCalls, 0);
   assert.equal(await restarted.storage.effect(restarted.account, id, (await restarted.core.rails.records.findOperation(id))!.fingerprint), null);
+});
+
+test("parallel local SOL approve uses one prompt, binding, and signing transition", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-approval-parallel-0001");
+  let enter!: () => void; const entered = new Promise<void>((resolve) => { enter = resolve; });
+  let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const approve = s.approval.approve.bind(s.approval);
+  Object.assign(s.approval, { approve: async (...args: Parameters<typeof approve>) => { enter(); await blocked; return await approve(...args); } });
+  const bind = s.adapter.bindSend!.bind(s.adapter);
+  let binds = 0;
+  Object.assign(s.adapter, { bindSend: async (...args: Parameters<typeof bind>) => { binds++; return await bind(...args); } });
+  const first = s.core.rails.approve(id);
+  await entered;
+  const second = s.core.rails.approve(id);
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.deepEqual(a, b);
+  assert.equal(s.approval.calls.length, 1);
+  assert.equal(binds, 1);
+  assert.equal(s.rpc.submissions.length, 1);
+  const operation = (await s.core.rails.records.findOperation(id))!;
+  assert.equal(operation.transitions.filter((entry) => entry.state === "signing_started").length, 1);
+  const lease = operation.allowlistLease!;
+  assert.equal((await new AssetUsageLedger(temporary.root).load(lease.reservation, lease.reservation.reservationId))?.state, "finalized");
+  assert.deepEqual(await readdir(join(temporary.root, "rail-approval-claims")), []);
+});
+
+test("local SOL approval leaves money-operation locks available during paced send binding", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-approval-wait-0001");
+  s.rpc.simulateTransportLosses = 1;
+  let enter!: () => void; const entered = new Promise<void>((resolve) => { enter = resolve; });
+  let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const wait = s.wait.wait.bind(s.wait);
+  Object.assign(s.wait, { wait: async (milliseconds: number) => { enter(); await blocked; return await wait(milliseconds); } });
+  const approving = s.core.rails.approve(id);
+  await entered;
+  try {
+    await Promise.race([
+      s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => true),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("approval held money-operation locks during paced wait")), 2000)),
+    ]);
+  } finally { release(); }
+  await approving;
+  assert.equal(s.rpc.submissions.length, 1);
+});
+
+test("local SOL approval discards policy drift during the owner prompt before signing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-approval-policy-drift-0001");
+  const policy = await s.core.rails.policies.requiredPolicy(s.account, "sol");
+  let enter!: () => void; const entered = new Promise<void>((resolve) => { enter = resolve; });
+  let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const approve = s.approval.approve.bind(s.approval);
+  Object.assign(s.approval, { approve: async (...args: Parameters<typeof approve>) => { enter(); await blocked; return await approve(...args); } });
+  const approving = s.core.rails.approve(id);
+  await entered;
+  const { policyHash: _old, ...body } = policy;
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
+    await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
+  });
+  release();
+  await assert.rejects(approving, { code: "APN_PROFILE_DRIFT" });
+  assert.equal(s.rpc.submissions.length, 0);
+  assert.equal((await s.core.rails.records.findOperation(id))?.state, "failed_before_effect");
+  assert.equal(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint), null);
+});
+
+test("local SOL approval rejects a send binding after policy changes during RPC", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-approval-bind-policy-drift-0001");
+  const policy = await s.core.rails.policies.requiredPolicy(s.account, "sol");
+  let enter!: () => void; const entered = new Promise<void>((resolve) => { enter = resolve; });
+  let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const bind = s.adapter.bindSend!.bind(s.adapter);
+  Object.assign(s.adapter, { bindSend: async (...args: Parameters<typeof bind>) => {
+    const result = await bind(...args); enter(); await blocked; return result;
+  } });
+  const approving = s.core.rails.approve(id);
+  await entered;
+  const { policyHash: _old, ...body } = policy;
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
+    await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
+  });
+  release();
+  await assert.rejects(approving, { code: "APN_PROFILE_DRIFT" });
+  assert.equal(s.rpc.submissions.length, 0);
+  assert.equal((await s.core.rails.records.findOperation(id))?.state, "awaiting_approval");
+  assert.equal(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint), null);
+  assert.deepEqual(await readdir(join(temporary.root, "rail-approval-claims")), []);
+});
+
+test("local SOL approval discards account drift during the owner prompt before signing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-approval-account-drift-0001");
+  let enter!: () => void; const entered = new Promise<void>((resolve) => { enter = resolve; });
+  let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const approve = s.approval.approve.bind(s.approval);
+  Object.assign(s.approval, { approve: async (...args: Parameters<typeof approve>) => { enter(); await blocked; return await approve(...args); } });
+  const approving = s.core.rails.approve(id);
+  await entered;
+  const accountPath = join(temporary.root, "chain-accounts", "solana", `${s.account.profileHash}.json`);
+  const { identityHash: _old, ...accountBody } = s.account;
+  const changed = sealChainAccount({ ...accountBody, createdAt: new Date(Date.parse(s.account.createdAt) + 1000).toISOString() });
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
+    await writeFile(accountPath, `${canonicalJson(changed)}\n`, { mode: 0o600 });
+  });
+  release();
+  await assert.rejects(approving, { code: "APN_STATE_CORRUPT" });
+  assert.equal(s.rpc.submissions.length, 0);
+  assert.equal((await s.core.rails.records.findOperation(id))?.state, "failed_before_effect");
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
+    await writeFile(accountPath, `${canonicalJson(s.account)}\n`, { mode: 0o600 });
+  });
+  assert.equal(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint), null);
+});
+
+test("local SOL approval retry reuses a matching durable claim after restart", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-approval-crash-0001");
+  const operation = (await s.core.rails.records.findOperation(id))!;
+  const directory = await writeDurableApprovalClaim(temporary.root, operation);
+  const restarted = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
+  const approved = await restarted.core.rails.approve(id) as { state: string };
+  assert.equal(approved.state, "completed");
+  assert.equal(restarted.approval.calls.length, 1);
+  assert.equal(s.rpc.submissions.length, 1);
+  assert.deepEqual(await readdir(directory), []);
 });
 
 test("duplicate local SOL prepare shares one claim and leaves money-operation locks free during RPC", async (t) => {
