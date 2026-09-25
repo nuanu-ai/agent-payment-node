@@ -28,6 +28,9 @@ function key(op: RelayUnsignedOperation): string {
 function depositKey(op: RelayUnsignedOperation): string {
   return domainHash("apn.relay-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
 }
+function nativeDepositKey(op: RelayUnsignedOperation): string {
+  return domainHash("apn.relay-native-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
+}
 export interface RelaySignedApproval { readonly rawTransaction: Hex; readonly transactionHash: Hex }
 export interface RelayApprovalCustodyPort {
   load(op: RelayUnsignedOperation): Promise<RelaySignedApproval | null>;
@@ -46,7 +49,8 @@ export class RelayEncryptedApprovalCustody implements RelayApprovalCustodyPort {
         if (wallet === null) corrupt("custody envelope disappeared");
         try {
           if (wallet.secret.directEffects[key(op)] !== undefined ||
-            wallet.secret.directEffects[depositKey(op)] !== undefined) blocked("signed_effect_custody_exists");
+            wallet.secret.directEffects[depositKey(op)] !== undefined ||
+            (op.nativeQuote !== undefined && wallet.secret.directEffects[nativeDepositKey(op)] !== undefined)) blocked("signed_effect_custody_exists");
         } finally { this.wallets.clear(wallet.secret); }
       }
       return action();
