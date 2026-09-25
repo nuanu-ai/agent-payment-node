@@ -72,6 +72,38 @@ export class TtyRelayArbitrumApprovalConfirmation {
         }
     }
 }
+/** Fresh foreground consent for the single saved Arbitrum deposit effect. */
+export class TtyRelayArbitrumDepositConfirmation {
+    options;
+    constructor(options = {}) {
+        this.options = options;
+    }
+    async confirm(summary) {
+        const expiresAt = new Date(Math.min(Date.parse(summary.deadline), Date.now() + TTY_APPROVAL_DEADLINE_MS)).toISOString();
+        try {
+            await exactChainConsent([
+                "Agent Payment Node Relay Arbitrum USDC deposit",
+                `Operation: ${summary.operationId}`,
+                `Source chain: Arbitrum One (eip155:${summary.sourceChainId})`,
+                `Destination chain: Ethereum (eip155:${summary.destinationChainId})`,
+                `Owner: ${summary.owner}`,
+                `Token: ${summary.token}`,
+                `Depository: ${summary.spender}`,
+                `Deposit amount: ${summary.depositAmountAtomic} USDC atomic`,
+                `Deposit network fee ceiling: ${summary.depositNetworkFeeCeilingWei} wei`,
+                `Quote deadline: ${summary.deadline}`,
+                `Quote digest: ${summary.quoteDigest}`,
+                "This confirms one Arbitrum deposit transaction only; Ethereum delivery is separate.",
+            ], approvalCode("bridge", summary.operationId, summary.quoteDigest), expiresAt, this.options);
+            return true;
+        }
+        catch (error) {
+            if (error instanceof ApnError && error.code === "APN_NATIVE_REJECTED")
+                return false;
+            throw error;
+        }
+    }
+}
 /** Fresh consent naming the native value and exact BNB depository. */
 export class TtyRelayNativeExecuteConfirmation {
     options;

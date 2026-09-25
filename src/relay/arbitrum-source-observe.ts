@@ -37,8 +37,8 @@ function boundProof(proof: RelayArbitrumSourceProof, role: ArbitrumEffectRole,
   return proof.sourceChainId === 42161 && proof.proofClass === "canonical_safe_source_receipts" &&
     proof.destinationDeliveryProven === false && proof.causalLinkCryptographicallyProven === false &&
     proof.paidAcceptance === false && same(proof.deposit.transactionHash, chosen.transactionHash) &&
-    (role === "approval" ? proof.approval === null : approval !== null && proof.approval !== null &&
-      same(proof.approval.transactionHash, approval.transactionHash));
+    (role === "approval" ? proof.approval === null : approval === null ? proof.approval === null :
+      proof.approval !== null && same(proof.approval.transactionHash, approval.transactionHash));
 }
 export interface RelayArbitrumSourceObservePorts {
   readonly operation?: (operationId: string) => Promise<RelayUnsignedOperation | null>;
@@ -77,14 +77,14 @@ export class RelayArbitrumSourceObserveService {
       journal.orderId !== op.arbitrumDraft.orderId) corrupt("journal_operation_binding");
     const [approvalEffect, depositEffect] = journal.effects;
     if (depositEffect.phase === "confirmed") return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
-    if (approvalEffect.phase === "approval_skipped") return output("approval_skipped",
+    if (approvalEffect.phase === "approval_skipped" && depositEffect.phase === "pending") return output("approval_skipped",
       "canonical_allowance_observed_deposit_recheck_required");
-    const role: ArbitrumEffectRole = approvalEffect.phase === "confirmed" ? "deposit" : "approval";
+    const role: ArbitrumEffectRole = ["confirmed", "approval_skipped"].includes(approvalEffect.phase) ? "deposit" : "approval";
     const current = role === "approval" ? approvalEffect : depositEffect;
-    if (!observable.has(current.phase)) return output(role === "deposit" ? "approval_source_confirmed" : "observation_only",
+    if (!observable.has(current.phase)) return output(role === "deposit" && approvalEffect.phase === "confirmed" ? "approval_source_confirmed" : "observation_only",
       role === "deposit" ? "deposit_effect_not_submitting" : "approval_effect_not_submitting");
     const chosen = expected(op, journal, role);
-    const approval = role === "deposit" ? expected(op, journal, "approval") : null;
+    const approval = role === "deposit" && approvalEffect.phase === "confirmed" ? expected(op, journal, "approval") : null;
     // The standalone observer owns the persisted 24-POST cap, 750 ms pacing, and no-429-retry policy.
     const proof = await this.observer.observe(chosen, approval ?? undefined);
     if (proof === null || !boundProof(proof, role, chosen, approval))

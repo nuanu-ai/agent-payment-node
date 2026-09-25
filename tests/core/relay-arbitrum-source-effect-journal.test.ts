@@ -222,7 +222,7 @@ test("repository persists only an injected verified observation and reopens its 
   assert.equal(await arbitrumSourceRecoveryClass(confirmed, op), "approval_confirmed");
 });
 
-test("approval skip persists a canonical allowance proof, never fabricates a transaction, and keeps deposit gated", async t => {
+test("approval skip persists a canonical allowance proof and permits a separate guarded deposit stage", async t => {
   const { temporary, state, op } = await prepared(); t.after(temporary.cleanup);
   const verified: ArbitrumVerifiedAllowanceRead = { policyDigest: op.policyDigest!, policyRevision: op.policyRevision!,
     allowanceAtomic: op.amountAtomic, blockNumber: "293510000", blockHash: `0x${"b".repeat(64)}`, observedAt: t1 };
@@ -266,8 +266,9 @@ test("approval skip persists a canonical allowance proof, never fabricates a tra
     { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(repository(verified).skipApproval(op.profileHash, op.operationId, skipped.integrityHash),
     { code: "APN_OPERATION_BLOCKED" });
-  await assert.rejects(repository().beginSigning(op.profileHash, op.operationId, skipped.integrityHash,
-    "deposit", t1), { code: "APN_OPERATION_BLOCKED" });
+  const depositStarted = await repository().beginSigning(op.profileHash, op.operationId, skipped.integrityHash,
+    "deposit", t1);
+  assert.equal(depositStarted.effects[1].phase, "signing_started");
   const tampered = structuredClone(skipped) as any;
   tampered.effects[0].skipProof.spender = owner;
   const { integrityHash: _hash, ...body } = tampered; tampered.integrityHash = hashObject(body);
