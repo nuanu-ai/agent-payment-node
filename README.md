@@ -643,6 +643,16 @@ JSON-RPC errors and malformed evidence are not retried. Each network reports
 reported as `external_provider_profile`, not guessed. There is no balance
 cache: every run reads the chains.
 
+Relay currently exposes unsigned prepare and read-only preflight only. A future
+Relay execution signer must call `assertExclusiveRelayExecutionOwner` immediately
+before signing and again immediately before its first submission. The helper
+holds the shared EVM address lock while checking public profile and wallet
+identities and decrypting every locally stored MetaMask Smart Account permission
+through the configured Keychain-backed wrapping-secret port. A matching grant
+in another profile blocks execution; unreadable or malformed permission state
+fails closed. Grant commits use the same address lock after browser consent has
+returned. The signer must perform network reads outside that lock.
+
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
 apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>

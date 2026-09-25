@@ -34,6 +34,7 @@ import { ApnCore } from "../../src/core.js";
 import { runCli } from "../../src/cli.js";
 import { BASE_USDC } from "../../src/constants.js";
 import { EncryptedSmartAccountPermissionStore } from "../../src/encrypted-smart-account-permission-store.js";
+import { assertExclusiveRelayExecutionOwner } from "../../src/evm-address-ownership.js";
 import { EncryptedSmartAccountDirectEffectStore } from "../../src/encrypted-smart-account-direct-effect-store.js";
 import { EncryptedSmartAccountX402MaterialStore } from "../../src/encrypted-smart-account-x402-material-store.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
@@ -408,6 +409,63 @@ test("connect is idempotent, encrypted, restart-safe and exposes only safe permi
     assert.equal(listed.ok, true);
     assert.equal((status.data as any).permission.grant_fingerprint, (first.data as any).permission.grant_fingerprint);
     assert.equal(fixture.consent.requestCalls, 1);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("Relay execution owner guard authenticates grants and distinguishes own from other profiles", async () => {
+  const fixture = await makeFixture();
+  try {
+    const connected = await fixture.core.execute(connectCommand());
+    assert.equal(connected.ok, true);
+    const store = new EncryptedSmartAccountPermissionStore(fixture.state, fixture.wrapping);
+    const ownHash = fixture.state.profileHash(PROFILE);
+    await assertExclusiveRelayExecutionOwner(fixture.state, store, OWNER.toLowerCase(), ownHash);
+    await assert.rejects(assertExclusiveRelayExecutionOwner(fixture.state, store, OWNER, fixture.state.profileHash("other")),
+      { code: "APN_OPERATION_BLOCKED" });
+    const unreadable = new EncryptedSmartAccountPermissionStore(fixture.state, {
+      load: async () => null,
+      create: async () => { throw new Error("unexpected create"); },
+    });
+    await assert.rejects(assertExclusiveRelayExecutionOwner(fixture.state, unreadable, OWNER, ownHash),
+      { code: "APN_STATE_CORRUPT" });
+    const path = join(fixture.temporary.root, "smart-account-permissions", `${ownHash}.json`);
+    await writeFile(path, "{broken", { mode: 0o600 });
+    await assert.rejects(assertExclusiveRelayExecutionOwner(fixture.state, store, OWNER, ownHash),
+      { code: "APN_STATE_CORRUPT" });
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("Relay execution owner guard waits for a concurrent encrypted grant commit", async () => {
+  const fixture = await makeFixture();
+  try {
+    const connected = await fixture.core.execute(connectCommand());
+    assert.equal(connected.ok, true);
+    const base = new EncryptedSmartAccountPermissionStore(fixture.state, fixture.wrapping);
+    const source = await base.load(fixture.state.profileHash(PROFILE));
+    assert.ok(source !== null && isGrantedPermissionRecord(source));
+    const otherHash = fixture.state.profileHash("other");
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const loading = new Promise<void>(resolve => { entered = resolve; });
+    let gateNextLoad = true;
+    const wrapping: WrappingSecretPort = {
+      load: async () => {
+        if (gateNextLoad) { gateNextLoad = false; entered(); await gate; }
+        return await fixture.wrapping.load();
+      },
+      create: async () => await fixture.wrapping.create(),
+    };
+    const writer = new EncryptedSmartAccountPermissionStore(fixture.state, wrapping);
+    const pendingWrite = writer.save({ ...source, profile: "other", profile_hash: otherHash });
+    await loading;
+    let checked = false;
+    const guard = assertExclusiveRelayExecutionOwner(fixture.state, base, OWNER, fixture.state.profileHash(PROFILE))
+      .then(() => { checked = true; });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(checked, false);
+    release();
+    await pendingWrite;
+    await assert.rejects(guard, { code: "APN_OPERATION_BLOCKED" });
   } finally { await fixture.temporary.cleanup(); }
 });
 
