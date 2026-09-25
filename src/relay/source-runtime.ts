@@ -7,7 +7,7 @@ import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger
 import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account-permission-store.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
-import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord, recheckEvmBlock } from "../evm-rpc-codec.js";
+import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
 import { isGrantedPermissionRecord } from "../metamask-smart-account-record.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -106,7 +106,7 @@ export class RelayEthereumSourceRuntime {
   private readonly approvalCustody: RelayEncryptedApprovalCustody;
   private readonly depositCustody: RelayEncryptedDepositCustody;
   private signingNonce: bigint | null = null;
-  constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly rpc: Pick<HttpsBaseRpc, "batchCall" | "coinbaseGaslessCall" | "submitRawTransaction">,
+  constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly rpc: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">,
     private readonly authorization: RelayExecutionAuthorizationPort, private readonly clock: ClockPort = { now: () => new Date() }) {
     this.wallets = new EncryptedWalletStore(state, wrapping);
     this.permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
@@ -349,14 +349,9 @@ export class RelayEthereumSourceRuntime {
         blockHash: found.blockHash }, canonicalBlockHash: found.blockHash };
   }
   private async observation(hash: Hex) {
-    const call = this.rpc.coinbaseGaslessCall?.bind(this.rpc);
-    if (call === undefined) blocked("ethereum_observer_unavailable");
-    const blockCall = async (method: string, params: readonly unknown[]): Promise<unknown> => {
-      if (method !== "eth_getBlockByNumber") blocked("ethereum_observer_method");
-      return call(method, params);
-    };
-    const [rawTx, rawReceipt] = await Promise.all([
-      call("eth_getTransactionByHash", [hash]), call("eth_getTransactionReceipt", [hash]),
+    const [rawTx, rawReceipt] = await this.rpc.batchCall([
+      { method: "eth_getTransactionByHash", params: [hash] },
+      { method: "eth_getTransactionReceipt", params: [hash] },
     ]);
     if (rawTx === null && rawReceipt === null) return null;
     if (rawTx === null || rawReceipt === null) return null;
@@ -366,12 +361,24 @@ export class RelayEthereumSourceRuntime {
       evmRpcQuantity(tx.blockNumber) !== evmRpcQuantity(receipt.blockNumber) ||
       evmRpcHex(tx.blockHash, 32) !== evmRpcHex(receipt.blockHash, 32)) corrupt("transaction and receipt identity");
     const number = evmRpcQuantity(receipt.blockNumber);
-    const block = await evmRpcBlock(blockCall, `0x${number.toString(16)}`);
+    const inclusionTag = `0x${number.toString(16)}`;
+    const [rawBlock, rawFinalized] = await this.rpc.batchCall([
+      { method: "eth_getBlockByNumber", params: [inclusionTag, false] },
+      { method: "eth_getBlockByNumber", params: ["finalized", false] },
+    ]);
+    const block = evmRpcBlockResult(rawBlock, inclusionTag);
     if (block.hash !== evmRpcHex(receipt.blockHash, 32)) blocked("source_receipt_reorg");
-    const finalized = await evmRpcBlock(blockCall, "finalized");
+    const finalized = evmRpcBlockResult(rawFinalized, "finalized");
     if (BigInt(finalized.number) < number) return null;
-    await recheckEvmBlock(blockCall, block); await recheckEvmBlock(blockCall, finalized);
-    if (evmRpcQuantity(await this.rpc.batchCall([{ method: "eth_chainId", params: [] }]).then(values => values[0])) !== 1n)
+    const [rawRecheckedBlock, rawRecheckedFinalized, rawChainId] = await this.rpc.batchCall([
+      { method: "eth_getBlockByNumber", params: [block.tag, false] },
+      { method: "eth_getBlockByNumber", params: [finalized.tag, false] },
+      { method: "eth_chainId", params: [] },
+    ]);
+    if (evmRpcBlockResult(rawRecheckedBlock, block.tag).hash !== block.hash ||
+      evmRpcBlockResult(rawRecheckedFinalized, finalized.tag).hash !== finalized.hash)
+      throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.");
+    if (evmRpcQuantity(rawChainId) !== 1n)
       blocked("ethereum_rpc_chain");
     const status = evmRpcQuantity(receipt.status);
     if (status !== 0n && status !== 1n) corrupt("receipt status");
