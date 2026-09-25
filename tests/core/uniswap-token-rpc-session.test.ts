@@ -98,12 +98,71 @@ test("token reads never retry 429 and reject exhausted request budget before tra
   assert.equal(attempts, 1); assert.equal(capped.telemetry!()?.budgetRejectedBeforeTransport, 1);
 });
 
-test("token raw send is one direct attempt outside the read retry and request budgets", async (t) => {
+test("token raw send consumes the shared physical request budget without retry", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); let attempts = 0;
   const rpc = createTokenRpc({ environment: URLS, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 1, deadlineMs: 10_000,
     transport: { request: async () => { attempts += 1; return { status: 503, body: "unavailable" }; } } });
   await assert.rejects(rpc("eth_sendRawTransaction", ["0x00"])); assert.equal(attempts, 1); assert.equal(rpc.effectAttempts!(), 1);
   assert.equal(rpc.telemetry!()?.httpAttempts, 0);
+});
+
+test("reserved send slot limits pooled reads and permits exactly 24 physical POSTs", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const methods: string[] = []; let now = Date.now();
+  const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: () => now, pacingNow: () => now,
+    maxHttpRequests: 24, deadlineMs: 60_000, wait: async (milliseconds) => { now += milliseconds; },
+    transport: { request: async (_url, _method, body) => { const parsed = JSON.parse(body!); const rows = Array.isArray(parsed) ? parsed : [parsed];
+      methods.push(rows[0].method); return { status: 200, body: batchResponse(body!, (method) => method === "eth_chainId" ? "0x1" : "0x2") }; } } });
+  await tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain }]);
+  for (let index = 0; index < 22; index += 1) await rpc("eth_getBalance", [ACCOUNT, `0x${index.toString(16)}`]);
+  rpc.reserveEffectSlot!();
+  await assert.rejects(rpc("eth_getBalance", [ACCOUNT, "0x16"]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  await rpc("eth_sendRawTransaction", ["0x00"]);
+  assert.equal(methods.length, 24); assert.equal(methods.at(-1), "eth_sendRawTransaction");
+  assert.equal(rpc.telemetry!()?.httpAttempts, 23); assert.equal(rpc.effectAttempts!(), 1);
+  await assert.rejects(rpc("eth_getBalance", [ACCOUNT, "0x17"]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  await assert.rejects(rpc("eth_sendRawTransaction", ["0x00"]), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(methods.length, 24);
+});
+
+test("effect capacity is refused before signing when 24 reads used the invocation", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); let posts = 0, now = Date.now();
+  const rpc = createTokenRpc({ environment: URLS, state: new StateStore(temp.root), now: () => now, pacingNow: () => now,
+    maxHttpRequests: 24, deadlineMs: 60_000, wait: async (milliseconds) => { now += milliseconds; },
+    transport: { request: async (_url, _method, body) => { posts += 1;
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(body!).id, result: "0x1" }) }; } } });
+  for (let index = 0; index < 24; index += 1) await rpc("eth_getBalance", [ACCOUNT, `0x${index.toString(16)}`]);
+  await assert.rejects(async () => rpc.reserveEffectSlot!(), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(posts, 24); assert.equal(rpc.effectAttempts!(), 0);
+});
+
+test("raw send shares persisted provider pacing with reads in scalar and pooled token RPC", async (t) => {
+  for (const environment of [URLS, POOL]) {
+    const temp = await temporaryState(); t.after(temp.cleanup); let now = 10_000;
+    const starts: Array<{ method: string; at: number }> = [];
+    const rpc = createTokenRpc({ environment, state: new StateStore(temp.root), now: () => now, pacingNow: () => now,
+      maxHttpRequests: 3, deadlineMs: 10_000, wait: async (milliseconds) => { now += milliseconds; },
+      transport: { request: async (_url, _method, body) => { const request = JSON.parse(body!);
+        const row = Array.isArray(request) ? request[0] : request; starts.push({ method: row.method, at: now });
+        return { status: 200, body: batchResponse(body!, poolValue) }; } } });
+    await tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain }]);
+    await rpc("eth_sendRawTransaction", ["0x00"]);
+    await rpc("eth_getBalance", [ACCOUNT, "latest"]);
+    assert.deepEqual(starts.map((row) => row.method), ["eth_chainId", "eth_sendRawTransaction", "eth_getBalance"]);
+    assert.deepEqual(starts.map((row) => row.at), [10_000, 10_750, 11_500]);
+  }
+});
+
+test("pooled raw send 429 is terminal and persists provider cooldown", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); let now = 10_000; const starts: string[] = [];
+  const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: () => now, pacingNow: () => now,
+    maxHttpRequests: 3, deadlineMs: 10_000, wait: async (milliseconds) => { now += milliseconds; },
+    transport: { request: async (_url, _method, body) => { const row = JSON.parse(body!); starts.push(row.method);
+      return row.method === "eth_sendRawTransaction" ? { status: 429, body: "rate", headers: { "retry-after": "30" } }
+        : { status: 200, body: batchResponse(body!, poolValue) }; } } });
+  await tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], decoder: tokenChain }]);
+  await assert.rejects(rpc("eth_sendRawTransaction", ["0x00"]), { code: "APN_RPC_RATE_LIMITED" });
+  await assert.rejects(rpc("eth_getBalance", [ACCOUNT, "latest"]), { code: "APN_PROVIDER_UNAVAILABLE" });
+  assert.deepEqual(starts, ["eth_chainId", "eth_sendRawTransaction"]); assert.equal(rpc.effectAttempts!(), 1);
 });
 
 const POOL = { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify(["https://first.example", "https://second.example"]),
@@ -133,15 +192,17 @@ test("ordered token primary pool charges one timeout then freezes the fully deco
   assert.equal(rpc.telemetry!()?.httpAttempts, 3); assert.equal(rpc.telemetry!()?.logicalItems, 5);
 });
 
-test("pool cooldown is durable across runtimes and skips the failed family without transport", async (t) => {
+test("pool 429 is terminal for the invocation and cooldown is durable across runtimes", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const calls: string[] = [], request = async (url: string, _method: string, body: string | null) => {
     const origin = new URL(url).origin; calls.push(origin); if (origin === "https://first.example") return { status: 429, body: "rate", headers: { "retry-after": "30" } };
     return { status: 200, body: batchResponse(body!, poolValue) }; };
   const items = [{ method: "eth_chainId", params: [], decoder: tokenChain }];
   for (let run = 0; run < 2; run += 1) { const rpc = createTokenRpc({ environment: POOL, state: new StateStore(temp.root), now: Date.now,
-    maxHttpRequests: 3, deadlineMs: 10_000, transport: { request } }); await tokenBatch(rpc, "primary", items);
+    maxHttpRequests: 3, deadlineMs: 10_000, transport: { request } });
+    if (run === 0) await assert.rejects(tokenBatch(rpc, "primary", items), { code: "APN_RPC_RATE_LIMITED" });
+    else await tokenBatch(rpc, "primary", items);
     if (run === 1) assert.equal(rpc.primaryPoolTelemetry!().attempts[0]?.outcome, "cooldown_skipped"); }
-  assert.deepEqual(calls, ["https://first.example", "https://second.example", "https://second.example"]);
+  assert.deepEqual(calls, ["https://first.example", "https://second.example"]);
 });
 
 test("malformed candidate batch commits no cross-provider cache and archive must match the primary block", async (t) => {

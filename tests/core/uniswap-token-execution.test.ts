@@ -21,13 +21,14 @@ async function fixture(root: string, allowance = "0") {
     maximumNativeDebitWei: "600000", policyDigest: domainHash("p", "p"), mechanismDigest: domainHash("m", "m"), now: NOW }));
   const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance,
     sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0, rejectRevalidation = false, guardError: unknown = null, rejectSeal = false,
-    currentUsageState: AssetUsageState = "reserved";
+    currentUsageState: AssetUsageState = "reserved", capacityCalls = 0, rejectCapacityAt = 0;
   const released: string[] = [], committed: string[] = [];
   const ports = { now: () => NOW, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
     withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(), allocateNonce: async () => String(7 + sends.length),
     releaseNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { released.push(`${kind}:${nonce}`); },
     commitNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { committed.push(`${kind}:${nonce}`); },
     currentAllowance: async () => currentAllowance, guard: async () => { if (guardError !== null) throw guardError; }, revalidate: async () => { revalidations += 1; if (rejectRevalidation) throw new Error("drift"); },
+    reserveSendCapacity: () => { capacityCalls += 1; if (capacityCalls === rejectCapacityAt) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Physical cap reached."); },
     reserveUsage: async () => { currentUsageState = "reserved"; return { reservationId: "d".repeat(64), state: currentUsageState }; },
     currentUsage: async (op: { usageReservationId: string | null }) => ({ reservationId: op.usageReservationId!, state: currentUsageState }),
     followUsage: async (_op: unknown, target: AssetUsageState) => { currentUsageState = target; return { reservationId: "d".repeat(64), state: currentUsageState }; },
@@ -39,8 +40,18 @@ async function fixture(root: string, allowance = "0") {
     allowance: (v: string) => { currentAllowance = v; }, sendResult: (v: "accepted" | "ambiguous") => { sendResult = v; },
     rejectRevalidation: () => { rejectRevalidation = true; }, rejectGuard: (error: unknown = new Error("refused")) => { guardError = error; },
     rejectSeal: () => { rejectSeal = true; }, usageState: (state: AssetUsageState) => { currentUsageState = state; }, released, committed,
-    revalidations: () => revalidations };
+    revalidations: () => revalidations, rejectCapacityOn: (call: number) => { rejectCapacityAt = call; } };
 }
+test("capacity exhaustion after sealing preserves signed but unsubmitted state without a send", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  f.rejectCapacityOn(2);
+  await assert.rejects(f.runtime.approve(f.operation.operationId), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  const signed = await f.journal.load(f.operation.operationId);
+  assert.equal(signed?.phase, "approval_submission_started"); assert.equal(signed?.approvalAttempt?.transactionHash, H("1"));
+  assert.deepEqual(f.sends, []);
+  assert.equal((await f.runtime.status(f.operation.operationId)).phase, "approval_submission_started");
+  assert.deepEqual(f.sends, []);
+});
 test("exact approval then swap finalizes with zero allowance and bounded debit", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "approval_submitted"); assert.deepEqual(f.sends, ["approval"]);
   f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" }); f.allowance("1000000");
