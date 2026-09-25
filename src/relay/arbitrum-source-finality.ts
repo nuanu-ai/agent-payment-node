@@ -35,7 +35,8 @@ export class RelayArbitrumSourceFinalityObserver {
   private readonly rpc: Pick<HttpsBaseRpc, "batchCall">;
   constructor(private readonly url: string, private readonly state: StateStore,
     rpc?: Pick<HttpsBaseRpc, "batchCall">,
-    private readonly guardFactory: () => EvmDirectRpcGuard = () => new EvmDirectRpcGuard(state)) {
+    private readonly guardFactory: () => EvmDirectRpcGuard = () => new EvmDirectRpcGuard(state),
+    private readonly holdAfterPost: () => Promise<void> = () => new Promise(resolve => setTimeout(resolve, 750))) {
     this.rpc = rpc ?? new HttpsBaseRpc(url);
   }
 
@@ -62,7 +63,12 @@ export class RelayArbitrumSourceFinalityObserver {
   }
 
   private async batch(guard: EvmDirectRpcGuard, calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
-    const results = await guard.post(this.url, () => this.rpc.batchCall(calls));
+    // The guard persists the provider-family start before transport setup. Keep
+    // its lock for 750 ms after settlement so slow DNS cannot compress actual POST starts.
+    const results = await guard.post(this.url, async () => {
+      try { return await this.rpc.batchCall(calls); }
+      finally { await this.holdAfterPost(); }
+    });
     if (!Array.isArray(results) || results.length !== calls.length) invalid("batch_shape");
     return results;
   }

@@ -37,8 +37,9 @@ export declare class RelayArbitrumSourceFinalityObserver {
     private readonly url;
     private readonly state;
     private readonly guardFactory;
+    private readonly holdAfterPost;
     private readonly rpc;
-    constructor(url: string, state: StateStore, rpc?: Pick<HttpsBaseRpc, "batchCall">, guardFactory?: () => EvmDirectRpcGuard);
+    constructor(url: string, state: StateStore, rpc?: Pick<HttpsBaseRpc, "batchCall">, guardFactory?: () => EvmDirectRpcGuard, holdAfterPost?: () => Promise<void>);
     observe(deposit: RelayArbitrumExpectedEffect, approval?: RelayArbitrumExpectedEffect): Promise<RelayArbitrumSourceProof | null>;
     private batch;
     private confirmTogether;

@@ -10,11 +10,13 @@ export class RelayArbitrumSourceFinalityObserver {
     url;
     state;
     guardFactory;
+    holdAfterPost;
     rpc;
-    constructor(url, state, rpc, guardFactory = () => new EvmDirectRpcGuard(state)) {
+    constructor(url, state, rpc, guardFactory = () => new EvmDirectRpcGuard(state), holdAfterPost = () => new Promise(resolve => setTimeout(resolve, 750))) {
         this.url = url;
         this.state = state;
         this.guardFactory = guardFactory;
+        this.holdAfterPost = holdAfterPost;
         this.rpc = rpc ?? new HttpsBaseRpc(url);
     }
     async observe(deposit, approval) {
@@ -42,7 +44,16 @@ export class RelayArbitrumSourceFinalityObserver {
             causalLinkCryptographicallyProven: false, paidAcceptance: false };
     }
     async batch(guard, calls) {
-        const results = await guard.post(this.url, () => this.rpc.batchCall(calls));
+        // The guard persists the provider-family start before transport setup. Keep
+        // its lock for 750 ms after settlement so slow DNS cannot compress actual POST starts.
+        const results = await guard.post(this.url, async () => {
+            try {
+                return await this.rpc.batchCall(calls);
+            }
+            finally {
+                await this.holdAfterPost();
+            }
+        });
         if (!Array.isArray(results) || results.length !== calls.length)
             invalid("batch_shape");
         return results;

@@ -41,7 +41,7 @@ async function setup(mutate?: Mutation, guardLimit = 24,
     return rows;
   } };
   const observer = new RelayArbitrumSourceFinalityObserver("https://arb-rpc.publicnode.com", state, rpc,
-    () => new EvmDirectRpcGuard(state, guardLimit, () => clock, async ms => { clock += ms; }));
+    () => new EvmDirectRpcGuard(state, guardLimit, () => clock, async ms => { clock += ms; }), async () => {});
   return { observer, cleanup: temp.cleanup, requests, posts: () => posts, clock: () => clock };
 }
 
@@ -140,7 +140,7 @@ test("malformed batch, timeout, terminal 429 and hard request cap cannot return 
   for (const failure of [new ApnError("APN_RPC_AMBIGUOUS", "timeout"),
     new ApnError("APN_RPC_PROTOCOL", "rate limited", { httpStatus: 429 })]) {
     const observer = new RelayArbitrumSourceFinalityObserver("https://arb-rpc.publicnode.com", state,
-      { batchCall: async () => { attempts++; throw failure; } });
+      { batchCall: async () => { attempts++; throw failure; } }, undefined, async () => {});
     await assert.rejects(observer.observe(deposit), { code: failure.details?.httpStatus === 429 ? "APN_RPC_RATE_LIMITED" : "APN_RPC_AMBIGUOUS" });
   }
   assert.equal(attempts, 2);
