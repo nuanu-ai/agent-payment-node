@@ -130,12 +130,15 @@ and finalized observation. It reacquires them for journal comparisons and
 transitions; before signing and the first send it also rechecks the account,
 policy and owner allowlist.
 The per-key prepare claim and per-operation approval claim still serialize the
-respective work across RPC waits. Owner abandonment still holds the profile and
-operation locks during its validity-history RPC check and foreground prompt.
-The production factory does not yet attach `SolanaRpcBudget` to `SolanaRpc`, so
-the transport's shared physical request limit and two-per-second pacing are not
-enabled for this live rail. Live request counts and rate-limit acceptance remain
-unverified.
+respective work across RPC waits. Owner abandonment performs validity-history
+RPC and the foreground prompt outside the profile and operation locks, then
+rechecks the journal, account, policy and allowlist before committing.
+The production factory attaches a fresh 24-physical-POST budget to each command
+invocation. JSON-RPC batches count as one POST, and submission counts as one.
+Starts for the same public RPC provider are paced across processes through
+durable state with at least 500 ms between POSTs. HTTP 429 stops the command
+without a retry. Synthetic full journeys use 21 POSTs for SOL and 23 for USDC;
+live request counts and rate-limit acceptance remain unverified.
 
 After the owner approves and before anything is signed, the send guard runs
 once:

@@ -1,3 +1,4 @@
+import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { publicRailOperation, transitionRail } from "./rail-operation-model.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
@@ -5,6 +6,8 @@ import { OperationService } from "./operation-service.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
+import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
+import { railAllowlistSubject } from "./rail-direct-allowlist.js";
 export class OperationAbandonService {
     context;
     rails;
@@ -27,7 +30,9 @@ export class OperationAbandonService {
         await this.context.ready();
         const found = await this.operations.required(operationId);
         if (found.kind === "rail_transfer")
-            return await this.abandonRail(found.record.profileHash, operationId);
+            return found.record.account.rail === "solana"
+                ? await this.abandonLocalSolana(found.record.profileHash, operationId)
+                : await this.abandonRail(found.record.profileHash, operationId);
         const base = { context: this.context, operations: this.operations };
         if (found.kind === "gasless_transfer")
             return await abandonLocalGasless({ ...base, gasless: this.gasless }, operationId);
@@ -92,7 +97,7 @@ export class OperationAbandonService {
                 operationId: operation.operationId, fingerprint: operation.fingerprint, profile: operation.profile, providerId: operation.account.provider,
                 walletAddress: operation.prepared.sender, recipient: operation.prepared.recipient, amountAtomic: operation.prepared.amountAtomic,
                 amountDecimal: railDecimal(operation.prepared.amountAtomic, asset.decimals),
-                chainLabel: operation.account.rail === "solana" ? "Solana mainnet" : "TRON mainnet", assetLabel: `${asset.symbol} (${asset.identifier})`, unit: asset.symbol,
+                chainLabel: "TRON mainnet", assetLabel: `${asset.symbol} (${asset.identifier})`, unit: asset.symbol,
                 outcomeNote: "Financial outcome: UNKNOWN. The validity window has passed and the configured RPC history shows no transaction, but that history can be incomplete.",
             });
             const abandoned = transitionRail(operation, { state: "abandoned_unknown", at: this.context.clock.now().toISOString(),
@@ -100,6 +105,58 @@ export class OperationAbandonService {
             await this.rails.records.persist(abandoned);
             return publicRailOperation(abandoned);
         });
+    }
+    /** A Solana RPC cooldown and the owner's acknowledgement hold only this narrow claim lock. */
+    async abandonLocalSolana(profileHash, operationId) {
+        const state = this.context.state, keys = [`profile:${profileHash}`, `operation:${operationId}`];
+        return await state.withLocks([`rail:abandon-claim:${operationId}`], async () => {
+            const snapshot = await state.withLocks(keys, async () => {
+                const selected = await this.operations.required(operationId);
+                if (selected.kind !== "rail_transfer" || selected.record.profileHash !== profileHash ||
+                    selected.record.account.rail !== "solana")
+                    return ineligibleRail();
+                const operation = selected.record;
+                if (operation.state === "abandoned_unknown" && operation.terminal)
+                    return { done: operation };
+                const adapter = this.rails.policies.adapter(operation.account.rail, operation.account.provider);
+                if (operation.terminal || operation.account.provider !== "local" || operation.transactionId === null ||
+                    !["unknown_finality", "submitted_pending"].includes(operation.state) || adapter.assertValidityExpired === undefined)
+                    ineligibleRail();
+                return { operation, adapter };
+            });
+            if ("done" in snapshot)
+                return publicRailOperation(snapshot.done);
+            const { operation, adapter } = snapshot;
+            await adapter.assertValidityExpired(operation.account, operation.prepared, operation.transactionId, operation.send ?? null);
+            const { asset } = operation.prepared;
+            await this.context.requireOperationAbandonApproval().approve({
+                operationId: operation.operationId, fingerprint: operation.fingerprint, profile: operation.profile, providerId: operation.account.provider,
+                walletAddress: operation.prepared.sender, recipient: operation.prepared.recipient, amountAtomic: operation.prepared.amountAtomic,
+                amountDecimal: railDecimal(operation.prepared.amountAtomic, asset.decimals), chainLabel: "Solana mainnet",
+                assetLabel: `${asset.symbol} (${asset.identifier})`, unit: asset.symbol,
+                outcomeNote: "Financial outcome: UNKNOWN. The validity window has passed and the configured RPC history shows no transaction, but that history can be incomplete.",
+            });
+            return await state.withLocks(keys, async () => {
+                const selected = await this.operations.required(operationId);
+                if (selected.kind !== "rail_transfer" || selected.record.profileHash !== profileHash)
+                    return ineligibleRail();
+                const latest = selected.record;
+                if (latest.integrityHash !== operation.integrityHash)
+                    return publicRailOperation(latest);
+                const currentAccount = await this.rails.policies.account(operation.profile, "solana");
+                if (canonicalJson(currentAccount) !== canonicalJson(operation.account))
+                    throw new ApnError("APN_PROFILE_DRIFT", "The Solana account changed during validity attestation.");
+                const policy = await this.rails.policies.authorize(currentAccount, asset.alias, operation.prepared.maximumFeeAtomic);
+                if (policy.policyHash !== operation.policyHash)
+                    throw new ApnError("APN_PROFILE_DRIFT", "The Solana policy changed during validity attestation.");
+                if (operation.allowlist !== undefined)
+                    await new DirectAllowlistGate(this.context).confirm(railAllowlistSubject(operation), operation.allowlist);
+                const abandoned = transitionRail(latest, { state: "abandoned_unknown", at: this.context.clock.now().toISOString(),
+                    reason: "owner_acknowledged_expired_unresolved_effect", proofClass: "owner_acknowledgement_only" });
+                await this.rails.records.persist(abandoned);
+                return publicRailOperation(abandoned);
+            });
+        }, { waitMs: 300_000 });
     }
 }
 function assertProviderAbandonFamily(operation) {

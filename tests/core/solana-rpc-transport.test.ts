@@ -1,10 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import { SolanaRpc, SolanaRpcBudget } from "../../src/solana/rpc.js";
+import { SolanaRpcPacer } from "../../src/solana/pacing.js";
 import { simulateSolanaSend } from "../../src/solana/simulation.js";
+import { StateStore } from "../../src/state.js";
+import { temporaryState } from "./helpers.js";
+import { createApnCore } from "../../src/runtime-factory.js";
+import { bindArgv } from "../../src/command-binder.js";
+import { SolanaLocalAdapter } from "../../src/solana/local-adapter.js";
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+
+test("installed runtime gives each command a fresh 24 POST Solana cap", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const bound = bindArgv(["wallet", "capabilities-solana"]);
+  const left = createApnCore(bound, { stateRoot: temporary.root, solanaRpcUrl: "https://api.mainnet-beta.solana.com" });
+  const right = createApnCore(bound, { stateRoot: temporary.root, solanaRpcUrl: "https://api.mainnet-beta.solana.com" });
+  const leftRpc = (left.context.directRails[0] as SolanaLocalAdapter).rpc as SolanaRpc;
+  const rightRpc = (right.context.directRails[0] as SolanaLocalAdapter).rpc as SolanaRpc;
+  assert.equal(leftRpc.budget?.maxPhysicalRequests, 24);
+  assert.equal(rightRpc.budget?.maxPhysicalRequests, 24);
+  assert.notEqual(leftRpc.budget, rightRpc.budget);
+});
 
 test("Solana batch correlates shuffled unique IDs and counts one physical POST", async () => {
   const budget = new SolanaRpcBudget({ maxPhysicalRequests: 1 });
@@ -122,5 +142,67 @@ test("a batched read returns HTTP 429 after one POST without retrying", async ()
     (error.details as { retryAfterMs?: number })?.retryAfterMs === 4000);
   assert.equal(posts, 1);
   assert.equal(budget.logicalCalls, 2);
+  assert.equal(budget.physicalRequests, 1);
+});
+
+test("persistent Solana pacing serializes concurrent commands and survives a fresh client", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const firstState = new StateStore(temporary.root); await firstState.initialize();
+  const secondState = new StateStore(temporary.root); await secondState.initialize();
+  let now = 1_000;
+  const starts: number[] = [];
+  const wait = async (milliseconds: number) => { now += milliseconds; };
+  const fetcher = (async (_url: unknown, init: RequestInit) => {
+    starts.push(now);
+    const request = JSON.parse(init.body as string) as { id: string };
+    return json({ jsonrpc: "2.0", id: request.id, result: 1 });
+  }) as typeof fetch;
+  const rpc = (state: StateStore) => new SolanaRpc("https://api.mainnet-beta.solana.com", fetcher,
+    new SolanaRpcBudget({ maxPhysicalRequests: 24, now: () => now, wait }),
+    new SolanaRpcPacer(state, () => now, wait));
+  await Promise.all([rpc(firstState).call("getGenesisHash", []), rpc(secondState).call("getBlockHeight", [])]);
+  await rpc(new StateStore(temporary.root)).call("getBlockHeight", []);
+  assert.equal(starts.length, 3);
+  assert.ok(starts[1]! - starts[0]! >= 500 && starts[2]! - starts[1]! >= 500);
+  const files = await readdir(join(temporary.root, "rpc-provider-pacing"));
+  assert.equal(files.length, 1);
+  const persisted = await readFile(join(temporary.root, "rpc-provider-pacing", files[0]!), "utf8");
+  assert.doesNotMatch(persisted + files[0]!, /api\.mainnet|https:|credential|secret/u);
+});
+
+test("Solana invocation counts batches and send as physical POSTs and denies the 25th", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  let now = 1_000; let posts = 0;
+  const wait = async (milliseconds: number) => { now += milliseconds; };
+  const budget = new SolanaRpcBudget({ maxPhysicalRequests: 24, now: () => now, wait });
+  const rpc = new SolanaRpc("https://api.mainnet-beta.solana.com", (async (_url: unknown, init: RequestInit) => {
+    posts++;
+    const request = JSON.parse(init.body as string) as { id: string } | { id: string }[];
+    return json(Array.isArray(request) ? request.map(row => ({ jsonrpc: "2.0", id: row.id, result: 1 })) :
+      { jsonrpc: "2.0", id: request.id, result: 1 });
+  }) as typeof fetch, budget, new SolanaRpcPacer(state, () => now, wait));
+  await rpc.batch([{ method: "getGenesisHash", params: [] }, { method: "getBlockHeight", params: [] }]);
+  for (let index = 1; index < 23; index++) await rpc.call("getBlockHeight", []);
+  await rpc.call("sendTransaction", ["synthetic"]);
+  await assert.rejects(rpc.call("getBlockHeight", []), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(posts, 24);
+  assert.equal(budget.physicalRequests, 24);
+  assert.equal(budget.logicalCalls, 26);
+});
+
+test("Solana HTTP 429 persists cooldown and never amplifies a send", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  let now = 1_000; let posts = 0;
+  const wait = async (milliseconds: number) => { now += milliseconds; };
+  const pacer = new SolanaRpcPacer(state, () => now, wait);
+  const budget = new SolanaRpcBudget({ maxPhysicalRequests: 24, now: () => now, wait });
+  const rpc = new SolanaRpc("https://api.mainnet-beta.solana.com", (async () => {
+    posts++; return json({ error: "rate limited" }, 429, { "retry-after": "3" });
+  }) as typeof fetch, budget, pacer);
+  await assert.rejects(rpc.call("sendTransaction", ["synthetic"]), { code: "APN_RPC_RATE_LIMITED" });
+  await assert.rejects(rpc.call("getBlockHeight", []), { code: "APN_PROVIDER_UNAVAILABLE" });
+  assert.equal(posts, 1);
   assert.equal(budget.physicalRequests, 1);
 });
