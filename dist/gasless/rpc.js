@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { encodeAbiParameters, keccak256, numberToHex } from "viem";
 import { canonicalJson, exactKeys, hashObject, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
@@ -19,8 +20,31 @@ const RPC_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBala
 const BUNDLER_METHODS = new Set(["eth_chainId", "eth_supportedEntryPoints",
     "eth_estimateUserOperationGas", "eth_sendUserOperation", "eth_getUserOperationReceipt", "eth_getUserOperationByHash"]);
 const MAX_RESPONSE = 2 * 1024 * 1024;
+const MAX_INVOCATION_POSTS = 24;
+const invocation = new AsyncLocalStorage();
+/** One command invocation includes RPC and bundler POSTs, including failed transport attempts. */
+export class GaslessRpcRequestSession {
+    posts = 0;
+    rateLimited = false;
+    reserve() {
+        if (this.rateLimited)
+            gaslessFailure("APN_RPC_RATE_LIMITED", "gasless_RPC_HTTP_429");
+        if (this.posts >= MAX_INVOCATION_POSTS)
+            gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
+        this.posts += 1;
+    }
+    reject429() {
+        this.rateLimited = true;
+        return gaslessFailure("APN_RPC_RATE_LIMITED", "gasless_RPC_HTTP_429");
+    }
+}
+/** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
+export async function withGaslessRpcInvocation(work) {
+    return await invocation.run(new GaslessRpcRequestSession(), work);
+}
 export function gaslessRpcFactory(environment) {
     const cache = new Map(), transport = new GaslessHttps();
+    const fallbackSession = new GaslessRpcRequestSession();
     return (chainId) => {
         const selected = gaslessChain(chainId, "APN_RPC_CONFIG"), existing = cache.get(selected);
         if (existing !== undefined)
@@ -30,13 +54,14 @@ export function gaslessRpcFactory(environment) {
             gaslessFailure("APN_RPC_CONFIG", `missing_${deployment.rpcEnv}`);
         const configuredBundler = environment[deployment.bundlerEnv];
         const rpc = new GaslessRpc(selected, rpcUrl, configuredBundler === undefined || configuredBundler.length === 0
-            ? undefined : configuredBundler, transport);
+            ? undefined : configuredBundler, transport, fallbackSession);
         cache.set(selected, rpc);
         return rpc;
     };
 }
 export class GaslessRpc {
     transport;
+    fallbackSession;
     chainId;
     rpcOrigin;
     rpcEndpointHash;
@@ -48,8 +73,10 @@ export class GaslessRpc {
     sequence = 0n;
     rpcCall;
     bundlerCall;
-    constructor(chainId, rpcUrl, bundlerUrl, transport = new GaslessHttps()) {
+    pendingReads = new Map();
+    constructor(chainId, rpcUrl, bundlerUrl, transport = new GaslessHttps(), fallbackSession = new GaslessRpcRequestSession()) {
         this.transport = transport;
+        this.fallbackSession = fallbackSession;
         this.chainId = gaslessChain(chainId, "APN_RPC_CONFIG");
         this.deployment = gaslessDeployment(this.chainId);
         const rpc = endpoint(rpcUrl), bundler = endpoint(bundlerUrl ?? this.deployment.publicBundlerUrl);
@@ -112,14 +139,15 @@ export class GaslessRpc {
         const methods = ["eth_chainId", "eth_supportedEntryPoints", "pimlico_getUserOperationGasPrice"];
         const requests = methods.map(method => ({ jsonrpc: "2.0", id: (++this.sequence).toString(), method, params: [] }));
         let response;
+        const session = invocation.getStore() ?? this.fallbackSession;
+        session.reserve();
         try {
             response = await this.transport.request(this.bundlerEndpoint, "POST", canonicalJson(requests), MAX_RESPONSE, "APN_RPC_CONFIG");
         }
         catch {
             throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable.");
         }
-        if (response.status !== 200)
-            gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_HTTP_status");
+        assertHttpStatus(response.status, session);
         const rows = rpcJson(response.body, MAX_RESPONSE);
         if (!Array.isArray(rows) || rows.length !== requests.length)
             gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
@@ -255,16 +283,20 @@ export class GaslessRpc {
         const methods = which === "rpc" ? RPC_METHODS : BUNDLER_METHODS;
         if (!methods.has(method))
             gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_method");
-        const id = (++this.sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
+        const id = (++this.sequence).toString();
+        const session = invocation.getStore() ?? this.fallbackSession;
+        if (which === "rpc")
+            return await this.queueRead({ id, method, params }, session);
+        const body = canonicalJson({ jsonrpc: "2.0", id, method, params });
+        session.reserve();
         let response;
         try {
-            response = await transport.request(which === "rpc" ? this.rpcEndpoint : this.bundlerEndpoint, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG");
+            response = await transport.request(this.bundlerEndpoint, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG");
         }
         catch {
             throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable.");
         }
-        if (response.status !== 200)
-            gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_HTTP_status");
+        assertHttpStatus(response.status, session);
         const record = rpcRecord(rpcJson(response.body, MAX_RESPONSE));
         const result = Object.hasOwn(record, "result"), error = Object.hasOwn(record, "error");
         const keys = result ? ["jsonrpc", "id", "result"] : ["jsonrpc", "id", "error"];
@@ -275,6 +307,69 @@ export class GaslessRpc {
             gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_provider_response");
         return record.result;
     }
+    /** Same-turn read calls share one physical POST; invocation sessions never share a batch. */
+    queueRead(read, session) {
+        return new Promise((resolve, reject) => {
+            const pending = this.pendingReads.get(session);
+            const row = { ...read, resolve, reject };
+            if (pending !== undefined) {
+                pending.push(row);
+                return;
+            }
+            this.pendingReads.set(session, [row]);
+            queueMicrotask(() => { void this.flushReads(session); });
+        });
+    }
+    async flushReads(session) {
+        const reads = this.pendingReads.get(session);
+        if (reads === undefined)
+            return;
+        this.pendingReads.delete(session);
+        try {
+            session.reserve();
+            const requests = reads.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
+            const response = await this.transport.request(this.rpcEndpoint, "POST", canonicalJson(requests.length === 1 ? requests[0] : requests), MAX_RESPONSE, "APN_RPC_CONFIG");
+            assertHttpStatus(response.status, session);
+            if (reads.length === 1) {
+                reads[0].resolve(parseRpcResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), reads[0].id));
+                return;
+            }
+            const rows = rpcJson(response.body, MAX_RESPONSE);
+            if (!Array.isArray(rows) || rows.length !== reads.length)
+                gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
+            const expected = new Set(reads.map(row => row.id)), results = new Map();
+            for (const value of rows) {
+                const record = rpcRecord(value), id = record.id;
+                if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
+                    gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
+                }
+                results.set(id, parseRpcResult(record, id));
+            }
+            for (const read of reads)
+                read.resolve(results.get(read.id));
+        }
+        catch (error) {
+            const safe = error instanceof ApnError ? error : new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable.");
+            for (const read of reads)
+                read.reject(safe);
+        }
+    }
+}
+function parseRpcResult(record, id) {
+    const result = Object.hasOwn(record, "result"), error = Object.hasOwn(record, "error");
+    const keys = result ? ["jsonrpc", "id", "result"] : ["jsonrpc", "id", "error"];
+    if (record.jsonrpc !== "2.0" || record.id !== id || result === error || !exactKeys(record, keys)) {
+        gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
+    }
+    if (error)
+        gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_provider_response");
+    return record.result;
+}
+function assertHttpStatus(status, session) {
+    if (status === 429)
+        session.reject429();
+    if (status !== 200)
+        gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_HTTP_status");
 }
 /** Storage key of a Solidity `mapping(address => uint256)` entry at the given base slot. */
 export function gaslessBalanceSlot(holder, base) {

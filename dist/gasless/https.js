@@ -1,11 +1,56 @@
 import { request as httpsRequest } from "node:https";
 import { performance } from "node:perf_hooks";
+import { setTimeout as pause } from "node:timers/promises";
 import { ApnError } from "../errors.js";
+import { rpcProviderFamily } from "../lifi/rpc-scheduler.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress } from "../network-policy.js";
+/** One queue per provider family, shared by all gasless HTTPS clients in this process. */
+export class GaslessPostPacer {
+    now;
+    wait;
+    families = new Map();
+    constructor(now = Date.now, wait = async (milliseconds, signal) => { await pause(milliseconds, undefined, { signal }); }) {
+        this.now = now;
+        this.wait = wait;
+    }
+    async run(endpoint, signal, sendPost) {
+        const family = rpcProviderFamily(endpoint);
+        const state = this.families.get(family) ?? { tail: Promise.resolve(), lastStart: null };
+        this.families.set(family, state);
+        const previous = state.tail;
+        let release;
+        state.tail = new Promise(resolve => { release = resolve; });
+        try {
+            await abortable(previous, signal);
+            if (signal.aborted)
+                throw signal.reason;
+            if (state.lastStart !== null) {
+                const next = state.lastStart + 750;
+                while (this.now() < next) {
+                    await this.wait(next - this.now(), signal);
+                    if (signal.aborted)
+                        throw signal.reason;
+                }
+            }
+            if (signal.aborted)
+                throw signal.reason;
+            state.lastStart = this.now();
+            return await sendPost();
+        }
+        finally {
+            release();
+        }
+    }
+}
+const sharedPostPacer = new GaslessPostPacer();
 /** Finite public HTTPS transport: DNS pinning, default TLS, no redirects and no retries. */
 export class GaslessHttps {
+    pacer;
     active = 0;
     waiting = [];
+    constructor(pacer = sharedPostPacer) {
+        this.pacer = pacer;
+    }
     async request(endpointInput, method, body, maximumBytes, code) {
         const expires = performance.now() + 15_000;
         const endpoint = parsePublicHttpsUrl(endpointInput, code, "Gasless endpoint", 2048);
@@ -29,7 +74,10 @@ export class GaslessHttps {
             deadline.assert();
             const addresses = await abortable(resolvePublicAddresses(endpoint, code, "Gasless endpoint"), deadline.signal);
             deadline.assert();
-            return await send(endpoint, method, body, addresses, maximumBytes, deadline, code);
+            return method === "POST" ? await this.pacer.run(endpoint.origin, deadline.signal, async () => {
+                deadline.assert();
+                return await send(endpoint, method, body, addresses, maximumBytes, deadline, code);
+            }) : await send(endpoint, method, body, addresses, maximumBytes, deadline, code);
         }
         finally {
             clearTimeout(timer);

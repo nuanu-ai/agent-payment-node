@@ -6,7 +6,7 @@ import { sha256 } from "../../../src/canonical.js";
 import type { GaslessTransport } from "../../../src/gasless/https.js";
 import type { GaslessIntent } from "../../../src/gasless/model.js";
 import { gaslessAsset, gaslessDeployment } from "../../../src/gasless/registry.js";
-import { GaslessRpc, gaslessBalanceSlot } from "../../../src/gasless/rpc.js";
+import { GaslessRpc, gaslessBalanceSlot, withGaslessRpcInvocation } from "../../../src/gasless/rpc.js";
 import { gaslessUserOperationHash } from "../../../src/gasless/wire.js";
 import { gaslessFixture } from "../gasless-helpers.js";
 
@@ -43,9 +43,10 @@ export async function bundledGaslessFixture(root: string) {
     calls.push({ method: Array.isArray(request) ? "read_only_batch" : request.method, bundler, afterApproval: approved });
     if (bundler && calls.filter(c => c.bundler).length > limit) return { status: 429, body: "fixture limit" };
     if (Array.isArray(request)) {
-      assert.equal(bundler, true); assert.equal(request.length, 3);
+      if (bundler) assert.equal(request.length, 3);
+      else assert.ok(request.length >= 2);
       const rows = request.map(row => ({ jsonrpc: "2.0", id: row.id, result: response(row.method, row.params) }));
-      return { status: 200, body: JSON.stringify(batchReply(rows)) };
+      return { status: 200, body: JSON.stringify(bundler ? batchReply(rows) : rows) };
     }
     const result = response(request.method, request.params as readonly unknown[]);
     return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
@@ -101,6 +102,8 @@ export async function bundledGaslessFixture(root: string) {
   s.approval.confirm = async input => { approved = true; return await confirm(input); };
   const core = new ApnCore({ state: s.state, gasless: { ...s.dependencies, rpcFor: () => rpc },
     clock: { now: () => new Date(s.now) }, wait: s.wait });
+  const execute = core.execute.bind(core);
+  core.execute = async request => await withGaslessRpcInvocation(async () => await execute(request));
   return { ...s, core, rpc, calls, estimates, setLimit: (value: number) => { limit = value; },
     setFault: (value: typeof fault) => { fault = value; },
     setBatchReply: (value: typeof batchReply) => { batchReply = value; },
