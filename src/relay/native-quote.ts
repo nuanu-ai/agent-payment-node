@@ -192,6 +192,25 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
   return freeze({ ...projection, quoteDigest: hashObject(projection) });
 }
 
+/** Recheck the saved quote's solver authority and native deposit at the execution boundary. */
+export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuote): Promise<void> {
+  if (quote.schemaVersion !== "apn.relay-native-quote.v1" || quote.routeReference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE ||
+    hashObject((({ quoteDigest: _digest, ...projection }) => projection)(quote)) !== quote.quoteDigest) fail("saved digest");
+  let orderId: string, signer: string;
+  try {
+    orderId = getOrderId(quote.orderData as Parameters<typeof getOrderId>[0], CHAINS);
+    signer = await recoverMessageAddress({ message: { raw: orderId as Hex }, signature: quote.orderSignature as Hex });
+  } catch { return fail("saved order authority"); }
+  if (!same(orderId, quote.orderId) || !same(signer, RELAY_SOLVER) || !same(quote.solver, RELAY_SOLVER)) fail("saved order authority");
+  try {
+    const decoded = decodeFunctionData({ abi: DEPOSIT_NATIVE, data: quote.deposit.data as Hex });
+    if (decoded.functionName !== "depositNative" || !same(decoded.args[0], quote.payer) ||
+      !same(decoded.args[1], orderId) ||
+      !same(encodeFunctionData({ abi: DEPOSIT_NATIVE, functionName: "depositNative", args: [...decoded.args] }), quote.deposit.data) ||
+      quote.deposit.value !== quote.principalAtomic || !same(quote.deposit.to, ETHEREUM_DEPOSITORY)) fail("saved deposit");
+  } catch { fail("saved deposit"); }
+}
+
 /** One public quote POST, no API key or retry. */
 export async function requestRelayNativeQuote(intent: RelayNativeQuoteIntent, fetcher: typeof fetch = fetch,
   now: () => number = () => Math.floor(Date.now() / 1000)): Promise<ValidatedRelayNativeQuote> {

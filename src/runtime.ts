@@ -4,6 +4,7 @@ import type { RelayRetireService } from "./relay/retire.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayObserveService } from "./relay/observe.js";
 import type { RelayEffectJournal } from "./relay/effect-journal.js";
+import type { RelayNativeSourceRuntime } from "./relay/native-source.js";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as waitFor } from "node:timers/promises";
@@ -73,6 +74,7 @@ export interface CoreDependencies {
   readonly relayStatus?: RelayKeylessStatusService;
   readonly relayObserve?: RelayObserveService;
   readonly relayExecute?: RelayExecuteHandler;
+  readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
@@ -130,6 +132,7 @@ export class RuntimeContext {
   readonly relayStatus?: RelayKeylessStatusService;
   readonly relayObserve?: RelayObserveService;
   readonly relayExecute?: RelayExecuteHandler;
+  readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
@@ -188,6 +191,7 @@ export class RuntimeContext {
     if (dependencies.relayStatus !== undefined) this.relayStatus = dependencies.relayStatus;
     if (dependencies.relayObserve !== undefined) this.relayObserve = dependencies.relayObserve;
     if (dependencies.relayExecute !== undefined) this.relayExecute = dependencies.relayExecute;
+    if (dependencies.relayNativeExecute !== undefined) this.relayNativeExecute = dependencies.relayNativeExecute;
     if (dependencies.relayExecuteConfirmation !== undefined) this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
     if (dependencies.stargateNative !== undefined) this.stargateNative = dependencies.stargateNative;
     if (dependencies.stargateToken !== undefined) this.stargateToken = dependencies.stargateToken;
