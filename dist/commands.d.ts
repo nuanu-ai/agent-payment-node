@@ -15,6 +15,14 @@ export type CommandRequest = {
     readonly maxDepositNetworkFeeWei: string;
     readonly idempotencyKey: string;
 } | {
+    readonly command: "relay.native.prepare";
+    readonly profile: string;
+    readonly recipient: string;
+    readonly amountAtomic: string;
+    readonly minOutputAtomic: string;
+    readonly maxDepositNetworkFeeWei: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "relay.preflight";
     readonly profile: string;
     readonly operationId: string;

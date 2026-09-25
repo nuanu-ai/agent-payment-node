@@ -1,6 +1,7 @@
 /** An immutable Relay quote projection. Its transactions are unsigned and have no execution path. */
 import { hashObject } from "./canonical.js";
 import { relayStatusLocator } from "./relay/quote.js";
+import { RELAY_BNB_POLYGON_ROUTE_REFERENCE } from "./relay/native-quote.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { z } from "zod";
@@ -17,13 +18,14 @@ const body = z.strictObject({
     operationId: hash,
     idempotencyHash: hash,
     requestHash: hash,
-    sourceChainId: z.literal(1),
-    destinationChainId: z.literal(56),
+    sourceChainId: z.union([z.literal(1), z.literal(56)]),
+    destinationChainId: z.union([z.literal(56), z.literal(137)]),
     sourceAccount: address,
     recipient: address,
     quoteDigest: hash,
     statusLocator: z.strictObject({ requestId: z.string(), endpoint: z.string() }).optional(),
     quote: z.custom((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
+    nativeQuote: z.custom((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
     policyDigest: hash.optional(),
     policyRevision: z.number().int().positive().optional(),
     approvalNetworkFeeCeilingWei: positiveAtomic.optional(),
@@ -48,8 +50,28 @@ export function validateRelayUnsignedOperation(value) {
         corrupt();
     if ([operation.quote, operation.policyDigest, operation.policyRevision,
         operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value !== undefined) &&
-        [operation.quote, operation.policyDigest, operation.policyRevision,
-            operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value === undefined))
+        operation.nativeQuote === undefined && [operation.quote, operation.policyDigest, operation.policyRevision,
+        operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value === undefined))
+        corrupt();
+    if (operation.nativeQuote !== undefined) {
+        const quote = operation.nativeQuote;
+        if (operation.quote !== undefined || operation.sourceChainId !== 56 || operation.destinationChainId !== 137 ||
+            quote.routeReference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE || quote.schemaVersion !== "apn.relay-native-quote.v1" ||
+            operation.approvalNetworkFeeCeilingWei !== undefined || operation.policyDigest === undefined ||
+            operation.policyRevision === undefined || operation.depositNetworkFeeCeilingWei === undefined ||
+            quote.payer !== operation.sourceAccount.toLowerCase() || quote.recipient !== operation.recipient.toLowerCase() ||
+            quote.principalAtomic !== operation.amountAtomic || quote.minimumOutputWei !== operation.minOutputAtomic ||
+            new Date(quote.deadline * 1000).toISOString() !== operation.deadline ||
+            quote.deposit.maximumNetworkFeeWei !== operation.depositNetworkFeeCeilingWei ||
+            quote.quoteDigest !== operation.quoteDigest ||
+            hashObject((({ quoteDigest: _digest, ...projection }) => projection)(quote)) !== quote.quoteDigest ||
+            (quote.statusLocator === undefined) !== (operation.statusLocator === undefined) ||
+            (operation.statusLocator !== undefined && (quote.statusLocator?.requestId !== operation.statusLocator.requestId ||
+                quote.statusLocator?.endpoint !== operation.statusLocator.endpoint ||
+                relayStatusLocator(operation.statusLocator.requestId, operation.statusLocator.endpoint).endpoint !== operation.statusLocator.endpoint)))
+            corrupt();
+    }
+    else if (operation.sourceChainId !== 1 || operation.destinationChainId !== 56)
         corrupt();
     if (operation.quote !== undefined) {
         try {
@@ -73,7 +95,7 @@ export function validateRelayUnsignedOperation(value) {
             corrupt();
         }
     }
-    else if (operation.statusLocator !== undefined)
+    else if (operation.statusLocator !== undefined && operation.nativeQuote === undefined)
         corrupt();
     return operation;
 }
