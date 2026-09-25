@@ -115,9 +115,10 @@ export declare class RpcReadSession {
     /** Reserve a physical POST for an effect before signing. Reads and pool probes share this limit. */
     reserveExternalAttempt(): void;
     externalAttempt<T>(origin: string, task: () => Promise<T>): Promise<T>;
-    submit(origin: string, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown>;
     recordPhysicalAttempt(endpointRole: "primary" | "receipt" | "archive", methods: readonly string[]): void;
     wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt?: EvmRpcCall): EvmRpcCall;
+    /** One raw send through the same persisted provider-family pacing and cooldown as reads. */
+    submit(origin: string, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown>;
     read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall, decoder?: RpcDecoder): Promise<unknown>;
     /** Strict whole-batch read. Cached exact immutable/snapshot keys are removed before the one HTTP request. */
     readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{
