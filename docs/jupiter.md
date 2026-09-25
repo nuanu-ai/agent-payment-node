@@ -18,10 +18,25 @@ transaction envelope but does not claim a verified JUP6 instruction and
 account ABI. APN therefore installs no signer, sender, or observer. `status`
 only reads an existing guarded swap operation from local durable state.
 
-The pinned official-source review is bundled at
-`data/swap/jupiter-solana-abi-blocker-2026-09-17.json`. It records the verified
-exact-input instruction discriminators and fixed accounts, plus the unresolved
-route-dependent remaining-account, build-fixture, and deployed-artifact gaps.
+The official-source review is bundled at
+`data/swap/jupiter-solana-abi-blocker-2026-09-17.json` (reviewed 2026-09-26).
+Jupiter's [Common Errors documentation](https://developers.jup.ag/docs/swap/v1/common-errors)
+links to the [JUP6 program page and displayed IDL on Solscan](https://solscan.io/account/JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4#programIdl).
+The review recorded the IDL version slot as `449568452`; the same program page
+reported deployed slot `449280566`. The displayed IDL defines `route_v2`
+(`bb64facc31c4af14`), its typed argument order, ten fixed account roles, and
+`RoutePlanStepV2` with the `Quantum { side: Side }` swap variant. This makes the
+outer instruction syntactically decodable from the current displayed IDL.
+
+That decode does not bind the quoted `routePlan.swapInfo.ammKey`: each
+`RoutePlanStepV2` carries the swap enum, `bps`, and input/output indices. The
+IDL also does not assign Quantum pool, vault, oracle, or token accounts to the
+route-dependent remaining-account positions. Solscan's page reports the
+program executable but not verified; neither it nor the reviewed Jupiter
+sources provide a deployed executable digest or source/build attestation tied
+to this IDL. The exact `/build` fixture gap is closed by the historical fixture
+below, but these account-binding and executable-provenance gaps remain. APN's
+guard therefore stays `signable: false`.
 
 The source-only `decodeRawBuildResponse` codec accepts the raw instruction
 response documented for `GET /swap/v2/build`, including the optional OpenAPI
