@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { createKeyPairSignerFromPrivateKeyBytes, getBase64EncodedWireTransaction, getCompiledTransactionMessageDecoder, getSignatureFromTransaction, getTransactionDecoder, signTransaction } from "@solana/kit";
@@ -7,7 +7,8 @@ import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import { SolanaRpc, solanaAddress } from "../../src/solana/rpc.js";
 import { SolanaAwalAdapter, awalAmount } from "../../src/solana/awal-adapter.js";
-import { chainAsset, chainDecimal } from "../../src/chain-policy.js";
+import { chainAsset, chainDecimal, sealChainPolicy } from "../../src/chain-policy.js";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { sealChainAccount } from "../../src/chain-account-store.js";
 import { inspectSolana } from "../../src/solana/evidence.js";
 import { solanaMessage } from "../../src/solana/message.js";
@@ -15,8 +16,37 @@ import { temporaryState } from "./helpers.js";
 import { OperationService } from "../../src/operation-service.js";
 import { transitionRail } from "../../src/rail-operation-model.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { DirectAllowlistGate } from "../../src/direct-allowlist-gate.js";
+import { railAllowlistSubject } from "../../src/rail-direct-allowlist.js";
+import { freezeRelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
 import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
+
+async function writeDurableSolanaClaim(root: string, s: Awaited<ReturnType<typeof solanaFixture>>,
+  input: { readonly profile: string; readonly amount: string; readonly maximumFee: string; readonly idempotencyKey: string },
+  options: { readonly account?: typeof s.account; readonly policyHash?: string;
+    readonly allowlist?: Awaited<ReturnType<DirectAllowlistGate["admit"]>> } = {}) {
+  const account = options.account ?? s.account;
+  const asset = chainAsset("solana", "sol");
+  const amountAtomic = chainDecimal(input.amount, asset.decimals);
+  const maximumFeeAtomic = chainDecimal(input.maximumFee, 9);
+  const state = s.core.context.state;
+  const operationId = state.operationId(input.profile, input.idempotencyKey);
+  const idempotencyHash = state.idempotencyHash(input.idempotencyKey);
+  const policyHash = options.policyHash ?? (await s.core.rails.policies.requiredPolicy(account, "sol")).policyHash;
+  const allowlist = options.allowlist ?? await new DirectAllowlistGate({ state: { root }, clock: { now: () => s.now } })
+    .admit(railAllowlistSubject({ profile: input.profile, operationId, account, prepared: { asset, amountAtomic } }));
+  const body = { schemaVersion: "apn.rail-prepare-claim.v1", profileHash: account.profileHash, operationId,
+    idempotencyHash, inputHash: hashObject({ kind: "rail_transfer", profile: input.profile, rail: "solana", asset,
+      recipient: SOL_RECIPIENT, amountAtomic, maximumFeeAtomic }),
+    requestHash: hashObject({ kind: "rail_transfer", account, asset, recipient: SOL_RECIPIENT, amountAtomic, maximumFeeAtomic }),
+    accountIdentityHash: account.identityHash, policyHash, allowlist };
+  const directory = join(root, "rail-prepare-claims");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const contents = `${canonicalJson({ ...body, integrityHash: hashObject(body) })}\n`;
+  await writeFile(join(directory, `${idempotencyHash}.json`), contents, { mode: 0o600 });
+  return { directory, idempotencyHash, operationId, contents, allowlist, policyHash };
+}
 
 test("Solana CLI and MCP use the same explicit profile/asset/amount binding", () => {
   const input = { profile: "solana-test", asset: "usdc", to: SOL_RECIPIENT, amount: "1.25", max_fee_sol: "0.003", idempotency_key: "solana-parity-0001" };
@@ -59,6 +89,150 @@ test("local Solana public identity and unsigned prepare recover across restart w
   assert.equal(first.rpc.submissions.length, 0);
   assert.equal(first.rpc.simulateCalls, 0);
   assert.equal(await restarted.storage.effect(restarted.account, id, (await restarted.core.rails.records.findOperation(id))!.fingerprint), null);
+});
+
+test("duplicate local SOL prepare shares one claim and leaves money-operation locks free during RPC", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const input = { profile: s.account.profile, rail: "solana", asset: "sol", recipient: SOL_RECIPIENT,
+    amount: "0.000001", maximumFee: "0.003", idempotencyKey: "solana-claim-race-0001" } as const;
+  const operationId = s.core.context.state.operationId(input.profile, input.idempotencyKey);
+  const idempotencyHash = s.core.context.state.idempotencyHash(input.idempotencyKey);
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const prepare = s.adapter.prepare.bind(s.adapter);
+  let calls = 0;
+  Object.assign(s.adapter, { prepare: async (...args: Parameters<typeof prepare>) => {
+    calls++; entered(); await blocked; return await prepare(...args);
+  } });
+  const first = s.core.rails.prepare(input);
+  await started;
+  assert.deepEqual(await readdir(join(temporary.root, "rail-prepare-claims")), [`${idempotencyHash}.json`]);
+  await Promise.race([
+    s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${operationId}`,
+      `operation:idempotency:${idempotencyHash}`], async () => true),
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("prepare held money-operation locks during RPC")), 2000)),
+  ]);
+  const second = s.core.rails.prepare(input);
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.deepEqual(a, b);
+  assert.equal(calls, 1);
+  assert.equal((await s.core.rails.records.findOperation(operationId))?.state, "awaiting_approval");
+  assert.deepEqual(await readdir(join(temporary.root, "rail-prepare-claims")), []);
+  assert.equal(s.rpc.submissions.length, 0);
+});
+
+test("local SOL prepare discards an RPC result after policy drift and cleans the claim for retry", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const input = { profile: s.account.profile, rail: "solana", asset: "sol", recipient: SOL_RECIPIENT,
+    amount: "0.000001", maximumFee: "0.003", idempotencyKey: "solana-claim-drift-0001" } as const;
+  const policy = await s.core.rails.policies.requiredPolicy(s.account, "sol");
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const prepare = s.adapter.prepare.bind(s.adapter);
+  Object.assign(s.adapter, { prepare: async (...args: Parameters<typeof prepare>) => {
+    entered(); await blocked; return await prepare(...args);
+  } });
+  const first = s.core.rails.prepare(input);
+  await started;
+  const { policyHash: _old, ...body } = policy;
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
+    await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
+  });
+  release();
+  await assert.rejects(first, { code: "APN_PROFILE_DRIFT" });
+  assert.equal(await s.core.rails.records.findOperation(s.core.context.state.operationId(input.profile, input.idempotencyKey)), null);
+  assert.deepEqual(await readdir(join(temporary.root, "rail-prepare-claims")), []);
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => { await s.core.rails.policies.policies.write(policy); });
+  assert.equal((await s.core.rails.prepare(input) as { state: string }).state, "awaiting_approval");
+});
+
+test("local SOL prepare refuses a changed account during RPC without committing stale bytes", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const input = { profile: s.account.profile, rail: "solana", asset: "sol", recipient: SOL_RECIPIENT,
+    amount: "0.000001", maximumFee: "0.003", idempotencyKey: "solana-claim-account-drift-0001" } as const;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const prepare = s.adapter.prepare.bind(s.adapter);
+  Object.assign(s.adapter, { prepare: async (...args: Parameters<typeof prepare>) => {
+    entered(); await blocked; return await prepare(...args);
+  } });
+  const first = s.core.rails.prepare(input);
+  await started;
+  const accountPath = join(temporary.root, "chain-accounts", "solana", `${s.account.profileHash}.json`);
+  const { identityHash: _old, ...accountBody } = s.account;
+  const changed = sealChainAccount({ ...accountBody, createdAt: new Date(Date.parse(s.account.createdAt) + 1000).toISOString() });
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
+    await writeFile(accountPath, `${canonicalJson(changed)}\n`, { mode: 0o600 });
+  });
+  release();
+  await assert.rejects(first);
+  assert.equal(await s.core.rails.records.findOperation(s.core.context.state.operationId(input.profile, input.idempotencyKey)), null);
+  assert.deepEqual(await readdir(join(temporary.root, "rail-prepare-claims")), []);
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
+    await writeFile(accountPath, `${canonicalJson(s.account)}\n`, { mode: 0o600 });
+  });
+  assert.equal((await s.core.rails.prepare(input) as { state: string }).state, "awaiting_approval");
+});
+
+test("local SOL retry recovers a durable claim left by an interrupted prepare", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const input = { profile: s.account.profile, rail: "solana", asset: "sol", recipient: SOL_RECIPIENT,
+    amount: "0.000001", maximumFee: "0.003", idempotencyKey: "solana-claim-crash-0001" } as const;
+  const { directory, idempotencyHash, operationId } = await writeDurableSolanaClaim(temporary.root, s, input);
+  const restarted = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
+  await assert.rejects(restarted.core.rails.prepare({ ...input, amount: "0.000002" }), { code: "APN_IDEMPOTENCY_CONFLICT" });
+  assert.deepEqual(await readdir(directory), [`${idempotencyHash}.json`]);
+  const result = await restarted.core.rails.prepare(input) as { state: string; operation_id: string };
+  assert.equal(result.state, "awaiting_approval");
+  assert.equal(result.operation_id, operationId);
+  assert.deepEqual(await readdir(directory), []);
+  assert.equal(s.rpc.submissions.length, 0);
+});
+
+test("same-key replay preserves a different profile's durable Solana claim", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const input = { profile: s.account.profile, rail: "solana", asset: "sol", recipient: SOL_RECIPIENT,
+    amount: "0.000001", maximumFee: "0.003", idempotencyKey: "solana-claim-other-profile-0001" } as const;
+  const prepared = await s.core.rails.prepare(input);
+  const other = await s.storage.ensureLocal({ profile: "solana-other", rail: "solana", create: async () => {
+    const seed = Buffer.alloc(32, 48);
+    const signer = await createKeyPairSignerFromPrivateKeyBytes(seed);
+    return { seed, address: signer.address };
+  } });
+  const stored = (await s.core.rails.records.findOperation(s.core.context.state.operationId(input.profile, input.idempotencyKey)))!;
+  const claim = await writeDurableSolanaClaim(temporary.root, s, { ...input, profile: other.profile },
+    { account: other, policyHash: stored.policyHash, allowlist: stored.allowlist! });
+  assert.deepEqual(await s.core.rails.prepare(input), prepared);
+  assert.equal(await readFile(join(claim.directory, `${claim.idempotencyHash}.json`), "utf8"), claim.contents);
+  assert.equal(s.rpc.submissions.length, 0);
+});
+
+test("crashed Solana claim is removed when another operation kind durably takes the key", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const input = { profile: s.account.profile, rail: "solana", asset: "sol", recipient: SOL_RECIPIENT,
+    amount: "0.000001", maximumFee: "0.003", idempotencyKey: "solana-claim-superseded-0001" } as const;
+  const claim = await writeDurableSolanaClaim(temporary.root, s, input);
+  const relay = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned",
+    state: "prepared", terminal: false, profileHash: s.account.profileHash, operationId: claim.operationId,
+    idempotencyHash: claim.idempotencyHash, requestHash: "1".repeat(64), sourceChainId: 1, destinationChainId: 56,
+    sourceAccount: "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14", recipient: "0xf41170df51aab52aaa04fbc3ff325cf051644aca",
+    quoteDigest: "2".repeat(64), amountAtomic: "1000000000000000", minOutputAtomic: "100000000000000",
+    createdAt: s.now.toISOString(), deadline: new Date(s.now.getTime() + 300_000).toISOString() });
+  await new OperationService(s.core.context.state).persistRelayUnsigned(relay);
+  const restarted = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
+  const before = s.rpc.calls.length;
+  await assert.rejects(restarted.core.rails.prepare(input), { code: "APN_IDEMPOTENCY_CONFLICT" });
+  assert.deepEqual(await readdir(claim.directory), []);
+  assert.equal((await new OperationService(restarted.core.context.state).required(relay.operationId)).kind, "relay_unsigned");
+  assert.equal(s.rpc.calls.length, before);
+  assert.equal(s.rpc.submissions.length, 0);
 });
 
 for (const asset of ["sol", "usdc"] as const) test(`local ${asset} integrates encrypted custody, human policy, exact wire effect and finalized receipt`, async (t) => {
