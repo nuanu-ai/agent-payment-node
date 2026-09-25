@@ -1,7 +1,19 @@
 import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
+import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc } from "../rpc.js";
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+/** The shared provider lock stays held until 750 ms after a POST settles.
+ * This covers the delay between the scheduler's persisted reservation and the
+ * transport's actual POST start, including DNS and filesystem latency. */
+async function holdProviderAfterPost(post) {
+    try {
+        return await post();
+    }
+    finally {
+        await new Promise(resolve => setTimeout(resolve, 750));
+    }
+}
 function block(value, tag) {
     if (value === null)
         return null;
@@ -18,10 +30,22 @@ function status(value) {
     return code === 1n ? "success" : "reverted";
 }
 export class RelayEthereumFinalityRpc {
+    url;
+    guardFactory;
     rpc;
-    constructor(url, rpc) { this.rpc = rpc ?? new HttpsBaseRpc(url); }
+    constructor(url, state, rpc, guardFactory = () => new EvmDirectRpcGuard(state, 3)) {
+        this.url = url;
+        this.guardFactory = guardFactory;
+        this.rpc = rpc ?? new HttpsBaseRpc(url);
+    }
+    async read(guard, calls) {
+        // One batch is one POST. The shared provider-family scheduler persists starts
+        // across CLI processes and refuses cooldowns/lock contention before transport.
+        return guard.post(this.url, () => holdProviderAfterPost(() => this.rpc.batchCall(calls)));
+    }
     async finalizedDeposit(hash) {
-        const [chain, rawTx, rawReceipt] = await this.rpc.batchCall([
+        const guard = this.guardFactory();
+        const [chain, rawTx, rawReceipt] = await this.read(guard, [
             { method: "eth_chainId", params: [] },
             { method: "eth_getTransactionByHash", params: [hash] },
             { method: "eth_getTransactionReceipt", params: [hash] },
@@ -33,7 +57,7 @@ export class RelayEthereumFinalityRpc {
         const tx = evmRpcRecord(rawTx), receipt = evmRpcRecord(rawReceipt);
         const number = evmRpcQuantity(receipt.blockNumber);
         const inclusion = `0x${number.toString(16)}`;
-        const [rawBlock, rawFinalized] = await this.rpc.batchCall([
+        const [rawBlock, rawFinalized] = await this.read(guard, [
             { method: "eth_getBlockByNumber", params: [inclusion, false] },
             { method: "eth_getBlockByNumber", params: ["finalized", false] },
         ]);
@@ -42,7 +66,7 @@ export class RelayEthereumFinalityRpc {
         const included = evmRpcBlockResult(rawBlock, inclusion), finalized = evmRpcBlockResult(rawFinalized, "finalized");
         if (BigInt(finalized.number) < number)
             return null;
-        const [rawIncludedAgain, rawFinalizedAgain] = await this.rpc.batchCall([
+        const [rawIncludedAgain, rawFinalizedAgain] = await this.read(guard, [
             { method: "eth_getBlockByNumber", params: [included.tag, false] },
             { method: "eth_getBlockByNumber", params: [finalized.tag, false] },
         ]);
@@ -61,27 +85,17 @@ export class RelayEthereumFinalityRpc {
     }
 }
 export class RelayBnbReadOnlyRpc {
+    url;
     rpc;
-    posts = 0;
-    lastStart = 0;
-    pending = Promise.resolve();
-    constructor(url, rpc) { this.rpc = rpc ?? new HttpsBaseRpc(url); }
-    get physicalPosts() { return this.posts; }
-    async read(method, params) {
-        const task = this.pending.then(async () => this.readSerial(method, params));
-        this.pending = task.catch(() => undefined);
-        return task;
+    guard;
+    constructor(url, state, rpc, guard = new EvmDirectRpcGuard(state, 8)) {
+        this.url = url;
+        this.rpc = rpc ?? new HttpsBaseRpc(url);
+        this.guard = guard;
     }
-    async readSerial(method, params) {
-        if (this.posts >= 8)
-            throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Relay observe exhausted eight BNB RPC POSTs.");
-        const wait = Math.max(0, this.lastStart + 500 - Date.now());
-        if (wait > 0)
-            await new Promise(resolve => setTimeout(resolve, wait));
-        this.lastStart = Date.now();
-        this.posts++;
-        // HttpsBaseRpc issues one POST with no retry. HTTP 429 fails this invocation.
-        const [value] = await this.rpc.batchCall([{ method, params }]);
+    get physicalPosts() { return this.guard.physicalRequests; }
+    async read(method, params) {
+        const [value] = await this.guard.post(this.url, () => holdProviderAfterPost(() => this.rpc.batchCall([{ method, params }])));
         return value;
     }
     async chainId() { return Number(evmRpcQuantity(await this.read("eth_chainId", []))); }
