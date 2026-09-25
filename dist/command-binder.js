@@ -70,7 +70,7 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path.join(" ") === "relay observe")
         return { request: { command: "relay.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), bnbRpcUrl: value(options, "--bnb-rpc-url") };
     if (parsed.command.path.join(" ") === "relay base observe")
-        return { request: { command: "relay.base.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+        return { request: { command: "relay.base.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), ...(options["--ethereum-rpc-url"] === undefined ? {} : { ethereumRpcUrl: options["--ethereum-rpc-url"] }) };
     if (parsed.command.path[0] === "stargate") {
         switch (parsed.command.path.join(" ")) {
             case "stargate native prepare": return { request: { command: "stargate.native.prepare", profile: value(options, "--profile"),

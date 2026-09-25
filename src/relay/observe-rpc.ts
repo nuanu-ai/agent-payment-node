@@ -1,5 +1,5 @@
 /** Bounded, keyless JSON-RPC adapters. Every batchCall here is one physical POST. */
-import type { Hex } from "viem";
+import { keccak256, type Hex } from "viem";
 import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
@@ -90,9 +90,11 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
   }
   get physicalPosts(): number { return this.guard.physicalRequests; }
   private async read(method: ReadOnlyRpcBatchCall["method"], params: readonly unknown[]): Promise<unknown> {
-    const [value] = await this.guard.post(this.url,
-      () => holdProviderAfterPost(() => this.rpc.batchCall([{ method, params }])));
+    const [value] = await this.readBatch([{ method, params }]);
     return value;
+  }
+  private async readBatch(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
+    return this.guard.post(this.url, () => holdProviderAfterPost(() => this.rpc.batchCall(calls)));
   }
   async chainId(): Promise<number> { return Number(evmRpcQuantity(await this.read("eth_chainId", []))); }
   async transaction(hash: string): Promise<RelayBnbTransaction | null> {
@@ -108,19 +110,51 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     const value = await this.read("eth_getTransactionReceipt", [hash]);
     if (value === null) return null;
     const receipt = evmRpcRecord(value);
-    return { transactionHash: evmRpcHex(receipt.transactionHash, 32), status: status(receipt.status),
-      blockNumber: evmRpcQuantity(receipt.blockNumber), blockHash: evmRpcHex(receipt.blockHash, 32) };
+    const transactionHash = evmRpcHex(receipt.transactionHash, 32), blockHash = evmRpcHex(receipt.blockHash, 32);
+    const blockNumber = evmRpcQuantity(receipt.blockNumber);
+    if ((this.expectedChainId === 8453 && !Array.isArray(receipt.logs)) ||
+      (Array.isArray(receipt.logs) && receipt.logs.length > 256))
+      throw new ApnError("APN_RPC_PROTOCOL", "Relay receipt logs are invalid.");
+    const logs = (Array.isArray(receipt.logs) ? receipt.logs : []).map(value => {
+      const log = evmRpcRecord(value);
+      if (!Array.isArray(log.topics) || log.topics.length > 4 || log.removed !== false ||
+        !same(evmRpcHex(log.transactionHash, 32), transactionHash) ||
+        !same(evmRpcHex(log.blockHash, 32), blockHash) || evmRpcQuantity(log.blockNumber) !== blockNumber)
+        throw new ApnError("APN_RPC_PROTOCOL", "Relay receipt log identity is invalid.");
+      return { address: evmRpcAddress(log.address), topics: log.topics.map(topic => evmRpcHex(topic, 32)),
+        data: evmRpcHex(log.data) };
+    });
+    return { transactionHash, status: status(receipt.status), blockNumber, blockHash, logs };
   }
   async block(number: bigint): Promise<RelayBnbBlock | null> {
     const tag = `0x${number.toString(16)}`;
     return block(await this.read("eth_getBlockByNumber", [tag, false]), tag);
   }
   async finalityCheckpoint(): Promise<RelayBnbBlock | null> {
-    if (this.expectedChainId === 56) return block(await this.read("eth_getBlockByNumber", ["safe", false]), "safe");
+    if (this.expectedChainId === 56 || this.expectedChainId === 8453)
+      return block(await this.read("eth_getBlockByNumber", ["safe", false]), "safe");
     // A 15-block canonical checkpoint is used on native Relay destination lanes.
     const latest = block(await this.read("eth_getBlockByNumber", ["latest", false]), "latest");
     if (latest === null || latest.number < 15n) return null;
     return this.block(latest.number - 15n);
   }
   async nativeTrace(): Promise<null> { return null; }
+  async routerCodeHash(address: string, blockNumber: bigint): Promise<string> {
+    const code = evmRpcHex(await this.read("eth_getCode", [address, `0x${blockNumber.toString(16)}`]));
+    return keccak256(code);
+  }
+  async adjacentBalances(address: string, blockNumber: bigint, expectedBlockHash: string): Promise<readonly [bigint, bigint]> {
+    if (blockNumber === 0n) throw new ApnError("APN_RPC_PROTOCOL", "Relay adjacent balance requires a preceding block.");
+    const previousTag = `0x${(blockNumber - 1n).toString(16)}`, inclusionTag = `0x${blockNumber.toString(16)}`;
+    const [before, after, rawPrevious, rawIncluded] = await this.readBatch([
+      { method: "eth_getBalance", params: [address, previousTag] },
+      { method: "eth_getBalance", params: [address, inclusionTag] },
+      { method: "eth_getBlockByNumber", params: [previousTag, false] },
+      { method: "eth_getBlockByNumber", params: [inclusionTag, false] },
+    ]);
+    const previous = evmRpcBlockResult(rawPrevious, previousTag), included = evmRpcBlockResult(rawIncluded, inclusionTag);
+    if (!same(included.hash, expectedBlockHash) || !same(evmRpcHex(included.raw.parentHash, 32), previous.hash))
+      throw new ApnError("APN_RPC_PROTOCOL", "Relay adjacent balance blocks are not one canonical pair.");
+    return [evmRpcQuantity(before), evmRpcQuantity(after)];
+  }
 }

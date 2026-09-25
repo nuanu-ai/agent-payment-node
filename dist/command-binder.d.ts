@@ -4,6 +4,7 @@ export interface BoundCommand {
     readonly request: CommandRequest;
     readonly rpcUrl?: string;
     readonly bnbRpcUrl?: string;
+    readonly ethereumRpcUrl?: string;
 }
 export declare function bindArgv(argv: readonly string[]): BoundCommand;
 export declare function bindMcpInput(command: CommandDefinition, input: unknown): BoundCommand;
