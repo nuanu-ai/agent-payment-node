@@ -497,9 +497,9 @@ export declare const stateSchema: z.ZodEnum<{
     failed_before_effect: "failed_before_effect";
     failed_confirmed_revert: "failed_confirmed_revert";
     awaiting_approval: "awaiting_approval";
+    completed: "completed";
     submitted_pending: "submitted_pending";
     abandoned_unknown: "abandoned_unknown";
-    completed: "completed";
     execution_pending: "execution_pending";
     included_success: "included_success";
     included_revert: "included_revert";
@@ -568,9 +568,9 @@ export declare const transitionSchema: z.ZodObject<{
         failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
+        completed: "completed";
         submitted_pending: "submitted_pending";
         abandoned_unknown: "abandoned_unknown";
-        completed: "completed";
         execution_pending: "execution_pending";
         included_success: "included_success";
         included_revert: "included_revert";
@@ -986,9 +986,9 @@ export declare const operationSchema: z.ZodObject<{
             failed_before_effect: "failed_before_effect";
             failed_confirmed_revert: "failed_confirmed_revert";
             awaiting_approval: "awaiting_approval";
+            completed: "completed";
             submitted_pending: "submitted_pending";
             abandoned_unknown: "abandoned_unknown";
-            completed: "completed";
             execution_pending: "execution_pending";
             included_success: "included_success";
             included_revert: "included_revert";
@@ -1301,9 +1301,9 @@ export declare const operationSchema: z.ZodObject<{
         failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
+        completed: "completed";
         submitted_pending: "submitted_pending";
         abandoned_unknown: "abandoned_unknown";
-        completed: "completed";
         execution_pending: "execution_pending";
         included_success: "included_success";
         included_revert: "included_revert";

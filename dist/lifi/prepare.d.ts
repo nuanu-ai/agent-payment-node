@@ -15,6 +15,7 @@ export interface BridgePreparationOptions {
     readonly rpcFor: BridgeRpcFactory;
     readonly now: () => number;
     readonly providerScheduler?: RpcProviderScheduler;
+    readonly lineaArchiveDeploymentScalarCode?: boolean;
 }
 export declare class BridgePreparation {
     private readonly o;

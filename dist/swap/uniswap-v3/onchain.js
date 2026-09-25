@@ -2,6 +2,7 @@ import { decodeFunctionResult, encodeFunctionData, parseAbi } from "viem";
 import { ApnError } from "../../errors.js";
 import { evmRpcHex } from "../../evm-rpc-codec.js";
 import { UNISWAP_V3_QUOTER_V2, UNISWAP_WETH9 } from "./pins.js";
+import { nativeReads } from "./native-rpc.js";
 const POOL_ABI = parseAbi([
     "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
     "function liquidity() view returns (uint128)",
@@ -13,10 +14,13 @@ const Q192 = 1n << 192n, FEE_DENOMINATOR = 1000000n;
 export async function readUniswapV3Quote(call, pair, amountIn, tag) {
     if (amountIn <= 0n)
         invalid("Uniswap input amount must be positive.");
-    const slot0 = decodeFunctionResult({ abi: POOL_ABI, functionName: "slot0",
-        data: evmRpcHex(await call("eth_call", [{ to: pair.pool, data: encodeFunctionData({ abi: POOL_ABI, functionName: "slot0" }) }, tag])) });
+    const [rawSlot, rawLiquidity] = await nativeReads(call, [
+        { method: "eth_call", params: [{ to: pair.pool, data: encodeFunctionData({ abi: POOL_ABI, functionName: "slot0" }) }, tag] },
+        { method: "eth_call", params: [{ to: pair.pool, data: encodeFunctionData({ abi: POOL_ABI, functionName: "liquidity" }) }, tag] },
+    ]);
+    const slot0 = decodeFunctionResult({ abi: POOL_ABI, functionName: "slot0", data: evmRpcHex(rawSlot) });
     const liquidity = decodeFunctionResult({ abi: POOL_ABI, functionName: "liquidity",
-        data: evmRpcHex(await call("eth_call", [{ to: pair.pool, data: encodeFunctionData({ abi: POOL_ABI, functionName: "liquidity" }) }, tag])) });
+        data: evmRpcHex(rawLiquidity) });
     const [sqrtPriceX96, tick, , , , , unlocked] = slot0;
     if (!unlocked || sqrtPriceX96 === 0n || liquidity === 0n)
         blocked("The pinned pool is locked, uninitialized, or has no active liquidity.", "uniswap_pool_state");
@@ -24,7 +28,7 @@ export async function readUniswapV3Quote(call, pair, amountIn, tag) {
                 tokenOut: pair.outputToken, amountIn, fee: pair.fee, sqrtPriceLimitX96: 0n }] });
     let raw;
     try {
-        raw = evmRpcHex(await call("eth_call", [{ to: UNISWAP_V3_QUOTER_V2, data: quoteData }, tag]));
+        raw = evmRpcHex((await nativeReads(call, [{ method: "eth_call", params: [{ to: UNISWAP_V3_QUOTER_V2, data: quoteData }, tag] }]))[0]);
     }
     catch (error) {
         if (error instanceof ApnError && error.code === "APN_RPC_CONFIG")

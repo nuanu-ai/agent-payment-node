@@ -1,5 +1,6 @@
 import { type Hex } from "viem";
 import type { EvmRpcCall } from "../../evm-ports.js";
+import { type NativeBatchCall } from "./native-rpc.js";
 import { type SwapMechanismPin } from "../pin.js";
 import { type SwapProtocolRegistry } from "../protocol-registry.js";
 /**
@@ -44,6 +45,15 @@ export declare function uniswapV3Pair(outputToken: string): UniswapV3PairPin;
 export type UniswapV3PinVerifier = (call: EvmRpcCall, tag: Hex) => Promise<readonly UniswapV3CodePin[]>;
 /** Production verifier: every pinned runtime code hash, the USDC proxy implementation, and USDT not deprecated. */
 export declare const verifyUniswapV3CodePins: UniswapV3PinVerifier;
+/** Three-item provider batches, with proxy implementation resolved only after the storage witness is checked. */
+export declare function verifyNativeCodePins(call: NativeBatchCall, tag: Hex, pins: readonly UniswapV3CodePin[], implementation: {
+    readonly proxy: string;
+    readonly slot: Hex;
+    readonly pin: UniswapV3CodePin;
+}, deprecatedCall: {
+    readonly to: string;
+    readonly data: Hex;
+}): Promise<readonly UniswapV3CodePin[]>;
 export declare function verifyUsdtNotDeprecated(call: EvmRpcCall, tag: Hex): Promise<void>;
 export declare function verifyCodePins(call: EvmRpcCall, tag: Hex, pins: readonly UniswapV3CodePin[], implementation: {
     readonly proxy: string;

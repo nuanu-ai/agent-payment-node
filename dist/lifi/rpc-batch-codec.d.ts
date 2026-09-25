@@ -20,7 +20,7 @@ export declare function bridgeFeeQuote(chainId: BridgeChainId, origin: string, b
     rpcOrigin: string;
     observedAt: string;
     feeModel: "arbitrum-inclusive";
-    chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+    chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
 } | {
     l1DataFeeUpperWei: string;
     operatorFeeUpperWei: string;
@@ -32,7 +32,7 @@ export declare function bridgeFeeQuote(chainId: BridgeChainId, origin: string, b
     rpcOrigin: string;
     observedAt: string;
     feeModel: "monad-gas-limit";
-    chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+    chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
 } | {
     l1DataFeeUpperWei: string;
     operatorFeeUpperWei: string;
@@ -43,5 +43,5 @@ export declare function bridgeFeeQuote(chainId: BridgeChainId, origin: string, b
     blockHash: `0x${string}`;
     rpcOrigin: string;
     observedAt: string;
-    chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+    chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
 };
