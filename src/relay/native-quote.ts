@@ -7,9 +7,11 @@ import { BNB_NATIVE, ETHEREUM_DEPOSITORY, RELAY_SOLVER, relayStatusLocator, type
 
 export const RELAY_BNB_POLYGON_ROUTE_REFERENCE = "bnb-native-polygon-native-v1";
 export const RELAY_BNB_MONAD_ROUTE_REFERENCE = "bnb-native-monad-native-v1";
+export const RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE = "bnb-native-monad-native-default-v1";
 export const POLYGON_USDC = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359";
 export const RELAY_BNB_SOURCE = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
 export const RELAY_POLYGON_RECIPIENT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
+export const RELAY_BNB_DEFAULT_SOURCE = RELAY_POLYGON_RECIPIENT;
 const DEPOSIT_NATIVE = parseAbi(["function depositNative(address depositor, bytes32 id) payable"]);
 const CHAINS = { ethereum: "ethereum-vm", bnb: "ethereum-vm", base: "ethereum-vm", polygon: "ethereum-vm", monad: "ethereum-vm" } as const;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u, UINT = /^(0|[1-9][0-9]*)$/u;
@@ -44,21 +46,29 @@ export interface RelayNativeQuoteIntent {
   readonly payer: string; readonly recipient: string; readonly amountAtomic: string;
   readonly minimumOutputWei: string; readonly nowSeconds: number;
 }
-export function relayNativeRoute(recipient: string) {
-  if (same(address(recipient, "recipient"), RELAY_POLYGON_RECIPIENT)) return {
+export function relayNativeRoute(payer: string, recipient: string) {
+  address(payer, "payer"); address(recipient, "recipient");
+  if (same(payer, RELAY_BNB_SOURCE) && same(recipient, RELAY_POLYGON_RECIPIENT)) return {
     reference: RELAY_BNB_POLYGON_ROUTE_REFERENCE as typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE,
     chainId: 137 as const, chain: "polygon" as const,
+    payer: RELAY_BNB_SOURCE, profile: "evm-live-buyer" as const,
     recipient: RELAY_POLYGON_RECIPIENT, refundCurrency: POLYGON_USDC };
-  if (same(recipient, RELAY_BNB_SOURCE)) return {
+  if (same(payer, RELAY_BNB_SOURCE) && same(recipient, RELAY_BNB_SOURCE)) return {
     reference: RELAY_BNB_MONAD_ROUTE_REFERENCE as typeof RELAY_BNB_MONAD_ROUTE_REFERENCE,
     chainId: 143 as const, chain: "monad" as const,
+    payer: RELAY_BNB_SOURCE, profile: "evm-live-buyer" as const,
     recipient: RELAY_BNB_SOURCE, refundCurrency: BNB_NATIVE };
-  return fail("recipient");
+  if (same(payer, RELAY_BNB_DEFAULT_SOURCE) && same(recipient, RELAY_BNB_DEFAULT_SOURCE)) return {
+    reference: RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE as typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE,
+    chainId: 143 as const, chain: "monad" as const,
+    payer: RELAY_BNB_DEFAULT_SOURCE, profile: "default" as const,
+    recipient: RELAY_BNB_DEFAULT_SOURCE, refundCurrency: BNB_NATIVE };
+  return fail("lane intent");
 }
 export function relayNativeQuoteRequest(intent: RelayNativeQuoteIntent): Record<string, unknown> {
-  const route = relayNativeRoute(intent.recipient);
-  if (!same(address(intent.payer, "payer"), RELAY_BNB_SOURCE) ||
-    amount(intent.amountAtomic, "amount") <= 0n || amount(intent.minimumOutputWei, "minimum output") <= 0n) fail("lane intent");
+  const route = relayNativeRoute(intent.payer, intent.recipient);
+  if (!same(intent.payer, route.payer) || amount(intent.amountAtomic, "amount") <= 0n ||
+    amount(intent.minimumOutputWei, "minimum output") <= 0n) fail("lane intent");
   return { user: intent.payer, originChainId: 56, destinationChainId: route.chainId,
     originCurrency: BNB_NATIVE, destinationCurrency: BNB_NATIVE,
     amount: intent.amountAtomic, tradeType: "EXACT_INPUT", recipient: intent.recipient,
@@ -66,7 +76,7 @@ export function relayNativeQuoteRequest(intent: RelayNativeQuoteIntent): Record<
 }
 export interface ValidatedRelayNativeQuote {
   readonly schemaVersion: "apn.relay-native-quote.v1";
-  readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE;
+  readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE;
   readonly quoteDigest: string; readonly statusLocator?: RelayStatusLocator;
   readonly orderId: string; readonly orderSignature: string; readonly solver: string;
   readonly payer: string; readonly recipient: string; readonly principalAtomic: string;
@@ -79,7 +89,7 @@ export interface ValidatedRelayNativeQuote {
 
 export async function validateRelayNativeQuote(value: unknown, intent: RelayNativeQuoteIntent): Promise<ValidatedRelayNativeQuote> {
   relayNativeQuoteRequest(intent);
-  const route = relayNativeRoute(intent.recipient);
+  const route = relayNativeRoute(intent.payer, intent.recipient);
   if (!Number.isSafeInteger(intent.nowSeconds) || intent.nowSeconds < 0) fail("clock");
   const quote = record(value, "quote"), steps = list(quote.steps, "steps");
   if (steps.length !== 1) fail("steps");
@@ -194,7 +204,7 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
 
 /** Recheck the saved quote's solver authority and native deposit at the execution boundary. */
 export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuote): Promise<void> {
-  const route = relayNativeRoute(quote.recipient);
+  const route = relayNativeRoute(quote.payer, quote.recipient);
   if (quote.schemaVersion !== "apn.relay-native-quote.v1" || quote.routeReference !== route.reference ||
     hashObject((({ quoteDigest: _digest, ...projection }) => projection)(quote)) !== quote.quoteDigest) fail("saved digest");
   const order = record(quote.orderData, "saved order"), input = one(order.inputs, "saved inputs"),
@@ -208,7 +218,7 @@ export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuo
     amount(payee.minimumAmount, "saved minimum") !== amount(quote.minimumOutputWei, "saved minimum") ||
     list(output.calls, "saved calls").length !== 0 || list(order.fees, "saved fees").length !== 0 ||
     refunds.length !== 2 || quote.deadline !== output.deadline ||
-    !same(address(quote.payer, "saved payer"), RELAY_BNB_SOURCE) ||
+    !same(address(quote.payer, "saved payer"), route.payer) ||
     quote.paymentDetails.chainId !== "bnb" || !same(quote.paymentDetails.depository, ETHEREUM_DEPOSITORY) ||
     !same(quote.paymentDetails.currency, BNB_NATIVE) || quote.paymentDetails.amount !== quote.principalAtomic ||
     quote.deposit.chainId !== 56 || !same(quote.deposit.from, quote.payer)) fail("saved route");

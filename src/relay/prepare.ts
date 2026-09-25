@@ -11,7 +11,7 @@ import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { ETHEREUM_USDC, requestRelayQuote, type RelayQuoteIntent, type ValidatedRelayQuote } from "./quote.js";
-import { RELAY_BNB_SOURCE, relayNativeRoute,
+import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, relayNativeRoute,
   requestRelayNativeQuote, type RelayNativeQuoteIntent, type ValidatedRelayNativeQuote } from "./native-quote.js";
 
 export const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
@@ -129,10 +129,13 @@ export class RelayUnsignedPrepareService {
       !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
       throw new ApnError("APN_INVALID_INPUT", "Relay native prepare inputs are invalid.");
     }
-    let route: ReturnType<typeof relayNativeRoute>;
-    try { route = relayNativeRoute(input.recipient); }
-    catch { throw new ApnError("APN_INVALID_INPUT", "Relay native recipient is outside admitted routes."); }
     allowlistProfileHash(input.profile);
+    const expectedPayer = input.profile === "evm-live-buyer" ? RELAY_BNB_SOURCE :
+      input.profile === "default" ? RELAY_BNB_DEFAULT_SOURCE : null;
+    if (expectedPayer === null) refuse("relay_native_profile_route_mismatch");
+    let route: ReturnType<typeof relayNativeRoute>;
+    try { route = relayNativeRoute(expectedPayer, input.recipient); }
+    catch { throw new ApnError("APN_INVALID_INPUT", "Relay native payer and recipient are outside admitted routes."); }
     const profileHash = this.state.profileHash(input.profile);
     const operationId = this.state.operationId(input.profile, input.idempotencyKey);
     const idempotencyHash = this.state.idempotencyHash(input.idempotencyKey);
@@ -150,7 +153,7 @@ export class RelayUnsignedPrepareService {
     if (!Number.isFinite(now.getTime())) throw new ApnError("APN_INVALID_INPUT", "Relay native prepare clock is invalid.");
     const active = await (this.ports.activePolicy?.(input.profile) ?? loadActiveAssetPolicyRegistry(
       { state: this.state, clock: this.clock }, input.profile));
-    if (active === null || active.profile !== input.profile || active.accounts.evm?.toLowerCase() !== RELAY_BNB_SOURCE.toLowerCase()) {
+    if (active === null || active.profile !== input.profile || active.accounts.evm?.toLowerCase() !== expectedPayer.toLowerCase()) {
       refuse("relay_bnb_source_owner_policy_required");
     }
     if (active.registry.expiresAt !== undefined && now.toISOString() >= active.registry.expiresAt) refuse("relay_policy_expired");

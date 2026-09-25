@@ -1,9 +1,11 @@
 import { type RelayStatusLocator } from "./quote.js";
 export declare const RELAY_BNB_POLYGON_ROUTE_REFERENCE = "bnb-native-polygon-native-v1";
 export declare const RELAY_BNB_MONAD_ROUTE_REFERENCE = "bnb-native-monad-native-v1";
+export declare const RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE = "bnb-native-monad-native-default-v1";
 export declare const POLYGON_USDC = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359";
 export declare const RELAY_BNB_SOURCE = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
 export declare const RELAY_POLYGON_RECIPIENT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
+export declare const RELAY_BNB_DEFAULT_SOURCE = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 export interface RelayNativeQuoteIntent {
     readonly payer: string;
     readonly recipient: string;
@@ -11,23 +13,35 @@ export interface RelayNativeQuoteIntent {
     readonly minimumOutputWei: string;
     readonly nowSeconds: number;
 }
-export declare function relayNativeRoute(recipient: string): {
+export declare function relayNativeRoute(payer: string, recipient: string): {
     reference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE;
     chainId: 137;
     chain: "polygon";
+    payer: string;
+    profile: "evm-live-buyer";
     recipient: string;
     refundCurrency: string;
 } | {
     reference: typeof RELAY_BNB_MONAD_ROUTE_REFERENCE;
     chainId: 143;
     chain: "monad";
+    payer: string;
+    profile: "evm-live-buyer";
+    recipient: string;
+    refundCurrency: string;
+} | {
+    reference: typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE;
+    chainId: 143;
+    chain: "monad";
+    payer: string;
+    profile: "default";
     recipient: string;
     refundCurrency: string;
 };
 export declare function relayNativeQuoteRequest(intent: RelayNativeQuoteIntent): Record<string, unknown>;
 export interface ValidatedRelayNativeQuote {
     readonly schemaVersion: "apn.relay-native-quote.v1";
-    readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE;
+    readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE;
     readonly quoteDigest: string;
     readonly statusLocator?: RelayStatusLocator;
     readonly orderId: string;
