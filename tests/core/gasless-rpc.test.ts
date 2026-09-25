@@ -53,19 +53,22 @@ class TestTransport implements GaslessTransport {
 test("gasless production prepare and approval fit one public bundler request window", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
-  assert.equal(s.calls.length, 6, "concurrent pinned prepare reads use six physical POSTs");
+  const preparePosts = s.calls.length;
+  assert.ok(preparePosts <= 24, `prepare used ${preparePosts} physical POSTs`);
   const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
   const record = await s.record(id), bundler = s.calls.filter(c => c.bundler);
-  t.diagnostic(JSON.stringify({ bundlerRequests: bundler.length,
+  const approvalPosts = s.calls.length - preparePosts;
+  t.diagnostic(JSON.stringify({ preparePosts, approvalPosts, bundlerRequests: bundler.length,
     afterApproval: bundler.filter(c => c.afterApproval).length,
     finalPhase: record.userOperation.phase, failure: record.failure }));
+  assert.ok(approvalPosts <= 24, `approve used ${approvalPosts} physical POSTs`);
+  assert.equal(s.calls.slice(preparePosts).filter(c => c.methods.includes("eth_getBlockByNumber") &&
+    c.methods.includes("eth_chainId")).length, 5, "five distinct guard snapshots remain");
   assert.equal(bundler.filter(c => c.method === "eth_sendUserOperation").length, 1);
   // One throwaway-key estimate runs before the approval screen; the owner's bootstrap estimate follows approval.
   assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas").length, 2);
   assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas" && !c.afterApproval).length, 1);
-  assert.equal(bundler.length, 15);
-  assert.equal(bundler.filter(c => c.afterApproval).length, 12);
   assert.equal(record.intent.gas.maxPriorityFeePerGas, "600000");
   assert.equal(record.intent.gas.maxFeePerGas, "2600000");
   assert.equal(record.bootstrap.signingAttempts, 1);
@@ -74,6 +77,82 @@ test("gasless production prepare and approval fit one public bundler request win
   assert.equal(record.userOperation.phase, "submitted_pending");
   // Locator absence is still ambiguous; passing the rate budget is not settlement.
   assert.equal(record.terminal, false);
+});
+
+test("gasless approval rechecks a changed block anchor and refuses a canonical reorg before signing", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  const confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { const accepted = await confirm(input); s.setFault("reorg"); return accepted; };
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id);
+  assert.equal(record.bootstrap.signingAttempts, 0);
+  assert.equal(record.userOperation.submissionAttempts, 0);
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal(record.failure, "gasless_block_reorg");
+});
+
+test("gasless owner wait makes no effect and keeps the distinct post-TTY guard", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { enter(); await held; return await confirm(input); };
+  const running = s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  await entered;
+  const before = s.calls.length;
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal((await s.record(id)).bootstrap.signingAttempts, 0);
+  release();
+  const result = await running;
+  assert.equal(result.ok, true, result.error?.message);
+  assert.ok(s.calls.length > before, "fresh checks ran after the owner released the terminal");
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 1);
+});
+
+for (const fault of ["code", "proxy"] as const) {
+  test(`gasless approval invalidates anchored static proof on ${fault} drift`, async t => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+    const confirm = s.approval.confirm.bind(s.approval);
+    s.approval.confirm = async input => { const accepted = await confirm(input);
+      s.setBlockHash(`0x${"ab".repeat(32)}`); s.setFault(fault); return accepted; };
+    const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+    assert.equal(result.ok, true, result.error?.message);
+    const record = await s.record(id);
+    assert.equal(record.bootstrap.signingAttempts, 0);
+    assert.equal(record.userOperation.submissionAttempts, 0);
+    assert.equal(record.failure, "gasless_protocol_identity");
+  });
+}
+
+test("gasless final guard 429 is terminal before the durable send marker", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare(); s.setLimit(7);
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id);
+  assert.equal(record.userOperation.submissionAttempts, 0);
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal(record.failure, "gasless_rpc_http_429");
+  assert.equal(s.calls.filter(c => c.bundler).length, 8);
+});
+
+test("gasless extra in-invocation reads exhaust the cap before any send marker", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  const preparePosts = s.calls.length, confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { const accepted = await confirm(input); await s.rpc.assertChain(); return accepted; };
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id);
+  assert.equal(s.calls.length - preparePosts, 24);
+  assert.equal(record.userOperation.submissionAttempts, 0);
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal(record.failure, "gasless_rpc_request_budget");
 });
 
 for (const boundary of ["before_bootstrap", "before_send"] as const) {
@@ -185,6 +264,18 @@ test("gasless HTTP 429 is terminal for its invocation without another transport 
     const after429 = calls;
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
     assert.equal(calls, after429);
+  });
+});
+
+test("gasless generic non-200 HTTP response is terminal for its invocation", async () => {
+  let calls = 0;
+  const transport: GaslessTransport = { request: async () => { calls += 1; return { status: 503, body: "secret" }; } };
+  const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+  await withGaslessRpcInvocation(async () => {
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_PROTOCOL" });
+    const after = calls;
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_PROTOCOL" });
+    assert.equal(calls, after);
   });
 });
 

@@ -25,17 +25,34 @@ const invocation = new AsyncLocalStorage();
 /** One command invocation includes RPC and bundler POSTs, including failed transport attempts. */
 export class GaslessRpcRequestSession {
     posts = 0;
-    rateLimited = false;
+    terminalStatus = null;
+    verifiedChains = new Set();
+    protocolAnchors = new Map();
     reserve() {
-        if (this.rateLimited)
-            gaslessFailure("APN_RPC_RATE_LIMITED", "gasless_RPC_HTTP_429");
+        if (this.terminalStatus !== null)
+            this.rejectHttp(this.terminalStatus);
         if (this.posts >= MAX_INVOCATION_POSTS)
             gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
         this.posts += 1;
     }
-    reject429() {
-        this.rateLimited = true;
-        return gaslessFailure("APN_RPC_RATE_LIMITED", "gasless_RPC_HTTP_429");
+    rejectHttp(status) {
+        this.terminalStatus = status;
+        if (status === 429)
+            return gaslessFailure("APN_RPC_RATE_LIMITED", "gasless_RPC_HTTP_429");
+        return gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_HTTP_status");
+    }
+    hasVerifiedChain(rpc) { return this.verifiedChains.has(rpc); }
+    verifyChain(rpc) { this.verifiedChains.add(rpc); }
+    protocolAt(rpc, hash, verify) {
+        const cached = this.protocolAnchors.get(rpc);
+        if (cached?.hash === hash)
+            return cached.proof;
+        // A changed latest anchor requires fresh code and proxy reads before the next effect gate.
+        const proof = verify();
+        this.protocolAnchors.set(rpc, { hash, proof });
+        void proof.catch(() => { if (this.protocolAnchors.get(rpc)?.proof === proof)
+            this.protocolAnchors.delete(rpc); });
+        return proof;
     }
 }
 /** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
@@ -112,20 +129,24 @@ export class GaslessRpc {
             gaslessFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "gasless_entrypoint_unavailable");
     }
     async snapshot(owner, approvedGas) {
-        const [rpcChain, bundler] = await Promise.all([this.rpcCall("eth_chainId", []), this.bundlerState()]);
+        const session = invocation.getStore() ?? this.fallbackSession;
+        // The latest anchor is read in the same read-only batch as the chain identity.
+        const [rpcChain, bundler, at] = await Promise.all([
+            this.rpcCall("eth_chainId", []), this.bundlerState(), rpcBlock(this.rpcCall, "latest"),
+        ]);
         this.validateChain(rpcChain, bundler[0], bundler[1]);
-        const at = await rpcBlock(this.rpcCall, "latest");
         const [account, feeConfiguration, priority] = await Promise.all([
             readAccountAt(this.rpcCall, this.deployment, owner, at.block, true),
             readFeeConfigurationAt(this.rpcCall, this.deployment, owner, at.block),
             this.rpcCall("eth_maxPriorityFeePerGas", []),
-            verifyProtocolAt(this.rpcCall, this.deployment, at.block),
+            session.protocolAt(this, at.block.hash, async () => await verifyProtocolAt(this.rpcCall, this.deployment, at.block)),
         ]).then(([accountState, configuration, priorityFee]) => [accountState, configuration, priorityFee]);
         if (account.pendingEoaNonceAtomic !== account.eoaNonceAtomic) {
             gaslessFailure("APN_OPERATION_BLOCKED", "gasless_nonce_drift");
         }
         const prices = bundlerGasPrices(bundler[2], at.raw.baseFeePerGas, priority, approvedGas);
         await recheckBlock(this.rpcCall, at.block);
+        session.verifyChain(this);
         return { chainId: this.chainId, rpcOrigin: this.rpcOrigin, rpcEndpointHash: this.rpcEndpointHash,
             bundlerOrigin: this.bundlerOrigin, bundlerEndpointHash: this.bundlerEndpointHash, block: at.block,
             protocolHash: gaslessProtocolHash(this.deployment), owner: account.owner, token: this.deployment.token,
@@ -200,7 +221,7 @@ export class GaslessRpc {
         assertGaslessExecutionChain(this.chainId);
         this.assertIntent(intent);
         await verifyGaslessBootstrap(intent, { permitSignature: bootstrap.permitSignature, authorization: bootstrap.authorization });
-        await this.assertChain();
+        await this.assertChainUnlessVerified();
         const wire = gaslessUserOperation(intent, bootstrap, GASLESS_ESTIMATE_SIGNATURE, fees);
         validateGaslessWire(intent, wire);
         const raw = rpcRecord(await this.bundlerCall("eth_estimateUserOperationGas", [wire, intent.entryPoint]));
@@ -221,7 +242,7 @@ export class GaslessRpc {
         if (sealed.userOperationHash !== localHash || await verifyGaslessUserOperation(intent, wire) !== localHash) {
             gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_protocol_identity");
         }
-        await this.assertChain();
+        await this.assertChainUnlessVerified();
         try {
             const returned = rpcHex(await this.bundlerCall("eth_sendUserOperation", [wire, intent.entryPoint]), 32, 32);
             if (returned !== localHash)
@@ -239,6 +260,10 @@ export class GaslessRpc {
             gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
         return await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin, deployment: this.deployment,
             rpc: this.rpcCall, bundler: this.bundlerCall }, intent, identity, cursor);
+    }
+    async assertChainUnlessVerified() {
+        if (!(invocation.getStore() ?? this.fallbackSession).hasVerifiedChain(this))
+            await this.assertChain();
     }
     /** Returns the admitted asset the intent names, so no caller has to re-derive it from a literal. */
     assertIntent(intent) {
@@ -366,10 +391,8 @@ function parseRpcResult(record, id) {
     return record.result;
 }
 function assertHttpStatus(status, session) {
-    if (status === 429)
-        session.reject429();
     if (status !== 200)
-        gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_HTTP_status");
+        session.rejectHttp(status);
 }
 /** Storage key of a Solidity `mapping(address => uint256)` entry at the given base slot. */
 export function gaslessBalanceSlot(holder, base) {

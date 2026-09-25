@@ -16,8 +16,8 @@ import { gaslessSignedFees } from "./wire.js";
 
 /** A transient check failure is retried inside the approved window, before a disclosure as well as after one. */
 const GUARD_ATTEMPTS = 18, GUARD_RETRY_MS = 5_000;
-const TRANSIENT_REASONS = new Set(["gasless_rpc_unavailable", "gasless_bundler_fee_drift", "gasless_RPC_HTTP_status",
-  "gasless_RPC_response", "gasless_provider_response", "gasless_mirror_estimate_unavailable"]);
+const TRANSIENT_REASONS = new Set(["gasless_rpc_unavailable", "gasless_bundler_fee_drift",
+  "gasless_rpc_response", "gasless_provider_response", "gasless_mirror_estimate_unavailable"]);
 
 export class GaslessExecution {
   private readonly observation: GaslessObservationService;
@@ -97,7 +97,9 @@ export class GaslessExecution {
     op = await this.save(op, { state: acknowledged ? "submitted_pending" : "unknown_finality",
       userOperation: { ...op.userOperation, phase: acknowledged ? "submitted_pending" : "unknown_finality" },
       failure: acknowledged ? null : "gasless_submission_unknown" });
-    return await this.observation.run(op);
+    // The first-send marker is durable. Finality belongs to an explicit resume/observe invocation
+    // with a separate bounded read budget; never turn a submitted response into an inline retry.
+    return op;
   }
   private async material(op: GaslessOperationRecord, role: GaslessRole, bootstrap?: GaslessBootstrapMaterial):
     Promise<{ op: GaslessOperationRecord; material: GaslessSealedMaterial | null }> {

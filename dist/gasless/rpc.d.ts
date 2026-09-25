@@ -5,9 +5,14 @@ import type { GaslessBootstrapMaterial, GaslessRpcFactory, GaslessRpcPort, Gasle
 /** One command invocation includes RPC and bundler POSTs, including failed transport attempts. */
 export declare class GaslessRpcRequestSession {
     private posts;
-    private rateLimited;
+    private terminalStatus;
+    private readonly verifiedChains;
+    private readonly protocolAnchors;
     reserve(): void;
-    reject429(): never;
+    rejectHttp(status: number): never;
+    hasVerifiedChain(rpc: GaslessRpc): boolean;
+    verifyChain(rpc: GaslessRpc): void;
+    protocolAt(rpc: GaslessRpc, hash: Hex, verify: () => Promise<void>): Promise<void>;
 }
 /** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
 export declare function withGaslessRpcInvocation<T>(work: () => Promise<T>): Promise<T>;
@@ -37,6 +42,7 @@ export declare class GaslessRpc implements GaslessRpcPort {
     estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate>;
     send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex>;
     observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
+    private assertChainUnlessVerified;
     /** Returns the admitted asset the intent names, so no caller has to re-derive it from a literal. */
     private assertIntent;
     /**

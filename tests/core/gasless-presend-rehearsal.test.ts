@@ -94,6 +94,8 @@ test("an approved transfer runs one mirror estimate before the screen and before
   const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
   const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(response.ok, true, response.error?.message);
+  assert.equal((await s.record(id)).state, "submitted_pending");
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
   assert.equal((await s.record(id)).state, "completed");
   const calls = s.rpc.calls;
   assert.equal(calls.filter((c) => c === "mirror_estimate").length, 1);
@@ -153,7 +155,9 @@ for (const result of ["misfit", "fit"] as const) {
       assert.equal(calls.filter((c) => c === "estimate").length, 0); assert.equal(s.rpc.sends.length, 0);
       await new OperationService(s.state).assertProfileAvailable(stored.profileHash);
     } else {
-      assert.equal(stored.state, "completed");
+      assert.equal(stored.state, "submitted_pending");
+      assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+      assert.equal((await s.record(id)).state, "completed");
       assert.ok(calls.indexOf("mirror_estimate") < calls.indexOf("estimate"));
     }
   });
@@ -189,7 +193,7 @@ test("an approval pause that moves bundler prices signs fresh fees within the ow
   };
   const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(response.ok, true, response.error?.message);
-  assert.equal((await s.record(id)).state, "completed"); assert.equal(operation.intent.gas.maxFeePerGas, "2100000");
+  assert.equal((await s.record(id)).state, "submitted_pending"); assert.equal(operation.intent.gas.maxFeePerGas, "2100000");
   const sent = s.rpc.sends[0] as GaslessUserOperationMaterial;
   assert.equal(sent.userOperation.maxFeePerGas, "0x27ac40"); assert.equal(sent.userOperation.maxPriorityFeePerGas, "0x927c0");
   assert.deepEqual(s.rpc.estimateFees, [{ maxFeePerGas: "2600000", maxPriorityFeePerGas: "600000" }]);
@@ -217,7 +221,7 @@ test("a fresh quote above the owner's cap after approval ends before the bootstr
   await new OperationService(s.state).assertProfileAvailable(stored.profileHash);
 });
 
-for (const [spike, state] of [[2, "completed"], [100, "unknown_finality"]] as const) {
+for (const [spike, state] of [[2, "submitted_pending"], [100, "unknown_finality"]] as const) {
   test(`after disclosure a ${spike === 2 ? "short bundler price spike is waited out" : "persistent price spike is bounded"}`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
