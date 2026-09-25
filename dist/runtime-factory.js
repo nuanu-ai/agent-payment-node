@@ -100,7 +100,9 @@ export function createApnCore(bound, options = {}) {
     const coinbaseRpcUrl = ["gasless.balance", "gasless.transfer.prepare", "gasless.transfer.approve", "operation.resume"].includes(bound.request.command)
         ? process.env.APN_BASE_RPC_URL : undefined;
     const effectiveRpcUrl = bound.rpcUrl;
-    const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl));
+    const directBnbCommand = bound.request.command === "transfer.approve" || bound.request.command === "operation.resume" ||
+        bound.request.command === "transfer.prepare" && bound.request.asset?.chainId === 56;
+    const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl, directBnbCommand ? { directGuardState: state } : {}));
     const coinbaseRpc = options.rpc;
     const http = options.http ?? (needsHttp(bound.request.command) ? new HttpsX402Http() : undefined);
     const profileRepository = options.profileRepository ?? new StateProfileRepository(state);

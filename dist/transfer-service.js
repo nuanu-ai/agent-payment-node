@@ -226,6 +226,8 @@ export class TransferService {
             throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a local direct transfer.");
         if (found.providerDirect !== undefined)
             return await this.providerDirect.resume(operationId, waitSeconds);
+        if (found.evm?.asset.chainId === 56)
+            this.context.requireRpc().armBnbDirectRpcGuard?.();
         if (waitSeconds !== undefined) {
             throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");
         }

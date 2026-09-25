@@ -28,9 +28,10 @@ export class EvmRpc implements EvmRpcPort {
   prepareUnichainNative(): EvmNativePrepareReads { return this.prepareNativeBatched(130); }
   prepareUnichainUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(130, "usdc"); }
   preparePolygonUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(137, "usdc"); }
+  prepareBnbNative(): EvmNativePrepareReads { return this.prepareNativeBatched(56); }
 
   /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
-  private prepareNativeBatched(chainId: 59144 | 130 | 137, asset: "native" | "usdc" = "native"): EvmNativePrepareReads {
+  private prepareNativeBatched(chainId: 59144 | 130 | 137 | 56, asset: "native" | "usdc" = "native"): EvmNativePrepareReads {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     let attempts = 0;
     const attempt = async (method: string, params: readonly unknown[]): Promise<unknown> => {
@@ -207,8 +208,17 @@ export class EvmRpc implements EvmRpcPort {
   }
 
   async receipt(chainId: DirectEvmChainId, transactionHash: Hex): Promise<RpcReceipt | null> {
-    await this.assertChain(chainId);
-    const raw = await this.call("eth_getTransactionReceipt", [transactionHash]);
+    let raw: unknown;
+    if (chainId === 56 && this.batchCall !== undefined) {
+      const [identity, receipt] = await this.batchCall([
+        { method: "eth_chainId", params: [] }, { method: "eth_getTransactionReceipt", params: [transactionHash] },
+      ]);
+      if (evmRpcQuantity(identity) !== 56n) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+      raw = receipt;
+    } else {
+      await this.assertChain(chainId);
+      raw = await this.call("eth_getTransactionReceipt", [transactionHash]);
+    }
     if (raw === null) return null;
     const receipt = evmRpcRecord(raw);
     const receiptHash = evmRpcHex(receipt.transactionHash, 32), blockHash = evmRpcHex(receipt.blockHash, 32);
