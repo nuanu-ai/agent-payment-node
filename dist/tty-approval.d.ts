@@ -2,6 +2,7 @@ import type { Address } from "./model.js";
 import type { EvmDirectBinding } from "./evm-direct.js";
 import type { RailApprovalPort } from "./direct-rail-ports.js";
 import { type ChainPolicy, type ChainPolicyApprovalPort } from "./chain-policy.js";
+import type { RelayExecutionConfirmationSummary } from "./runtime.js";
 export declare const TTY_APPROVAL_DEADLINE_MS = 60000;
 export interface TransferApprovalIntent {
     readonly evm?: EvmDirectBinding;
@@ -34,6 +35,12 @@ export interface TtyTransferApprovalOptions {
     readonly signal?: AbortSignal;
     readonly openTerminal?: () => Promise<ApprovalTerminal>;
     readonly isTerminal?: (fd: number) => boolean;
+}
+/** A fresh foreground consent for each Relay source execution attempt. */
+export declare class TtyRelayExecuteConfirmation {
+    private readonly options;
+    constructor(options?: TtyTransferApprovalOptions);
+    confirm(summary: RelayExecutionConfirmationSummary): Promise<boolean>;
 }
 export declare class TtyTransferApproval implements TransferApprovalPort {
     private readonly deadlineMs;

@@ -9,6 +9,7 @@ import type { ClockPort, HttpPort, IdPort, NativePort, RpcPort, WaitPort } from 
 import { type ProfilePolicyApprovalPort } from "./policy-approval.js";
 import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
+import type { RelayExecuteConfirmation, RelayExecuteHandler } from "./runtime.js";
 import type { ForegroundAuthenticationPort, ProviderProfileRepositoryPort, ProviderRegistryPort, X402PaymentMaterialPort } from "./provider-ports.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import { type ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
@@ -41,6 +42,8 @@ import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export interface RuntimeFactoryOptions {
+    readonly relayExecute?: RelayExecuteHandler;
+    readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
     readonly relayPrepare?: RelayUnsignedPrepareService;
     readonly relayPreparePorts?: RelayPreparePorts;
     readonly relayPreflight?: RelayReadOnlyPreflightService;
