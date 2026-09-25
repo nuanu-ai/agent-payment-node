@@ -1,5 +1,5 @@
 import { ApnError } from "./errors.js";
-import { requireEvmFunding, requireEvmRpc, evmTransaction } from "./evm-direct.js";
+import { requireEvmFunding, requireEvmRpc, evmTransaction, validateEvmFeeQuote } from "./evm-direct.js";
 import { directEvmNetwork } from "./evm-direct-networks.js";
 import type { Economics, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
@@ -20,10 +20,13 @@ function frozenEconomicsRemainExecutable(current: Economics, frozen: Economics):
 export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: OperationRecord, beforeSigning: boolean, stateRoot?: string): Promise<void> {
   const binding = operation.evm;
   if (binding === undefined || operation.economics === undefined) throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
-  if (operation.chainId === 56) rpcPort.armBnbDirectRpcGuard?.();
+  if (operation.chainId === 1 || operation.chainId === 56) rpcPort.armEvmDirectRpcGuard?.();
   const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
-  const grouped = operation.chainId === 56 && asset.kind === "native" ? rpc.prepareBnbNative?.() : undefined;
-  if (operation.chainId === 56 && grouped === undefined) throw new ApnError("APN_RPC_CONFIG", "BNB native approval requires batched RPC reads.");
+  const grouped = asset.kind === "native" ? operation.chainId === 1 ? rpc.prepareEthereumNative?.() :
+    operation.chainId === 56 ? rpc.prepareBnbNative?.() : undefined : undefined;
+  if ((operation.chainId === 1 || operation.chainId === 56) && asset.kind === "native" && grouped === undefined) {
+    throw new ApnError("APN_RPC_CONFIG", "Selected native approval requires batched RPC reads.");
+  }
   // The balance reader checks the selected chain before and after its pinned reads.
   const balance = await (grouped ?? rpc).balance(operation.walletAddress, {
     chainId: operation.chainId, token: asset.kind === "native" ? "native" : asset.address, decimals: asset.decimals,
@@ -54,7 +57,11 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
       throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "Current Arbitrum inclusive gas or price exceeds the frozen signed envelope; retain this operation without replacement.");
     }
   }
-  const quote = await (grouped === undefined ? rpc.feeQuote(operation.chainId, operation.economics) : grouped.feeQuote(operation.economics));
+  // On Ethereum the signed max fee times gas limit is already the on-chain upper bound.
+  // There are no separate L1/operator charges to refresh after the signature exists.
+  const quote = !beforeSigning && operation.chainId === 1 && asset.kind === "native"
+    ? validateEvmFeeQuote(binding.feeQuote, operation.economics)
+    : await (grouped === undefined ? rpc.feeQuote(operation.chainId, operation.economics) : grouped.feeQuote(operation.economics));
   requireEvmFunding(balance, operation.amountAtomic, quote, binding.maxFeeWei);
 }
 

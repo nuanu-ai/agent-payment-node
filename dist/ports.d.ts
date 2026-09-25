@@ -160,6 +160,7 @@ export interface X402RpcPort {
 export interface RpcPort {
     /** Arm the command-scoped public BNB transport cap before any direct BNB network read. */
     armBnbDirectRpcGuard?(): void;
+    armEvmDirectRpcGuard?(): void;
     forX402Network?(chainId: EvmChainId): RpcPort & X402RpcPort;
     readonly evm?: EvmRpcPort;
     assertBaseChain(): Promise<{

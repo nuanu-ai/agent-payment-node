@@ -25,6 +25,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly directGuardState?: StateStore;
     });
     armBnbDirectRpcGuard(): void;
+    armEvmDirectRpcGuard(): void;
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
     withAbortSignal(signal: AbortSignal): HttpsBaseRpc;
     /** Resolve and validate public addresses before a caller reserves a physical POST start. */

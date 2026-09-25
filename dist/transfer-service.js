@@ -226,8 +226,8 @@ export class TransferService {
             throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a local direct transfer.");
         if (found.providerDirect !== undefined)
             return await this.providerDirect.resume(operationId, waitSeconds);
-        if (found.evm?.asset.chainId === 56)
-            this.context.requireRpc().armBnbDirectRpcGuard?.();
+        if (found.evm?.asset.chainId === 1 || found.evm?.asset.chainId === 56)
+            this.context.requireRpc().armEvmDirectRpcGuard?.();
         if (waitSeconds !== undefined) {
             throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");
         }
@@ -335,6 +335,10 @@ export class TransferService {
         catch {
             return await this.transition(operation, "unknown_finality", false, "submission_outcome_ambiguous", "ambiguous_submission", { lastSubmissionAt: this.context.clock.now().toISOString() });
         }
+        // A successful Ethereum send is durable at this point. Receipt inspection belongs to
+        // explicit observation, preserving this invocation's bounded pre-send RPC budget.
+        if (operation.evm?.asset.chainId === 1 && operation.evm.asset.kind === "native")
+            return operation;
         return await this.inspectReceipt(operation, rpc);
     }
     async inspectReceipt(operation, rpc) {
