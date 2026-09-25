@@ -4,8 +4,12 @@ import test from "node:test";
 import { bindArgv } from "../../src/command-binder.js";
 import { hashObject } from "../../src/canonical.js";
 import { proveRelayBaseDestination, type RelayBnbProofPorts } from "../../src/relay/destination-proof.js";
+import { RelayBaseObserveService } from "../../src/relay/base-observe.js";
 import { relayQuoteRequest, validateRelayQuote } from "../../src/relay/quote.js";
-import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
+import { RelayKeylessStatusService } from "../../src/relay/status.js";
+import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
+import { StateStore } from "../../src/state.js";
+import { temporaryState } from "./helpers.js";
 
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const recipient = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
@@ -76,4 +80,45 @@ test("saved Base quote hides provider locator and cannot turn a candidate into p
     hash, chainId: 8453, to: recipient, valueWei: 1n, blockNumber: 100n, blockHash }) })).status, "mismatch");
   assert.equal((await proveRelayBaseDestination(op, [hash], { ...ports,
     finalityCheckpoint: async () => ({ number: 99n, hash: safeHash }) })).status, "pending");
+});
+
+test("Base observe reads one provider candidate and never promotes credit to paid acceptance", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  const old = await validateRelayQuote(await fixture(), { ...intent, destinationChainId: 56,
+    minimumOutputWei: "3000000000000000" });
+  const { quoteDigest: _discard, ...fields } = old;
+  const requestId = `0x${"d".repeat(64)}`;
+  const locator = { requestId, endpoint: `https://api.relay.link/intents/status/v3?requestId=${requestId}` };
+  const quoteFields = { ...fields, routeReference: "ethereum-usdc-base-eth-v1" as const, statusLocator: locator,
+    orderData: { ...fields.orderData, inputs: [{ ...fields.orderData.inputs[0]!, refunds: [
+      fields.orderData.inputs[0]!.refunds[0]!, { ...fields.orderData.inputs[0]!.refunds[1]!, chainId: "base" as const } ] }],
+      output: { ...fields.orderData.output, chainId: "base" as const } } };
+  const quote = { ...quoteFields, quoteDigest: hashObject(quoteFields) };
+  const op = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned",
+    state: "prepared", terminal: false, profileHash: "1".repeat(64), operationId: "2".repeat(64),
+    idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64), sourceChainId: 1, destinationChainId: 8453,
+    sourceAccount: payer.toLowerCase(), recipient: recipient.toLowerCase(), quoteDigest: quote.quoteDigest, quote,
+    statusLocator: locator, policyDigest: "5".repeat(64), policyRevision: 1,
+    approvalNetworkFeeCeilingWei: quote.approval.maximumNetworkFeeWei,
+    depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei, amountAtomic: "2500000",
+    minOutputAtomic: quote.minimumOutputWei, createdAt: "2026-09-30T00:00:00.000Z",
+    deadline: new Date(quote.deadline * 1000).toISOString() });
+  await new RelayUnsignedOperationRepository(temporary.root).persistLocked(op);
+  const hash = `0x${"a".repeat(64)}`, blockHash = `0x${"b".repeat(64)}`, safeHash = `0x${"c".repeat(64)}`;
+  let rpcCalls = 0, statusCalls = 0;
+  const ports: RelayBnbProofPorts = { chainId: async () => { rpcCalls++; return 8453; },
+    transaction: async () => ({ hash, chainId: 8453, to: recipient, valueWei: BigInt(op.minOutputAtomic), blockNumber: 100n, blockHash }),
+    receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash }),
+    block: async number => ({ number, hash: number === 100n ? blockHash : safeHash }),
+    finalityCheckpoint: async () => ({ number: 101n, hash: safeHash }), nativeTrace: async () => null };
+  const fetcher = (async () => { statusCalls++; return new Response(JSON.stringify({ status: "success", originChainId: 1,
+    destinationChainId: 8453, txHashes: [hash] }), { status: 200 }); }) as typeof fetch;
+  const service = new RelayBaseObserveService(state, () => ports, new RelayKeylessStatusService(state, fetcher));
+  const observed = await service.observe(op.operationId);
+  assert.equal(observed.state, "recipient_credit_observed");
+  assert.equal(observed.destinationProof?.status, "recipient_credit_proven");
+  assert.equal(observed.paidAcceptance, false); assert.equal(observed.sourceFinalized, false);
+  assert.equal(observed.operationalAcceptance, false);
+  assert.equal(statusCalls, 1); assert.equal(rpcCalls, 1);
 });
