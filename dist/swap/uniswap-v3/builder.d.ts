@@ -29,4 +29,5 @@ export declare class KeylessUniswapQuoteBuilder implements GuardedSwapReadOnlyBu
     }): Promise<unknown>;
     load(quoteHash: string): Promise<UniswapKeylessMaterial | null>;
     private assertChain;
+    private checkChain;
 }
