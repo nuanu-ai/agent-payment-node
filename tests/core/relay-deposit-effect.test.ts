@@ -4,10 +4,11 @@ import test from "node:test";
 import { encodeFunctionData, keccak256, parseAbi, toBytes, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../../src/canonical.js";
+import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
-import { RelayDepositEffectService, type RelayDepositObservation, type RelayDepositPorts,
+import { RelayDepositEffectService, RelayEncryptedDepositCustody, type RelayDepositObservation, type RelayDepositPorts,
   type RelaySignedDeposit } from "../../src/relay/deposit-effect.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator, validateRelayQuote } from "../../src/relay/quote.js";
 import { RELAY_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
@@ -199,4 +200,21 @@ test("crash after custody seal resumes the same transaction without a second sig
   const journal = await new RelayDepositEffectService(f.state, f.ports).run(f.op.operationId);
   assert.equal(journal.effects[1].phase, "submitting");
   assert.deepEqual(f.counts, { signs: 1, sends: 1, observations: 1 });
+});
+
+test("encrypted deposit custody survives restart and rejects a changed binding", async t => {
+  const f = await setup(t);
+  const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) };
+  const wallets = new EncryptedWalletStore(f.state, wrapping);
+  const key = `0x${"1".repeat(64)}` as Hex;
+  await wallets.importNew("default", key, account.address);
+  const rawTransaction = await f.ports.sign(f.op);
+  const signed = { rawTransaction, transactionHash: keccak256(rawTransaction) };
+  await new RelayEncryptedDepositCustody(f.state, wrapping).seal(f.op, signed);
+  assert.deepEqual(await new RelayEncryptedDepositCustody(f.state, wrapping).load(f.op), signed);
+  await assert.rejects(new RelayEncryptedDepositCustody(f.state, wrapping).seal(f.op, signed),
+    { code: "APN_OPERATION_BLOCKED" });
+  const changed = { ...f.op, quoteDigest: "f".repeat(64) };
+  await assert.rejects(new RelayEncryptedDepositCustody(f.state, wrapping).load(changed),
+    { code: "APN_STATE_CORRUPT" });
 });
