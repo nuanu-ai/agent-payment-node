@@ -91,6 +91,42 @@ test("read-only preflight binds Arbitrum funding reads to one block and keeps di
   assert.deepEqual(result.nextActions, []);
 });
 
+test("preflight needs deposit gas only when exact owner allowance already covers principal", async () => {
+  const draft = await createRelayArbitrumSourceDraft(await input());
+  const result = await preflightRelayArbitrumSourceDraft(draft, active(), owner, "0", now, {
+    now: () => now,
+    batch: async calls => calls.length === 2 ? ["0xa4b1", head]
+      : [head, "0x1d1a94a2000", word(500_000n), word(500_000n)], // 2,000,000,000,000 wei
+  });
+  assert.equal(result.approvalRequired, false);
+  assert.equal(result.requiredNativeWei, draft.maxDepositNetworkFeeWei);
+  assert.equal(result.fundingObserved, true);
+  assert.deepEqual(result.fundingReasons, []);
+});
+
+test("preflight rejects reorg after EIP-1898 pinned reads and malformed RPC results", async () => {
+  const draft = await createRelayArbitrumSourceDraft(await input());
+  let batches = 0;
+  await assert.rejects(preflightRelayArbitrumSourceDraft(draft, active(), owner, "0", now, {
+    now: () => now,
+    batch: async calls => {
+      batches++;
+      if (batches === 1) return ["0xa4b1", head];
+      assert.deepEqual(calls[0]!.params, ["0x100", false]);
+      for (const call of calls.slice(1)) assert.deepEqual(call.params[1], { blockHash, requireCanonical: true });
+      return [{ ...head, hash: `0x${"34".repeat(32)}` }, "0x3a352944000", word(500_000n), word(0n)];
+    },
+  }), { code: "APN_OPERATION_BLOCKED", details: { reason: "source_block_changed" } });
+  assert.equal(batches, 2);
+  for (const malformed of [{ error: { code: -32000, message: "block not found" } }, "0x1", null]) {
+    await assert.rejects(preflightRelayArbitrumSourceDraft(draft, active(), owner, "0", now, {
+      now: () => now,
+      batch: async calls => calls.length === 2 ? ["0xa4b1", head]
+        : [head, "0x3a352944000", malformed, word(0n)],
+    }), { code: "APN_RPC_PROTOCOL" });
+  }
+});
+
 test("preflight fails closed on chain, block, funding and draft tamper", async () => {
   const draft = await createRelayArbitrumSourceDraft(await input());
   const fail = async (responses: readonly (readonly unknown[])[]) => {
