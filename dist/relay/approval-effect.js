@@ -4,7 +4,7 @@ import { keccak256, parseTransaction, recoverTransactionAddress, toBytes } from 
 import { hashObject, domainHash, canonicalJson } from "../canonical.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
-import { RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
+import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
@@ -20,6 +20,9 @@ function binding(op) {
 }
 function key(op) {
     return domainHash("apn.relay-approval-custody.v1", canonicalJson({ operationId: op.operationId }));
+}
+function depositKey(op) {
+    return domainHash("apn.relay-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
 }
 /** Reuses the existing AES-GCM encrypted wallet secret and hash-bound direct-effect slot. */
 export class RelayEncryptedApprovalCustody {
@@ -38,7 +41,8 @@ export class RelayEncryptedApprovalCustody {
                 if (wallet === null)
                     corrupt("custody envelope disappeared");
                 try {
-                    if (wallet.secret.directEffects[key(op)] !== undefined)
+                    if (wallet.secret.directEffects[key(op)] !== undefined ||
+                        wallet.secret.directEffects[depositKey(op)] !== undefined)
                         blocked("signed_effect_custody_exists");
                 }
                 finally {
@@ -82,8 +86,9 @@ export class RelayEncryptedApprovalCustody {
                 corrupt("custody owner");
             if (wallet.secret.directEffects[key(op)] !== undefined)
                 blocked("signed_effect_already_sealed");
-            const entry = { payloadHash: binding(op), transactionHash: signed.transactionHash,
-                rawTransaction: signed.rawTransaction, rawTransactionHash: signed.transactionHash };
+            const verified = await verifySigned(op, signed.rawTransaction, signed.transactionHash);
+            const entry = { payloadHash: binding(op), transactionHash: verified.transactionHash,
+                rawTransaction: verified.rawTransaction, rawTransactionHash: verified.transactionHash };
             wallet.secret.directEffects[key(op)] = entry;
             await this.wallets.save(wallet.identity, wallet.secret);
         }
@@ -112,6 +117,8 @@ export class RelayApprovalEffectService {
             const op = await this.operations.loadOperation(profileHash, operationId);
             if (op === null)
                 blocked("prepared_operation_missing");
+            if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
+                blocked("operation_retired");
             this.assertEnvelope(op);
             let journal = await this.effects.load(profileHash, operationId);
             if (journal === null)
@@ -120,10 +127,10 @@ export class RelayApprovalEffectService {
             if (effect.phase === "confirmed" || effect.phase === "failed")
                 return journal;
             if (effect.phase === "pending") {
-                await this.revalidate(op);
+                const nonce = await this.revalidate(op);
                 journal = await this.effects.transition(profileHash, operationId, journal.integrityHash, { kind: "mark_signing", role: "approval", marker: randomBytes(32).toString("hex"), at: this.ports.now().toISOString() });
                 const raw = await this.ports.sign(op);
-                const signed = await verifySigned(op, raw);
+                const signed = await verifySigned(op, raw, undefined, nonce);
                 await this.ports.custody.seal(op, signed);
                 effect = journal.effects[0];
             }
@@ -136,11 +143,11 @@ export class RelayApprovalEffectService {
                 effect = journal.effects[0];
             }
             if (effect.phase === "sealed") {
-                await this.revalidate(op);
+                const nonce = await this.revalidate(op);
                 const signed = await this.ports.custody.load(op);
                 if (signed === null || !same(signed.transactionHash, effect.attempt.transactionHash))
                     corrupt("sealed custody missing");
-                await verifySigned(op, signed.rawTransaction, signed.transactionHash);
+                await verifySigned(op, signed.rawTransaction, signed.transactionHash, nonce);
                 journal = await this.effects.transition(profileHash, operationId, journal.integrityHash, { kind: "mark_submitting", role: "approval", at: this.ports.now().toISOString() });
                 try {
                     await this.ports.send(signed.rawTransaction);
@@ -171,6 +178,8 @@ export class RelayApprovalEffectService {
         validateRelayUnsignedOperation(op);
         const quote = op.quote, approval = quote?.approval;
         if (!quote || !approval || !op.policyDigest || !op.policyRevision || !op.approvalNetworkFeeCeilingWei ||
+            !op.depositNetworkFeeCeilingWei || !op.statusLocator || !quote.statusLocator ||
+            op.statusLocator.requestId !== quote.statusLocator.requestId ||
             quote.quoteDigest !== op.quoteDigest || op.sourceChainId !== 1 || approval.chainId !== 1 ||
             !same(approval.from, op.sourceAccount) || !same(approval.to, ETHEREUM_USDC) ||
             !same(quote.paymentDetails.depository, ETHEREUM_DEPOSITORY) || approval.value !== "0" ||
@@ -199,13 +208,24 @@ export class RelayApprovalEffectService {
         if (pin?.provider !== "relay" || pin.reference !== RELAY_ROUTE_REFERENCE)
             blocked("route_pin");
         const execution = await this.ports.executionAdmission(op);
-        if (execution === null || !/^[A-Za-z0-9._:-]{8,256}$/u.test(execution.requestId) ||
+        if (execution === null || execution.requestId !== op.statusLocator?.requestId ||
             execution.operationIntegrityHash !== op.integrityHash || execution.quoteDigest !== op.quoteDigest) {
             blocked("relay_request_id_execution_admission_required");
         }
+        const funding = await this.ports.funding(op);
+        if (funding.chainId !== 1 || funding.nativeBalanceWei < BigInt(op.approvalNetworkFeeCeilingWei) + BigInt(op.depositNetworkFeeCeilingWei) ||
+            funding.tokenBalanceAtomic < BigInt(op.amountAtomic) || funding.allowanceAtomic < 0n ||
+            funding.currentMaxFeePerGasWei < 0n || funding.currentMaxFeePerGasWei > BigInt(op.quote.approval.maxFeePerGas) ||
+            funding.nextNonce < 0n)
+            blocked("source_funding_or_fee");
+        const after = this.ports.now();
+        if (!Number.isFinite(after.getTime()) || after.getTime() + 60_000 >= Date.parse(op.deadline) ||
+            (active.registry.expiresAt !== undefined && after.toISOString() >= active.registry.expiresAt))
+            blocked("deadline_during_revalidation");
+        return funding.nextNonce;
     }
 }
-export async function verifySigned(op, raw, claimedHash) {
+export async function verifySigned(op, raw, claimedHash, expectedNonce) {
     if (!TX.test(raw))
         corrupt("signed raw encoding");
     const hash = keccak256(raw);
@@ -225,6 +245,7 @@ export async function verifySigned(op, raw, claimedHash) {
         tx.gas !== BigInt(expected.gas) || tx.maxFeePerGas !== BigInt(expected.maxFeePerGas) ||
         tx.maxPriorityFeePerGas !== BigInt(expected.maxPriorityFeePerGas) ||
         (tx.accessList?.length ?? 0) !== 0 || tx.nonce === undefined ||
+        (expectedNonce !== undefined && BigInt(tx.nonce) !== expectedNonce) ||
         tx.gas * tx.maxFeePerGas > BigInt(op.approvalNetworkFeeCeilingWei))
         corrupt("signed envelope drift");
     return { rawTransaction: raw, transactionHash: hash };

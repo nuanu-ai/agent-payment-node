@@ -60,6 +60,15 @@ export interface RelayApprovalPorts {
         operationIntegrityHash: string;
         quoteDigest: string;
     }>>;
+    /** Fresh source state before signing and again before the first submission. */
+    funding(op: RelayUnsignedOperation): Promise<Readonly<{
+        chainId: number;
+        nativeBalanceWei: bigint;
+        tokenBalanceAtomic: bigint;
+        allowanceAtomic: bigint;
+        currentMaxFeePerGasWei: bigint;
+        nextNonce: bigint;
+    }>>;
     sign(op: RelayUnsignedOperation): Promise<Hex>;
     send(rawTransaction: Hex): Promise<string>;
     observe(transactionHash: Hex): Promise<RelayApprovalObservation | null>;
@@ -76,5 +85,5 @@ export declare class RelayApprovalEffectService {
     private assertEnvelope;
     private revalidate;
 }
-export declare function verifySigned(op: RelayUnsignedOperation, raw: Hex, claimedHash?: string): Promise<RelaySignedApproval>;
+export declare function verifySigned(op: RelayUnsignedOperation, raw: Hex, claimedHash?: string, expectedNonce?: bigint): Promise<RelaySignedApproval>;
 export declare function verifyApprovalObservation(op: RelayUnsignedOperation, hash: Hex, value: RelayApprovalObservation): "pending" | "confirmed" | "failed";

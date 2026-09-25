@@ -9,7 +9,7 @@ import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "
 import { RelayApprovalEffectService, type RelayApprovalCustodyPort, type RelayApprovalObservation,
   type RelayApprovalPorts } from "../../src/relay/approval-effect.js";
 import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
-import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, validateRelayQuote } from "../../src/relay/quote.js";
+import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator, validateRelayQuote } from "../../src/relay/quote.js";
 import { RELAY_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
 import { StateStore } from "../../src/state.js";
@@ -21,6 +21,7 @@ const fixturePayer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14".toLowerCase();
 const recipient = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7".toLowerCase();
 const now = new Date("2026-09-30T00:00:00.000Z");
 const blockHash = `0x${"a".repeat(64)}`;
+const requestId = `0x${"b".repeat(64)}`;
 const topic = keccak256(toBytes("Approval(address,address,uint256)"));
 const word = (hex: string) => `0x${hex.slice(2).padStart(64, "0")}`;
 
@@ -42,13 +43,14 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
   const quoted = await validateRelayQuote(fixture, { payer: fixturePayer, recipient, amountAtomic: "2500000",
     minimumOutputWei: "3000000000000000", nowSeconds: 1790800000 });
   const { quoteDigest: _, ...body } = quoted;
-  const modified = { ...body, payer: owner, sourceRefundRecipient: owner,
+  const locator = relayStatusLocator(requestId);
+  const modified = { ...body, statusLocator: locator, payer: owner, sourceRefundRecipient: owner,
     approval: { ...quoted.approval, from: owner }, deposit: { ...quoted.deposit, from: owner } };
   const quote = { ...modified, quoteDigest: hashObject(modified) };
   const op = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned",
     state: "prepared", terminal: false, profileHash: state.profileHash("default"), operationId: "2".repeat(64),
     idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64), sourceChainId: 1, destinationChainId: 56,
-    sourceAccount: owner, recipient, quoteDigest: quote.quoteDigest, quote,
+    sourceAccount: owner, recipient, quoteDigest: quote.quoteDigest, quote, statusLocator: locator,
     policyDigest: policy().digest, policyRevision: 1,
     approvalNetworkFeeCeilingWei: quote.approval.maximumNetworkFeeWei,
     depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
@@ -66,8 +68,10 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
   const ports: RelayApprovalPorts = {
     now: () => now, activePolicy: async () => policy(), publicAccount: async () => owner,
     dailyUsage: async () => "0", custody,
-    executionAdmission: async operation => ({ requestId: "validated-request-0001",
+    executionAdmission: async operation => ({ requestId,
       operationIntegrityHash: operation.integrityHash, quoteDigest: operation.quoteDigest }),
+    funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n, tokenBalanceAtomic: 2500000n,
+      allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 7n }),
     sign: async operation => { signs++; const a = operation.quote!.approval;
       return account.signTransaction({ type: "eip1559", chainId: 1, to: a.to as Hex, data: a.data as Hex,
         value: 0n, nonce: 7, gas: BigInt(a.gas), maxFeePerGas: BigInt(a.maxFeePerGas),
@@ -108,6 +112,20 @@ test("missing external requestId admission blocks old saved operation before sig
   const service = new RelayApprovalEffectService(f.state, { ...f.ports, executionAdmission: async () => null });
   await assert.rejects(service.run(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(f.counts.signs, 0); assert.equal(f.counts.sends, 0);
+});
+
+test("wrong requestId and stale source funding or nonce block approval before send", async t => {
+  const f = await setup(t);
+  const invalid: RelayApprovalPorts[] = [
+    { ...f.ports, executionAdmission: async operation => ({ requestId: "wrong-request-0001",
+      operationIntegrityHash: operation.integrityHash, quoteDigest: operation.quoteDigest }) },
+    { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 0n,
+      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 7n }) },
+    { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
+      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 8n }) },
+  ];
+  for (const ports of invalid) await assert.rejects(new RelayApprovalEffectService(f.state, ports).run(f.op.operationId));
+  assert.equal(f.counts.sends, 0);
 });
 
 test("retired Relay operation cannot enter approval signing or submission", async t => {

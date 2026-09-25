@@ -356,6 +356,23 @@ test("Relay retirement refuses orphan encrypted approval custody without a journ
   assert.equal(status.state, "prepared");
 });
 
+test("Relay retirement refuses orphan encrypted deposit custody without a journal", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root), first = await serviceFor(state, () => {}).prepare(input);
+  const key = `0x${"1".repeat(64)}` as const;
+  const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) };
+  const wallets = new EncryptedWalletStore(state, wrapping);
+  await wallets.importNew("default", key, privateKeyToAccount(key).address);
+  const wallet = await wallets.describe("default"); assert.ok(wallet);
+  const slot = domainHash("apn.relay-deposit-custody.v1", canonicalJson({ operationId: first.operationId }));
+  const rawTransaction = "0x0102" as const, transactionHash = keccak256(rawTransaction);
+  wallet.secret.directEffects[slot] = { payloadHash: "a".repeat(64), transactionHash,
+    rawTransaction, rawTransactionHash: transactionHash };
+  await wallets.save(wallet.identity, wallet.secret); wallets.clear(wallet.secret);
+  await assert.rejects(new RelayRetireService(state, { now: () => instant }, wrapping).retire({
+    profile: "default", operationId: first.operationId }), { code: "APN_OPERATION_BLOCKED" });
+});
+
 test("Relay retirement fails closed on corrupt encrypted custody metadata", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root), first = await serviceFor(state, () => {}).prepare(input);

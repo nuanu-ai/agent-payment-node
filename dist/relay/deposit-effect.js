@@ -1,6 +1,8 @@
 /** Internal Ethereum Relay source deposit. All money and observation ports are injected. */
 import { randomBytes } from "node:crypto";
 import { decodeFunctionData, encodeFunctionData, keccak256, parseAbi, parseTransaction, recoverTransactionAddress } from "viem";
+import { canonicalJson, domainHash } from "../canonical.js";
+import { EncryptedWalletStore, walletCustodyLock } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
@@ -12,6 +14,64 @@ const DEPOSIT_ABI = parseAbi(["function depositErc20(address depositor, address 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay deposit effect is blocked.", { reason }); }
 function corrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Relay deposit effect is invalid: ${reason}.`); }
+function depositBinding(op) {
+    return domainHash("apn.relay-deposit-envelope.v1", canonicalJson({ operationId: op.operationId,
+        quoteDigest: op.quoteDigest, deposit: op.quote.deposit }));
+}
+function depositKey(op) {
+    return domainHash("apn.relay-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
+}
+/** Encrypted, hash-bound signed material for the one permitted deposit attempt. */
+export class RelayEncryptedDepositCustody {
+    state;
+    wallets;
+    constructor(state, wrapping) {
+        this.state = state;
+        this.wallets = new EncryptedWalletStore(state, wrapping);
+    }
+    async load(op) {
+        return this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
+            const wallet = await this.wallets.describe("default");
+            if (wallet === null)
+                return null;
+            try {
+                if (!same(wallet.identity.address, op.sourceAccount))
+                    corrupt("deposit custody owner");
+                const stored = wallet.secret.directEffects[depositKey(op)];
+                if (stored === undefined)
+                    return null;
+                if (stored.payloadHash !== depositBinding(op) || stored.transactionHash !== stored.rawTransactionHash ||
+                    keccak256(stored.rawTransaction) !== stored.transactionHash)
+                    corrupt("deposit custody binding");
+                return { rawTransaction: stored.rawTransaction, transactionHash: stored.transactionHash };
+            }
+            finally {
+                this.wallets.clear(wallet.secret);
+            }
+        });
+    }
+    async seal(op, signed) {
+        await this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
+            const wallet = await this.wallets.describe("default");
+            if (wallet === null)
+                blocked("encrypted_custody_missing");
+            try {
+                if (!same(wallet.identity.address, op.sourceAccount))
+                    corrupt("deposit custody owner");
+                if (wallet.secret.directEffects[depositKey(op)] !== undefined)
+                    blocked("signed_deposit_already_sealed");
+                const verified = await verifySignedEnvelope(op, signed.rawTransaction, signed.transactionHash);
+                const entry = { payloadHash: depositBinding(op), transactionHash: verified.transactionHash,
+                    rawTransaction: verified.rawTransaction, rawTransactionHash: verified.transactionHash };
+                wallet.secret.directEffects[depositKey(op)] = entry;
+                await this.wallets.save(wallet.identity, wallet.secret);
+            }
+            finally {
+                this.wallets.clear(wallet.secret);
+            }
+        });
+    }
+}
 function verifyRawHash(raw, claimedHash) {
     if (!/^0x(?:[a-fA-F0-9]{2})+$/u.test(raw))
         corrupt("signed raw encoding");
