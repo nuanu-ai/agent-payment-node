@@ -1,9 +1,9 @@
 # Direct EVM acceptance runbook (2026-09-19)
 
-This is the owner handoff for the remaining direct EVM proofs. It is pinned to
-`origin/main` commit `5e5dbefc8bb37026563bbc6cfc91ed2850d11fc7` and the frozen
-allowlist dataset
+This is the owner handoff for the remaining direct EVM proofs. The base network
+matrix uses the frozen allowlist dataset
 [`data/allowlist/2026-09-17/dataset.json`](../data/allowlist/2026-09-17/dataset.json).
+The three C1-12 historical token rows use the separate direct-only registry.
 The commands below stop at `prepare`; they do not approve, sign, submit, resume,
 or charge a payment.
 
