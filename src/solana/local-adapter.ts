@@ -92,9 +92,16 @@ export class SolanaLocalAdapter implements DirectRailPort {
     await this.currentAccount(account); validateRailPrepared(prepared, account); await this.assertNetwork();
     await validateSolanaMessage(prepared);
     if (this.now().getTime() >= Date.parse(prepared.expiresAt)) expired();
-    const block = rpcRecord(rpcRecord(await this.rpc.call("getLatestBlockhash", [{ commitment: "confirmed" }])).value);
+    const [latestBlock, height] = this.rpc.batch === undefined
+      ? [await this.rpc.call("getLatestBlockhash", [{ commitment: "confirmed" }]),
+        await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }])]
+      : await this.rpc.batch([
+        { method: "getLatestBlockhash", params: [{ commitment: "confirmed" }] },
+        { method: "getBlockHeight", params: [{ commitment: "confirmed" }] },
+      ]);
+    const block = rpcRecord(rpcRecord(latestBlock).value);
     if (typeof block.blockhash !== "string") protocolFailure(); solanaAddress(block.blockhash);
-    const observedBlockHeight = rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }]));
+    const observedBlockHeight = rpcAtomic(height);
     const candidate = { blockReference: block.blockhash, lastValidBlockHeight: rpcAtomic(block.lastValidBlockHeight).toString(),
       observedBlockHeight: observedBlockHeight.toString(), acquiredAt: this.now().toISOString() };
     const message = await solanaMessage(prepared, candidate);
