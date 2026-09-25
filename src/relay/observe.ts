@@ -19,7 +19,6 @@ export type RelayObserveState = "prepared_waiting" | "approval_pending" | "depos
 
 export interface RelayObserveResult {
   readonly operationId: string;
-  readonly requestId: string | null;
   readonly state: RelayObserveState;
   readonly reason: string;
   readonly sourceFinalized: boolean;
@@ -49,7 +48,7 @@ export class RelayObserveService {
     const result = (state: RelayObserveState, reason: string, sourceFinalized = false,
       providerStatus: string | null = null, providerStatusBound = false,
       destinationProof: RelayBnbProofResult | null = null): RelayObserveResult => ({
-      operationId, requestId: op.statusLocator?.requestId ?? null, state, reason, sourceFinalized,
+      operationId, state, reason, sourceFinalized,
       providerStatus, providerStatusBound, destinationProof, causalLinkCryptographicallyProven: false,
       paidAcceptance: false, operationalAcceptance: state === "operational_acceptance",
     });

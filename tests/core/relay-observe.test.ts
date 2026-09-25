@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { hashObject } from "../../src/canonical.js";
+import { hashObject, sha256 } from "../../src/canonical.js";
+import { EvmDirectRpcGuard } from "../../src/evm-direct-rpc-guard.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
 import { RelayObserveService } from "../../src/relay/observe.js";
@@ -184,7 +185,7 @@ test("RPC adapter rechecks finalized source in three physical POSTs and refuses 
     assert.ok(Array.isArray(requests));
     return calls === 1 ? ["0x1", tx, receipt] : calls === 2 ? [included, finalized] : [included, finalized];
   } } as unknown as HttpsBaseRpc;
-  const adapter = new RelayEthereumFinalityRpc("https://example.com", fake);
+  const adapter = new RelayEthereumFinalityRpc("https://example.com", f.state, fake);
   assert.ok(await adapter.finalizedDeposit(sourceHash as `0x${string}`));
   assert.equal(calls, 3);
   let reorgCalls = 0;
@@ -193,7 +194,7 @@ test("RPC adapter rechecks finalized source in three physical POSTs and refuses 
     return reorgCalls === 1 ? ["0x1", tx, receipt] : reorgCalls === 2 ? [included, finalized] :
       [{ ...included, hash: hash("8") }, finalized];
   } } as unknown as HttpsBaseRpc;
-  assert.equal(await new RelayEthereumFinalityRpc("https://example.com", reorg).finalizedDeposit(sourceHash as `0x${string}`), null);
+  assert.equal(await new RelayEthereumFinalityRpc("https://example.com", f.state, reorg).finalizedDeposit(sourceHash as `0x${string}`), null);
   assert.equal(reorgCalls, 3);
   let sequentialCalls = 0;
   const sequential = { batchCall: async () => {
@@ -201,16 +202,18 @@ test("RPC adapter rechecks finalized source in three physical POSTs and refuses 
     const step = (sequentialCalls - 1) % 3;
     return step === 0 ? ["0x1", tx, receipt] : [included, finalized];
   } } as unknown as HttpsBaseRpc;
-  const reusedSource = new RelayEthereumFinalityRpc("https://example.com", sequential);
+  const reusedSource = new RelayEthereumFinalityRpc("https://example.com", f.state, sequential);
   assert.ok(await reusedSource.finalizedDeposit(sourceHash as `0x${string}`));
   assert.ok(await reusedSource.finalizedDeposit(sourceHash as `0x${string}`));
   assert.equal(sequentialCalls, 6);
 });
 
-test("BNB RPC adapter caps physical POSTs at eight without retries", async () => {
+test("BNB RPC adapter caps physical POSTs at eight without retries", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root); await state.initialize();
   let calls = 0;
   const fake = { batchCall: async () => { calls++; return ["0x38"]; } } as unknown as HttpsBaseRpc;
-  const adapter = new RelayBnbReadOnlyRpc("https://example.com", fake);
+  const adapter = new RelayBnbReadOnlyRpc("https://example.com", state, fake);
   for (let i = 0; i < 8; i++) assert.equal(await adapter.chainId(), 56);
   await assert.rejects(adapter.chainId(), { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert.equal(adapter.physicalPosts, 8); assert.equal(calls, 8);
@@ -234,7 +237,7 @@ test("two sequential observations get separate six-POST BNB budgets", async t =>
     throw new Error("unexpected RPC method");
   } } as unknown as HttpsBaseRpc;
   const service = new RelayObserveService(f.state, f.source, () => {
-    const adapter = new RelayBnbReadOnlyRpc("https://example.com", fake);
+    const adapter = new RelayBnbReadOnlyRpc("https://example.com", f.state, fake);
     adapters.push(adapter);
     return adapter;
   }, new RelayKeylessStatusService(f.state, async () => new Response(JSON.stringify(f.payload))));
@@ -308,14 +311,55 @@ test("Relay observe CLI emits operational evidence with a bounded keyless adapte
   assert.equal(evidence.paidAcceptance, false);
   assert.equal(evidence.causalLinkCryptographicallyProven, false);
   assert.equal(evidence.destinationProof?.status, "recipient_credit_proven");
+  assert.equal("requestId" in evidence, false);
+  assert.ok(f.op.statusLocator);
+  assert.equal(JSON.stringify(result).includes(f.op.statusLocator.requestId), false);
   assert.equal(methods.filter(method => method.startsWith("bnb:")).length, 6);
   assert.equal(methods.filter(method => method.startsWith("eth:eth_chainId")).length, 1);
   assert.equal(methods.length, 13);
   assert.equal(providerReads, 1);
   assert.equal(sourceStarts.length, 3);
-  assert.ok(sourceStarts.slice(1).every((start, index) => start - sourceStarts[index]! >= 450));
-  assert.ok(bnbStarts.slice(1).every((start, index) => start - bnbStarts[index]! >= 450));
+  assert.ok(sourceStarts.slice(1).every((start, index) => start - sourceStarts[index]! >= 750), JSON.stringify(sourceStarts));
+  assert.ok(bnbStarts.slice(1).every((start, index) => start - bnbStarts[index]! >= 750), JSON.stringify(bnbStarts));
   assert.deepEqual(await Promise.all([readFile(operationPath), readFile(journalPath)]), before);
+});
+
+test("separate state clients share persisted 750 ms pacing across Ethereum and BNB publicnode hosts", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const leftState = new StateStore(temp.root); await leftState.initialize();
+  const rightState = new StateStore(temp.root);
+  let now = 1_000_000;
+  const starts: number[] = [];
+  const wait = async (milliseconds: number) => { now += milliseconds; };
+  const bnbRpc = { batchCall: async () => { starts.push(now); return ["0x38"]; } } as unknown as HttpsBaseRpc;
+  const sourceRpc = { batchCall: async () => { starts.push(now); return ["0x1", null, null]; } } as unknown as HttpsBaseRpc;
+  const bnb = new RelayBnbReadOnlyRpc("https://bsc-rpc.publicnode.com", leftState, bnbRpc,
+    new EvmDirectRpcGuard(leftState, 8, () => now, wait));
+  const ethereum = new RelayEthereumFinalityRpc("https://ethereum-rpc.publicnode.com", rightState, sourceRpc,
+    () => new EvmDirectRpcGuard(rightState, 3, () => now, wait));
+  assert.equal(await bnb.chainId(), 56);
+  assert.equal(await ethereum.finalizedDeposit(sourceHash as `0x${string}`), null);
+  assert.deepEqual(starts, [1_000_000, 1_000_750]);
+  assert.equal(bnb.physicalPosts, 1);
+});
+
+test("contended cross-client provider lock refuses observe RPC before physical POST", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const holder = new StateStore(temp.root); await holder.initialize();
+  const contender = new StateStore(temp.root, { lockWaitMs: 0 });
+  const familyHash = sha256("rpc-provider-family\0publicnode.com");
+  let entered!: () => void, release!: () => void;
+  const active = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const holding = holder.withLocks([`rpc-provider-family:${familyHash}`], async () => { entered(); await held; });
+  await active;
+  let posts = 0;
+  const rpc = { batchCall: async () => { posts++; return ["0x38"]; } } as unknown as HttpsBaseRpc;
+  const bnb = new RelayBnbReadOnlyRpc("https://bsc-rpc.publicnode.com", contender, rpc);
+  try { await assert.rejects(bnb.chainId(), { code: "APN_STATE_BUSY" }); }
+  finally { release(); await holding; }
+  assert.equal(posts, 0);
+  assert.equal(bnb.physicalPosts, 0);
 });
 
 test("Relay observe CLI keeps provider failure and source mismatch below operational acceptance", async t => {

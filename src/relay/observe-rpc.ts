@@ -2,12 +2,21 @@
 import type { Hex } from "viem";
 import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
+import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc, type ReadOnlyRpcBatchCall } from "../rpc.js";
+import type { StateStore } from "../state.js";
 import type { RelayDepositObservation } from "./deposit-effect.js";
 import type { RelayBnbProofPorts, RelayBnbBlock, RelayBnbReceipt, RelayBnbTransaction } from "./destination-proof.js";
 import type { RelaySourceFinalityPorts } from "./observe.js";
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+/** The shared provider lock stays held until 750 ms after a POST settles.
+ * This covers the delay between the scheduler's persisted reservation and the
+ * transport's actual POST start, including DNS and filesystem latency. */
+async function holdProviderAfterPost<T>(post: () => Promise<T>): Promise<T> {
+  try { return await post(); }
+  finally { await new Promise(resolve => setTimeout(resolve, 750)); }
+}
 function block(value: unknown, tag: string): RelayBnbBlock | null {
   if (value === null) return null;
   const parsed = evmRpcBlockResult(value, tag);
@@ -24,22 +33,18 @@ function status(value: unknown): "success" | "reverted" {
 
 export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
   private readonly rpc: HttpsBaseRpc;
-  private lastStart = 0;
-  private pending: Promise<unknown> = Promise.resolve();
-  constructor(url: string, rpc?: HttpsBaseRpc) { this.rpc = rpc ?? new HttpsBaseRpc(url); }
-  private async read(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
-    const task = this.pending.then(async () => {
-      const wait = Math.max(0, this.lastStart + 500 - Date.now());
-      if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
-      this.lastStart = Date.now();
-      // One batch is one physical POST. HTTP 429 fails without a retry.
-      return this.rpc.batchCall(calls);
-    });
-    this.pending = task.catch(() => undefined);
-    return task;
+  constructor(private readonly url: string, state: StateStore, rpc?: HttpsBaseRpc,
+    private readonly guardFactory: () => EvmDirectRpcGuard = () => new EvmDirectRpcGuard(state, 3)) {
+    this.rpc = rpc ?? new HttpsBaseRpc(url);
+  }
+  private async read(guard: EvmDirectRpcGuard, calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
+    // One batch is one POST. The shared provider-family scheduler persists starts
+    // across CLI processes and refuses cooldowns/lock contention before transport.
+    return guard.post(this.url, () => holdProviderAfterPost(() => this.rpc.batchCall(calls)));
   }
   async finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null> {
-    const [chain, rawTx, rawReceipt] = await this.read([
+    const guard = this.guardFactory();
+    const [chain, rawTx, rawReceipt] = await this.read(guard, [
       { method: "eth_chainId", params: [] },
       { method: "eth_getTransactionByHash", params: [hash] },
       { method: "eth_getTransactionReceipt", params: [hash] },
@@ -49,14 +54,14 @@ export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
     const tx = evmRpcRecord(rawTx), receipt = evmRpcRecord(rawReceipt);
     const number = evmRpcQuantity(receipt.blockNumber);
     const inclusion = `0x${number.toString(16)}`;
-    const [rawBlock, rawFinalized] = await this.read([
+    const [rawBlock, rawFinalized] = await this.read(guard, [
       { method: "eth_getBlockByNumber", params: [inclusion, false] },
       { method: "eth_getBlockByNumber", params: ["finalized", false] },
     ]);
     if (rawBlock === null || rawFinalized === null) return null;
     const included = evmRpcBlockResult(rawBlock, inclusion), finalized = evmRpcBlockResult(rawFinalized, "finalized");
     if (BigInt(finalized.number) < number) return null;
-    const [rawIncludedAgain, rawFinalizedAgain] = await this.read([
+    const [rawIncludedAgain, rawFinalizedAgain] = await this.read(guard, [
       { method: "eth_getBlockByNumber", params: [included.tag, false] },
       { method: "eth_getBlockByNumber", params: [finalized.tag, false] },
     ]);
@@ -75,23 +80,16 @@ export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
 
 export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
   private readonly rpc: HttpsBaseRpc;
-  private posts = 0;
-  private lastStart = 0;
-  private pending: Promise<unknown> = Promise.resolve();
-  constructor(url: string, rpc?: HttpsBaseRpc) { this.rpc = rpc ?? new HttpsBaseRpc(url); }
-  get physicalPosts(): number { return this.posts; }
-  private async read(method: ReadOnlyRpcBatchCall["method"], params: readonly unknown[]): Promise<unknown> {
-    const task = this.pending.then(async () => this.readSerial(method, params));
-    this.pending = task.catch(() => undefined);
-    return task;
+  private readonly guard: EvmDirectRpcGuard;
+  constructor(private readonly url: string, state: StateStore, rpc?: HttpsBaseRpc,
+    guard = new EvmDirectRpcGuard(state, 8)) {
+    this.rpc = rpc ?? new HttpsBaseRpc(url);
+    this.guard = guard;
   }
-  private async readSerial(method: ReadOnlyRpcBatchCall["method"], params: readonly unknown[]): Promise<unknown> {
-    if (this.posts >= 8) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Relay observe exhausted eight BNB RPC POSTs.");
-    const wait = Math.max(0, this.lastStart + 500 - Date.now());
-    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
-    this.lastStart = Date.now(); this.posts++;
-    // HttpsBaseRpc issues one POST with no retry. HTTP 429 fails this invocation.
-    const [value] = await this.rpc.batchCall([{ method, params }]);
+  get physicalPosts(): number { return this.guard.physicalRequests; }
+  private async read(method: ReadOnlyRpcBatchCall["method"], params: readonly unknown[]): Promise<unknown> {
+    const [value] = await this.guard.post(this.url,
+      () => holdProviderAfterPost(() => this.rpc.batchCall([{ method, params }])));
     return value;
   }
   async chainId(): Promise<number> { return Number(evmRpcQuantity(await this.read("eth_chainId", []))); }
