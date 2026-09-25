@@ -12,6 +12,13 @@ export declare function readAccounts(rpc: SolanaRpcPort, addresses: readonly str
     readonly slot: bigint;
     readonly accounts: readonly (SolanaAccountInfo | null)[];
 }>;
+export declare function accountRead(addresses: readonly string[]): {
+    method: "getMultipleAccounts";
+    params: readonly [readonly string[], {
+        readonly encoding: "base64";
+        readonly commitment: "confirmed";
+    }];
+};
 /** Decodes one base64 `getMultipleAccounts` result that must carry exactly `count` entries. */
 export declare function multipleAccounts(value: unknown, count: number): {
     readonly slot: bigint;
