@@ -48,7 +48,7 @@ export interface RelayNativeSourcePorts {
     readonly confirm: (summary: {
         operationId: string;
         sourceChainId: 56;
-        destinationChainId: 137;
+        destinationChainId: 137 | 143;
         sourceAccount: string;
         recipient: string;
         amountAtomic: string;
