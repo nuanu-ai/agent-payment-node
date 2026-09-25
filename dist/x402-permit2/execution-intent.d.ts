@@ -33,9 +33,11 @@ export interface Permit2ExecutionIntent {
     readonly createdAtUnix: number;
     readonly integrityHash: string;
 }
-/** The caller must authenticate this fresh read. The port has no effect methods. */
+/** The port must load the local wallet and active policy for the requested profile from authenticated state.
+ * Caller-supplied profile/account labels are insufficient. The port has no effect methods. */
 export interface Permit2IntentReadPort {
     read(input: {
+        readonly profile: string;
         readonly payer: string;
         readonly nonceBitmapWordIndex: string;
         readonly amountAtomic: string;
@@ -44,6 +46,12 @@ export interface Permit2IntentReadPort {
         readonly owner: Permit2OwnerAdmission;
         readonly evidence: Permit2PrepareEvidence;
         readonly gasBalanceAtomic: string;
+        readonly binding: {
+            readonly walletProfile: string;
+            readonly walletAccount: string;
+            readonly policyProfile: string;
+            readonly policyDigest: string;
+        };
         readonly facilitatorEndpoint: string;
     }>;
 }
@@ -60,8 +68,8 @@ export interface Permit2IntentInput {
 }
 /** Internal-only journal. It owns one durable, immutable file per profile/idempotency key. */
 export declare class Permit2ExecutionIntentJournal extends SecureStateStore {
-    private initialized?;
     private ready;
+    protected syncIntentDirectoryParent(): Promise<void>;
     private path;
     create(input: Permit2IntentInput, port: Permit2IntentReadPort): Promise<Permit2ExecutionIntent>;
     load(operationId: string): Promise<Permit2ExecutionIntent | null>;

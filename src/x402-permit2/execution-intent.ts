@@ -1,3 +1,4 @@
+import { open } from "node:fs/promises";
 import { hashTypedData } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
@@ -47,11 +48,14 @@ export interface Permit2ExecutionIntent {
   readonly integrityHash: string;
 }
 
-/** The caller must authenticate this fresh read. The port has no effect methods. */
+/** The port must load the local wallet and active policy for the requested profile from authenticated state.
+ * Caller-supplied profile/account labels are insufficient. The port has no effect methods. */
 export interface Permit2IntentReadPort {
-  read(input: { readonly payer: string; readonly nonceBitmapWordIndex: string; readonly amountAtomic: string;
+  read(input: { readonly profile: string; readonly payer: string; readonly nonceBitmapWordIndex: string; readonly amountAtomic: string;
     readonly nowSeconds: number }): Promise<{ readonly owner: Permit2OwnerAdmission;
     readonly evidence: Permit2PrepareEvidence; readonly gasBalanceAtomic: string;
+    readonly binding: { readonly walletProfile: string; readonly walletAccount: string;
+      readonly policyProfile: string; readonly policyDigest: string };
     readonly facilitatorEndpoint: string }>;
 }
 
@@ -69,10 +73,17 @@ export interface Permit2IntentInput {
 
 /** Internal-only journal. It owns one durable, immutable file per profile/idempotency key. */
 export class Permit2ExecutionIntentJournal extends SecureStateStore {
-  private initialized?: Promise<void>;
   private async ready(): Promise<void> {
-    this.initialized ??= (async () => { await this.initialize(); await this.ensureDirectory("permit2-intents"); })();
-    await this.initialized;
+    await this.initialize();
+    await this.ensureDirectory("permit2-intents");
+    // mkdir persists the child inode, but its name in the root can still be lost
+    // after a crash. Repeat on every retry, including after a failed first sync.
+    try { await this.syncIntentDirectoryParent(); }
+    catch { throw new ApnError("APN_STATE_SECURITY", "Permit2 intent directory parent sync failed."); }
+  }
+  protected async syncIntentDirectoryParent(): Promise<void> {
+    const handle = await open(this.root, "r");
+    try { await handle.sync(); } finally { await handle.close(); }
   }
   private path(operationId: string): string { return `permit2-intents/${operationId}.json`; }
   async create(input: Permit2IntentInput, port: Permit2IntentReadPort): Promise<Permit2ExecutionIntent> {
@@ -92,8 +103,13 @@ export class Permit2ExecutionIntentJournal extends SecureStateStore {
         return existing;
       }
       const nonce = BigInt(bound.nonce);
-      const fresh = await port.read({ payer: bound.owner, nonceBitmapWordIndex: (nonce >> 8n).toString(),
+      const fresh = await port.read({ profile, payer: bound.owner, nonceBitmapWordIndex: (nonce >> 8n).toString(),
         amountAtomic: bound.amountAtomic, nowSeconds: input.nowSeconds });
+      if (fresh.binding?.walletProfile !== profile || fresh.binding.policyProfile !== profile ||
+          fresh.binding.walletAccount?.toLowerCase() !== bound.owner.toLowerCase() ||
+          fresh.binding.policyDigest !== fresh.owner.policyDigest) {
+        refuse("The selected profile does not own this wallet and active policy.");
+      }
       if (fresh.facilitatorEndpoint !== ENDPOINT) refuse("The facilitator endpoint changed.");
       if (!validQuantity(fresh.gasBalanceAtomic) || BigInt(fresh.gasBalanceAtomic) < BigInt(input.minimumGasAtomic)) {
         throw new ApnError("APN_INSUFFICIENT_GAS", "Avalanche gas balance is below the required minimum.");

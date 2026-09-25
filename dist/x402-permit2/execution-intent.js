@@ -1,3 +1,4 @@
+import { open } from "node:fs/promises";
 import { hashTypedData } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
@@ -14,10 +15,26 @@ const HASH = /^[a-f0-9]{64}$/u;
 const QUANTITY = /^(0|[1-9][0-9]{0,77})$/u;
 /** Internal-only journal. It owns one durable, immutable file per profile/idempotency key. */
 export class Permit2ExecutionIntentJournal extends SecureStateStore {
-    initialized;
     async ready() {
-        this.initialized ??= (async () => { await this.initialize(); await this.ensureDirectory("permit2-intents"); })();
-        await this.initialized;
+        await this.initialize();
+        await this.ensureDirectory("permit2-intents");
+        // mkdir persists the child inode, but its name in the root can still be lost
+        // after a crash. Repeat on every retry, including after a failed first sync.
+        try {
+            await this.syncIntentDirectoryParent();
+        }
+        catch {
+            throw new ApnError("APN_STATE_SECURITY", "Permit2 intent directory parent sync failed.");
+        }
+    }
+    async syncIntentDirectoryParent() {
+        const handle = await open(this.root, "r");
+        try {
+            await handle.sync();
+        }
+        finally {
+            await handle.close();
+        }
     }
     path(operationId) { return `permit2-intents/${operationId}.json`; }
     async create(input, port) {
@@ -38,8 +55,13 @@ export class Permit2ExecutionIntentJournal extends SecureStateStore {
                 return existing;
             }
             const nonce = BigInt(bound.nonce);
-            const fresh = await port.read({ payer: bound.owner, nonceBitmapWordIndex: (nonce >> 8n).toString(),
+            const fresh = await port.read({ profile, payer: bound.owner, nonceBitmapWordIndex: (nonce >> 8n).toString(),
                 amountAtomic: bound.amountAtomic, nowSeconds: input.nowSeconds });
+            if (fresh.binding?.walletProfile !== profile || fresh.binding.policyProfile !== profile ||
+                fresh.binding.walletAccount?.toLowerCase() !== bound.owner.toLowerCase() ||
+                fresh.binding.policyDigest !== fresh.owner.policyDigest) {
+                refuse("The selected profile does not own this wallet and active policy.");
+            }
             if (fresh.facilitatorEndpoint !== ENDPOINT)
                 refuse("The facilitator endpoint changed.");
             if (!validQuantity(fresh.gasBalanceAtomic) || BigInt(fresh.gasBalanceAtomic) < BigInt(input.minimumGasAtomic)) {

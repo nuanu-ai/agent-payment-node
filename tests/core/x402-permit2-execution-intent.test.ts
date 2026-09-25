@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import type { PaymentRequired } from "@x402/core/types";
 import { ApnError } from "../../src/errors.js";
@@ -39,6 +41,8 @@ const request: Permit2IntentInput = { profile: "owner", idempotencyKey: "permit2
 const port = (changes: Partial<Awaited<ReturnType<Permit2IntentReadPort["read"]>>> = {}): Permit2IntentReadPort =>
   ({ read: async () => ({ owner: original.owner,
     evidence: { ...original.evidence, observedAtSeconds: request.nowSeconds }, gasBalanceAtomic: "1000",
+    binding: { walletProfile: "owner", walletAccount: payer, policyProfile: "owner",
+      policyDigest: original.owner.policyDigest },
     facilitatorEndpoint: request.facilitatorEndpoint, ...changes }) });
 const errorCode = (code: string) => (error: unknown) => error instanceof ApnError && error.code === code;
 
@@ -84,6 +88,44 @@ test("insufficient token or gas and stale policy leave no partial intent or rese
   await assert.rejects(journal.create(request, port({ owner: { ...original.owner, policyDigest: "b".repeat(64) } })),
     errorCode("APN_OPERATION_BLOCKED"));
   assert.equal(await journal.load(journal.operationId("owner", request.idempotencyKey)), null);
+});
+
+test("two profiles cannot journal owner A material under profile B", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const journal = new Permit2ExecutionIntentJournal(state.root);
+  const other = { ...request, profile: "other-owner" };
+  await assert.rejects(journal.create(other, port()), errorCode("APN_OPERATION_BLOCKED"));
+  assert.equal(await journal.load(journal.operationId("other-owner", request.idempotencyKey)), null);
+  // A forged label for the other profile still fails when its authenticated wallet is distinct.
+  await assert.rejects(journal.create(other, port({ binding: { walletProfile: "other-owner",
+    walletAccount: "0x1111111111111111111111111111111111111111", policyProfile: "other-owner",
+    policyDigest: original.owner.policyDigest } })), errorCode("APN_OPERATION_BLOCKED"));
+  assert.equal(await journal.load(journal.operationId("other-owner", request.idempotencyKey)), null);
+});
+
+test("first use syncs the journal parent before publication and retries after a failed sync", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  class FailingFirstSync extends Permit2ExecutionIntentJournal {
+    attempts = 0;
+    protected override async syncIntentDirectoryParent(): Promise<void> {
+      this.attempts++;
+      if (this.attempts === 1) throw new Error("directory fsync unavailable");
+      await super.syncIntentDirectoryParent();
+    }
+  }
+  const journal = new FailingFirstSync(state.root);
+  let reads = 0;
+  const reader: Permit2IntentReadPort = { read: async (input) => {
+    reads++;
+    return port().read(input);
+  } };
+  await assert.rejects(journal.create(request, reader), errorCode("APN_STATE_SECURITY"));
+  assert.equal(reads, 0);
+  assert.deepEqual(await readdir(join(state.root, "permit2-intents")), []);
+  const result = await journal.create(request, reader);
+  assert.equal(result.capability, "execution_blocked");
+  assert.ok(journal.attempts >= 2);
+  assert.equal(reads, 1);
 });
 
 test("read only prepare creates no operation and has no paid outcome", async (t) => {
