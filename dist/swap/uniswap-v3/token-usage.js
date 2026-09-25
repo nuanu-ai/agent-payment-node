@@ -90,7 +90,8 @@ export class UniswapTokenUsage {
             await move(target, true);
         }
         else if (target === "failed_before_effect") {
-            if (current.state !== "reserved")
+            if (current.state !== "reserved" || op.swapAttempt !== null ||
+                op.approvalAttempt?.transactionHash != null && (op.phase !== "cleaned" || op.cleanupEvidence?.kind !== "expired_approval_no_swap"))
                 corrupt("Uniswap token usage cannot release after a possible principal effect.");
             await move(target, true);
         }
