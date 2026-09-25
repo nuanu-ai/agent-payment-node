@@ -19,6 +19,7 @@ test("the pinned Jupiter ABI review remains fail closed and digest bound", () =>
   });
   const verifiedInterface = record.verifiedInterface as Record<string, unknown>;
   const routeV2 = (verifiedInterface.exactInInstructions as Array<Record<string, unknown>>)[0];
+  assert.ok(routeV2);
   assert.equal(routeV2.name, "route_v2");
   assert.equal(routeV2.discriminatorHex, "bb64facc31c4af14");
   assert.equal((routeV2.fixedAccounts as string[]).length, 10);
