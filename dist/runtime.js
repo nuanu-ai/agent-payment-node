@@ -11,6 +11,7 @@ export class RuntimeContext {
     relayObserve;
     relayBaseObserve;
     relayArbitrumObserve;
+    relayArbitrumApprovalDecision;
     relayExecute;
     relayNativeExecute;
     relayExecuteConfirmation;
@@ -78,6 +79,8 @@ export class RuntimeContext {
             this.relayBaseObserve = dependencies.relayBaseObserve;
         if (dependencies.relayArbitrumObserve !== undefined)
             this.relayArbitrumObserve = dependencies.relayArbitrumObserve;
+        if (dependencies.relayArbitrumApprovalDecision !== undefined)
+            this.relayArbitrumApprovalDecision = dependencies.relayArbitrumApprovalDecision;
         if (dependencies.relayExecute !== undefined)
             this.relayExecute = dependencies.relayExecute;
         if (dependencies.relayNativeExecute !== undefined)

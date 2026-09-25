@@ -5,6 +5,7 @@ import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayObserveService } from "./relay/observe.js";
 import type { RelayBaseObserveService } from "./relay/base-observe.js";
 import type { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
+import type { RelayArbitrumApprovalDecisionService } from "./relay/arbitrum-approval-decision.js";
 import type { RelayEffectJournal } from "./relay/effect-journal.js";
 import type { RelayNativeSourceRuntime } from "./relay/native-source.js";
 import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort, WaitPort } from "./ports.js";
@@ -68,6 +69,7 @@ export interface CoreDependencies {
     readonly relayObserve?: RelayObserveService;
     readonly relayBaseObserve?: RelayBaseObserveService;
     readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
+    readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
     readonly relayExecute?: RelayExecuteHandler;
     readonly relayNativeExecute?: RelayNativeSourceRuntime;
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
@@ -131,6 +133,7 @@ export declare class RuntimeContext {
     readonly relayObserve?: RelayObserveService;
     readonly relayBaseObserve?: RelayBaseObserveService;
     readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
+    readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
     readonly relayExecute?: RelayExecuteHandler;
     readonly relayNativeExecute?: RelayNativeSourceRuntime;
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;

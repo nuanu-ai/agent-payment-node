@@ -104,6 +104,13 @@ export class AllowlistPolicyStore extends SecureStateStore {
     return await this.withLocks([lockKey(profileHash)], async () => await this.load(profile, profileHash));
   }
 
+  /** Caller must already hold profile:<allowlistProfileHash(profile)>; used for an atomic policy-bound transition. */
+  async readUnderProfileLock(profile: string): Promise<AllowlistPolicyState> {
+    const profileHash = allowlistProfileHash(profile);
+    await this.ready();
+    return this.load(profile, profileHash);
+  }
+
   /** Append one decision only if the chain head still equals the head the human approved against. */
   async appendDecision(profile: string, expectedHeadDigest: string | null, decision: AllowlistPolicyDecision): Promise<AllowlistPolicyActivationEntry> {
     const profileHash = allowlistProfileHash(profile);

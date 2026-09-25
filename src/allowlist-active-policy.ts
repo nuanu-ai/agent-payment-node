@@ -44,6 +44,11 @@ export async function loadActiveAssetPolicyRegistry(
     throw new ApnError("APN_INVALID_INPUT", "An exact instant is required to load the active allowlist policy.", { reason: "invalid_time" });
   }
   const state = await new AllowlistPolicyStore(typeof source === "string" ? source : source.state.root).read(profile);
+  return activeAssetPolicyFromState(state, at);
+}
+
+/** Decode an authenticated state already read while the caller holds the profile lock. */
+export function activeAssetPolicyFromState(state: AllowlistPolicyState, at: Date): ActiveAssetPolicy | null {
   const active = activeAllowlistPolicy(state);
   if (active === null) return null;
   const { entry, record } = active;

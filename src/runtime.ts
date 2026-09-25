@@ -5,6 +5,7 @@ import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayObserveService } from "./relay/observe.js";
 import type { RelayBaseObserveService } from "./relay/base-observe.js";
 import type { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
+import type { RelayArbitrumApprovalDecisionService } from "./relay/arbitrum-approval-decision.js";
 import type { RelayEffectJournal } from "./relay/effect-journal.js";
 import type { RelayNativeSourceRuntime } from "./relay/native-source.js";
 import { randomUUID } from "node:crypto";
@@ -77,6 +78,7 @@ export interface CoreDependencies {
   readonly relayObserve?: RelayObserveService;
   readonly relayBaseObserve?: RelayBaseObserveService;
   readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
+  readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
   readonly relayExecute?: RelayExecuteHandler;
   readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
@@ -137,6 +139,7 @@ export class RuntimeContext {
   readonly relayObserve?: RelayObserveService;
   readonly relayBaseObserve?: RelayBaseObserveService;
   readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
+  readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
   readonly relayExecute?: RelayExecuteHandler;
   readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
@@ -198,6 +201,7 @@ export class RuntimeContext {
     if (dependencies.relayObserve !== undefined) this.relayObserve = dependencies.relayObserve;
     if (dependencies.relayBaseObserve !== undefined) this.relayBaseObserve = dependencies.relayBaseObserve;
     if (dependencies.relayArbitrumObserve !== undefined) this.relayArbitrumObserve = dependencies.relayArbitrumObserve;
+    if (dependencies.relayArbitrumApprovalDecision !== undefined) this.relayArbitrumApprovalDecision = dependencies.relayArbitrumApprovalDecision;
     if (dependencies.relayExecute !== undefined) this.relayExecute = dependencies.relayExecute;
     if (dependencies.relayNativeExecute !== undefined) this.relayNativeExecute = dependencies.relayNativeExecute;
     if (dependencies.relayExecuteConfirmation !== undefined) this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
