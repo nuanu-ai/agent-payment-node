@@ -3,6 +3,8 @@ import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../../encrypted-wallet-store.js";
 import { ApnError } from "../../errors.js";
+import { assertExclusiveEvmOwnerIncludingGrants, evmAddressLock } from "../../evm-address-ownership.js";
+import { EncryptedSmartAccountPermissionStore } from "../../encrypted-smart-account-permission-store.js";
 import type { EvmRpcCall } from "../../evm-ports.js";
 import { evmRpcHex, evmRpcQuantity } from "../../evm-rpc-codec.js";
 import type { WrappingSecretPort } from "../../macos-keychain.js";
@@ -21,14 +23,20 @@ export interface TokenTransactionEnvelope { readonly chainId: 1; readonly from: 
 /** Local encrypted-wallet custody plus the durable one-way broadcast boundary. */
 export class UniswapTokenCustody {
   private readonly wallets: EncryptedWalletStore;
+  private readonly permissions: EncryptedSmartAccountPermissionStore;
   private readonly nonces: UniswapTokenNonceStore;
   private readonly operations: UniswapTokenJournal;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly call: EvmRpcCall,
     private readonly now: () => Date, private readonly effects = new UniswapTokenEffectJournal(state.root)) { this.wallets = new EncryptedWalletStore(state, wrapping);
+    this.permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
     this.nonces = new UniswapTokenNonceStore(state.root); this.operations = new UniswapTokenJournal(state.root); }
 
   async withAccountLock<T>(op: UniswapTokenOperation, work: () => Promise<T>): Promise<T> {
-    return await this.state.withLocks([`profile:${this.state.profileHash(op.profile)}`, walletCustodyLock(this.state, op.profile)], work);
+    return await this.state.withLocks([`profile:${this.state.profileHash(op.profile)}`, walletCustodyLock(this.state, op.profile),
+      evmAddressLock(op.account)], async () => { await this.assertOwner(op); return await work(); });
+  }
+  private async assertOwner(op: UniswapTokenOperation): Promise<void> {
+    await assertExclusiveEvmOwnerIncludingGrants(this.state, this.permissions, op.account, this.state.profileHash(op.profile));
   }
   async allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind) {
     await this.reconcileNonceReservations(op.account);
@@ -76,6 +84,7 @@ export class UniswapTokenCustody {
     return await this.state.withLocks([`uniswap-token-custody:${op.operationId}:${kind}`], async () => await this.sealUnlocked(op, kind, nonce));
   }
   private async sealUnlocked(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect> {
+    await this.assertOwner(op);
     const envelope = envelopeOf(op, kind, nonce), envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelope)),
       key = effectKey(op, kind), existing = await this.effects.load(op, kind);
     const wallet = await this.wallets.describe(op.profile);
@@ -131,6 +140,7 @@ export class UniswapTokenCustody {
     return await this.state.withLocks([`uniswap-token-custody:${op.operationId}:${kind}`], async () => await this.sendUnlocked(op, kind));
   }
   private async sendUnlocked(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<"accepted" | "ambiguous"> {
+    await this.assertOwner(op);
     const effect = await this.effects.load(op, kind); if (effect === null || effect.phase !== "sealed") blocked("Uniswap token effect is unavailable or already attempted.", "uniswap_token_single_send");
     const wallet = await this.wallets.describe(op.profile); if (wallet === null) corrupt("Uniswap token wallet disappeared.");
     try {
