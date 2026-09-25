@@ -10,7 +10,7 @@ import { newBridgeEffect, type BridgeOperationRecord } from "./operation-model.j
 import { BridgeOperationRepository } from "./operation-repository.js";
 import { assertBridgeOwner, bridgeOwner } from "./owner.js";
 import type { BridgeRpcFactory, LifiProviderPort } from "./ports.js";
-import { RpcProviderScheduler, RpcReadSession } from "./rpc.js";
+import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
 import { BridgeQuoteRepository, newBridgeQuote } from "./quote-repository.js";
 import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from "./routes.js";
 import { newBridgeOperation } from "./transitions.js";
@@ -67,6 +67,7 @@ export class BridgePreparation {
       // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary. Only the
       // provider-family scheduler/cooldown spans phases. Cold proofs retain bounded request and retry headroom.
       const session = new RpcReadSession({ now: this.o.now, maxHttpRequests: 26, maxHttpAttempts: 28,
+        physicalBudget: new BridgeRpcPhysicalBudget(),
         archiveDeploymentBatchMaxItems: 3, lineaArchiveDeploymentScalarCode: this.o.lineaArchiveDeploymentScalarCode === true,
         ...(this.o.providerScheduler === undefined ? {} : { providerScheduler: this.o.providerScheduler }) });
       const source = this.o.rpcFor(quote.request.fromChainId, session), destination = this.o.rpcFor(quote.request.toChainId, session);

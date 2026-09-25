@@ -104,6 +104,49 @@ test("LI.FI observation phases use independent lazy bounded RPC sessions", async
   assert.notEqual(resumeSession, approvalSession);
 });
 
+test("LI.FI exhausted invocation budget leaves an effect unsigned for a fresh resume", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root); s.source.allowance = s.request.amountAtomic;
+  const { id } = await s.prepare();
+  s.approval.confirm = async () => {
+    const budget = s.rpcSessions.at(-1)!.physicalBudget!;
+    (budget as unknown as { posts: number }).posts = 23;
+    return true;
+  };
+  const result = await s.core.execute({ command: "bridge.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const stored = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(stored.effects[0]!.phase, "unsealed"); assert.equal(s.source.submissions.length, 0);
+  const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
+  const resumed = await restart.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(resumed.ok, true, resumed.error?.message);
+  assert.equal((resumed.operation as { state: string }).state, "completed");
+  assert.equal(s.source.submissions.length, 1);
+});
+
+test("LI.FI exhausted send slot preserves one durable seal for a fresh resume", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root); s.source.allowance = s.request.amountAtomic;
+  const { id } = await s.prepare();
+  const originalSeal = s.custody.seal.bind(s.custody);
+  s.custody.seal = async (...args) => {
+    const material = await originalSeal(...args);
+    const budget = s.rpcSessions.at(-1)!.physicalBudget!;
+    (budget as unknown as { posts: number }).posts = 24;
+    return material;
+  };
+  const result = await s.core.execute({ command: "bridge.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const stored = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(stored.effects[0]!.phase, "sealed"); assert.equal(stored.effects[0]!.submissionAttempts, 0);
+  assert.equal(s.source.submissions.length, 0);
+  const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
+  const resumed = await restart.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(resumed.ok, true, resumed.error?.message);
+  assert.equal((resumed.operation as { state: string }).state, "completed");
+  assert.equal(s.source.submissions.length, 1);
+});
+
 test("LI.FI expiry after paid approval preserves its fee and residual allowance, halting the unsent bridge", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.source.safeApproval = false;
   const { id } = await s.prepare(); const send = s.source.send.bind(s.source);

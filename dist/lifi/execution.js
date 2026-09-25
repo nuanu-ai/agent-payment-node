@@ -15,14 +15,16 @@ export class BridgeExecution {
     custody;
     now;
     save;
+    physicalBudget;
     observation;
-    constructor(state, source, destination, provider, custody, now, save, observationRpc = { source: () => source, destination: () => destination, residual: () => source }) {
+    constructor(state, source, destination, provider, custody, now, save, observationRpc = { source: () => source, destination: () => destination, residual: () => source }, physicalBudget) {
         this.state = state;
         this.source = source;
         this.destination = destination;
         this.custody = custody;
         this.now = now;
         this.save = save;
+        this.physicalBudget = physicalBudget;
         this.observation = new BridgeObservation(observationRpc.source, observationRpc.destination, provider, save, observationRpc.residual);
     }
     async approve(op, approval) {
@@ -32,7 +34,7 @@ export class BridgeExecution {
             await this.guard(op, op.effects[0].role);
         }
         catch (error) {
-            return await this.haltUnsent(op, error);
+            return budgetExhausted(error) ? op : await this.haltUnsent(op, error);
         }
         const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
             exactPhrase: approvalCode("bridge", op.fingerprint), summary: publicBridgeOperation(op) });
@@ -91,8 +93,11 @@ export class BridgeExecution {
                     await this.guard(op, effect.role);
                 }
                 catch (error) {
-                    return await this.haltUnsent(op, error);
+                    return budgetExhausted(error) ? op : await this.haltUnsent(op, error);
                 }
+                // Signing commits an effect; leave room for a fresh guard and its single raw send.
+                if (this.physicalBudget !== undefined && this.physicalBudget.remaining() < 2)
+                    return op;
                 op = await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "signing_started" }) });
                 // The marker is durable before entering custody. A recovered marker only loads its original seal.
                 try {
@@ -118,8 +123,11 @@ export class BridgeExecution {
                 await this.guard(op, effect.role);
             }
             catch (error) {
-                return await this.haltUnsent(op, error);
+                return budgetExhausted(error) ? op : await this.haltUnsent(op, error);
             }
+            // Preserve a sealed effect for a later invocation when its one permitted send cannot fit.
+            if (this.physicalBudget?.remaining() === 0)
+                return op;
             op = await this.save(op, { state: "source_pending", effects: replaceEffect(op, { ...effect, phase: "submitting",
                     submittedAt: new Date(this.now()).toISOString(), submissionAttempts: 1 }) });
             effect = op.effects.find((e) => e.role === effect.role);
@@ -192,6 +200,9 @@ export class BridgeExecution {
         return await this.save(op, { state, observationTelemetry: residual.observationTelemetry, failure: { reason: failureReason, residualAllowance: residual.value,
                 ...(diagnostic === null ? {} : { residualAllowanceStatus: "observed", preSignRpc: diagnostic }) } });
     }
+}
+function budgetExhausted(error) {
+    return error instanceof ApnError && error.code === "APN_RPC_BUDGET_EXCEEDED";
 }
 function preSignRpcFailure(error) {
     if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS")

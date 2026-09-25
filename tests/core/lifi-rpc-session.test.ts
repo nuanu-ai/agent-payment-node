@@ -184,77 +184,26 @@ test("dRPC family pacing persists across Ethereum, Base and Arbitrum process rec
   assert.deepEqual(waits, [750, 750]); assert.equal(persisted, 11_500);
 });
 
-test("dRPC Retry-After blocks concurrent sibling processes until shared cooldown and pacing expire", async () => {
-  const run = async (retryAfterMs: number | undefined, effectiveCooldown: number, siblingOrigin: string, siblingChain: 1 | 42161) => {
-    let now = 0, attempts = 0, siblingCalls = 0, persisted: number | null = null, cooldown: number | null = null;
-    let tail = Promise.resolve(), releaseBaseRetry!: () => void, releaseSiblingCooldown!: () => void, releaseBasePacing!: () => void;
-    const baseRetry = new Promise<void>((resolve) => { releaseBaseRetry = resolve; });
-    const siblingCooldown = new Promise<void>((resolve) => { releaseSiblingCooldown = resolve; });
-    const basePacing = new Promise<void>((resolve) => { releaseBasePacing = resolve; });
-    const families: string[] = [], coordinator = { coordinate: async <T>(family: string,
-      work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
-        saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {
-      let unlock!: () => void; const previous = tail; tail = new Promise<void>((resolve) => { unlock = resolve; }); await previous;
-      families.push(family);
-      try { return await work(persisted, async (value) => { persisted = value; }, cooldown, async (value) => { cooldown = value; }); }
-      finally { unlock(); }
-    } };
-    const baseWaits: number[] = [], siblingWaits: number[] = [];
-    const base = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
-      wait: async (milliseconds) => { baseWaits.push(milliseconds); await (milliseconds === effectiveCooldown ? baseRetry : basePacing); } });
-    const baseRead = base.read("https://base.drpc.org/archive", 8453, "eth_chainId", [], async () => {
-      attempts += 1; if (attempts === 1) throw new RpcHttpFailure("eth_chainId", 429, retryAfterMs); return "0x2105";
-    });
-    while (baseWaits.length === 0) await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(cooldown, effectiveCooldown);
-    const sibling = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
-      wait: async (milliseconds) => { siblingWaits.push(milliseconds); await siblingCooldown; } });
-    const siblingRead = sibling.read(siblingOrigin, siblingChain, "eth_chainId", [], async () => {
-      siblingCalls += 1; return siblingChain === 1 ? "0x1" : "0xa4b1";
-    });
-    while (siblingWaits.length === 0) await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(siblingCalls, 0); assert.deepEqual(siblingWaits, [effectiveCooldown]);
-    now = effectiveCooldown; releaseSiblingCooldown(); await siblingRead;
-    assert.equal(siblingCalls, 1); assert.equal(persisted, effectiveCooldown);
-    releaseBaseRetry();
-    while (baseWaits.length < 2) await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(attempts, 1); assert.deepEqual(baseWaits, [effectiveCooldown, 750]);
-    now = effectiveCooldown + 750; releaseBasePacing(); await baseRead;
-    assert.equal(attempts, 2); assert.deepEqual(families, ["drpc.org", "drpc.org", "drpc.org"]);
-  };
-  await run(undefined, 2_000, "https://arbitrum.drpc.org/archive", 42161);
-  await run(1_000, 2_000, "https://ethereum.drpc.org/archive", 1);
-  await run(5_000, 5_000, "https://arbitrum.drpc.org/archive", 42161);
-});
-
-test("terminal second 429 extends shared dRPC cooldown without a third local attempt", async () => {
-  let now = 0, attempts = 0, siblingCalls = 0, persisted: number | null = null, cooldown: number | null = null;
-  const families: string[] = [], coordinator = { coordinate: async <T>(family: string,
+test("first 429 stops local retries and cools down sibling dRPC origin", async () => {
+  let now = 0, attempts = 0, cooldown: number | null = null, siblingCalls = 0;
+  const coordinator = { coordinate: async <T>(_family: string,
     work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
-      saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {
-    families.push(family); return await work(persisted, async (value) => { persisted = value; }, cooldown,
-      async (value) => { cooldown = value; });
-  } };
-  const base = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
+      saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) =>
+    await work(null, async () => {}, cooldown, async (value) => { cooldown = value; }) };
+  const scheduler = new RpcProviderScheduler(coordinator, () => now);
+  const base = new RpcReadSession({ providerScheduler: scheduler, now: () => now,
     wait: async (milliseconds) => { now += milliseconds; } });
   await assert.rejects(base.read("https://base.drpc.org", 8453, "eth_chainId", [], async () => {
-    attempts += 1; throw new RpcHttpFailure("eth_chainId", 429, attempts === 1 ? undefined : 5_000);
-  }), (error: unknown) => error instanceof ApnError && error.code === "APN_RPC_RATE_LIMITED" &&
-    error.details?.httpAttempts === "2");
-  assert.equal(attempts, 2); assert.equal(now, 2_000); assert.equal(cooldown, 7_000);
-
-  let releaseSibling!: () => void;
-  const siblingGate = new Promise<void>((resolve) => { releaseSibling = resolve; }), siblingWaits: number[] = [];
-  const sibling = new RpcReadSession({ providerScheduler: new RpcProviderScheduler(coordinator, () => now), now: () => now,
-    wait: async (milliseconds) => { siblingWaits.push(milliseconds); await siblingGate; } });
-  const siblingRead = sibling.read("https://ethereum.drpc.org", 1, "eth_chainId", [], async () => {
+    attempts += 1; throw new RpcHttpFailure("eth_chainId", 429, 5_000);
+  }), { code: "APN_RPC_RATE_LIMITED" });
+  assert.equal(attempts, 1); assert.equal(cooldown, 5_000);
+  const waits: number[] = [];
+  const sibling = new RpcReadSession({ providerScheduler: scheduler, now: () => now,
+    wait: async (milliseconds) => { waits.push(milliseconds); now += milliseconds; } });
+  await sibling.read("https://ethereum.drpc.org", 1, "eth_chainId", [], async () => {
     siblingCalls += 1; return "0x1";
   });
-  while (siblingWaits.length === 0) await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(siblingCalls, 0); assert.deepEqual(siblingWaits, [5_000]);
-  now = 7_000; releaseSibling(); await siblingRead;
-  assert.equal(siblingCalls, 1); assert.equal(attempts, 2);
-  assert.deepEqual(families, ["drpc.org", "drpc.org", "drpc.org"]);
+  assert.equal(siblingCalls, 1); assert.deepEqual(waits, [5_000]);
 });
 
 test("provider-family pacing survives scheduler restart through its coordinator", async () => {
@@ -343,7 +292,7 @@ test("RPC session rejects the 65th representative unique read before HTTP", asyn
   assert.equal(calls, 64);
 });
 
-test("RPC session honors Retry-After once for idempotent 429 and retains one retry for 408", async () => {
+test("RPC session returns immediately on 429 and retains one retry for 408", async () => {
   let calls = 0, cooldownNow = 0; const waits: number[] = [];
   const transport = { request: async (_endpoint: string, _method: string, body: string) => {
     const request = JSON.parse(body) as { id: string };
@@ -355,8 +304,8 @@ test("RPC session honors Retry-After once for idempotent 429 and retains one ret
   const cooldown = new RpcReadSession({ now: () => cooldownNow,
     wait: async (milliseconds) => { waits.push(milliseconds); cooldownNow += milliseconds; } });
   const rpc = new BridgeRpc(8453, descriptor.origin, descriptor.call, cooldown, descriptor.attempt);
-  await rpc.assertChain();
-  assert.equal(calls, 2); assert.deepEqual(waits, [5_000]);
+  await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
+  assert.equal(calls, 1); assert.deepEqual(waits, []);
 
   calls = 0; let limitedNow = 0; const boundedWaits: number[] = [];
   const alwaysLimited = { request: async () => { calls += 1; return { status: 429, body: "", headers: { "retry-after": "1" } }; } };
@@ -365,8 +314,8 @@ test("RPC session honors Retry-After once for idempotent 429 and retains one ret
     new RpcReadSession({ now: () => limitedNow,
       wait: async (milliseconds) => { boundedWaits.push(milliseconds); limitedNow += milliseconds; } }), limitedDescriptor.attempt);
   await assert.rejects(limited.assertChain(), (error: unknown) => error instanceof ApnError && error.code === "APN_RPC_RATE_LIMITED" &&
-    error.details?.retryAfterMs === "1000" && error.details?.httpAttempts === "2");
-  assert.equal(calls, 2); assert.deepEqual(boundedWaits, [2_000]);
+    error.details?.retryAfterMs === "1000" && error.details?.httpAttempts === "1");
+  assert.equal(calls, 1); assert.deepEqual(boundedWaits, []);
 
   calls = 0; const retryWaits: number[] = [];
   const retryTransport = { request: async (_endpoint: string, _method: string, body: string) => {
@@ -610,7 +559,7 @@ test("RPC batch enforces 33/96/8/10/deadline bounds and removes cached immutable
   assert.deepEqual(observedSizes, [1, 1]); assert.equal(cached.telemetry().cacheHits, 1);
 });
 
-test("whole RPC batch uses stable retry ids/body and retries 429/503 once", async () => {
+test("whole RPC batch never retries 429 and retains one 503 retry with stable ids/body", async () => {
   for (const status of [400, 429, 503]) {
     let calls = 0; const bodies: string[] = [];
     const transport = { request: async (_endpoint: string, _method: string, body: string) => {
@@ -621,12 +570,12 @@ test("whole RPC batch uses stable retry ids/body and retries 429/503 once", asyn
     const descriptor = bridgeRpcCall(1, { APN_ETHEREUM_RPC_URL: "https://ethereum.example" }, { transport });
     const session = new RpcReadSession({ wait: async () => {} }), batch = descriptor.sessionBatchCall(session);
     const item = { method: "eth_chainId", params: [], cachePolicy: "immutable" as const, decoder: canonicalQuantity };
-    if (status === 400) await assert.rejects(batch([item]), (error: unknown) => error instanceof ApnError &&
-      error.code === "APN_RPC_PROTOCOL" && error.details?.rpcMethod === "eth_chainId");
+    if (status === 400 || status === 429) await assert.rejects(batch([item]), (error: unknown) => error instanceof ApnError &&
+      error.code === (status === 429 ? "APN_RPC_RATE_LIMITED" : "APN_RPC_PROTOCOL") && error.details?.rpcMethod === "eth_chainId");
     else assert.deepEqual(await batch([item]), [1n]);
-    assert.equal(calls, status === 400 ? 1 : 2); assert.equal(session.telemetry().httpRequests, 1);
-    assert.equal(session.telemetry().httpAttempts, status === 400 ? 1 : 2);
-    if (status !== 400) assert.equal(bodies[0], bodies[1]);
+    assert.equal(calls, status === 503 ? 2 : 1); assert.equal(session.telemetry().httpRequests, 1);
+    assert.equal(session.telemetry().httpAttempts, status === 503 ? 2 : 1);
+    if (status === 503) assert.equal(bodies[0], bodies[1]);
   }
 });
 

@@ -171,7 +171,8 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   const sessionCall = (session: RpcReadSession): EvmRpcCall => async (method, params) => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
     const primaryAttempt = (m: string, p: readonly unknown[]) => oneAttempt(endpoint, m, p, session.currentTime(), "primary", session);
-    if (method === "eth_sendRawTransaction") return await submitDirect(method, params, primaryAttempt);
+    if (method === "eth_sendRawTransaction") return await submitDirect(method, params,
+      (m, p) => session.submit(endpoint.toString(), m, p, primaryAttempt));
     if (method === "eth_getTransactionReceipt" && isArchiveRead(method, params)) {
       if (distinctReceipt !== null) return await withEndpointRole(sessionArchiveReceipt(session, method, params), "receipt");
       let primary: unknown;

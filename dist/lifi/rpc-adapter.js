@@ -34,7 +34,7 @@ export class BridgeRpc {
         this.readSession = session;
         this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call);
         this.submit = session === undefined || oneAttempt === undefined ? call :
-            async (method, params) => await submitDirect(method, params, (m, p) => oneAttempt(m, p));
+            sessionCall?.(session) ?? (async (method, params) => await submitDirect(method, params, (m, p) => oneAttempt(m, p)));
         this.batchCall = session === undefined ? undefined : sessionBatchCall?.(session);
         this.evm = new EvmRpc(this.call, origin, 16 * 1024);
     }
