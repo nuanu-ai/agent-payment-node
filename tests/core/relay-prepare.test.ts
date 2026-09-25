@@ -219,6 +219,7 @@ test("Relay prepare freezes one validated quote, replays without another quote, 
   });
   const first = await service.prepare(input);
   assert.equal(first.state, "prepared"); assert.equal(first.executionAdmitted, false);
+  assert.equal(first.statusObservable, false);
   assert.equal(first.quote?.approval.chainId, 1); assert.equal(first.policyDigest, policy().digest);
   assert.equal(first.approvalNetworkFeeCeilingWei, first.quote?.approval.maximumNetworkFeeWei);
   assert.deepEqual(await service.prepare(input), first); assert.equal(calls, 1);
@@ -227,6 +228,35 @@ test("Relay prepare freezes one validated quote, replays without another quote, 
   await assert.rejects(service.prepare({ ...input, recipient: payer }), { code: "APN_IDEMPOTENCY_CONFLICT" });
   await assert.rejects(service.prepare({ ...input, idempotencyKey: "relay-prepare-0002" }), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(calls, 1);
+});
+
+test("Relay prepare persists a quote-bound status locator and rejects locator tampering", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  const requestId = `0x${"ab".repeat(32)}`;
+  const service = new RelayUnsignedPrepareService(state, { now: () => instant }, undefined, {
+    activePolicy: async () => policy(), publicAccount: async () => payer, dailyUsage: async () => "0",
+    quote: async intent => {
+      const source = await quoteFixture() as any;
+      source.requestId = requestId;
+      source.steps[1].items[0].check = { method: "GET", endpoint: `/intents/status/v3?requestId=${requestId}` };
+      return validateRelayQuote(source, intent);
+    },
+  });
+  const first = await service.prepare(input);
+  assert.equal(first.statusObservable, true);
+  assert.equal(first.executionAdmitted, false);
+  assert.equal(first.statusLocator?.requestId, requestId);
+  assert.deepEqual((await new OperationService(new StateStore(temporary.root)).status(first.operationId)), first);
+  const { validateRelayUnsignedOperation } = await import("../../src/relay-unsigned-operation.js");
+  const { join } = await import("node:path");
+  const saved = JSON.parse(await readFile(join(temporary.root, "relay-unsigned-operations",
+    state.profileHash("default"), `${first.operationId}.json`), "utf8")) as Record<string, unknown>;
+  const { integrityHash: _integrityHash, ...fields } = saved;
+  const changed = { ...fields, statusLocator: { requestId: `0x${"cd".repeat(32)}`,
+    endpoint: `https://api.relay.link/intents/status/v3?requestId=0x${"cd".repeat(32)}` } };
+  assert.throws(() => validateRelayUnsignedOperation({ ...changed, integrityHash: hashObject(changed) }),
+    { code: "APN_STATE_CORRUPT" });
 });
 
 test("Relay prepare uses the checksummed owner for ledger usage before quoting and replays without quoting", async t => {

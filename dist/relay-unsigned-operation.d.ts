@@ -15,6 +15,10 @@ declare const body: z.ZodObject<{
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
+    statusLocator: z.ZodOptional<z.ZodObject<{
+        requestId: z.ZodString;
+        endpoint: z.ZodString;
+    }, z.core.$strict>>;
     quote: z.ZodOptional<z.ZodCustom<ValidatedRelayQuote, ValidatedRelayQuote>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
@@ -39,6 +43,10 @@ declare const schema: z.ZodObject<{
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
+    statusLocator: z.ZodOptional<z.ZodObject<{
+        requestId: z.ZodString;
+        endpoint: z.ZodString;
+    }, z.core.$strict>>;
     quote: z.ZodOptional<z.ZodCustom<ValidatedRelayQuote, ValidatedRelayQuote>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
@@ -58,6 +66,7 @@ export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOpe
     proofClass: "saved_unsigned_quote";
     balanceEvidence: "not_checked";
     allowanceEvidence: "not_checked";
+    statusObservable: boolean;
     executionAdmitted: false;
     nextActions: readonly [];
     schemaVersion: "apn.relay-unsigned-operation.v1";
@@ -77,6 +86,10 @@ export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOpe
     minOutputAtomic: string;
     createdAt: string;
     deadline: string;
+    statusLocator?: {
+        requestId: string;
+        endpoint: string;
+    } | undefined;
     quote?: ValidatedRelayQuote | undefined;
     policyDigest?: string | undefined;
     policyRevision?: number | undefined;
