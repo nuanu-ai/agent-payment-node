@@ -1,6 +1,7 @@
 /** Saved-operation Arbitrum approval decision. Only a verified allowance skip can mutate state. */
 import { ApnError } from "../errors.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
@@ -21,8 +22,9 @@ export class RelayArbitrumApprovalDecisionService {
         this.ports = ports;
     }
     async decide(profile, operationId) {
-        if (profile !== "default" || !HASH.test(operationId))
-            throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum approval requires default profile and an operation ID.");
+        allowlistProfileHash(profile);
+        if (!HASH.test(operationId))
+            throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum approval requires an operation ID.");
         const profileHash = this.state.profileHash(profile);
         const operation = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, operationId);
         if (operation === null)
@@ -40,7 +42,7 @@ export class RelayArbitrumApprovalDecisionService {
                 blocked("invalid_clock");
             const policy = lockedPolicy ?? await (this.ports.activePolicy?.(profile, at) ??
                 loadActiveAssetPolicyRegistry(this.state.root, profile, at));
-            if (policy === null || policy.accounts.evm?.toLowerCase() !== operation.sourceAccount)
+            if (policy === null || policy.profile !== profile || policy.accounts.evm?.toLowerCase() !== operation.sourceAccount)
                 return blocked("active_owner_policy_required");
             const usage = await (this.ports.dailyUsage?.(operation.sourceAccount, at) ??
                 new AssetUsageLedger(this.state.root).usage({ account: operation.sourceAccount,
