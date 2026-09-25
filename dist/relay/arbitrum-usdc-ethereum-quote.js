@@ -58,6 +58,7 @@ function transaction(value, id, payer) {
     const step = object(value, "step");
     keys(step, ["id", "action", "description", "kind", "items", "requestId", "depositAddress"], "step extension");
     if (step.id !== id || step.kind !== "transaction" ||
+        step.action !== "Confirm transaction in your wallet" ||
         (step.depositAddress !== undefined && step.depositAddress !== ""))
         fail("step action");
     const item = one(step.items, "step items");
@@ -186,6 +187,8 @@ export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value, intent) 
         inToken.chainId !== 42161 || !same(address(inToken.address, "input token address"), RELAY_ARBITRUM_USDC) ||
         outToken.chainId !== 1 || !same(address(outToken.address, "output token address"), ETHEREUM_USDC) ||
         atomic(currencyIn.amount, "details input") !== atomic(intent.amountAtomic, "intent amount") ||
+        atomic(currencyIn.minimumAmount, "details input minimum") !== atomic(intent.amountAtomic, "intent amount") ||
+        atomic(currencyOut.amount, "details output") !== expected ||
         atomic(currencyOut.minimumAmount, "details minimum") !== minimum)
         fail("quote details");
     const approval = transaction(steps[0], "approve", payer), deposit = transaction(steps[1], "deposit", payer);
