@@ -21,7 +21,10 @@ for (const chain of GASLESS_CHAINS.filter(chain => chain !== 43114)) for (const 
     assert.equal(s.wrapping.loads, loads);
     const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
     assert.equal(response.ok, true, response.error?.message);
-    const stored = await s.record(id), publicOp = response.operation as any;
+    assert.equal((await s.record(id)).state, "submitted_pending");
+    const observed = await s.core.execute({ command: "operation.resume", operationId: id });
+    assert.equal(observed.ok, true, observed.error?.message);
+    const stored = await s.record(id), publicOp = observed.operation as any;
     assert.equal(stored.state, "completed"); assert.equal(stored.fingerprint, operation.fingerprint);
     assert.equal(stored.bootstrap.signingAttempts, 1); assert.equal(stored.bootstrap.disclosureAttempts, 1);
     assert.equal(stored.userOperation.signingAttempts, 1); assert.equal(stored.userOperation.submissionAttempts, 1);
@@ -138,6 +141,8 @@ test("gasless freezes the owner's fee limit so a paymaster fee increase before s
   s.rpc.current = { ...s.rpc.current, feeConfiguration: { ...s.rpc.current.feeConfiguration, nativeTokenPrice: "3000000000" } };
   const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(response.ok, true, response.error?.message);
+  assert.equal((await s.record(id)).state, "submitted_pending");
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
   const stored = await s.record(id); assert.equal(stored.state, "completed"); assert.equal(s.rpc.sends.length, 1);
   await new OperationService(s.state).assertProfileAvailable(stored.profileHash);
 });

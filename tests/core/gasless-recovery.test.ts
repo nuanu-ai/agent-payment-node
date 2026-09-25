@@ -61,7 +61,10 @@ for (const boundary of ["bootstrap_checked", "user_sealed"] as const) {
     const before = await s.record(id), bootHash = before.bootstrap.materialHash;
     const restart = await gaslessFixture(temporary.root, 8453, { ...s, initializeWallet: false });
     const response = await restart.core.execute({ command: "operation.resume", operationId: id });
-    assert.equal(response.ok, true, response.error?.message); const after = await restart.record(id);
+    assert.equal(response.ok, true, response.error?.message);
+    assert.equal((await restart.record(id)).state, "submitted_pending");
+    assert.equal((await restart.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+    const after = await restart.record(id);
     assert.equal(after.state, "completed"); assert.equal(after.bootstrap.materialHash, bootHash);
     if (boundary === "user_sealed") assert.equal(after.userOperation.materialHash, before.userOperation.materialHash);
     assert.equal(s.rpc.calls.filter((c) => c === "estimate").length, 1); assert.equal(s.rpc.sends.length, 1);
@@ -73,7 +76,10 @@ for (const branch of ["sponsored", "post_op_reverted", "prefund_too_low"] as con
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await gaslessFixture(temporary.root), { id } = await s.prepare(); s.rpc.success = false; s.rpc.branch = branch;
     const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
-    assert.equal(response.ok, true, response.error?.message); const before = await s.record(id);
+    assert.equal(response.ok, true, response.error?.message);
+    assert.equal((await s.record(id)).state, "submitted_pending");
+    assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+    const before = await s.record(id);
     assert.equal(before.state, "failed_effects_pending"); assert.equal(before.terminal, false); assert.equal(before.settlement, null);
     const evidence = before.observation!.settlement!, fee = evidence.accounting.feeAtomic;
     assert.ok(BigInt(fee) > 0n); assert.equal(evidence.accounting.deliveredAtomic, "0");

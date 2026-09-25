@@ -11,20 +11,20 @@ const ZERO_WORD = `0x${"0".repeat(64)}` as Hex;
 export async function verifyProtocolAt(call: GaslessRpcCall, deployment: GaslessDeployment,
   block: GaslessBlock): Promise<void> {
   const pinned = { blockHash: block.hash, requireCanonical: true };
-  const codes = await Promise.all(deployment.code.map(async (row) => {
+  const codes = deployment.code.map(async (row) => {
     const code = rpcHex(await call("eth_getCode", [row.address, pinned]), 256 * 1024);
     if (code === "0x" || keccak256(code) !== row.codeHash) {
       gaslessFailure("APN_RPC_PROTOCOL", "gasless_protocol_identity");
     }
     return code;
-  }));
-  if (codes.length !== deployment.code.length) gaslessFailure("APN_RPC_PROTOCOL", "gasless_protocol_identity");
-  await Promise.all(deployment.reads.map(async (row) => {
+  });
+  const reads = deployment.reads.map(async (row) => {
     const raw = row.kind === "storage"
       ? await call("eth_getStorageAt", [row.address, row.data, pinned])
       : await call("eth_call", [{ to: row.address, data: row.data }, pinned]);
     if (rpcHex(raw, 64 * 1024) !== row.expected) gaslessFailure("APN_RPC_PROTOCOL", "gasless_protocol_identity");
-  }));
+  });
+  await Promise.all([...codes, ...reads]);
 }
 
 export async function readAccountAt(call: GaslessRpcCall, deployment: GaslessDeployment, ownerInput: Address,
@@ -36,7 +36,6 @@ export async function readAccountAt(call: GaslessRpcCall, deployment: GaslessDep
   const allowanceData = callData("allowance(address,address)", [ownerWord, addressWord(deployment.paymaster)]);
   const permitNonceData = callData("nonces(address)", [ownerWord]);
   const entryPointNonceData = callData("getNonce(address,uint192)", [ownerWord, ZERO_WORD]);
-  const pendingPromise = readPending ? call("eth_getTransactionCount", [owner, "pending"]) : null;
   const [balance, native, allowance, permitNonce, entryPointNonce, eoaNonce, code, pending] = await Promise.all([
     call("eth_call", [{ to: deployment.token, data: balanceData }, pinned]).then(rpcWord),
     call("eth_getBalance", [owner, pinned]).then(rpcQuantity),
@@ -45,7 +44,7 @@ export async function readAccountAt(call: GaslessRpcCall, deployment: GaslessDep
     call("eth_call", [{ to: deployment.entryPoint, data: entryPointNonceData }, pinned]).then(rpcWord),
     call("eth_getTransactionCount", [owner, pinned]).then(rpcQuantity),
     call("eth_getCode", [owner, pinned]).then((value) => rpcHex(value, 24)),
-    pendingPromise === null ? Promise.resolve(null) : pendingPromise.then(rpcQuantity),
+    readPending ? call("eth_getTransactionCount", [owner, "pending"]).then(rpcQuantity) : Promise.resolve(null),
   ]);
   const expectedDelegation = `0xef0100${deployment.delegate.slice(2).toLowerCase()}`;
   let delegation: "empty" | "expected";

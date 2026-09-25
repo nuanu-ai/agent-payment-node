@@ -7,12 +7,12 @@ import { hashObject, sha256 } from "../../src/canonical.js";
 import type { Address, Hex } from "../../src/model.js";
 import { GASLESS_ENTRYPOINT_ABI, GASLESS_PAYMASTER_ABI, GASLESS_TOKEN_ABI } from "../../src/gasless/abi.js";
 import { gaslessFee, gaslessGas } from "../../src/gasless/economics.js";
-import { GaslessHttps, type GaslessTransport } from "../../src/gasless/https.js";
+import { GaslessHttps, GaslessPostPacer, gaslessResponseDisposition, type GaslessTransport } from "../../src/gasless/https.js";
 import type { GaslessBlock, GaslessChainId, GaslessCursor, GaslessDeployment, GaslessIntent, GaslessLog,
   GaslessSnapshot } from "../../src/gasless/model.js";
 import type { GaslessBootstrapMaterial, GaslessUserOperationMaterial } from "../../src/gasless/ports.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
-import { GaslessRpc, gaslessRpcFactory } from "../../src/gasless/rpc.js";
+import { GaslessRpc, GaslessRpcRequestSession, gaslessRpcFactory, withGaslessRpcInvocation } from "../../src/gasless/rpc.js";
 import { observeGasless, type GaslessObservationContext } from "../../src/gasless/rpc-observe.js";
 import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "../../src/gasless/rpc-state.js";
 import { verifyGaslessOuterTransaction } from "../../src/gasless/rpc-transaction.js";
@@ -41,28 +41,34 @@ class TestTransport implements GaslessTransport {
   constructor(readonly result: (endpoint: string, method: string, params: readonly unknown[]) => unknown) {}
   async request(endpoint: string, method: "POST" | "GET", body: string | null) {
     assert.equal(method, "POST"); assert.notEqual(body, null);
-    const request = JSON.parse(body!) as Json;
-    this.calls.push({ endpoint, method: request.method, params: request.params });
-    const result = this.result(endpoint, request.method, request.params);
-    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
+    const request = JSON.parse(body!) as Json | Json[];
+    const reply = (row: Json) => {
+      this.calls.push({ endpoint, method: row.method, params: row.params });
+      return { jsonrpc: "2.0", id: row.id, result: this.result(endpoint, row.method, row.params) };
+    };
+    return { status: 200, body: JSON.stringify(Array.isArray(request) ? request.map(reply) : reply(request)) };
   }
 }
 
 test("gasless production prepare and approval fit one public bundler request window", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  const preparePosts = s.calls.length;
+  assert.ok(preparePosts <= 24, `prepare used ${preparePosts} physical POSTs`);
   const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
   const record = await s.record(id), bundler = s.calls.filter(c => c.bundler);
-  t.diagnostic(JSON.stringify({ bundlerRequests: bundler.length,
+  const approvalPosts = s.calls.length - preparePosts;
+  t.diagnostic(JSON.stringify({ preparePosts, approvalPosts, bundlerRequests: bundler.length,
     afterApproval: bundler.filter(c => c.afterApproval).length,
     finalPhase: record.userOperation.phase, failure: record.failure }));
+  assert.ok(approvalPosts <= 24, `approve used ${approvalPosts} physical POSTs`);
+  assert.equal(s.calls.slice(preparePosts).filter(c => c.methods.includes("eth_getBlockByNumber") &&
+    c.methods.includes("eth_chainId")).length, 5, "five distinct guard snapshots remain");
   assert.equal(bundler.filter(c => c.method === "eth_sendUserOperation").length, 1);
   // One throwaway-key estimate runs before the approval screen; the owner's bootstrap estimate follows approval.
   assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas").length, 2);
   assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas" && !c.afterApproval).length, 1);
-  assert.equal(bundler.length, 15);
-  assert.equal(bundler.filter(c => c.afterApproval).length, 12);
   assert.equal(record.intent.gas.maxPriorityFeePerGas, "600000");
   assert.equal(record.intent.gas.maxFeePerGas, "2600000");
   assert.equal(record.bootstrap.signingAttempts, 1);
@@ -71,6 +77,101 @@ test("gasless production prepare and approval fit one public bundler request win
   assert.equal(record.userOperation.phase, "submitted_pending");
   // Locator absence is still ambiguous; passing the rate budget is not settlement.
   assert.equal(record.terminal, false);
+});
+
+test("gasless approval rechecks a changed block anchor and refuses a canonical reorg before signing", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  const confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { const accepted = await confirm(input); s.setFault("reorg"); return accepted; };
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id);
+  assert.equal(record.bootstrap.signingAttempts, 0);
+  assert.equal(record.userOperation.submissionAttempts, 0);
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal(record.failure, "gasless_block_reorg");
+});
+
+test("gasless owner wait makes no effect and keeps the distinct post-TTY guard", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { enter(); await held; return await confirm(input); };
+  const running = s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  await entered;
+  const before = s.calls.length;
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal((await s.record(id)).bootstrap.signingAttempts, 0);
+  release();
+  const result = await running;
+  assert.equal(result.ok, true, result.error?.message);
+  assert.ok(s.calls.length > before, "fresh checks ran after the owner released the terminal");
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 1);
+});
+
+for (const fault of ["code", "proxy"] as const) {
+  test(`gasless approval invalidates anchored static proof on ${fault} drift`, async t => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+    const confirm = s.approval.confirm.bind(s.approval);
+    s.approval.confirm = async input => { const accepted = await confirm(input);
+      s.setBlockHash(`0x${"ab".repeat(32)}`); s.setFault(fault); return accepted; };
+    const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+    assert.equal(result.ok, true, result.error?.message);
+    const record = await s.record(id);
+    assert.equal(record.bootstrap.signingAttempts, 0);
+    assert.equal(record.userOperation.submissionAttempts, 0);
+    assert.equal(record.failure, "gasless_protocol_identity");
+  });
+}
+
+test("gasless final guard 429 is terminal before the durable send marker", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare(); s.setLimit(7);
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id);
+  assert.equal(record.userOperation.submissionAttempts, 0);
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal(record.failure, "gasless_rpc_http_429");
+  assert.equal(s.calls.filter(c => c.bundler).length, 8);
+});
+
+test("gasless extra in-invocation reads exhaust the cap before any send marker", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  const preparePosts = s.calls.length, confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { const accepted = await confirm(input); await s.rpc.assertChain(); return accepted; };
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id);
+  assert.equal(s.calls.length - preparePosts, 24);
+  assert.equal(record.userOperation.submissionAttempts, 0);
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal(record.failure, "gasless_rpc_request_budget");
+});
+
+test("gasless post-TTY duplicate batch ID is terminal before signing even if a retry would be valid", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  let malformed = 0;
+  const confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { const accepted = await confirm(input);
+    s.setBatchReply(rows => { malformed += 1; return malformed === 1
+      ? [{ ...rows[0]!, id: rows[1]!.id }, ...rows.slice(1)] : rows; });
+    return accepted; };
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id);
+  assert.equal(malformed, 1);
+  assert.equal(record.bootstrap.signingAttempts, 0);
+  assert.equal(record.userOperation.submissionAttempts, 0);
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal(record.failure, "gasless_rpc_response");
 });
 
 for (const boundary of ["before_bootstrap", "before_send"] as const) {
@@ -123,6 +224,158 @@ test("gasless RPC factory is lazy and requires only the selected chain RPC confi
   const first = configured(8453), repeated = configured(8453);
   assert.equal(first, repeated); assert.equal(first.rpcEndpointHash, sha256(RPC_URL));
   assert.equal(first.bundlerEndpointHash, sha256(gaslessDeployment(8453).publicBundlerUrl));
+});
+
+test("gasless request sessions cap physical RPC and bundler POSTs at 24 and reset per invocation", async () => {
+  const deployment = gaslessDeployment(8453), calls: string[] = [];
+  const transport: GaslessTransport = { request: async (endpoint, method, body) => {
+    assert.equal(method, "POST");
+    calls.push(endpoint);
+    const request = JSON.parse(body!) as Json;
+    const response = (row: Json): Json => ({ jsonrpc: "2.0", id: row.id,
+      result: row.method === "eth_supportedEntryPoints" ? [deployment.entryPoint] : "0x2105" });
+    return { status: 200, body: JSON.stringify(Array.isArray(request) ? request.map(response) : response(request)) };
+  } };
+  const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+  await withGaslessRpcInvocation(async () => {
+    for (let index = 0; index < 8; index += 1) await rpc.assertChain();
+    assert.equal(calls.length, 24);
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_BUDGET_EXCEEDED" });
+    assert.equal(calls.length, 24);
+  });
+  await withGaslessRpcInvocation(async () => { await rpc.assertChain(); });
+  assert.equal(calls.length, 27);
+  // The bundler price batch is one physical POST despite its three logical methods.
+  const batch = (rpc as unknown as { bundlerState(): Promise<readonly unknown[]> }).bundlerState.bind(rpc);
+  await withGaslessRpcInvocation(async () => { await batch(); });
+  assert.equal(calls.length, 28);
+});
+
+test("gasless concurrent invocations retain independent caps and JSON-RPC request identities", async () => {
+  const deployment = gaslessDeployment(8453), ids: string[] = [];
+  const transport: GaslessTransport = { request: async (_endpoint, _method, body) => {
+    const request = JSON.parse(body!) as Json;
+    ids.push(request.id);
+    await Promise.resolve();
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "eth_supportedEntryPoints" ? [deployment.entryPoint] : "0x2105" }) };
+  } };
+  const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+  await Promise.all(Array.from({ length: 2 }, () => withGaslessRpcInvocation(async () => {
+    for (let index = 0; index < 8; index += 1) await rpc.assertChain();
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  })));
+  assert.equal(ids.length, 48);
+  assert.equal(new Set(ids).size, 48);
+});
+
+test("gasless HTTP 429 is terminal for its invocation without another transport request", async () => {
+  let calls = 0;
+  const transport: GaslessTransport = { request: async () => { calls += 1; return { status: 429, body: "secret" }; } };
+  const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+  await withGaslessRpcInvocation(async () => {
+    await assert.rejects(rpc.assertChain(), (error: any) => {
+      assert.equal(error.code, "APN_RPC_RATE_LIMITED");
+      assert.match(error.message, /gasless_RPC_HTTP_429/u);
+      assert.doesNotMatch(error.message, /secret/u);
+      return true;
+    });
+    const after429 = calls;
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
+    assert.equal(calls, after429);
+  });
+});
+
+test("malformed HTTP 429 headers and oversized body are discarded before protocol parsing", async () => {
+  assert.equal(gaslessResponseDisposition(429, "gzip", "invalid-length", 32), "terminal");
+  assert.equal(gaslessResponseDisposition(429, "gzip", String(2 ** 24), 32), "terminal");
+  assert.equal(gaslessResponseDisposition(200, "gzip", "invalid-length", 32), "reject");
+  let calls = 0, now = 0;
+  const pacer = new GaslessPostPacer(() => now, async milliseconds => { now += milliseconds; });
+  const transport: GaslessTransport = { request: async (endpoint, _method, _body, _max, _code, beforeSend) =>
+    await pacer.run(endpoint, new AbortController().signal, async () => {
+      beforeSend?.(); calls += 1; return { status: 429, body: "canary_secret".repeat(300_000) };
+    }) };
+  const rpc = new GaslessRpc(8453, "https://public.pimlico.io/base", "https://public.pimlico.io/bundler", transport);
+  await withGaslessRpcInvocation(async () => {
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
+  });
+  assert.equal(calls, 1);
+});
+
+test("same-family queued POSTs recheck terminal 429 after pacing and never start", async () => {
+  let now = 0;
+  const starts: number[] = [], waits: number[] = [];
+  const pacer = new GaslessPostPacer(() => now, async milliseconds => { waits.push(milliseconds); now += milliseconds; });
+  const session = new GaslessRpcRequestSession(), signal = new AbortController().signal;
+  const request = async () => { session.reserve(); return await pacer.run("https://public.pimlico.io", signal, async () => {
+    session.assertActive(); starts.push(now);
+    if (starts.length === 1) session.rejectHttp(429);
+    return 200;
+  }); };
+  const outcomes = await Promise.allSettled([request(), request(), request()]);
+  assert.equal(outcomes.every(result => result.status === "rejected"), true);
+  assert.deepEqual(starts, [0]);
+  assert.equal(waits.length >= 1 && waits.every(value => value >= 750), true);
+});
+
+test("gasless generic non-200 HTTP response is terminal for its invocation", async () => {
+  let calls = 0;
+  const transport: GaslessTransport = { request: async () => { calls += 1; return { status: 503, body: "secret" }; } };
+  const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+  await withGaslessRpcInvocation(async () => {
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_PROTOCOL" });
+    const after = calls;
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_PROTOCOL" });
+    assert.equal(calls, after);
+  });
+});
+
+test("gasless read batches bind every result ID and never fall back to sequential POSTs", async () => {
+  const deployment = gaslessDeployment(8453);
+  for (const fault of ["missing", "duplicate", "wrong", "extra"] as const) {
+    let rpcPosts = 0;
+    const transport: GaslessTransport = { request: async (endpoint, _method, body) => {
+      const request = JSON.parse(body!) as Json | Json[];
+      if (endpoint === RPC_URL) {
+        assert.ok(Array.isArray(request)); rpcPosts += 1;
+        const rows = request.map(row => ({ jsonrpc: "2.0", id: row.id, result: "0x2105" }));
+        if (fault === "missing") rows.pop();
+        if (fault === "duplicate") rows[1]!.id = rows[0]!.id;
+        if (fault === "wrong") rows[1]!.id = "unknown";
+        if (fault === "extra") rows.push({ jsonrpc: "2.0", id: "extra", result: "0x2105" });
+        return { status: 200, body: JSON.stringify(rows) };
+      }
+      assert.ok(!Array.isArray(request));
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id,
+        result: request.method === "eth_supportedEntryPoints" ? [deployment.entryPoint] : "0x2105" }) };
+    } };
+    const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+    await withGaslessRpcInvocation(async () => {
+      await assert.rejects(Promise.all([rpc.assertChain(), rpc.assertChain()]), { code: "APN_RPC_PROTOCOL" });
+    });
+    assert.equal(rpcPosts, 1, fault);
+  }
+});
+
+test("gasless shared provider-family pacer separates physical POST starts across clients", async () => {
+  let time = 10_000;
+  const waits: number[] = [], starts: Array<{ family: string; at: number }> = [];
+  const pacer = new GaslessPostPacer(() => time, async milliseconds => { waits.push(milliseconds); time += milliseconds; });
+  const send = (endpoint: string) => pacer.run(endpoint, new AbortController().signal, async () => {
+    starts.push({ family: endpoint, at: time }); return 200;
+  });
+  const result = await Promise.all([
+    send("https://base.publicnode.com"), send("https://ethereum.publicnode.com"),
+    send("https://rpc.other.example"), send("https://base.publicnode.com"),
+  ]);
+  assert.deepEqual(result, [200, 200, 200, 200]);
+  const familyStarts = starts.filter(row => row.family.endsWith("publicnode.com")).map(row => row.at);
+  assert.equal(familyStarts.length, 3);
+  assert.ok(familyStarts[1]! - familyStarts[0]! >= 750);
+  assert.ok(familyStarts[2]! - familyStarts[1]! >= 750);
+  assert.deepEqual(waits, [750, 750]);
 });
 
 test("gasless JSON-RPC parser rejects malformed envelopes, bounds responses, and redacts provider errors", async () => {
@@ -475,7 +728,7 @@ for (const fault of ["transport", "range", "count", "reorg"] as const) {
       { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash }, cursor);
     assert.equal(observation.status, "unresolved"); assert.equal(observation.settlement, null);
     assert.deepEqual(observation.cursor, cursor); assert.equal(observation.evidenceHash, null);
-    assert.equal(requests, fault === "count" ? 2 : fault === "reorg" ? 26 : 3);
+    assert.equal(requests, 26, "all bounded read-only ranges are requested in one batch");
   });
 }
 

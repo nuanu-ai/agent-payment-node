@@ -95,15 +95,19 @@ export class ObservationTransport implements GaslessTransport {
   }
 
   async request(endpoint: string, method: "POST" | "GET", body: string | null, maxBytes: number,
-    code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG") {
+    code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", beforeSend?: () => void) {
+    beforeSend?.();
     assert.equal(endpoint, this.endpoint);
     assert.equal(method, "POST");
     assert.notEqual(body, null);
-    const request = JSON.parse(body!) as Json;
-    assert.deepEqual(Object.keys(request), ["id", "jsonrpc", "method", "params"]);
-    this.calls.push({ endpoint, method: request.method, params: request.params, id: request.id, maxBytes, code });
-    const result = await this.response(request.method, request.params as readonly unknown[]);
-    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
+    const request = JSON.parse(body!) as Json | Json[];
+    const reply = async (row: Json) => {
+      assert.deepEqual(Object.keys(row), ["id", "jsonrpc", "method", "params"]);
+      this.calls.push({ endpoint, method: row.method, params: row.params, id: row.id, maxBytes, code });
+      const result = await this.response(row.method, row.params as readonly unknown[]);
+      return { jsonrpc: "2.0", id: row.id, result };
+    };
+    return { status: 200, body: JSON.stringify(Array.isArray(request) ? await Promise.all(request.map(reply)) : await reply(request)) };
   }
 
   private async response(method: string, params: readonly unknown[]): Promise<unknown> {

@@ -7,6 +7,7 @@ import { gaslessOwner } from "./owner.js";
 import { GaslessObservationService } from "./observation.js";
 import { gaslessObservationRpcEnv } from "./observation-source.js";
 import { GaslessPreparation } from "./prepare.js";
+import { withGaslessRpcInvocation } from "./rpc.js";
 import { publicGaslessOperation } from "./receipt.js";
 import { gaslessAsset, gaslessDeployment, gaslessIntentAsset } from "./registry.js";
 import { snapshotSchema } from "./schema.js";
@@ -22,26 +23,30 @@ export class GaslessService {
         this.operations = new OperationService(context.state, context.providerX402Repository, undefined, undefined, this.records);
     }
     async balance(profile, chainId) {
-        const row = gaslessDeployment(chainId), { owner } = await gaslessOwner(this.context.state, profile);
-        const asset = gaslessAsset(chainId, row.token);
-        const rpc = this.dependencies().rpcFor(chainId);
-        const snapshot = await rpc.snapshot(owner.address);
-        if (!snapshotSchema.safeParse(snapshot).success || snapshot.chainId !== chainId || snapshot.owner !== owner.address ||
-            snapshot.token !== row.token)
-            gaslessFailure("APN_RPC_PROTOCOL", "gasless_balance_binding");
-        return { profile: owner.profile, provider: "local", chain_id: chainId, token: row.token, symbol: asset.symbol, decimals: asset.decimals,
-            address: owner.address, balance_atomic: snapshot.balanceAtomic, native_balance_wei: snapshot.nativeBalanceWei,
-            paymaster_allowance_atomic: snapshot.allowanceAtomic, delegation: snapshot.delegation,
-            block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read" };
+        return await withGaslessRpcInvocation(async () => {
+            const row = gaslessDeployment(chainId), { owner } = await gaslessOwner(this.context.state, profile);
+            const asset = gaslessAsset(chainId, row.token);
+            const rpc = this.dependencies().rpcFor(chainId);
+            const snapshot = await rpc.snapshot(owner.address);
+            if (!snapshotSchema.safeParse(snapshot).success || snapshot.chainId !== chainId || snapshot.owner !== owner.address ||
+                snapshot.token !== row.token)
+                gaslessFailure("APN_RPC_PROTOCOL", "gasless_balance_binding");
+            return { profile: owner.profile, provider: "local", chain_id: chainId, token: row.token, symbol: asset.symbol, decimals: asset.decimals,
+                address: owner.address, balance_atomic: snapshot.balanceAtomic, native_balance_wei: snapshot.nativeBalanceWei,
+                paymaster_allowance_atomic: snapshot.allowanceAtomic, delegation: snapshot.delegation,
+                block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read" };
+        });
     }
     async prepare(input) {
-        const d = this.dependencies();
-        const preparation = new GaslessPreparation({ state: this.context.state, records: this.records,
-            operations: this.operations, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime() });
-        return publicGaslessOperation(await preparation.prepare(input));
+        return await withGaslessRpcInvocation(async () => {
+            const d = this.dependencies();
+            const preparation = new GaslessPreparation({ state: this.context.state, records: this.records,
+                operations: this.operations, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime() });
+            return publicGaslessOperation(await preparation.prepare(input));
+        });
     }
     async approve(operationId) {
-        return await this.locked(operationId, async (op) => {
+        return await withGaslessRpcInvocation(async () => await this.locked(operationId, async (op) => {
             if (op.terminal || op.state !== "awaiting_approval")
                 return publicGaslessOperation(op);
             const approval = this.dependencies().approval;
@@ -51,22 +56,24 @@ export class GaslessService {
                     nextActions: [`apn gasless transfer approve --operation ${op.operationId}`],
                 });
             return publicGaslessOperation(await this.execution(op).approve(op, approval));
-        });
+        }));
     }
     async resume(operationId, observationRpcEnv) {
-        if (observationRpcEnv !== undefined) {
-            const environmentName = gaslessObservationRpcEnv(observationRpcEnv);
-            return await this.locked(operationId, async (op) => {
-                if (op.terminal || op.bootstrap.signingAttempts === 0)
-                    return publicGaslessOperation(op);
-                const factory = this.dependencies().observationRpcFor;
-                if (factory === undefined)
-                    gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_unavailable");
-                const observer = new GaslessObservationService(factory(op.intent.request.chainId, environmentName), async (previous, patch) => await this.save(previous, patch), environmentName);
-                return publicGaslessOperation(await observer.run(op));
-            });
-        }
-        return await this.locked(operationId, async (op) => publicGaslessOperation(op.terminal || op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
+        return await withGaslessRpcInvocation(async () => {
+            if (observationRpcEnv !== undefined) {
+                const environmentName = gaslessObservationRpcEnv(observationRpcEnv);
+                return await this.locked(operationId, async (op) => {
+                    if (op.terminal || op.bootstrap.signingAttempts === 0)
+                        return publicGaslessOperation(op);
+                    const factory = this.dependencies().observationRpcFor;
+                    if (factory === undefined)
+                        gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_unavailable");
+                    const observer = new GaslessObservationService(factory(op.intent.request.chainId, environmentName), async (previous, patch) => await this.save(previous, patch), environmentName);
+                    return publicGaslessOperation(await observer.run(op));
+                });
+            }
+            return await this.locked(operationId, async (op) => publicGaslessOperation(op.terminal || op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
+        });
     }
     async status(operationId) { return await this.locked(operationId, async (op) => publicGaslessOperation(op)); }
     async receipt(operationId) {
