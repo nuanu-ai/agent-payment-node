@@ -23,6 +23,9 @@ export type CommandRequest = {
     readonly profile: string;
     readonly operationId: string;
 } | {
+    readonly command: "relay.status";
+    readonly operationId: string;
+} | {
     readonly command: "stargate.native.prepare";
     readonly profile: string;
     readonly amountAtomic: string;

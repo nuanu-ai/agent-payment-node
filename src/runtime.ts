@@ -1,6 +1,7 @@
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
+import type { RelayKeylessStatusService } from "./relay/status.js";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as waitFor } from "node:timers/promises";
@@ -49,6 +50,7 @@ export interface CoreDependencies {
   readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly relayPreflight?: RelayReadOnlyPreflightService;
   readonly relayRetire?: RelayRetireService;
+  readonly relayStatus?: RelayKeylessStatusService;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -102,6 +104,7 @@ export class RuntimeContext {
   readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly relayPreflight?: RelayReadOnlyPreflightService;
   readonly relayRetire?: RelayRetireService;
+  readonly relayStatus?: RelayKeylessStatusService;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -156,6 +159,7 @@ export class RuntimeContext {
     if (dependencies.relayPrepare !== undefined) this.relayPrepare = dependencies.relayPrepare;
     if (dependencies.relayPreflight !== undefined) this.relayPreflight = dependencies.relayPreflight;
     if (dependencies.relayRetire !== undefined) this.relayRetire = dependencies.relayRetire;
+    if (dependencies.relayStatus !== undefined) this.relayStatus = dependencies.relayStatus;
     if (dependencies.stargateNative !== undefined) this.stargateNative = dependencies.stargateNative;
     if (dependencies.stargateToken !== undefined) this.stargateToken = dependencies.stargateToken;
     if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;
