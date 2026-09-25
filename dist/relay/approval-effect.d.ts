@@ -19,7 +19,7 @@ export declare class RelayEncryptedApprovalCustody implements RelayApprovalCusto
     constructor(state: StateStore, wrapping: WrappingSecretPort);
     /** Hold the wallet mutation lock through a local retirement transition. A
      * damaged or unreadable envelope must not be treated as empty custody. */
-    withNoMaterial<T>(op: RelayUnsignedOperation, action: () => Promise<T>): Promise<T>;
+    withNoMaterial<T>(op: RelayUnsignedOperation, action: () => Promise<T>, profile?: string): Promise<T>;
     load(op: RelayUnsignedOperation): Promise<RelaySignedApproval | null>;
     private loadLocked;
     seal(op: RelayUnsignedOperation, signed: RelaySignedApproval): Promise<void>;

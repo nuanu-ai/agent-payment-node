@@ -27,7 +27,7 @@ export declare class RelayRetireService {
         idempotencyHash: string;
         requestHash: string;
         sourceChainId: 1 | 56;
-        destinationChainId: 137 | 56;
+        destinationChainId: 56 | 137;
         sourceAccount: string;
         recipient: string;
         quoteDigest: string;

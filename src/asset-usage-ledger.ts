@@ -89,12 +89,14 @@ export class AssetUsageLedger extends SecureStateStore {
   private initialized: Promise<void> | undefined;
 
   /** Relay and this ledger hash idempotency keys in separate domains. Hold the
-   * exact Ethereum USDC bucket lock through the caller's retirement write. */
+   * exact source asset bucket lock through the caller's retirement write. */
   async withNoMatchingRelayReservation<T>(account: string, policyDigest: string | undefined,
-    amountAtomic: string, action: () => Promise<T>): Promise<T> {
+    amountAtomic: string, action: () => Promise<T>, sourceChainId: 1 | 56 = 1): Promise<T> {
     if (policyDigest !== undefined) digest(policyDigest, "Policy digest");
-    const identity = validateIdentity({ account: getAddress(account), chain: "eip155:1",
-      asset: { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" } });
+    const identity = validateIdentity(sourceChainId === 56
+      ? { account: getAddress(account), chain: "eip155:56", asset: { kind: "native", identifier: null } }
+      : { account: getAddress(account), chain: "eip155:1",
+        asset: { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" } });
     await this.ready();
     return this.withLocks([this.bucketLock(identity)], async () => {
       const records = await this.loadBucket(identity);
