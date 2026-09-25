@@ -19,6 +19,8 @@ import { FacilitatorGaslessOperationRepository } from "./facilitator-gasless/ope
 import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
 import { RelayUnsignedOperationRepository, RelayRetirementRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation } from "./relay-unsigned-operation.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
+import { RelayEffectJournalRepository } from "./relay/effect-journal.js";
+import { RelayNativeSourceJournalRepository } from "./relay/native-source.js";
 export class OperationService {
     state;
     providerX402;
@@ -103,7 +105,7 @@ export class OperationService {
         for (const operation of await this.profileOperations(profileHash)) {
             if (operation.record.terminal)
                 continue;
-            if (operation.kind === "relay_unsigned" && await new RelayRetirementRepository(this.state.root).load(operation.record) !== null)
+            if (operation.kind === "relay_unsigned" && await this.relayLifecycle(operation.record) !== "active")
                 continue;
             blocking = operation;
             break;
@@ -134,7 +136,7 @@ export class OperationService {
         for (const operation of await this.profileOperations(profileHash)) {
             if (operation.record.terminal)
                 continue;
-            if (operation.kind === "relay_unsigned" && await new RelayRetirementRepository(this.state.root).load(operation.record) !== null)
+            if (operation.kind === "relay_unsigned" && await this.relayLifecycle(operation.record) !== "active")
                 continue;
             const held = storedOperationDomains(operation);
             const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
@@ -242,7 +244,23 @@ export class OperationService {
             : publicProviderX402Operation(operation.record);
     }
     async relayStatus(operation) {
-        return publicRelayUnsignedOperation(operation, await new RelayRetirementRepository(this.state.root).load(operation));
+        const retirement = await new RelayRetirementRepository(this.state.root).load(operation);
+        const completion = retirement === null ? await this.relaySourceCompletion(operation) : null;
+        return publicRelayUnsignedOperation(operation, retirement, completion);
+    }
+    /** Source finality ends this operation's spend attempt. Destination delivery is observed separately. */
+    async relaySourceCompletion(operation) {
+        if (operation.nativeQuote !== undefined) {
+            const journal = await new RelayNativeSourceJournalRepository(this.state.root).load(operation);
+            return journal?.phase === "confirmed" ? { journalIntegrityHash: journal.integrityHash } : null;
+        }
+        const journal = await new RelayEffectJournalRepository(this.state.root).load(operation.profileHash, operation.operationId);
+        return journal?.effects[1].phase === "confirmed" ? { journalIntegrityHash: journal.integrityHash } : null;
+    }
+    async relayLifecycle(operation) {
+        if (await new RelayRetirementRepository(this.state.root).load(operation) !== null)
+            return "retired";
+        return await this.relaySourceCompletion(operation) === null ? "active" : "source_confirmed";
     }
     // Test and embedding ports written before the compatibility reader expose the
     // original current-record methods. Keep those ports working while the concrete
