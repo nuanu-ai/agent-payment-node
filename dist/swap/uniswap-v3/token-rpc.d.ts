@@ -14,6 +14,7 @@ export type TokenRpcCall = EvmRpcCall & {
     readonly batch?: (route: TokenRpcRoute, items: readonly TokenRpcItem[]) => Promise<readonly unknown[]>;
     readonly telemetry?: () => RpcReadTelemetry | null;
     readonly effectAttempts?: () => number;
+    readonly reserveEffectSlot?: () => void;
     readonly primaryPoolTelemetry?: () => TokenPrimaryPoolTelemetry;
     readonly primaryPoolEnabled?: () => boolean;
     readonly primaryPoolSize?: () => number;

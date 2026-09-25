@@ -15,6 +15,7 @@ export interface UniswapTokenExecutionPorts {
   releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
   commitNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
   guard(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+  reserveSendCapacity?(): void;
   revalidate(operation: UniswapTokenOperation): Promise<void>;
   reserveUsage(operation: UniswapTokenOperation): Promise<TokenUsageBinding>;
   currentUsage(operation: UniswapTokenOperation): Promise<TokenUsageBinding>;
@@ -87,6 +88,7 @@ export class UniswapTokenExecution {
     try { await this.ports.guard(op, kind, attempt.nonce); }
     catch (error) { await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op,
       kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase)); }
+    this.ports.reserveSendCapacity?.();
     let sealed: TokenSealedEffect;
     try { sealed = await this.ports.seal(op, kind, attempt.nonce); }
     catch (error) { const durable = await this.ports.probeSealed(op, kind, attempt.nonce);
@@ -97,6 +99,7 @@ export class UniswapTokenExecution {
     return await this.submit(op, kind);
   }
   private async submit(op: UniswapTokenOperation, kind: TokenEffectKind) {
+    this.ports.reserveSendCapacity?.();
     let result: "accepted" | "ambiguous"; try { result = await this.ports.send(op, kind); } catch { result = "ambiguous"; }
     const usage = kind === "swap" ? await this.ports.followUsage(op, result === "accepted" ? "submitted" : "unknown_finality") : null;
     return await this.persist(transitionUniswapToken(op, result === "accepted" ? submitted(kind) : unknown(kind), usage === null ? {} : usagePatch(usage), this.ports.now()));

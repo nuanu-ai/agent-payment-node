@@ -109,6 +109,7 @@ export class UniswapTokenExecution {
             await this.ports.releaseNonce(op, kind, attempt.nonce);
             return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase));
         }
+        this.ports.reserveSendCapacity?.();
         let sealed;
         try {
             sealed = await this.ports.seal(op, kind, attempt.nonce);
@@ -127,6 +128,7 @@ export class UniswapTokenExecution {
         return await this.submit(op, kind);
     }
     async submit(op, kind) {
+        this.ports.reserveSendCapacity?.();
         let result;
         try {
             result = await this.ports.send(op, kind);

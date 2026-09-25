@@ -55,6 +55,7 @@ export function createTokenRpc(input) {
             throw new ApnError("APN_RPC_CONFIG", "Uniswap token primary provider is not semantically selected.", { reason: "token_primary_not_selected" });
         const descriptor = resolve().descriptors[selected];
         if (method === "eth_sendRawTransaction") {
+            resolve().session.consumeExternalAttempt();
             effects += 1;
             return await descriptor.call(method, params);
         }
@@ -71,6 +72,7 @@ export function createTokenRpc(input) {
             } },
         telemetry: { value: () => initialized?.session.telemetry() ?? null },
         effectAttempts: { value: () => effects },
+        reserveEffectSlot: { value: () => resolve().session.reserveExternalAttempt() },
         primaryPoolTelemetry: { value: () => ({ schemaVersion: "apn.uniswap-token-primary-pool-telemetry.v1",
                 configuredCandidates: candidates().length, selectedProviderId: selected === null ? null : candidates()[selected].id, attempts: [...attempts] }) },
         primaryPoolEnabled: { value: () => true },
@@ -104,6 +106,8 @@ export function createTokenRpc(input) {
                         outcome: reason === "cooldown" ? "cooldown_skipped" : "failed", reason });
                     if (reason !== "cooldown")
                         await quarantine(index, reason);
+                    if (reason === "rate_limited")
+                        throw error;
                     return { ok: false };
                 }
             });
@@ -195,6 +199,7 @@ function createLegacyTokenRpc(input) {
     let effects = 0, archiveVerified = false;
     const call = (async (method, params) => {
         if (method === "eth_sendRawTransaction") {
+            resolve().session.consumeExternalAttempt();
             effects += 1;
             return await resolve().direct(method, params);
         }
@@ -214,7 +219,8 @@ function createLegacyTokenRpc(input) {
                 }
                 return await resolve().batch(items, route);
             } }, telemetry: { value: () => initialized?.session.telemetry() ?? null },
-        effectAttempts: { value: () => effects }, primaryPoolEnabled: { value: () => false }, primaryPoolSize: { value: () => 1 },
+        effectAttempts: { value: () => effects }, reserveEffectSlot: { value: () => resolve().session.reserveExternalAttempt() },
+        primaryPoolEnabled: { value: () => false }, primaryPoolSize: { value: () => 1 },
         selectedPrimaryProviderId: { value: () => null }, bindPrimaryProvider: { value: async (providerId) => {
                 if (providerId !== null)
                     throw new ApnError("APN_OPERATION_BLOCKED", "Scalar Uniswap token RPC cannot restore a pooled provider binding.", { reason: "uniswap_token_provider_binding_changed" });

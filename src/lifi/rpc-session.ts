@@ -101,6 +101,8 @@ export class RpcReadSession {
   private logicalItems = 0;
   private httpRequests = 0;
   private httpAttempts = 0;
+  private externalAttempts = 0;
+  private externalReservations = 0;
   private batchCount = 0;
   private dedupHits = 0;
   private cacheHits = 0;
@@ -151,6 +153,17 @@ export class RpcReadSession {
   }
 
   currentTime(): number { return this.now(); }
+  /** Reserve a physical POST for an effect before signing. Reads and pool probes share this limit. */
+  reserveExternalAttempt(): void {
+    if (this.externalReservations > 0) return;
+    this.assertBeforeAttempt("eth_sendRawTransaction");
+    this.externalReservations += 1;
+  }
+  consumeExternalAttempt(): void {
+    this.reserveExternalAttempt();
+    this.externalReservations -= 1;
+    this.externalAttempts += 1;
+  }
   recordPhysicalAttempt(endpointRole: "primary" | "receipt" | "archive", methods: readonly string[]): void {
     this.roleAttempts[endpointRole] += 1;
     for (const method of methods) {
@@ -400,7 +413,9 @@ export class RpcReadSession {
     if (methods.length > 1) this.batchCount += 1;
   }
   private assertBeforeAttempt(method: string): void {
-    this.assertDeadline(method); if (this.httpAttempts >= this.maxHttpAttempts) this.budgetError(method, "maxHttpAttempts");
+    this.assertDeadline(method);
+    if (this.httpAttempts + this.externalAttempts + this.externalReservations >= this.maxHttpAttempts)
+      this.budgetError(method, "maxHttpAttempts");
   }
   private assertBeforeQueue(method: string): void { this.assertDeadline(method); }
   private assertBeforeWait(method: string, milliseconds: number): void {
