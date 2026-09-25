@@ -7,6 +7,37 @@ export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIden
 export type { RpcProviderPacingCoordinator } from "./rpc-scheduler.js";
 
 export const MAX_READ_ATTEMPTS = 2;
+export const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
+/** One invocation's physical transport gate, shared by every chain and read/observation session. */
+export class BridgeRpcPhysicalBudget {
+  private posts = 0;
+  private lastStart = Number.NEGATIVE_INFINITY;
+  private tail: Promise<void> = Promise.resolve();
+  constructor(private readonly now: () => number = Date.now,
+    private readonly wait: (milliseconds: number) => Promise<void> = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms))) {}
+  remaining(): number { return BRIDGE_INVOCATION_RPC_POST_LIMIT - this.posts; }
+  require(posts: number, method: string): void {
+    if (this.remaining() < posts) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC invocation POST budget exhausted.",
+      { reason: "physical_post_limit", rpcMethod: method, physicalPosts: this.posts.toString(), remainingPhysicalPosts: this.remaining().toString() });
+  }
+  async beforePost(method: string): Promise<void> {
+    const previous = this.tail;
+    let release!: () => void;
+    this.tail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      this.require(1, method);
+      const nextStart = this.lastStart + 750;
+      while (this.now() < nextStart) {
+        const before = this.now();
+        await this.wait(nextStart - before);
+        if (this.now() <= before) throw new ApnError("APN_RPC_CONFIG", "Bridge RPC invocation pacing clock did not advance.");
+      }
+      this.require(1, method);
+      this.posts += 1; this.lastStart = this.now();
+    } finally { release(); }
+  }
+}
 export const RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS = 3;
 const RPC_DEFAULT_LOGICAL_ITEMS = 96;
 const RPC_DEFAULT_HTTP_REQUESTS = 8;
@@ -34,6 +65,7 @@ export interface RpcBatchReadItem<T = unknown> {
   readonly batchAttempt: RpcBatchAttempt;
 }
 export interface RpcReadSessionOptions {
+  readonly physicalBudget?: BridgeRpcPhysicalBudget;
   readonly maxLogicalItems?: number;
   readonly maxHttpRequests?: number;
   readonly maxHttpAttempts?: number;
@@ -85,6 +117,7 @@ interface BatchExecution {
 
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export class RpcReadSession {
+  readonly physicalBudget: BridgeRpcPhysicalBudget | undefined;
   private readonly maxLogicalItems: number;
   private readonly maxHttpRequests: number;
   private readonly maxHttpAttempts: number;
@@ -117,6 +150,7 @@ export class RpcReadSession {
   private budgetRejectedBeforeTransport = 0;
 
   constructor(options: RpcReadSessionOptions = {}) {
+    this.physicalBudget = options.physicalBudget;
     this.maxLogicalItems = positiveBound(options.maxLogicalItems ?? options.maxUniqueCalls ?? RPC_DEFAULT_LOGICAL_ITEMS, "maxLogicalItems");
     this.maxHttpRequests = positiveBound(options.maxHttpRequests ?? RPC_DEFAULT_HTTP_REQUESTS, "maxHttpRequests");
     this.maxHttpAttempts = positiveBound(options.maxHttpAttempts ?? RPC_DEFAULT_HTTP_ATTEMPTS, "maxHttpAttempts");
@@ -178,6 +212,12 @@ export class RpcReadSession {
     return async (method, params) => {
       return await this.read(origin, chainId, method, params, oneAttempt);
     };
+  }
+
+  /** One raw send through the same persisted provider-family pacing and cooldown as reads. */
+  async submit(origin: string, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown> {
+    if (method !== "eth_sendRawTransaction") throw invalidRpcReadMethod();
+    return await this.schedule(origin, async () => await oneAttempt(method, params));
   }
 
   async read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall,
@@ -384,7 +424,7 @@ export class RpcReadSession {
         const http = error instanceof RpcHttpFailure ? error : undefined, transport = approvedTransportReason(error);
         // Archive deployment HTTP 500 commonly represents deterministic provider rejection (including an oversized batch).
         // Replaying the identical chunk cannot change that shape; other bounded reads retain their existing retry contract.
-        const retryable = http !== undefined ? http.status === 408 || http.status === 429 || http.status >= 500 && http.status <= 599 &&
+        const retryable = http !== undefined ? http.status === 408 || http.status >= 500 && http.status <= 599 &&
           (http.status !== 500 || retryHttp500) : transport !== undefined;
         if (!retryable || !allowRetry || attempt + 1 >= this.maxReadAttempts) {
           if (http !== undefined) {

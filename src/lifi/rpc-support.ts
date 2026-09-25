@@ -73,7 +73,7 @@ export function isReceiptFallbackError(error: unknown): boolean {
   if (error.code === "APN_PROVIDER_CAPABILITY_UNAVAILABLE") {
     return error.details?.reason === "historical_receipt_unavailable" && error.details.rpcMethod === "eth_getTransactionReceipt";
   }
-  if (["APN_RPC_AMBIGUOUS", "APN_RPC_RATE_LIMITED", "APN_PROVIDER_UNAVAILABLE"].includes(error.code)) return true;
+  if (["APN_RPC_AMBIGUOUS", "APN_PROVIDER_UNAVAILABLE"].includes(error.code)) return true;
   if (error.code !== "APN_RPC_PROTOCOL") return false;
   const status = Number(error.details?.httpStatus);
   return status === 408 || status >= 500 && status <= 599;

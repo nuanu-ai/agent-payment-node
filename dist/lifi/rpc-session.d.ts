@@ -4,6 +4,19 @@ import { RpcProviderScheduler } from "./rpc-scheduler.js";
 export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity, rpcProviderFamily } from "./rpc-scheduler.js";
 export type { RpcProviderPacingCoordinator } from "./rpc-scheduler.js";
 export declare const MAX_READ_ATTEMPTS = 2;
+export declare const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
+/** One invocation's physical transport gate, shared by every chain and read/observation session. */
+export declare class BridgeRpcPhysicalBudget {
+    private readonly now;
+    private readonly wait;
+    private posts;
+    private lastStart;
+    private tail;
+    constructor(now?: () => number, wait?: (milliseconds: number) => Promise<void>);
+    remaining(): number;
+    require(posts: number, method: string): void;
+    beforePost(method: string): Promise<void>;
+}
 export declare const RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS = 3;
 export declare const RPC_BATCH_MAX_ITEMS = 33;
 export declare const RPC_READ_METHODS: readonly ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction"];
@@ -18,6 +31,7 @@ export interface RpcBatchReadItem<T = unknown> {
     readonly batchAttempt: RpcBatchAttempt;
 }
 export interface RpcReadSessionOptions {
+    readonly physicalBudget?: BridgeRpcPhysicalBudget;
     readonly maxLogicalItems?: number;
     readonly maxHttpRequests?: number;
     readonly maxHttpAttempts?: number;
@@ -64,6 +78,7 @@ export interface RpcReadTelemetry {
 type RpcDecoder<T = unknown> = (value: unknown) => T;
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export declare class RpcReadSession {
+    readonly physicalBudget: BridgeRpcPhysicalBudget | undefined;
     private readonly maxLogicalItems;
     private readonly maxHttpRequests;
     private readonly maxHttpAttempts;
@@ -100,6 +115,7 @@ export declare class RpcReadSession {
     /** Reserve a physical POST for an effect before signing. Reads and pool probes share this limit. */
     reserveExternalAttempt(): void;
     externalAttempt<T>(origin: string, task: () => Promise<T>): Promise<T>;
+    submit(origin: string, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown>;
     recordPhysicalAttempt(endpointRole: "primary" | "receipt" | "archive", methods: readonly string[]): void;
     wrap(origin: string, chainId: BridgeChainId, call: EvmRpcCall, oneAttempt?: EvmRpcCall): EvmRpcCall;
     read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall, decoder?: RpcDecoder): Promise<unknown>;

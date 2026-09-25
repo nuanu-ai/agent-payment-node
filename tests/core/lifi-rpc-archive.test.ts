@@ -55,6 +55,20 @@ test("a null primary receipt falls back once through a chain-checked archive", a
   ]);
 });
 
+test("receipt HTTP 429 stops before archive fallback in direct and session paths", async () => {
+  for (const sessionMode of [false, true]) {
+    const hosts: string[] = [];
+    const transport = { request: async (endpoint: string) => {
+      hosts.push(new URL(endpoint).host);
+      return { status: 429, body: "", headers: { "retry-after": "1" } };
+    } };
+    const descriptor = bridgeRpcCall(1, withArchive, { transport });
+    const rpc = sessionMode ? descriptor.sessionCall(new RpcReadSession({ wait: async () => {} })) : descriptor.call;
+    await assert.rejects(rpc("eth_getTransactionReceipt", [TRANSACTION_HASH]), { code: "APN_RPC_RATE_LIMITED" });
+    assert.deepEqual(hosts, ["primary.example"]);
+  }
+});
+
 test("the exact Base PublicNode historical receipt capability response falls back to the explicit archive", async () => {
   const calls: Array<{ host: string; method: string }> = [];
   const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
