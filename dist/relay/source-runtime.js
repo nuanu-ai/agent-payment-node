@@ -17,6 +17,7 @@ import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { RelayApprovalEffectService, RelayEncryptedApprovalCustody } from "./approval-effect.js";
 import { RelayDepositEffectService, RelayEncryptedDepositCustody } from "./deposit-effect.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
+import { relayExecutionRoute } from "./execution-route.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 const HASH = /^[a-f0-9]{64}$/u;
@@ -253,15 +254,16 @@ export class RelayEthereumSourceRuntime {
     }
     assertPrepared(op) {
         validateRelayUnsignedOperation(op);
-        if (op.sourceChainId !== 1 || op.destinationChainId !== 56 || op.quote === undefined || op.statusLocator === undefined ||
+        if (op.sourceChainId !== 1 || op.quote === undefined || op.statusLocator === undefined ||
             op.policyDigest === undefined || op.policyRevision === undefined || op.approvalNetworkFeeCeilingWei === undefined ||
             op.depositNetworkFeeCeilingWei === undefined || op.quote.statusLocator?.requestId !== op.statusLocator.requestId ||
             op.quote.quoteDigest !== op.quoteDigest)
             blocked("saved_quote_or_request_id_required");
+        relayExecutionRoute(op);
     }
     summary(op) {
         this.assertPrepared(op);
-        return { operationId: op.operationId, sourceChainId: 1, destinationChainId: 56, sourceAccount: op.sourceAccount,
+        return { operationId: op.operationId, sourceChainId: 1, destinationChainId: op.destinationChainId, sourceAccount: op.sourceAccount,
             sourceToken: ETHEREUM_USDC, amountAtomic: op.amountAtomic, recipient: op.recipient,
             minOutputAtomic: op.minOutputAtomic, deadline: op.deadline, requestId: op.statusLocator.requestId,
             quoteDigest: op.quoteDigest, approvalNetworkFeeCeilingWei: op.approvalNetworkFeeCeilingWei,

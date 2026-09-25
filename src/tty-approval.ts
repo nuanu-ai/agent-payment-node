@@ -61,7 +61,7 @@ export class TtyRelayExecuteConfirmation implements RelayExecutionAuthorizationP
         "Agent Payment Node Relay Ethereum source execution",
         `Operation: ${summary.operationId}`,
         `Source chain: Ethereum (eip155:${summary.sourceChainId})`,
-        `Destination chain: BNB Chain (eip155:${summary.destinationChainId})`,
+        `Destination chain: ${summary.destinationChainId === 8453 ? "Base" : "BNB Chain"} (eip155:${summary.destinationChainId})`,
         `Source account: ${summary.sourceAccount}`,
         `Source token: ${summary.sourceToken}`,
         `Amount: ${summary.amountAtomic} token atomic`,

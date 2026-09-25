@@ -8,7 +8,7 @@ import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRe
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator } from "./quote.js";
-import { RELAY_ROUTE_REFERENCE } from "./prepare.js";
+import { relayExecutionRoute } from "./execution-route.js";
 import { verifyApprovalObservation } from "./approval-effect.js";
 const DEPOSIT_ABI = parseAbi(["function depositErc20(address depositor, address token, uint256 amount, bytes32 id)"]);
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
@@ -200,9 +200,10 @@ export class RelayDepositEffectService {
     }
     assertEnvelope(op) {
         validateRelayUnsignedOperation(op);
+        relayExecutionRoute(op);
         const quote = op.quote, deposit = quote?.deposit;
         if (!quote || !deposit || !op.policyDigest || !op.policyRevision || !op.depositNetworkFeeCeilingWei ||
-            op.sourceChainId !== 1 || op.destinationChainId !== 56 || quote.quoteDigest !== op.quoteDigest ||
+            op.sourceChainId !== 1 || quote.quoteDigest !== op.quoteDigest ||
             !quote.statusLocator || !op.statusLocator ||
             relayStatusLocator(quote.statusLocator.requestId, quote.statusLocator.endpoint).requestId !== op.statusLocator.requestId ||
             !same(deposit.from, op.sourceAccount) || !same(deposit.to, ETHEREUM_DEPOSITORY) || deposit.chainId !== 1 ||
@@ -242,7 +243,7 @@ export class RelayDepositEffectService {
             dailyUsageAtomic: await this.ports.dailyUsage(op.sourceAccount, now),
             asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
         const pin = admission.asset.mechanismPins?.bridge;
-        if (pin?.provider !== "relay" || pin.reference !== RELAY_ROUTE_REFERENCE)
+        if (pin?.provider !== "relay" || pin.reference !== relayExecutionRoute(op))
             blocked("route_pin");
         const execution = await this.ports.executionAdmission(op);
         if (execution === null || execution.requestId !== op.statusLocator.requestId ||

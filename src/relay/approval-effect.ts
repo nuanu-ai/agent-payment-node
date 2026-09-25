@@ -11,7 +11,7 @@ import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
-import { RELAY_ROUTE_REFERENCE } from "./prepare.js";
+import { relayExecutionRoute } from "./execution-route.js";
 
 const TX = /^0x[0-9a-fA-F]+$/u;
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -181,6 +181,7 @@ export class RelayApprovalEffectService {
   }
   private assertEnvelope(op: RelayUnsignedOperation): void {
     validateRelayUnsignedOperation(op);
+    relayExecutionRoute(op);
     const quote = op.quote, approval = quote?.approval;
     if (!quote || !approval || !op.policyDigest || !op.policyRevision || !op.approvalNetworkFeeCeilingWei ||
       !op.depositNetworkFeeCeilingWei || !op.statusLocator || !quote.statusLocator ||
@@ -206,7 +207,7 @@ export class RelayApprovalEffectService {
       asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: op.amountAtomic,
       dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
     const pin = admission.asset.mechanismPins?.bridge;
-    if (pin?.provider !== "relay" || pin.reference !== RELAY_ROUTE_REFERENCE) blocked("route_pin");
+    if (pin?.provider !== "relay" || pin.reference !== relayExecutionRoute(op)) blocked("route_pin");
     const execution = await this.ports.executionAdmission(op);
     if (execution === null || execution.requestId !== op.statusLocator?.requestId ||
       execution.operationIntegrityHash !== op.integrityHash || execution.quoteDigest !== op.quoteDigest) {
