@@ -1,6 +1,7 @@
 import { getAddress, keccak256 } from "viem";
 import { ApnError } from "../../errors.js";
 import { evmRpcHex } from "../../evm-rpc-codec.js";
+import { nativeReads } from "./native-rpc.js";
 import { SWAP_MECHANISM_PIN_SCHEMA, validateSwapMechanismPin } from "../pin.js";
 import { compileSwapProtocolRegistry } from "../protocol-registry.js";
 import { UNISWAP_ROUTER, UNISWAP_ROUTER_VERSION, UNISWAP_USDC } from "../uniswap-pin.js";
@@ -59,12 +60,37 @@ export function uniswapV3Pair(outputToken) {
 }
 /** Production verifier: every pinned runtime code hash, the USDC proxy implementation, and USDT not deprecated. */
 export const verifyUniswapV3CodePins = async (call, tag) => {
+    if (call.batch !== undefined) {
+        return await verifyNativeCodePins(call, tag, UNISWAP_V3_CODE_PINS, { proxy: UNISWAP_USDC, slot: USDC_IMPLEMENTATION_SLOT, pin: USDC_IMPLEMENTATION_PIN }, USDT_DEPRECATED_CALL);
+    }
     const verified = await verifyCodePins(call, tag, UNISWAP_V3_CODE_PINS, { proxy: UNISWAP_USDC, slot: USDC_IMPLEMENTATION_SLOT, pin: USDC_IMPLEMENTATION_PIN });
     await verifyUsdtNotDeprecated(call, tag);
     return verified;
 };
+/** Three-item provider batches, with proxy implementation resolved only after the storage witness is checked. */
+export async function verifyNativeCodePins(call, tag, pins, implementation, deprecatedCall) {
+    if (call.batch === undefined)
+        throw new ApnError("APN_RPC_CONFIG", "Native code-pin batching was selected without batch transport.");
+    const requests = [...pins.map((pin) => ({ method: "eth_getCode", params: [pin.address, tag] })),
+        { method: "eth_call", params: [deprecatedCall, tag] }];
+    const values = [];
+    for (let index = 0; index < requests.length; index += 3)
+        values.push(...await nativeReads(call, requests.slice(index, index + 3)));
+    for (let index = 0; index < pins.length; index += 1)
+        verifyCodeValue(values[index], pins[index]);
+    assertUsdtNotDeprecated(values[pins.length]);
+    const word = evmRpcHex((await nativeReads(call, [{ method: "eth_getStorageAt", params: [implementation.proxy, implementation.slot, tag] }]))[0], 32);
+    if (!/^0x0{24}/u.test(word) || getAddress(`0x${word.slice(26)}`) !== implementation.pin.address) {
+        blocked("The USDC proxy implementation changed from its pinned address.", "uniswap_code_pin_drift");
+    }
+    verifyCodeValue((await nativeReads(call, [{ method: "eth_getCode", params: [implementation.pin.address, tag] }]))[0], implementation.pin);
+    return [...pins, implementation.pin];
+}
 export async function verifyUsdtNotDeprecated(call, tag) {
-    if (evmRpcHex(await call("eth_call", [USDT_DEPRECATED_CALL, tag]), 32) !== `0x${"0".repeat(64)}`) {
+    assertUsdtNotDeprecated(await call("eth_call", [USDT_DEPRECATED_CALL, tag]));
+}
+function assertUsdtNotDeprecated(value) {
+    if (evmRpcHex(value, 32) !== `0x${"0".repeat(64)}`) {
         blocked("USDT is deprecated and forwards to another contract.", "uniswap_code_pin_drift");
     }
 }
@@ -80,11 +106,14 @@ export async function verifyCodePins(call, tag, pins, implementation) {
     return verified;
 }
 async function verifyCode(call, pin, tag) {
-    const code = evmRpcHex(await call("eth_getCode", [pin.address, tag]));
+    verifyCodeValue(await call("eth_getCode", [pin.address, tag]), pin);
+    return pin;
+}
+function verifyCodeValue(value, pin) {
+    const code = evmRpcHex(value);
     if (code === "0x" || code.length > 2 + 2 * 49_152 || keccak256(code) !== pin.codeHash) {
         blocked(`Pinned ${pin.role} runtime code changed or is missing.`, "uniswap_code_pin_drift");
     }
-    return pin;
 }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=pins.js.map

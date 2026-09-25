@@ -21,8 +21,8 @@ export declare class BridgeRpc implements BridgeRpcPort {
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
     deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock, exactHashPin?: boolean): Promise<{
-        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
-        peerChainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
+        peerChainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
         tool: BridgeTool;
         block: BridgeBlock;
         rpcOrigin: string;
@@ -31,8 +31,8 @@ export declare class BridgeRpc implements BridgeRpcPort {
         configurationHash: string;
     }>;
     refreshDeployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, frozen: BridgeDeploymentIdentity): Promise<{
-        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
-        peerChainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
+        peerChainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
         tool: BridgeTool;
         block: BridgeBlock;
         rpcOrigin: string;
@@ -42,7 +42,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
     }>;
     /** A native principal's balance is the native balance itself and its allowance is the constant zero: nothing is approved. */
     account(owner: Address, spender: Address, token: Address, planned?: readonly BridgeTransaction[]): Promise<{
-        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
         rpcOrigin: string;
         block: BridgeBlock;
         owner: `0x${string}`;
@@ -70,7 +70,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         rpcOrigin: string;
         observedAt: string;
         feeModel: "arbitrum-inclusive";
-        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
     } | {
         l1DataFeeUpperWei: string;
         operatorFeeUpperWei: string;
@@ -82,7 +82,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         rpcOrigin: string;
         observedAt: string;
         feeModel: "monad-gas-limit";
-        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
     } | {
         l1DataFeeUpperWei: string;
         operatorFeeUpperWei: string;
@@ -93,7 +93,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         blockHash: `0x${string}`;
         rpcOrigin: string;
         observedAt: string;
-        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
     }>;
     feeQuotes(envelopes: readonly Pick<BridgeEnvelope, "economics">[]): Promise<import("../evm-ports.js").EvmFeeQuote[] | ({
         l1DataFeeUpperWei: string;
@@ -106,7 +106,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         rpcOrigin: string;
         observedAt: string;
         feeModel: "arbitrum-inclusive";
-        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
     } | {
         l1DataFeeUpperWei: string;
         operatorFeeUpperWei: string;
@@ -118,7 +118,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         rpcOrigin: string;
         observedAt: string;
         feeModel: "monad-gas-limit";
-        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
     } | {
         l1DataFeeUpperWei: string;
         operatorFeeUpperWei: string;
@@ -129,7 +129,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         blockHash: `0x${string}`;
         rpcOrigin: string;
         observedAt: string;
-        chainId: 1 | 8453 | 42161 | 56 | 59144 | 143;
+        chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
     })[]>;
     send(raw: Hex): Promise<Hex>;
     private basePinnedFeeValues;
