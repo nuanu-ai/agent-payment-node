@@ -7,6 +7,9 @@ import { privateKeyToAccount } from "viem/accounts";
 import { runCli } from "../../src/cli.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { StateStore } from "../../src/state.js";
+import { StateProfileRepository } from "../../src/profile-repository.js";
+import { evmAddressLock } from "../../src/evm-address-ownership.js";
+import { accountBindingHash, capabilityHash, metamaskDirectCapabilitySnapshot } from "../../src/provider-profile.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 
 const KEY = `0x${"1".padStart(64, "0")}` as const;
@@ -49,6 +52,40 @@ test("wallet import creates checksum metadata and equivalent local custody", asy
     await privateKeyToAccount(KEY).signMessage({ message }));
   assert.equal((await f.run()).ok, false, "retry must not overwrite a successful import");
   assert.equal((await readFile(f.keyFile, "utf8")).includes(KEY), true);
+});
+
+test("wallet import holds the shared owner lock before a concurrent provider profile save", async t => {
+  const f = await fixture(t);
+  let release!: () => void, entered!: () => void, attempted!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const importing = new Promise<void>(resolve => { entered = resolve; });
+  const saving = new Promise<void>(resolve => { attempted = resolve; });
+  const pausedWrapping: WrappingSecretPort = {
+    load: wrapping.load,
+    create: async () => { entered(); await gate; return Buffer.alloc(32, 7); },
+  };
+  const pendingImport = f.run(undefined, pausedWrapping); await importing;
+  class ObservedState extends StateStore {
+    protected override async beforeLockAcquire(key: string): Promise<void> {
+      if (key === evmAddressLock(ADDRESS)) attempted();
+    }
+  }
+  const state = new ObservedState(f.root), repository = new StateProfileRepository(state);
+  const profile = "provider", provider_id = "metamask-agent-wallet", capability_snapshot = metamaskDirectCapabilitySnapshot();
+  let saved = false;
+  const pendingSave = repository.save({ schema_version: "apn.provider-profile.v1", profile,
+    profile_hash: state.profileHash(profile), provider_id, public_address: ADDRESS,
+    account_binding_hash: accountBindingHash(provider_id, ADDRESS), capability_snapshot,
+    capability_hash: capabilityHash(capability_snapshot), revision: 1,
+    trust_class: "provider_managed_non_custodial_signer", observed_at: new Date().toISOString(),
+    drift: { state: "bound", reason: "none" } }).then(() => { saved = true; });
+  await saving;
+  assert.equal(saved, false);
+  release();
+  const result = await pendingImport;
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  await pendingSave;
+  assert.equal(saved, true);
 });
 
 test("wallet import rejects unsafe file, bad key, mismatched address, and occupied state", async (t) => {

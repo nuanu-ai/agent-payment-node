@@ -36,6 +36,7 @@ import type { FacilitatorOperationRecord } from "./facilitator-gasless/operation
 import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
 import { RelayUnsignedOperationRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation,
   type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
+import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
 
 export type StoredMoneyOperation =
   | { readonly kind: "relay_unsigned"; readonly record: RelayUnsignedOperation }
@@ -62,13 +63,14 @@ export class OperationService {
     private readonly relayUnsigned = new RelayUnsignedOperationRepository(state.root),
   ) {}
 
-  /** Registry-only insertion. A future prepare flow must supply a validated unsigned quote. */
+  /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
+   * locks are acquired together so owner validation and durable write are atomic. */
   async persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation> {
     validateRelayUnsignedOperation(operation);
     await this.state.initialize();
     return await this.state.withLocks([
       `profile:${operation.profileHash}`, `operation:${operation.operationId}`,
-      `operation:idempotency:${operation.idempotencyHash}`,
+      `operation:idempotency:${operation.idempotencyHash}`, evmAddressLock(operation.sourceAccount),
     ], async () => {
       const existing = await this.resolvePrepare({ kind: "relay_unsigned", profileHash: operation.profileHash,
         operationId: operation.operationId, idempotencyHash: operation.idempotencyHash, requestHash: operation.requestHash });
@@ -85,6 +87,7 @@ export class OperationService {
         if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_NOT_FOUND") throw error;
       }
       await this.assertProfileAvailable(operation.profileHash);
+      await assertExclusiveEvmOwner(this.state, operation.sourceAccount, operation.profileHash);
       await this.relayUnsigned.persistLocked(operation);
       return operation;
     });

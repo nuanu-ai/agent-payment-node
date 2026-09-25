@@ -7,6 +7,7 @@ import { fundingPosture, policyBinding, publicProfilePolicy } from "./profile-po
 import { projectLegacyLocalProfile } from "./provider-profile.js";
 import { assertLocalNetworkProfile, networkPolicyBinding } from "./x402-network.js";
 import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
+import { evmAddressLock } from "./evm-address-ownership.js";
 export class WalletService {
     context;
     constructor(context) {
@@ -57,7 +58,9 @@ export class WalletService {
                 createdAt: result.createdAt,
                 bindingHash: result.bindingHash,
             });
-            await this.context.state.writeWallet(wallet);
+            await this.context.state.withLocks([evmAddressLock(wallet.address)], async () => {
+                await this.context.state.writeWallet(wallet);
+            });
             await this.materializeLocalProfile(wallet, providerProfile);
             return publicWallet(wallet, "ready");
         });
@@ -66,7 +69,7 @@ export class WalletService {
         const profile = canonicalProfile(profileInput);
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
-        return await this.context.state.withLocks([`profile:${profileHash}`, "wallet-import-global"], async () => {
+        return await this.context.state.withLocks([`profile:${profileHash}`, "wallet-import-global", evmAddressLock(expectedAddress)], async () => {
             await assertWalletLifecycleAvailable(this.context, profileHash);
             const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
             const provider = await this.context.state.loadProviderProfile(profileHash);
