@@ -2,6 +2,9 @@
 import { randomBytes } from "node:crypto";
 import { keccak256, parseTransaction, recoverTransactionAddress, type Hex } from "viem";
 import { hashObject } from "../canonical.js";
+import { activeAssetPolicyFromState, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
+import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation,
   type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
@@ -345,6 +348,55 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
       const body = { ...fields(j), effects };
       const next = await validateArbitrumSourceEffectJournal({ ...body, integrityHash: hashObject(body) }, op);
       await this.writeJson(path, next); return next;
+    });
+  }
+
+  /** Atomically create a skipped journal only after an injected fresh canonical allowance read. */
+  async skipApprovalIfVerified(profileHash: string, operationId: string,
+    expectedIntegrityHash: string | null,
+    verifier: (input: { readonly operation: RelayUnsignedOperation; readonly journal: ArbitrumSourceEffectJournal;
+      readonly activePolicy: ActiveAssetPolicy }) => Promise<ArbitrumVerifiedAllowanceRead | null>,
+    policyUnderLock?: (profile: string, at: Date) => Promise<ActiveAssetPolicy | null>):
+    Promise<ArbitrumSourceEffectJournal | null> {
+    await this.initialize();
+    return this.withLocks([`profile:${profileHash}`, `profile:${allowlistProfileHash("default")}`,
+      `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`], async () => {
+      const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
+      if (await new RelayRetirementRepository(this.root).load(op) !== null) blocked("operation_retired");
+      const data = await this.readJson(path);
+      if ((data === null) !== (expectedIntegrityHash === null)) blocked("stale_journal_revision");
+      const started = this.clock();
+      if (!(started instanceof Date) || !Number.isFinite(started.getTime())) blocked("invalid_clock");
+      const j = data === null ? await createArbitrumSourceEffectJournal(op, started.toISOString()) :
+        await validateArbitrumSourceEffectJournal(data, op);
+      if (expectedIntegrityHash !== null && j.integrityHash !== expectedIntegrityHash) blocked("stale_journal_revision");
+      if (j.effects[0].phase !== "pending" || j.effects[1].phase !== "pending") blocked("approval_already_started");
+      const activePolicy = policyUnderLock === undefined ? activeAssetPolicyFromState(
+        await new AllowlistPolicyStore(this.root).readUnderProfileLock("default"), started) :
+        await policyUnderLock("default", started);
+      if (activePolicy === null || activePolicy.digest !== op.policyDigest ||
+        activePolicy.revision !== op.policyRevision || activePolicy.accounts.evm?.toLowerCase() !== op.sourceAccount)
+        blocked("active_owner_policy_required");
+      const read = await verifier({ operation: op, journal: j, activePolicy });
+      if (read === null) return null;
+      const now = this.clock();
+      if (!(now instanceof Date) || !Number.isFinite(now.getTime()) ||
+        !iso(read.observedAt) || Date.parse(read.observedAt) > now.getTime() ||
+        now.getTime() - Date.parse(read.observedAt) > 30_000 ||
+        now.getTime() + 60_000 >= Date.parse(op.deadline)) blocked("fresh_canonical_allowance_unavailable");
+      const proof: ArbitrumApprovalSkipProof = { proofClass: "canonical_allowance_observation",
+        operationIntegrityHash: op.integrityHash, policyDigest: read.policyDigest,
+        policyRevision: read.policyRevision, token: RELAY_ARBITRUM_USDC,
+        owner: op.sourceAccount, spender: ETHEREUM_DEPOSITORY, amountAtomic: op.amountAtomic,
+        allowanceAtomic: read.allowanceAtomic, blockNumber: read.blockNumber,
+        blockHash: read.blockHash, observedAt: read.observedAt };
+      if (!validSkipProof(proof, op, j.createdAt)) blocked("allowance_or_policy_mismatch");
+      const effects: [ArbitrumSourceEffect, ArbitrumSourceEffect] = [
+        { role: "approval", phase: "approval_skipped", attempt: null, skipProof: proof }, j.effects[1]];
+      const body = { ...fields(j), effects };
+      const next = await validateArbitrumSourceEffectJournal({ ...body, integrityHash: hashObject(body) }, op);
+      if (data === null) await this.ensureDirectory(`relay-arbitrum-source-effect-journals/${profileHash}`);
+      await this.writeJson(path, next, data === null); return next;
     });
   }
 }

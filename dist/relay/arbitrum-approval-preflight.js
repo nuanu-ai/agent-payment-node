@@ -71,6 +71,7 @@ export async function preflightRelayArbitrumApproval(operation, active, publicAc
         confirmedNonce: confirmedNonce.toString(), pendingNonce: pendingNonce.toString(),
         baseFeePerGas: baseFee.toString(), quotedMaxFeePerGas: quote.approval.maxFeePerGas,
         quotedMaxPriorityFeePerGas: quote.approval.maxPriorityFeePerGas,
+        observedAt: observedAt.toISOString(),
         readOnlyConditionsSatisfied: reasons.length === 0, reasons, rpcBatches: 3,
         proofClass: "read_only_rpc_observation", executionAdmitted: false,
         nextActions: [] });

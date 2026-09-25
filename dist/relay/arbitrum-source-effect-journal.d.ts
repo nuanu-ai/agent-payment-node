@@ -1,3 +1,4 @@
+import { type ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore } from "../secure-state-store.js";
 export type ArbitrumEffectRole = "approval" | "deposit";
@@ -97,4 +98,10 @@ export declare class ArbitrumSourceEffectJournalRepository extends SecureStateSt
     beginSigning(profileHash: string, operationId: string, expectedIntegrityHash: string, role: ArbitrumEffectRole, at: string): Promise<ArbitrumSourceEffectJournal>;
     /** Only a separately wired canonical read may create this proof. It does not authorize deposit dispatch. */
     skipApproval(profileHash: string, operationId: string, expectedIntegrityHash: string): Promise<ArbitrumSourceEffectJournal>;
+    /** Atomically create a skipped journal only after an injected fresh canonical allowance read. */
+    skipApprovalIfVerified(profileHash: string, operationId: string, expectedIntegrityHash: string | null, verifier: (input: {
+        readonly operation: RelayUnsignedOperation;
+        readonly journal: ArbitrumSourceEffectJournal;
+        readonly activePolicy: ActiveAssetPolicy;
+    }) => Promise<ArbitrumVerifiedAllowanceRead | null>, policyUnderLock?: (profile: string, at: Date) => Promise<ActiveAssetPolicy | null>): Promise<ArbitrumSourceEffectJournal | null>;
 }
