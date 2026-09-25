@@ -11,7 +11,9 @@ export async function listLocalWallets(state: StateStore): Promise<readonly Wall
     if (entry.isDirectory()) {
       if (!/^[a-f0-9]{64}$/u.test(entry.name)) stateSecurity("Wallets directory contains an unknown directory.");
       const wallet = await state.loadWallet(entry.name);
-      if (wallet !== null) wallets.push(wallet);
+      if (wallet === null) stateCorrupt("Wallet metadata disappeared during identity validation.");
+      if (wallet.profileHash !== entry.name) stateCorrupt("Wallet metadata path does not match its identity.");
+      wallets.push(wallet);
     } else if (!entry.isFile() || !/^[a-z0-9][a-z0-9._-]{0,63}\.json$/u.test(entry.name)) {
       stateSecurity("Wallets directory contains an unknown file.");
     }

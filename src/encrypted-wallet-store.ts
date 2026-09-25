@@ -279,6 +279,11 @@ function parseEnvelope(value: unknown, profile: string): WalletEnvelope {
   return value as unknown as WalletEnvelope;
 }
 
+/** Validate public envelope identity without loading or exposing the signing key. */
+export function walletEnvelopeIdentity(value: unknown, profile: string): WalletIdentity {
+  return parseEnvelope(value, profile).identity;
+}
+
 function parseSecret(value: unknown): WalletSecretState {
   if (!isPlainRecord(value) || !exactKeys(value, ["version", "privateKey", "directEffects", "x402Effects"]) || value.version !== SECRET_VERSION) corrupt("Wallet secret schema is invalid.");
   if (typeof value.privateKey !== "string" || !PRIVATE_KEY.test(value.privateKey)) corrupt("Wallet private key encoding is invalid.");

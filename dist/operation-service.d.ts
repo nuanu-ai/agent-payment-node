@@ -61,7 +61,8 @@ export declare class OperationService {
     private readonly facilitatorGasless;
     private readonly relayUnsigned;
     constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository);
-    /** Registry-only insertion. A future prepare flow must supply a validated unsigned quote. */
+    /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
+     * locks are acquired together so owner validation and durable write are atomic. */
     persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation>;
     resolvePrepare(input: {
         readonly kind: StoredMoneyOperation["kind"];

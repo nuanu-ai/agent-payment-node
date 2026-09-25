@@ -18,6 +18,7 @@ import { publicSmartAccountGaslessOperation } from "./smart-account-gasless/rece
 import { FacilitatorGaslessOperationRepository } from "./facilitator-gasless/operation-repository.js";
 import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
 import { RelayUnsignedOperationRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation } from "./relay-unsigned-operation.js";
+import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
 export class OperationService {
     state;
     providerX402;
@@ -39,13 +40,14 @@ export class OperationService {
         this.facilitatorGasless = facilitatorGasless;
         this.relayUnsigned = relayUnsigned;
     }
-    /** Registry-only insertion. A future prepare flow must supply a validated unsigned quote. */
+    /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
+     * locks are acquired together so owner validation and durable write are atomic. */
     async persistRelayUnsigned(operation) {
         validateRelayUnsignedOperation(operation);
         await this.state.initialize();
         return await this.state.withLocks([
             `profile:${operation.profileHash}`, `operation:${operation.operationId}`,
-            `operation:idempotency:${operation.idempotencyHash}`,
+            `operation:idempotency:${operation.idempotencyHash}`, evmAddressLock(operation.sourceAccount),
         ], async () => {
             const existing = await this.resolvePrepare({ kind: "relay_unsigned", profileHash: operation.profileHash,
                 operationId: operation.operationId, idempotencyHash: operation.idempotencyHash, requestHash: operation.requestHash });
@@ -64,6 +66,7 @@ export class OperationService {
                     throw error;
             }
             await this.assertProfileAvailable(operation.profileHash);
+            await assertExclusiveEvmOwner(this.state, operation.sourceAccount, operation.profileHash);
             await this.relayUnsigned.persistLocked(operation);
             return operation;
         });

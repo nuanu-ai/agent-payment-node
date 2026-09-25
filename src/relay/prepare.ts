@@ -9,6 +9,7 @@ import { OperationService } from "../operation-service.js";
 import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
+import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { ETHEREUM_USDC, requestRelayQuote, type RelayQuoteIntent, type ValidatedRelayQuote } from "./quote.js";
 
 export const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
@@ -73,6 +74,12 @@ export class RelayUnsignedPrepareService {
       dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
     const pin = admission.asset.mechanismPins?.bridge;
     if (pin?.provider !== "relay" || pin.reference !== RELAY_ROUTE_REFERENCE) refuse("relay_route_pin_required");
+    await this.state.initialize();
+    // Fail closed before quoting. The final owner check and create-only write
+    // share one profile/operation/address critical section in OperationService.
+    const checkOwner = async () => await this.state.withLocks([evmAddressLock(payer)],
+      async () => await assertExclusiveEvmOwner(this.state, payer, profileHash));
+    await checkOwner();
     await this.operations.assertProfileAvailable(profileHash);
     const intent: RelayQuoteIntent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
       minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000) };
