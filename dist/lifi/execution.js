@@ -95,6 +95,9 @@ export class BridgeExecution {
                 catch (error) {
                     return budgetExhausted(error) ? op : await this.haltUnsent(op, error);
                 }
+                // Signing commits an effect; leave room for a fresh guard and its single raw send.
+                if (this.physicalBudget !== undefined && this.physicalBudget.remaining() < 2)
+                    return op;
                 op = await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "signing_started" }) });
                 // The marker is durable before entering custody. A recovered marker only loads its original seal.
                 try {
