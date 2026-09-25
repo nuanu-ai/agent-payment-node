@@ -5,6 +5,7 @@ import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
     relayPrepare;
+    relayPreflight;
     stargateNative;
     stargateToken;
     portfolio;
@@ -57,6 +58,8 @@ export class RuntimeContext {
     constructor(dependencies) {
         if (dependencies.relayPrepare !== undefined)
             this.relayPrepare = dependencies.relayPrepare;
+        if (dependencies.relayPreflight !== undefined)
+            this.relayPreflight = dependencies.relayPreflight;
         if (dependencies.stargateNative !== undefined)
             this.stargateNative = dependencies.stargateNative;
         if (dependencies.stargateToken !== undefined)
