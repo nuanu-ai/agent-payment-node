@@ -28,10 +28,12 @@ export interface AssetUsageReservation extends AssetUsageIdentity {
     readonly registryVersion: string;
     readonly rail: AssetPolicyRail;
     readonly amountAtomic: string;
+    /** Proven asset consumption on a confirmed revert; absent on historical zero-consumption records. */
+    readonly consumedAtomic?: string;
     readonly state: AssetUsageState;
     readonly reservedAt: string;
     readonly updatedAt: string;
-    /** Set only when a terminal effect is finalized. */
+    /** Set when a finalized effect or proven reverted consumption is charged to a UTC day. */
     readonly effectAt: string | null;
     /** Required terminal proof binding; the proof itself remains in the owning rail. */
     readonly outcomeDigest: string | null;
@@ -56,6 +58,8 @@ export interface AssetUsageTransitionInput extends AssetUsageIdentity {
     readonly state: Exclude<AssetUsageState, "reserved">;
     readonly now: Date;
     readonly outcomeDigest?: string;
+    /** Exact asset consumed on a confirmed revert, such as a gasless USDC fee. */
+    readonly consumedAtomic?: string;
     /** Optional compare-and-transition guard, checked atomically while the bucket lock is held. */
     readonly expectedCurrentStates?: readonly AssetUsageState[];
 }

@@ -35,8 +35,9 @@ before the first signature. APN rechecks the active policy and remaining cap
 before signing, disclosure and dispatch. A revoked or replaced policy blocks
 new effects; an already attempted transfer remains observation only and keeps
 its durable usage reservation until a proven outcome. A safe confirmed revert
-releases gross usage after allowance cleanup while retaining the actual fee in
-the settlement record. Safe permission invalidation also releases usage when
+replaces gross reserved usage with the proven USDC fee after allowance cleanup;
+the settlement record keeps that fee separate from the zero delivered amount.
+Safe permission invalidation also releases usage when
 the payment was never submitted; attempted submissions with unknown financial
 results remain reserved. Historical local Base
 operations without this binding cannot be approved or replayed; signed ones

@@ -121,7 +121,9 @@ export class GaslessAssetPolicy {
       const expected = lease.state === "released_unsubmitted"
         ? op.state === "failed_permissions_invalidated" && op.userOperation.submissionAttempts === 0
         : lease.state === op.state;
-      if (!expected || lease.outcomeDigest !== op.integrityHash) corrupt();
+      if (!expected || lease.outcomeDigest !== op.integrityHash ||
+        (lease.state === "failed_confirmed_revert" &&
+          lease.consumedAtomic !== op.settlement?.accounting.feeAtomic)) corrupt();
       return;
     }
     this.checkedReservation(op, lease);
@@ -149,6 +151,7 @@ export class GaslessAssetPolicy {
     if (target === "failed_before_effect" && lease.state !== "reserved") corrupt();
     await this.usage.transition({ ...account, reservationId: bound.reservationId, policyDigest: bound.policyDigest,
       state: target, now: at(this.now()),
+      ...(target === "failed_confirmed_revert" ? { consumedAtomic: op.settlement!.accounting.feeAtomic } : {}),
       ...(target === "failed_before_effect" || target === "released_unsubmitted" ||
         target === "failed_confirmed_revert" || target === "finalized"
         ? { outcomeDigest: op.integrityHash } : {}) });

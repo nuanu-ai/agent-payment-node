@@ -166,10 +166,10 @@ test("revocation after the durable send marker keeps saved-hash observation and 
   assert.equal(lease?.state, "finalized");
 });
 
-test("safe reverted transfer releases gross daily usage after allowance cleanup while retaining its actual fee", async t => {
+test("safe reverted transfers charge their proven USDC fees to the daily cap after allowance cleanup", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root, 8453, { now, activatePolicy: false });
-  await activate(temporary.root, s.profile, s.account.address, { daily: s.request.grossAtomic });
+  await activate(temporary.root, s.profile, s.account.address, { daily: "10299849" });
   const { id } = await s.prepare("reverted-gross-usage");
   s.rpc.success = false;
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
@@ -185,13 +185,31 @@ test("safe reverted transfer releases gross daily usage after allowance cleanup 
   const final = await s.record(id);
   assert.equal(final.state, "failed_confirmed_revert");
   assert.equal(final.settlement?.accounting.deliveredAtomic, "0");
-  assert.ok(BigInt(final.settlement!.accounting.feeAtomic) > 0n);
+  assert.equal(final.settlement?.accounting.feeAtomic, "149925");
+  const publicOp = (await s.core.execute({ command: "operation.status", operationId: id })).operation as any;
+  assert.equal(publicOp.transfer.actual_delivered_atomic, "0");
+  assert.equal(publicOp.fees.actual_fee_atomic, "149925");
   const lease = await usage.load(identity, final.intent.allowlist!.reservationId);
   assert.equal(lease?.state, "failed_confirmed_revert");
+  assert.equal(lease?.consumedAtomic, "149925");
   assert.equal(lease?.outcomeDigest, final.integrityHash);
-  assert.equal((await usage.usage(identity, s.now)).amountAtomic, "0");
-  assert.equal((await s.prepare("after-reverted-gross-usage")).operation.state, "awaiting_approval");
-  assert.equal(s.rpc.sends.length, 1);
+  assert.equal((await usage.usage(identity, s.now)).amountAtomic, "149925");
+  const second = await s.prepare("after-reverted-gross-usage");
+  s.rpc.safeAllowance = undefined; s.rpc.safeNumber = "102";
+  assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: second.id })).ok, true);
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: second.id })).ok, true);
+  assert.equal((await s.record(second.id)).state, "failed_effects_pending");
+  s.rpc.safeAllowance = "0"; s.rpc.safeNumber = "103";
+  s.now.setTime(s.now.getTime() + 360000);
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: second.id })).ok, true);
+  assert.equal((await s.record(second.id)).state, "failed_confirmed_revert");
+  assert.equal((await usage.usage(identity, s.now)).amountAtomic, "299850");
+  const calls = s.rpc.calls.length;
+  const denied = await s.core.execute({ command: "gasless.transfer.prepare", profile: s.profile,
+    request: s.request, idempotencyKey: "third-reverted-gross-usage" });
+  assert.equal(denied.ok, false);
+  assert.equal(s.rpc.calls.length, calls, "daily cap blocks before another RPC request");
+  assert.equal(s.rpc.sends.length, 2);
 });
 
 test("safe bootstrap permission invalidation releases an unsubmitted payment without replay", async t => {

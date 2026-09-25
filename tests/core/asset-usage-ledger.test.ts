@@ -117,6 +117,34 @@ test("proven unsubmitted payment releases gross usage with a distinct terminal l
   { code: "APN_OPERATION_BLOCKED" });
 });
 
+test("confirmed revert charges exact proven asset consumption and binds idempotent replay", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root), day = new Date("2026-09-17T10:02:00.000Z");
+  const held = await reserve(ledger, "confirmed-fee-consumption", "100", "gasless");
+  await ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "submitted", now: new Date("2026-09-17T10:01:00.000Z") });
+  await assert.rejects(ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "failed_confirmed_revert", now: day, outcomeDigest: "a".repeat(64), consumedAtomic: "101" }),
+  { code: "APN_OPERATION_BLOCKED" });
+  const charged = await ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "failed_confirmed_revert", now: day, outcomeDigest: "a".repeat(64), consumedAtomic: "7" });
+  assert.equal(charged.consumedAtomic, "7"); assert.equal(charged.effectAt, day.toISOString());
+  assert.equal((await ledger.usage(identity, day)).amountAtomic, "7");
+  assert.deepEqual(await ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "failed_confirmed_revert", now: day, outcomeDigest: "a".repeat(64), consumedAtomic: "7" }), charged);
+  await assert.rejects(ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "failed_confirmed_revert", now: day, outcomeDigest: "a".repeat(64), consumedAtomic: "8" }),
+  { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await ledger.usage(identity, new Date("2026-09-18T00:00:00.000Z"))).amountAtomic, "0");
+  const historical = await reserve(ledger, "historical-zero-revert", "10", "direct");
+  await ledger.transition({ ...identity, reservationId: historical.reservationId, policyDigest: historical.policyDigest,
+    state: "submitted", now: new Date("2026-09-17T10:03:00.000Z") });
+  const released = await ledger.transition({ ...identity, reservationId: historical.reservationId, policyDigest: historical.policyDigest,
+    state: "failed_confirmed_revert", now: new Date("2026-09-17T10:04:00.000Z"), outcomeDigest: "b".repeat(64) });
+  assert.equal(released.consumedAtomic, undefined);
+  assert.equal((await ledger.usage(identity, new Date("2026-09-17T10:05:00.000Z"))).amountAtomic, "7");
+});
+
 test("concurrent duplicate reservation is idempotent and concurrent distinct reservations cannot race past the cap", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const first = new AssetUsageLedger(temporary.root);

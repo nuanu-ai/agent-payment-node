@@ -44,10 +44,12 @@ export interface AssetUsageReservation extends AssetUsageIdentity {
   readonly registryVersion: string;
   readonly rail: AssetPolicyRail;
   readonly amountAtomic: string;
+  /** Proven asset consumption on a confirmed revert; absent on historical zero-consumption records. */
+  readonly consumedAtomic?: string;
   readonly state: AssetUsageState;
   readonly reservedAt: string;
   readonly updatedAt: string;
-  /** Set only when a terminal effect is finalized. */
+  /** Set when a finalized effect or proven reverted consumption is charged to a UTC day. */
   readonly effectAt: string | null;
   /** Required terminal proof binding; the proof itself remains in the owning rail. */
   readonly outcomeDigest: string | null;
@@ -71,6 +73,8 @@ export interface AssetUsageTransitionInput extends AssetUsageIdentity {
   readonly state: Exclude<AssetUsageState, "reserved">;
   readonly now: Date;
   readonly outcomeDigest?: string;
+  /** Exact asset consumed on a confirmed revert, such as a gasless USDC fee. */
+  readonly consumedAtomic?: string;
   /** Optional compare-and-transition guard, checked atomically while the bucket lock is held. */
   readonly expectedCurrentStates?: readonly AssetUsageState[];
 }
@@ -195,8 +199,15 @@ export class AssetUsageLedger extends SecureStateStore {
       const terminal = input.state === "finalized" || input.state === "failed_before_effect" ||
         input.state === "released_unsubmitted" || input.state === "failed_confirmed_revert";
       const outcomeDigest = terminal ? digest(input.outcomeDigest, "Outcome digest") : null;
+      const consumedAtomic = input.consumedAtomic === undefined ? undefined : atomic(input.consumedAtomic, false, true).toString();
+      if (consumedAtomic !== undefined && (input.state !== "failed_confirmed_revert" ||
+        BigInt(consumedAtomic) > BigInt(current.amountAtomic))) {
+        throw blocked("Confirmed-revert consumption exceeds or conflicts with the reservation.");
+      }
       if (current.state === input.state) {
-        if (current.outcomeDigest !== outcomeDigest) throw blocked("The idempotent usage transition outcome does not match.");
+        if (current.outcomeDigest !== outcomeDigest || current.consumedAtomic !== consumedAtomic) {
+          throw blocked("The idempotent usage transition outcome does not match.");
+        }
         return current;
       }
       assertTransition(current.state, input.state);
@@ -204,8 +215,9 @@ export class AssetUsageLedger extends SecureStateStore {
         ...withoutDigest(current),
         state: input.state,
         updatedAt: at,
-        effectAt: input.state === "finalized" ? at : null,
+        effectAt: input.state === "finalized" || consumedAtomic !== undefined ? at : null,
         outcomeDigest,
+        ...(consumedAtomic === undefined ? {} : { consumedAtomic }),
       };
       const next = seal(body);
       await this.writeJson(this.recordPath(identity, reservationId), next);
@@ -304,10 +316,13 @@ export function assetUsageReservationId(identityValue: AssetUsageIdentity, idemp
 }
 
 export function validateAssetUsageReservation(value: unknown): AssetUsageReservation {
-  if (!isPlainRecord(value) || !exactKeys(value, [
+  if (!isPlainRecord(value) || !(exactKeys(value, [
     "schemaVersion", "reservationId", "idempotencyHash", "policyDigest", "registryVersion", "account", "chain",
     "asset", "rail", "amountAtomic", "state", "reservedAt", "updatedAt", "effectAt", "outcomeDigest", "reservationDigest",
-  ]) || value.schemaVersion !== ASSET_USAGE_RESERVATION_SCHEMA) corrupt("The usage reservation schema is invalid.");
+  ]) || exactKeys(value, [
+    "schemaVersion", "reservationId", "idempotencyHash", "policyDigest", "registryVersion", "account", "chain",
+    "asset", "rail", "amountAtomic", "consumedAtomic", "state", "reservedAt", "updatedAt", "effectAt", "outcomeDigest", "reservationDigest",
+  ])) || value.schemaVersion !== ASSET_USAGE_RESERVATION_SCHEMA) corrupt("The usage reservation schema is invalid.");
   const { reservationDigest, ...body } = value;
   validateBody(body);
   if (typeof reservationDigest !== "string" || !DIGEST.test(reservationDigest) ||
@@ -325,6 +340,10 @@ function validateBody(value: Record<string, unknown>): void {
   validateIdentity(value as unknown as AssetUsageIdentity, true);
   if (!["direct", "gasless", "x402", "bridge", "swap"].includes(value.rail as string)) corrupt("The usage rail binding is invalid.");
   atomic(value.amountAtomic, true, true);
+  if (value.consumedAtomic !== undefined && (value.state !== "failed_confirmed_revert" ||
+    atomic(value.consumedAtomic, true, true) > atomic(value.amountAtomic, true, true))) {
+    corrupt("Confirmed-revert consumption is invalid.");
+  }
   if (!["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "released_unsubmitted", "failed_confirmed_revert"].includes(value.state as string)) corrupt("The usage state is invalid.");
   const reservedAt = storedInstant(value.reservedAt); const updatedAt = storedInstant(value.updatedAt);
   if (updatedAt < reservedAt) corrupt("The usage reservation timestamps are invalid.");
@@ -333,7 +352,9 @@ function validateBody(value: Record<string, unknown>): void {
     if (effectAt !== updatedAt) corrupt("The finalized usage effect timestamp is invalid.");
     digest(value.outcomeDigest, "Outcome digest", true);
   } else if (value.state === "failed_before_effect" || value.state === "released_unsubmitted" || value.state === "failed_confirmed_revert") {
-    if (value.effectAt !== null) corrupt("A released usage failure cannot contain an effect timestamp.");
+    if (value.state === "failed_confirmed_revert" && value.consumedAtomic !== undefined) {
+      if (storedInstant(value.effectAt) !== updatedAt) corrupt("Confirmed-revert consumption time is invalid.");
+    } else if (value.effectAt !== null) corrupt("A released usage failure cannot contain an effect timestamp.");
     digest(value.outcomeDigest, "Outcome digest", true);
   } else if (value.effectAt !== null || value.outcomeDigest !== null) {
     corrupt("A nonterminal usage reservation contains terminal outcome data.");
@@ -360,9 +381,11 @@ function sumUsage(records: readonly AssetUsageReservation[], now: Date): string 
   const day = instant(now).slice(0, 10);
   let total = 0n;
   for (const record of records) {
-    if (record.state === "failed_before_effect" || record.state === "released_unsubmitted" || record.state === "failed_confirmed_revert") continue;
+    if (record.state === "failed_before_effect" || record.state === "released_unsubmitted") continue;
+    if (record.state === "failed_confirmed_revert" && record.consumedAtomic === undefined) continue;
     if (record.state === "finalized" && record.effectAt!.slice(0, 10) !== day) continue;
-    total += atomic(record.amountAtomic, true, true);
+    if (record.state === "failed_confirmed_revert" && record.effectAt!.slice(0, 10) !== day) continue;
+    total += atomic(record.state === "failed_confirmed_revert" ? record.consumedAtomic! : record.amountAtomic, true, true);
     if (total > MAX_UINT256) corrupt("The usage ledger total exceeds uint256.");
   }
   return total.toString();
