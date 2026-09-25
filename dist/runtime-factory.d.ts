@@ -2,6 +2,7 @@ import { RelayUnsignedPrepareService, type RelayPreparePorts } from "./relay/pre
 import { RelayReadOnlyPreflightService, type RelayPreflightPorts } from "./relay/preflight.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
 import { RelayObserveService } from "./relay/observe.js";
+import { RelayBaseObserveService } from "./relay/base-observe.js";
 import type { BoundCommand } from "./command-binder.js";
 import type { OutputEnvelope } from "./commands.js";
 import { ApnCore } from "./core.js";
@@ -54,6 +55,8 @@ export interface RuntimeFactoryOptions {
     readonly relayStatus?: RelayKeylessStatusService;
     readonly relayStatusFetch?: typeof fetch;
     readonly relayObserve?: RelayObserveService;
+    readonly relayBaseObserve?: RelayBaseObserveService;
+    readonly relayObserveBaseRpc?: HttpsBaseRpc;
     readonly relayObserveSourceRpc?: HttpsBaseRpc;
     readonly relayObserveBnbRpc?: HttpsBaseRpc;
     readonly stargateNative?: StargateNativeService;

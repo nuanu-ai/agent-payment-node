@@ -12,7 +12,7 @@ declare const body: z.ZodObject<{
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
     sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>]>;
-    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<8453>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
@@ -41,7 +41,7 @@ declare const schema: z.ZodObject<{
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
     sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>]>;
-    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<8453>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;

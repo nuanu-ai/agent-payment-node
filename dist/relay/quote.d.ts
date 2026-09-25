@@ -1,5 +1,6 @@
 export declare const ETHEREUM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 export declare const BNB_NATIVE = "0x0000000000000000000000000000000000000000";
+export declare const BASE_NATIVE = "0x0000000000000000000000000000000000000000";
 export declare const ETHEREUM_DEPOSITORY = "0x4cd00e387622c35bddb9b4c962c136462338bc31";
 export declare const RELAY_SOLVER = "0xf70da97812cb96acdf810712aa562db8dfa3dbef";
 export interface RelayQuoteIntent {
@@ -8,11 +9,13 @@ export interface RelayQuoteIntent {
     readonly amountAtomic: string;
     readonly minimumOutputWei: string;
     readonly nowSeconds: number;
+    readonly destinationChainId?: 56 | 8453;
 }
 export declare function relayQuoteRequest(intent: RelayQuoteIntent): Record<string, unknown>;
 export interface ValidatedRelayQuote {
     readonly schemaVersion: "apn.relay-quote.v1";
     readonly quoteDigest: string;
+    readonly routeReference?: "ethereum-usdc-base-eth-v1";
     readonly statusLocator?: RelayStatusLocator;
     readonly orderId: string;
     readonly orderSignature: string;
@@ -34,7 +37,7 @@ export interface ValidatedRelayQuote {
                 weight: "1";
             }>;
             refunds: readonly Readonly<{
-                chainId: "ethereum" | "bnb";
+                chainId: "ethereum" | "bnb" | "base";
                 recipient: string;
                 currency: string;
                 minimumAmount: "0";
@@ -43,7 +46,7 @@ export interface ValidatedRelayQuote {
             }>[];
         }>[];
         output: Readonly<{
-            chainId: "bnb";
+            chainId: "bnb" | "base";
             payments: readonly Readonly<{
                 recipient: string;
                 currency: string;

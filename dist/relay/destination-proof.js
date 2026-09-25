@@ -50,7 +50,7 @@ export async function proveRelayBnbDestination(input, ports) {
         return mismatch("destination_chain_id");
     const results = [];
     for (const hash of hashes)
-        results.push(await inspectCandidate(op, input.sourceDeposit.transactionHash.toLowerCase(), hash, ports));
+        results.push(await inspectCandidate(op, input.sourceDeposit.transactionHash.toLowerCase(), hash, ports, 56));
     const credits = results.filter((result) => result.status === "recipient_credit_proven");
     if (credits.length > 1)
         return unproven("multiple_qualifying_candidates");
@@ -59,7 +59,31 @@ export async function proveRelayBnbDestination(input, ports) {
     return results.find(result => result.status === "pending") ??
         results.find(result => result.status === "unproven") ?? results[0];
 }
-async function inspectCandidate(op, sourceHash, hash, ports) {
+/** Base credit observation has no source journal or order-causal proof. */
+export async function proveRelayBaseDestination(operation, candidateHashes, ports) {
+    const op = validateRelayUnsignedOperation(operation);
+    const quote = op.quote;
+    if (op.sourceChainId !== 1 || op.destinationChainId !== 8453 || !quote ||
+        quote.routeReference !== "ethereum-usdc-base-eth-v1" || quote.orderData.output.chainId !== "base" ||
+        quote.orderData.output.calls.length !== 0 || quote.orderData.output.payments.length !== 1 ||
+        !same(quote.orderData.output.payments[0].currency, BNB_NATIVE) ||
+        !same(quote.orderData.output.payments[0].recipient, op.recipient) ||
+        BigInt(quote.orderData.output.payments[0].minimumAmount) < BigInt(op.minOutputAtomic))
+        return mismatch("saved_quote_binding");
+    if (candidateHashes.length !== 1 || !HASH.test(candidateHashes[0]))
+        return mismatch("candidate_hashes_invalid");
+    let chainId;
+    try {
+        chainId = await ports.chainId();
+    }
+    catch {
+        return unproven("base_rpc_unavailable");
+    }
+    if (chainId !== 8453)
+        return mismatch("destination_chain_id");
+    return inspectCandidate(op, "", candidateHashes[0].toLowerCase(), ports, 8453);
+}
+async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
     let tx, receipt;
     try {
         [tx, receipt] = await Promise.all([ports.transaction(hash), ports.receipt(hash)]);
@@ -69,7 +93,7 @@ async function inspectCandidate(op, sourceHash, hash, ports) {
     }
     if (tx === null || receipt === null)
         return pending("destination_transaction_or_receipt_missing");
-    if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== 56 ||
+    if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== expectedChainId ||
         tx.blockNumber !== receipt.blockNumber || tx.blockHash === null || !same(tx.blockHash, receipt.blockHash) ||
         !HASH.test(receipt.blockHash) || receipt.blockNumber < 0n)
         return mismatch("destination_transaction_receipt_identity");
@@ -123,7 +147,7 @@ async function inspectCandidate(op, sourceHash, hash, ports) {
     }
     return { status: "recipient_credit_proven", relayOrderFulfillmentProven: false, paidAcceptance: false, proof: {
             operationId: op.operationId, operationIntegrityHash: op.integrityHash, quoteDigest: op.quoteDigest,
-            orderId: op.quote.orderId, sourceDepositHash: sourceHash, destinationTransactionHash: hash,
+            orderId: op.quote.orderId, sourceDepositHash: sourceHash === "" ? null : sourceHash, destinationTransactionHash: hash,
             destinationBlockNumber: receipt.blockNumber.toString(), destinationBlockHash: receipt.blockHash.toLowerCase(),
             finalityBlockNumber: safe.number.toString(), finalityBlockHash: safe.hash.toLowerCase(),
             recipient: op.recipient.toLowerCase(), minimumOutputWei: op.minOutputAtomic, creditedWei: credited.toString(), method

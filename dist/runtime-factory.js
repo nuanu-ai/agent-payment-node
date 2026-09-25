@@ -3,6 +3,7 @@ import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import { RelayRetireService } from "./relay/retire.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
 import { RelayObserveService } from "./relay/observe.js";
+import { RelayBaseObserveService } from "./relay/base-observe.js";
 import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "./relay/observe-rpc.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
 import { createRelayNativeSourceRuntime } from "./relay/native-source.js";
@@ -80,6 +81,12 @@ import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
+    if (bound.request.command === "relay.base.observe") {
+        const baseUrl = bound.rpcUrl ?? "";
+        const baseInvocation = () => new RelayBnbReadOnlyRpc(baseUrl, state, options.relayObserveBaseRpc);
+        return new ApnCore({ state, relayBaseObserve: options.relayBaseObserve ??
+                new RelayBaseObserveService(state, baseInvocation, new RelayKeylessStatusService(state, options.relayStatusFetch)) });
+    }
     if (bound.request.command === "relay.observe") {
         const sourceUrl = bound.rpcUrl ?? "";
         const bnbUrl = bound.bnbRpcUrl ?? "";
@@ -198,7 +205,7 @@ export function createApnCore(bound, options = {}) {
         ...(stargateNative === undefined ? {} : { stargateNative }),
         ...(stargateToken === undefined ? {} : { stargateToken }),
         // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
-        ...(bound.request.command === "relay.prepare" || bound.request.command === "relay.native.prepare" || options.relayPrepare !== undefined ? { relayPrepare: options.relayPrepare ?? new RelayUnsignedPrepareService(state, clock, undefined, options.relayPreparePorts) } : {}),
+        ...(bound.request.command === "relay.prepare" || bound.request.command === "relay.base.prepare" || bound.request.command === "relay.native.prepare" || options.relayPrepare !== undefined ? { relayPrepare: options.relayPrepare ?? new RelayUnsignedPrepareService(state, clock, undefined, options.relayPreparePorts) } : {}),
         ...(bound.request.command === "relay.retire" ? { relayRetire: new RelayRetireService(state, clock, wrappingSecret) } : {}),
         ...(bound.request.command === "relay.status" || options.relayStatus !== undefined ? {
             relayStatus: options.relayStatus ?? new RelayKeylessStatusService(state, options.relayStatusFetch),
