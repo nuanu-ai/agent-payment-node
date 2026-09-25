@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
+import { EvmDirectRpcGuard } from "../../src/evm-direct-rpc-guard.js";
+import { ApnError } from "../../src/errors.js";
+import type { ReadOnlyRpcBatchCall } from "../../src/rpc.js";
+import { StateStore } from "../../src/state.js";
 import { ETHEREUM_USDC } from "../../src/relay/quote.js";
 import { RELAY_ETHEREUM_USDC_RECIPIENT, validateRelayArbitrumUsdcEthereumUsdcQuote } from
   "../../src/relay/arbitrum-usdc-ethereum-quote.js";
-import { proveRelayEthereumUsdcCredit, type RelayEthereumUsdcProofPorts } from
+import { proveRelayEthereumUsdcCredit, RelayEthereumUsdcReadOnlyRpc, type RelayEthereumUsdcProofPorts } from
   "../../src/relay/ethereum-usdc-credit-proof.js";
+import { temporaryState } from "./helpers.js";
 
 const hash = (digit: string) => `0x${digit.repeat(64)}`;
 const destinationHash = hash("a"), inclusionHash = hash("b"), safeHash = hash("c");
@@ -103,4 +109,71 @@ test("an unrelated USDC transfer selected by Relay is still only recipient credi
   assert.equal(result.status, "recipient_credit_proven");
   assert.equal(result.relayOrderFulfillmentProven, false);
   assert.equal(result.paidAcceptance, false);
+});
+
+test("guarded adapter uses exactly seven read POSTs with persisted family pacing", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  const f = await fixture();
+  let now = 1_000_000;
+  const starts: number[] = [], methods: string[] = [];
+  const origin = "https://ethereum-rpc.publicnode.com";
+  const transport = { batchCall: async (calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> => {
+    assert.equal(calls.length, 1);
+    const call = calls[0]!; starts.push(now); methods.push(call.method);
+    switch (call.method) {
+      case "eth_chainId": return ["0x1"];
+      case "eth_getTransactionByHash": return [{ hash: destinationHash, chainId: "0x1",
+        blockNumber: "0xc8", blockHash: inclusionHash }];
+      case "eth_getTransactionReceipt": return [{ transactionHash: destinationHash, status: "0x1",
+        blockNumber: "0xc8", blockHash: inclusionHash,
+        logs: [{ address: ETHEREUM_USDC, topics: f.log.topics, data: f.log.data,
+          transactionHash: destinationHash, blockNumber: "0xc8", blockHash: inclusionHash,
+          removed: false, logIndex: "0x3" }] }];
+      case "eth_getBlockByNumber": {
+        const tag = call.params[0];
+        if (tag === "0xc8") return [{ number: "0xc8", hash: inclusionHash }];
+        if (tag === "safe" || tag === "0xcd") return [{ number: "0xcd", hash: safeHash }];
+        throw new Error("unexpected block tag");
+      }
+      default: throw new Error("unexpected method");
+    }
+  } };
+  const guard = new EvmDirectRpcGuard(state, 7, () => now, async ms => { now += ms; });
+  const rpc = new RelayEthereumUsdcReadOnlyRpc(origin, state,
+    transport as unknown as ConstructorParameters<typeof RelayEthereumUsdcReadOnlyRpc>[2], guard);
+  const result = await proveRelayEthereumUsdcCredit(f.quote, destinationHash, rpc);
+  assert.equal(result.status, "recipient_credit_proven");
+  assert.equal(rpc.physicalPosts, 7);
+  assert.deepEqual(methods, ["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt",
+    "eth_getBlockByNumber", "eth_getBlockByNumber", "eth_getBlockByNumber", "eth_getBlockByNumber"]);
+  assert.deepEqual(starts, Array.from({ length: 7 }, (_, index) => 1_000_000 + index * 750));
+  assert.equal((await readdir(join(temporary.root, "rpc-provider-pacing"))).length, 1);
+  await assert.rejects(guard.post(origin, async () => { throw new Error("transport reached"); }),
+    { code: "APN_RPC_BUDGET_EXCEEDED" });
+  const next = new EvmDirectRpcGuard(state, 7, () => now, async ms => { now += ms; });
+  await next.post("https://base-rpc.publicnode.com", async () => { starts.push(now); });
+  assert.equal(starts[7], 1_000_000 + 7 * 750, "pacing survives a new guard and sibling provider endpoint");
+});
+
+test("guarded adapter makes one attempt on 429 and persists cooldown", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  const origin = "https://ethereum-rpc.publicnode.com";
+  let now = 2_000_000, attempts = 0;
+  const transport = { batchCall: async () => {
+    attempts++;
+    throw new ApnError("APN_RPC_PROTOCOL", "Synthetic HTTP 429", { httpStatus: 429 });
+  } };
+  const guard = new EvmDirectRpcGuard(state, 7, () => now, async ms => { now += ms; });
+  const rpc = new RelayEthereumUsdcReadOnlyRpc(origin, state,
+    transport as unknown as ConstructorParameters<typeof RelayEthereumUsdcReadOnlyRpc>[2], guard);
+  await assert.rejects(rpc.chainId(), { code: "APN_RPC_RATE_LIMITED" });
+  assert.equal(attempts, 1);
+  assert.equal(rpc.physicalPosts, 1);
+  const nextGuard = new EvmDirectRpcGuard(state, 7, () => now, async ms => { now += ms; });
+  const next = new RelayEthereumUsdcReadOnlyRpc(origin, state,
+    transport as unknown as ConstructorParameters<typeof RelayEthereumUsdcReadOnlyRpc>[2], nextGuard);
+  await assert.rejects(next.chainId(), { code: "APN_PROVIDER_UNAVAILABLE" });
+  assert.equal(attempts, 1);
 });

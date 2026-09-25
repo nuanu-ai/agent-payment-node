@@ -121,7 +121,7 @@ export class RelayEthereumUsdcReadOnlyRpc implements RelayEthereumUsdcProofPorts
   private readonly rpc: HttpsBaseRpc;
   private readonly guard: EvmDirectRpcGuard;
   constructor(private readonly url: string, state: StateStore, rpc?: HttpsBaseRpc,
-    guard = new EvmDirectRpcGuard(state, 8)) {
+    guard = new EvmDirectRpcGuard(state, 7)) {
     this.rpc = rpc ?? new HttpsBaseRpc(url); this.guard = guard;
   }
   get physicalPosts(): number { return this.guard.physicalRequests; }
