@@ -37,6 +37,8 @@ import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
 import { RelayUnsignedOperationRepository, RelayRetirementRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation,
   type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
+import { RelayEffectJournalRepository } from "./relay/effect-journal.js";
+import { RelayNativeSourceJournalRepository } from "./relay/native-source.js";
 
 export type StoredMoneyOperation =
   | { readonly kind: "relay_unsigned"; readonly record: RelayUnsignedOperation }
@@ -131,7 +133,7 @@ export class OperationService {
     let blocking: StoredMoneyOperation | undefined;
     for (const operation of await this.profileOperations(profileHash)) {
       if (operation.record.terminal) continue;
-      if (operation.kind === "relay_unsigned" && await new RelayRetirementRepository(this.state.root).load(operation.record) !== null) continue;
+      if (operation.kind === "relay_unsigned" && await this.relayLifecycle(operation.record) !== "active") continue;
       blocking = operation; break;
     }
     if (blocking !== undefined) {
@@ -157,7 +159,7 @@ export class OperationService {
     try { wanted = new Set(domains().map(conflictDomainKey)); } catch { wanted = new Set(); }
     for (const operation of await this.profileOperations(profileHash)) {
       if (operation.record.terminal) continue;
-      if (operation.kind === "relay_unsigned" && await new RelayRetirementRepository(this.state.root).load(operation.record) !== null) continue;
+      if (operation.kind === "relay_unsigned" && await this.relayLifecycle(operation.record) !== "active") continue;
       const held = storedOperationDomains(operation);
       const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
       // An unreadable network or account on either side blocks the whole profile.
@@ -250,7 +252,24 @@ export class OperationService {
   }
 
   async relayStatus(operation: RelayUnsignedOperation) {
-    return publicRelayUnsignedOperation(operation, await new RelayRetirementRepository(this.state.root).load(operation));
+    const retirement = await new RelayRetirementRepository(this.state.root).load(operation);
+    const completion = retirement === null ? await this.relaySourceCompletion(operation) : null;
+    return publicRelayUnsignedOperation(operation, retirement, completion);
+  }
+
+  /** Source finality ends this operation's spend attempt. Destination delivery is observed separately. */
+  private async relaySourceCompletion(operation: RelayUnsignedOperation): Promise<{ journalIntegrityHash: string } | null> {
+    if (operation.nativeQuote !== undefined) {
+      const journal = await new RelayNativeSourceJournalRepository(this.state.root).load(operation);
+      return journal?.phase === "confirmed" ? { journalIntegrityHash: journal.integrityHash } : null;
+    }
+    const journal = await new RelayEffectJournalRepository(this.state.root).load(operation.profileHash, operation.operationId);
+    return journal?.effects[1].phase === "confirmed" ? { journalIntegrityHash: journal.integrityHash } : null;
+  }
+
+  private async relayLifecycle(operation: RelayUnsignedOperation): Promise<"active" | "retired" | "source_confirmed"> {
+    if (await new RelayRetirementRepository(this.state.root).load(operation) !== null) return "retired";
+    return await this.relaySourceCompletion(operation) === null ? "active" : "source_confirmed";
   }
 
   // Test and embedding ports written before the compatibility reader expose the

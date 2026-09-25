@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { keccak256, type Hex } from "viem";
 import { canonicalJson, domainHash, hashObject } from "../../src/canonical.js";
@@ -7,6 +8,7 @@ import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { runCli } from "../../src/cli.js";
+import { OperationService } from "../../src/operation-service.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce,
   createRelayNativeSourceRuntime, publicRelayNativeSourceJournal, RelayNativeSourceRuntime } from "../../src/relay/native-source.js";
@@ -160,6 +162,31 @@ test("native journal marks a single dispatch before send and never repeats an am
   assert.deepEqual(replay, journal); assert.equal(sends, 1);
   await assert.rejects(store.advance(op, journal.integrityHash, "submitting", null, now),
     { code: "APN_OPERATION_BLOCKED" });
+});
+
+test("default Monad profile is released only by a valid confirmed source journal", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root), op = await preparedDefault(state);
+  await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
+  const operations = new OperationService(state), store = new RelayNativeSourceJournalRepository(temp.root);
+  await assert.rejects(operations.assertProfileAvailable(op.profileHash), { code: "APN_OPERATION_BLOCKED" });
+  let journal = await store.advance(op, null, "pending", null, now);
+  await assert.rejects(operations.assertProfileAvailable(op.profileHash), { code: "APN_OPERATION_BLOCKED" });
+  journal = await store.advance(op, journal.integrityHash, "signing_started", null, now);
+  journal = await store.advance(op, journal.integrityHash, "sealed", `0x${"a".repeat(64)}`, now);
+  journal = await store.advance(op, journal.integrityHash, "submitting", null, now);
+  await assert.rejects(operations.assertProfileAvailable(op.profileHash), { code: "APN_OPERATION_BLOCKED" });
+  journal = await store.advance(op, journal.integrityHash, "confirmed", null, now);
+  await operations.assertProfileAvailable(op.profileHash);
+  const status = await operations.status(op.operationId) as Awaited<ReturnType<OperationService["relayStatus"]>>;
+  assert.equal(status.state, "source_confirmed"); assert.equal(status.terminal, true);
+  assert.equal(status.sourceJournalIntegrityHash, journal.integrityHash);
+  assert.equal(status.proofClass, "source_effect_confirmed");
+  assert.equal("destinationProof" in status, false); assert.equal("paidAcceptance" in status, false);
+  assert.equal("statusLocator" in status, false);
+  const path = join(temp.root, "relay-native-source-journals", op.profileHash, `${op.operationId}.json`);
+  await writeFile(path, `${JSON.stringify({ ...journal, quoteDigest: "f".repeat(64) })}\n`);
+  await assert.rejects(operations.assertProfileAvailable(op.profileHash), { code: "APN_STATE_CORRUPT" });
 });
 
 test("native execute command remains distinct and keyless RPC URL is mandatory", async t => {

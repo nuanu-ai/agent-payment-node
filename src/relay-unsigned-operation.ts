@@ -112,11 +112,13 @@ export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation,
   "integrityHash" | "statusLocator" | "quote" | "nativeQuote" | "state" | "terminal"> & {
   readonly quote?: Omit<ValidatedRelayQuote, "statusLocator">;
   readonly nativeQuote?: Omit<ValidatedRelayNativeQuote, "statusLocator">;
-  readonly state: "prepared" | "retired";
+  readonly state: "prepared" | "retired" | "source_confirmed";
   readonly terminal: boolean;
+  readonly sourceEffectTerminal?: true;
+  readonly sourceJournalIntegrityHash?: string;
   readonly retiredAt?: string;
   readonly retirementIntegrityHash?: string;
-  readonly proofClass: "saved_unsigned_quote";
+  readonly proofClass: "saved_unsigned_quote" | "source_effect_confirmed";
   readonly balanceEvidence: "not_checked";
   readonly allowanceEvidence: "not_checked";
   readonly statusObservable: boolean;
@@ -125,7 +127,8 @@ export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation,
 };
 
 export function publicRelayUnsignedOperation(operation: RelayUnsignedOperation,
-  retirement: RelayRetirement | null = null): PublicRelayUnsignedOperation {
+  retirement: RelayRetirement | null = null,
+  sourceCompletion: { readonly journalIntegrityHash: string } | null = null): PublicRelayUnsignedOperation {
   const { integrityHash: _integrityHash, statusLocator: _locator, quote, nativeQuote,
     ...publicFields } = validateRelayUnsignedOperation(operation);
   const publicQuote = quote === undefined ? {} : { quote: (({ statusLocator: _hidden, ...fields }) => fields)(quote) };
@@ -135,7 +138,10 @@ export function publicRelayUnsignedOperation(operation: RelayUnsignedOperation,
   return { ...publicFields, ...publicQuote, ...publicNativeQuote,
     ...(retirement === null ? {} : { state: "retired" as const, terminal: true as const,
     retiredAt: retirement.retiredAt, retirementIntegrityHash: retirement.integrityHash }),
-    proofClass: "saved_unsigned_quote" as const, balanceEvidence: "not_checked" as const,
+    ...(sourceCompletion === null ? {} : { state: "source_confirmed" as const, terminal: true as const,
+      sourceEffectTerminal: true as const, sourceJournalIntegrityHash: sourceCompletion.journalIntegrityHash }),
+    proofClass: sourceCompletion === null ? "saved_unsigned_quote" as const : "source_effect_confirmed" as const,
+    balanceEvidence: "not_checked" as const,
     allowanceEvidence: "not_checked" as const, statusObservable: operation.statusLocator !== undefined,
     executionAdmitted: false as const, nextActions: [] as const };
 }

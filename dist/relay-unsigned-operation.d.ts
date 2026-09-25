@@ -77,18 +77,22 @@ export declare function freezeRelayUnsignedOperation(input: RelayUnsignedOperati
 export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation, "integrityHash" | "statusLocator" | "quote" | "nativeQuote" | "state" | "terminal"> & {
     readonly quote?: Omit<ValidatedRelayQuote, "statusLocator">;
     readonly nativeQuote?: Omit<ValidatedRelayNativeQuote, "statusLocator">;
-    readonly state: "prepared" | "retired";
+    readonly state: "prepared" | "retired" | "source_confirmed";
     readonly terminal: boolean;
+    readonly sourceEffectTerminal?: true;
+    readonly sourceJournalIntegrityHash?: string;
     readonly retiredAt?: string;
     readonly retirementIntegrityHash?: string;
-    readonly proofClass: "saved_unsigned_quote";
+    readonly proofClass: "saved_unsigned_quote" | "source_effect_confirmed";
     readonly balanceEvidence: "not_checked";
     readonly allowanceEvidence: "not_checked";
     readonly statusObservable: boolean;
     readonly executionAdmitted: false;
     readonly nextActions: readonly [];
 };
-export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOperation, retirement?: RelayRetirement | null): PublicRelayUnsignedOperation;
+export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOperation, retirement?: RelayRetirement | null, sourceCompletion?: {
+    readonly journalIntegrityHash: string;
+} | null): PublicRelayUnsignedOperation;
 /** Separate create-only marker preserves the original prepared quote byte for byte. */
 export declare class RelayRetirementRepository extends SecureStateStore {
     private path;
