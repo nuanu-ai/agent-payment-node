@@ -1,7 +1,8 @@
 /** An immutable Relay quote projection. Its transactions are unsigned and have no execution path. */
-import { hashObject } from "./canonical.js";
-import { relayStatusLocator } from "./relay/quote.js";
+import { hashObject, sha256 } from "./canonical.js";
+import { ETHEREUM_USDC, relayStatusLocator } from "./relay/quote.js";
 import { relayNativeRoute } from "./relay/native-quote.js";
+import { RELAY_ARBITRUM_USDC, validateRelayArbitrumUsdcEthereumUsdcQuote } from "./relay/arbitrum-usdc-ethereum-quote.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { z } from "zod";
@@ -18,14 +19,15 @@ const body = z.strictObject({
     operationId: hash,
     idempotencyHash: hash,
     requestHash: hash,
-    sourceChainId: z.union([z.literal(1), z.literal(56)]),
-    destinationChainId: z.union([z.literal(56), z.literal(137), z.literal(143), z.literal(8453)]),
+    sourceChainId: z.union([z.literal(1), z.literal(56), z.literal(42161)]),
+    destinationChainId: z.union([z.literal(1), z.literal(56), z.literal(137), z.literal(143), z.literal(8453)]),
     sourceAccount: address,
     recipient: address,
     quoteDigest: hash,
     statusLocator: z.strictObject({ requestId: z.string(), endpoint: z.string() }).optional(),
     quote: z.custom((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
     nativeQuote: z.custom((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
+    arbitrumDraft: z.custom((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
     policyDigest: hash.optional(),
     policyRevision: z.number().int().positive().optional(),
     approvalNetworkFeeCeilingWei: positiveAtomic.optional(),
@@ -50,10 +52,35 @@ export function validateRelayUnsignedOperation(value) {
         corrupt();
     if ([operation.quote, operation.policyDigest, operation.policyRevision,
         operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value !== undefined) &&
-        operation.nativeQuote === undefined && [operation.quote, operation.policyDigest, operation.policyRevision,
-        operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value === undefined))
+        operation.nativeQuote === undefined && operation.arbitrumDraft === undefined &&
+        [operation.quote, operation.policyDigest, operation.policyRevision,
+            operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value === undefined))
         corrupt();
-    if (operation.nativeQuote !== undefined) {
+    if (operation.arbitrumDraft !== undefined) {
+        const draft = operation.arbitrumDraft;
+        try {
+            const { integrityHash: draftHash, ...draftBody } = draft;
+            if (hashObject(draftBody) !== draftHash || draft.schemaVersion !== "apn.relay-arbitrum-source-draft.v1" ||
+                draft.executionAdmitted !== false || draft.nextActions.length !== 0 ||
+                operation.quote !== undefined || operation.nativeQuote !== undefined ||
+                operation.sourceChainId !== 42161 || operation.destinationChainId !== 1 ||
+                operation.profileHash !== sha256("profile\0default") || draft.profile !== "default" ||
+                operation.sourceAccount !== draft.owner || operation.recipient !== draft.recipient.toLowerCase() ||
+                operation.quoteDigest !== draft.quoteDigest || operation.amountAtomic !== draft.amountAtomic ||
+                operation.minOutputAtomic !== draft.minimumOutputAtomic ||
+                operation.policyDigest !== draft.policyDigest || operation.policyRevision !== draft.policyRevision ||
+                operation.approvalNetworkFeeCeilingWei !== draft.maxApprovalNetworkFeeWei ||
+                operation.depositNetworkFeeCeilingWei !== draft.maxDepositNetworkFeeWei ||
+                operation.createdAt !== draft.createdAt || operation.deadline !== draft.deadline ||
+                operation.statusLocator?.requestId !== draft.requestId ||
+                relayStatusLocator(draft.requestId, operation.statusLocator.endpoint).endpoint !== operation.statusLocator.endpoint)
+                corrupt();
+        }
+        catch {
+            corrupt();
+        }
+    }
+    else if (operation.nativeQuote !== undefined) {
         const quote = operation.nativeQuote;
         let route;
         try {
@@ -107,7 +134,8 @@ export function validateRelayUnsignedOperation(value) {
             corrupt();
         }
     }
-    else if (operation.statusLocator !== undefined && operation.nativeQuote === undefined)
+    else if (operation.statusLocator !== undefined && operation.nativeQuote === undefined &&
+        operation.arbitrumDraft === undefined)
         corrupt();
     return operation;
 }
@@ -118,12 +146,15 @@ export function freezeRelayUnsignedOperation(input) {
     return validateRelayUnsignedOperation({ ...parsed.data, integrityHash: hashObject(parsed.data) });
 }
 export function publicRelayUnsignedOperation(operation, retirement = null, sourceCompletion = null) {
-    const { integrityHash: _integrityHash, statusLocator: _locator, quote, nativeQuote, ...publicFields } = validateRelayUnsignedOperation(operation);
+    const { integrityHash: _integrityHash, statusLocator: _locator, quote, nativeQuote, arbitrumDraft, ...publicFields } = validateRelayUnsignedOperation(operation);
     const publicQuote = quote === undefined ? {} : { quote: (({ statusLocator: _hidden, ...fields }) => fields)(quote) };
     const publicNativeQuote = nativeQuote === undefined ? {} : {
         nativeQuote: (({ statusLocator: _hidden, ...fields }) => fields)(nativeQuote),
     };
     return { ...publicFields, ...publicQuote, ...publicNativeQuote,
+        ...(arbitrumDraft === undefined ? {} : { arbitrumSource: { orderId: arbitrumDraft.orderId,
+                providerFeeCeilingAtomic: arbitrumDraft.maxProviderFeeAtomic,
+                routeReference: "arbitrum-usdc-ethereum-usdc-source-draft-v1" } }),
         ...(retirement === null ? {} : { state: "retired", terminal: true,
             retiredAt: retirement.retiredAt, retirementIntegrityHash: retirement.integrityHash }),
         ...(sourceCompletion === null ? {} : { state: "source_confirmed", terminal: true,
@@ -175,6 +206,32 @@ export class RelayRetirementRepository extends SecureStateStore {
     }
 }
 export class RelayUnsignedOperationRepository extends SecureStateStore {
+    async verifyArbitrumDraft(operation) {
+        const draft = operation.arbitrumDraft;
+        if (draft === undefined)
+            return;
+        try {
+            const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(draft.rawQuote, {
+                payer: draft.owner, amountAtomic: draft.amountAtomic,
+                minimumOutputAtomic: draft.minimumOutputAtomic,
+                nowSeconds: Math.floor(Date.parse(draft.createdAt) / 1000),
+            });
+            if (draft.sourceChainId !== 42161 || draft.destinationChainId !== 1 ||
+                draft.sourceToken.toLowerCase() !== RELAY_ARBITRUM_USDC.toLowerCase() ||
+                draft.destinationToken.toLowerCase() !== ETHEREUM_USDC.toLowerCase() ||
+                draft.quoteDigest !== quote.quoteDigest || draft.orderId !== quote.orderId ||
+                draft.requestId !== quote.statusLocator.requestId || draft.recipient.toLowerCase() !== quote.recipient ||
+                draft.minimumOutputAtomic !== quote.minimumOutputAtomic ||
+                new Date(quote.deadline * 1000).toISOString() !== draft.deadline ||
+                BigInt(quote.providerFeeAtomic) > BigInt(draft.maxProviderFeeAtomic) ||
+                BigInt(quote.approval.maximumNetworkFeeWei) > BigInt(draft.maxApprovalNetworkFeeWei) ||
+                BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(draft.maxDepositNetworkFeeWei))
+                corrupt();
+        }
+        catch {
+            corrupt();
+        }
+    }
     async loadOperation(profileHash, operationId) {
         const value = await this.readJson(this.path(profileHash, operationId));
         if (value === null)
@@ -182,6 +239,7 @@ export class RelayUnsignedOperationRepository extends SecureStateStore {
         const operation = validateRelayUnsignedOperation(value);
         if (operation.profileHash !== profileHash || operation.operationId !== operationId)
             corrupt();
+        await this.verifyArbitrumDraft(operation);
         return operation;
     }
     async findOperation(operationId) {
@@ -218,6 +276,7 @@ export class RelayUnsignedOperationRepository extends SecureStateStore {
     /** Caller holds the shared profile, operation ID, and idempotency locks and checks all money stores. */
     async persistLocked(operation) {
         validateRelayUnsignedOperation(operation);
+        await this.verifyArbitrumDraft(operation);
         const previous = await this.loadOperation(operation.profileHash, operation.operationId);
         if (previous !== null) {
             if (previous.integrityHash !== operation.integrityHash)

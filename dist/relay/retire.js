@@ -36,6 +36,9 @@ export class RelayRetireService {
                 await new OperationService(this.state).required(input.operationId);
                 throw new ApnError("APN_OPERATION_BLOCKED", "The operation is not a prepared Relay quote for this profile.");
             }
+            if (op.arbitrumDraft !== undefined) {
+                throw new ApnError("APN_OPERATION_BLOCKED", "Relay Arbitrum retirement requires its source effect lifecycle.");
+            }
             if (input.profile === "evm-live-buyer" || op.nativeQuote !== undefined) {
                 let route = null;
                 try {
