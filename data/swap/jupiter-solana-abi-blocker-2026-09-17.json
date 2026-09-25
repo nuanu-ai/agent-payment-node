@@ -1,6 +1,6 @@
 {
   "schemaVersion": "apn.jupiter-solana-abi-blocker.v1",
-  "reviewedAt": "2026-09-17",
+  "reviewedAt": "2026-09-26",
   "programId": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
   "pair": {
     "inputMint": "So11111111111111111111111111111111111111112",
@@ -32,75 +32,76 @@
       "url": "https://github.com/jup-ag/jupiter-amm-implementation/blob/cc068c9d1df0060c62f9a8a4fc37ea13ea7b9b39/jupiter-core/src/swap_transaction/build_swap_instruction.rs",
       "commit": "cc068c9d1df0060c62f9a8a4fc37ea13ea7b9b39",
       "sha256": "b911709e2f0d5b451838f4ac1ff4b61822eb9a3f77ce73e46dbaa9faa2ae77e5"
+    },
+    {
+      "url": "https://developers.jup.ag/docs/swap/v1/common-errors",
+      "role": "Official Jupiter documentation points to the JUP6 Swap Program IDL on Solscan."
+    },
+    {
+      "url": "https://solscan.io/account/JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4#programIdl",
+      "role": "JUP6 program page and displayed on-chain IDL; explorer observation, not a Jupiter executable-build attestation.",
+      "observedAt": "2026-09-26",
+      "idlVersionSlot": 449568452,
+      "reportedDeployedSlot": 449280566,
+      "reportedExecutable": true,
+      "reportedProgramVerified": false
     }
   ],
   "verifiedInterface": {
+    "sourceUrl": "https://solscan.io/account/JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4#programIdl",
+    "observedAt": "2026-09-26",
+    "idlVersionSlot": 449568452,
     "exactInInstructions": [
       {
-        "name": "route",
-        "discriminatorHex": "e517cb977ae3ad2a",
-        "arguments": ["route_plan", "in_amount", "quoted_out_amount", "slippage_bps", "platform_fee_bps"],
+        "name": "route_v2",
+        "discriminatorHex": "bb64facc31c4af14",
+        "arguments": [
+          "in_amount:u64",
+          "quoted_out_amount:u64",
+          "slippage_bps:u16",
+          "platform_fee_bps:u16",
+          "positive_slippage_bps:u16",
+          "route_plan:Vec<RoutePlanStepV2>"
+        ],
         "fixedAccounts": [
-          "token_program:readonly",
           "user_transfer_authority:readonly_signer",
           "user_source_token_account:writable",
           "user_destination_token_account:writable",
-          "destination_token_account:writable_optional",
-          "destination_mint:readonly",
-          "platform_fee_account:writable_optional",
-          "event_authority:readonly:D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf",
-          "program:readonly"
-        ]
-      },
-      {
-        "name": "shared_accounts_route",
-        "discriminatorHex": "c1209b3341d69c81",
-        "arguments": ["id", "route_plan", "in_amount", "quoted_out_amount", "slippage_bps", "platform_fee_bps"],
-        "fixedAccounts": [
-          "token_program:readonly",
-          "program_authority:readonly",
-          "user_transfer_authority:readonly_signer",
-          "source_token_account:writable",
-          "program_source_token_account:writable",
-          "program_destination_token_account:writable",
-          "destination_token_account:writable",
           "source_mint:readonly",
           "destination_mint:readonly",
-          "platform_fee_account:writable_optional",
-          "token_2022_program:readonly_optional",
-          "event_authority:readonly:D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf",
+          "source_token_program:readonly",
+          "destination_token_program:readonly",
+          "destination_token_account:writable",
+          "event_authority:readonly",
           "program:readonly"
         ]
       }
     ],
+    "routePlanStepV2": {
+      "fields": ["swap:Swap", "bps:u16", "input_index:u8", "output_index:u8"],
+      "relevantSwapVariant": "Quantum { side: Side }"
+    },
+    "routeV2DecodeBoundary": "The discriminator, serialized argument types/order, and ten fixed account roles are syntactically decodable from this displayed IDL. RoutePlanStepV2 contains a Swap enum, bps, and input/output indices; it does not contain the quoted routePlan swapInfo.ammKey or label. The IDL does not specify the Quantum pool/vault/oracle positions among route-dependent remaining accounts.",
     "buildResponseKind": "raw_instructions",
     "assembledTransactionReturned": false
   },
   "blockers": [
     {
-      "code": "NO_OFFICIAL_EXACT_BUILD_FIXTURE",
-      "detail": "The pinned V2 OpenAPI and build guide define response shapes and construction examples but publish no exact SOL-to-USDC /build response fixture with instruction bytes and account metas."
-    },
-    {
       "code": "ROUTE_PLAN_DOES_NOT_BIND_QUOTED_AMM_KEY",
-      "detail": "The JUP6 RoutePlanStep encodes a Swap enum, percent, input_index, and output_index; it does not encode the quoted routePlan swapInfo.ammKey or label."
+      "detail": "The on-chain RoutePlanStepV2 encodes a Swap enum, bps, input_index, and output_index; it does not encode the quoted routePlan swapInfo.ammKey or label, so the Quantum variant cannot be bound to the captured quote's AMM identity from this instruction alone."
     },
     {
       "code": "REMAINING_ACCOUNT_ABI_IS_ROUTE_DEPENDENT",
-      "detail": "The IDL covers fixed route accounts only. Inner DEX program, pool, vault, oracle, and token accounts are dynamic remaining accounts assembled by AMM adapters and are not described by the JUP6 IDL."
+      "detail": "The current IDL lists the ten fixed route_v2 accounts but does not define the Quantum pool, vault, oracle, and token account positions among route-dependent remaining accounts; the APN guard cannot verify those account roles without an exact account ABI."
     },
     {
       "code": "NO_PINNED_ONCHAIN_ARTIFACT_PROVENANCE",
-      "detail": "No official source found in this review pins a deployed JUP6 executable-data digest or a reproducible-build attestation to the reviewed IDL and builder source."
-    },
-    {
-      "code": "LOCAL_BUILD_CODEC_IS_NOT_V2_BUILD_SHAPE",
-      "detail": "The local decoder expects an assembled swapTransaction plus request and fee fields, while official V2 /build returns raw instruction groups and blockhashWithMetadata."
+      "detail": "Solscan displays an executable JUP6 program and an IDL version at slot 449568452 (program page reports deployed slot 449280566), but neither this explorer view nor the reviewed official Jupiter sources pin executable bytes or provide a reproducible-build/source attestation tying the deployed binary to this IDL and builder."
     }
   ],
   "decision": {
     "signable": false,
-    "reason": "A finite decoder cannot bind every route-dependent account and quoted AMM identity from the reviewed official artifacts without guessing. Keep JUP6 signing fail closed."
+    "reason": "route_v2 is syntactically decodable from the current JUP6 on-chain IDL, but RoutePlanStepV2 does not bind the quoted ammKey, the IDL does not define Quantum route-dependent remaining-account positions, and no deployed executable source/build attestation links the binary to this IDL. Keep JUP6 signing fail closed."
   },
-  "evidenceDigest": "41f74b2c2588a44c153b85eba13b519af5f5dbfadd96d03f7f6214e8684c88cd"
+  "evidenceDigest": "e2948c8a30829be4b7f73d870b80f0b19bae110b7a6c0b40f95385a05cc3334b"
 }
