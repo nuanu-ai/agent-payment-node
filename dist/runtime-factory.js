@@ -2,6 +2,7 @@ import { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import { RelayRetireService } from "./relay/retire.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
+import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
 import { ApnError } from "./errors.js";
 import { userInfo } from "node:os";
 import { resolve } from "node:path";
@@ -12,7 +13,7 @@ import { MacOSLoginKeychainSecret } from "./macos-keychain.js";
 import { TtyProfilePolicyApproval } from "./policy-approval.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
-import { TtyTransferApproval } from "./tty-approval.js";
+import { TtyRelayExecuteConfirmation, TtyTransferApproval } from "./tty-approval.js";
 import { HttpsX402Http } from "./x402-http.js";
 import { AWAL_PROVIDER_ID, AwalProcessAdapter } from "./awal-process-adapter.js";
 import { TtyForegroundAuthentication } from "./foreground-auth.js";
@@ -135,6 +136,11 @@ export function createApnCore(bound, options = {}) {
         ? new EncryptedProviderAuthorizationStore(state, wrappingSecret)
         : undefined);
     const clock = options.clock ?? { now: () => new Date() };
+    const relayAuthorization = bound.request.command === "relay.execute"
+        ? new TtyRelayExecuteConfirmation(options.relayExecuteTtyOptions) : undefined;
+    const relayExecuteConfirmation = relayAuthorization?.confirm.bind(relayAuthorization);
+    const relayExecute = relayAuthorization === undefined ? undefined
+        : createRelayEthereumSourceRuntime(state, wrappingSecret, bound.rpcUrl ?? "", { confirm: relayExecuteConfirmation }, clock, options.relayExecuteTransport);
     const stargateNative = options.stargateNative ?? (bound.request.command.startsWith("stargate.native.")
         ? new StargateNativeService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
     const stargateToken = options.stargateToken ?? (bound.request.command.startsWith("stargate.token.")
@@ -167,6 +173,7 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     return new ApnCore({
         state,
+        ...(relayExecute === undefined ? {} : { relayExecute, relayExecuteConfirmation: relayExecuteConfirmation }),
         ...(stargateNative === undefined ? {} : { stargateNative }),
         ...(stargateToken === undefined ? {} : { stargateToken }),
         // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.

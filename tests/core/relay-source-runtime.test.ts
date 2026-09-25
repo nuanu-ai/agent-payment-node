@@ -5,6 +5,8 @@ import test from "node:test";
 import { encodeFunctionData, keccak256, parseAbi, toBytes, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../../src/canonical.js";
+import { approvalCode } from "../../src/approval-code.js";
+import { runCli } from "../../src/cli.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
@@ -167,6 +169,49 @@ test("TTY Relay authorization declines before source RPC, signing, or journal ef
   assert.equal(f.evidence.batches, 0);
   assert.equal(f.evidence.sends, 0);
   assert.equal(await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId), null);
+});
+
+test("installed Relay execute CLI refuses decline and non-TTY before source RPC", async t => {
+  const f = await setup(t);
+  let screen = "";
+  const terminal = { fd: 0, write: async (value: string) => { screen += value; },
+    read: async function* () { yield Buffer.from("decline\n"); }, close: async () => {} };
+  const args = ["relay", "execute", "--operation", f.op.operationId, "--rpc-url", "https://rpc.example"];
+  for (const isTerminal of [true, false]) {
+    const result = await runCli(args, {}, { stateRoot: f.state.root, wrappingSecret: f.wrapping,
+      clock: { now: () => now }, relayExecuteTransport: f.rpc,
+      relayExecuteTtyOptions: { openTerminal: async () => terminal, isTerminal: () => isTerminal } });
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
+  }
+  assert.equal(f.evidence.batches, 0);
+  assert.equal(f.evidence.sends, 0);
+  assert.equal(await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId), null);
+  assert.ok(screen.includes(f.op.recipient));
+  assert.ok(!screen.includes(requestId));
+  assert.ok(!screen.includes(key));
+});
+
+test("installed Relay execute CLI confirms exact saved operation and explicit resume does not resend", async t => {
+  const f = await setup(t);
+  let prompts = 0;
+  const terminal = { fd: 0, write: async () => { prompts++; },
+    read: async function* () { yield Buffer.from(`${approvalCode("bridge", f.op.operationId, f.op.quoteDigest)}\n`); },
+    close: async () => {} };
+  const args = ["relay", "execute", "--operation", f.op.operationId, "--rpc-url", "https://rpc.example"];
+  const options = { stateRoot: f.state.root, wrappingSecret: f.wrapping,
+    clock: { now: () => now }, relayExecuteTransport: f.rpc,
+    relayExecuteTtyOptions: { openTerminal: async () => terminal, isTerminal: () => true } };
+  const first = await runCli(args, {}, options);
+  assert.equal(first.ok, true);
+  assert.equal(first.proof_class, "source_effect_journal");
+  assert.equal((first.data as { operationId: string }).operationId, f.op.operationId);
+  assert.equal(f.evidence.sends, 1);
+  const resumed = await runCli(args, {}, options);
+  assert.equal(resumed.ok, true);
+  assert.equal(f.evidence.sends, 1);
+  assert.equal(prompts, 2);
+  assert.ok(f.evidence.batches + f.evidence.sends <= 24);
 });
 
 test("finalized canonical approval advances to one deposit send", async t => {
