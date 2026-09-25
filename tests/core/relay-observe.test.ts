@@ -407,7 +407,7 @@ test("Relay observe CLI rejects saved BNB native to Polygon operations before ex
     relayStatusFetch: async () => { reads++; throw new Error("unexpected provider read"); } });
   assert.equal(result.ok, false);
   assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
-  assert.equal(result.error?.details?.reason, "relay_observe_unsupported_lane");
+  assert.equal(result.error?.details?.reason, "saved_native_route_or_owner");
   assert.equal(reads, 0);
   assert.equal(JSON.stringify(result).includes(nativeQuote.statusLocator?.requestId ?? "unavailable"), false);
 });

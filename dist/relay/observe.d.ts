@@ -1,9 +1,10 @@
-/** Read-only cross-chain evidence for one saved Ethereum USDC to BNB Relay operation. */
+/** Relay cross-chain observation; native source reconciliation may update local state. */
 import type { Hex } from "viem";
 import type { StateStore } from "../state.js";
 import { type RelayDepositObservation } from "./deposit-effect.js";
 import { type RelayBnbProofPorts, type RelayBnbProofResult } from "./destination-proof.js";
 import { RelayKeylessStatusService } from "./status.js";
+import { RelayNativeObserveService } from "./native-observe.js";
 export interface RelaySourceFinalityPorts {
     /** A fresh, canonical, finalized Ethereum observation. At most three physical RPC POSTs. */
     finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null>;
@@ -21,14 +22,15 @@ export interface RelayObserveResult {
     readonly paidAcceptance: false;
     readonly operationalAcceptance: boolean;
 }
-/** No signer, wallet, send, journal mutation, or retry surface is reachable here. */
+/** No signer, send, or retry surface is reachable here. */
 export declare class RelayObserveService {
     private readonly state;
     private readonly source;
     private readonly status;
+    private readonly native?;
     private readonly usedBnbInvocations;
     /** The factory must return a fresh budgeted BNB adapter for each observation. */
     private readonly bnbInvocation;
-    constructor(state: StateStore, source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts, status?: RelayKeylessStatusService);
+    constructor(state: StateStore, source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts, status?: RelayKeylessStatusService, native?: RelayNativeObserveService | undefined);
     observe(operationId: string): Promise<RelayObserveResult>;
 }

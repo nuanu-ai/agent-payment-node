@@ -34,7 +34,8 @@ function status(value: unknown): "success" | "reverted" {
 export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
   private readonly rpc: HttpsBaseRpc;
   constructor(private readonly url: string, state: StateStore, rpc?: HttpsBaseRpc,
-    private readonly guardFactory: () => EvmDirectRpcGuard = () => new EvmDirectRpcGuard(state, 3)) {
+    private readonly guardFactory: () => EvmDirectRpcGuard = () => new EvmDirectRpcGuard(state, 3),
+    private readonly expectedChainId: 1 | 56 = 1) {
     this.rpc = rpc ?? new HttpsBaseRpc(url);
   }
   private async read(guard: EvmDirectRpcGuard, calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
@@ -49,18 +50,19 @@ export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
       { method: "eth_getTransactionByHash", params: [hash] },
       { method: "eth_getTransactionReceipt", params: [hash] },
     ]);
-    if (evmRpcQuantity(chain) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Relay source RPC is not Ethereum.");
+    if (evmRpcQuantity(chain) !== BigInt(this.expectedChainId)) throw new ApnError("APN_CHAIN_MISMATCH", "Relay source RPC chain is wrong.");
     if (rawTx === null || rawReceipt === null) return null;
     const tx = evmRpcRecord(rawTx), receipt = evmRpcRecord(rawReceipt);
     const number = evmRpcQuantity(receipt.blockNumber);
     const inclusion = `0x${number.toString(16)}`;
     const [rawBlock, rawFinalized] = await this.read(guard, [
       { method: "eth_getBlockByNumber", params: [inclusion, false] },
-      { method: "eth_getBlockByNumber", params: ["finalized", false] },
+      { method: "eth_getBlockByNumber", params: [this.expectedChainId === 1 ? "finalized" : "latest", false] },
     ]);
     if (rawBlock === null || rawFinalized === null) return null;
-    const included = evmRpcBlockResult(rawBlock, inclusion), finalized = evmRpcBlockResult(rawFinalized, "finalized");
-    if (BigInt(finalized.number) < number) return null;
+    const included = evmRpcBlockResult(rawBlock, inclusion), finalized = evmRpcBlockResult(rawFinalized,
+      this.expectedChainId === 1 ? "finalized" : "latest");
+    if (BigInt(finalized.number) < number + (this.expectedChainId === 56 ? 15n : 0n)) return null;
     const [rawIncludedAgain, rawFinalizedAgain] = await this.read(guard, [
       { method: "eth_getBlockByNumber", params: [included.tag, false] },
       { method: "eth_getBlockByNumber", params: [finalized.tag, false] },
@@ -70,9 +72,9 @@ export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
       !same(evmRpcBlockResult(rawFinalizedAgain, finalized.tag).hash, finalized.hash)) return null;
     if (!same(evmRpcHex(tx.blockHash, 32), included.hash) ||
       !same(evmRpcHex(receipt.blockHash, 32), included.hash) ||
-      evmRpcQuantity(tx.blockNumber) !== number || evmRpcQuantity(tx.chainId) !== 1n) return null;
+      evmRpcQuantity(tx.blockNumber) !== number || evmRpcQuantity(tx.chainId) !== BigInt(this.expectedChainId)) return null;
     return { transaction: { hash: evmRpcHex(tx.hash, 32), from: evmRpcAddress(tx.from),
-      to: optionalAddress(tx.to), input: evmRpcHex(tx.input), value: evmRpcQuantity(tx.value), chainId: 1 },
+      to: optionalAddress(tx.to), input: evmRpcHex(tx.input), value: evmRpcQuantity(tx.value), chainId: this.expectedChainId },
     receipt: { transactionHash: evmRpcHex(receipt.transactionHash, 32), status: status(receipt.status),
       blockNumber: number, blockHash: evmRpcHex(receipt.blockHash, 32) }, canonicalBlockHash: included.hash };
   }
@@ -82,7 +84,7 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
   private readonly rpc: HttpsBaseRpc;
   private readonly guard: EvmDirectRpcGuard;
   constructor(private readonly url: string, state: StateStore, rpc?: HttpsBaseRpc,
-    guard = new EvmDirectRpcGuard(state, 8)) {
+    guard = new EvmDirectRpcGuard(state, 8), private readonly expectedChainId: 56 | 137 | 143 | 8453 = 56) {
     this.rpc = rpc ?? new HttpsBaseRpc(url);
     this.guard = guard;
   }
@@ -114,7 +116,11 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     return block(await this.read("eth_getBlockByNumber", [tag, false]), tag);
   }
   async finalityCheckpoint(): Promise<RelayBnbBlock | null> {
-    return block(await this.read("eth_getBlockByNumber", ["safe", false]), "safe");
+    if (this.expectedChainId === 56) return block(await this.read("eth_getBlockByNumber", ["safe", false]), "safe");
+    // A 15-block canonical checkpoint is used on native Relay destination lanes.
+    const latest = block(await this.read("eth_getBlockByNumber", ["latest", false]), "latest");
+    if (latest === null || latest.number < 15n) return null;
+    return this.block(latest.number - 15n);
   }
   async nativeTrace(): Promise<null> { return null; }
 }

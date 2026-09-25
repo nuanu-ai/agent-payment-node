@@ -5,19 +5,22 @@ import { proveRelayBnbDestination } from "./destination-proof.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RelayKeylessStatusService } from "./status.js";
 import { BNB_NATIVE, ETHEREUM_USDC } from "./quote.js";
+import { RelayNativeObserveService } from "./native-observe.js";
 const OPERATION = /^[a-f0-9]{64}$/u;
-/** No signer, wallet, send, journal mutation, or retry surface is reachable here. */
+/** No signer, send, or retry surface is reachable here. */
 export class RelayObserveService {
     state;
     source;
     status;
+    native;
     usedBnbInvocations = new WeakSet();
     /** The factory must return a fresh budgeted BNB adapter for each observation. */
     bnbInvocation;
-    constructor(state, source, bnbInvocation, status = new RelayKeylessStatusService(state)) {
+    constructor(state, source, bnbInvocation, status = new RelayKeylessStatusService(state), native) {
         this.state = state;
         this.source = source;
         this.status = status;
+        this.native = native;
         this.bnbInvocation = bnbInvocation;
     }
     async observe(operationId) {
@@ -28,6 +31,11 @@ export class RelayObserveService {
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
         if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
             throw new ApnError("APN_OPERATION_BLOCKED", "Relay operation is retired.");
+        if (op.nativeQuote !== undefined) {
+            if (this.native === undefined)
+                throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay native observer is unavailable.");
+            return this.native.observe(op);
+        }
         const quote = op.quote;
         if (op.sourceChainId !== 1 || op.destinationChainId !== 56 || quote === undefined ||
             op.nativeQuote !== undefined || quote.paymentDetails?.chainId !== "ethereum" ||
