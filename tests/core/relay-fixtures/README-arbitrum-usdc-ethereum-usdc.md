@@ -1,0 +1,5 @@
+# Relay Arbitrum USDC → Ethereum USDC quote fixture
+
+Captured 2026-09-25 at approximately 14:41 UTC from one keyless `POST https://api.relay.link/quote/v2` with `includeProtocolData: true`, `usePermit: false`, and `useDepositAddress: false`. The request used the public sample payer `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14`, exact recipient `0x991e254B5C8e0AAf6c244eaa2706BAd059809b04`, 500,000 atomic Arbitrum USDC, and Ethereum USDC output. No wallet was consulted; no transaction was signed or sent. The raw public response, including its ephemeral request ID, signed order, and unsigned transaction templates, is preserved in `arbitrum-usdc-ethereum-usdc-quote-20260925.json` for offline verification.
+
+The quote's expected output was 98,518 atomic USDC, with a 94,065 atomic minimum. It reported 401,482 atomic USDC in provider fees plus 1,872,662,000,000 wei for the deposit transaction; approval gas is additional. These figures are one volatile observation, not a fee ceiling or an admitted route. The decoder under `src/relay/arbitrum-usdc-ethereum-quote.ts` is intentionally disconnected from prepare, execution, and observe commands.
