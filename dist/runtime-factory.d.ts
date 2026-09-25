@@ -3,6 +3,7 @@ import { RelayReadOnlyPreflightService, type RelayPreflightPorts } from "./relay
 import { RelayKeylessStatusService } from "./relay/status.js";
 import { RelayObserveService } from "./relay/observe.js";
 import { RelayBaseObserveService } from "./relay/base-observe.js";
+import { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
 import type { BoundCommand } from "./command-binder.js";
 import type { OutputEnvelope } from "./commands.js";
 import { ApnCore } from "./core.js";
@@ -56,6 +57,8 @@ export interface RuntimeFactoryOptions {
     readonly relayStatusFetch?: typeof fetch;
     readonly relayObserve?: RelayObserveService;
     readonly relayBaseObserve?: RelayBaseObserveService;
+    readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
+    readonly relayArbitrumObserveRpc?: HttpsBaseRpc;
     readonly relayObserveBaseRpc?: HttpsBaseRpc;
     readonly relayObserveSourceRpc?: HttpsBaseRpc;
     readonly relayObserveBnbRpc?: HttpsBaseRpc;

@@ -5,6 +5,8 @@ import { RelayKeylessStatusService } from "./relay/status.js";
 import { RelayObserveService } from "./relay/observe.js";
 import { RelayNativeObserveService } from "./relay/native-observe.js";
 import { RelayBaseObserveService } from "./relay/base-observe.js";
+import { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
+import { RelayArbitrumSourceFinalityObserver } from "./relay/arbitrum-source-finality.js";
 import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "./relay/observe-rpc.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
 import { createRelayNativeSourceRuntime } from "./relay/native-source.js";
@@ -82,6 +84,13 @@ import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
+    if (bound.request.command === "relay.arbitrum.observe") {
+        const url = bound.rpcUrl ?? "";
+        // Construct only the guarded Arbitrum read path. No wallet, signer, or send transport exists here.
+        const observer = new RelayArbitrumSourceFinalityObserver(url, state, options.relayArbitrumObserveRpc);
+        return new ApnCore({ state, relayArbitrumObserve: options.relayArbitrumObserve ??
+                new RelayArbitrumSourceObserveService(state, observer) });
+    }
     if (bound.request.command === "relay.base.observe") {
         const baseUrl = bound.rpcUrl ?? "";
         const baseInvocation = () => new RelayBnbReadOnlyRpc(baseUrl, state, options.relayObserveBaseRpc, undefined, 8453);
