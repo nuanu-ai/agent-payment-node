@@ -2,7 +2,7 @@
 import { hashObject } from "./canonical.js";
 import type { ValidatedRelayQuote } from "./relay/quote.js";
 import { relayStatusLocator } from "./relay/quote.js";
-import { RELAY_BNB_POLYGON_ROUTE_REFERENCE, type ValidatedRelayNativeQuote } from "./relay/native-quote.js";
+import { RELAY_BNB_SOURCE, relayNativeRoute, type ValidatedRelayNativeQuote } from "./relay/native-quote.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { z } from "zod";
@@ -21,7 +21,7 @@ const body = z.strictObject({
   idempotencyHash: hash,
   requestHash: hash,
   sourceChainId: z.union([z.literal(1), z.literal(56)]),
-  destinationChainId: z.union([z.literal(56), z.literal(137)]),
+  destinationChainId: z.union([z.literal(56), z.literal(137), z.literal(143)]),
   sourceAccount: address,
   recipient: address,
   quoteDigest: hash,
@@ -59,8 +59,11 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
       operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value === undefined)) corrupt();
   if (operation.nativeQuote !== undefined) {
     const quote = operation.nativeQuote;
-    if (operation.quote !== undefined || operation.sourceChainId !== 56 || operation.destinationChainId !== 137 ||
-      quote.routeReference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE || quote.schemaVersion !== "apn.relay-native-quote.v1" ||
+    let route: ReturnType<typeof relayNativeRoute>;
+    try { route = relayNativeRoute(operation.recipient); } catch { return corrupt(); }
+    if (operation.quote !== undefined || operation.sourceChainId !== 56 || operation.destinationChainId !== route.chainId ||
+      operation.sourceAccount.toLowerCase() !== RELAY_BNB_SOURCE.toLowerCase() ||
+      quote.routeReference !== route.reference || quote.schemaVersion !== "apn.relay-native-quote.v1" ||
       operation.approvalNetworkFeeCeilingWei !== undefined || operation.policyDigest === undefined ||
       operation.policyRevision === undefined || operation.depositNetworkFeeCeilingWei === undefined ||
       quote.payer !== operation.sourceAccount.toLowerCase() || quote.recipient !== operation.recipient.toLowerCase() ||
@@ -101,9 +104,32 @@ export function freezeRelayUnsignedOperation(input: RelayUnsignedOperationInput)
   return validateRelayUnsignedOperation({ ...parsed.data, integrityHash: hashObject(parsed.data) });
 }
 
-export function publicRelayUnsignedOperation(operation: RelayUnsignedOperation, retirement: RelayRetirement | null = null) {
-  const { integrityHash: _integrityHash, ...publicFields } = validateRelayUnsignedOperation(operation);
-  return { ...publicFields, ...(retirement === null ? {} : { state: "retired" as const, terminal: true as const,
+export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation,
+  "integrityHash" | "statusLocator" | "quote" | "nativeQuote" | "state" | "terminal"> & {
+  readonly quote?: Omit<ValidatedRelayQuote, "statusLocator">;
+  readonly nativeQuote?: Omit<ValidatedRelayNativeQuote, "statusLocator">;
+  readonly state: "prepared" | "retired";
+  readonly terminal: boolean;
+  readonly retiredAt?: string;
+  readonly retirementIntegrityHash?: string;
+  readonly proofClass: "saved_unsigned_quote";
+  readonly balanceEvidence: "not_checked";
+  readonly allowanceEvidence: "not_checked";
+  readonly statusObservable: boolean;
+  readonly executionAdmitted: false;
+  readonly nextActions: readonly [];
+};
+
+export function publicRelayUnsignedOperation(operation: RelayUnsignedOperation,
+  retirement: RelayRetirement | null = null): PublicRelayUnsignedOperation {
+  const { integrityHash: _integrityHash, statusLocator: _locator, quote, nativeQuote,
+    ...publicFields } = validateRelayUnsignedOperation(operation);
+  const publicQuote = quote === undefined ? {} : { quote: (({ statusLocator: _hidden, ...fields }) => fields)(quote) };
+  const publicNativeQuote = nativeQuote === undefined ? {} : {
+    nativeQuote: (({ statusLocator: _hidden, ...fields }) => fields)(nativeQuote),
+  };
+  return { ...publicFields, ...publicQuote, ...publicNativeQuote,
+    ...(retirement === null ? {} : { state: "retired" as const, terminal: true as const,
     retiredAt: retirement.retiredAt, retirementIntegrityHash: retirement.integrityHash }),
     proofClass: "saved_unsigned_quote" as const, balanceEvidence: "not_checked" as const,
     allowanceEvidence: "not_checked" as const, statusObservable: operation.statusLocator !== undefined,

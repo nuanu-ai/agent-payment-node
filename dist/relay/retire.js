@@ -8,7 +8,7 @@ import { RelayRetirementRepository, RelayUnsignedOperationRepository, publicRela
 import { StateStore } from "../state.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RelayEncryptedApprovalCustody } from "./approval-effect.js";
-import { RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, RELAY_BNB_POLYGON_ROUTE_REFERENCE } from "./native-quote.js";
+import { RELAY_BNB_SOURCE, relayNativeRoute } from "./native-quote.js";
 export class RelayRetireService {
     state;
     clock;
@@ -31,13 +31,19 @@ export class RelayRetireService {
                 await new OperationService(this.state).required(input.operationId);
                 throw new ApnError("APN_OPERATION_BLOCKED", "The operation is not a prepared Relay quote for this profile.");
             }
-            if (input.profile === "evm-live-buyer" && (op.nativeQuote === undefined || op.quote !== undefined ||
-                op.sourceChainId !== 56 || op.destinationChainId !== 137 ||
-                op.sourceAccount.toLowerCase() !== RELAY_BNB_SOURCE.toLowerCase() ||
-                op.recipient.toLowerCase() !== RELAY_POLYGON_RECIPIENT.toLowerCase() ||
-                op.nativeQuote.routeReference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE ||
-                op.policyDigest === undefined || op.policyRevision === undefined)) {
-                throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is limited to the buyer BNB native to Polygon quote.");
+            if (input.profile === "evm-live-buyer") {
+                let route = null;
+                try {
+                    route = relayNativeRoute(op.recipient);
+                }
+                catch { /* outside the buyer native lanes */ }
+                if (route === null || op.nativeQuote === undefined || op.quote !== undefined ||
+                    op.sourceChainId !== 56 || op.destinationChainId !== route.chainId ||
+                    op.sourceAccount.toLowerCase() !== RELAY_BNB_SOURCE.toLowerCase() ||
+                    op.nativeQuote.routeReference !== route.reference ||
+                    op.policyDigest === undefined || op.policyRevision === undefined) {
+                    throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement requires an exact buyer native quote.");
+                }
             }
             if (input.profile === "default" && op.nativeQuote !== undefined) {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Default Relay retirement requires its Ethereum USDC quote.");
