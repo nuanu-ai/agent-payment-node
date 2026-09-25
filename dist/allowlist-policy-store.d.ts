@@ -43,6 +43,8 @@ export declare class AllowlistPolicyStore extends SecureStateStore {
     /** The latest staged revision, authenticated. */
     status(profile: string): Promise<StagedAllowlistPolicyRecord | null>;
     read(profile: string): Promise<AllowlistPolicyState>;
+    /** Caller must already hold profile:<allowlistProfileHash(profile)>; used for an atomic policy-bound transition. */
+    readUnderProfileLock(profile: string): Promise<AllowlistPolicyState>;
     /** Append one decision only if the chain head still equals the head the human approved against. */
     appendDecision(profile: string, expectedHeadDigest: string | null, decision: AllowlistPolicyDecision): Promise<AllowlistPolicyActivationEntry>;
     private writeRevision;

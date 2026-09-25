@@ -26,6 +26,8 @@ export interface ActiveAssetPolicyContext {
  */
 export declare function loadActiveAssetPolicyRegistry(context: ActiveAssetPolicyContext, profile: string): Promise<ActiveAssetPolicy | null>;
 export declare function loadActiveAssetPolicyRegistry(stateRoot: string, profile: string, now: Date): Promise<ActiveAssetPolicy | null>;
+/** Decode an authenticated state already read while the caller holds the profile lock. */
+export declare function activeAssetPolicyFromState(state: AllowlistPolicyState, at: Date): ActiveAssetPolicy | null;
 /** The chain head when it is an activation. The store has already bound it to its staged record. */
 export declare function activeAllowlistPolicy(state: AllowlistPolicyState): {
     readonly entry: AllowlistPolicyActivationEntry;

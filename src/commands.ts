@@ -13,6 +13,7 @@ export type CommandRequest =
       readonly minOutputAtomic: string; readonly maxProviderFeeAtomic: string; readonly maxApprovalNetworkFeeWei: string;
       readonly maxDepositNetworkFeeWei: string; readonly quoteFile: string; readonly idempotencyKey: string }
   | { readonly command: "relay.arbitrum.observe"; readonly operationId: string }
+  | { readonly command: "relay.arbitrum.approval-check"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.native.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.preflight"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.execute"; readonly operationId: string }

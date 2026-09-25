@@ -6,6 +6,9 @@ import { RelayObserveService } from "./relay/observe.js";
 import { RelayNativeObserveService } from "./relay/native-observe.js";
 import { RelayBaseObserveService } from "./relay/base-observe.js";
 import { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
+import { RelayArbitrumApprovalDecisionService } from "./relay/arbitrum-approval-decision.js";
+import { RelayArbitrumApprovalPreflightReader } from "./relay/arbitrum-approval-preflight.js";
+import { EvmDirectRpcGuard } from "./evm-direct-rpc-guard.js";
 import { RelayArbitrumSourceFinalityObserver } from "./relay/arbitrum-source-finality.js";
 import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "./relay/observe-rpc.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
@@ -144,6 +147,8 @@ export interface RuntimeFactoryOptions {
   readonly relayBaseObserve?: RelayBaseObserveService;
   readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
   readonly relayArbitrumObserveRpc?: HttpsBaseRpc;
+  readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
+  readonly relayArbitrumApprovalRpc?: Pick<HttpsBaseRpc, "batchCall">;
   readonly relayObserveBaseRpc?: HttpsBaseRpc;
   readonly relayObserveSourceRpc?: HttpsBaseRpc;
   readonly relayObserveBnbRpc?: HttpsBaseRpc;
@@ -210,6 +215,14 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     const observer = new RelayArbitrumSourceFinalityObserver(url, state, options.relayArbitrumObserveRpc);
     return new ApnCore({ state, relayArbitrumObserve: options.relayArbitrumObserve ??
       new RelayArbitrumSourceObserveService(state, observer) });
+  }
+  if (bound.request.command === "relay.arbitrum.approval-check") {
+    const url = bound.rpcUrl ?? "";
+    const guard = new EvmDirectRpcGuard(state);
+    const reader = new RelayArbitrumApprovalPreflightReader(url, state, options.relayArbitrumApprovalRpc,
+      () => guard);
+    return new ApnCore({ state, relayArbitrumApprovalDecision: options.relayArbitrumApprovalDecision ??
+      new RelayArbitrumApprovalDecisionService(state, reader) });
   }
   if (bound.request.command === "relay.base.observe") {
     const baseUrl = bound.rpcUrl ?? "";
