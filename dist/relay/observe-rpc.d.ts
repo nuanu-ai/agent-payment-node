@@ -1,5 +1,5 @@
 /** Bounded, keyless JSON-RPC adapters. Every batchCall here is one physical POST. */
-import type { Hex } from "viem";
+import { type Hex } from "viem";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc } from "../rpc.js";
 import type { StateStore } from "../state.js";
@@ -23,10 +23,13 @@ export declare class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guard?: EvmDirectRpcGuard, expectedChainId?: 56 | 137 | 143 | 8453);
     get physicalPosts(): number;
     private read;
+    private readBatch;
     chainId(): Promise<number>;
     transaction(hash: string): Promise<RelayBnbTransaction | null>;
     receipt(hash: string): Promise<RelayBnbReceipt | null>;
     block(number: bigint): Promise<RelayBnbBlock | null>;
     finalityCheckpoint(): Promise<RelayBnbBlock | null>;
     nativeTrace(): Promise<null>;
+    routerCodeHash(address: string, blockNumber: bigint): Promise<string>;
+    adjacentBalances(address: string, blockNumber: bigint, expectedBlockHash: string): Promise<readonly [bigint, bigint]>;
 }

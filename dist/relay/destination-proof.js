@@ -11,6 +11,27 @@ const unproven = (reason) => ({ status: "unproven", reason,
     relayOrderFulfillmentProven: false, paidAcceptance: false });
 const mismatch = (reason) => ({ status: "mismatch", reason,
     relayOrderFulfillmentProven: false, paidAcceptance: false });
+/** Former official Base V3 deployment: relay-periphery cc6808ba97f7, deployments/v3/addresses.json.
+ * Runtime hash matches its verified Base bytecode (Blockscout) at safe block 51770413. */
+const BASE_RELAY_ROUTER_V3 = "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
+const BASE_RELAY_ROUTER_V3_CODE_HASH = "0xde894e5c12e9513d50613c8fff375ecbf19b5d9a53bec0662e2b9667e3ec8f15";
+const SOLVER_NATIVE_TRANSFER_TOPIC = "0xd35467972d1fda5b63c735f59d3974fa51785a41a92aa3ed1b70832836f8dba6";
+function routerEventCredit(receipt, recipient) {
+    const logs = receipt.logs;
+    if (!logs || logs.length > 256)
+        return null;
+    const transfers = logs.filter(log => same(log.address, BASE_RELAY_ROUTER_V3) &&
+        log.topics.length > 0 && same(log.topics[0], SOLVER_NATIVE_TRANSFER_TOPIC));
+    if (transfers.some(log => log.topics.length !== 1 || !/^0x[0-9a-fA-F]{128}$/u.test(log.data) ||
+        log.data.slice(2, 26) !== "0".repeat(24)))
+        return null;
+    const matching = transfers.filter(log => /^0x[0-9a-fA-F]{128}$/u.test(log.data) &&
+        log.data.slice(2, 26) === "0".repeat(24) &&
+        same(`0x${log.data.slice(26, 66)}`, recipient));
+    if (matching.length !== 1)
+        return null;
+    return BigInt(`0x${matching[0].data.slice(66)}`);
+}
 /**
  * Provider transaction hashes are discovery hints only. A valid credit can be an
  * unrelated payment to the same recipient; this function never proves Relay order
@@ -153,19 +174,45 @@ async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
         catch {
             return unproven("destination_trace_unavailable");
         }
-        if (trace === null)
-            return unproven("destination_trace_unavailable");
-        if (!same(trace.transactionHash, hash) || !same(trace.blockHash, receipt.blockHash) ||
-            trace.complete !== true || trace.revertedCallsExcluded !== true ||
-            trace.transfers.some(transfer => !ADDRESS.test(transfer.from) || !ADDRESS.test(transfer.to) || transfer.valueWei < 0n))
-            return mismatch("destination_trace_binding");
-        const credits = trace.transfers.filter(transfer => same(transfer.to, op.recipient) && transfer.valueWei > 0n);
-        if (credits.length !== 1)
-            return unproven("destination_trace_ambiguous_or_no_credit");
-        credited = credits[0].valueWei;
-        if (credited < minimum)
-            return mismatch("destination_value_below_minimum");
-        method = "receipt_bound_native_trace";
+        if (trace === null && expectedChainId === 8453) {
+            if (!ports.routerCodeHash || !ports.adjacentBalances || receipt.blockNumber === 0n ||
+                tx.to === null || !same(tx.to, BASE_RELAY_ROUTER_V3))
+                return unproven("base_router_fallback_unavailable");
+            const eventAmount = routerEventCredit(receipt, op.recipient);
+            if (eventAmount === null || eventAmount <= 0n)
+                return unproven("base_router_event_missing_or_ambiguous");
+            if (eventAmount < minimum)
+                return mismatch("destination_value_below_minimum");
+            let codeHash, balances;
+            try {
+                codeHash = await ports.routerCodeHash(BASE_RELAY_ROUTER_V3, receipt.blockNumber);
+                balances = await ports.adjacentBalances(op.recipient, receipt.blockNumber, receipt.blockHash);
+            }
+            catch {
+                return unproven("base_router_state_unavailable");
+            }
+            if (!same(codeHash, BASE_RELAY_ROUTER_V3_CODE_HASH))
+                return mismatch("base_router_code_identity");
+            if (balances[0] < 0n || balances[1] < balances[0] || balances[1] - balances[0] !== eventAmount)
+                return unproven("base_balance_delta_ambiguous");
+            credited = eventAmount;
+            method = "verified_relay_router_event_balance";
+        }
+        else {
+            if (trace === null)
+                return unproven("destination_trace_unavailable");
+            if (!same(trace.transactionHash, hash) || !same(trace.blockHash, receipt.blockHash) ||
+                trace.complete !== true || trace.revertedCallsExcluded !== true ||
+                trace.transfers.some(transfer => !ADDRESS.test(transfer.from) || !ADDRESS.test(transfer.to) || transfer.valueWei < 0n))
+                return mismatch("destination_trace_binding");
+            const credits = trace.transfers.filter(transfer => same(transfer.to, op.recipient) && transfer.valueWei > 0n);
+            if (credits.length !== 1)
+                return unproven("destination_trace_ambiguous_or_no_credit");
+            credited = credits[0].valueWei;
+            if (credited < minimum)
+                return mismatch("destination_value_below_minimum");
+            method = "receipt_bound_native_trace";
+        }
     }
     return { status: "recipient_credit_proven", relayOrderFulfillmentProven: false, paidAcceptance: false, proof: {
             operationId: op.operationId, operationIntegrityHash: op.integrityHash, quoteDigest: op.quoteDigest,
