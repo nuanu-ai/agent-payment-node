@@ -1,7 +1,9 @@
 import { ApnError } from "../errors.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { OperationService } from "../operation-service.js";
 import { canonicalOperationId } from "../transfer-policy.js";
 import { GaslessExecution } from "./execution.js";
+import { GaslessAssetPolicy } from "./asset-policy.js";
 import { GaslessOperationRepository } from "./operation-repository.js";
 import { gaslessOwner } from "./owner.js";
 import { GaslessObservationService } from "./observation.js";
@@ -17,10 +19,12 @@ export class GaslessService {
     context;
     records;
     operations;
+    policy;
     constructor(context) {
         this.context = context;
         this.records = new GaslessOperationRepository(context.state.root);
         this.operations = new OperationService(context.state, context.providerX402Repository, undefined, undefined, this.records);
+        this.policy = new GaslessAssetPolicy(context.state, () => context.clock.now().getTime());
     }
     async balance(profile, chainId) {
         return await withGaslessRpcInvocation(async () => {
@@ -41,7 +45,7 @@ export class GaslessService {
         return await withGaslessRpcInvocation(async () => {
             const d = this.dependencies();
             const preparation = new GaslessPreparation({ state: this.context.state, records: this.records,
-                operations: this.operations, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime() });
+                operations: this.operations, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime(), policy: this.policy });
             return publicGaslessOperation(await preparation.prepare(input));
         });
     }
@@ -49,6 +53,8 @@ export class GaslessService {
         return await withGaslessRpcInvocation(async () => await this.locked(operationId, async (op) => {
             if (op.terminal || op.state !== "awaiting_approval")
                 return publicGaslessOperation(op);
+            if (this.legacyBase(op))
+                return publicGaslessOperation(await this.save(op, { state: "failed_before_effect", failure: "gasless_legacy_observation_only" }));
             const approval = this.dependencies().approval;
             const unit = gaslessIntentAsset(op.intent).symbol;
             if (approval === undefined)
@@ -63,6 +69,9 @@ export class GaslessService {
             if (observationRpcEnv !== undefined) {
                 const environmentName = gaslessObservationRpcEnv(observationRpcEnv);
                 return await this.locked(operationId, async (op) => {
+                    if (!op.terminal && this.legacyBase(op) && op.bootstrap.signingAttempts === 0) {
+                        return publicGaslessOperation(await this.legacyRecovery(op));
+                    }
                     if (op.terminal || op.bootstrap.signingAttempts === 0)
                         return publicGaslessOperation(op);
                     const factory = this.dependencies().observationRpcFor;
@@ -72,7 +81,8 @@ export class GaslessService {
                     return publicGaslessOperation(await observer.run(op));
                 });
             }
-            return await this.locked(operationId, async (op) => publicGaslessOperation(op.terminal || op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
+            return await this.locked(operationId, async (op) => publicGaslessOperation(op.terminal ? op : this.legacyBase(op) ? await this.legacyRecovery(op)
+                : op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
         });
     }
     async status(operationId) { return await this.locked(operationId, async (op) => publicGaslessOperation(op)); }
@@ -86,24 +96,36 @@ export class GaslessService {
     }
     execution(op) {
         const d = this.dependencies();
-        return new GaslessExecution(this.context.state, d.rpcFor(op.intent.request.chainId), d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), this.context.wait);
+        return new GaslessExecution(this.context.state, d.rpcFor(op.intent.request.chainId), d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), this.context.wait, this.policy);
     }
     async save(op, patch) {
         const next = transitionGasless(op, patch, this.context.clock.now().toISOString());
         await this.records.persist(next);
+        await this.policy.reconcile(next);
         return next;
+    }
+    legacyBase(op) {
+        return op.intent.request.chainId === 8453 && op.intent.allowlist === undefined;
+    }
+    async legacyRecovery(op) {
+        if (op.bootstrap.signingAttempts === 0 && op.userOperation.signingAttempts === 0) {
+            return await this.save(op, { state: "failed_before_effect", failure: "gasless_legacy_observation_only" });
+        }
+        const d = this.dependencies();
+        return await new GaslessObservationService(d.rpcFor(op.intent.request.chainId), async (previous, patch) => await this.save(previous, patch)).run(op);
     }
     async locked(input, work) {
         const operationId = canonicalOperationId(input), first = await this.operations.required(operationId);
         if (first.kind !== "gasless_transfer")
             gaslessFailure("APN_OPERATION_BLOCKED", "gasless_operation_kind");
-        return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${operationId}`], async () => {
+        return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${operationId}`], async () => await this.context.state.withLocks([`profile:${allowlistProfileHash(first.record.intent.profile)}`], async () => {
             const current = await this.operations.required(operationId);
             if (current.kind !== "gasless_transfer")
                 gaslessFailure("APN_STATE_CORRUPT", "gasless_operation_kind_changed");
             await this.records.repairReceipt(current.record);
+            await this.policy.reconcile(current.record);
             return await work(current.record);
-        });
+        }));
     }
 }
 //# sourceMappingURL=service.js.map

@@ -1,8 +1,10 @@
 import { ApnError } from "../errors.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
 import { canonicalOperationId } from "../transfer-policy.js";
 import { GaslessExecution } from "./execution.js";
+import { GaslessAssetPolicy } from "./asset-policy.js";
 import type { GaslessChainId } from "./model.js";
 import type { GaslessMutable, GaslessOperationRecord } from "./operation-model.js";
 import { GaslessOperationRepository } from "./operation-repository.js";
@@ -27,9 +29,11 @@ export interface GaslessDependencies {
 export class GaslessService {
   readonly records: GaslessOperationRepository;
   readonly operations: OperationService;
+  readonly policy: GaslessAssetPolicy;
   constructor(private readonly context: RuntimeContext) {
     this.records = new GaslessOperationRepository(context.state.root);
     this.operations = new OperationService(context.state, context.providerX402Repository, undefined, undefined, this.records);
+    this.policy = new GaslessAssetPolicy(context.state, () => context.clock.now().getTime());
   }
   async balance(profile: string, chainId: GaslessChainId) {
     return await withGaslessRpcInvocation(async () => {
@@ -49,13 +53,15 @@ export class GaslessService {
     return await withGaslessRpcInvocation(async () => {
       const d = this.dependencies();
       const preparation = new GaslessPreparation({ state: this.context.state, records: this.records,
-        operations: this.operations, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime() });
+        operations: this.operations, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime(), policy: this.policy });
       return publicGaslessOperation(await preparation.prepare(input));
     });
   }
   async approve(operationId: string) {
     return await withGaslessRpcInvocation(async () => await this.locked(operationId, async (op) => {
       if (op.terminal || op.state !== "awaiting_approval") return publicGaslessOperation(op);
+      if (this.legacyBase(op)) return publicGaslessOperation(await this.save(op,
+        { state: "failed_before_effect", failure: "gasless_legacy_observation_only" }));
       const approval = this.dependencies().approval;
       const unit = gaslessIntentAsset(op.intent).symbol;
       if (approval === undefined) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", `Approve this ${unit} fee transfer in a foreground terminal.`, {
@@ -69,6 +75,9 @@ export class GaslessService {
       if (observationRpcEnv !== undefined) {
         const environmentName = gaslessObservationRpcEnv(observationRpcEnv);
         return await this.locked(operationId, async (op) => {
+          if (!op.terminal && this.legacyBase(op) && op.bootstrap.signingAttempts === 0) {
+            return publicGaslessOperation(await this.legacyRecovery(op));
+          }
           if (op.terminal || op.bootstrap.signingAttempts === 0) return publicGaslessOperation(op);
           const factory = this.dependencies().observationRpcFor;
           if (factory === undefined) gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_unavailable");
@@ -78,7 +87,8 @@ export class GaslessService {
         });
       }
       return await this.locked(operationId, async (op) => publicGaslessOperation(
-        op.terminal || op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
+        op.terminal ? op : this.legacyBase(op) ? await this.legacyRecovery(op)
+          : op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
     });
   }
   async status(operationId: string) { return await this.locked(operationId, async (op) => publicGaslessOperation(op)); }
@@ -92,20 +102,34 @@ export class GaslessService {
   private execution(op: GaslessOperationRecord) {
     const d = this.dependencies();
     return new GaslessExecution(this.context.state, d.rpcFor(op.intent.request.chainId), d.custody,
-      () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), this.context.wait);
+      () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), this.context.wait,
+      this.policy);
   }
   private async save(op: GaslessOperationRecord, patch: Partial<GaslessMutable>) {
     const next = transitionGasless(op, patch, this.context.clock.now().toISOString());
-    await this.records.persist(next); return next;
+    await this.records.persist(next); await this.policy.reconcile(next); return next;
+  }
+  private legacyBase(op: GaslessOperationRecord): boolean {
+    return op.intent.request.chainId === 8453 && op.intent.allowlist === undefined;
+  }
+  private async legacyRecovery(op: GaslessOperationRecord): Promise<GaslessOperationRecord> {
+    if (op.bootstrap.signingAttempts === 0 && op.userOperation.signingAttempts === 0) {
+      return await this.save(op, { state: "failed_before_effect", failure: "gasless_legacy_observation_only" });
+    }
+    const d = this.dependencies();
+    return await new GaslessObservationService(d.rpcFor(op.intent.request.chainId),
+      async (previous, patch) => await this.save(previous, patch)).run(op);
   }
   private async locked<T>(input: string, work: (op: GaslessOperationRecord) => Promise<T>): Promise<T> {
     const operationId = canonicalOperationId(input), first = await this.operations.required(operationId);
     if (first.kind !== "gasless_transfer") gaslessFailure("APN_OPERATION_BLOCKED", "gasless_operation_kind");
-    return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${operationId}`], async () => {
+    return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${operationId}`],
+      async () => await this.context.state.withLocks([`profile:${allowlistProfileHash(first.record.intent.profile)}`], async () => {
       const current = await this.operations.required(operationId);
       if (current.kind !== "gasless_transfer") gaslessFailure("APN_STATE_CORRUPT", "gasless_operation_kind_changed");
       await this.records.repairReceipt(current.record);
+      await this.policy.reconcile(current.record);
       return await work(current.record);
-    });
+    }));
   }
 }

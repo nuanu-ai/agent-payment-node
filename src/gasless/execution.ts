@@ -1,4 +1,5 @@
 import { approvalCode } from "../approval-code.js";
+import type { GaslessAssetPolicy } from "./asset-policy.js";
 import { ApnError } from "../errors.js";
 import type { WaitPort } from "../ports.js";
 import type { StateStore } from "../state.js";
@@ -23,7 +24,8 @@ export class GaslessExecution {
   private readonly observation: GaslessObservationService;
   constructor(private readonly state: StateStore, private readonly rpc: GaslessRpcPort,
     private readonly custody: GaslessCustodyPort, private readonly now: () => number,
-    private readonly save: GaslessSave, private readonly wait: WaitPort) {
+    private readonly save: GaslessSave, private readonly wait: WaitPort,
+    private readonly policy?: GaslessAssetPolicy) {
     this.observation = new GaslessObservationService(rpc, save);
   }
   async approve(op: GaslessOperationRecord, approval: GaslessApprovalPort): Promise<GaslessOperationRecord> {
@@ -107,6 +109,7 @@ export class GaslessExecution {
     if (effect.signingAttempts === 0) {
       let fees: GaslessFees;
       try { fees = await this.guard(op); } catch (error) { return { op: await this.halt(op, error), material: null }; }
+      try { await this.policy?.reserve(op); } catch (error) { return { op: await this.halt(op, error), material: null }; }
       effect = { ...effect, phase: "signing_started", signingAttempts: 1, signingStartedAt: this.at() };
       op = await this.save(op, { state: role === "bootstrap" ? "bootstrap_pending" : "user_operation_pending", [this.key(role)]: effect });
       try { await this.custody.seal(op, role, op.intent.owner, bootstrap, role === "bootstrap" ? undefined : fees); }
@@ -136,7 +139,12 @@ export class GaslessExecution {
   private key(role: GaslessRole): "bootstrap" | "userOperation" { return role === "bootstrap" ? "bootstrap" : "userOperation"; }
   private at(): string { return new Date(this.now()).toISOString(); }
   private async guard(op: GaslessOperationRecord, signed?: GaslessFees): Promise<GaslessFees> {
-    return await this.steady(op, async () => await guardGaslessOperation(this.state, this.rpc, op, this.now, signed));
+    return await this.steady(op, async () => {
+      await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
+      const fees = await guardGaslessOperation(this.state, this.rpc, op, this.now, signed);
+      await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
+      return fees;
+    });
   }
   /**
    * A price spike, rate limit or transport failure is waited out while the approved window still leaves room for the

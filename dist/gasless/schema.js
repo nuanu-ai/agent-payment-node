@@ -62,7 +62,11 @@ export const intentSchema = z.strictObject({ wireVersion: z.enum(["apn.gasless-w
     owner: ownerSchema, providerBinding: providerBindingSchema, initialSnapshot: snapshotSchema, gas: gasSchema,
     token: addressSchema, tokenDomain: tokenDomainSchema, paymaster: addressSchema, entryPoint: addressSchema,
     delegate: addressSchema, feeCapAtomic: uintSchema, recipientAtomic: uintSchema, callData: hexSchema,
-    unsignedEnvelopeHash: hashSchema, preparedAt: isoSchema, expiresAt: isoSchema, policyHash: hashSchema });
+    unsignedEnvelopeHash: hashSchema, preparedAt: isoSchema, expiresAt: isoSchema, policyHash: hashSchema,
+    allowlist: z.strictObject({ policyDigest: hashSchema, policyRevision: z.number().int().positive().safe(),
+        activationDigest: hashSchema, chain: z.literal("eip155:8453"), token: addressSchema,
+        mechanism: z.strictObject({ provider: z.literal("local"), reference: z.string().min(1).max(256) }),
+        reservationId: hashSchema }).optional() });
 export const estimateSchema = z.strictObject({ verificationGasLimit: uintSchema, callGasLimit: uintSchema,
     paymasterVerificationGasLimit: uintSchema, paymasterPostOpGasLimit: uintSchema, preVerificationGas: uintSchema,
     responseHash: hashSchema });
