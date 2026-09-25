@@ -26,18 +26,22 @@ export declare function createRelayEthereumSourceRuntime(state: StateStore, wrap
 /** The constructor accepts an injected RPC surface so tests can never reach a network. */
 export declare class RelayEthereumSourceRuntime {
     private readonly state;
-    private readonly rpc;
+    private readonly transport;
     private readonly authorization;
     private readonly clock;
+    private readonly pacedOrigin?;
     private readonly wallets;
     private readonly permissions;
     private readonly admissions;
     private readonly usage;
     private readonly approvalCustody;
     private readonly depositCustody;
+    private readonly rpcScope;
     private signingNonce;
-    constructor(state: StateStore, wrapping: WrappingSecretPort, rpc: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">, authorization: RelayExecutionAuthorizationPort, clock?: ClockPort);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, transport: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">, authorization: RelayExecutionAuthorizationPort, clock?: ClockPort, pacedOrigin?: string | undefined);
+    private get rpc();
     execute(operationId: string): Promise<RelayEffectJournal>;
+    private executeScoped;
     private usageIdentity;
     private usageReservationId;
     /** Profile/operation -> encrypted custody -> exact usage bucket. A journal with
