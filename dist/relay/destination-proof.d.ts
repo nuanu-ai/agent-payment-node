@@ -54,7 +54,7 @@ export interface RelayBnbRecipientCreditEvidence {
     readonly operationIntegrityHash: string;
     readonly quoteDigest: string;
     readonly orderId: string;
-    readonly sourceDepositHash: string;
+    readonly sourceDepositHash: string | null;
     readonly destinationTransactionHash: string;
     readonly destinationBlockNumber: string;
     readonly destinationBlockHash: string;
@@ -86,3 +86,5 @@ export declare function proveRelayBnbDestination(input: Readonly<{
     sourceDeposit: RelaySourceDepositProof;
     candidateHashes: readonly string[];
 }>, ports: RelayBnbProofPorts): Promise<RelayBnbProofResult>;
+/** Base credit observation has no source journal or order-causal proof. */
+export declare function proveRelayBaseDestination(operation: RelayUnsignedOperation, candidateHashes: readonly string[], ports: RelayBnbProofPorts): Promise<RelayBnbProofResult>;

@@ -53,6 +53,8 @@ function bindParsedCatalog(parsed) {
     const options = parsed.values;
     if (parsed.command.path.join(" ") === "relay prepare")
         return { request: { command: "relay.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
+    if (parsed.command.path.join(" ") === "relay base prepare")
+        return { request: { command: "relay.base.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay native prepare")
         return { request: { command: "relay.native.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay preflight")
@@ -67,6 +69,8 @@ function bindParsedCatalog(parsed) {
         return { request: { command: "relay.status", operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "relay observe")
         return { request: { command: "relay.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), bnbRpcUrl: value(options, "--bnb-rpc-url") };
+    if (parsed.command.path.join(" ") === "relay base observe")
+        return { request: { command: "relay.base.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path[0] === "stargate") {
         switch (parsed.command.path.join(" ")) {
             case "stargate native prepare": return { request: { command: "stargate.native.prepare", profile: value(options, "--profile"),
