@@ -18,7 +18,7 @@ export declare class RpcProviderScheduler {
     private readonly queue;
     private active;
     constructor(coordinator?: RpcProviderPacingCoordinator | undefined, pacingNow?: (() => number) | undefined, cooldownMode?: "wait" | "reject", cooldownFailures?: "rate_limit" | "transient");
-    schedule(origin: string, now: () => number, wait: (milliseconds: number) => Promise<void>, beforeWait: (milliseconds: number) => void, task: () => Promise<unknown>): Promise<unknown>;
+    schedule(origin: string, now: () => number, wait: (milliseconds: number) => Promise<void>, beforeWait: (milliseconds: number) => void, task: () => Promise<unknown>, beforeStart?: () => Promise<void>): Promise<unknown>;
     private pump;
     private run;
 }

@@ -13,6 +13,7 @@ interface ScheduledRpcRead {
   readonly now: () => number;
   readonly wait: (milliseconds: number) => Promise<void>;
   readonly beforeWait: (milliseconds: number) => void;
+  readonly beforeStart: (() => Promise<void>) | undefined;
   readonly task: () => Promise<unknown>;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: unknown) => void;
@@ -32,9 +33,9 @@ export class RpcProviderScheduler {
     private readonly cooldownFailures: "rate_limit" | "transient" = "rate_limit") {}
 
   schedule(origin: string, now: () => number, wait: (milliseconds: number) => Promise<void>, beforeWait: (milliseconds: number) => void,
-    task: () => Promise<unknown>): Promise<unknown> {
+    task: () => Promise<unknown>, beforeStart?: () => Promise<void>): Promise<unknown> {
     const family = rpcProviderFamily(origin);
-    return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, resolve, reject }); this.pump(); });
+    return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, beforeStart, resolve, reject }); this.pump(); });
   }
 
   private pump(): void {
@@ -73,6 +74,13 @@ export class RpcProviderScheduler {
           const rechecked = clock();
           if (rechecked <= current || rechecked < nextAllowed) throw schedulerClockRollback(entry.family);
           current = rechecked;
+        }
+        // The physical gate may wait for a POST on another provider family. Persist the
+        // actual admitted start, so a sibling process cannot start inside its 750 ms gap.
+        if (entry.beforeStart !== undefined) {
+          await entry.beforeStart();
+          current = clock();
+          if (current < nextAllowed) throw schedulerClockRollback(entry.family);
         }
         state.lastStart = current;
         await saveStart(state.lastStart);

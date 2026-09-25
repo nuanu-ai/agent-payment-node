@@ -1,5 +1,6 @@
 import { ApnError } from "../errors.js";
 const RPC_ORIGIN_GAP_MS = 750;
+const PIMLICO_PUBLIC_GAP_MS = 3_000;
 export const RPC_RETRY_DELAY_MS = 2_000;
 export class RpcHttpFailure extends Error {
     method;
@@ -27,9 +28,9 @@ export class RpcProviderScheduler {
         this.cooldownMode = cooldownMode;
         this.cooldownFailures = cooldownFailures;
     }
-    schedule(origin, now, wait, beforeWait, task) {
+    schedule(origin, now, wait, beforeWait, task, beforeStart) {
         const family = rpcProviderFamily(origin);
-        return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, resolve, reject }); this.pump(); });
+        return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, beforeStart, resolve, reject }); this.pump(); });
     }
     pump() {
         while (this.active < 2) {
@@ -58,7 +59,8 @@ export class RpcProviderScheduler {
                 if (this.cooldownMode === "reject" && cooldownUntil > before) {
                     throw new ApnError("APN_PROVIDER_UNAVAILABLE", "RPC provider is cooling down.", { reason: "rpc_provider_cooldown" });
                 }
-                const nextAllowed = Math.max(lastStart + RPC_ORIGIN_GAP_MS, cooldownUntil), delay = Math.max(0, nextAllowed - before);
+                const gap = entry.family === "public.pimlico.io" ? PIMLICO_PUBLIC_GAP_MS : RPC_ORIGIN_GAP_MS;
+                const nextAllowed = Math.max(lastStart + gap, cooldownUntil), delay = Math.max(0, nextAllowed - before);
                 entry.beforeWait(delay);
                 if (delay > 0)
                     await entry.wait(delay);
@@ -75,6 +77,14 @@ export class RpcProviderScheduler {
                     if (rechecked <= current || rechecked < nextAllowed)
                         throw schedulerClockRollback(entry.family);
                     current = rechecked;
+                }
+                // The physical gate may wait for a POST on another provider family. Persist the
+                // actual admitted start, so a sibling process cannot start inside its 750 ms gap.
+                if (entry.beforeStart !== undefined) {
+                    await entry.beforeStart();
+                    current = clock();
+                    if (current < nextAllowed)
+                        throw schedulerClockRollback(entry.family);
                 }
                 state.lastStart = current;
                 await saveStart(state.lastStart);

@@ -10,6 +10,7 @@ import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcPort, LifiProvider
 import { publicBridgeOperation } from "./receipt.js";
 import { bridgeFailure } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
+import type { BridgeRpcPhysicalBudget } from "./rpc.js";
 
 export class BridgeExecution {
   private readonly observation: BridgeObservation;
@@ -17,13 +18,14 @@ export class BridgeExecution {
     private readonly destination: BridgeRpcPort, provider: LifiProviderPort, private readonly custody: BridgeCustodyPort,
     private readonly now: () => number, private readonly save: BridgeSave, observationRpc: Readonly<{
       source: () => BridgeRpcPort; destination: () => BridgeRpcPort; residual: () => BridgeRpcPort;
-    }> = { source: () => source, destination: () => destination, residual: () => source }) {
+    }> = { source: () => source, destination: () => destination, residual: () => source },
+    private readonly physicalBudget?: BridgeRpcPhysicalBudget) {
     this.observation = new BridgeObservation(observationRpc.source, observationRpc.destination, provider, save, observationRpc.residual);
   }
   async approve(op: BridgeOperationRecord, approval: BridgeApprovalPort): Promise<BridgeOperationRecord> {
     if (op.terminal || op.state !== "awaiting_approval") return op;
     try { await this.guard(op, op.effects[0]!.role); }
-    catch (error) { return await this.haltUnsent(op, error); }
+    catch (error) { return budgetExhausted(error) ? op : await this.haltUnsent(op, error); }
     const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
       exactPhrase: approvalCode("bridge", op.fingerprint), summary: publicBridgeOperation(op) });
     if (!accepted) return await this.save(op, { state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null } });
@@ -61,7 +63,9 @@ export class BridgeExecution {
         !["included_success", "safe_success"].includes(op.effects[0]!.phase)) return op;
       if (effect.phase === "unsealed") {
         try { await this.guard(op, effect.role); }
-        catch (error) { return await this.haltUnsent(op, error); }
+        catch (error) { return budgetExhausted(error) ? op : await this.haltUnsent(op, error); }
+        // Signing commits an effect; leave room for a fresh guard and its single raw send.
+        if (this.physicalBudget !== undefined && this.physicalBudget.remaining() < 2) return op;
         op = await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "signing_started" }) });
         // The marker is durable before entering custody. A recovered marker only loads its original seal.
         try { await this.custody.seal(op, effect.role, op.intent.owner); }
@@ -80,7 +84,9 @@ export class BridgeExecution {
       if (material === null) bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_committed_sealed_material_missing");
       await validateMaterial(material, op, effect.role);
       try { await this.guard(op, effect.role); }
-      catch (error) { return await this.haltUnsent(op, error); }
+      catch (error) { return budgetExhausted(error) ? op : await this.haltUnsent(op, error); }
+      // Preserve a sealed effect for a later invocation when its one permitted send cannot fit.
+      if (this.physicalBudget?.remaining() === 0) return op;
       op = await this.save(op, { state: "source_pending", effects: replaceEffect(op, { ...effect, phase: "submitting",
         submittedAt: new Date(this.now()).toISOString(), submissionAttempts: 1 }) });
       effect = op.effects.find((e) => e.role === effect.role)!;
@@ -143,6 +149,9 @@ export class BridgeExecution {
     return await this.save(op, { state, observationTelemetry: residual.observationTelemetry, failure: { reason: failureReason, residualAllowance: residual.value,
       ...(diagnostic === null ? {} : { residualAllowanceStatus: "observed" as const, preSignRpc: diagnostic }) } });
   }
+}
+function budgetExhausted(error: unknown): boolean {
+  return error instanceof ApnError && error.code === "APN_RPC_BUDGET_EXCEEDED";
 }
 function preSignRpcFailure(error: unknown): BridgePreSignRpcFailure | null {
   if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS") return null;

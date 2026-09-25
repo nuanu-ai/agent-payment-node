@@ -2,6 +2,7 @@ import type { StateStore } from "../state.js";
 import { type BridgeSave } from "./observation.js";
 import { type BridgeOperationRecord } from "./operation-model.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcPort, LifiProviderPort } from "./ports.js";
+import type { BridgeRpcPhysicalBudget } from "./rpc.js";
 export declare class BridgeExecution {
     private readonly state;
     private readonly source;
@@ -9,12 +10,13 @@ export declare class BridgeExecution {
     private readonly custody;
     private readonly now;
     private readonly save;
+    private readonly physicalBudget?;
     private readonly observation;
     constructor(state: StateStore, source: BridgeRpcPort, destination: BridgeRpcPort, provider: LifiProviderPort, custody: BridgeCustodyPort, now: () => number, save: BridgeSave, observationRpc?: Readonly<{
         source: () => BridgeRpcPort;
         destination: () => BridgeRpcPort;
         residual: () => BridgeRpcPort;
-    }>);
+    }>, physicalBudget?: BridgeRpcPhysicalBudget | undefined);
     approve(op: BridgeOperationRecord, approval: BridgeApprovalPort): Promise<BridgeOperationRecord>;
     run(op: BridgeOperationRecord): Promise<BridgeOperationRecord>;
     private guard;

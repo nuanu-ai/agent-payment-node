@@ -14,7 +14,7 @@ import { isLegacyBridgeOperation } from "./legacy-operation.js";
 import { LINEA_DEPLOYMENT_MIGRATION_CANDIDATE, assertLineaDeploymentMigrationProof, migrateLineaDeploymentOperation } from "./deployment-migration.js";
 import { bridgeProtocolEmitter } from "./deployments.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation } from "./base-deployment-migration.js";
-import { RpcProviderScheduler, RpcReadSession } from "./rpc.js";
+import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
 import { sha256 } from "../canonical.js";
 export class BridgeService {
     context;
@@ -77,7 +77,8 @@ export class BridgeService {
             // five Ethereum and eight Base deployment chunks, and two finality reads. Keep two request
             // retries plus two additional attempt-only retries bounded inside the one repair command.
             const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 31, maxHttpAttempts: 33,
-                archiveDeploymentBatchMaxItems: 3 });
+                archiveDeploymentBatchMaxItems: 3,
+                physicalBudget: new BridgeRpcPhysicalBudget() });
             if (raw.operationId === BASE_DEPLOYMENT_MIGRATION_CANDIDATE.operationId) {
                 if (!isLegacyBridgeOperation(op)) {
                     const eligible = migrateBaseDeploymentOperation(raw);
@@ -153,16 +154,17 @@ export class BridgeService {
     }
     execution(op) {
         const d = this.dependencies(), m = op.intent.materialization;
+        const physicalBudget = new BridgeRpcPhysicalBudget();
         // The modeled worst-case first token guard spends 19 requests: two safe heads, 6+9 Ethereum/Base archive chunks and two account batches.
         // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof. Arbitrum code remains fully fresh
         // because this verifier lacks an exact fork activation point: two safe heads, four Base plus five Arbitrum chunks,
         // and two source account/simulation batches total 13 physical reads.
         // Four later guards reuse immutable evidence and spend one mutable account/simulation batch each.
         const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 28, maxHttpAttempts: 30,
-            archiveDeploymentBatchMaxItems: 3, providerScheduler: this.providerScheduler });
+            archiveDeploymentBatchMaxItems: 3, providerScheduler: this.providerScheduler, physicalBudget });
         const lazy = (chainId, options) => {
             let rpc;
-            return () => rpc ??= d.rpcFor(chainId, new RpcReadSession({ ...options, providerScheduler: this.providerScheduler }));
+            return () => rpc ??= d.rpcFor(chainId, new RpcReadSession({ ...options, providerScheduler: this.providerScheduler, physicalBudget }));
         };
         const common = { now: () => this.context.clock.now().getTime(), archiveDeploymentBatchMaxItems: 3 };
         // Base source observation with explicit scalar receipt and archive readers needs 14 clean requests:
@@ -174,7 +176,7 @@ export class BridgeService {
         const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 14, maxHttpAttempts: 16 });
         const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: 16, maxHttpAttempts: 16 });
         const residualObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 2, maxHttpAttempts: 3 });
-        return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), { source: sourceObservation, destination: destinationObservation, residual: residualObservation });
+        return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), { source: sourceObservation, destination: destinationObservation, residual: residualObservation }, physicalBudget);
     }
     async save(op, patch) {
         const next = transitionBridge(op, patch, this.context.clock.now().toISOString());
