@@ -69,7 +69,7 @@ export type BridgeTokenCode = {
     readonly implementationCodeHash: Hex;
 };
 export interface BridgeStargatePool {
-    readonly assetId: 1;
+    readonly assetId: 1 | 13;
     readonly router: Address;
     readonly routerCodeHash: Hex;
     readonly sharedDecimals: number;
@@ -86,8 +86,7 @@ export interface BridgeWrappedNative {
 }
 /**
  * Native coins are first class. The provider's zero-address wire sentinel names the native coin as a route leg and
- * is never a token. A native principal is carried by Across only: its deposit wraps into the pinned wrapped-native
- * contract and its fill unwraps from it, so both movements are provable by exact logs of that contract.
+ * is never a token. The sole Stargate native direction is Ethereum to Base; other native routes use Across.
  */
 export interface BridgeNativeCoin {
     readonly kind: "native";
@@ -97,7 +96,7 @@ export interface BridgeNativeCoin {
     readonly decimals: 18;
     readonly pairKey: "eth" | "bnb" | "mon";
     readonly acrossSupported: true;
-    readonly stargate: null;
+    readonly stargate: BridgeStargatePool | null;
     readonly peers: readonly BridgeChainId[];
     readonly wrapped: BridgeWrappedNative;
     readonly listing: "frozen_list";

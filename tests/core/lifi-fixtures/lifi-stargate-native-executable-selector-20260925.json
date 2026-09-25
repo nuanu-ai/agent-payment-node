@@ -1,0 +1,37 @@
+{
+  "physical_posts": 2,
+  "rows": [
+    {
+      "chain": "ethereum",
+      "started_at_utc": "2026-09-25T07:06:35.010179+00:00",
+      "host": "ethereum-rpc.publicnode.com",
+      "http_status": 200,
+      "block_hash": "0xc273ddf05ea9419078f7de501490d6c8d7f1b80d105c76b4bebf8e909df8c2e6",
+      "eip1898_requireCanonical": true,
+      "chain_id_result": "0x1",
+      "expected_chain_id": "0x1",
+      "facet_selector": "0xa6010a66",
+      "facet_result": "0x000000000000000000000000bf4ad13fa0e6e05916a78c201f147c5152dbe1c9",
+      "facet_address": "0xbf4ad13fa0e6e05916a78c201f147c5152dbe1c9",
+      "prior_pinned_facet": "0xbf4ad13fa0e6e05916a78c201f147c5152dbe1c9",
+      "matches_prior_pinned_facet": true,
+      "rpc_errors": []
+    },
+    {
+      "chain": "base",
+      "started_at_utc": "2026-09-25T07:06:35.769336+00:00",
+      "host": "mainnet.base.org",
+      "http_status": 200,
+      "block_hash": "0xb4a719c69abd5799942ad6be592a1a06ff683843efc1ff187a49ecdf4c48eeae",
+      "eip1898_requireCanonical": true,
+      "chain_id_result": "0x2105",
+      "expected_chain_id": "0x2105",
+      "facet_selector": "0xa6010a66",
+      "facet_result": "0x0000000000000000000000006e378c84e657c57b2a8d183cff30ee5cc8989b61",
+      "facet_address": "0x6e378c84e657c57b2a8d183cff30ee5cc8989b61",
+      "prior_pinned_facet": "0x6e378c84e657c57b2a8d183cff30ee5cc8989b61",
+      "matches_prior_pinned_facet": true,
+      "rpc_errors": []
+    }
+  ]
+}

@@ -65,7 +65,8 @@ export class BridgePreparation {
             // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary. Only the
             // provider-family scheduler/cooldown spans phases. Cold proofs retain bounded request and retry headroom.
             const session = new RpcReadSession({ now: this.o.now, maxHttpRequests: 26, maxHttpAttempts: 28,
-                archiveDeploymentBatchMaxItems: 3, ...(this.o.providerScheduler === undefined ? {} : { providerScheduler: this.o.providerScheduler }) });
+                archiveDeploymentBatchMaxItems: 3, lineaArchiveDeploymentScalarCode: this.o.lineaArchiveDeploymentScalarCode === true,
+                ...(this.o.providerScheduler === undefined ? {} : { providerScheduler: this.o.providerScheduler }) });
             const source = this.o.rpcFor(quote.request.fromChainId, session), destination = this.o.rpcFor(quote.request.toChainId, session);
             const [sourceSafeBlock, destinationSafeBlock, response] = await Promise.all([
                 source.block("safe"), destination.block("safe"), this.o.provider.materialize(selected.step),
@@ -74,8 +75,8 @@ export class BridgePreparation {
             if (decoded.composite !== undefined)
                 await verifyFlyHeaderSignature(decoded.composite, BNB_COMPOSITE.signer);
             const [sourceDeployment, destinationDeployment] = await Promise.all([
-                source.deployment(m.tool, m.request.toChainId, m.request.fromToken, sourceSafeBlock),
-                destination.deployment(m.tool, m.request.fromChainId, m.request.toToken, destinationSafeBlock),
+                source.deployment(m.tool, m.request.toChainId, m.request.fromToken, sourceSafeBlock, m.tool === "stargateV2" && bridgeNativePrincipal(m.request)),
+                destination.deployment(m.tool, m.request.fromChainId, m.request.toToken, destinationSafeBlock, m.tool === "stargateV2" && bridgeNativePrincipal(m.request)),
             ]);
             const planned = bridgeNativePrincipal(m.request) ? [m.transaction] : [{ chainId: m.request.fromChainId,
                     from: m.sender, to: m.request.fromToken, data: approvalData(m.approvalAddress, m.request.amountAtomic), valueAtomic: "0", gasLimitAtomic: "0" }];

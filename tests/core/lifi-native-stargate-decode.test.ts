@@ -71,8 +71,7 @@ test("captured native Stargate ABI shape decodes principal and separate LayerZer
   assert.equal(decoded.protocol.assetId, 13);
   assert.equal(decoded.protocol.nativeFee, LZ_FEE.toString());
   assert.equal(validateRouteEconomics(m), "1500000000000");
-  assert.throws(() => bridgeAssetTool(bridgeAssetRow(1, BRIDGE_ZERO_ADDRESS), "stargateV2"),
-    { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE" });
+  assert.equal(bridgeAssetTool(bridgeAssetRow(1, BRIDGE_ZERO_ADDRESS), "stargateV2")?.assetId, 13);
 });
 
 test("native Stargate fails closed on debit cap, asset ID and both fee bindings", () => {
