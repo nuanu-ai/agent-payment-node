@@ -8,6 +8,8 @@ import { ApnError } from "../../src/errors.js";
 import { temporaryState } from "./helpers.js";
 import { Permit2ExecutionIntentJournal, type Permit2IntentInput, type Permit2IntentReadPort } from
   "../../src/x402-permit2/execution-intent.js";
+import { Permit2ExposureLifecycle, type Permit2EffectBinding, type Permit2EffectPorts } from
+  "../../src/x402-permit2/exposure-lifecycle.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
 import { hashChallenge, preparePermit2Payment, type Permit2PrepareInput } from "../../src/x402-permit2/prepare.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from
@@ -138,3 +140,134 @@ test("read only prepare creates no operation and has no paid outcome", async (t)
   assert.equal("signature" in intent, false);
   assert.equal("transactionHash" in intent, false);
 });
+
+function fakeEffects(changes: Partial<Permit2EffectPorts> = {}) {
+  const calls = { reserve: 0, sign: 0, submit: 0, observe: 0 };
+  const reservations = new Map<string, Permit2EffectBinding>();
+  const ports: Permit2EffectPorts = {
+    reserve: async binding => { calls.reserve++; const prior = reservations.get(binding.reservationId);
+      if (prior !== undefined) assert.deepEqual(prior, binding); else reservations.set(binding.reservationId, binding);
+      return binding; },
+    sign: async () => { calls.sign++; return "fake-authorization"; },
+    submit: async (_binding, authorization) => { calls.submit++; assert.equal(authorization, "fake-authorization");
+      return { reference: "fake-reference" }; },
+    observe: async () => { calls.observe++; return null; },
+    ...changes,
+  };
+  return { ports, calls, reservations };
+}
+
+test("reservation crash before and after the port call reuses the exact reservation", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  class CrashAtReserved extends Permit2ExposureLifecycle {
+    fail = true;
+    protected override async writeJson(path: string, value: unknown, createOnly = false): Promise<void> {
+      if (this.fail && path.startsWith("permit2-exposures/") &&
+          (value as { state?: string }).state === "reserved") { this.fail = false; throw new Error("crash after reserve"); }
+      await super.writeJson(path, value, createOnly);
+    }
+  }
+  const effects = fakeEffects();
+  const crash = new CrashAtReserved(state.root);
+  await assert.rejects(crash.resume(intent.operationId, prepared, effects.ports, request.nowSeconds), /crash after reserve/u);
+  assert.equal((await crash.load(intent.operationId))?.state, "reserving");
+  assert.deepEqual(effects.calls, { reserve: 1, sign: 0, submit: 0, observe: 0 });
+  const resumed = await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared, effects.ports, request.nowSeconds);
+  assert.equal(resumed.state, "submitted_pending");
+  assert.deepEqual(effects.calls, { reserve: 2, sign: 1, submit: 1, observe: 0 });
+  assert.equal(effects.reservations.size, 1);
+  await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared, effects.ports, request.nowSeconds);
+  assert.deepEqual(effects.calls, { reserve: 2, sign: 1, submit: 1, observe: 0 });
+});
+
+test("reservation port failure before persistence cannot reach signer or submitter", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const failed = fakeEffects({ reserve: async () => { throw new Error("reservation unavailable"); } });
+  const lifecycle = new Permit2ExposureLifecycle(state.root);
+  await assert.rejects(lifecycle.resume(intent.operationId, prepared, failed.ports, request.nowSeconds),
+    /reservation unavailable/u);
+  assert.equal((await lifecycle.load(intent.operationId))?.state, "reserving");
+  assert.deepEqual(failed.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  const retry = fakeEffects();
+  assert.equal((await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared,
+    retry.ports, request.nowSeconds)).state, "submitted_pending");
+  assert.deepEqual(retry.calls, { reserve: 1, sign: 1, submit: 1, observe: 0 });
+});
+
+test("crash before exposure publication cannot reach signer; after signer handoff never signs again", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  class CrashAtExposure extends Permit2ExposureLifecycle {
+    fail = true;
+    protected override async writeJson(path: string, value: unknown, createOnly = false): Promise<void> {
+      if (this.fail && path.startsWith("permit2-exposures/") &&
+          (value as { state?: string }).state === "exposure_unknown") { this.fail = false; throw new Error("crash before handoff"); }
+      await super.writeJson(path, value, createOnly);
+    }
+  }
+  const effects = fakeEffects();
+  const crash = new CrashAtExposure(state.root);
+  await assert.rejects(crash.resume(intent.operationId, prepared, effects.ports, request.nowSeconds), /crash before handoff/u);
+  assert.equal((await crash.load(intent.operationId))?.state, "reserved");
+  assert.equal(effects.calls.sign, 0);
+  const signing = fakeEffects({ sign: async () => { effects.calls.sign++; throw new Error("signer handoff lost"); } });
+  await assert.rejects(new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared,
+    signing.ports, request.nowSeconds), /signer handoff lost/u);
+  assert.equal((await crash.load(intent.operationId))?.state, "exposure_unknown");
+  const retry = fakeEffects();
+  await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared, retry.ports, request.nowSeconds);
+  assert.deepEqual(retry.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  assert.equal(effects.calls.sign, 1);
+});
+
+test("ambiguous submission, 429, not-found and repeated resume retain unknown exposure", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const effects = fakeEffects({ submit: async () => { throw new Error("submission timed out"); } });
+  await assert.rejects(new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared,
+    effects.ports, request.nowSeconds), /submission timed out/u);
+  const lifecycle = new Permit2ExposureLifecycle(state.root);
+  assert.equal((await lifecycle.load(intent.operationId))?.state, "exposure_unknown");
+  const read = fakeEffects({ observe: async () => { throw new Error("429"); } });
+  assert.equal((await lifecycle.reconcile(intent.operationId, read.ports)).state, "exposure_unknown");
+  assert.equal((await lifecycle.reconcile(intent.operationId, { observe: async () => null })).state, "exposure_unknown");
+  await lifecycle.resume(intent.operationId, prepared, read.ports, request.nowSeconds);
+  assert.deepEqual(read.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  assert.equal((await lifecycle.load(intent.operationId))?.proofDigest, null);
+});
+
+test("acknowledged submission settles only through observation; no production signer or sender is wired", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const effects = fakeEffects();
+  assert.equal((await new Permit2ExecutionIntentJournal(state.root).load(intent.operationId))?.capability, "execution_blocked");
+  assert.deepEqual(effects.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  const lifecycle = new Permit2ExposureLifecycle(state.root);
+  assert.equal((await lifecycle.resume(intent.operationId, prepared, effects.ports, request.nowSeconds)).state, "submitted_pending");
+  assert.equal((await lifecycle.reconcile(intent.operationId, { observe: async () => ({ kind: "pending" }) })).state,
+    "submitted_pending");
+  const settled = await lifecycle.reconcile(intent.operationId,
+    { observe: async () => ({ kind: "settled", proofDigest: "b".repeat(64) }) });
+  assert.equal(settled.state, "settled");
+  assert.equal((await lifecycle.reconcile(intent.operationId, readOnlyObserve())).integrityHash, settled.integrityHash);
+  assert.equal(readFileSync("src/runtime-factory.ts", "utf8").includes("Permit2ExposureLifecycle"), false);
+  assert.equal(readFileSync("src/x402-permit2/exposure-lifecycle.ts", "utf8").includes("createPermit2Production"), false);
+});
+
+test("forged prepared signing data cannot reach reservation or signer", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const effects = fakeEffects();
+  const forged = { ...prepared, plan: { ...prepared.plan, permit2: { ...prepared.plan.permit2,
+    message: { ...prepared.plan.permit2.message, nonce: 8n } } } };
+  await assert.rejects(new Permit2ExposureLifecycle(state.root).resume(intent.operationId, forged, effects.ports,
+    request.nowSeconds), errorCode("APN_OPERATION_BLOCKED"));
+  assert.deepEqual(effects.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  assert.equal(await new Permit2ExposureLifecycle(state.root).load(intent.operationId), null);
+});
+
+function readOnlyObserve(): Pick<Permit2EffectPorts, "observe"> {
+  return { observe: async () => { throw new Error("settled replay must not observe"); } };
+}
