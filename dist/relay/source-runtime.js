@@ -1,5 +1,6 @@
 /** Explicit, foreground Ethereum source execution for one saved Relay operation. */
 import { getAddress } from "viem";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
@@ -17,6 +18,7 @@ import { RelayApprovalEffectService, RelayEncryptedApprovalCustody } from "./app
 import { RelayDepositEffectService, RelayEncryptedDepositCustody } from "./deposit-effect.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
+import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 const HASH = /^[a-f0-9]{64}$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay source execution is blocked.", { reason }); }
@@ -70,26 +72,29 @@ export function createRelayEthereumSourceRuntime(state, wrappingSecret, rpcUrl, 
     }
     if (endpoint.pathname !== "/" || endpoint.search !== "" || endpoint.hash !== "" || endpoint.username !== "" || endpoint.password !== "")
         throw new ApnError("APN_RPC_CONFIG", "Relay execution requires a keyless HTTPS RPC origin without a signed path or query.");
-    return new RelayEthereumSourceRuntime(state, wrappingSecret, new HttpsBaseRpc(rpcUrl), authorization, clock);
+    return new RelayEthereumSourceRuntime(state, wrappingSecret, new HttpsBaseRpc(rpcUrl), authorization, clock, endpoint.origin);
 }
 /** The constructor accepts an injected RPC surface so tests can never reach a network. */
 export class RelayEthereumSourceRuntime {
     state;
-    rpc;
+    transport;
     authorization;
     clock;
+    pacedOrigin;
     wallets;
     permissions;
     admissions;
     usage;
     approvalCustody;
     depositCustody;
+    rpcScope = new AsyncLocalStorage();
     signingNonce = null;
-    constructor(state, wrapping, rpc, authorization, clock = { now: () => new Date() }) {
+    constructor(state, wrapping, transport, authorization, clock = { now: () => new Date() }, pacedOrigin) {
         this.state = state;
-        this.rpc = rpc;
+        this.transport = transport;
         this.authorization = authorization;
         this.clock = clock;
+        this.pacedOrigin = pacedOrigin;
         this.wallets = new EncryptedWalletStore(state, wrapping);
         this.permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
         this.admissions = new RelayExecutionAdmissionStore(state.root);
@@ -97,7 +102,26 @@ export class RelayEthereumSourceRuntime {
         this.approvalCustody = new RelayEncryptedApprovalCustody(state, wrapping);
         this.depositCustody = new RelayEncryptedDepositCustody(state, wrapping);
     }
+    get rpc() {
+        return this.rpcScope.getStore() ?? this.transport;
+    }
     async execute(operationId) {
+        if (this.pacedOrigin === undefined)
+            return await this.executeScoped(operationId);
+        const abort = new AbortController();
+        const timeout = setTimeout(() => abort.abort(), RELAY_EXECUTION_WALL_MS);
+        try {
+            const transport = this.transport instanceof HttpsBaseRpc ? this.transport.withAbortSignal(abort.signal) : this.transport;
+            const invocation = new RelayRpcInvocation(this.state, this.pacedOrigin, transport, abort.signal, transport instanceof HttpsBaseRpc ? () => transport.primePublicAddresses() : undefined);
+            const journal = await this.rpcScope.run(invocation.rpc, () => this.executeScoped(operationId));
+            invocation.assertAllowed();
+            return journal;
+        }
+        finally {
+            clearTimeout(timeout);
+        }
+    }
+    async executeScoped(operationId) {
         if (!HASH.test(operationId))
             throw new ApnError("APN_INVALID_INPUT", "Relay execution requires one operation ID.");
         const profileHash = this.state.profileHash("default");

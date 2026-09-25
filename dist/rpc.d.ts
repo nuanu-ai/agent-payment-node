@@ -14,10 +14,16 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     private readonly x402ChainId;
     private pinnedAddresses;
     private readonly totalDeadlineMs;
+    private readonly abortSignal;
     constructor(endpoint: string, options?: {
         readonly totalDeadlineMs?: number;
         readonly x402ChainId?: EvmChainId;
+        readonly abortSignal?: AbortSignal;
     });
+    /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
+    withAbortSignal(signal: AbortSignal): HttpsBaseRpc;
+    /** Resolve and validate public addresses before a caller reserves a physical POST start. */
+    primePublicAddresses(): Promise<void>;
     withTotalTimeout(milliseconds: number): X402RpcPort;
     forX402Network(chainId: EvmChainId): HttpsBaseRpc;
     assertX402Chain(chainId: EvmChainId): Promise<{

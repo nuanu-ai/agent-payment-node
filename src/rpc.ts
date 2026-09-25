@@ -49,15 +49,29 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   private readonly x402ChainId: EvmChainId;
   private pinnedAddresses: Promise<readonly PinnedAddress[]> | undefined;
   private readonly totalDeadlineMs: number | undefined;
+  private readonly abortSignal: AbortSignal | undefined;
 
-  constructor(endpoint: string, options: { readonly totalDeadlineMs?: number; readonly x402ChainId?: EvmChainId } = {}) {
+  constructor(endpoint: string, options: { readonly totalDeadlineMs?: number; readonly x402ChainId?: EvmChainId; readonly abortSignal?: AbortSignal } = {}) {
     const parsed = parsePublicHttpsUrl(endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     this.endpoint = parsed;
     this.rpcOrigin = parsed.origin;
     this.evm = new EvmRpc((method, params) => this.call(method, params), this.rpcOrigin, undefined,
       (calls) => this.batchCall(calls));
     this.totalDeadlineMs = options.totalDeadlineMs;
+    this.abortSignal = options.abortSignal;
     this.x402ChainId = x402Network(options.x402ChainId).chainId;
+  }
+
+  /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
+  withAbortSignal(signal: AbortSignal): HttpsBaseRpc {
+    const selected = new HttpsBaseRpc(this.endpoint.toString(), { abortSignal: signal, x402ChainId: this.x402ChainId });
+    selected.pinnedAddresses = this.pinnedAddresses;
+    return selected;
+  }
+
+  /** Resolve and validate public addresses before a caller reserves a physical POST start. */
+  async primePublicAddresses(): Promise<void> {
+    await (this.pinnedAddresses ??= this.resolvePublicAddresses());
   }
 
   withTotalTimeout(milliseconds: number): X402RpcPort {
@@ -308,7 +322,11 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
 
   async submitRawTransaction(rawTransaction: Hex): Promise<Hex> {
     try { return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction]), 32); }
-    catch { throw new ApnError("APN_RPC_AMBIGUOUS", "Transaction submission outcome is ambiguous."); }
+    catch (error) {
+      if (error instanceof ApnError && error.code === "APN_RPC_BUDGET_EXCEEDED") throw error;
+      if (error instanceof ApnError && error.details?.httpStatus === 429) throw error;
+      throw new ApnError("APN_RPC_AMBIGUOUS", "Transaction submission outcome is ambiguous.");
+    }
   }
 
   async getReceipt(transactionHash: Hex): Promise<RpcReceipt | null> {
@@ -371,7 +389,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const id = (++this.sequence).toString();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method);
+    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal);
     return parseRpcResultEnvelope(raw, id, method);
   }
 
@@ -395,7 +413,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
       throw new ApnError("APN_INVALID_INPUT", "RPC batch request exceeds the size limit.");
     }
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), "batch");
+    const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), "batch", false, this.abortSignal);
     return parseRpcBatchResultEnvelope(raw, ids);
   }
 
@@ -506,12 +524,15 @@ async function postJson(
   timeoutMs: number,
   rpcMethod: string,
   allowJsonRpcClientError = false,
+  abortSignal?: AbortSignal,
 ): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const selected = addresses[0];
     if (selected === undefined) { reject(new ApnError("APN_RPC_CONFIG", "RPC host has no validated address.")); return; }
+    let requestTimedOut = false;
     const request = httpsRequest(endpoint, {
       method: "POST",
+      signal: abortSignal,
       family: selected.family,
       headers: jsonRpcRequestHeaders(body),
       lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
@@ -532,11 +553,20 @@ async function postJson(
         if (total > MAX_RPC_RESPONSE_BYTES) { response.destroy(); reject(new ApnError("APN_RPC_PROTOCOL", "RPC response exceeds the size limit.")); return; }
         chunks.push(chunk);
       });
-      response.on("end", () => resolve(Buffer.concat(chunks, total).toString("utf8")));
-      response.on("error", () => reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC response failed safely.")));
+      response.on("end", () => { if (!abortSignal?.aborted && !requestTimedOut) resolve(Buffer.concat(chunks, total).toString("utf8")); });
+      response.on("error", () => { if (!abortSignal?.aborted && !requestTimedOut) reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC response failed safely.")); });
     });
-    request.setTimeout(timeoutMs, () => request.destroy(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out.")));
-    request.on("error", (error) => reject(error instanceof ApnError ? error : new ApnError("APN_RPC_AMBIGUOUS", "RPC transport failed safely.")));
+    request.setTimeout(timeoutMs, () => { requestTimedOut = true; request.destroy(); });
+    request.on("error", (error) => {
+      // Abort rejects only after close, when the underlying HTTPS request has stopped.
+      if (abortSignal?.aborted || requestTimedOut) return;
+      reject(error instanceof ApnError ? error : new ApnError("APN_RPC_AMBIGUOUS", "RPC transport failed safely."));
+    });
+    request.on("close", () => {
+      if (abortSignal?.aborted) reject(new ApnError("APN_RPC_BUDGET_EXCEEDED",
+        "Relay execution reached its wall deadline; resume the saved operation explicitly.", { reason: "relay_wall_deadline" }));
+      else if (requestTimedOut) reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out."));
+    });
     request.end(body);
   });
 }
