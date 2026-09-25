@@ -51,22 +51,48 @@ test("batch transport sends one read-only POST and restores request order from r
   assert.equal(bodies.length, 1);
 });
 
-test("batch parser rejects missing, duplicate, unexpected, malformed IDs, suberrors and duplicate JSON members", () => {
+test("batch parser accepts only identical duplicate envelopes and preserves request order", () => {
+  const first = { jsonrpc: "2.0", id: 1, result: { transactionHash: "0xabc", block: { number: "0x2", hash: "0xdef" } } };
+  const second = { jsonrpc: "2.0", id: 2, result: "0x10" };
+  assert.deepEqual(parseRpcBatchResultEnvelope(JSON.stringify([second, first, structuredClone(first)]), [1, 2]),
+    [first.result, second.result]);
+  assert.deepEqual(parseRpcBatchResultEnvelope(JSON.stringify([first, ...Array(22).fill(first), second]), [1, 2]),
+    [first.result, second.result], "24 envelopes remain within the fixed cap");
+});
+
+test("batch parser rejects conflicting duplicates, missing and unknown IDs, oversized extras, errors and malformed members", () => {
   const good = (id: unknown, result: unknown) => ({ jsonrpc: "2.0", id, result });
   const bad = [
     JSON.stringify([good(1, "a")]),
     JSON.stringify([good(1, "a"), good(1, "b")]),
+    JSON.stringify([good(1, { block: "0x1" }), good(2, "b"), good(1, { block: "0x2" })]),
+    JSON.stringify([good(1, "a"), good(1, "a"), good(1, "a")]),
     JSON.stringify([good(1, "a"), good(3, "b")]),
+    JSON.stringify([good(1, "a"), good(2, "b"), good(3, "c")]),
+    JSON.stringify([good(1, "a"), ...Array(23).fill(good(1, "a")), good(2, "b")]),
     JSON.stringify([good("2", "b"), good(1, "a")]),
     JSON.stringify([good(null, "b"), good(1, "a")]),
     JSON.stringify([good(1.5, "b"), good(2, "a")]),
     JSON.stringify([good(1, "a"), { jsonrpc: "2.0", id: 2, error: { code: -1, message: secret } }]),
+    JSON.stringify([good(1, "a"), good(2, "b"), { jsonrpc: "2.0", id: 1, error: { code: -1, message: secret } }]),
     '[{"jsonrpc":"2.0","id":1,"result":"a","result":"b"},{"jsonrpc":"2.0","id":2,"result":"c"}]',
     '[{"jsonrpc":"2.0","id":1,"result":{"x":1,"x":2}},{"jsonrpc":"2.0","id":2,"result":"c"}]',
     JSON.stringify({ jsonrpc: "2.0", id: 1, result: "a" }),
   ];
   for (const raw of bad) assert.throws(() => parseRpcBatchResultEnvelope(raw, [1, 2]), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => parseRpcBatchResultEnvelope(" ".repeat(1024 * 1024 + 1), [1, 2]),
+    { code: "APN_RPC_PROTOCOL" }, "the parser retains the transport byte bound");
   assert.deepEqual(parseRpcBatchResultEnvelope(JSON.stringify([good(2, "b"), good(1, "a")]), [1, 2]), ["a", "b"]);
+});
+
+test("batch transport accepts an identical repeated response in one POST", async (t) => {
+  const bodies = mockHttps(t, (body) => ({ status: 200, raw: JSON.stringify([
+    { jsonrpc: "2.0", id: body[0].id, result: "0x1" },
+    { jsonrpc: "2.0", id: body[0].id, result: "0x1" },
+    { jsonrpc: "2.0", id: body[1].id, result: "0x10" },
+  ]) }));
+  assert.deepEqual(await new HttpsBaseRpc(endpoint).batchCall(read), ["0x1", "0x10"]);
+  assert.equal(bodies.length, 1);
 });
 
 test("batch rejects unsuccessful HTTP once with safe method and status only", async (t) => {
