@@ -34,10 +34,10 @@ export class RelayEncryptedApprovalCustody {
     }
     /** Hold the wallet mutation lock through a local retirement transition. A
      * damaged or unreadable envelope must not be treated as empty custody. */
-    async withNoMaterial(op, action) {
-        return this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
-            if (await this.state.loadEncryptedWalletEnvelope("default") !== null) {
-                const wallet = await this.wallets.describe("default");
+    async withNoMaterial(op, action, profile = "default") {
+        return this.state.withLocks([walletCustodyLock(this.state, profile)], async () => {
+            if (await this.state.loadEncryptedWalletEnvelope(profile) !== null) {
+                const wallet = await this.wallets.describe(profile);
                 if (wallet === null)
                     corrupt("custody envelope disappeared");
                 try {
