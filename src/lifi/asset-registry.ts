@@ -26,6 +26,12 @@ export const BRIDGE_QUOTE_DESTINATIONS = {
 } as const;
 export type BridgeQuoteDestinationChainId = keyof typeof BRIDGE_QUOTE_DESTINATIONS;
 
+/** Quote inspection only. Sei is absent from every bridge execution chain and asset peer set. */
+export const SEI_GASZIP_QUOTE_DESTINATION = {
+  chainId: 1329, caip2: "eip155:1329", nativeToken: BRIDGE_ZERO_ADDRESS,
+  nativeSymbol: "SEI", nativeDecimals: 18, tool: "gasZipBridge",
+} as const;
+
 /** Each upgradeability shape is pinned explicitly; there is no default shape for an unreviewed proxy. */
 export type BridgeTokenCode =
   | { readonly upgradeability: "immutable"; readonly codeHash: Hex }
