@@ -123,12 +123,19 @@ RPC for EVM operations.
 The native local adapter requests the fresh blockhash and confirmed block height
 in one JSON-RPC batch when the RPC transport supports batching. This saves one
 physical POST at the send guard without moving the approval, simulation, signer
-or durable submission checkpoints. The operation service currently holds its
-state lock across network calls. The shared physical request budget and pacing
-from the RPC transport are therefore not enabled for the live direct rail: safe
-two-per-second pacing needs the service to release and reacquire that lock with
-the operation and policy revalidated at each checkpoint. Live request counts
-and rate-limit acceptance remain unverified.
+or durable submission checkpoints. For local SOL, the operation service now
+releases the profile and operation locks during prepare RPC, approval reads and
+prompt, send binding and retry waits, signer revalidation, the first submission,
+and finalized observation. It reacquires them for journal comparisons and
+transitions; before signing and the first send it also rechecks the account,
+policy and owner allowlist.
+The per-key prepare claim and per-operation approval claim still serialize the
+respective work across RPC waits. Owner abandonment still holds the profile and
+operation locks during its validity-history RPC check and foreground prompt.
+The production factory does not yet attach `SolanaRpcBudget` to `SolanaRpc`, so
+the transport's shared physical request limit and two-per-second pacing are not
+enabled for this live rail. Live request counts and rate-limit acceptance remain
+unverified.
 
 After the owner approves and before anything is signed, the send guard runs
 once:
