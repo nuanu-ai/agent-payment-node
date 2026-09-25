@@ -63,7 +63,7 @@ export class RelayArbitrumSourceObserveService {
     const repository = new ArbitrumSourceEffectJournalRepository(this.state.root);
     const journal = await (this.ports.journal?.(op.profileHash, operationId) ?? repository.load(op.profileHash, operationId));
     const output = (state: "source_effect_not_recorded" | "observation_only" | "source_proof_pending" |
-      "approval_source_confirmed" | "deposit_source_confirmed", reason: string,
+      "approval_source_confirmed" | "approval_skipped" | "deposit_source_confirmed", reason: string,
       proof: RelayArbitrumSourceProof | null = null) => ({ operationId, state, reason,
       approvalPhase: journal?.effects[0].phase ?? null, depositPhase: journal?.effects[1].phase ?? null,
       sourceProof: proof === null ? null : { ...proof,
@@ -77,6 +77,8 @@ export class RelayArbitrumSourceObserveService {
       journal.orderId !== op.arbitrumDraft.orderId) corrupt("journal_operation_binding");
     const [approvalEffect, depositEffect] = journal.effects;
     if (depositEffect.phase === "confirmed") return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
+    if (approvalEffect.phase === "approval_skipped") return output("approval_skipped",
+      "canonical_allowance_observed_deposit_recheck_required");
     const role: ArbitrumEffectRole = approvalEffect.phase === "confirmed" ? "deposit" : "approval";
     const current = role === "approval" ? approvalEffect : depositEffect;
     if (!observable.has(current.phase)) return output(role === "deposit" ? "approval_source_confirmed" : "observation_only",

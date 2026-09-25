@@ -71,6 +71,8 @@ export class RelayArbitrumSourceObserveService {
         const [approvalEffect, depositEffect] = journal.effects;
         if (depositEffect.phase === "confirmed")
             return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
+        if (approvalEffect.phase === "approval_skipped")
+            return output("approval_skipped", "canonical_allowance_observed_deposit_recheck_required");
         const role = approvalEffect.phase === "confirmed" ? "deposit" : "approval";
         const current = role === "approval" ? approvalEffect : depositEffect;
         if (!observable.has(current.phase))

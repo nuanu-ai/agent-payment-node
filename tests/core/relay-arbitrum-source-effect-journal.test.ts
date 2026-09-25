@@ -7,9 +7,11 @@ import type { Hex } from "viem";
 import { hashObject } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { ArbitrumSourceEffectJournalRepository, advanceArbitrumSourceEffectJournal,
-  arbitrumSourceRecoveryClass, createArbitrumSourceEffectJournal, validateArbitrumSourceEffectJournal } from
+  arbitrumSourceRecoveryClass, createArbitrumSourceEffectJournal, validateArbitrumSourceEffectJournal,
+  type ArbitrumVerifiedAllowanceRead } from
   "../../src/relay/arbitrum-source-effect-journal.js";
 import { RELAY_ARBITRUM_USDC } from "../../src/relay/arbitrum-usdc-ethereum-quote.js";
+import { RelayArbitrumSourceObserveService } from "../../src/relay/arbitrum-source-observe.js";
 import { RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } from "../../src/relay/arbitrum-usdc-source-draft.js";
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
 import { RelayUnsignedOperationRepository, freezeRelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
@@ -218,4 +220,59 @@ test("repository persists only an injected verified observation and reopens its 
   assert.deepEqual(await syntheticRepository()
     .load(op.profileHash, op.operationId), confirmed);
   assert.equal(await arbitrumSourceRecoveryClass(confirmed, op), "approval_confirmed");
+});
+
+test("approval skip persists a canonical allowance proof, never fabricates a transaction, and keeps deposit gated", async t => {
+  const { temporary, state, op } = await prepared(); t.after(temporary.cleanup);
+  const verified: ArbitrumVerifiedAllowanceRead = { policyDigest: op.policyDigest!, policyRevision: op.policyRevision!,
+    allowanceAtomic: op.amountAtomic, blockNumber: "293510000", blockHash: `0x${"b".repeat(64)}`, observedAt: t1 };
+  const repository = (read?: ArbitrumVerifiedAllowanceRead | null, clock = new Date(t1)) =>
+    new ArbitrumSourceEffectJournalRepository(temporary.root, undefined,
+      read === undefined ? undefined : async () => read, () => clock);
+  const initial = await repository().create(op.profileHash, op.operationId, t0);
+  await assert.rejects(repository().skipApproval(op.profileHash, op.operationId, initial.integrityHash),
+    { code: "APN_OPERATION_BLOCKED" });
+  // A verifier that loses its canonical pin (for example on a reorg) returns no observation.
+  await assert.rejects(repository(null).skipApproval(op.profileHash, op.operationId, initial.integrityHash),
+    { code: "APN_OPERATION_BLOCKED" });
+  for (const bad of [
+    { ...verified, allowanceAtomic: (BigInt(op.amountAtomic) - 1n).toString() },
+    { ...verified, policyDigest: "f".repeat(64) },
+    { ...verified, policyRevision: verified.policyRevision + 1 },
+    { ...verified, blockHash: `0x${"0".repeat(64)}` },
+    { ...verified, blockHash: "0xdead" },
+  ]) {
+    await assert.rejects(repository(bad).skipApproval(
+      op.profileHash, op.operationId, initial.integrityHash), { code: "APN_OPERATION_BLOCKED" });
+  }
+  await assert.rejects(repository(verified, new Date(now.getTime() + 40_000)).skipApproval(
+    op.profileHash, op.operationId, initial.integrityHash), { code: "APN_OPERATION_BLOCKED" });
+  assert.deepEqual(await repository().load(op.profileHash, op.operationId), initial);
+  const skipped = await repository(verified).skipApproval(op.profileHash, op.operationId, initial.integrityHash);
+  assert.equal(skipped.effects[0].phase, "approval_skipped");
+  assert.equal(skipped.effects[0].attempt, null);
+  assert.equal(skipped.effects[0].skipProof?.allowanceAtomic, op.amountAtomic);
+  assert.equal(skipped.effects[0].skipProof?.operationIntegrityHash, op.integrityHash);
+  assert.equal(await arbitrumSourceRecoveryClass(skipped, op), "approval_skipped");
+  assert.deepEqual(await repository().load(op.profileHash, op.operationId), skipped);
+  const observe = new RelayArbitrumSourceObserveService(state, { observe: async () => {
+    throw new Error("skipped approval has no receipt to observe");
+  } }, { operation: async () => op });
+  const reported = await observe.observe(op.operationId);
+  assert.equal(reported.state, "approval_skipped");
+  assert.equal(reported.sourceProof, null);
+  assert.equal(reported.sourceFinalized, false);
+  await assert.rejects(repository(verified).skipApproval(op.profileHash, op.operationId, initial.integrityHash),
+    { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(repository(verified).skipApproval(op.profileHash, op.operationId, skipped.integrityHash),
+    { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(repository().beginSigning(op.profileHash, op.operationId, skipped.integrityHash,
+    "deposit", t1), { code: "APN_OPERATION_BLOCKED" });
+  const tampered = structuredClone(skipped) as any;
+  tampered.effects[0].skipProof.spender = owner;
+  const { integrityHash: _hash, ...body } = tampered; tampered.integrityHash = hashObject(body);
+  await assert.rejects(validateArbitrumSourceEffectJournal(tampered, op), { code: "APN_STATE_CORRUPT" });
+  const path = join(temporary.root, "relay-arbitrum-source-effect-journals", op.profileHash, `${op.operationId}.json`);
+  await writeFile(path, JSON.stringify(tampered), { mode: 0o600 });
+  await assert.rejects(repository().load(op.profileHash, op.operationId), { code: "APN_STATE_CORRUPT" });
 });
