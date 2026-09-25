@@ -18,6 +18,7 @@ import { RelayRetireService } from "../../src/relay/retire.js";
 import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
 import { RelayReadOnlyPreflightService } from "../../src/relay/preflight.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { join } from "node:path";
 
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
@@ -326,6 +327,24 @@ test("Relay retirement refuses a matching usage reservation", async t => {
     idempotencyKey: input.idempotencyKey, now: instant });
   await assert.rejects(new RelayRetireService(state, { now: () => instant }).retire({ profile: "default", operationId: first.operationId }),
     { code: "APN_OPERATION_BLOCKED" });
+});
+
+test("Relay retirement rejects foreign IDs, profile mismatch, and malformed prepared records", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root), first = await serviceFor(state, () => {}).prepare(input);
+  const retire = new RelayRetireService(state, { now: () => instant });
+  await assert.rejects(retire.retire({ profile: "other", operationId: first.operationId }), { code: "APN_INVALID_INPUT" });
+  await assert.rejects(retire.retire({ profile: "default", operationId: "f".repeat(64) }), { code: "APN_OPERATION_NOT_FOUND" });
+  const repo = new RelayUnsignedOperationRepository(temporary.root);
+  const original = await repo.loadOperation(first.profileHash, first.operationId);
+  assert.ok(original);
+  const { integrityHash: _integrityHash, ...fields } = original;
+  const foreign = freezeRelayUnsignedOperation({ ...fields, profileHash: state.profileHash("other"),
+    operationId: "c".repeat(64), idempotencyHash: "d".repeat(64) });
+  await repo.persistLocked(foreign);
+  await assert.rejects(retire.retire({ profile: "default", operationId: foreign.operationId }), { code: "APN_OPERATION_BLOCKED" });
+  await writeFile(join(temporary.root, "relay-unsigned-operations", first.profileHash, `${first.operationId}.json`), "{}");
+  await assert.rejects(retire.retire({ profile: "default", operationId: first.operationId }), { code: "APN_STATE_CORRUPT" });
 });
 
 test("Relay retire and fresh prepare serialize without losing the new operation", async t => {
