@@ -18,6 +18,23 @@ const DIGEST = /^[a-f0-9]{64}$/u;
  */
 export class AssetUsageLedger extends SecureStateStore {
     initialized;
+    /** Relay and this ledger hash idempotency keys in separate domains. Hold the
+     * exact Ethereum USDC bucket lock through the caller's retirement write. */
+    async withNoMatchingRelayReservation(account, policyDigest, amountAtomic, action) {
+        if (policyDigest !== undefined)
+            digest(policyDigest, "Policy digest");
+        const identity = validateIdentity({ account: getAddress(account), chain: "eip155:1",
+            asset: { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" } });
+        await this.ready();
+        return this.withLocks([this.bucketLock(identity)], async () => {
+            const records = await this.loadBucket(identity);
+            if (records.some(record => record.rail === "bridge" &&
+                (policyDigest === undefined || record.policyDigest === policyDigest) && record.amountAtomic === amountAtomic)) {
+                throw blocked("Relay retirement is refused because a matching usage reservation exists.");
+            }
+            return action();
+        });
+    }
     async reserve(input) {
         const registry = validateAssetPolicyRegistry(input.registry);
         const at = instant(input.now);

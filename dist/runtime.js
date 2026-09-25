@@ -6,6 +6,7 @@ import { ApnError } from "./errors.js";
 export class RuntimeContext {
     relayPrepare;
     relayPreflight;
+    relayRetire;
     stargateNative;
     stargateToken;
     portfolio;
@@ -60,6 +61,8 @@ export class RuntimeContext {
             this.relayPrepare = dependencies.relayPrepare;
         if (dependencies.relayPreflight !== undefined)
             this.relayPreflight = dependencies.relayPreflight;
+        if (dependencies.relayRetire !== undefined)
+            this.relayRetire = dependencies.relayRetire;
         if (dependencies.stargateNative !== undefined)
             this.stargateNative = dependencies.stargateNative;
         if (dependencies.stargateToken !== undefined)

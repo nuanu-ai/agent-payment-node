@@ -5,7 +5,7 @@ import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { evmRpcQuantity, evmRpcWord, evmRpcRecord, evmRpcHex } from "../evm-rpc-codec.js";
-import { RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
+import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import { StateStore } from "../state.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { RELAY_ROUTE_REFERENCE } from "./prepare.js";
@@ -30,6 +30,8 @@ export class RelayReadOnlyPreflightService {
             .loadOperation(this.state.profileHash(input.profile), input.operationId);
         if (operation === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found for this profile.");
+        if (await new RelayRetirementRepository(this.state.root).load(operation) !== null)
+            blocked("relay_operation_retired");
         const quote = operation.quote;
         if (quote === undefined || operation.policyDigest === undefined || operation.policyRevision === undefined ||
             operation.approvalNetworkFeeCeilingWei === undefined || operation.depositNetworkFeeCeilingWei === undefined) {

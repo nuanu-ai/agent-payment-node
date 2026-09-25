@@ -171,6 +171,11 @@ export class ApnCore {
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay preflight runtime is unavailable.");
         return dataOutcome(await service.preflight(request), "read_only_rpc_observation");
       }
+      case "relay.retire": {
+        const service = this.context.relayRetire;
+        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay retirement runtime is unavailable.");
+        return operationOutcome(await service.retire(request));
+      }
       case "stargate.native.prepare": {
         const service = this.context.stargateNative;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate native runtime is unavailable.");

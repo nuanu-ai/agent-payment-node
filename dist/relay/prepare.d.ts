@@ -32,10 +32,12 @@ export declare class RelayUnsignedPrepareService {
         statusObservable: boolean;
         executionAdmitted: false;
         nextActions: readonly [];
+        state: "prepared" | "retired";
+        terminal: boolean;
+        retiredAt?: string;
+        retirementIntegrityHash?: string;
         schemaVersion: "apn.relay-unsigned-operation.v1";
         kind: "relay_unsigned";
-        state: "prepared";
-        terminal: false;
         profileHash: string;
         operationId: string;
         idempotencyHash: string;

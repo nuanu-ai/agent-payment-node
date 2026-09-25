@@ -1,7 +1,7 @@
 /** Durable Relay effect intent and observation journal. This module cannot sign or submit. */
 import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { RelayUnsignedOperationRepository, validateRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
+import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import type { RelayQuoteTransaction } from "./quote.js";
 
@@ -165,8 +165,9 @@ export class RelayEffectJournalRepository extends SecureStateStore {
   }
   async create(profileHash: string, operationId: string, createdAt: string): Promise<RelayEffectJournal> {
     await this.initialize();
-    return this.withLocks([`relay-effect:${profileHash}:${operationId}`], async () => {
+    return this.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `relay-effect:${profileHash}:${operationId}`], async () => {
       const op = await this.operation(profileHash, operationId);
+      if (await new RelayRetirementRepository(this.root).load(op) !== null) blocked("operation is retired");
       const path = this.path(profileHash, operationId);
       if (await this.readJson(path) !== null) blocked("journal already exists");
       const journal = createRelayEffectJournal(op, createdAt);
@@ -178,8 +179,9 @@ export class RelayEffectJournalRepository extends SecureStateStore {
   async transition(profileHash: string, operationId: string, expectedIntegrityHash: string,
     event: RelayEffectEvent): Promise<RelayEffectJournal> {
     await this.initialize();
-    return this.withLocks([`relay-effect:${profileHash}:${operationId}`], async () => {
+    return this.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `relay-effect:${profileHash}:${operationId}`], async () => {
       const op = await this.operation(profileHash, operationId);
+      if (await new RelayRetirementRepository(this.root).load(op) !== null) blocked("operation is retired");
       const path = this.path(profileHash, operationId);
       const value = await this.readJson(path);
       if (value === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay effect journal was not found.");

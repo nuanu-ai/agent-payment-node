@@ -34,6 +34,20 @@ export interface RelayApprovalCustodyPort {
 export class RelayEncryptedApprovalCustody implements RelayApprovalCustodyPort {
   private readonly wallets: EncryptedWalletStore;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort) { this.wallets = new EncryptedWalletStore(state, wrapping); }
+  /** Hold the wallet mutation lock through a local retirement transition. A
+   * damaged or unreadable envelope must not be treated as empty custody. */
+  async withNoMaterial<T>(op: RelayUnsignedOperation, action: () => Promise<T>): Promise<T> {
+    return this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
+      if (await this.state.loadEncryptedWalletEnvelope("default") !== null) {
+        const wallet = await this.wallets.describe("default");
+        if (wallet === null) corrupt("custody envelope disappeared");
+        try {
+          if (wallet.secret.directEffects[key(op)] !== undefined) blocked("signed_effect_custody_exists");
+        } finally { this.wallets.clear(wallet.secret); }
+      }
+      return action();
+    });
+  }
   async load(op: RelayUnsignedOperation): Promise<RelaySignedApproval | null> {
     return this.state.withLocks([walletCustodyLock(this.state, "default")], async () => this.loadLocked(op));
   }

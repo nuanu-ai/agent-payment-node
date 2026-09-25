@@ -45,7 +45,7 @@ export class RelayUnsignedPrepareService {
         if (replay !== null) {
             if (replay.kind !== "relay_unsigned")
                 throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Relay replay changed operation kind.");
-            return publicRelayUnsignedOperation(replay.record);
+            return await this.operations.relayStatus(replay.record);
         }
         const now = this.clock.now();
         if (!Number.isFinite(now.getTime()))
