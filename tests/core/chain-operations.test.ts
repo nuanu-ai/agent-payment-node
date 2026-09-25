@@ -16,8 +16,8 @@ import { SOLANA_CHAIN, activateDirectPolicy, directAdmission, reserveRailLease }
 
 test("restart after custody saved an effect recovers the same signature without another approval or signing", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root); const id = await s.prepare();
-  const original = s.adapter.sign.bind(s.adapter); let signs = 0;
-  s.adapter.sign = async (binding) => { signs++; await original(binding); throw new Error("synthetic process interruption"); };
+  const original = s.adapter.sealRevalidated.bind(s.adapter); let signs = 0;
+  s.adapter.sealRevalidated = async (binding) => { signs++; await original(binding); throw new Error("synthetic process interruption"); };
   const first = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(first.ok, false); assert.equal((await s.core.rails.records.findOperation(id))!.state, "signing_started");
   assert.equal(s.rpc.submissions.length, 0); assert.equal(signs, 1);
