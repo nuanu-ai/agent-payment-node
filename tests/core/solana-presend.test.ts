@@ -180,6 +180,18 @@ test("a persistent transport loss ends before any effect and never reads as an u
   assert.equal(await s.storage.effect(s.account, id, fingerprint), null);
 });
 
+test("a simulation provider cooldown stops patient bind after one attempt before signing or sending", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare();
+  s.rpc.simulateRateLimit = true;
+  const result = await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal(result.error?.code, "APN_RPC_RATE_LIMITED");
+  assert.equal(s.rpc.simulateCalls, 1);
+  assert.equal(s.wait.waits.length, 0);
+  assert.equal(s.rpc.submissions.length, 0);
+  assert.equal((await s.core.rails.records.findOperation(id))!.state, "failed_before_effect");
+});
+
 test("an interrupted wait stops retrying at once and still ends before any effect", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare();

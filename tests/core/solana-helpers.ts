@@ -55,7 +55,7 @@ export class SolanaTestRpc implements SolanaRpcPort {
   /** Set to model a validator that hands back a different recent blockhash after preparation. */
   reboundBlockhash: string | undefined;
   /** Simulation control: transport losses to serve first, then either an error or a clean run. */
-  simulateTransportLosses = 0; simulateError: unknown = null; simulateUnits = 450n; simulateCalls = 0;
+  simulateTransportLosses = 0; simulateRateLimit = false; simulateError: unknown = null; simulateUnits = 450n; simulateCalls = 0;
   destinationExists = false; corruptMint = false; corruptTokenOwner = false; simulateMalformed = false;
   private blockhashCalls = 0;
   failed = false; corruptEffect = false; corruptSignature = false;
@@ -75,6 +75,7 @@ export class SolanaTestRpc implements SolanaRpcPort {
         value: { blockhash: this.blockhashCalls++ > 0 ? this.reboundBlockhash ?? SOL_BLOCKHASH : SOL_BLOCKHASH, lastValidBlockHeight: this.lastValidBlockHeight } };
       case "simulateTransaction": {
         this.simulateCalls++;
+        if (this.simulateRateLimit) throw new ApnError("APN_RPC_RATE_LIMITED", "synthetic provider cooldown", { retryAfterMs: 3_000 });
         if (this.simulateTransportLosses-- > 0) throw new ApnError("APN_RPC_PROTOCOL", "synthetic simulation transport loss");
         if (this.simulateMalformed) return { context: { slot: 300n }, value: { logs: [], unitsConsumed: this.simulateUnits } };
         return { context: { slot: 300n }, value: { err: this.simulateError, logs: [], unitsConsumed: this.simulateUnits, accounts: null, returnData: null } };
