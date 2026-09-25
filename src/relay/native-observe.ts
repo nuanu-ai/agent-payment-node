@@ -91,6 +91,11 @@ export class RelayNativeObserveService {
         blocked("source_usage_binding");
       if (journal.phase === "submitting") journal = await journals.advance(op, journal.integrityHash, outcome, null, this.clock.now());
       const target = outcome === "confirmed" ? "finalized" : "failed_confirmed_revert";
+      // A native send keeps its reservation in `reserved` until observation. The
+      // ledger requires a sent state before a confirmed revert can release it.
+      if (outcome === "failed" && reserved.state === "reserved")
+        await usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest!,
+          state: "submitted", expectedCurrentStates: ["reserved"], now: this.clock.now() });
       if (reserved.state !== target) await usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest!,
         state: target, expectedCurrentStates: ["reserved", "submitted", "unknown_finality"],
         now: this.clock.now(), outcomeDigest: journal.integrityHash });

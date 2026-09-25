@@ -132,6 +132,34 @@ test("native observation reconciles one BNB source send and bounded Monad recipi
   assert.equal(destinationReads, readsBeforeAmbiguous);
   observation = { ...sourceObservation, transaction: { ...sourceObservation.transaction, from: RELAY_POLYGON_RECIPIENT } };
   assert.equal((await service.observe(saved)).state, "source_unproven");
+
+  // A confirmed revert must release the reservation even when the send left it
+  // in `reserved`; repeat observation must remain idempotent after a crash.
+  const revertedTemp = await temporaryState(); t.after(revertedTemp.cleanup);
+  const revertedState = new StateStore(revertedTemp.root);
+  const revertedOp = await prepared(revertedState, true);
+  const { integrityHash: _revertedOld, ...revertedFields } = revertedOp;
+  const revertedSaved = freezeRelayUnsignedOperation({ ...revertedFields, policyDigest: registry.policyDigest });
+  await new RelayUnsignedOperationRepository(revertedTemp.root).persistLocked(revertedSaved);
+  await revertedState.writeNewWallet({ ...walletFields, integrityHash: hashObject(walletFields) });
+  const revertedLedger = new AssetUsageLedger(revertedTemp.root);
+  await revertedLedger.reserve({ ...identity, registry, rail: "bridge", amountAtomic: revertedSaved.amountAtomic,
+    idempotencyKey: `relay-native-execute:${revertedSaved.operationId}`, now });
+  const revertedReservationId = assetUsageReservationId(identity, `relay-native-execute:${revertedSaved.operationId}`);
+  const revertedJournals = new RelayNativeSourceJournalRepository(revertedTemp.root);
+  let revertedJournal = await revertedJournals.advance(revertedSaved, null, "pending", null, now);
+  revertedJournal = await revertedJournals.advance(revertedSaved, revertedJournal.integrityHash, "signing_started", null, now);
+  revertedJournal = await revertedJournals.advance(revertedSaved, revertedJournal.integrityHash, "sealed", txHash("a"), now);
+  await revertedJournals.advance(revertedSaved, revertedJournal.integrityHash, "submitting", null, now);
+  const revertedService = new RelayNativeObserveService(revertedState,
+    { finalizedDeposit: async () => ({ ...sourceObservation,
+      receipt: { ...sourceObservation.receipt, status: "reverted" as const } }) }, destination,
+    status, { now: () => now });
+  assert.equal((await revertedService.observe(revertedSaved)).reason, "source_receipt_failed");
+  assert.equal((await revertedJournals.load(revertedSaved))?.phase, "failed");
+  assert.equal((await revertedLedger.load(identity, revertedReservationId))?.state, "failed_confirmed_revert");
+  assert.equal((await revertedService.observe(revertedSaved)).reason, "source_receipt_failed");
+  assert.equal((await revertedLedger.load(identity, revertedReservationId))?.state, "failed_confirmed_revert");
 });
 
 test("BNB source reader requires fifteen stable confirmations in three read batches", async t => {
