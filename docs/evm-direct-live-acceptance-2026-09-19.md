@@ -1,9 +1,9 @@
 # Direct EVM acceptance runbook (2026-09-19)
 
-This is the owner handoff for the remaining direct EVM proofs. It is pinned to
-`origin/main` commit `5e5dbefc8bb37026563bbc6cfc91ed2850d11fc7` and the frozen
-allowlist dataset
+This is the owner handoff for the remaining direct EVM proofs. The base network
+matrix uses the frozen allowlist dataset
 [`data/allowlist/2026-09-17/dataset.json`](../data/allowlist/2026-09-17/dataset.json).
+The three C1-12 historical token rows use the separate direct-only registry.
 The commands below stop at `prepare`; they do not approve, sign, submit, resume,
 or charge a payment.
 
@@ -159,13 +159,16 @@ Base ETH, USDC, and WETH; and Arbitrum One ETH, USDC, and USDT0. The current
 report has fresh evidence for only one of those nine (Ethereum ETH). The other
 eight require fresh evidence on this source revision.
 
-WETH and USDT0 are not listed in the current frozen direct dataset above. Do
-not invent admissions or reuse an old contract address. If the owner still
-requires those three historical token rows, first resolve their exact current
-source identity and policy admission, update the authoritative dataset/policy,
-and record that decision before preparing or funding anything. The nine-row
-mapping is therefore a tracking requirement, not permission to use legacy asset
-identities.
+WETH and USDT0 remain absent from the frozen market-cap dataset above. The
+direct-only supplemental registry pins Ethereum WETH9
+`0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` (18 decimals), Base WETH9
+`0x4200000000000000000000000000000000000006` (18 decimals), and Arbitrum
+USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9` (6 decimals). Their
+identities are recorded in the [direct registry](../src/evm-direct-supplemental-assets.ts),
+with deployment references in [LI.FI documentation](lifi.md) and historical
+direct acceptance in [EVM assets](evm-assets.md). They require exact direct
+owner-policy admissions and fresh no-money prepares before any live acceptance.
+The registry does not admit them on bridge, x402, gasless, or swap rails.
 
 ## Owner inputs required for live acceptance
 
