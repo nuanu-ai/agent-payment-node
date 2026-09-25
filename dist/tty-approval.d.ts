@@ -4,6 +4,7 @@ import type { RailApprovalPort } from "./direct-rail-ports.js";
 import { type ChainPolicy, type ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { RelayExecutionConfirmationSummary } from "./runtime.js";
 import type { RelayExecutionAuthorizationPort } from "./relay/source-runtime.js";
+import type { RelayNativeSourcePorts } from "./relay/native-source.js";
 export declare const TTY_APPROVAL_DEADLINE_MS = 60000;
 export interface TransferApprovalIntent {
     readonly evm?: EvmDirectBinding;
@@ -42,6 +43,12 @@ export declare class TtyRelayExecuteConfirmation implements RelayExecutionAuthor
     private readonly options;
     constructor(options?: TtyTransferApprovalOptions);
     confirm(summary: RelayExecutionConfirmationSummary): Promise<boolean>;
+}
+/** Fresh consent naming the native value and exact BNB depository. */
+export declare class TtyRelayNativeExecuteConfirmation {
+    private readonly options;
+    constructor(options?: TtyTransferApprovalOptions);
+    confirm(summary: Parameters<RelayNativeSourcePorts["confirm"]>[0]): Promise<boolean>;
 }
 export declare class TtyTransferApproval implements TransferApprovalPort {
     private readonly deadlineMs;

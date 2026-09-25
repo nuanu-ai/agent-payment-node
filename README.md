@@ -661,9 +661,10 @@ returned. The signer must perform network reads outside that lock.
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
 apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
-apn relay native prepare --profile <bnb-owner-profile> --recipient 0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14 --amount-atomic <bnb-wei> --min-output-atomic <pol-wei> --max-deposit-network-fee-wei <bnb-wei> --idempotency-key <key>
+apn relay native prepare --profile <bnb-owner-profile> --recipient <pinned-destination-address> --amount-atomic <bnb-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <bnb-wei> --idempotency-key <key>
 apn relay preflight --profile default --operation <operation-id> --rpc-url <ethereum-rpc>
 apn relay execute --operation <operation-id> --rpc-url <ethereum-rpc>
+apn relay native execute --operation <operation-id> --rpc-url <bnb-rpc>
 apn relay retire --profile <default|evm-live-buyer> --operation <operation-id>
 apn relay status --operation <operation-id>
 apn relay observe --operation <operation-id> --rpc-url <ethereum-rpc> --bnb-rpc-url <bnb-rpc>
@@ -784,13 +785,18 @@ apn swap solana orca execute --operation <operation_id>
 ```
 <!-- END APN COMMAND CATALOG -->
 
-`relay native prepare` admits only BNB native on chain 56 from the checksummed buyer
-account `0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7` to Polygon native POL
-at the default recipient `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14`.
-It requires an active owner policy for the BNB native bridge asset pinned to
-`bnb-native-polygon-native-v1`. It saves the verified quote and unsigned native
-deposit envelope. The existing Relay preflight and execute paths remain bound
-to the Ethereum USDC to BNB lane and refuse this native operation.
+`relay native prepare` admits BNB native on chain 56 from the checksummed buyer
+account `0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7` to its pinned Polygon
+POL or Monad MON recipient. It requires an active owner policy for the exact
+native bridge route and saves a verified unsigned deposit. `relay execute` stays
+bound to Ethereum USDC to BNB. `relay native execute` currently accepts only
+the saved BNB to Polygon operation. It requires active native bridge policy,
+encrypted local buyer wallet, fresh BNB funding and nonce, and foreground
+confirmation. It signs and marks one exact native deposit before the only send;
+an ambiguous send is observed by its saved hash and never repeated. Its source
+journal proves neither Polygon delivery nor paid acceptance. A crash before
+signed custody closes the attempt without a source effect, releases its exact
+usage reservation, and permits local retirement; it cannot sign again.
 
 `relay observe` reads one saved Ethereum USDC to BNB operation. Supply explicit
 credential-free public HTTPS Ethereum and BNB RPC URLs. It checks the finalized
