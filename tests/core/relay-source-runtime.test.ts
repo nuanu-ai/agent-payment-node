@@ -202,6 +202,22 @@ test("approval and deposit finality use bounded physical POSTs and preserve jour
   assert.equal(f.evidence.batches + f.evidence.sends, 24);
 });
 
+test("paced source runtime reaches finalized approval and deposit through 24 synthetic physical POSTs", async t => {
+  const f = await setup(t);
+  const runtime = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc,
+    { confirm: async () => true }, { now: () => now }, "https://ethereum-rpc.publicnode.com");
+  let journal = await runtime.execute(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "submitting");
+  f.showApproval();
+  journal = await runtime.execute(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "confirmed");
+  assert.equal(journal.effects[1].phase, "submitting");
+  f.showDeposit();
+  journal = await runtime.execute(f.op.operationId);
+  assert.equal(journal.effects[1].phase, "confirmed");
+  assert.deepEqual({ batches: f.evidence.batches, sends: f.evidence.sends }, { batches: 22, sends: 2 });
+});
+
 test("recheck reorg preserves the submitting approval and never resends", async t => {
   const f = await setup(t);
   await f.runtime.execute(f.op.operationId);

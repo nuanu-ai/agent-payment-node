@@ -26,13 +26,25 @@ export class HttpsBaseRpc {
     x402ChainId;
     pinnedAddresses;
     totalDeadlineMs;
+    abortSignal;
     constructor(endpoint, options = {}) {
         const parsed = parsePublicHttpsUrl(endpoint, "APN_RPC_CONFIG", "RPC endpoint");
         this.endpoint = parsed;
         this.rpcOrigin = parsed.origin;
         this.evm = new EvmRpc((method, params) => this.call(method, params), this.rpcOrigin, undefined, (calls) => this.batchCall(calls));
         this.totalDeadlineMs = options.totalDeadlineMs;
+        this.abortSignal = options.abortSignal;
         this.x402ChainId = x402Network(options.x402ChainId).chainId;
+    }
+    /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
+    withAbortSignal(signal) {
+        const selected = new HttpsBaseRpc(this.endpoint.toString(), { abortSignal: signal, x402ChainId: this.x402ChainId });
+        selected.pinnedAddresses = this.pinnedAddresses;
+        return selected;
+    }
+    /** Resolve and validate public addresses before a caller reserves a physical POST start. */
+    async primePublicAddresses() {
+        await (this.pinnedAddresses ??= this.resolvePublicAddresses());
     }
     withTotalTimeout(milliseconds) {
         if (!Number.isFinite(milliseconds) || milliseconds < 1 || milliseconds > 20_000) {
@@ -264,7 +276,11 @@ export class HttpsBaseRpc {
         try {
             return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction]), 32);
         }
-        catch {
+        catch (error) {
+            if (error instanceof ApnError && error.code === "APN_RPC_BUDGET_EXCEEDED")
+                throw error;
+            if (error instanceof ApnError && error.details?.httpStatus === 429)
+                throw error;
             throw new ApnError("APN_RPC_AMBIGUOUS", "Transaction submission outcome is ambiguous.");
         }
     }
@@ -328,7 +344,7 @@ export class HttpsBaseRpc {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method);
+        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal);
         return parseRpcResultEnvelope(raw, id, method);
     }
     async batchCall(calls) {
@@ -351,7 +367,7 @@ export class HttpsBaseRpc {
             throw new ApnError("APN_INVALID_INPUT", "RPC batch request exceeds the size limit.");
         }
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), "batch");
+        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), "batch", false, this.abortSignal);
         return parseRpcBatchResultEnvelope(raw, ids);
     }
     async callX402Logs(params) {
@@ -450,15 +466,17 @@ export function classifyX402LogAvailabilityMessage(message) {
     const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most|up to)\b/u.test(text);
     return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
-async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJsonRpcClientError = false) {
+async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJsonRpcClientError = false, abortSignal) {
     return await new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
             reject(new ApnError("APN_RPC_CONFIG", "RPC host has no validated address."));
             return;
         }
+        let requestTimedOut = false;
         const request = httpsRequest(endpoint, {
             method: "POST",
+            signal: abortSignal,
             family: selected.family,
             headers: jsonRpcRequestHeaders(body),
             lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
@@ -491,11 +509,24 @@ async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJs
                 }
                 chunks.push(chunk);
             });
-            response.on("end", () => resolve(Buffer.concat(chunks, total).toString("utf8")));
-            response.on("error", () => reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC response failed safely.")));
+            response.on("end", () => { if (!abortSignal?.aborted && !requestTimedOut)
+                resolve(Buffer.concat(chunks, total).toString("utf8")); });
+            response.on("error", () => { if (!abortSignal?.aborted && !requestTimedOut)
+                reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC response failed safely.")); });
         });
-        request.setTimeout(timeoutMs, () => request.destroy(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out.")));
-        request.on("error", (error) => reject(error instanceof ApnError ? error : new ApnError("APN_RPC_AMBIGUOUS", "RPC transport failed safely.")));
+        request.setTimeout(timeoutMs, () => { requestTimedOut = true; request.destroy(); });
+        request.on("error", (error) => {
+            // Abort rejects only after close, when the underlying HTTPS request has stopped.
+            if (abortSignal?.aborted || requestTimedOut)
+                return;
+            reject(error instanceof ApnError ? error : new ApnError("APN_RPC_AMBIGUOUS", "RPC transport failed safely."));
+        });
+        request.on("close", () => {
+            if (abortSignal?.aborted)
+                reject(new ApnError("APN_RPC_BUDGET_EXCEEDED", "Relay execution reached its wall deadline; resume the saved operation explicitly.", { reason: "relay_wall_deadline" }));
+            else if (requestTimedOut)
+                reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out."));
+        });
         request.end(body);
     });
 }
