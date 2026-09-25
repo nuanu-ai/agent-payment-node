@@ -50,6 +50,8 @@ export interface AssetPolicyRow {
     readonly mechanismOptions?: Readonly<{
         bridge: readonly AssetMechanismOption[];
     }>;
+    /** Optional canonical recipient bound only to Ethereum or Base local gasless admission. */
+    readonly gaslessRecipient?: string;
 }
 export interface AssetPolicyChain {
     /** Exact network identity: eip155 chain ID, Solana genesis hash, or TRON genesis block ID. */

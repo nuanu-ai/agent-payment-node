@@ -16,6 +16,8 @@ export interface AllowlistPolicyAdmissionInput {
     readonly maximumPerTransferAtomic?: string;
     readonly dailyLimitAtomic: string;
     readonly mechanism?: AllowlistAdmissionMechanismPin;
+    /** Optional exact recipient for Ethereum or Base local gasless transfers. */
+    readonly recipient?: string;
     /** Bridge only: exact alternative pins, each with its own per-transfer ceiling. */
     readonly mechanisms?: readonly (AllowlistMechanismPin & {
         readonly maximumPerTransferAtomic: string;
