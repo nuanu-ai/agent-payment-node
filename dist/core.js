@@ -178,6 +178,12 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Arbitrum approval decision is unavailable.");
                 return dataOutcome(await service.decide(request.profile, request.operationId), "read_only_rpc_observation");
             }
+            case "relay.arbitrum.approval-execute": {
+                const service = this.context.relayArbitrumApprovalExecute;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Arbitrum approval execution is unavailable.");
+                return dataOutcome(await service.execute(request.profile, request.operationId), "source_effect_journal");
+            }
             case "stargate.native.prepare": {
                 const service = this.context.stargateNative;
                 if (service === undefined)
