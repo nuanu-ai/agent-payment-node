@@ -1,4 +1,5 @@
 import { canonicalJson, hashObject } from "../canonical.js";
+import { isDeepStrictEqual } from "node:util";
 import { ApnError } from "../errors.js";
 import { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity } from "./rpc-scheduler.js";
 export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity, rpcProviderFamily } from "./rpc-scheduler.js";
@@ -259,7 +260,7 @@ export class RpcReadSession {
             this.reserveLogical(entry.item.method);
         const rpcMethod = pending.length === 1 ? pending[0][1].item.method : "batch";
         const requests = pending.map(([, entry], index) => ({ jsonrpc: "2.0", id: String(index + 1), method: entry.item.method, params: entry.item.params }));
-        const raw = new Array(pending.length), seen = new Set();
+        const raw = new Array(pending.length), seen = new Map();
         const chunks = [];
         if (scalarizeLineaCode) {
             const code = requests.filter((row) => row.method === "eth_getCode");
@@ -286,20 +287,23 @@ export class RpcReadSession {
             const responses = chunk.length === 1 ? [response] : response;
             if (!Array.isArray(responses))
                 throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod: chunkMethod });
-            if (responses.length !== chunk.length)
+            if (responses.length < chunk.length || responses.length > chunk.length * 2) {
                 throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch result count is invalid.", { rpcMethod: chunkMethod });
+            }
             const expected = new Set(chunk.map((request) => request.id));
             for (const candidate of responses) {
                 if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate))
                     throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.", { rpcMethod: chunkMethod });
                 const row = candidate, id = row.id;
-                if (row.jsonrpc !== "2.0" || typeof id !== "string" || !expected.has(id) || seen.has(id)) {
+                if (row.jsonrpc !== "2.0" || typeof id !== "string" || !expected.has(id)) {
                     throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod: chunkMethod });
                 }
                 const offset = Number(id) - 1;
                 if (!Number.isSafeInteger(offset) || requests[offset]?.id !== id)
                     throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod: chunkMethod });
-                seen.add(id);
+                if (seen.has(id) && Object.hasOwn(row, "error")) {
+                    throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod: chunkMethod });
+                }
                 if (Object.hasOwn(row, "error")) {
                     const error = row.error;
                     const provider = typeof error === "object" && error !== null && !Array.isArray(error)
@@ -316,6 +320,14 @@ export class RpcReadSession {
                 if (!Object.hasOwn(row, "result") || Object.keys(row).some((key) => !["jsonrpc", "id", "result"].includes(key))) {
                     throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response item is malformed.", { rpcMethod: chunkMethod });
                 }
+                const previous = seen.get(id);
+                if (previous !== undefined) {
+                    if (!isDeepStrictEqual(previous, row)) {
+                        throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch response id set is invalid.", { rpcMethod: chunkMethod });
+                    }
+                    continue;
+                }
+                seen.set(id, row);
                 raw[offset] = row.result;
             }
         }
