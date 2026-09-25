@@ -5,6 +5,18 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     rpc_origin: string;
     bundler_origin: string;
     policy: {
+        asset_allowlist?: {
+            policy_digest: string;
+            policy_revision: number;
+            activation_digest: string;
+            chain: "eip155:8453";
+            token: `0x${string}`;
+            mechanism: Readonly<{
+                provider: "local";
+                reference: string;
+            }>;
+            reservation_id: string;
+        };
         identity: string;
         policy_hash: string;
         approved_at: string | null;
@@ -99,6 +111,18 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     rpc_origin: string;
     bundler_origin: string;
     policy: {
+        asset_allowlist?: {
+            policy_digest: string;
+            policy_revision: number;
+            activation_digest: string;
+            chain: "eip155:8453";
+            token: `0x${string}`;
+            mechanism: Readonly<{
+                provider: "local";
+                reference: string;
+            }>;
+            reservation_id: string;
+        };
         identity: string;
         policy_hash: string;
         approved_at: string | null;
@@ -195,6 +219,18 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     rpc_origin: string;
     bundler_origin: string;
     policy: {
+        asset_allowlist?: {
+            policy_digest: string;
+            policy_revision: number;
+            activation_digest: string;
+            chain: "eip155:8453";
+            token: `0x${string}`;
+            mechanism: Readonly<{
+                provider: "local";
+                reference: string;
+            }>;
+            reservation_id: string;
+        };
         identity: string;
         policy_hash: string;
         approved_at: string | null;
@@ -298,6 +334,18 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     rpc_origin: string;
     bundler_origin: string;
     policy: {
+        asset_allowlist?: {
+            policy_digest: string;
+            policy_revision: number;
+            activation_digest: string;
+            chain: "eip155:8453";
+            token: `0x${string}`;
+            mechanism: Readonly<{
+                provider: "local";
+                reference: string;
+            }>;
+            reservation_id: string;
+        };
         identity: string;
         policy_hash: string;
         approved_at: string | null;
@@ -394,6 +442,18 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     rpc_origin: string;
     bundler_origin: string;
     policy: {
+        asset_allowlist?: {
+            policy_digest: string;
+            policy_revision: number;
+            activation_digest: string;
+            chain: "eip155:8453";
+            token: `0x${string}`;
+            mechanism: Readonly<{
+                provider: "local";
+                reference: string;
+            }>;
+            reservation_id: string;
+        };
         identity: string;
         policy_hash: string;
         approved_at: string | null;
@@ -492,6 +552,18 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     rpc_origin: string;
     bundler_origin: string;
     policy: {
+        asset_allowlist?: {
+            policy_digest: string;
+            policy_revision: number;
+            activation_digest: string;
+            chain: "eip155:8453";
+            token: `0x${string}`;
+            mechanism: Readonly<{
+                provider: "local";
+                reference: string;
+            }>;
+            reservation_id: string;
+        };
         identity: string;
         policy_hash: string;
         approved_at: string | null;

@@ -18,14 +18,16 @@ export class GaslessExecution {
     now;
     save;
     wait;
+    policy;
     observation;
-    constructor(state, rpc, custody, now, save, wait) {
+    constructor(state, rpc, custody, now, save, wait, policy) {
         this.state = state;
         this.rpc = rpc;
         this.custody = custody;
         this.now = now;
         this.save = save;
         this.wait = wait;
+        this.policy = policy;
         this.observation = new GaslessObservationService(rpc, save);
     }
     async approve(op, approval) {
@@ -148,6 +150,12 @@ export class GaslessExecution {
             catch (error) {
                 return { op: await this.halt(op, error), material: null };
             }
+            try {
+                await this.policy?.reserve(op);
+            }
+            catch (error) {
+                return { op: await this.halt(op, error), material: null };
+            }
             effect = { ...effect, phase: "signing_started", signingAttempts: 1, signingStartedAt: this.at() };
             op = await this.save(op, { state: role === "bootstrap" ? "bootstrap_pending" : "user_operation_pending", [this.key(role)]: effect });
             try {
@@ -181,7 +189,12 @@ export class GaslessExecution {
     key(role) { return role === "bootstrap" ? "bootstrap" : "userOperation"; }
     at() { return new Date(this.now()).toISOString(); }
     async guard(op, signed) {
-        return await this.steady(op, async () => await guardGaslessOperation(this.state, this.rpc, op, this.now, signed));
+        return await this.steady(op, async () => {
+            await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
+            const fees = await guardGaslessOperation(this.state, this.rpc, op, this.now, signed);
+            await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
+            return fees;
+        });
     }
     /**
      * A price spike, rate limit or transport failure is waited out while the approved window still leaves room for the

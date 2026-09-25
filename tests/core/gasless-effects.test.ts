@@ -16,6 +16,7 @@ import type { GaslessEstimate, GaslessIntent, GaslessSnapshot } from "../../src/
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
 import { gaslessOwner } from "../../src/gasless/owner.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
+import { baseLocalGaslessMechanism } from "../../src/gasless/asset-policy.js";
 import { newGaslessOperation, transitionGasless } from "../../src/gasless/transitions.js";
 import { gaslessBatch, gaslessEnvelopeBinding, gaslessUserOperation } from "../../src/gasless/wire.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
@@ -33,6 +34,11 @@ import { LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 import { TestHttp } from "./x402-helpers.js";
 import { X402_URL } from "./x402-vectors.js";
+
+const gaslessAdmission = () => ({ chain: "eip155:8453", kind: "token" as const,
+  identifier: gaslessDeployment(8453).token, rail: "gasless" as const,
+  maximumPerTransferAtomic: "100000000", dailyLimitAtomic: "1000000000",
+  mechanism: baseLocalGaslessMechanism() });
 import { activateDirectPolicy, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 
 const MASTER = Buffer.from("6d".repeat(32), "hex");
@@ -149,9 +155,10 @@ test("signing gates and changed encrypted keys fail before a new gasless effect"
 test("gasless repository initialization preserves local-wallet, provider-authorization, and unresolved direct identities", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const gasless = await gaslessCoreFixture(temporary.root);
+  const gasless = await gaslessCoreFixture(temporary.root, 8453, { now: new Date() });
   const direct = evmCore(temporary.root, undefined, gasless.wrapping);
-  await activateDirectPolicy(temporary.root, gasless.profile, { accounts: { evm: gasless.account.address }, admissions: evmDirectAdmissions(), now: direct.clock.now() });
+  await activateDirectPolicy(temporary.root, gasless.profile, { accounts: { evm: gasless.account.address },
+    admissions: [...evmDirectAdmissions(), gaslessAdmission()], now: direct.clock.now() });
   const directResult = await direct.core.execute({
     ...EVM_REQUEST,
     profile: gasless.profile,
@@ -234,9 +241,10 @@ test("an active gasless operation blocks a new direct prepare for the same profi
 test("concurrent direct and gasless prepares serialize one shared idempotency identity", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const gasless = await gaslessCoreFixture(temporary.root);
+  const gasless = await gaslessCoreFixture(temporary.root, 8453, { now: new Date() });
   const direct = evmCore(temporary.root, undefined, gasless.wrapping);
-  await activateDirectPolicy(temporary.root, gasless.profile, { accounts: { evm: gasless.account.address }, admissions: evmDirectAdmissions(), now: direct.clock.now() });
+  await activateDirectPolicy(temporary.root, gasless.profile, { accounts: { evm: gasless.account.address },
+    admissions: [...evmDirectAdmissions(), gaslessAdmission()], now: direct.clock.now() });
   const idempotencyKey = "cross-family-concurrent-0001";
   const [gaslessResult, directResult] = await Promise.all([
     gasless.core.execute({
@@ -437,8 +445,9 @@ async function rejectsCode(promise: Promise<unknown>, code: string): Promise<voi
 test("concurrent legacy direct and gasless preparation preserves the same-profile guard in both orders", { timeout: 15_000 }, async (t) => {
   for (const first of ["gasless", "direct"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
-    const gasless = await gaslessCoreFixture(temporary.root), direct = evmCore(temporary.root, undefined, gasless.wrapping);
-    await activateDirectPolicy(temporary.root, gasless.profile, { accounts: { evm: gasless.account.address }, admissions: evmDirectAdmissions(), now: direct.clock.now() });
+    const gasless = await gaslessCoreFixture(temporary.root, 8453, { now: new Date() }), direct = evmCore(temporary.root, undefined, gasless.wrapping);
+    await activateDirectPolicy(temporary.root, gasless.profile, { accounts: { evm: gasless.account.address },
+      admissions: [...evmDirectAdmissions(), gaslessAdmission()], now: direct.clock.now() });
     const profileHash = gasless.state.profileHash(gasless.profile), gate = new BoundaryGate();
     const loserState = new LockObservedState(temporary.root, `profile:${profileHash}`);
     const gaslessCore = new ApnCore({ state: first === "gasless" ? gasless.state : loserState,
@@ -687,11 +696,12 @@ async function gaslessProfileFixture(root: string, profile: string, now: Date, w
     await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile, profileHash: state.profileHash(profile),
       address: identity.address, createdAt: identity.createdAt, bindingHash: identity.bindingHash }));
   }
-  const rpc = new GaslessTestRpc(8453, account.address, "empty", now), approval = new GaslessApproval();
+  // These cross-network lock tests exercise the generic local gasless path; Base has a separate owner allowlist.
+  const rpc = new GaslessTestRpc(137, account.address, "empty", now), approval = new GaslessApproval();
   const custody = new LocalGaslessCustody(state, wrapping, () => now.getTime());
   const dependencies = { rpcFor: () => rpc, custody, approval };
   const core = new ApnCore({ state, gasless: dependencies, clock: { now: () => new Date(now) } });
-  const request = { chainId: 8453 as const, recipient: RECIPIENT, grossAtomic: "10000000",
+  const request = { chainId: 137 as const, recipient: RECIPIENT, grossAtomic: "10000000",
     maxFeeAtomic: "200000", minReceivedAtomic: "9800000" };
   return { state, profile, now, rpc, approval, custody, dependencies, core, request };
 }

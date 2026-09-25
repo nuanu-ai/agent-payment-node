@@ -1,4 +1,6 @@
 import { hashObject } from "../canonical.js";
+import { assetUsageReservationId } from "../asset-usage-ledger.js";
+import { BASE_GASLESS_CHAIN } from "./asset-policy.js";
 import { validateGaslessMutable } from "./effect-validation.js";
 import { validateGaslessIntent } from "./intent-validation.js";
 import { GASLESS_TERMINAL, gaslessIntentBinding, gaslessSnapshot, newGaslessEffect,
@@ -38,6 +40,10 @@ export function validateGaslessOperation(value: unknown): GaslessOperationRecord
   try { validateGaslessIntent(op.intent); } catch { gaslessCorrupt(); }
   if (op.profileHash !== op.intent.owner.profileHash || op.createdAt !== op.intent.preparedAt ||
     op.requestHash !== hashObject({ profile: op.intent.profile, request: op.intent.request })) gaslessCorrupt();
+  if (op.intent.allowlist !== undefined && op.intent.allowlist.reservationId !== assetUsageReservationId({
+    account: op.intent.owner.address, chain: BASE_GASLESS_CHAIN,
+    asset: { kind: "token", identifier: op.intent.token },
+  }, op.operationId)) gaslessCorrupt();
   let previous: GaslessTransition | undefined;
   for (const entry of op.transitions) {
     const { transitionHash, ...entryBody } = entry;
