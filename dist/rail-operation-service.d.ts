@@ -2,6 +2,15 @@ import { ChainPolicyService } from "./chain-policy-service.js";
 import type { ChainAssetAlias, DirectRailName } from "./direct-rail-ports.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import type { RuntimeContext } from "./runtime.js";
+interface RailPrepareInput {
+    readonly profile: string;
+    readonly rail: DirectRailName;
+    readonly asset: ChainAssetAlias;
+    readonly recipient: string;
+    readonly amount: string;
+    readonly maximumFee: string;
+    readonly idempotencyKey: string;
+}
 export declare class RailOperationService {
     private readonly context;
     readonly records: RailOperationRepository;
@@ -9,15 +18,9 @@ export declare class RailOperationService {
     private readonly operations;
     private readonly allowlist;
     constructor(context: RuntimeContext);
-    prepare(input: {
-        readonly profile: string;
-        readonly rail: DirectRailName;
-        readonly asset: ChainAssetAlias;
-        readonly recipient: string;
-        readonly amount: string;
-        readonly maximumFee: string;
-        readonly idempotencyKey: string;
-    }): Promise<unknown>;
+    prepare(input: RailPrepareInput): Promise<unknown>;
+    /** A durable, key-scoped claim survives a crash; only its short commit phases hold money-operation locks. */
+    private prepareLocalSolana;
     approve(operationId: string): Promise<unknown>;
     resume(operationId: string): Promise<unknown>;
     /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
@@ -44,3 +47,4 @@ export declare class RailOperationService {
     /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently. */
     private followUsage;
 }
+export {};
