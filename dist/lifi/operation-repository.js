@@ -8,6 +8,7 @@ import { legacyBridgeReceiptCandidates } from "./receipt.js";
 import { bridgeAtTransition } from "./transitions.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
 import { adaptLegacyBridgeOperation, isLegacyBridgeOperation } from "./legacy-operation.js";
+import { assertBaseDeploymentMigrationCandidate, assertBaseDeploymentMigrationSourceProof, BASE_DEPLOYMENT_MIGRATION_CANDIDATE } from "./base-deployment-migration.js";
 export class BridgeOperationRepository extends SecureStateStore {
     initialized;
     async ready() {
@@ -218,6 +219,41 @@ export class BridgeOperationRepository extends SecureStateStore {
         await this.ensureDirectory(`bridge-receipts/${op.profileHash}`);
         if (!bridgeSame(savedReceipt, bridgeReceipt(op)))
             await this.writeJson(receiptPath, bridgeReceipt(op));
+    }
+    /** Immutable source phase for the one recognized Base migration. Caller holds profile and operation locks. */
+    async baseMigrationSourceCheckpoint(op) {
+        assertBaseDeploymentMigrationCandidate(op);
+        const value = await this.readJson(`bridge-migrations/${op.profileHash}/${op.operationId}.source.json`);
+        if (value === null)
+            return null;
+        if (!isPlainRecord(value))
+            bridgeCorrupt();
+        const { digest, ...body } = value;
+        if (body.schemaVersion !== "apn.bridge-base-source-checkpoint.v1" ||
+            body.operationId !== op.operationId || body.oldIntegrityHash !== op.integrityHash ||
+            body.candidateHash !== hashObject(BASE_DEPLOYMENT_MIGRATION_CANDIDATE) || hashObject(body) !== digest)
+            bridgeCorrupt();
+        try {
+            assertBaseDeploymentMigrationSourceProof(op, body.observation, body.deployment);
+        }
+        catch {
+            return bridgeCorrupt();
+        }
+        return { observation: body.observation, deployment: body.deployment };
+    }
+    async saveBaseMigrationSourceCheckpoint(op, observation, deployment) {
+        assertBaseDeploymentMigrationCandidate(op);
+        assertBaseDeploymentMigrationSourceProof(op, observation, deployment);
+        const previous = await this.baseMigrationSourceCheckpoint(op);
+        if (previous !== null) {
+            if (!bridgeSame(previous, { observation, deployment }))
+                bridgeCorrupt();
+            return;
+        }
+        const body = { schemaVersion: "apn.bridge-base-source-checkpoint.v1", operationId: op.operationId,
+            oldIntegrityHash: op.integrityHash, candidateHash: hashObject(BASE_DEPLOYMENT_MIGRATION_CANDIDATE), observation, deployment };
+        await this.ensureDirectory(`bridge-migrations/${op.profileHash}`);
+        await this.writeJson(`bridge-migrations/${op.profileHash}/${op.operationId}.source.json`, { ...body, digest: hashObject(body) }, true);
     }
     async loadReceipt(profileHash, operationId) {
         const op = await this.loadOperation(profileHash, operationId);

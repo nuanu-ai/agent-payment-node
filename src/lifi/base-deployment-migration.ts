@@ -69,6 +69,11 @@ export interface BaseMigrationObservation {
   readonly receipt: BridgeProtocolReceipt;
 }
 
+export function assertBaseDeploymentMigrationCandidate(operation: BridgeOperationRecord): void {
+  validateLegacyBridgeOperation(operation);
+  assertCandidate(operation, false);
+}
+
 function same(left: unknown, right: unknown): boolean { return canonicalJson(left) === canonicalJson(right); }
 function blocked(reason: string): never {
   throw new ApnError("APN_OPERATION_BLOCKED", "The saved operation is not eligible for the recognized historical Base USDC deployment migration.", { reason });
@@ -80,6 +85,30 @@ export function assertBaseDeploymentMigrationProof(operation: BridgeOperationRec
   destinationFinalityBlock: BridgeBlock): BridgeVerifiedDestinationProof {
   const c = BASE_DEPLOYMENT_MIGRATION_CANDIDATE;
   if (!same(sourceFinalityBlock, c.sourceSafeBlock) || !same(destinationFinalityBlock, c.destinationSafeBlock)) blocked("finality_block_mismatch");
+  const finalized = (proof: BridgeTransactionProof, minimum: BridgeBlock) => proof.status === "success" && proof.safeBlock !== null &&
+    BigInt(proof.safeBlock.numberAtomic) >= BigInt(minimum.numberAtomic) &&
+    (proof.safeBlock.numberAtomic !== minimum.numberAtomic || same(proof.safeBlock, minimum));
+  assertBaseDeploymentMigrationSourceProof(operation, source, sourceDeployment);
+  if (destination.transaction.chainId !== 8453 || destination.transaction.transactionHash !== c.destinationTransactionHash ||
+    destination.transaction.rpcOrigin !== c.newDestinationDeployment.rpcOrigin || !same(destination.transaction.block, c.destinationBlock) ||
+    !finalized(destination.transaction, c.destinationSafeBlock) ||
+    hashObject({ ...destination.transaction, safeBlock: null }) !== c.destinationTransactionProofHash) blocked("destination_transaction_mismatch");
+  if (!same(destinationDeployment, c.newDestinationDeployment) || !same(destinationDeployment.block, destination.transaction.block)) blocked("destination_deployment_mismatch");
+  const parsedSource = bridgeSourceProof(operation.intent.materialization, operation.intent.decoded, source.receipt);
+  let parsedDestination;
+  try { parsedDestination = bridgeDestinationProof(parsedSource, operation.intent.materialization, operation.intent.decoded, destination.receipt); }
+  catch { return blocked("destination_correlation_mismatch"); }
+  if (parsedDestination.transactionHash !== c.destinationTransactionHash || parsedDestination.blockNumberAtomic !== c.destinationBlock.numberAtomic ||
+    parsedDestination.blockHash !== c.destinationBlock.hash || parsedDestination.recipient !== c.route.recipient ||
+    parsedDestination.token !== c.route.toToken || parsedDestination.amountAtomic !== c.route.outputAmountAtomic) blocked("destination_correlation_mismatch");
+  return { ...parsedDestination, safeBlock: destinationFinalityBlock, rpcOrigin: c.newDestinationDeployment.rpcOrigin,
+    transactionProofHash: c.destinationTransactionProofHash };
+}
+
+/** Checkpoint only the independently pinned source evidence; finality is reread on resume. */
+export function assertBaseDeploymentMigrationSourceProof(operation: BridgeOperationRecord, source: BaseMigrationObservation,
+  sourceDeployment: BridgeDeploymentIdentity): void {
+  const c = BASE_DEPLOYMENT_MIGRATION_CANDIDATE;
   const finalized = (proof: BridgeTransactionProof, minimum: BridgeBlock) => proof.status === "success" && proof.safeBlock !== null &&
     BigInt(proof.safeBlock.numberAtomic) >= BigInt(minimum.numberAtomic) &&
     (proof.safeBlock.numberAtomic !== minimum.numberAtomic || same(proof.safeBlock, minimum));
@@ -96,19 +125,6 @@ export function assertBaseDeploymentMigrationProof(operation: BridgeOperationRec
   if (!same(parsedSource, operation.sourceProof) || parsedSource.sourceAmountAtomic !== c.route.amountAtomic ||
     parsedSource.bridgeAmountAtomic !== c.route.bridgeAmountAtomic || parsedSource.correlation.kind !== "across" ||
     parsedSource.correlation.outputAmountAtomic !== c.route.outputAmountAtomic || parsedSource.correlation.recipient !== word(c.route.recipient)) blocked("source_correlation_mismatch");
-  if (destination.transaction.chainId !== 8453 || destination.transaction.transactionHash !== c.destinationTransactionHash ||
-    destination.transaction.rpcOrigin !== c.newDestinationDeployment.rpcOrigin || !same(destination.transaction.block, c.destinationBlock) ||
-    !finalized(destination.transaction, c.destinationSafeBlock) ||
-    hashObject({ ...destination.transaction, safeBlock: null }) !== c.destinationTransactionProofHash) blocked("destination_transaction_mismatch");
-  if (!same(destinationDeployment, c.newDestinationDeployment) || !same(destinationDeployment.block, destination.transaction.block)) blocked("destination_deployment_mismatch");
-  let parsedDestination;
-  try { parsedDestination = bridgeDestinationProof(parsedSource, operation.intent.materialization, operation.intent.decoded, destination.receipt); }
-  catch { return blocked("destination_correlation_mismatch"); }
-  if (parsedDestination.transactionHash !== c.destinationTransactionHash || parsedDestination.blockNumberAtomic !== c.destinationBlock.numberAtomic ||
-    parsedDestination.blockHash !== c.destinationBlock.hash || parsedDestination.recipient !== c.route.recipient ||
-    parsedDestination.token !== c.route.toToken || parsedDestination.amountAtomic !== c.route.outputAmountAtomic) blocked("destination_correlation_mismatch");
-  return { ...parsedDestination, safeBlock: destinationFinalityBlock, rpcOrigin: c.newDestinationDeployment.rpcOrigin,
-    transactionProofHash: c.destinationTransactionProofHash };
 }
 
 export function migrateBaseDeploymentOperation(operation: BridgeOperationRecord, destinationProof?: BridgeVerifiedDestinationProof): {
